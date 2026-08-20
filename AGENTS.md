@@ -13,6 +13,8 @@ section is binding. Rules for working here:
   agent writes go through _staging/ + review. The harness alone writes
   Receipts/ and task status fields.
 - Keep it a dev build: small modules, no ceremony, no new frameworks.
+- After every source or vault change, restart the affected Obsidience dev
+  process and verify its live health so the owner can test each iteration.
 
 ## Phase 1 directive (owner, 2026-08-20) — finish before anything else
 
