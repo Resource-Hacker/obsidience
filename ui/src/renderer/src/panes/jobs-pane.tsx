@@ -2,8 +2,8 @@
  *  task instances under the interpreter. ("Job" is operational vocabulary
  *  for a task instance, not a fifth primitive.) */
 
-import { useCallback, useEffect, useState } from "react";
-import { Play, Plus, RefreshCw, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, ChevronRight, Play, Plus, RefreshCw, X } from "lucide-react";
 import { API_BASE, api, openReader, type TaskRow } from "@/lib/api";
 
 const STATUS_STYLE: Record<string, string> = {
@@ -18,6 +18,8 @@ const STATUS_STYLE: Record<string, string> = {
 
 export function JobsPaneBody() {
   const [tasks, setTasks] = useState<TaskRow[]>([]);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const initializedHierarchy = useRef(false);
   const [busyRef, setBusyRef] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [runbooks, setRunbooks] = useState<string[]>([]);
@@ -33,6 +35,57 @@ export function JobsPaneBody() {
     const t = setInterval(refresh, 8_000);
     return () => clearInterval(t);
   }, [refresh]);
+
+  const hierarchy = useMemo(() => {
+    const byRef = new Map(tasks.map((task) => [task.ref, task]));
+    const byName = new Map(tasks.map((task) => [task.ref.split("/").pop(), task]));
+    const children = new Map<string, TaskRow[]>();
+    const childRefs = new Set<string>();
+    const resolve = (ref: string) => {
+      const clean = ref.replace(/^\[\[/, "").replace(/\]\]$/, "").split("|")[0];
+      return byRef.get(clean) ?? byName.get(clean.split("/").pop());
+    };
+
+    for (const task of tasks) {
+      const rows = (task.subtask_refs ?? []).flatMap((ref) => {
+        const child = resolve(ref);
+        return child ? [child] : [];
+      });
+      children.set(task.ref, rows);
+      rows.forEach((child) => childRefs.add(child.ref));
+    }
+
+    const roots = tasks.filter((task) => !childRefs.has(task.ref));
+    return { children, roots: roots.length ? roots : tasks };
+  }, [tasks]);
+
+  useEffect(() => {
+    if (initializedHierarchy.current || hierarchy.roots.length === 0) return;
+    initializedHierarchy.current = true;
+    setExpanded(new Set(hierarchy.roots.filter((task) => task.subtasks > 0).map((task) => task.ref)));
+  }, [hierarchy]);
+
+  const visibleRows = useMemo(() => {
+    const rows: Array<{ task: TaskRow; depth: number }> = [];
+    const seen = new Set<string>();
+    const add = (task: TaskRow, depth: number) => {
+      if (seen.has(task.ref)) return;
+      seen.add(task.ref);
+      rows.push({ task, depth });
+      if (!expanded.has(task.ref)) return;
+      for (const child of hierarchy.children.get(task.ref) ?? []) add(child, depth + 1);
+    };
+    hierarchy.roots.forEach((task) => add(task, 0));
+    return rows;
+  }, [expanded, hierarchy]);
+
+  function toggleExpanded(ref: string) {
+    setExpanded((current) => {
+      const next = new Set(current);
+      if (next.has(ref)) next.delete(ref); else next.add(ref);
+      return next;
+    });
+  }
 
   useEffect(() => {
     if (!creating) return;
@@ -75,9 +128,13 @@ export function JobsPaneBody() {
     <div className="flex h-full flex-col">
       <div className="flex shrink-0 items-center justify-between border-b border-cyan-300/10 px-3 py-1.5">
         <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-cyan-300/50">
-          {tasks.length} tasks
+          {hierarchy.roots.length} roots · {tasks.length} tasks
         </span>
         <div className="flex items-center gap-2">
+          <button onClick={() => setExpanded(new Set(tasks.filter((task) => task.subtasks > 0).map((task) => task.ref)))}
+            title="Expand all task groups" className="font-mono text-[11px] text-cyan-300/50 hover:text-cyan-100">▾</button>
+          <button onClick={() => setExpanded(new Set())}
+            title="Collapse all task groups" className="font-mono text-[11px] text-cyan-300/50 hover:text-cyan-100">▸</button>
           <button onClick={() => setCreating((c) => !c)} title="Assign a new task"
             className="text-cyan-300/60 hover:text-cyan-100">
             {creating ? <X size={13} /> : <Plus size={13} />}
@@ -114,58 +171,50 @@ export function JobsPaneBody() {
       ) : null}
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {(() => {
-          const byRef = new Map(tasks.map((t) => [t.ref, t]));
-          const resolveChild = (r: string) => byRef.get(r) ?? byRef.get(`Tasks/${r.split("/").pop()}`);
-          const childRefs = new Set(tasks.flatMap((t) => (t.subtask_refs ?? []).map((r) => resolveChild(r)?.ref)).filter(Boolean));
-          const roots = tasks.filter((t) => !childRefs.has(t.ref));
-          const ordered: Array<{ t: TaskRow; depth: number }> = [];
-          const push = (t: TaskRow, depth: number) => {
-            ordered.push({ t, depth });
-            if (depth < 3) for (const r of t.subtask_refs ?? []) {
-              const c = resolveChild(r);
-              if (c) push(c, depth + 1);
-            }
-          };
-          roots.forEach((t) => push(t, 0));
-          return ordered.map(({ t, depth }) => (
-          <div key={t.ref} className="flex items-center gap-2 border-b border-cyan-300/8 py-2 pr-3"
-            style={{ paddingLeft: 12 + depth * 18 }}>
-            {depth > 0 ? <span className="shrink-0 font-mono text-[10px] text-cyan-300/30">└</span> : null}
-            <span className={`shrink-0 rounded border px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider ${STATUS_STYLE[t.status] ?? STATUS_STYLE.draft}`}>
-              {t.status}
-            </span>
-            <button onClick={() => openReader(t.ref)}
-              className={`min-w-0 flex-1 truncate text-left font-mono hover:text-cyan-300 ${
-                t.subtasks ? "text-[12.5px] uppercase tracking-[0.14em] text-cyan-50" : "text-[12px] text-cyan-100"}`}>
-              {t.title}
-            </button>
-            {t.assignee ? (
-              <span className="shrink-0 font-mono text-[9px] text-teal-300/70">
-                {t.assignee.replace(/\[\[Agents\//, "").replace(/\]\]/, "")}
-              </span>
-            ) : null}
-            {t.subtasks ? (
-              <span className="shrink-0 font-mono text-[9px] text-violet-300/70">▤ {t.subtasks}</span>
-            ) : null}
-            {t.schedule ? (
-              <span className="shrink-0 font-mono text-[9px] text-cyan-300/40">⏰ {t.schedule}</span>
-            ) : null}
-            {t.blocked_reason ? (
-              <span className="max-w-[34%] shrink-0 truncate font-mono text-[9px] text-rose-300/70" title={t.blocked_reason}>
-                {t.blocked_reason}
-              </span>
-            ) : null}
-            <button
-              onClick={() => runNow(t.ref)}
-              disabled={busyRef === t.ref || t.status === "running"}
-              title="Run now"
-              className="shrink-0 rounded border border-cyan-300/25 p-1 text-cyan-300/60 hover:bg-cyan-300/10 disabled:opacity-30">
-              <Play size={11} />
-            </button>
+        {tasks.length > 0 ? (
+          <div className="sticky top-0 z-10 grid grid-cols-[minmax(0,1fr)_72px_70px_28px] border-b border-cyan-300/15 bg-[#03101a]/95 px-2 py-1 font-mono text-[8px] uppercase tracking-[0.16em] text-cyan-300/40">
+            <span>Task</span><span>State</span><span>Agent</span><span />
           </div>
-          ));
-        })()}
+        ) : null}
+        {visibleRows.map(({ task, depth }) => {
+          const children = hierarchy.children.get(task.ref) ?? [];
+          const hasChildren = children.length > 0;
+          const isExpanded = expanded.has(task.ref);
+          const agent = task.assignee.replace(/\[\[Agents\//, "").replace(/\]\]/, "");
+          return (
+            <div key={task.ref}
+              className="grid grid-cols-[minmax(0,1fr)_72px_70px_28px] items-center border-b border-cyan-300/8 px-2 py-1.5 hover:bg-cyan-300/[0.035]">
+              <div className="flex min-w-0 items-start" style={{ paddingLeft: depth * 17 }}>
+                <button onClick={() => hasChildren && toggleExpanded(task.ref)} disabled={!hasChildren}
+                  title={hasChildren ? `${isExpanded ? "Collapse" : "Expand"} ${task.title}` : undefined}
+                  className="mr-1 mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center text-cyan-300/55 hover:text-cyan-100 disabled:text-cyan-300/15">
+                  {hasChildren ? (isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />) : <span className="text-[8px]">·</span>}
+                </button>
+                <div className="min-w-0">
+                  <button onClick={() => openReader(task.ref)}
+                    className={`block w-full truncate text-left font-mono hover:text-cyan-300 ${
+                      hasChildren ? "text-[11px] font-semibold uppercase tracking-[0.1em] text-cyan-50" : "text-[11px] text-cyan-100"}`}>
+                    {task.title}
+                  </button>
+                  <div className="flex min-w-0 gap-2 font-mono text-[8px] text-cyan-300/35">
+                    {hasChildren ? <span>{children.length} subtasks</span> : null}
+                    {task.schedule ? <span className="truncate">⏰ {task.schedule}</span> : null}
+                    {task.blocked_reason ? <span className="truncate text-rose-300/70" title={task.blocked_reason}>{task.blocked_reason}</span> : null}
+                  </div>
+                </div>
+              </div>
+              <span className={`w-fit rounded border px-1.5 py-0.5 font-mono text-[8px] uppercase tracking-wider ${STATUS_STYLE[task.status] ?? STATUS_STYLE.draft}`}>
+                {task.status}
+              </span>
+              <span className="truncate font-mono text-[8px] text-teal-300/70" title={agent}>{agent || "—"}</span>
+              <button onClick={() => runNow(task.ref)}
+                disabled={busyRef === task.ref || task.status === "running"} title="Run now"
+                className="rounded border border-cyan-300/25 p-1 text-cyan-300/60 hover:bg-cyan-300/10 disabled:opacity-30">
+                <Play size={10} />
+              </button>
+            </div>
+          );
+        })}
         {tasks.length === 0 ? (
           <p className="p-4 font-mono text-[11px] text-cyan-200/40">No task notes in the vault yet — assign one with +.</p>
         ) : null}
