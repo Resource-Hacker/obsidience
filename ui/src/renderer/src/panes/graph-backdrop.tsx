@@ -132,6 +132,9 @@ export function GraphBackdrop() {
         .map((raw) => subRef(raw, allIds)).filter((ref): ref is string => Boolean(ref)),
     );
     const libraryKinds = new Set(["tool", "skill", "runbook", "task"]);
+    const primitiveFolderByKind: Record<string, string> = {
+      tool: "Tools", skill: "Skills", runbook: "Runbooks", task: "Tasks",
+    };
     const libraryNotes = all.filter((n) => libraryKinds.has(n.kind));
     const hierarchyClosure = (roots: Set<string>): Set<string> => {
       const pool = new Set(libraryNotes.map((node) => node.id));
@@ -146,6 +149,15 @@ export function GraphBackdrop() {
           if (!child || closure.has(child) || byId.get(child)?.kind !== parent.kind) continue;
           closure.add(child);
           queue.push(child);
+        }
+      }
+      const parentOf = hierarchyParents(libraryNotes);
+      for (const ref of [...closure]) {
+        let cursor = ref;
+        while (parentOf.has(cursor)) {
+          cursor = parentOf.get(cursor) as string;
+          if (closure.has(cursor)) break;
+          closure.add(cursor);
         }
       }
       return closure;
@@ -192,9 +204,12 @@ export function GraphBackdrop() {
         const container = executiveParents.get(n.id);
         const isContainer = executiveContainers.has(n.id);
         return {
-          id: n.id, degree: degree.get(n.id) ?? 0, kind: "note" as never, label: n.title,
+          id: n.id, degree: degree.get(n.id) ?? 0, kind: "note" as never,
+          label: container?.startsWith("@library/Tools/") ? n.title.split(".").pop() ?? n.title : n.title,
           role: (isContainer ? "section" : "claim") as never,
-          parentId: container ?? (n.id.includes("/") ? `@branch/${branchOf(n.id)}` : ROOT_ID),
+          parentId: container ?? (libraryKinds.has(n.kind)
+            ? `@branch/${primitiveFolderByKind[n.kind]}`
+            : n.id.includes("/") ? `@branch/${branchOf(n.id)}` : ROOT_ID),
           order: i,
         };
       }),
@@ -223,7 +238,8 @@ export function GraphBackdrop() {
     titles.current = new Map([
       [ROOT_ID, "Obsidience"],
       ...[...branches, ...primitiveFolders].map((b) => [`@branch/${b}`, b] as [string, string]),
-      ...notes.map((n) => [n.id, n.title] as [string, string]),
+      ...notes.map((n) => [n.id, executiveParents.get(n.id)?.startsWith("@library/Tools/")
+        ? n.title.split(".").pop() ?? n.title : n.title] as [string, string]),
     ]);
 
     // — the original buildKnowledge3dRenderModel law, tone = top folder —
@@ -289,10 +305,12 @@ export function GraphBackdrop() {
           kind: "concept" as never, label: folder, role: "section" as never, parentId: identityRef, order: index,
         })),
         ...members.map((n, i) => ({
-          id: n.id, degree: 0, kind: "note" as never, label: n.title,
+          id: n.id, degree: 0, kind: "note" as never,
+          label: primitiveParents.get(n.id)?.startsWith("@library/Tools/")
+            ? n.title.split(".").pop() ?? n.title : n.title,
           role: (primitiveContainers.has(n.id) ? "section" : "claim") as never,
           parentId: primitiveParents.get(n.id) ?? (libraryKinds.has(n.kind)
-            ? `@sat/${name}/${String(branchOf(n.id)).toLowerCase()}` : identityRef),
+            ? `@sat/${name}/${primitiveFolderByKind[n.kind].toLowerCase()}` : identityRef),
           order: i,
         })),
       ];
@@ -335,7 +353,9 @@ export function GraphBackdrop() {
       for (const ref of memberSet) {
         const n = all.find((x) => x.id === ref);
         titles.current.set(`agent:${name}/${ref}`,
-          n?.title ?? (ref === identityRef ? name : satelliteFolders.find((folder) => ref === `@sat/${name}/${folder.toLowerCase()}`) ?? ref));
+          n ? (primitiveParents.get(ref)?.startsWith("@library/Tools/")
+            ? n.title.split(".").pop() ?? n.title : n.title)
+            : (ref === identityRef ? name : satelliteFolders.find((folder) => ref === `@sat/${name}/${folder.toLowerCase()}`) ?? ref));
       }
       return { agentId: name, nodes: satNodes, edges: satEdges, tuning };
     });
@@ -362,7 +382,9 @@ export function GraphBackdrop() {
         id: node.id,
         degree: 0,
         kind: "note" as never,
-        label: node.title,
+        label: libraryParents.get(node.id)?.startsWith("@library/Tools/")
+          ? node.title.split(".").pop() ?? node.title
+          : node.title,
         role: (libraryContainers.has(node.id) ? "section" : "claim") as never,
         parentId: libraryParents.get(node.id) ?? `@library/${shelfLabels[node.kind as keyof typeof shelfLabels]}`,
         order: index,
@@ -410,7 +432,10 @@ export function GraphBackdrop() {
     for (const ref of librarySet) {
       const note = libraryNotes.find((node) => node.id === ref);
       const shelf = Object.values(shelfLabels).find((label) => ref === `@library/${label}`);
-      titles.current.set(`agent:library/${ref}`, note?.title ?? (ref === libraryRoot ? "Library" : shelf ?? ref));
+      titles.current.set(`agent:library/${ref}`, note
+        ? (libraryParents.get(ref)?.startsWith("@library/Tools/")
+          ? note.title.split(".").pop() ?? note.title : note.title)
+        : (ref === libraryRoot ? "Library" : shelf ?? ref));
     }
     const librarySatellite = {
       agentId: "library",

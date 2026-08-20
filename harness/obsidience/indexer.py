@@ -157,6 +157,48 @@ class Index:
                 t = resolver.resolve(target)
                 if t and t.ref in known and t.ref != ref:
                     links.append({"source": ref, "target": t.ref})
+
+        # Dotted Tool names are callable namespaces, so project them as the
+        # same expandable article hierarchy used by explicit sub* fields.
+        tool_rows = [(ref, json.loads(meta)) for ref, _title, kind, meta, _links in rows
+                     if kind == "tool"]
+        explicit_children = set()
+        for _ref, meta in tool_rows:
+            for raw in _meta_links(meta.get("subtools")):
+                target = resolver.resolve(raw)
+                if target:
+                    explicit_children.add(target.ref)
+        tool_parts = {
+            ref: ref.rsplit("/", 1)[-1].split(".")
+            for ref, _meta in tool_rows if ref not in explicit_children and "." in ref.rsplit("/", 1)[-1]
+        }
+        namespaces = sorted({
+            ".".join(parts[:depth])
+            for parts in tool_parts.values() for depth in range(1, len(parts))
+        })
+        namespace_set = set(namespaces)
+        for namespace in namespaces:
+            prefix = namespace.split(".")
+            child_namespaces = sorted(
+                child for child in namespace_set
+                if child.startswith(namespace + ".") and len(child.split(".")) == len(prefix) + 1
+            )
+            child_tools = sorted(
+                ref for ref, parts in tool_parts.items()
+                if parts[:len(prefix)] == prefix and len(parts) == len(prefix) + 1
+            )
+            nodes.append({
+                "id": f"@library/Tools/{namespace}",
+                "title": prefix[-1],
+                "kind": "tool",
+                "status": None,
+                "assignee": None,
+                "children": [*(f"@library/Tools/{child}" for child in child_namespaces), *child_tools],
+                "subtasks": [],
+                "checkouts": {},
+                "tags": ["generated-index", "tool-namespace"],
+                "synthetic": True,
+            })
         return {"nodes": nodes, "links": links}
 
     # ---------- runs ----------

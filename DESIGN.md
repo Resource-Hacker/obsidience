@@ -118,6 +118,10 @@ the Reader.
 All four Library shelves use the same recursive matrix interaction. A row with
 same-kind children expands in authored order, search preserves matching ancestor
 paths, and every row remains an independently readable and check-outable article.
+Callable Tool names additionally project their dotted namespace as generated
+index articles: `task.complete` and `task.create` render beneath `task`, while
+the `vault.*` capabilities render beneath `vault`. Checking out a namespace
+stores only its canonical descendant Tool links on the identity note.
 
 The **Jobs** pane is the scheduler surface: it creates, edits, runs, and watches
 scheduled task definitions. It does not double as the task catalog. "Job" is

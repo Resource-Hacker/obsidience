@@ -334,7 +334,9 @@ export function ReaderPaneBody() {
             {childRefs.map((ref) => (
               <button key={ref} onClick={() => openReader(cleanLink(ref))}
                 className="rounded border border-cyan-300/20 px-2 py-1 font-mono text-[9px] text-cyan-100/70 hover:border-cyan-300/45 hover:text-cyan-50">
-                {cleanLink(ref).split("/").pop()}
+                {articleNode?.synthetic
+                  ? cleanLink(ref).split("/").pop()?.split(".").pop()
+                  : cleanLink(ref).split("/").pop()}
               </button>
             ))}
           </div>

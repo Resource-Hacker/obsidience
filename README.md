@@ -27,6 +27,8 @@ review decisions are git-committed.
 Every Library primitive is recursively composable through its same-kind child
 field: `subtasks`, `subrunbooks`, `subskills`, or `subtools`. The Library,
 graph, Reader, validator, and interpreter all follow those exact ordered edges.
+Dotted Tool bindings also receive generated namespace parents in the Library,
+so `task.*` and `vault.*` display as expandable trees without duplicate notes.
 
 ## Layout
 - `vault/` — the system itself (charters, runbooks, tasks, knowledge, receipts)

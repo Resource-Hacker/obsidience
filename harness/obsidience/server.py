@@ -50,6 +50,62 @@ def _folder_index(folder: str):
     return load_note(f"{folder}/index.md") or load_note(f"{folder}/README.md")
 
 
+def _tool_namespace_catalog():
+    tools = [note for note in iter_notes() if note.kind == "tool"]
+    res = resolver()
+    explicit_children = {
+        child.ref
+        for parent in tools for raw in parent.children
+        if (child := res.resolve(raw)) and child.kind == "tool"
+    }
+    eligible = {
+        note.ref.rsplit("/", 1)[-1]: note
+        for note in tools
+        if note.ref not in explicit_children and "." in note.ref.rsplit("/", 1)[-1]
+    }
+    namespaces = {
+        ".".join(name.split(".")[:depth])
+        for name in eligible for depth in range(1, len(name.split(".")))
+    }
+    return eligible, namespaces
+
+
+def _tool_namespace_members(namespace: str) -> list:
+    eligible, _namespaces = _tool_namespace_catalog()
+    prefix = namespace + "."
+    return [note for name, note in eligible.items() if name.startswith(prefix)]
+
+
+def _tool_namespace_article(ref: str, namespace: str | None = None) -> dict:
+    eligible, namespaces = _tool_namespace_catalog()
+    prefix_parts = namespace.split(".") if namespace else []
+    child_namespaces = sorted(
+        child for child in namespaces
+        if (not namespace or child.startswith(namespace + "."))
+        and len(child.split(".")) == len(prefix_parts) + 1
+    )
+    child_tools = sorted(
+        (name, note) for name, note in eligible.items()
+        if name.split(".")[:len(prefix_parts)] == prefix_parts
+        and len(name.split(".")) == len(prefix_parts) + 1
+    )
+    lines = [
+        f"- [[@library/Tools/{child}|{child.rsplit('.', 1)[-1]}]] · tool index"
+        for child in child_namespaces
+    ]
+    lines.extend(
+        f"- [[{note.ref}|{name.rsplit('.', 1)[-1]}]] · tool"
+        for name, note in child_tools
+    )
+    title = namespace.rsplit(".", 1)[-1] if namespace else "Library · Tools"
+    summary = (f"The `{namespace}` Tool namespace." if namespace
+               else "The Library's accepted tools shelf, grouped by callable namespace.")
+    body = summary + "\n\n## Indexed articles\n\n" + ("\n".join(lines) or "*No tools are indexed here.*")
+    article_count = len(_tool_namespace_members(namespace)) if namespace else len(eligible)
+    return {"ref": ref, "title": title, "kind": "index",
+            "meta": {"node": "true", "articles": str(article_count)}, "body": body}
+
+
 def _primitive_closure(roots, catalog) -> list:
     """Project a checked-out/assigned primitive with all same-kind descendants."""
     by_ref = {note.ref.lower(): note for note in catalog}
@@ -178,13 +234,26 @@ def get_article(ref: str):
             ref, "Obsidience", "The root index for this vault.", notes)
     if ref == "@library":
         primitives = [item for item in notes if item.kind in CHECKOUT_FIELDS]
-        return _virtual_index(
-            ref, "Library",
-            "The curated canonical repository for Tools, Skills, Runbooks, and Tasks.",
-            primitives,
+        body = (
+            "The curated canonical repository for Tools, Skills, Runbooks, and Tasks.\n\n"
+            "## Indexed shelves\n\n"
+            "- [[@library/Tools|Tools]]\n"
+            "- [[@library/Skills|Skills]]\n"
+            "- [[@library/Runbooks|Runbooks]]\n"
+            "- [[@library/Tasks|Tasks]]"
         )
+        return {"ref": ref, "title": "Library", "kind": "index",
+                "meta": {"node": "true", "articles": str(len(primitives))}, "body": body}
     if ref.startswith("@library/"):
-        folder = ref.removeprefix("@library/").strip("/")
+        relative = ref.removeprefix("@library/").strip("/")
+        if relative == "Tools":
+            return _tool_namespace_article(ref)
+        if relative.startswith("Tools/"):
+            namespace = relative.removeprefix("Tools/")
+            if namespace not in _tool_namespace_catalog()[1]:
+                raise HTTPException(404, f"tool namespace not found: {namespace}")
+            return _tool_namespace_article(ref, namespace)
+        folder = relative
         kind = folder.rstrip("s").lower()
         if kind not in CHECKOUT_FIELDS:
             raise HTTPException(404, f"library node not found: {ref}")
@@ -249,10 +318,22 @@ def library_checkouts():
         if not identity:
             continue
         for kind, field in CHECKOUT_FIELDS.items():
+            selected = set()
             for raw in _link_values(identity.meta.get(field)):
                 target = res.resolve(raw)
                 if target and target.kind == kind:
                     assignments.append({"agent": agent, "ref": target.ref, "kind": kind})
+                    selected.add(target.ref)
+            if kind == "tool":
+                _eligible, namespaces = _tool_namespace_catalog()
+                for namespace in sorted(namespaces):
+                    members = {note.ref for note in _tool_namespace_members(namespace)}
+                    if members and members <= selected:
+                        assignments.append({
+                            "agent": agent,
+                            "ref": f"@library/Tools/{namespace}",
+                            "kind": "tool",
+                        })
     return {"assignments": assignments}
 
 
@@ -267,22 +348,28 @@ def set_library_checkout(ref: str, payload: dict):
         raise HTTPException(400, "checked_out must be boolean")
 
     res = resolver()
-    target = res.resolve(ref)
-    if not target or target.kind not in CHECKOUT_FIELDS:
+    namespace = ref.removeprefix("@library/Tools/") if ref.startswith("@library/Tools/") else None
+    targets = _tool_namespace_members(namespace) if namespace else []
+    if namespace and namespace not in _tool_namespace_catalog()[1]:
+        raise HTTPException(404, f"tool namespace not found: {namespace}")
+    target = res.resolve(ref) if not namespace else None
+    if not targets and (not target or target.kind not in CHECKOUT_FIELDS):
         raise HTTPException(404, f"library item not found: {ref}")
     identity = res.resolve(CHECKOUT_AGENTS[agent])
     if not identity:
         raise HTTPException(500, f"checkout identity missing: {CHECKOUT_AGENTS[agent]}")
 
-    field = CHECKOUT_FIELDS[target.kind]
+    kind = "tool" if namespace else target.kind
+    field = CHECKOUT_FIELDS[kind]
     current = _link_values(identity.meta.get(field))
     retained = []
+    target_refs = {item.ref for item in targets} if namespace else {target.ref}
     for raw in current:
         resolved = res.resolve(raw)
-        if not resolved or resolved.ref != target.ref:
+        if not resolved or resolved.ref not in target_refs:
             retained.append(raw)
     if checked_out:
-        retained.append(f"[[{target.ref}]]")
+        retained.extend(f"[[{target_ref}]]" for target_ref in sorted(target_refs))
 
     meta = dict(identity.meta)
     if retained:
@@ -291,7 +378,8 @@ def set_library_checkout(ref: str, payload: dict):
         meta.pop(field, None)
     write_note(identity.path, meta, identity.body)
     INDEX.sync()
-    return {"agent": agent, "ref": target.ref, "kind": target.kind, "checked_out": checked_out}
+    return {"agent": agent, "ref": ref if namespace else target.ref,
+            "kind": kind, "checked_out": checked_out}
 
 
 @app.get("/api/notes/{ref:path}")

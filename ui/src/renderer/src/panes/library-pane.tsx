@@ -140,8 +140,9 @@ export function LibraryPaneBody() {
 
   const counts = useMemo(() => Object.fromEntries(SHELVES.map((kind) => [
     kind,
-    nodes.filter((node) => node.kind === kind).length,
+    nodes.filter((node) => node.kind === kind && !node.synthetic).length,
   ])) as Record<Shelf, number>, [nodes]);
+  const acceptedCount = useMemo(() => nodes.filter((node) => !node.synthetic).length, [nodes]);
 
   const taskByRef = useMemo(() => new Map(tasks.map((task) => [task.ref, task])), [tasks]);
   const shelfNodes = useMemo(() => nodes
@@ -174,7 +175,7 @@ export function LibraryPaneBody() {
       children.set(node.id, rows);
     }
     const roots = shelfNodes.filter((node) => !childRefs.has(node.id));
-    return { children, roots: roots.length ? roots : shelfNodes };
+    return { children, parentOf, roots: roots.length ? roots : shelfNodes };
   }, [shelfNodes]);
 
   useEffect(() => {
@@ -258,7 +259,7 @@ export function LibraryPaneBody() {
         <div className="min-w-0 flex-1">
           <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-emerald-200">Curated Library</p>
           <p className="font-mono text-[8px] text-emerald-200/45">
-            {nodes.length} accepted · {reviewCount} awaiting curation
+            {acceptedCount} accepted · {reviewCount} awaiting curation
           </p>
         </div>
         <button onClick={refresh} title="Refresh library" className="text-emerald-300/50 hover:text-emerald-100">
@@ -298,6 +299,9 @@ export function LibraryPaneBody() {
           const task = taskByRef.get(node.id);
           const children = hierarchy.children.get(node.id) ?? [];
           const hasChildren = children.length > 0;
+          const displayTitle = hierarchy.parentOf.get(node.id)?.startsWith("@library/Tools/")
+            ? node.title.split(".").pop() ?? node.title
+            : node.title;
           return (
             <div key={node.id} className="flex items-start border-b border-emerald-300/[0.07] px-2 py-1.5 hover:bg-emerald-300/[0.04]"
               style={{ paddingLeft: 8 + depth * 17 }}>
@@ -307,7 +311,7 @@ export function LibraryPaneBody() {
               </button>
               <button onClick={() => openReader(node.id)} className="min-w-0 flex-1 text-left">
                 <span className={`block truncate font-mono text-[11px] hover:text-emerald-200 ${hasChildren ? "font-semibold uppercase tracking-[0.08em] text-emerald-50" : "text-emerald-100/80"}`}>
-                  {node.title}
+                  {displayTitle}
                 </span>
                 <span className="flex gap-2 font-mono text-[8px] text-emerald-200/35">
                   {hasChildren ? <span>{children.length} {CHILD_LABELS[shelf]}</span> : <span>{task?.status ?? node.id}</span>}

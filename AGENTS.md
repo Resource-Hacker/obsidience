@@ -28,6 +28,10 @@ section is binding. Rules for working here:
   `subrunbooks:`, `subskills:`, and `subtools:`. Keep one generic hierarchy
   projection in code; do not reintroduce task-only tree rendering. A parent
   checkout projects its descendant closure without copying canonical notes.
+- Dotted callable Tool names project generated namespace index articles in the
+  Library (`task` → `complete`, `create`; `vault` → its callable leaves). Keep
+  canonical checkout storage on the real descendant Tool refs, never the
+  generated `@library/Tools/*` presentation IDs.
 
 ## Phase 1 directive (owner, 2026-08-20) — finish before anything else
 

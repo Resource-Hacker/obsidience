@@ -17,6 +17,7 @@ export interface GraphNode {
   assignee?: string | null;
   children?: string[];
   subtasks?: string[];
+  synthetic?: boolean;
   checkouts?: Partial<Record<"tools" | "skills" | "runbooks" | "tasks", string[]>>;
   tags?: string[];
 }
