@@ -56,16 +56,33 @@ export const NEUTRAL_PALETTE: KnowledgeBranchPalette = {
 
 /** Obsidience branches on the original hue wheel (hues verbatim from
  *  KNOWLEDGE_MAIN_BRANCH_HUES; sat/light pairs from the original table). */
+/** The Agent subtree wears HEREBRUM's agent branch verbatim: hue 173 with
+ *  the original sub-tone sat/light pairs (agent/agentTasks/agentRunbooks/
+ *  agentSkills/agentTools). World-knowledge folders get the other main hues. */
 const FOLDER_PALETTES: Record<string, KnowledgeBranchPalette> = {
-  Charters: chromaticKnowledgePalette(173, 66, 50),   // agent teal
-  Runbooks: chromaticKnowledgePalette(43, 96, 56),    // strategy gold
-  Tasks: chromaticKnowledgePalette(271, 91, 75),      // projects violet
-  Knowledge: chromaticKnowledgePalette(199, 91, 60),  // workstation cyan
-  Receipts: chromaticKnowledgePalette(239, 84, 74),   // news indigo
-  Skills: chromaticKnowledgePalette(350, 94, 72),     // personal rose
-  Tools: chromaticKnowledgePalette(130, 88, 62),      // websites green
+  Agent: chromaticKnowledgePalette(173, 66, 50),      // agent
+  Tasks: chromaticKnowledgePalette(173, 58, 64),      // agentTasks
+  Runbooks: chromaticKnowledgePalette(173, 84, 52),   // agentRunbooks
+  Skills: chromaticKnowledgePalette(173, 88, 68),     // agentSkills
+  Tools: chromaticKnowledgePalette(173, 74, 62),      // agentTools
+  Sources: chromaticKnowledgePalette(239, 84, 74),    // news indigo
 };
-const SPARE_HUES = [350, 130, 239, 20, 90];
+const SPARE_HUES = [199, 271, 350, 130, 43, 239];
+
+/** Satellite agents wear their own branch hues (HEREBRUM main-hue wheel). */
+const AGENT_PALETTES: Record<string, KnowledgeBranchPalette> = {
+  Alexandria: chromaticKnowledgePalette(271, 91, 75),  // curator violet
+  Darwin: chromaticKnowledgePalette(130, 88, 62),      // researcher green
+  Heimdall: chromaticKnowledgePalette(43, 96, 56),     // guardian gold
+};
+
+export function paletteForAgent(name: string): KnowledgeBranchPalette {
+  const hit = AGENT_PALETTES[name];
+  if (hit) return hit;
+  let hash = 0;
+  for (const ch of name) hash = (hash * 31 + ch.charCodeAt(0)) | 0;
+  return chromaticKnowledgePalette([199, 271, 350, 130, 43][Math.abs(hash) % 5], 80, 62);
+}
 
 export function paletteForBranch(branch: string | null): KnowledgeBranchPalette {
   if (!branch) return BRAIN_PALETTE;

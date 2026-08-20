@@ -1,6 +1,7 @@
 ---
 acceptance:
 - each finding cites both conflicting notes
+assignee: '[[Agents/Heimdall]]'
 auto_done: true
 blocked_reason: null
 kind: task

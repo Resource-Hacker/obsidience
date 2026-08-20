@@ -1,11 +1,12 @@
 ---
+assignee: '[[Agents/Alexandria]]'
 auto_done: true
 blocked_reason: null
 kind: task
-last_run: 26218df1c191
+last_run: 943add8d99e2
 runbook: '[[Runbooks/ingest-sources]]'
 status: completed
-status_updated: '2026-08-20T10:14:06'
+status_updated: '2026-08-20T11:00:14'
 title: ingest-sources
 ---
 

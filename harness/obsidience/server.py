@@ -80,6 +80,7 @@ def tasks():
         subtasks = n.meta.get("subtasks") or []
         out.append({"ref": n.ref, "title": n.title,
                     "status": n.meta.get("status", "draft"),
+                    "assignee": str(n.meta.get("assignee", "")),
                     "runbook": str(n.meta.get("runbook", "")),
                     "subtasks": len(subtasks) if isinstance(subtasks, list) else 0,
                     "schedule": n.meta.get("schedule"),
@@ -100,6 +101,8 @@ async def create_task(payload: dict):
         raise HTTPException(409, f"task already exists: {ref}")
     meta: dict = {"title": title, "kind": "task",
                   "status": "pending" if payload.get("start") else "draft"}
+    if payload.get("assignee"):
+        meta["assignee"] = str(payload["assignee"])
     if payload.get("runbook"):
         meta["runbook"] = str(payload["runbook"])
     if payload.get("subtasks"):

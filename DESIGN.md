@@ -32,6 +32,18 @@ architecture; everything else is either knowledge (notes) or runtime state.
   "maintain the wiki" / "answer the user" / "research a question" are
   runbooks; every user request or background job is a task.
 
+## Agents (who — principals, not a fifth authoring primitive)
+
+Subagents are **literal agents**, exactly like HEREBRUM's fleet: Alexandria
+(curator), Darwin (researcher), Heimdall (guardian). Each is an identity note
+plus a private subtree under `Agents/<Name>/`, and tasks bind to them with
+`assignee: "[[Agents/<Name>]]"`. The four authoring primitives describe the
+work (what/how/knowledge/capability); agents are *who*. One interpreter
+runtime executes every session — **as** the assigned agent (its identity is
+the persona, and an agent `tools:` list further narrows the skill-granted
+set). Visually each agent is its own satellite ball orbiting the main graph
+(the HEREBRUM satellite machinery), carrying its subtree and assigned tasks.
+
 ## The runtime is not a primitive
 
 The harness is the **interpreter**:
@@ -85,6 +97,6 @@ ui/         Electron HUD: the 3D graph backdrop (original HEREBRUM engine,
 
 ## Non-goals for v0
 
-Multi-agent fleets, adjudication lanes, sealed validators, per-agent vault
+Adjudication lanes, sealed validators, per-agent vault
 isolation, secrets. Trust model: one owner + staged proposals + git. Add
 ceremony only when the dev build earns it.

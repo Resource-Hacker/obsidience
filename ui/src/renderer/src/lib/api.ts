@@ -14,11 +14,12 @@ export interface GraphNode {
   title: string;
   kind: string;
   status?: string | null;
+  assignee?: string | null;
   tags?: string[];
 }
 export interface GraphLink { source: string; target: string }
 export interface TaskRow {
-  ref: string; title: string; status: string; runbook: string; subtasks: number;
+  ref: string; title: string; status: string; assignee: string; runbook: string; subtasks: number;
   schedule?: string | null; blocked_reason?: string | null; last_run?: string | null;
 }
 export interface Proposal {

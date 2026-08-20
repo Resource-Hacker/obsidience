@@ -1,11 +1,12 @@
 ---
+assignee: '[[Agents/Alexandria]]'
 auto_done: true
 blocked_reason: null
 kind: task
-last_run: c086ca75d93e
+last_run: fefe9c5ffc8f
 runbook: '[[Runbooks/categorize-notes]]'
-status: completed
-status_updated: '2026-08-20T10:24:25'
+status: running
+status_updated: '2026-08-20T11:03:52'
 title: categorize-notes
 ---
 

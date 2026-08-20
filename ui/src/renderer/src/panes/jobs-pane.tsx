@@ -123,6 +123,11 @@ export function JobsPaneBody() {
               className="min-w-0 flex-1 truncate text-left font-mono text-[12px] text-cyan-100 hover:text-cyan-300">
               {t.title}
             </button>
+            {t.assignee ? (
+              <span className="shrink-0 font-mono text-[9px] text-teal-300/70">
+                {t.assignee.replace(/\[\[Agents\//, "").replace(/\]\]/, "")}
+              </span>
+            ) : null}
             {t.subtasks ? (
               <span className="shrink-0 font-mono text-[9px] text-violet-300/70">▤ {t.subtasks}</span>
             ) : null}

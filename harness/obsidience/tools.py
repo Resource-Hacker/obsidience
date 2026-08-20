@@ -13,7 +13,7 @@ from .vault import load_note, resolver, slugify, write_note
 
 # Fallback one-liners; the authoritative documentation lives in Tools/ notes.
 BUILTIN_DOCS = {
-    "vault.list": 'Deterministically list notes in a folder. args: {"folder": "Tasks|Runbooks|Skills|Tools|Knowledge|Sources"}',
+    "vault.list": 'Deterministically list notes in a folder. args: {"folder": "Tasks|Runbooks|Skills|Tools|Agent|Agents|Sources"}',
     "vault.validate": "Deterministically validate every load-bearing frontmatter edge (task runbook/subtasks, runbook skills, skill tools) across the vault. args: {} — returns a broken-edge report.",
     "vault.search": 'Hybrid search over the vault. args: {"query": str}',
     "vault.read": 'Read a full note. args: {"ref": "Folder/name or [[wikilink]]"}',
@@ -55,8 +55,8 @@ def run_tool(name: str, args: dict, context: dict) -> str:
     if name == "vault.list":
         from .vault import iter_notes
         folder = str(args.get("folder", "")).strip().strip("/")
-        if folder not in ("Tasks", "Runbooks", "Skills", "Tools", "Knowledge", "Sources"):
-            return "Invalid folder. One of: Tasks, Runbooks, Skills, Tools, Knowledge, Sources."
+        if folder not in ("Tasks", "Runbooks", "Skills", "Tools", "Agent", "Agents", "Sources"):
+            return "Invalid folder. One of: Tasks, Runbooks, Skills, Tools, Agent, Sources."
         rows = [n for n in iter_notes() if n.ref.startswith(folder + "/")]
         if not rows:
             return f"{folder}/ is empty."

@@ -16,9 +16,13 @@ section is binding. Rules for working here:
 
 ## Phase 1 directive (owner, 2026-08-20) — finish before anything else
 
-Codex now owns Obsidience development. The single interpreter must perform the
-old fleet's Curator, Researcher, and Guardian duties as vault task families —
-NOT as agents. Full directive with the gap list and acceptance criteria:
+Codex now owns Obsidience development. The subagents are LITERAL agents
+(owner decision 2026-08-20): Alexandria (curator), Darwin (researcher), and
+Heimdall (guardian) exist as identities under `Agents/<Name>/`, tasks bind via
+`assignee:`, one interpreter runtime executes each session AS the assigned
+agent, and each agent renders as its own satellite ball orbiting the main
+graph (already implemented). Phase 1 = complete each agent's duty kit.
+Full directive with the gap list and acceptance criteria:
 `~/Documents/HEREBRUM-Subagent-Architecture.html`. Summary of gaps to build:
 
 - Curator: `curate-note` (one bounded improvement/pass), `archive-stale`
@@ -26,7 +30,7 @@ NOT as agents. Full directive with the gap list and acceptance criteria:
 - Researcher (all new): `web.fetch` + `web.search` tools, `safe-web-research`
   skill (one source per doc, dates+URLs, failed-fetch honesty, backpressure
   ≥3 pending → stop), `learn` + `research-a-question` runbooks/tasks;
-  proposals target `Sources/` (raw layer only — never Knowledge directly).
+  proposals target `Sources/` (raw layer only — never the Agent layer directly).
 - Guardian: `evidence-audit` (sample claims → supported/weakened/contradicted/
   unresolved → bounded proposals), `verify-harness` (+ deterministic
   `harness.status` tool), runbook content hash recorded in receipts.

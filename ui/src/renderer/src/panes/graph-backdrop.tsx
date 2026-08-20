@@ -12,6 +12,7 @@ import {
 } from "@/components/themes/jarvis/knowledge-3d-scene";
 import {
   DEFAULT_KNOWLEDGE_3D_TUNING,
+  parseKnowledgeAgentNodeId,
   type Knowledge3dTuning,
 } from "@/components/themes/jarvis/knowledge-3d";
 import { layoutKnowledgeGraph } from "@/components/themes/jarvis/knowledge-layout";
@@ -24,6 +25,7 @@ import {
   knowledgeSubjectRingScale,
   knowledgeSubjectRingWidth,
   nodeCoreColor,
+  paletteForAgent,
   paletteForBranch,
 } from "@/components/themes/jarvis/knowledge-paint";
 import { api, openReader, type GraphNode } from "@/lib/api";
@@ -82,10 +84,27 @@ export function GraphBackdrop() {
   }, []);
 
   const model = useMemo(() => {
-    const notes = graph.nodes.filter((n) => !n.id.startsWith("Receipts/"));
+    const all = graph.nodes.filter((n) => !n.id.startsWith("Receipts/"));
+    // Literal subagents (HEREBRUM model): each Agents/<Name>/ subtree plus the
+    // tasks assigned to that agent render as their OWN satellite ball.
+    const agentNames = [...new Set(all.filter((n) => n.id.startsWith("Agents/"))
+      .map((n) => n.id.split("/")[1]))].sort();
+    const assigneeOf = (n: GraphNode): string | null => {
+      const m = /Agents\/([^\]|/]+)/.exec(n.assignee ?? "");
+      return m ? m[1] : null;
+    };
+    const satelliteRefs = new Set(all.filter((n) =>
+      n.id.startsWith("Agents/") || (n.kind === "task" && assigneeOf(n) && agentNames.includes(assigneeOf(n)!)),
+    ).map((n) => n.id));
+    const notes = all.filter((n) => !satelliteRefs.has(n.id));
     const branchOf = (id: string): string | null => (id.includes("/") ? id.split("/", 1)[0] : null);
-    const branches = [...new Set(notes.map((n) => branchOf(n.id)).filter(Boolean))] as string[];
-    branches.sort();
+    // HEREBRUM agent-node structure: the four primitive collections nest
+    // UNDER the Agent branch; every other folder is a sibling subject branch.
+    const PRIMITIVES = ["Tasks", "Runbooks", "Skills", "Tools"];
+    const folders = [...new Set(notes.map((n) => branchOf(n.id)).filter(Boolean))] as string[];
+    const primFolders = PRIMITIVES.filter((f) => folders.includes(f));
+    const worldFolders = folders.filter((f) => f !== "Agent" && !PRIMITIVES.includes(f)).sort();
+    const branches = ["Agent", ...worldFolders];
 
     const degree = new Map<string, number>();
     const noteIds = new Set(notes.map((n) => n.id));
@@ -101,6 +120,10 @@ export function GraphBackdrop() {
       ...branches.map((b, i) => ({
         id: `@branch/${b}`, degree: notes.filter((n) => branchOf(n.id) === b).length,
         kind: "concept" as never, label: b, role: "section" as never, parentId: ROOT_ID, order: i,
+      })),
+      ...primFolders.map((f, i) => ({
+        id: `@branch/${f}`, degree: notes.filter((n) => branchOf(n.id) === f).length,
+        kind: "concept" as never, label: f, role: "section" as never, parentId: "@branch/Agent", order: i,
       })),
       ...notes.map((n, i) => ({
         id: n.id, degree: degree.get(n.id) ?? 0, kind: "note" as never, label: n.title,
@@ -130,7 +153,7 @@ export function GraphBackdrop() {
     const meta = new Map(notes.map((n) => [n.id, n]));
     titles.current = new Map([
       [ROOT_ID, "Obsidience"],
-      ...branches.map((b) => [`@branch/${b}`, b] as [string, string]),
+      ...[...branches, ...primFolders].map((b) => [`@branch/${b}`, b] as [string, string]),
       ...notes.map((n) => [n.id, n.title] as [string, string]),
     ]);
 
@@ -172,7 +195,58 @@ export function GraphBackdrop() {
         colorEnd: paletteOf(e.target).core,
       })),
     ];
-    return { nodes: renderNodes, edges: renderEdges };
+    // ---- satellites: one ball per agent, seeded by its own mini hierarchy ----
+    const linkPairs = graph.links;
+    const satellites = agentNames.map((name) => {
+      const identityRef = `Agents/${name}/${name}`;
+      const members = all.filter((n) =>
+        (n.id.startsWith(`Agents/${name}/`) && n.id !== identityRef) ||
+        (n.kind === "task" && assigneeOf(n) === name));
+      const satLayout = layoutKnowledgeGraph({
+        nodes: [
+          { id: identityRef, degree: members.length, kind: "concept" as never, label: name, role: "root" as never, parentId: null, order: 0 },
+          ...members.map((n, i) => ({
+            id: n.id, degree: 0, kind: "note" as never, label: n.title,
+            role: "claim" as never, parentId: identityRef, order: i,
+          })),
+        ],
+        edges: members.map((n, i) => ({ id: `s${i}`, source: identityRef, target: n.id, type: "related_to" as never })),
+      });
+      const satPos = new Map(satLayout.nodes.map((n) => [n.id, n]));
+      const pal = paletteForAgent(name);
+      const memberSet = new Set([identityRef, ...members.map((m) => m.id)]);
+      const satNodes: Knowledge3dRenderNode[] = [identityRef, ...members.map((m) => m.id)].map((ref) => {
+        const pp = satPos.get(ref);
+        const isRoot = ref === identityRef;
+        const noteMeta = all.find((n) => n.id === ref);
+        return {
+          id: ref, x: pp?.x ?? 0.5, y: pp?.y ?? 0.5, depth: pp?.depth,
+          role: isRoot ? "root" : "claim", parentId: pp?.parentId,
+          radius: knowledgeNodeRadius(isRoot ? "root" : "claim" as never, 1, false, pp?.depth),
+          subject: isRoot,
+          core: nodeCoreColor(pal, isRoot ? "root" : undefined, noteMeta?.status),
+          dark: pal.dark,
+          ring: isRoot ? pal.ring : "rgba(0,0,0,0)",
+          glow: isRoot ? pal.glow : "rgba(0,0,0,0)",
+          ringScale: knowledgeSubjectRingScale(pp?.depth),
+          ringWidth: knowledgeSubjectRingWidth(isRoot ? "root" : undefined, pp?.depth),
+          glowScale: isRoot ? knowledgeSubjectGlowScale("root", pp?.depth) : 1,
+          alpha: knowledgeNodeBaseAlpha(isRoot ? "root" : undefined, pp?.depth, "hot"),
+        };
+      });
+      const satEdges: Knowledge3dRenderEdge[] = [
+        ...members.map((m) => ({ source: identityRef, target: m.id, taxonomy: true, color: pal.core })),
+        ...linkPairs.filter((l) => memberSet.has(l.source) && memberSet.has(l.target) && l.source !== identityRef)
+          .map((l) => ({ source: l.source, target: l.target, taxonomy: false,
+                         color: knowledgeAmbientEdgeStroke(false, false, pal), colorEnd: pal.core })),
+      ];
+      for (const ref of memberSet) {
+        const n = all.find((x) => x.id === ref);
+        titles.current.set(`agent:${name}/${ref}`, n?.title ?? (ref === identityRef ? name : ref));
+      }
+      return { agentId: name, nodes: satNodes, edges: satEdges, tuning };
+    });
+    return { nodes: renderNodes, edges: renderEdges, satellites };
   }, [graph, viewport, tuning]);
 
   return (
@@ -192,9 +266,12 @@ export function GraphBackdrop() {
         animationProfile="balanced"
         hoveredNodeId={hoveredId}
         tuning={tuning}
+        satellites={model.satellites}
         onHover={setHoveredId}
         onNodeAction={(kind, id) => {
-          if (kind === "click" && !id.startsWith("@")) openReader(id);
+          const parsed = parseKnowledgeAgentNodeId(id);
+          const ref = parsed.nodeId;
+          if (kind === "click" && !ref.startsWith("@")) openReader(ref);
         }}
         onProjected={() => undefined}
         onContextLost={() => setSceneKey((k) => k + 1)}

@@ -1,9 +1,10 @@
 ---
+blocked_reason: null
 kind: task
-last_run: 7fd1233f3fe8
+last_run: 3128f3a4b03c
 schedule: 0 */6 * * *
-status: pending
-status_updated: '2026-08-20T10:33:01'
+status: running
+status_updated: '2026-08-20T11:00:03'
 subtasks:
 - '[[Tasks/ingest-sources]]'
 - '[[Tasks/lint-notes]]'

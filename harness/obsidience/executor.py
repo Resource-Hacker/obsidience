@@ -119,6 +119,14 @@ async def run_task(task: Note, depth: int = 0) -> dict:
     allowed: list[str] = spine["tools"]
     params = task.meta.get("params") or {}
 
+    # Agent identity: the task's assignee is a literal agent note; the
+    # interpreter executes the session AS that agent (HEREBRUM model).
+    agent = res.resolve(str(task.meta.get("assignee", ""))) if task.meta.get("assignee") else None
+    agent_name = agent.title if agent and agent.kind == "agent" else "Obsidience"
+    if agent and agent.meta.get("tools"):
+        grant = {str(t).strip("[]") for t in agent.meta.get("tools")} | set(ALWAYS_ALLOWED)
+        allowed = [t for t in allowed if t in grant]
+
     queries = [task.title, runbook.title]
     if params:
         queries.append(" ".join(f"{k} {v}" for k, v in list(params.items())[:6]))
@@ -128,8 +136,11 @@ async def run_task(task: Note, depth: int = 0) -> dict:
     skills_block = "\n\n".join(
         f"### Skill: {s.title}\n{s.body.strip()[:2500]}" for s in skills
     )
+    persona = (f"You are {agent_name}, an agent of the Obsidience vault.\n{agent.body.strip()}"
+               if agent and agent.kind == "agent"
+               else "You are the Obsidience interpreter executing one task from the vault.")
     system = "\n\n".join(filter(None, [
-        "You are the Obsidience interpreter executing one task from the vault.",
+        persona,
         LAWS,
         ("## Skills (how to use your tools correctly)\n\n" + skills_block) if skills_block else "",
         tool_docs(allowed),
@@ -147,7 +158,7 @@ async def run_task(task: Note, depth: int = 0) -> dict:
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
     trace: list[dict] = []
     status, summary = "failed", "session ended without task.complete"
-    ctx = {"agent": "interpreter", "task": task.ref}
+    ctx = {"agent": agent_name, "task": task.ref}
 
     for _step in range(CONFIG.max_steps):
         try:
@@ -201,10 +212,10 @@ async def run_task(task: Note, depth: int = 0) -> dict:
         status = "review"
 
     finished = time.time()
-    receipt_path = write_receipt(task, "interpreter", run_id, status, summary, trace,
+    receipt_path = write_receipt(task, agent_name, run_id, status, summary, trace,
                                  started, finished)
     update_status(task, status, {"last_run": run_id, "blocked_reason": None})
-    INDEX.record_run(id=run_id, task_ref=task.ref, agent="interpreter", started=started,
+    INDEX.record_run(id=run_id, task_ref=task.ref, agent=agent_name, started=started,
                      finished=finished, status=status, summary=summary,
                      receipt_path=receipt_path, trace=json.dumps(trace)[:20000])
     INDEX.sync()

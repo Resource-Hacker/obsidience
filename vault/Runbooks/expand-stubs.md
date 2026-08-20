@@ -5,7 +5,7 @@ skills: ["[[Skills/reading-the-vault]]", "[[Skills/proposing-changes]]"]
 ---
 Expand a short article (Wikipedia Task Center pattern).
 
-1. `vault.list` Knowledge; identify the stubbiest note (shortest body that
+1. `vault.list` Agent; identify the stubbiest note (shortest body that
    is not the index).
 2. `vault.search` the vault for related material (receipts excluded); read
    what you find.

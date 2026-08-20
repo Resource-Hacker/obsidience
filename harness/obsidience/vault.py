@@ -40,7 +40,7 @@ class Note:
             return str(k)
         top = self.path.split("/", 1)[0].lower()
         return {"runbooks": "runbook", "tasks": "task", "skills": "skill",
-                "tools": "tool", "receipts": "receipt"}.get(top, "note")
+                "tools": "tool", "receipts": "receipt", "agents": "agent"}.get(top, "note")
 
     def text(self) -> str:
         return f"# {self.title}\n\n{self.body}"
@@ -52,7 +52,7 @@ def _title_of(path: Path, meta: dict) -> str:
 
 def _extract_links(meta: dict, body: str) -> list[str]:
     links = WIKILINK_RE.findall(body)
-    for key in ("runbook", "subtasks", "skills", "parent", "links"):
+    for key in ("runbook", "subtasks", "skills", "assignee", "parent", "links"):
         val = meta.get(key)
         vals = val if isinstance(val, list) else [val] if val else []
         for v in vals:
@@ -103,7 +103,8 @@ class Resolver:
         t = target.strip().strip("[]").split("|")[0].split("#")[0].strip().lower()
         if t.endswith(".md"):
             t = t[:-3]
-        return self.by_ref.get(t) or self.by_title.get(t) or self.by_base.get(t)
+        return (self.by_ref.get(t) or self.by_title.get(t) or self.by_base.get(t)
+                or self.by_base.get(t.rsplit("/", 1)[-1]))
 
 
 def resolver() -> Resolver:

@@ -1,4 +1,5 @@
 ---
+assignee: '[[Agents/Alexandria]]'
 auto_done: true
 blocked_reason: null
 kind: task
