@@ -14,3 +14,4 @@ Append-only chronology: `## [date] op | title` — query with `grep "^## \[" log
 ## [2026-08-20 10:27] run | expand-stubs (failed)
 ## [2026-08-20 10:13] run | maintain-wiki (failed)
 ## [2026-08-20 10:34] run | expand-stubs (completed)
+## [2026-08-20 10:42] approve | Knowledge/Obsidience.md
