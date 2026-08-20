@@ -13,7 +13,7 @@ import json
 import time
 import uuid
 
-from . import llm, retrieval
+from . import llm, retrieval, trace as action_trace
 from .config import CONFIG
 from .indexer import INDEX
 from .receipts import runbook_hash, write_receipt
@@ -82,6 +82,7 @@ async def run_task(task: Note, depth: int = 0, reasoning_effort: str | None = No
     )
 
     if "error" in spine:
+        action_trace.emit("error", f"{task.title} blocked", [spine["error"]])
         update_status(task, "blocked", {"blocked_reason": spine["error"]})
         INDEX.record_run(id=run_id, task_ref=task.ref, agent="interpreter", started=started,
                          finished=time.time(), status="blocked", summary=spine["error"],
@@ -92,12 +93,14 @@ async def run_task(task: Note, depth: int = 0, reasoning_effort: str | None = No
 
     # ---- container task: its subtasks are how it completes ----
     if "subtasks" in spine:
+        action_trace.emit("run", f"{task.title} started", [f"{len(spine['subtasks'])} subtasks"])
         if depth >= MAX_TASK_DEPTH:
             update_status(task, "failed", {"blocked_reason": "max task depth exceeded"})
             return {"run_id": run_id, "status": "failed", "summary": "max task depth exceeded"}
         results, worst = [], "completed"
         order = {"completed": 0, "review": 1, "blocked": 2, "failed": 3}
         for child in spine["subtasks"]:
+            action_trace.emit("run", f"{task.title} → {child.title}")
             child_result = await run_task(child, depth + 1, effort)
             results.append({"task": child.ref, **{k: child_result[k] for k in ("status", "summary")}})
             if order.get(child_result["status"], 3) > order[worst]:
@@ -115,6 +118,7 @@ async def run_task(task: Note, depth: int = 0, reasoning_effort: str | None = No
                          finished=finished, status=worst, summary=summary[:2000],
                          receipt_path=receipt, trace=json.dumps(results)[:20000])
         INDEX.sync()
+        action_trace.emit("status", f"{task.title} {worst}", [summary])
         return {"run_id": run_id, "status": worst, "summary": summary, "receipt": receipt}
 
     # ---- leaf task: runbook + skills + authorized tools ----
@@ -128,6 +132,7 @@ async def run_task(task: Note, depth: int = 0, reasoning_effort: str | None = No
     # interpreter executes the session AS that agent (HEREBRUM model).
     agent = res.resolve(str(task.meta.get("assignee", ""))) if task.meta.get("assignee") else None
     agent_name = agent.title if agent and agent.kind == "agent" else "Obsidience"
+    action_trace.emit("run", f"{agent_name} started {task.title}", [f"reasoning: {effort}"])
     if agent and agent.meta.get("tools"):
         grant = {str(t).strip("[]") for t in agent.meta.get("tools")} | set(ALWAYS_ALLOWED)
         allowed = [t for t in allowed if t in grant]
@@ -170,6 +175,7 @@ async def run_task(task: Note, depth: int = 0, reasoning_effort: str | None = No
             reply = await llm.chat(messages, reasoning_effort=effort)
         except Exception as exc:  # noqa: BLE001 — surface LLM transport errors into the receipt
             status, summary = "failed", f"LLM error: {exc}"
+            action_trace.emit("error", f"{task.title} LLM error", [str(exc)])
             break
         messages.append({"role": "assistant", "content": reply})
         action = llm.parse_action(reply)
@@ -177,6 +183,7 @@ async def run_task(task: Note, depth: int = 0, reasoning_effort: str | None = No
             invalids = sum(1 for t in trace[-3:] if "invalid" in t)
             if invalids >= 2:
                 status, summary = "failed", "three consecutive replies without a valid action block"
+                action_trace.emit("error", f"{agent_name} produced no valid action", [summary])
                 break
             messages.append({"role": "user", "content":
                              "No valid action block found. Reply with exactly one ```action``` block. "
@@ -192,7 +199,9 @@ async def run_task(task: Note, depth: int = 0, reasoning_effort: str | None = No
                 status = "completed"
             summary = str(args.get("summary", ""))[:2000]
             trace.append({"tool": "task.complete", "args": {"status": status}})
+            action_trace.emit("status", f"{agent_name} completed {task.title}: {status}", [summary])
             break
+        action_trace.emit("tool", f"{agent_name} → {name}", [json.dumps(args, default=str)[:1000]])
         call_sig = f"{name}:{json.dumps(args, sort_keys=True)}"
         repeats = sum(1 for t in trace if t.get("sig") == call_sig)
         if repeats >= 2:
@@ -206,6 +215,7 @@ async def run_task(task: Note, depth: int = 0, reasoning_effort: str | None = No
             except Exception as exc:  # noqa: BLE001
                 obs = f"Tool error: {exc}"
         trace.append({"tool": name, "args": args, "obs": obs[:600], "sig": call_sig})
+        action_trace.emit("result", f"{name} returned", str(obs).splitlines()[:12])
         remaining = CONFIG.max_steps - _step - 1
         nudge = ("\n\n(FINAL STEP — call task.complete now with your best status and summary.)"
                  if remaining == 1 else
@@ -225,4 +235,5 @@ async def run_task(task: Note, depth: int = 0, reasoning_effort: str | None = No
                      finished=finished, status=status, summary=summary,
                      receipt_path=receipt_path, trace=json.dumps(trace)[:20000])
     INDEX.sync()
+    action_trace.emit("status", f"{task.title} ended {status}", [summary])
     return {"run_id": run_id, "status": status, "summary": summary, "receipt": receipt_path}

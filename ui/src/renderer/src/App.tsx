@@ -16,6 +16,7 @@ import { JobsPaneBody } from "@/panes/jobs-pane";
 import { ReviewsPaneBody } from "@/panes/reviews-pane";
 import { ReaderPaneBody } from "@/panes/reader-pane";
 import { StatusPaneBody } from "@/panes/status-pane";
+import { TerminalPaneBody } from "@/panes/terminal-pane";
 import { onOpenReader } from "@/lib/api";
 
 function paneBody(id: JarvisPaneId) {
@@ -25,6 +26,7 @@ function paneBody(id: JarvisPaneId) {
     case "reviews": return <ReviewsPaneBody />;
     case "reader": return <ReaderPaneBody />;
     case "status": return <StatusPaneBody />;
+    case "terminal": return <TerminalPaneBody />;
   }
 }
 

@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-from . import llm, retrieval, review, scheduler, voice
+from . import llm, retrieval, review, scheduler, trace, voice
 from .config import CONFIG
 from .executor import run_task
 from .indexer import INDEX
@@ -163,6 +163,25 @@ async def run_now(ref: str, payload: dict | None = None):
 @app.get("/api/runs")
 def runs():
     return INDEX.runs()
+
+
+@app.get("/api/trace")
+def action_trace():
+    return trace.history()
+
+
+@app.websocket("/ws/trace")
+async def action_trace_ws(ws: WebSocket):
+    await ws.accept()
+    queue = trace.subscribe()
+    try:
+        await ws.send_json({"type": "snapshot", "entries": trace.history()})
+        while True:
+            await ws.send_json({"type": "entry", "entry": await queue.get()})
+    except WebSocketDisconnect:
+        return
+    finally:
+        trace.unsubscribe(queue)
 
 
 @app.get("/api/reviews")

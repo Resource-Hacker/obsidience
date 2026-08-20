@@ -11,7 +11,8 @@
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",
-    "kokoro-js": "1.2.1"
+    "kokoro-js": "1.2.1",
+    "node-pty": "1.1.0"
   },
   "devDependencies": {
     "@radix-ui/react-dialog": "^1.1.17",
@@ -24,6 +25,8 @@
     "@types/react-dom": "^19",
     "@types/three": "^0.185.1",
     "@vitejs/plugin-react": "^5.2.0",
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/xterm": "6.0.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "d3-force-3d": "^3.0.6",
@@ -43,5 +46,11 @@
     "vite": "^7.3.5",
     "zod": "^4.4.3"
   },
-  "pnpm": { "onlyBuiltDependencies": ["electron", "onnxruntime-node"] }
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "node-pty",
+      "onnxruntime-node"
+    ]
+  }
 }
