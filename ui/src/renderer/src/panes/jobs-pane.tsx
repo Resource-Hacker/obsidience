@@ -203,9 +203,11 @@ export function JobsPaneBody() {
                   </div>
                 </div>
               </div>
-              <span className={`w-fit rounded border px-1.5 py-0.5 font-mono text-[8px] uppercase tracking-wider ${STATUS_STYLE[task.status] ?? STATUS_STYLE.draft}`}>
-                {task.status}
-              </span>
+              {hasChildren ? <span /> : (
+                <span className={`w-fit rounded border px-1.5 py-0.5 font-mono text-[8px] uppercase tracking-wider ${STATUS_STYLE[task.status] ?? STATUS_STYLE.draft}`}>
+                  {task.status}
+                </span>
+              )}
               <span className="truncate font-mono text-[8px] text-teal-300/70" title={agent}>{agent || "—"}</span>
               {hasChildren ? <span /> : (
                 <button onClick={() => runNow(task.ref)}
