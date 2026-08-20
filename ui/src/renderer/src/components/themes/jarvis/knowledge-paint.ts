@@ -74,6 +74,7 @@ const AGENT_PALETTES: Record<string, KnowledgeBranchPalette> = {
   Alexandria: chromaticKnowledgePalette(271, 91, 75),  // curator violet
   Darwin: chromaticKnowledgePalette(130, 88, 62),      // researcher green
   Heimdall: chromaticKnowledgePalette(43, 96, 56),     // guardian gold
+  library: chromaticKnowledgePalette(157, 88, 59),     // curated library emerald
 };
 
 export function paletteForAgent(name: string): KnowledgeBranchPalette {

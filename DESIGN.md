@@ -87,9 +87,15 @@ creating a fifth architectural category. The scheduler fires `pending` tasks
 
 ## UI vocabulary
 
-The **Jobs** pane is where tasks are *assigned* (created, parameterized,
-scheduled, run, watched). "Job" is operational vocabulary for a task instance
-under the interpreter — it is not a fifth primitive.
+The **Library** is the curated repository for accepted Tools, Skills, Runbooks,
+and Tasks. It renders as HEREBRUM's green book satellite and as a searchable
+four-shelf pane. Agent changes remain proposals until accepted through the
+Review Queue.
+
+The **Jobs** pane is the scheduler surface: it creates, edits, runs, and watches
+scheduled task definitions. It does not double as the task catalog. "Job" is
+operational vocabulary for scheduled work under the interpreter — it is not a
+fifth primitive.
 
 ## Components
 
@@ -99,7 +105,8 @@ harness/    the interpreter: indexer (FTS5+BGE hybrid, RRF), briefing,
             executor, scheduler, review ops, FastAPI :8765, STT
 ui/         Electron HUD: the 3D graph backdrop (original HEREBRUM engine,
             paint pipeline, and the owner's recovered tuning) + floating
-            panes: Jobs, Operator (chat+voice), Review Queue, Reader, Harness
+            panes: Library, Jobs, Operator (chat+voice), Review Queue, Reader,
+            Harness, Terminal
 ```
 
 ## Non-goals for v0

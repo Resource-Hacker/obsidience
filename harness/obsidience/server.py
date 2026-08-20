@@ -107,24 +107,41 @@ def tasks():
 
 @app.post("/api/tasks")
 async def create_task(payload: dict):
-    """Owner surface (Jobs pane / CLI): assign a task directly — trusted writer."""
+    """Owner surface (Jobs pane / CLI): create a scheduled task directly."""
     from .vault import slugify, write_note
     title = str(payload.get("title", "")).strip()
     if not title:
         raise HTTPException(400, "title required")
+    schedule = str(payload.get("schedule") or "").strip()
+    if schedule:
+        try:
+            croniter(schedule, time.time()).get_next(float)
+        except (ValueError, KeyError) as exc:
+            raise HTTPException(400, f"invalid cron schedule: {schedule}") from exc
+    res = resolver()
+    assignee = None
+    if payload.get("assignee"):
+        assignee = res.resolve(str(payload["assignee"]))
+        if not assignee or assignee.kind != "agent":
+            raise HTTPException(400, f"agent not found: {payload['assignee']}")
+    runbook = None
+    if payload.get("runbook"):
+        runbook = res.resolve(str(payload["runbook"]))
+        if not runbook or runbook.kind != "runbook":
+            raise HTTPException(400, f"runbook not found: {payload['runbook']}")
     ref = f"Tasks/{slugify(title)}.md"
     if load_note(ref):
         raise HTTPException(409, f"task already exists: {ref}")
     meta: dict = {"title": title, "kind": "task",
                   "status": "pending" if payload.get("start") or payload.get("schedule") else "draft"}
-    if payload.get("assignee"):
-        meta["assignee"] = str(payload["assignee"])
-    if payload.get("runbook"):
-        meta["runbook"] = str(payload["runbook"])
+    if assignee:
+        meta["assignee"] = f"[[{assignee.ref}]]"
+    if runbook:
+        meta["runbook"] = f"[[{runbook.ref}]]"
     if payload.get("subtasks"):
         meta["subtasks"] = [str(s) for s in payload["subtasks"]][:9]
-    if payload.get("schedule"):
-        meta["schedule"] = str(payload["schedule"])
+    if schedule:
+        meta["schedule"] = schedule
     if payload.get("reasoning_effort"):
         try:
             meta["reasoning_effort"] = llm.normalize_reasoning_effort(payload["reasoning_effort"])

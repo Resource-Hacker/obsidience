@@ -1,8 +1,9 @@
 /** The Obsidience ball: the HEREBRUM 3D engine fed by the vault, using the
  *  ORIGINAL hierarchy layout + paint pipeline + the owner's recovered tuning.
- *  Structure: root "Obsidience" -> top folders (branches) -> notes (leaves);
- *  wikilinks between notes render as cross-link tendrils, exactly like the
- *  old ball's taxonomy-vs-cross-link law. */
+ *  Structure: root "Obsidience" -> knowledge branches -> notes, plus literal
+ *  agent satellites and the curated four-shelf Library satellite. Wikilinks
+ *  render as cross-link tendrils, exactly like the old ball's
+ *  taxonomy-vs-cross-link law. */
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -100,14 +101,14 @@ export function GraphBackdrop() {
       for (const id of pool) if (id.split("/").pop()!.toLowerCase() === base) return id;
       return null;
     };
-    const notes = all.filter((n) => !n.id.startsWith("Agents/"));
+    const libraryKinds = new Set(["tool", "skill", "runbook", "task"]);
+    const libraryNotes = all.filter((n) => libraryKinds.has(n.kind));
+    // The four authoring primitives belong to the curated Library satellite;
+    // the executive ball retains ordinary knowledge and agent identity only.
+    const notes = all.filter((n) => !n.id.startsWith("Agents/") && !libraryKinds.has(n.kind));
     const branchOf = (id: string): string | null => (id.includes("/") ? id.split("/", 1)[0] : null);
-    // HEREBRUM agent-node structure: the four primitive collections nest
-    // UNDER the Agent branch; every other folder is a sibling subject branch.
-    const PRIMITIVES = ["Tasks", "Runbooks", "Skills", "Tools"];
     const folders = [...new Set(notes.map((n) => branchOf(n.id)).filter(Boolean))] as string[];
-    const primFolders = PRIMITIVES.filter((f) => folders.includes(f));
-    const worldFolders = folders.filter((f) => f !== "Agent" && !PRIMITIVES.includes(f)).sort();
+    const worldFolders = folders.filter((f) => f !== "Agent").sort();
     const branches = ["Agent", ...worldFolders];
 
     const degree = new Map<string, number>();
@@ -125,20 +126,11 @@ export function GraphBackdrop() {
         id: `@branch/${b}`, degree: notes.filter((n) => branchOf(n.id) === b).length,
         kind: "concept" as never, label: b, role: "section" as never, parentId: ROOT_ID, order: i,
       })),
-      ...primFolders.map((f, i) => ({
-        id: `@branch/${f}`, degree: notes.filter((n) => branchOf(n.id) === f).length,
-        kind: "concept" as never, label: f, role: "section" as never, parentId: "@branch/Agent", order: i,
-      })),
       ...notes.map((n, i) => {
-        const pool = new Set(notes.map((x) => x.id));
-        const container = notes.find((c) => c.kind === "task" &&
-          (c.subtasks ?? []).some((r) => subRef(r, pool) === n.id));
-        const isContainer = n.kind === "task" && (n.subtasks ?? []).length > 0;
         return {
           id: n.id, degree: degree.get(n.id) ?? 0, kind: "note" as never, label: n.title,
-          role: (isContainer ? "section" : "claim") as never,
-          parentId: container ? container.id
-            : n.id.includes("/") ? `@branch/${branchOf(n.id)}` : ROOT_ID,
+          role: "claim" as never,
+          parentId: n.id.includes("/") ? `@branch/${branchOf(n.id)}` : ROOT_ID,
           order: i,
         };
       }),
@@ -166,7 +158,7 @@ export function GraphBackdrop() {
     const meta = new Map(notes.map((n) => [n.id, n]));
     titles.current = new Map([
       [ROOT_ID, "Obsidience"],
-      ...[...branches, ...primFolders].map((b) => [`@branch/${b}`, b] as [string, string]),
+      ...branches.map((b) => [`@branch/${b}`, b] as [string, string]),
       ...notes.map((n) => [n.id, n.title] as [string, string]),
     ]);
 
@@ -210,7 +202,7 @@ export function GraphBackdrop() {
     ];
     // ---- satellites: one ball per agent, seeded by its own mini hierarchy ----
     const linkPairs = graph.links;
-    const satellites = agentNames.map((name) => {
+    const agentSatellites = agentNames.map((name) => {
       const identityRef = `Agents/${name}/${name}`;
       const members = all.filter((n) =>
         (n.id.startsWith(`Agents/${name}/`) && n.id !== identityRef) ||
@@ -274,6 +266,90 @@ export function GraphBackdrop() {
       }
       return { agentId: name, nodes: satNodes, edges: satEdges, tuning };
     });
+    // HEREBRUM's Library returns as a first-class green satellite. Its four
+    // shelves hold the accepted primitive notes; task containers keep their
+    // recursive matrix hierarchy inside the Tasks shelf.
+    const libraryRoot = "@library";
+    const shelfOrder = ["tool", "skill", "runbook", "task"] as const;
+    const shelfLabels = { tool: "Tools", skill: "Skills", runbook: "Runbooks", task: "Tasks" };
+    const libraryPool = new Set(libraryNotes.map((n) => n.id));
+    const libraryTasks = libraryNotes.filter((n) => n.kind === "task");
+    const parentTaskOf = (id: string): string | null => {
+      const container = libraryTasks.find((task) =>
+        (task.subtasks ?? []).some((raw) => subRef(raw, libraryPool) === id));
+      return container?.id ?? null;
+    };
+    const libraryLayoutNodes = [
+      { id: libraryRoot, degree: libraryNotes.length, kind: "concept" as never, label: "Library", role: "root" as never, parentId: null as string | null, order: 0 },
+      ...shelfOrder.map((kind, index) => ({
+        id: `@library/${shelfLabels[kind]}`,
+        degree: libraryNotes.filter((node) => node.kind === kind).length,
+        kind: "concept" as never,
+        label: shelfLabels[kind],
+        role: "section" as never,
+        parentId: libraryRoot,
+        order: index,
+      })),
+      ...libraryNotes.map((node, index) => ({
+        id: node.id,
+        degree: 0,
+        kind: "note" as never,
+        label: node.title,
+        role: (node.kind === "task" && (node.subtasks ?? []).length ? "section" : "claim") as never,
+        parentId: parentTaskOf(node.id) ?? `@library/${shelfLabels[node.kind as keyof typeof shelfLabels]}`,
+        order: index,
+      })),
+    ];
+    const libraryLayout = layoutKnowledgeGraph({
+      nodes: libraryLayoutNodes,
+      edges: libraryLayoutNodes.filter((node) => node.parentId).map((node, index) => ({
+        id: `l${index}`, source: node.parentId as string, target: node.id, type: "related_to" as never,
+      })),
+    });
+    const libraryPositions = new Map(libraryLayout.nodes.map((node) => [node.id, node]));
+    const libraryPalette = paletteForAgent("library");
+    const librarySet = new Set(libraryLayoutNodes.map((node) => node.id));
+    const libraryRenderNodes: Knowledge3dRenderNode[] = libraryLayoutNodes.map((node) => {
+      const point = libraryPositions.get(node.id);
+      const role = node.role as never as ("root" | "section" | "claim");
+      const subject = role === "root" || role === "section";
+      const noteMeta = libraryNotes.find((note) => note.id === node.id);
+      return {
+        id: node.id, x: point?.x ?? 0.5, y: point?.y ?? 0.5, depth: point?.depth,
+        role, parentId: point?.parentId,
+        radius: knowledgeNodeRadius(role, 1, false, point?.depth),
+        subject,
+        core: nodeCoreColor(libraryPalette, subject ? role : undefined, noteMeta?.status),
+        dark: libraryPalette.dark,
+        ring: subject ? libraryPalette.ring : "rgba(0,0,0,0)",
+        glow: subject ? libraryPalette.glow : "rgba(0,0,0,0)",
+        ringScale: knowledgeSubjectRingScale(point?.depth),
+        ringWidth: knowledgeSubjectRingWidth(subject ? role : undefined, point?.depth),
+        glowScale: subject ? knowledgeSubjectGlowScale(role, point?.depth) : 1,
+        alpha: knowledgeNodeBaseAlpha(subject ? role : undefined, point?.depth, "hot"),
+      };
+    });
+    const libraryRenderEdges: Knowledge3dRenderEdge[] = [
+      ...libraryLayoutNodes.filter((node) => node.parentId).map((node) => ({
+        source: node.parentId as string, target: node.id, taxonomy: true, color: libraryPalette.core,
+      })),
+      ...linkPairs.filter((link) => librarySet.has(link.source) && librarySet.has(link.target)).map((link) => ({
+        source: link.source, target: link.target, taxonomy: false,
+        color: knowledgeAmbientEdgeStroke(false, false, libraryPalette), colorEnd: libraryPalette.core,
+      })),
+    ];
+    for (const ref of librarySet) {
+      const note = libraryNotes.find((node) => node.id === ref);
+      const shelf = Object.values(shelfLabels).find((label) => ref === `@library/${label}`);
+      titles.current.set(`agent:library/${ref}`, note?.title ?? (ref === libraryRoot ? "Library" : shelf ?? ref));
+    }
+    const librarySatellite = {
+      agentId: "library",
+      nodes: libraryRenderNodes,
+      edges: libraryRenderEdges,
+      tuning,
+    };
+    const satellites = [...agentSatellites, librarySatellite];
     return { nodes: renderNodes, edges: renderEdges, satellites };
   }, [graph, viewport, tuning]);
 

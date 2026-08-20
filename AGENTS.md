@@ -15,6 +15,9 @@ section is binding. Rules for working here:
 - Keep it a dev build: small modules, no ceremony, no new frameworks.
 - After every source or vault change, restart the affected Obsidience dev
   process and verify its live health so the owner can test each iteration.
+- The Library is the curated canonical repository and green book satellite for
+  Tools, Skills, Runbooks, and Tasks. Jobs is only the scheduler surface for
+  creating and operating scheduled tasks; do not turn it back into the catalog.
 
 ## Phase 1 directive (owner, 2026-08-20) — finish before anything else
 

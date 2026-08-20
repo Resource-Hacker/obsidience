@@ -1,6 +1,5 @@
-/** Jobs pane — where tasks are ASSIGNED: create, schedule, run, and watch
- *  task instances under the interpreter. ("Job" is operational vocabulary
- *  for a task instance, not a fifth primitive.) */
+/** Jobs pane — the scheduler surface. The accepted task catalog lives in the
+ *  Library; this pane creates and operates only scheduled task definitions. */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Play, Plus, RefreshCw, X } from "lucide-react";
@@ -98,8 +97,8 @@ export function JobsPaneBody() {
   const [runbooks, setRunbooks] = useState<string[]>([]);
   const [agents, setAgents] = useState<AgentOption[]>([]);
   const [form, setForm] = useState<{
-    title: string; runbook: string; schedule: string; body: string; reasoningEffort: ReasoningEffort;
-  }>({ title: "", runbook: "", schedule: "", body: "", reasoningEffort: "medium" });
+    title: string; runbook: string; assignee: string; schedule: string; body: string; reasoningEffort: ReasoningEffort;
+  }>({ title: "", runbook: "", assignee: "", schedule: "", body: "", reasoningEffort: "medium" });
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
@@ -116,9 +115,11 @@ export function JobsPaneBody() {
     return () => clearInterval(t);
   }, [refresh]);
 
+  const scheduledTasks = useMemo(() => tasks.filter((task) => Boolean(task.schedule)), [tasks]);
+
   const hierarchy = useMemo(() => {
-    const byRef = new Map(tasks.map((task) => [task.ref, task]));
-    const byName = new Map(tasks.map((task) => [task.ref.split("/").pop(), task]));
+    const byRef = new Map(scheduledTasks.map((task) => [task.ref, task]));
+    const byName = new Map(scheduledTasks.map((task) => [task.ref.split("/").pop(), task]));
     const children = new Map<string, TaskRow[]>();
     const childRefs = new Set<string>();
     const resolve = (ref: string) => {
@@ -126,7 +127,7 @@ export function JobsPaneBody() {
       return byRef.get(clean) ?? byName.get(clean.split("/").pop());
     };
 
-    for (const task of tasks) {
+    for (const task of scheduledTasks) {
       const rows = (task.subtask_refs ?? []).flatMap((ref) => {
         const child = resolve(ref);
         return child ? [child] : [];
@@ -135,9 +136,9 @@ export function JobsPaneBody() {
       rows.forEach((child) => childRefs.add(child.ref));
     }
 
-    const roots = tasks.filter((task) => !childRefs.has(task.ref));
-    return { children, roots: roots.length ? roots : tasks };
-  }, [tasks]);
+    const roots = scheduledTasks.filter((task) => !childRefs.has(task.ref));
+    return { children, roots: roots.length ? roots : scheduledTasks };
+  }, [scheduledTasks]);
 
   useEffect(() => {
     if (initializedHierarchy.current || hierarchy.roots.length === 0) return;
@@ -158,7 +159,7 @@ export function JobsPaneBody() {
     hierarchy.roots.forEach((task) => add(task, 0));
     return rows;
   }, [expanded, hierarchy]);
-  const runningCount = tasks.filter((task) => task.status === "running" && task.subtasks === 0).length;
+  const runningCount = scheduledTasks.filter((task) => task.status === "running" && task.subtasks === 0).length;
 
   function toggleExpanded(ref: string) {
     setExpanded((current) => {
@@ -205,14 +206,15 @@ export function JobsPaneBody() {
           title: form.title,
           runbook: form.runbook ? `[[${form.runbook}]]` : undefined,
           schedule: form.schedule || undefined,
+          assignee: form.assignee ? `[[${form.assignee}]]` : undefined,
           body: form.body,
           reasoning_effort: form.reasoningEffort,
-          start: !form.schedule,
+          start: false,
         }),
       });
       if (!res.ok) throw new Error(await res.text());
       setCreating(false);
-      setForm({ title: "", runbook: "", schedule: "", body: "", reasoningEffort: "medium" });
+      setForm({ title: "", runbook: "", assignee: "", schedule: "", body: "", reasoningEffort: "medium" });
       refresh();
     } catch (e) {
       setError(String(e).slice(0, 200));
@@ -223,22 +225,16 @@ export function JobsPaneBody() {
     <div className="flex h-full flex-col">
       <div className="flex shrink-0 items-center justify-between border-b border-cyan-300/10 px-3 py-1.5">
         <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.16em]">
-          <span className="text-cyan-300/50">{hierarchy.roots.length} roots · {tasks.length} tasks</span>
+          <span className="text-cyan-300/50">{scheduledTasks.length} schedules</span>
           {runningCount > 0 ? (
             <span className="animate-pulse text-emerald-300">
               ● {runningCount} running
             </span>
           ) : null}
-          <span className="text-cyan-300/35">
-            {tasks.filter((task) => task.schedule).length} scheduled
-          </span>
+          <span className="text-cyan-300/35">task catalog lives in Library</span>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => setExpanded(new Set(tasks.filter((task) => task.subtasks > 0).map((task) => task.ref)))}
-            title="Expand all task groups" className="font-mono text-[11px] text-cyan-300/50 hover:text-cyan-100">▾</button>
-          <button onClick={() => setExpanded(new Set())}
-            title="Collapse all task groups" className="font-mono text-[11px] text-cyan-300/50 hover:text-cyan-100">▸</button>
-          <button onClick={() => setCreating((c) => !c)} title="Assign a new task"
+          <button onClick={() => setCreating((c) => !c)} title="Create a scheduled task"
             className="text-cyan-300/60 hover:text-cyan-100">
             {creating ? <X size={13} /> : <Plus size={13} />}
           </button>
@@ -258,7 +254,13 @@ export function JobsPaneBody() {
               <option value="">runbook…</option>
               {runbooks.map((r) => <option key={r} value={r}>{r}</option>)}
             </select>
-            <input value={form.schedule} placeholder="cron (optional)"
+            <select value={form.assignee}
+              onChange={(e) => setForm({ ...form, assignee: e.target.value })}
+              className="min-w-0 flex-1 rounded border border-cyan-300/20 bg-[#020a12] px-1 py-1 font-mono text-[10px] text-cyan-100">
+              <option value="">agent…</option>
+              {agents.map((agent) => <option key={agent.ref} value={agent.ref}>{agent.title}</option>)}
+            </select>
+            <input value={form.schedule} placeholder="cron schedule"
               onChange={(e) => setForm({ ...form, schedule: e.target.value })}
               className="w-32 rounded border border-cyan-300/20 bg-[#020a12] px-2 py-1 font-mono text-[10px] text-cyan-50 outline-none" />
             <select value={form.reasoningEffort}
@@ -273,15 +275,15 @@ export function JobsPaneBody() {
             onChange={(e) => setForm({ ...form, body: e.target.value })} rows={2}
             className="w-full resize-none rounded border border-cyan-300/20 bg-[#020a12] px-2 py-1 font-mono text-[11px] text-cyan-50 outline-none" />
           {error ? <p className="font-mono text-[10px] text-rose-300">{error}</p> : null}
-          <button onClick={assign} disabled={!form.title || !form.runbook}
+          <button onClick={assign} disabled={!form.title || !form.runbook || !form.assignee || !form.schedule}
             className="rounded border border-cyan-300/40 px-2 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-cyan-100 hover:bg-cyan-300/10 disabled:opacity-40">
-            Assign{form.schedule ? " (scheduled)" : " + run"}
+            Create schedule
           </button>
         </div>
       ) : null}
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {tasks.length > 0 ? (
+        {scheduledTasks.length > 0 ? (
           <div className="sticky top-0 z-10 grid grid-cols-[minmax(0,1fr)_60px_116px_72px_28px] border-b border-cyan-300/15 bg-[#03101a]/95 px-2 py-1 font-mono text-[8px] uppercase tracking-[0.16em] text-cyan-300/40">
             <span>Task</span>
             <span className="justify-self-center">State</span>
@@ -293,6 +295,7 @@ export function JobsPaneBody() {
         {visibleRows.map(({ task, depth }) => {
           const children = hierarchy.children.get(task.ref) ?? [];
           const hasChildren = children.length > 0;
+          const isContainer = task.subtasks > 0;
           const isExpanded = expanded.has(task.ref);
           return (
             <div key={task.ref}
@@ -306,25 +309,25 @@ export function JobsPaneBody() {
                 <div className="min-w-0">
                   <button onClick={() => openReader(task.ref)}
                     className={`block w-full truncate text-left font-mono hover:text-cyan-300 ${
-                      hasChildren ? "text-[11px] font-semibold uppercase tracking-[0.1em] text-cyan-50" : "text-[11px] text-cyan-100"}`}>
+                    isContainer ? "text-[11px] font-semibold uppercase tracking-[0.1em] text-cyan-50" : "text-[11px] text-cyan-100"}`}>
                     {task.title}
                   </button>
                   <div className="flex min-w-0 gap-2 font-mono text-[8px] text-cyan-300/35">
-                    {hasChildren ? <span>{children.length} subtasks</span> : null}
+                    {isContainer ? <span>{task.subtasks} subtasks</span> : null}
                     {task.schedule ? <span className="truncate">⏰ {task.schedule}</span> : null}
                     {task.blocked_reason ? <span className="truncate text-rose-300/70" title={task.blocked_reason}>{task.blocked_reason}</span> : null}
                   </div>
                 </div>
               </div>
-              {hasChildren ? <span /> : (
+              {isContainer ? <span /> : (
                 <span className={`w-fit justify-self-center rounded border px-1.5 py-0.5 font-mono text-[8px] uppercase tracking-wider ${STATUS_STYLE[task.status] ?? STATUS_STYLE.draft}`}>
                   {task.status}
                 </span>
               )}
-              {hasChildren ? <span /> : (
+              {isContainer ? <span /> : (
                 <AssigneeSelect task={task} agents={agents} onChange={setAssignee} />
               )}
-              {hasChildren ? <span /> : (
+              {isContainer ? <span /> : (
                 <select value={task.reasoning_effort}
                   disabled={task.status === "running"}
                   onChange={(e) => setReasoning(task.ref, e.target.value as ReasoningEffort)}
@@ -335,7 +338,7 @@ export function JobsPaneBody() {
                   <option value="medium">Medium</option><option value="high">High</option>
                 </select>
               )}
-              {hasChildren ? <span /> : (
+              {isContainer ? <span /> : (
                 <button onClick={() => runNow(task)}
                   disabled={busyRef === task.ref || task.status === "running"} title={`Run now with ${task.reasoning_effort} reasoning`}
                   className="justify-self-center rounded border border-cyan-300/25 p-1 text-cyan-300/60 hover:bg-cyan-300/10 disabled:opacity-30">
@@ -345,8 +348,8 @@ export function JobsPaneBody() {
             </div>
           );
         })}
-        {tasks.length === 0 ? (
-          <p className="p-4 font-mono text-[11px] text-cyan-200/40">No task notes in the vault yet — assign one with +.</p>
+        {scheduledTasks.length === 0 ? (
+          <p className="p-4 font-mono text-[11px] text-cyan-200/40">No scheduled tasks yet — create one with +. The complete task catalog is in Library.</p>
         ) : null}
       </div>
     </div>

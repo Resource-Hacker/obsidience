@@ -13,6 +13,7 @@ import {
 import { GraphBackdrop } from "@/panes/graph-backdrop";
 import { ChatPaneBody } from "@/panes/chat-pane";
 import { JobsPaneBody } from "@/panes/jobs-pane";
+import { LibraryPaneBody } from "@/panes/library-pane";
 import { ReviewsPaneBody } from "@/panes/reviews-pane";
 import { ReaderPaneBody } from "@/panes/reader-pane";
 import { StatusPaneBody } from "@/panes/status-pane";
@@ -23,6 +24,7 @@ function paneBody(id: JarvisPaneId) {
   switch (id) {
     case "chat": return <ChatPaneBody />;
     case "jobs": return <JobsPaneBody />;
+    case "library": return <LibraryPaneBody />;
     case "reviews": return <ReviewsPaneBody />;
     case "reader": return <ReaderPaneBody />;
     case "status": return <StatusPaneBody />;
