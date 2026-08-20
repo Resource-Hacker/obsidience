@@ -36,14 +36,19 @@ export interface HarnessStatus {
   proposals_pending: number; voice: { stt: boolean; reason?: string };
   llm: { base_url: string; model: string }; vault: string; time: string;
 }
+export type ReasoningEffort = "none" | "low" | "medium" | "high";
 
 export const api = {
   status: () => json<HarnessStatus>("/api/status"),
   graph: () => json<{ nodes: GraphNode[]; links: GraphLink[] }>("/api/graph"),
   note: (ref: string) => json<NoteDoc>(`/api/notes/${encodeURI(ref)}`),
   tasks: () => json<TaskRow[]>("/api/tasks"),
-  runTask: (ref: string) => json<{ run_id: string; status: string; summary: string }>(
-    `/api/tasks/${encodeURI(ref)}/run`, { method: "POST" }),
+  runTask: (ref: string, reasoningEffort: ReasoningEffort) => json<{ started: string; reasoning_effort: string }>(
+    `/api/tasks/${encodeURI(ref)}/run`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ reasoning_effort: reasoningEffort }),
+    }),
   runs: () => json<Array<Record<string, unknown>>>("/api/runs"),
   reviews: () => json<Proposal[]>("/api/reviews"),
   approve: (name: string) => json(`/api/reviews/${encodeURIComponent(name)}/approve`, { method: "POST" }),

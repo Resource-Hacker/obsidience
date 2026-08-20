@@ -111,6 +111,11 @@ async def create_task(payload: dict):
         meta["subtasks"] = [str(s) for s in payload["subtasks"]][:9]
     if payload.get("schedule"):
         meta["schedule"] = str(payload["schedule"])
+    if payload.get("reasoning_effort"):
+        try:
+            meta["reasoning_effort"] = llm.normalize_reasoning_effort(payload["reasoning_effort"])
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
     if payload.get("params"):
         meta["params"] = payload["params"]
     write_note(ref, meta, str(payload.get("body", "")))
@@ -119,12 +124,17 @@ async def create_task(payload: dict):
 
 
 @app.post("/api/tasks/{ref:path}/run")
-async def run_now(ref: str):
+async def run_now(ref: str, payload: dict | None = None):
     note = load_note(ref + ".md") or resolver().resolve(ref)
     if not note or note.kind != "task":
         raise HTTPException(404, f"task not found: {ref}")
-    asyncio.create_task(run_task(note))  # fire-and-poll: watch /api/tasks + /api/runs
-    return {"started": note.ref}
+    try:
+        requested_effort = (payload or {}).get("reasoning_effort", note.meta.get("reasoning_effort"))
+        effort = llm.normalize_reasoning_effort(requested_effort)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    asyncio.create_task(run_task(note, reasoning_effort=effort))
+    return {"started": note.ref, "reasoning_effort": effort}
 
 
 @app.get("/api/runs")

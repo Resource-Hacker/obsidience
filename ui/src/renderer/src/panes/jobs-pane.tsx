@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Play, Plus, RefreshCw, X } from "lucide-react";
-import { API_BASE, api, openReader, type TaskRow } from "@/lib/api";
+import { API_BASE, api, openReader, type ReasoningEffort, type TaskRow } from "@/lib/api";
 
 const STATUS_STYLE: Record<string, string> = {
   pending: "text-cyan-200 border-cyan-300/40",
@@ -25,6 +25,7 @@ export function JobsPaneBody() {
   const [runbooks, setRunbooks] = useState<string[]>([]);
   const [form, setForm] = useState({ title: "", runbook: "", schedule: "", body: "" });
   const [error, setError] = useState<string | null>(null);
+  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>("medium");
 
   const refresh = useCallback(() => {
     api.tasks().then(setTasks).catch(() => undefined);
@@ -96,7 +97,7 @@ export function JobsPaneBody() {
 
   async function runNow(ref: string) {
     setBusyRef(ref);
-    try { await api.runTask(ref); } catch { /* surfaced via status poll */ }
+    try { await api.runTask(ref, reasoningEffort); } catch { /* surfaced via status poll */ }
     setBusyRef(null);
     refresh();
   }
@@ -112,6 +113,7 @@ export function JobsPaneBody() {
           runbook: form.runbook ? `[[${form.runbook}]]` : undefined,
           schedule: form.schedule || undefined,
           body: form.body,
+          reasoning_effort: reasoningEffort,
           start: !form.schedule,
         }),
       });
@@ -131,6 +133,16 @@ export function JobsPaneBody() {
           {hierarchy.roots.length} roots · {tasks.length} tasks
         </span>
         <div className="flex items-center gap-2">
+          <select value={reasoningEffort}
+            onChange={(e) => setReasoningEffort(e.target.value as ReasoningEffort)}
+            title="Reasoning effort for tasks launched from this pane"
+            aria-label="Reasoning effort"
+            className="rounded border border-cyan-300/20 bg-[#020a12] px-1 py-0.5 font-mono text-[9px] uppercase tracking-[0.08em] text-cyan-200/70 outline-none hover:border-cyan-300/40">
+            <option value="none">Reason: none</option>
+            <option value="low">Reason: low</option>
+            <option value="medium">Reason: medium</option>
+            <option value="high">Reason: high</option>
+          </select>
           <button onClick={() => setExpanded(new Set(tasks.filter((task) => task.subtasks > 0).map((task) => task.ref)))}
             title="Expand all task groups" className="font-mono text-[11px] text-cyan-300/50 hover:text-cyan-100">▾</button>
           <button onClick={() => setExpanded(new Set())}
@@ -211,7 +223,7 @@ export function JobsPaneBody() {
               <span className="truncate font-mono text-[8px] text-teal-300/70" title={agent}>{agent || "—"}</span>
               {hasChildren ? <span /> : (
                 <button onClick={() => runNow(task.ref)}
-                  disabled={busyRef === task.ref || task.status === "running"} title="Run now"
+                  disabled={busyRef === task.ref || task.status === "running"} title={`Run now with ${reasoningEffort} reasoning`}
                   className="rounded border border-cyan-300/25 p-1 text-cyan-300/60 hover:bg-cyan-300/10 disabled:opacity-30">
                   <Play size={10} />
                 </button>

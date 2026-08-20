@@ -72,11 +72,14 @@ def resolve_spine(task: Note, res: Resolver) -> dict:
     return {"runbook": runbook, "skills": skills, "tools": sorted(tool_names)}
 
 
-async def run_task(task: Note, depth: int = 0) -> dict:
+async def run_task(task: Note, depth: int = 0, reasoning_effort: str | None = None) -> dict:
     run_id = uuid.uuid4().hex[:12]
     started = time.time()
     res = resolver()
     spine = resolve_spine(task, res)
+    effort = llm.normalize_reasoning_effort(
+        reasoning_effort if reasoning_effort is not None else task.meta.get("reasoning_effort")
+    )
 
     if "error" in spine:
         update_status(task, "blocked", {"blocked_reason": spine["error"]})
@@ -95,7 +98,7 @@ async def run_task(task: Note, depth: int = 0) -> dict:
         results, worst = [], "completed"
         order = {"completed": 0, "review": 1, "blocked": 2, "failed": 3}
         for child in spine["subtasks"]:
-            child_result = await run_task(child, depth + 1)
+            child_result = await run_task(child, depth + 1, effort)
             results.append({"task": child.ref, **{k: child_result[k] for k in ("status", "summary")}})
             if order.get(child_result["status"], 3) > order[worst]:
                 worst = child_result["status"]
@@ -105,7 +108,8 @@ async def run_task(task: Note, depth: int = 0) -> dict:
         finished = time.time()
         receipt = write_receipt(task, "interpreter", run_id, worst, summary,
                                 [{"tool": "subtask", "args": {"ref": r["task"]}, "obs": r["summary"][:160]}
-                                 for r in results], started, finished)
+                                 for r in results], started, finished,
+                                reasoning_effort=effort)
         update_status(task, worst, {"last_run": run_id})
         INDEX.record_run(id=run_id, task_ref=task.ref, agent="interpreter", started=started,
                          finished=finished, status=worst, summary=summary[:2000],
@@ -163,7 +167,7 @@ async def run_task(task: Note, depth: int = 0) -> dict:
 
     for _step in range(CONFIG.max_steps):
         try:
-            reply = await llm.chat(messages)
+            reply = await llm.chat(messages, reasoning_effort=effort)
         except Exception as exc:  # noqa: BLE001 — surface LLM transport errors into the receipt
             status, summary = "failed", f"LLM error: {exc}"
             break
@@ -214,7 +218,8 @@ async def run_task(task: Note, depth: int = 0) -> dict:
 
     finished = time.time()
     receipt_path = write_receipt(task, agent_name, run_id, status, summary, trace,
-                                 started, finished, runbook, runbook_sha256)
+                                 started, finished, runbook, runbook_sha256,
+                                 reasoning_effort=effort)
     update_status(task, status, {"last_run": run_id, "blocked_reason": None})
     INDEX.record_run(id=run_id, task_ref=task.ref, agent=agent_name, started=started,
                      finished=finished, status=status, summary=summary,

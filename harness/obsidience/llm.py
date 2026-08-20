@@ -28,16 +28,36 @@ To complete the task, use:
 Think briefly before the block if useful. Never invent tool names.
 """
 
+REASONING_BUDGETS = {
+    "none": 0,
+    "low": 256,
+    "medium": 768,
+    "high": 1536,
+}
+
+
+def normalize_reasoning_effort(value: object) -> str:
+    effort = str(value or "medium").lower()
+    if effort not in REASONING_BUDGETS:
+        raise ValueError(f"reasoning effort must be one of: {', '.join(REASONING_BUDGETS)}")
+    return effort
+
 
 async def chat(messages: list[dict], max_tokens: int | None = None,
-               temperature: float | None = None) -> str:
+               temperature: float | None = None,
+               reasoning_effort: str = "medium") -> str:
+    effort = normalize_reasoning_effort(reasoning_effort)
     payload = {
         "model": CONFIG.llm_model,
         "messages": messages,
         "max_tokens": max_tokens or CONFIG.llm_max_tokens,
         "temperature": CONFIG.llm_temperature if temperature is None else temperature,
         "stream": False,
+        "chat_template_kwargs": {"enable_thinking": effort != "none"},
     }
+    if effort != "none":
+        payload["reasoning_format"] = "auto"
+        payload["reasoning_budget_tokens"] = REASONING_BUDGETS[effort]
     async with httpx.AsyncClient(timeout=300) as client:
         r = await client.post(f"{CONFIG.llm_base_url}/chat/completions", json=payload)
         r.raise_for_status()
