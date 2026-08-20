@@ -16,6 +16,21 @@ def runbook_hash(runbook: Note) -> str:
     return hashlib.sha256((CONFIG.vault_dir / runbook.path).read_bytes()).hexdigest()
 
 
+def runbook_tree_hash(runbooks: list[Note]) -> str:
+    """Attest an ordered recursive Runbook tree while preserving leaf hashes."""
+    if len(runbooks) == 1:
+        return runbook_hash(runbooks[0])
+    from .config import CONFIG
+
+    digest = hashlib.sha256()
+    for runbook in runbooks:
+        digest.update(runbook.ref.encode())
+        digest.update(b"\0")
+        digest.update((CONFIG.vault_dir / runbook.path).read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
 def write_receipt(task: Note, agent: str, run_id: str, status: str, summary: str,
                   trace: list[dict], started: float, finished: float,
                   runbook: Note | None = None, runbook_sha256: str | None = None,
@@ -49,7 +64,7 @@ def write_receipt(task: Note, agent: str, run_id: str, status: str, summary: str
 
 
 def _append_log(op: str, title: str, when: float) -> None:
-    """Append-only chronology, karpathy llm-wiki convention:
+    r"""Append-only chronology, karpathy llm-wiki convention:
     `## [YYYY-MM-DD] <op> | <title>` — greppable with `grep "^## \[" log.md`."""
     from .config import CONFIG
     line = f"## [{time.strftime('%Y-%m-%d %H:%M', time.localtime(when))}] {op} | {title}\n"

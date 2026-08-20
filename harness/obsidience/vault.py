@@ -18,6 +18,13 @@ from .config import CONFIG
 
 WIKILINK_RE = re.compile(r"\[\[([^\]\|#]+)(?:#[^\]\|]*)?(?:\|[^\]]*)?\]\]")
 SYSTEM_DIRS = ("_staging",)  # excluded from search/graph unless asked
+CHILD_FIELD_BY_KIND = {
+    "task": "subtasks",
+    "runbook": "subrunbooks",
+    "skill": "subskills",
+    "tool": "subtools",
+}
+HIERARCHY_FIELDS = tuple(CHILD_FIELD_BY_KIND.values())
 
 
 @dataclass
@@ -42,6 +49,13 @@ class Note:
         return {"runbooks": "runbook", "tasks": "task", "skills": "skill",
                 "tools": "tool", "receipts": "receipt", "agents": "agent"}.get(top, "note")
 
+    @property
+    def children(self) -> list[str]:
+        """Ordered same-kind children for any of the four Library primitives."""
+        value = self.meta.get(CHILD_FIELD_BY_KIND.get(self.kind, ""))
+        values = value if isinstance(value, list) else [value] if value else []
+        return [str(item) for item in values]
+
     def text(self) -> str:
         return f"# {self.title}\n\n{self.body}"
 
@@ -52,7 +66,7 @@ def _title_of(path: Path, meta: dict) -> str:
 
 def _extract_links(meta: dict, body: str) -> list[str]:
     links = WIKILINK_RE.findall(body)
-    for key in ("runbook", "subtasks", "skills", "assignee", "parent", "links"):
+    for key in ("runbook", *HIERARCHY_FIELDS, "skills", "assignee", "parent", "links"):
         val = meta.get(key)
         vals = val if isinstance(val, list) else [val] if val else []
         for v in vals:

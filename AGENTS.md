@@ -24,6 +24,10 @@ section is binding. Rules for working here:
 - Graph hierarchy nodes are articles in the Reader. Never discard `@` node
   clicks: prefer the subject's authored `index.md` or `README.md`, then use a
   read-only generated index over its children when no authored hub exists.
+- All four Library primitives use ordered recursive same-kind edges: `subtasks:`,
+  `subrunbooks:`, `subskills:`, and `subtools:`. Keep one generic hierarchy
+  projection in code; do not reintroduce task-only tree rendering. A parent
+  checkout projects its descendant closure without copying canonical notes.
 
 ## Phase 1 directive (owner, 2026-08-20) — finish before anything else
 

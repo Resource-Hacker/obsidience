@@ -24,6 +24,10 @@ Open `vault/` directly in **Obsidian** — it's a normal vault. You edit freely;
 agents can only stage proposals into `_staging/` for your review. Receipts and
 review decisions are git-committed.
 
+Every Library primitive is recursively composable through its same-kind child
+field: `subtasks`, `subrunbooks`, `subskills`, or `subtools`. The Library,
+graph, Reader, validator, and interpreter all follow those exact ordered edges.
+
 ## Layout
 - `vault/` — the system itself (charters, runbooks, tasks, knowledge, receipts)
 - `harness/` — Python daemon (FastAPI :8765): index, retrieval, executor, scheduler

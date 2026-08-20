@@ -12,11 +12,17 @@ architecture; everything else is either knowledge (notes) or runtime state.
 | Primitive | Question it answers | Folder | Links |
 |---|---|---|---|
 | **Task** | *What* needs to be accomplished | `Tasks/` | `subtasks:` (ordered, recursive), `runbook:` (leaf tasks) |
-| **Runbook** | *How* a task is completed — sequencing, branching, verification, recovery | `Runbooks/` | `skills:`, optional extra `tools:` |
-| **Skill** | How to use one or more tools *correctly* — parameters, safety rules, interpretation, failure handling | `Skills/` | `tools:` |
-| **Tool** | The executable capability itself | `Tools/` | `binding:` → a registry implementation |
+| **Runbook** | *How* a task is completed — sequencing, branching, verification, recovery | `Runbooks/` | `subrunbooks:` (ordered, recursive), `skills:`, optional extra `tools:` |
+| **Skill** | How to use one or more tools *correctly* — parameters, safety rules, interpretation, failure handling | `Skills/` | `subskills:` (ordered, recursive), `tools:` |
+| **Tool** | The executable capability itself | `Tools/` | `subtools:` (ordered, recursive), `binding:` → a registry implementation |
 
-- **Tasks are recursive, and trees flow from the graph.** A task either has
+- **Every primitive is recursive, and trees flow from the graph.** Tasks use
+  `subtasks:`, Runbooks use `subrunbooks:`, Skills use `subskills:`, and Tools
+  use `subtools:`. Each is an ordered same-kind wikilink list and may nest to
+  any authored level; cycles and wrong-kind children fail closed. The Library
+  and graph project this exact structure as index node → subnode → child node
+  → article.
+- **Tasks execute recursively.** A task either has
   ordered `subtasks:` (a container — its subtasks are how it completes, no
   runbook needed) or it is a leaf and **must** link a runbook. Missing
   runbook → `blocked/awaiting-runbook`, never improvised. The target model:
@@ -27,12 +33,15 @@ architecture; everything else is either knowledge (notes) or runtime state.
   node's children at runtime (generated task instances, receipts per child).
   Hand-wired `subtasks:` lists are the bootstrap form; generative expansion
   is the destination (Phase 2).
-- **Runbooks are procedural.** Imperative steps with stop-and-report
+- **Runbooks are procedural.** A Runbook tree is loaded in authored order.
+  Each article contributes imperative steps with stop-and-report
   conditions. They name the skills they need; they never explain tool usage
   inline — that's what skills are for.
-- **Skills are reusable tool knowledge.** One skill can cover several tools;
+- **Skills are reusable tool knowledge.** A Skill tree is loaded in authored
+  order. One skill can cover several tools;
   several runbooks can share one skill.
-- **Tools are executable.** A Tool note documents and *binds* a capability
+- **Tools are executable.** A Tool tree expands to its bound descendants. A
+  leaf Tool note documents and *binds* a capability
   implemented in the harness registry (`binding: builtin:vault.read`). Screen
   capture, OCR, ASR, TTS, retrieval, shell execution, UI input, and model
   delegation are all tools; instructions for operating them are skills;
@@ -74,7 +83,7 @@ creating a fifth architectural category. The scheduler fires `pending` tasks
 ## Laws
 
 1. **Edges dispatch, vectors inform.** Control flow resolves through exact
-   wikilinks (task → subtasks/runbook → skills → tools). Retrieval only
+   wikilinks (task → subtasks/runbook tree → skill tree → tool tree). Retrieval only
    assembles the activation briefing. Similarity never selects what runs.
 2. **Owner writes freely; agents propose.** The owner edits the vault in
    Obsidian; agents write only staged proposals (`_staging/`) which the owner
@@ -97,13 +106,18 @@ identity note (`tools:`, `skills:`, `runbooks:`, `tasks:`). The Library row
 controls are ordered Executive, Guardian, Curator, Researcher; a lit icon is
 the durable assignment state. Checkouts are projections, not duplicate source
 notes: the Library remains canonical, checked-out items appear on the target
-agent's graph, and tool checkouts narrow that agent's executable surface.
+agent's graph, a checked-out parent projects its complete descendant closure,
+and tool checkouts narrow that agent's executable surface.
 
 Every graph hierarchy node is readable as an article. A subject absorbs its
 authored `index.md` or `README.md` when one exists; otherwise the harness
 provides a read-only index article over the node's current children. Clicking
 either an article or a hierarchy node always opens that article-shaped view in
 the Reader.
+
+All four Library shelves use the same recursive matrix interaction. A row with
+same-kind children expands in authored order, search preserves matching ancestor
+paths, and every row remains an independently readable and check-outable article.
 
 The **Jobs** pane is the scheduler surface: it creates, edits, runs, and watches
 scheduled task definitions. It does not double as the task catalog. "Job" is

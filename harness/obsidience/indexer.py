@@ -143,10 +143,12 @@ class Index:
         resolver = Resolver(stubs)
         for ref, title, kind, meta, link_json in rows:
             m = json.loads(meta)
-            subtasks = m.get("subtasks") or []
+            child_refs = [str(item).strip("[]") for item in _N(
+                path=ref + ".md", title=title, meta=m, body="").children]
             nodes.append({"id": ref, "title": title, "kind": kind,
                           "status": m.get("status"), "assignee": m.get("assignee"),
-                          "subtasks": [str(x).strip("[]") for x in subtasks] if isinstance(subtasks, list) else [],
+                          "children": child_refs,
+                          "subtasks": child_refs if kind == "task" else [],
                           "checkouts": {field: _meta_links(m.get(field))
                                         for field in ("tools", "skills", "runbooks", "tasks")
                                         if m.get(field)},

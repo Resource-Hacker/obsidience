@@ -50,10 +50,69 @@ def _folder_index(folder: str):
     return load_note(f"{folder}/index.md") or load_note(f"{folder}/README.md")
 
 
+def _primitive_closure(roots, catalog) -> list:
+    """Project a checked-out/assigned primitive with all same-kind descendants."""
+    by_ref = {note.ref.lower(): note for note in catalog}
+    by_leaf = {note.ref.rsplit("/", 1)[-1].lower(): note for note in catalog}
+    closure = {note.ref: note for note in roots}
+    queue = list(closure.values())
+    while queue:
+        parent = queue.pop(0)
+        for raw in parent.children:
+            target = str(raw).strip().strip("[]").split("|", 1)[0].split("#", 1)[0]
+            child = by_ref.get(target.lower()) or by_leaf.get(target.rsplit("/", 1)[-1].lower())
+            if not child or child.kind != parent.kind or child.ref in closure:
+                continue
+            closure[child.ref] = child
+            queue.append(child)
+    return list(closure.values())
+
+
 def _virtual_index(ref: str, title: str, summary: str, children) -> dict:
     unique = {note.ref: note for note in children}
     ordered = sorted(unique.values(), key=lambda note: (note.title.lower(), note.ref.lower()))
-    contents = "\n".join(f"- [[{note.ref}|{note.title}]] · {note.kind}" for note in ordered)
+    by_ref = {note.ref.lower(): note for note in ordered}
+    by_leaf = {note.ref.rsplit("/", 1)[-1].lower(): note for note in ordered}
+    child_rows: dict[str, list] = {note.ref: [] for note in ordered}
+    parent_of: dict[str, str] = {}
+
+    def resolve_child(raw):
+        target = str(raw).strip().strip("[]").split("|", 1)[0].split("#", 1)[0]
+        target = target[:-3] if target.lower().endswith(".md") else target
+        return by_ref.get(target.lower()) or by_leaf.get(target.rsplit("/", 1)[-1].lower())
+
+    for parent in ordered:
+        for raw in parent.children:
+            child = resolve_child(raw)
+            if not child or child.kind != parent.kind or child.ref == parent.ref or child.ref in parent_of:
+                continue
+            cursor, cyclic = parent.ref, False
+            while cursor in parent_of:
+                cursor = parent_of[cursor]
+                if cursor == child.ref:
+                    cyclic = True
+                    break
+            if cyclic:
+                continue
+            parent_of[child.ref] = parent.ref
+            child_rows[parent.ref].append(child)
+
+    lines, seen = [], set()
+
+    def add(note, depth=0):
+        if note.ref in seen:
+            return
+        seen.add(note.ref)
+        lines.append(f"{'  ' * depth}- [[{note.ref}|{note.title}]] · {note.kind}")
+        for child in child_rows[note.ref]:
+            add(child, depth + 1)
+
+    for note in ordered:
+        if note.ref not in parent_of:
+            add(note)
+    for note in ordered:
+        add(note)
+    contents = "\n".join(lines)
     body = summary
     if contents:
         body += f"\n\n## Indexed articles\n\n{contents}"
@@ -147,8 +206,9 @@ def get_article(ref: str):
             res = resolver()
             identity = res.resolve(CHECKOUT_AGENTS["executive"])
             raw_checkouts = _link_values(identity.meta.get(CHECKOUT_FIELDS[kind])) if identity else []
-            children = [target for raw in raw_checkouts
-                        if (target := res.resolve(raw)) and target.kind == kind]
+            roots = [target for raw in raw_checkouts
+                     if (target := res.resolve(raw)) and target.kind == kind]
+            children = _primitive_closure(roots, [item for item in notes if item.kind == kind])
         else:
             children = [item for item in notes if item.ref.startswith(f"{folder}/")]
         return _virtual_index(ref, folder, f"The {folder} index node.", children)
@@ -170,6 +230,7 @@ def get_article(ref: str):
         if kind == "task":
             children.extend(item for item in notes if item.kind == "task" and
                             f"Agents/{agent_name}" in str(item.meta.get("assignee", "")))
+        children = _primitive_closure(children, [item for item in notes if item.kind == kind])
         return _virtual_index(
             ref, f"{agent_name} · {folder}",
             f"{agent_name}'s active and checked-out {folder.lower()}.",

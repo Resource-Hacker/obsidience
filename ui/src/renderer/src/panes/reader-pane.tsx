@@ -35,6 +35,13 @@ const TASK_STATUS_STYLE: Record<string, string> = {
   draft: "border-cyan-300/20 text-cyan-200/50",
 };
 
+const CHILD_LABELS: Record<string, string> = {
+  tool: "Subtools",
+  skill: "Subskills",
+  runbook: "Subrunbooks",
+  task: "Subtasks",
+};
+
 function cleanLink(value: string): string {
   return value.trim().replace(/^\[\[/, "").replace(/\]\]$/, "").split("|")[0];
 }
@@ -84,6 +91,7 @@ function nextRunLabel(task: TaskRow, container = false): string {
 
 export function ReaderPaneBody() {
   const [note, setNote] = useState<NoteDoc | null>(null);
+  const [articleNode, setArticleNode] = useState<GraphNode | null>(null);
   const [task, setTask] = useState<TaskRow | null>(null);
   const [agents, setAgents] = useState<GraphNode[]>([]);
   const [runbooks, setRunbooks] = useState<GraphNode[]>([]);
@@ -103,8 +111,10 @@ export function ReaderPaneBody() {
         .sort((left, right) => left.title.localeCompare(right.title));
       const nextRunbooks = graph.nodes.filter((node) => node.kind === "runbook")
         .sort((left, right) => left.title.localeCompare(right.title));
+      const nextArticleNode = graph.nodes.find((node) => node.id === nextNote.ref) ?? null;
       const nextTask = tasks.find((row) => row.ref === nextNote.ref) ?? null;
       setNote(nextNote);
+      setArticleNode(nextArticleNode);
       setTask(nextTask);
       setAgents(nextAgents);
       setRunbooks(nextRunbooks);
@@ -298,6 +308,9 @@ export function ReaderPaneBody() {
     );
   }
 
+  const childRefs = articleNode?.children ?? articleNode?.subtasks ?? [];
+  const childLabel = CHILD_LABELS[note.kind] ?? "Children";
+
   return (
     <div className="h-full overflow-y-auto p-4">
       <p className="font-mono text-[9px] uppercase tracking-[0.25em] text-cyan-300/40">{note.kind} · {note.ref}</p>
@@ -314,6 +327,19 @@ export function ReaderPaneBody() {
       <div className="text-[12.5px] leading-relaxed text-cyan-100/90">
         <JarvisMarkdown content={note.body} />
       </div>
+      {childRefs.length ? (
+        <div className="mt-4 border-t border-cyan-300/10 pt-3">
+          <p className="mb-1.5 font-mono text-[8px] uppercase tracking-[0.16em] text-cyan-300/45">{childLabel}</p>
+          <div className="flex flex-wrap gap-1">
+            {childRefs.map((ref) => (
+              <button key={ref} onClick={() => openReader(cleanLink(ref))}
+                className="rounded border border-cyan-300/20 px-2 py-1 font-mono text-[9px] text-cyan-100/70 hover:border-cyan-300/45 hover:text-cyan-50">
+                {cleanLink(ref).split("/").pop()}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

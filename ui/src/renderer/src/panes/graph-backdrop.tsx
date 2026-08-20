@@ -100,11 +100,31 @@ export function GraphBackdrop() {
       return m ? m[1] : null;
     };
     const subRef = (raw: string, pool: Set<string>): string | null => {
-      const clean = raw.replace(/^\[\[|\]\]$/g, "");
+      const clean = raw.trim().replace(/^\[\[/, "").replace(/\]\]$/, "").split("|")[0].split("#")[0];
       if (pool.has(clean)) return clean;
       const base = clean.split("/").pop()!.toLowerCase();
       for (const id of pool) if (id.split("/").pop()!.toLowerCase() === base) return id;
       return null;
+    };
+    const childRefsOf = (node: GraphNode): string[] => node.children ?? node.subtasks ?? [];
+    const hierarchyParents = (members: GraphNode[]): Map<string, string> => {
+      const pool = new Set(members.map((node) => node.id));
+      const byId = new Map(members.map((node) => [node.id, node]));
+      const parentOf = new Map<string, string>();
+      for (const parent of members) {
+        for (const raw of childRefsOf(parent)) {
+          const child = subRef(raw, pool);
+          if (!child || child === parent.id || parentOf.has(child) || byId.get(child)?.kind !== parent.kind) continue;
+          let cursor = parent.id;
+          let cyclic = false;
+          while (parentOf.has(cursor)) {
+            cursor = parentOf.get(cursor) as string;
+            if (cursor === child) { cyclic = true; break; }
+          }
+          if (!cyclic) parentOf.set(child, parent.id);
+        }
+      }
+      return parentOf;
     };
     const allIds = new Set(all.map((node) => node.id));
     const checkoutIdsOf = (identity?: GraphNode): Set<string> => new Set(
@@ -113,10 +133,31 @@ export function GraphBackdrop() {
     );
     const libraryKinds = new Set(["tool", "skill", "runbook", "task"]);
     const libraryNotes = all.filter((n) => libraryKinds.has(n.kind));
+    const hierarchyClosure = (roots: Set<string>): Set<string> => {
+      const pool = new Set(libraryNotes.map((node) => node.id));
+      const byId = new Map(libraryNotes.map((node) => [node.id, node]));
+      const closure = new Set([...roots].filter((ref) => pool.has(ref)));
+      const queue = [...closure];
+      while (queue.length) {
+        const parent = byId.get(queue.shift() as string);
+        if (!parent) continue;
+        for (const raw of childRefsOf(parent)) {
+          const child = subRef(raw, pool);
+          if (!child || closure.has(child) || byId.get(child)?.kind !== parent.kind) continue;
+          closure.add(child);
+          queue.push(child);
+        }
+      }
+      return closure;
+    };
     // The four authoring primitives belong to the curated Library satellite;
     // the executive ball carries only its checked-out projections.
-    const executiveCheckouts = checkoutIdsOf(all.find((node) => node.id === "Agent/Obsidience"));
+    const executiveCheckouts = hierarchyClosure(
+      checkoutIdsOf(all.find((node) => node.id === "Agent/Obsidience")),
+    );
     const executivePrimitives = libraryNotes.filter((node) => executiveCheckouts.has(node.id));
+    const executiveParents = hierarchyParents(executivePrimitives);
+    const executiveContainers = new Set(executiveParents.values());
     const notes = [
       ...all.filter((n) => !n.id.startsWith("Agents/") && !libraryKinds.has(n.kind)),
       ...executivePrimitives,
@@ -148,13 +189,12 @@ export function GraphBackdrop() {
         kind: "concept" as never, label: folder, role: "section" as never, parentId: "@branch/Agent", order: index,
       })),
       ...notes.map((n, i) => {
-        const container = executivePrimitives.find((candidate) => candidate.kind === "task" &&
-          (candidate.subtasks ?? []).some((raw) => subRef(raw, allIds) === n.id));
-        const isTaskContainer = n.kind === "task" && (n.subtasks ?? []).length > 0;
+        const container = executiveParents.get(n.id);
+        const isContainer = executiveContainers.has(n.id);
         return {
           id: n.id, degree: degree.get(n.id) ?? 0, kind: "note" as never, label: n.title,
-          role: (isTaskContainer ? "section" : "claim") as never,
-          parentId: container?.id ?? (n.id.includes("/") ? `@branch/${branchOf(n.id)}` : ROOT_ID),
+          role: (isContainer ? "section" : "claim") as never,
+          parentId: container ?? (n.id.includes("/") ? `@branch/${branchOf(n.id)}` : ROOT_ID),
           order: i,
         };
       }),
@@ -162,7 +202,7 @@ export function GraphBackdrop() {
     const taxonomyEdges = layoutNodes
       .filter((n) => n.parentId)
       .map((n, i) => ({ id: `t${i}`, source: n.parentId as string, target: n.id, type: "related_to" as never }));
-    const crossEdges = crossLinks.map((l, i) => ({
+    const crossEdges = crossLinks.filter((link) => executiveParents.get(link.target) !== link.source).map((l, i) => ({
       id: `x${i}`, source: l.source, target: l.target, type: "related_to" as never,
     }));
 
@@ -228,19 +268,20 @@ export function GraphBackdrop() {
     const linkPairs = graph.links;
     const agentSatellites = agentNames.map((name) => {
       const identityRef = `Agents/${name}/${name}`;
-      const checkedOut = checkoutIdsOf(all.find((node) => node.id === identityRef));
+      const assigned = new Set(all.filter((node) => node.kind === "task" && assigneeOf(node) === name)
+        .map((node) => node.id));
+      const checkedOut = hierarchyClosure(new Set([
+        ...checkoutIdsOf(all.find((node) => node.id === identityRef)),
+        ...assigned,
+      ]));
       const members = all.filter((n) =>
         (n.id.startsWith(`Agents/${name}/`) && n.id !== identityRef) ||
-        (n.kind === "task" && assigneeOf(n) === name) || checkedOut.has(n.id));
-      const taskMembers = members.filter((m) => m.kind === "task");
+        checkedOut.has(n.id));
       const primitiveMembers = members.filter((member) => libraryKinds.has(member.kind));
+      const primitiveParents = hierarchyParents(primitiveMembers);
+      const primitiveContainers = new Set(primitiveParents.values());
       const satelliteFolders = ["Tools", "Skills", "Runbooks", "Tasks"]
         .filter((folder) => primitiveMembers.some((member) => branchOf(member.id) === folder));
-      const memberPool = new Set(members.map((m) => m.id));
-      const parentTaskOf = (id: string): string | null => {
-        const c = taskMembers.find((t) => (t.subtasks ?? []).some((r) => subRef(r, memberPool) === id));
-        return c ? c.id : null;
-      };
       const satLayoutNodes = [
         { id: identityRef, degree: members.length, kind: "concept" as never, label: name, role: "root" as never, parentId: null as string | null, order: 0 },
         ...satelliteFolders.map((folder, index) => ({
@@ -249,8 +290,8 @@ export function GraphBackdrop() {
         })),
         ...members.map((n, i) => ({
           id: n.id, degree: 0, kind: "note" as never, label: n.title,
-          role: ((n.subtasks ?? []).length ? "section" : "claim") as never,
-          parentId: parentTaskOf(n.id) ?? (libraryKinds.has(n.kind)
+          role: (primitiveContainers.has(n.id) ? "section" : "claim") as never,
+          parentId: primitiveParents.get(n.id) ?? (libraryKinds.has(n.kind)
             ? `@sat/${name}/${String(branchOf(n.id)).toLowerCase()}` : identityRef),
           order: i,
         })),
@@ -287,6 +328,7 @@ export function GraphBackdrop() {
         ...satLayoutNodes.filter((n) => n.parentId)
           .map((n) => ({ source: n.parentId as string, target: n.id, taxonomy: true, color: pal.core })),
         ...linkPairs.filter((l) => memberSet.has(l.source) && memberSet.has(l.target) && l.source !== identityRef)
+          .filter((l) => primitiveParents.get(l.target) !== l.source)
           .map((l) => ({ source: l.source, target: l.target, taxonomy: false,
                          color: knowledgeAmbientEdgeStroke(false, false, pal), colorEnd: pal.core })),
       ];
@@ -298,18 +340,13 @@ export function GraphBackdrop() {
       return { agentId: name, nodes: satNodes, edges: satEdges, tuning };
     });
     // HEREBRUM's Library returns as a first-class green satellite. Its four
-    // shelves hold the accepted primitive notes; task containers keep their
-    // recursive matrix hierarchy inside the Tasks shelf.
+    // shelves hold the accepted primitive notes; every primitive keeps its
+    // recursively authored hierarchy inside its own shelf.
     const libraryRoot = "@library";
     const shelfOrder = ["tool", "skill", "runbook", "task"] as const;
     const shelfLabels = { tool: "Tools", skill: "Skills", runbook: "Runbooks", task: "Tasks" };
-    const libraryPool = new Set(libraryNotes.map((n) => n.id));
-    const libraryTasks = libraryNotes.filter((n) => n.kind === "task");
-    const parentTaskOf = (id: string): string | null => {
-      const container = libraryTasks.find((task) =>
-        (task.subtasks ?? []).some((raw) => subRef(raw, libraryPool) === id));
-      return container?.id ?? null;
-    };
+    const libraryParents = hierarchyParents(libraryNotes);
+    const libraryContainers = new Set(libraryParents.values());
     const libraryLayoutNodes = [
       { id: libraryRoot, degree: libraryNotes.length, kind: "concept" as never, label: "Library", role: "root" as never, parentId: null as string | null, order: 0 },
       ...shelfOrder.map((kind, index) => ({
@@ -326,8 +363,8 @@ export function GraphBackdrop() {
         degree: 0,
         kind: "note" as never,
         label: node.title,
-        role: (node.kind === "task" && (node.subtasks ?? []).length ? "section" : "claim") as never,
-        parentId: parentTaskOf(node.id) ?? `@library/${shelfLabels[node.kind as keyof typeof shelfLabels]}`,
+        role: (libraryContainers.has(node.id) ? "section" : "claim") as never,
+        parentId: libraryParents.get(node.id) ?? `@library/${shelfLabels[node.kind as keyof typeof shelfLabels]}`,
         order: index,
       })),
     ];
@@ -364,7 +401,8 @@ export function GraphBackdrop() {
       ...libraryLayoutNodes.filter((node) => node.parentId).map((node) => ({
         source: node.parentId as string, target: node.id, taxonomy: true, color: libraryPalette.core,
       })),
-      ...linkPairs.filter((link) => librarySet.has(link.source) && librarySet.has(link.target)).map((link) => ({
+      ...linkPairs.filter((link) => librarySet.has(link.source) && librarySet.has(link.target))
+        .filter((link) => libraryParents.get(link.target) !== link.source).map((link) => ({
         source: link.source, target: link.target, taxonomy: false,
         color: knowledgeAmbientEdgeStroke(false, false, libraryPalette), colorEnd: libraryPalette.core,
       })),

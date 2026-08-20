@@ -9,12 +9,12 @@ from __future__ import annotations
 import time
 
 from . import retrieval
-from .vault import load_note, resolver, slugify, write_note
+from .vault import CHILD_FIELD_BY_KIND, HIERARCHY_FIELDS, load_note, resolver, slugify, write_note
 
 # Fallback one-liners; the authoritative documentation lives in Tools/ notes.
 BUILTIN_DOCS = {
     "vault.list": 'Deterministically list notes in a folder. args: {"folder": "Tasks|Runbooks|Skills|Tools|Agent|Agents|Sources"}',
-    "vault.validate": "Deterministically validate every load-bearing frontmatter edge (task runbook/subtasks, runbook skills, skill tools) across the vault. args: {} — returns a broken-edge report.",
+    "vault.validate": "Deterministically validate every load-bearing frontmatter edge (primitive children, task runbook, runbook skills, skill/runbook tools) across the vault. args: {} — returns a broken-edge report.",
     "vault.search": 'Hybrid search over the vault. args: {"query": str}',
     "vault.read": 'Read a full note. args: {"ref": "Folder/name or [[wikilink]]"}',
     "vault.propose": ('Stage a note change for owner review (never writes the vault directly). '
@@ -26,6 +26,10 @@ BUILTIN_DOCS = {
 }
 
 ALWAYS_ALLOWED = ("task.complete",)
+
+
+def _link_leaf(value: str) -> str:
+    return value.strip().strip("[]").split("|", 1)[0].split("#", 1)[0].rsplit("/", 1)[-1]
 
 
 def tool_doc(name: str) -> str:
@@ -65,20 +69,58 @@ def run_tool(name: str, args: dict, context: dict) -> str:
     if name == "vault.validate":
         from .vault import iter_notes
         res = resolver()
+        notes = iter_notes()
         broken, checked = [], 0
-        for n in iter_notes():
+        for n in notes:
             if n.ref.startswith("Receipts/"):
                 continue
-            for field in ("runbook", "subtasks", "skills"):
+            for field in ("runbook", *HIERARCHY_FIELDS, "skills"):
                 val = n.meta.get(field)
                 for ref in (val if isinstance(val, list) else [val] if val else []):
                     checked += 1
-                    if not res.resolve(str(ref)):
+                    target = res.resolve(str(ref))
+                    if not target:
                         broken.append(f"- [[{n.ref}]] {field}: {ref} (unresolved)")
+                    elif field == CHILD_FIELD_BY_KIND.get(n.kind) and target.kind != n.kind:
+                        broken.append(
+                            f"- [[{n.ref}]] {field}: {ref} (expected {n.kind}, got {target.kind})")
             for t in (n.meta.get("tools") or []) if n.kind in ("skill", "runbook") else []:
                 checked += 1
-                if str(t).strip("[]") not in REGISTRY:
+                target = res.resolve(str(t))
+                if target and target.kind != "tool":
+                    broken.append(f"- [[{n.ref}]] tools: {t} (expected tool, got {target.kind})")
+                elif not target and _link_leaf(str(t)) not in REGISTRY:
                     broken.append(f"- [[{n.ref}]] tools: {t} (no registry binding)")
+        for tool in (note for note in notes if note.kind == "tool" and not note.children):
+            checked += 1
+            binding = str(tool.meta.get("binding", "")).removeprefix("builtin:")
+            if binding not in REGISTRY:
+                broken.append(f"- [[{tool.ref}]] binding: {binding or '(missing)'} (no registry binding)")
+        reported_cycles: set[frozenset[str]] = set()
+        for kind in CHILD_FIELD_BY_KIND:
+            visited: set[str] = set()
+            active: list[str] = []
+
+            def visit(note):
+                if note.ref in active:
+                    cycle = active[active.index(note.ref):] + [note.ref]
+                    key = frozenset(cycle)
+                    if key not in reported_cycles:
+                        reported_cycles.add(key)
+                        broken.append(f"- {kind} hierarchy cycle: {' -> '.join(cycle)}")
+                    return
+                if note.ref in visited:
+                    return
+                active.append(note.ref)
+                for raw in note.children:
+                    child = res.resolve(raw)
+                    if child and child.kind == kind:
+                        visit(child)
+                active.pop()
+                visited.add(note.ref)
+
+            for root in (note for note in notes if note.kind == kind):
+                visit(root)
         if not broken:
             return f"All {checked} load-bearing edges resolve. No broken references."
         return f"{checked} edges checked, {len(broken)} broken:\n" + "\n".join(broken[:30])
