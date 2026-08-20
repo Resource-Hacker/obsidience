@@ -16,7 +16,7 @@ import uuid
 from . import llm, retrieval
 from .config import CONFIG
 from .indexer import INDEX
-from .receipts import write_receipt
+from .receipts import runbook_hash, write_receipt
 from .tools import ALWAYS_ALLOWED, REGISTRY, run_tool, tool_docs
 from .vault import Note, Resolver, resolver, update_status
 
@@ -115,6 +115,7 @@ async def run_task(task: Note, depth: int = 0) -> dict:
 
     # ---- leaf task: runbook + skills + authorized tools ----
     runbook: Note = spine["runbook"]
+    runbook_sha256 = runbook_hash(runbook)
     skills: list[Note] = spine["skills"]
     allowed: list[str] = spine["tools"]
     params = task.meta.get("params") or {}
@@ -213,7 +214,7 @@ async def run_task(task: Note, depth: int = 0) -> dict:
 
     finished = time.time()
     receipt_path = write_receipt(task, agent_name, run_id, status, summary, trace,
-                                 started, finished)
+                                 started, finished, runbook, runbook_sha256)
     update_status(task, status, {"last_run": run_id, "blocked_reason": None})
     INDEX.record_run(id=run_id, task_ref=task.ref, agent=agent_name, started=started,
                      finished=finished, status=status, summary=summary,

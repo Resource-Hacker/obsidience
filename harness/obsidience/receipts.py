@@ -2,14 +2,23 @@
 
 from __future__ import annotations
 
+import hashlib
 import time
 
 from .vault import Note, slugify, write_note
 from .review import git_commit
 
 
+def runbook_hash(runbook: Note) -> str:
+    """Hash the exact runbook revision used by a leaf-task session."""
+    from .config import CONFIG
+
+    return hashlib.sha256((CONFIG.vault_dir / runbook.path).read_bytes()).hexdigest()
+
+
 def write_receipt(task: Note, agent: str, run_id: str, status: str, summary: str,
-                  trace: list[dict], started: float, finished: float) -> str:
+                  trace: list[dict], started: float, finished: float,
+                  runbook: Note | None = None, runbook_sha256: str | None = None) -> str:
     ts = time.strftime("%Y-%m-%d-%H%M%S", time.localtime(started))
     rel = f"Receipts/{slugify(task.title)}/{ts}-{run_id}.md"
     tool_log = "\n".join(
@@ -27,6 +36,9 @@ def write_receipt(task: Note, agent: str, run_id: str, status: str, summary: str
         "started": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(started)),
         "duration_s": round(finished - started, 1),
     }
+    if runbook:
+        meta["runbook"] = f"[[{runbook.ref}]]"
+        meta["runbook_sha256"] = runbook_sha256 or runbook_hash(runbook)
     write_note(rel, meta, body)
     _append_log("run", f"{task.title} ({status})", started)
     git_commit(f"[receipt] {task.title}: {status} ({run_id})", [rel])
