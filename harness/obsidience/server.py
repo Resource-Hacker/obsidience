@@ -146,6 +146,26 @@ async def set_task_reasoning(ref: str, payload: dict):
     return {"task": note.ref, "reasoning_effort": effort}
 
 
+@app.patch("/api/tasks/{ref:path}/assignee")
+async def set_task_assignee(ref: str, payload: dict):
+    """Persist an owner-selected agent on one executable task."""
+    from .vault import write_note
+
+    note = load_note(ref + ".md") or resolver().resolve(ref)
+    if not note or note.kind != "task":
+        raise HTTPException(404, f"task not found: {ref}")
+    requested = str(payload.get("assignee", "")).strip()
+    agent = resolver().resolve(requested)
+    if not requested or not agent or agent.kind != "agent":
+        raise HTTPException(400, f"agent not found: {requested or '(empty)'}")
+    assignee = f"[[{agent.ref}]]"
+    meta = dict(note.meta)
+    meta["assignee"] = assignee
+    write_note(note.path, meta, note.body)
+    INDEX.sync()
+    return {"task": note.ref, "assignee": assignee}
+
+
 @app.post("/api/tasks/{ref:path}/run")
 async def run_now(ref: str, payload: dict | None = None):
     note = load_note(ref + ".md") or resolver().resolve(ref)

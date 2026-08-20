@@ -56,6 +56,12 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ reasoning_effort: reasoningEffort }),
     }),
+  setTaskAssignee: (ref: string, assignee: string) => json<{ task: string; assignee: string }>(
+    `/api/tasks/${encodeURI(ref)}/assignee`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ assignee }),
+    }),
   runs: () => json<Array<Record<string, unknown>>>("/api/runs"),
   reviews: () => json<Proposal[]>("/api/reviews"),
   approve: (name: string) => json(`/api/reviews/${encodeURIComponent(name)}/approve`, { method: "POST" }),

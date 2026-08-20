@@ -5,6 +5,89 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Play, Plus, RefreshCw, X } from "lucide-react";
 import { API_BASE, api, openReader, type ReasoningEffort, type TaskRow } from "@/lib/api";
+import {
+  knowledgeRoleForAgent,
+  paintKnowledgeRoleIcon,
+  type KnowledgeRole,
+} from "@/components/themes/jarvis/knowledge-role-icons";
+
+interface AgentOption { ref: string; title: string }
+
+const AGENT_ROLE_BY_NAME: Record<string, KnowledgeRole> = {
+  alexandria: "curator",
+  darwin: "researcher",
+  heimdall: "guardian",
+};
+
+function cleanLink(value: string): string {
+  return value.trim().replace(/^\[\[/, "").replace(/\]\]$/, "").split("|")[0];
+}
+
+function agentName(value: string): string {
+  return cleanLink(value).split("/").pop() ?? "";
+}
+
+function roleForAgent(name: string): KnowledgeRole {
+  return AGENT_ROLE_BY_NAME[name.toLowerCase()] ?? knowledgeRoleForAgent(name.toLowerCase());
+}
+
+function AgentGlyph({ name, size = 14 }: { name: string; size?: number }) {
+  const holder = useRef<HTMLSpanElement | null>(null);
+  useEffect(() => {
+    const element = holder.current;
+    if (!element) return;
+    const canvas = paintKnowledgeRoleIcon(roleForAgent(name), Math.max(48, size * 3));
+    canvas.style.width = `${size}px`;
+    canvas.style.height = `${size}px`;
+    element.replaceChildren(canvas);
+  }, [name, size]);
+  return <span ref={holder} className="block shrink-0" style={{ width: size, height: size }} />;
+}
+
+function AssigneeSelect({
+  task,
+  agents,
+  onChange,
+}: {
+  task: TaskRow;
+  agents: AgentOption[];
+  onChange: (ref: string, agent: AgentOption) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const selectedName = agentName(task.assignee);
+  const selected = agents.find((agent) =>
+    cleanLink(task.assignee) === agent.ref || selectedName.toLowerCase() === agent.title.toLowerCase());
+  const label = selected?.title ?? (selectedName || "Assign");
+  return (
+    <div className="relative mr-1" onBlur={(event) => {
+      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
+    }}>
+      <button type="button" onClick={() => setOpen((current) => !current)}
+        aria-haspopup="listbox" aria-expanded={open} aria-label={`Assign ${task.title}`}
+        title={`Assign ${task.title}`}
+        className="flex w-[98px] items-center gap-1 rounded border border-cyan-300/20 bg-[#020a12] px-1 py-0.5 text-left font-mono text-[8px] text-cyan-100/75 outline-none hover:border-cyan-300/40">
+        {selectedName ? <AgentGlyph name={selectedName} /> : <span className="h-[14px] w-[14px]" />}
+        <span className="min-w-0 flex-1 truncate">{label}</span>
+        <ChevronDown size={9} className="shrink-0 text-cyan-300/45" />
+      </button>
+      {open ? (
+        <div role="listbox"
+          className="absolute left-0 top-full z-30 mt-1 w-[124px] overflow-hidden rounded border border-cyan-300/25 bg-[#020a12] py-0.5 shadow-[0_8px_24px_rgba(0,0,0,0.65)]">
+          {agents.map((agent) => (
+            <button key={agent.ref} type="button" role="option"
+              aria-selected={agent.ref === selected?.ref}
+              onClick={() => { onChange(task.ref, agent); setOpen(false); }}
+              className="flex w-full items-center gap-1.5 px-1.5 py-1 text-left font-mono text-[9px] text-cyan-100/75 hover:bg-cyan-300/10 hover:text-cyan-50">
+              <AgentGlyph name={agent.title} size={16} />
+              <span className="truncate">{agent.title}</span>
+            </button>
+          ))}
+          {agents.length === 0 ? <span className="block px-2 py-1 font-mono text-[8px] text-cyan-200/35">No agents</span> : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 const STATUS_STYLE: Record<string, string> = {
   pending: "text-cyan-200 border-cyan-300/40",
@@ -23,6 +106,7 @@ export function JobsPaneBody() {
   const [busyRef, setBusyRef] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [runbooks, setRunbooks] = useState<string[]>([]);
+  const [agents, setAgents] = useState<AgentOption[]>([]);
   const [form, setForm] = useState<{
     title: string; runbook: string; schedule: string; body: string; reasoningEffort: ReasoningEffort;
   }>({ title: "", runbook: "", schedule: "", body: "", reasoningEffort: "medium" });
@@ -34,6 +118,10 @@ export function JobsPaneBody() {
 
   useEffect(() => {
     refresh();
+    api.graph().then((graph) => setAgents(graph.nodes
+      .filter((node) => node.kind === "agent")
+      .map((node) => ({ ref: node.id, title: node.title }))
+      .sort((left, right) => left.title.localeCompare(right.title)))).catch(() => undefined);
     const t = setInterval(refresh, 8_000);
     return () => clearInterval(t);
   }, [refresh]);
@@ -100,6 +188,13 @@ export function JobsPaneBody() {
     setTasks((current) => current.map((task) =>
       task.ref === ref ? { ...task, reasoning_effort: reasoningEffort } : task));
     try { await api.setTaskReasoning(ref, reasoningEffort); } catch { refresh(); }
+  }
+
+  async function setAssignee(ref: string, agent: AgentOption) {
+    const assignee = `[[${agent.ref}]]`;
+    setTasks((current) => current.map((task) =>
+      task.ref === ref ? { ...task, assignee } : task));
+    try { await api.setTaskAssignee(ref, agent.ref); } catch { refresh(); }
   }
 
   async function runNow(task: TaskRow) {
@@ -188,7 +283,7 @@ export function JobsPaneBody() {
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {tasks.length > 0 ? (
-          <div className="sticky top-0 z-10 grid grid-cols-[minmax(0,1fr)_64px_64px_72px_28px] border-b border-cyan-300/15 bg-[#03101a]/95 px-2 py-1 font-mono text-[8px] uppercase tracking-[0.16em] text-cyan-300/40">
+          <div className="sticky top-0 z-10 grid grid-cols-[minmax(0,1fr)_60px_104px_72px_28px] border-b border-cyan-300/15 bg-[#03101a]/95 px-2 py-1 font-mono text-[8px] uppercase tracking-[0.16em] text-cyan-300/40">
             <span>Task</span><span>State</span><span>Agent</span><span>Reason</span><span />
           </div>
         ) : null}
@@ -196,10 +291,9 @@ export function JobsPaneBody() {
           const children = hierarchy.children.get(task.ref) ?? [];
           const hasChildren = children.length > 0;
           const isExpanded = expanded.has(task.ref);
-          const agent = task.assignee.replace(/\[\[Agents\//, "").replace(/\]\]/, "");
           return (
             <div key={task.ref}
-              className="grid grid-cols-[minmax(0,1fr)_64px_64px_72px_28px] items-center border-b border-cyan-300/8 px-2 py-1.5 hover:bg-cyan-300/[0.035]">
+              className="grid grid-cols-[minmax(0,1fr)_60px_104px_72px_28px] items-center border-b border-cyan-300/8 px-2 py-1.5 hover:bg-cyan-300/[0.035]">
               <div className="flex min-w-0 items-start" style={{ paddingLeft: depth * 17 }}>
                 <button onClick={() => hasChildren && toggleExpanded(task.ref)} disabled={!hasChildren}
                   title={hasChildren ? `${isExpanded ? "Collapse" : "Expand"} ${task.title}` : undefined}
@@ -224,7 +318,9 @@ export function JobsPaneBody() {
                   {task.status}
                 </span>
               )}
-              <span className="truncate font-mono text-[8px] text-teal-300/70" title={agent}>{agent || "—"}</span>
+              {hasChildren ? <span /> : (
+                <AssigneeSelect task={task} agents={agents} onChange={setAssignee} />
+              )}
               {hasChildren ? <span /> : (
                 <select value={task.reasoning_effort}
                   onChange={(e) => setReasoning(task.ref, e.target.value as ReasoningEffort)}
