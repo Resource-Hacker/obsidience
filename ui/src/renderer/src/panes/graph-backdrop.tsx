@@ -93,6 +93,13 @@ export function GraphBackdrop() {
       const m = /Agents\/([^\]|/]+)/.exec(n.assignee ?? "");
       return m ? m[1] : null;
     };
+    const subRef = (raw: string, pool: Set<string>): string | null => {
+      const clean = raw.replace(/^\[\[|\]\]$/g, "");
+      if (pool.has(clean)) return clean;
+      const base = clean.split("/").pop()!.toLowerCase();
+      for (const id of pool) if (id.split("/").pop()!.toLowerCase() === base) return id;
+      return null;
+    };
     const satelliteRefs = new Set(all.filter((n) =>
       n.id.startsWith("Agents/") || (n.kind === "task" && assigneeOf(n) && agentNames.includes(assigneeOf(n)!)),
     ).map((n) => n.id));
@@ -125,10 +132,19 @@ export function GraphBackdrop() {
         id: `@branch/${f}`, degree: notes.filter((n) => branchOf(n.id) === f).length,
         kind: "concept" as never, label: f, role: "section" as never, parentId: "@branch/Agent", order: i,
       })),
-      ...notes.map((n, i) => ({
-        id: n.id, degree: degree.get(n.id) ?? 0, kind: "note" as never, label: n.title,
-        role: "claim" as never, parentId: n.id.includes("/") ? `@branch/${branchOf(n.id)}` : ROOT_ID, order: i,
-      })),
+      ...notes.map((n, i) => {
+        const pool = new Set(notes.map((x) => x.id));
+        const container = notes.find((c) => c.kind === "task" &&
+          (c.subtasks ?? []).some((r) => subRef(r, pool) === n.id));
+        const isContainer = n.kind === "task" && (n.subtasks ?? []).length > 0;
+        return {
+          id: n.id, degree: degree.get(n.id) ?? 0, kind: "note" as never, label: n.title,
+          role: (isContainer ? "section" : "claim") as never,
+          parentId: container ? container.id
+            : n.id.includes("/") ? `@branch/${branchOf(n.id)}` : ROOT_ID,
+          order: i,
+        };
+      }),
     ];
     const taxonomyEdges = layoutNodes
       .filter((n) => n.parentId)
@@ -202,47 +218,62 @@ export function GraphBackdrop() {
       const members = all.filter((n) =>
         (n.id.startsWith(`Agents/${name}/`) && n.id !== identityRef) ||
         (n.kind === "task" && assigneeOf(n) === name));
+      const taskMembers = members.filter((m) => m.kind === "task");
+      const tasksNode = `@sat/${name}/tasks`;
+      const memberPool = new Set(members.map((m) => m.id));
+      const parentTaskOf = (id: string): string | null => {
+        const c = taskMembers.find((t) => (t.subtasks ?? []).some((r) => subRef(r, memberPool) === id));
+        return c ? c.id : null;
+      };
+      const satLayoutNodes = [
+        { id: identityRef, degree: members.length, kind: "concept" as never, label: name, role: "root" as never, parentId: null as string | null, order: 0 },
+        ...(taskMembers.length ? [{ id: tasksNode, degree: taskMembers.length, kind: "concept" as never, label: "Tasks", role: "section" as never, parentId: identityRef, order: 0 }] : []),
+        ...members.map((n, i) => ({
+          id: n.id, degree: 0, kind: "note" as never, label: n.title,
+          role: ((n.subtasks ?? []).length ? "section" : "claim") as never,
+          parentId: parentTaskOf(n.id) ?? (n.kind === "task" ? tasksNode : identityRef),
+          order: i,
+        })),
+      ];
       const satLayout = layoutKnowledgeGraph({
-        nodes: [
-          { id: identityRef, degree: members.length, kind: "concept" as never, label: name, role: "root" as never, parentId: null, order: 0 },
-          ...members.map((n, i) => ({
-            id: n.id, degree: 0, kind: "note" as never, label: n.title,
-            role: "claim" as never, parentId: identityRef, order: i,
-          })),
-        ],
-        edges: members.map((n, i) => ({ id: `s${i}`, source: identityRef, target: n.id, type: "related_to" as never })),
+        nodes: satLayoutNodes,
+        edges: satLayoutNodes.filter((n) => n.parentId)
+          .map((n, i) => ({ id: `s${i}`, source: n.parentId as string, target: n.id, type: "related_to" as never })),
       });
       const satPos = new Map(satLayout.nodes.map((n) => [n.id, n]));
       const pal = paletteForAgent(name);
-      const memberSet = new Set([identityRef, ...members.map((m) => m.id)]);
-      const satNodes: Knowledge3dRenderNode[] = [identityRef, ...members.map((m) => m.id)].map((ref) => {
-        const pp = satPos.get(ref);
-        const isRoot = ref === identityRef;
-        const noteMeta = all.find((n) => n.id === ref);
+      const memberSet = new Set(satLayoutNodes.map((n) => n.id));
+      const satNodes: Knowledge3dRenderNode[] = satLayoutNodes.map((ln) => {
+        const pp = satPos.get(ln.id);
+        const role = ln.role as never as ("root" | "section" | "claim");
+        const subject = role === "root" || role === "section";
+        const noteMeta = all.find((n) => n.id === ln.id);
         return {
-          id: ref, x: pp?.x ?? 0.5, y: pp?.y ?? 0.5, depth: pp?.depth,
-          role: isRoot ? "root" : "claim", parentId: pp?.parentId,
-          radius: knowledgeNodeRadius(isRoot ? "root" : "claim" as never, 1, false, pp?.depth),
-          subject: isRoot,
-          core: nodeCoreColor(pal, isRoot ? "root" : undefined, noteMeta?.status),
+          id: ln.id, x: pp?.x ?? 0.5, y: pp?.y ?? 0.5, depth: pp?.depth,
+          role, parentId: pp?.parentId,
+          radius: knowledgeNodeRadius(role, 1, false, pp?.depth),
+          subject,
+          core: nodeCoreColor(pal, subject ? role : undefined, noteMeta?.status),
           dark: pal.dark,
-          ring: isRoot ? pal.ring : "rgba(0,0,0,0)",
-          glow: isRoot ? pal.glow : "rgba(0,0,0,0)",
+          ring: subject ? pal.ring : "rgba(0,0,0,0)",
+          glow: subject ? pal.glow : "rgba(0,0,0,0)",
           ringScale: knowledgeSubjectRingScale(pp?.depth),
-          ringWidth: knowledgeSubjectRingWidth(isRoot ? "root" : undefined, pp?.depth),
-          glowScale: isRoot ? knowledgeSubjectGlowScale("root", pp?.depth) : 1,
-          alpha: knowledgeNodeBaseAlpha(isRoot ? "root" : undefined, pp?.depth, "hot"),
+          ringWidth: knowledgeSubjectRingWidth(subject ? role : undefined, pp?.depth),
+          glowScale: subject ? knowledgeSubjectGlowScale(role, pp?.depth) : 1,
+          alpha: knowledgeNodeBaseAlpha(subject ? role : undefined, pp?.depth, "hot"),
         };
       });
       const satEdges: Knowledge3dRenderEdge[] = [
-        ...members.map((m) => ({ source: identityRef, target: m.id, taxonomy: true, color: pal.core })),
+        ...satLayoutNodes.filter((n) => n.parentId)
+          .map((n) => ({ source: n.parentId as string, target: n.id, taxonomy: true, color: pal.core })),
         ...linkPairs.filter((l) => memberSet.has(l.source) && memberSet.has(l.target) && l.source !== identityRef)
           .map((l) => ({ source: l.source, target: l.target, taxonomy: false,
                          color: knowledgeAmbientEdgeStroke(false, false, pal), colorEnd: pal.core })),
       ];
       for (const ref of memberSet) {
         const n = all.find((x) => x.id === ref);
-        titles.current.set(`agent:${name}/${ref}`, n?.title ?? (ref === identityRef ? name : ref));
+        titles.current.set(`agent:${name}/${ref}`,
+          n?.title ?? (ref === identityRef ? name : ref === tasksNode ? "Tasks" : ref));
       }
       return { agentId: name, nodes: satNodes, edges: satEdges, tuning };
     });

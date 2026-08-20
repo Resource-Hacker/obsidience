@@ -15,11 +15,13 @@ export interface GraphNode {
   kind: string;
   status?: string | null;
   assignee?: string | null;
+  subtasks?: string[];
   tags?: string[];
 }
 export interface GraphLink { source: string; target: string }
 export interface TaskRow {
   ref: string; title: string; status: string; assignee: string; runbook: string; subtasks: number;
+  subtask_refs?: string[];
   schedule?: string | null; blocked_reason?: string | null; last_run?: string | null;
 }
 export interface Proposal {

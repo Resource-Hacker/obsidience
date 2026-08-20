@@ -114,13 +114,30 @@ export function JobsPaneBody() {
       ) : null}
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {tasks.map((t) => (
-          <div key={t.ref} className="flex items-center gap-2 border-b border-cyan-300/8 px-3 py-2">
+        {(() => {
+          const byRef = new Map(tasks.map((t) => [t.ref, t]));
+          const resolveChild = (r: string) => byRef.get(r) ?? byRef.get(`Tasks/${r.split("/").pop()}`);
+          const childRefs = new Set(tasks.flatMap((t) => (t.subtask_refs ?? []).map((r) => resolveChild(r)?.ref)).filter(Boolean));
+          const roots = tasks.filter((t) => !childRefs.has(t.ref));
+          const ordered: Array<{ t: TaskRow; depth: number }> = [];
+          const push = (t: TaskRow, depth: number) => {
+            ordered.push({ t, depth });
+            if (depth < 3) for (const r of t.subtask_refs ?? []) {
+              const c = resolveChild(r);
+              if (c) push(c, depth + 1);
+            }
+          };
+          roots.forEach((t) => push(t, 0));
+          return ordered.map(({ t, depth }) => (
+          <div key={t.ref} className="flex items-center gap-2 border-b border-cyan-300/8 py-2 pr-3"
+            style={{ paddingLeft: 12 + depth * 18 }}>
+            {depth > 0 ? <span className="shrink-0 font-mono text-[10px] text-cyan-300/30">└</span> : null}
             <span className={`shrink-0 rounded border px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider ${STATUS_STYLE[t.status] ?? STATUS_STYLE.draft}`}>
               {t.status}
             </span>
             <button onClick={() => openReader(t.ref)}
-              className="min-w-0 flex-1 truncate text-left font-mono text-[12px] text-cyan-100 hover:text-cyan-300">
+              className={`min-w-0 flex-1 truncate text-left font-mono hover:text-cyan-300 ${
+                t.subtasks ? "text-[12.5px] uppercase tracking-[0.14em] text-cyan-50" : "text-[12px] text-cyan-100"}`}>
               {t.title}
             </button>
             {t.assignee ? (
@@ -147,7 +164,8 @@ export function JobsPaneBody() {
               <Play size={11} />
             </button>
           </div>
-        ))}
+          ));
+        })()}
         {tasks.length === 0 ? (
           <p className="p-4 font-mono text-[11px] text-cyan-200/40">No task notes in the vault yet — assign one with +.</p>
         ) : null}

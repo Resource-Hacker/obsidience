@@ -12,7 +12,7 @@ subtasks:
 - '[[Tasks/categorize-notes]]'
 - '[[Tasks/detect-contradictions]]'
 - '[[Tasks/expand-stubs]]'
-title: maintain-wiki
+title: Wiki
 ---
 
 The self-maintenance loop (Wikipedia Task Center × llm-wiki): ingest new

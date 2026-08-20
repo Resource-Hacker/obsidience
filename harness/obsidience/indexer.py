@@ -137,8 +137,10 @@ class Index:
         resolver = Resolver(stubs)
         for ref, title, kind, meta, link_json in rows:
             m = json.loads(meta)
+            subtasks = m.get("subtasks") or []
             nodes.append({"id": ref, "title": title, "kind": kind,
                           "status": m.get("status"), "assignee": m.get("assignee"),
+                          "subtasks": [str(x).strip("[]") for x in subtasks] if isinstance(subtasks, list) else [],
                           "tags": m.get("tags") or []})
             for target in json.loads(link_json):
                 t = resolver.resolve(target)

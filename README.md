@@ -15,7 +15,7 @@ or piecewise:
 ```sh
 ./scripts/obsidience serve      # daemon: API, scheduler, indexer
 ./scripts/obsidience status     # what the harness sees
-./scripts/obsidience run Tasks/maintain-wiki     # run the self-maintenance loop now
+./scripts/obsidience run Tasks/wiki     # run the self-maintenance loop now
 ./scripts/obsidience review     # list staged proposals (approve/reject <file>)
 cd ui && pnpm dev               # the HUD
 ```
@@ -35,7 +35,7 @@ review decisions are git-committed.
   `/var/lib/ai/models/kokoro-82m-v1.0-onnx` (override: `HEREBRUM_KOKORO_CACHE_DIR`).
 
 ## Self-maintenance
-`Tasks/maintain-wiki` (every 6h, Wikipedia Task Center × karpathy llm-wiki):
+`Tasks/wiki` (every 6h, Wikipedia Task Center × karpathy llm-wiki):
 ingest-sources → lint-notes → validate-links → categorize-notes →
 detect-contradictions → expand-stubs. Leaves auto-complete; every change they
 want lands in `_staging/` for your review — **staging is the human gate**.

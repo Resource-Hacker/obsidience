@@ -78,11 +78,13 @@ def tasks():
         if n.kind != "task":
             continue
         subtasks = n.meta.get("subtasks") or []
+        refs = [str(x).strip("[]") for x in subtasks] if isinstance(subtasks, list) else []
         out.append({"ref": n.ref, "title": n.title,
                     "status": n.meta.get("status", "draft"),
                     "assignee": str(n.meta.get("assignee", "")),
                     "runbook": str(n.meta.get("runbook", "")),
-                    "subtasks": len(subtasks) if isinstance(subtasks, list) else 0,
+                    "subtasks": len(refs),
+                    "subtask_refs": refs,
                     "schedule": n.meta.get("schedule"),
                     "blocked_reason": n.meta.get("blocked_reason"),
                     "last_run": n.meta.get("last_run")})
