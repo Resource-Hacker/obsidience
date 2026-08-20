@@ -23,7 +23,7 @@ export interface TaskRow {
   ref: string; title: string; status: string; assignee: string; runbook: string; subtasks: number;
   subtask_refs?: string[];
   reasoning_effort: ReasoningEffort;
-  schedule?: string | null; blocked_reason?: string | null; last_run?: string | null;
+  schedule?: string | null; next_run?: number | null; blocked_reason?: string | null; last_run?: string | null;
 }
 export interface Proposal {
   file: string; title: string; action: string; target: string; agent: string;
@@ -62,6 +62,18 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ assignee }),
     }),
+  updateTask: (ref: string, update: {
+    title: string;
+    body: string;
+    schedule: string;
+    assignee: string;
+    runbook: string;
+    reasoning_effort: ReasoningEffort;
+  }) => json<{ task: string; updated: boolean }>(`/api/tasks/${encodeURI(ref)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(update),
+  }),
   runs: () => json<Array<Record<string, unknown>>>("/api/runs"),
   reviews: () => json<Proposal[]>("/api/reviews"),
   approve: (name: string) => json(`/api/reviews/${encodeURIComponent(name)}/approve`, { method: "POST" }),

@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from croniter import croniter
 
 from . import llm, retrieval, review, scheduler, trace, voice
 from .config import CONFIG
@@ -82,6 +83,14 @@ def tasks():
         effort = str(n.meta.get("reasoning_effort", "medium")).lower()
         if effort not in llm.REASONING_BUDGETS:
             effort = "medium"
+        status = str(n.meta.get("status", "draft"))
+        schedule = n.meta.get("schedule")
+        next_run = None
+        if schedule and status in ("pending", "completed", "failed", "running"):
+            try:
+                next_run = croniter(str(schedule), time.time()).get_next(float)
+            except (ValueError, KeyError):
+                pass
         out.append({"ref": n.ref, "title": n.title,
                     "status": n.meta.get("status", "draft"),
                     "assignee": str(n.meta.get("assignee", "")),
@@ -89,7 +98,8 @@ def tasks():
                     "subtasks": len(refs),
                     "subtask_refs": refs,
                     "reasoning_effort": effort,
-                    "schedule": n.meta.get("schedule"),
+                    "schedule": schedule,
+                    "next_run": next_run,
                     "blocked_reason": n.meta.get("blocked_reason"),
                     "last_run": n.meta.get("last_run")})
     return out
@@ -106,7 +116,7 @@ async def create_task(payload: dict):
     if load_note(ref):
         raise HTTPException(409, f"task already exists: {ref}")
     meta: dict = {"title": title, "kind": "task",
-                  "status": "pending" if payload.get("start") else "draft"}
+                  "status": "pending" if payload.get("start") or payload.get("schedule") else "draft"}
     if payload.get("assignee"):
         meta["assignee"] = str(payload["assignee"])
     if payload.get("runbook"):
@@ -135,6 +145,8 @@ async def set_task_reasoning(ref: str, payload: dict):
     note = load_note(ref + ".md") or resolver().resolve(ref)
     if not note or note.kind != "task":
         raise HTTPException(404, f"task not found: {ref}")
+    if str(note.meta.get("status", "draft")) == "running":
+        raise HTTPException(409, "cannot edit a running task")
     try:
         effort = llm.normalize_reasoning_effort(payload.get("reasoning_effort"))
     except ValueError as exc:
@@ -154,6 +166,8 @@ async def set_task_assignee(ref: str, payload: dict):
     note = load_note(ref + ".md") or resolver().resolve(ref)
     if not note or note.kind != "task":
         raise HTTPException(404, f"task not found: {ref}")
+    if str(note.meta.get("status", "draft")) == "running":
+        raise HTTPException(409, "cannot edit a running task")
     requested = str(payload.get("assignee", "")).strip()
     agent = resolver().resolve(requested)
     if not requested or not agent or agent.kind != "agent":
@@ -164,6 +178,70 @@ async def set_task_assignee(ref: str, payload: dict):
     write_note(note.path, meta, note.body)
     INDEX.sync()
     return {"task": note.ref, "assignee": assignee}
+
+
+@app.patch("/api/tasks/{ref:path}")
+async def update_task(ref: str, payload: dict):
+    """Owner editor for task instructions and scheduler-facing fields."""
+    from .vault import write_note
+
+    note = load_note(ref + ".md") or resolver().resolve(ref)
+    if not note or note.kind != "task":
+        raise HTTPException(404, f"task not found: {ref}")
+    if str(note.meta.get("status", "draft")) == "running":
+        raise HTTPException(409, "cannot edit a running task")
+    meta = dict(note.meta)
+
+    if "title" in payload:
+        title = str(payload["title"]).strip()
+        if not title:
+            raise HTTPException(400, "title required")
+        meta["title"] = title
+
+    if "schedule" in payload:
+        schedule = str(payload.get("schedule") or "").strip()
+        if schedule:
+            try:
+                croniter(schedule, time.time()).get_next(float)
+            except (ValueError, KeyError) as exc:
+                raise HTTPException(400, f"invalid cron schedule: {schedule}") from exc
+            meta["schedule"] = schedule
+            if str(meta.get("status", "draft")) == "draft":
+                meta["status"] = "pending"
+        else:
+            meta.pop("schedule", None)
+
+    res = resolver()
+    if "assignee" in payload:
+        requested = str(payload.get("assignee") or "").strip()
+        if requested:
+            agent = res.resolve(requested)
+            if not agent or agent.kind != "agent":
+                raise HTTPException(400, f"agent not found: {requested}")
+            meta["assignee"] = f"[[{agent.ref}]]"
+        else:
+            meta.pop("assignee", None)
+
+    if "runbook" in payload:
+        requested = str(payload.get("runbook") or "").strip()
+        if requested:
+            runbook = res.resolve(requested)
+            if not runbook or runbook.kind != "runbook":
+                raise HTTPException(400, f"runbook not found: {requested}")
+            meta["runbook"] = f"[[{runbook.ref}]]"
+        else:
+            meta.pop("runbook", None)
+
+    if "reasoning_effort" in payload:
+        try:
+            meta["reasoning_effort"] = llm.normalize_reasoning_effort(payload["reasoning_effort"])
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    body = str(payload["body"]) if "body" in payload else note.body
+    write_note(note.path, meta, body)
+    INDEX.sync()
+    return {"task": note.ref, "updated": True}
 
 
 @app.post("/api/tasks/{ref:path}/run")

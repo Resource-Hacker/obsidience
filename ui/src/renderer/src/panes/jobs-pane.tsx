@@ -52,9 +52,10 @@ function AssigneeSelect({
       if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
     }}>
       <button type="button" onClick={() => setOpen((current) => !current)}
+        disabled={task.status === "running"}
         aria-haspopup="listbox" aria-expanded={open} aria-label={`Assign ${task.title}`}
         title={`Assign ${task.title}`}
-        className="flex w-[98px] items-center gap-1 rounded border border-cyan-300/20 bg-[#020a12] px-1 py-0.5 text-left font-mono text-[8px] text-cyan-100/75 outline-none hover:border-cyan-300/40">
+        className="flex w-[98px] items-center gap-1 rounded border border-cyan-300/20 bg-[#020a12] px-1 py-0.5 text-left font-mono text-[8px] text-cyan-100/75 outline-none hover:border-cyan-300/40 disabled:opacity-45">
         {selectedName ? <AgentGlyph name={selectedName} /> : <span className="h-[14px] w-[14px]" />}
         <span className="min-w-0 flex-1 truncate">{label}</span>
         <ChevronDown size={9} className="shrink-0 text-cyan-300/45" />
@@ -111,7 +112,7 @@ export function JobsPaneBody() {
       .filter((node) => node.kind === "agent")
       .map((node) => ({ ref: node.id, title: node.title }))
       .sort((left, right) => left.title.localeCompare(right.title)))).catch(() => undefined);
-    const t = setInterval(refresh, 8_000);
+    const t = setInterval(refresh, 3_000);
     return () => clearInterval(t);
   }, [refresh]);
 
@@ -157,6 +158,7 @@ export function JobsPaneBody() {
     hierarchy.roots.forEach((task) => add(task, 0));
     return rows;
   }, [expanded, hierarchy]);
+  const runningCount = tasks.filter((task) => task.status === "running" && task.subtasks === 0).length;
 
   function toggleExpanded(ref: string) {
     setExpanded((current) => {
@@ -220,9 +222,17 @@ export function JobsPaneBody() {
   return (
     <div className="flex h-full flex-col">
       <div className="flex shrink-0 items-center justify-between border-b border-cyan-300/10 px-3 py-1.5">
-        <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-cyan-300/50">
-          {hierarchy.roots.length} roots · {tasks.length} tasks
-        </span>
+        <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.16em]">
+          <span className="text-cyan-300/50">{hierarchy.roots.length} roots · {tasks.length} tasks</span>
+          {runningCount > 0 ? (
+            <span className="animate-pulse text-emerald-300">
+              ● {runningCount} running
+            </span>
+          ) : null}
+          <span className="text-cyan-300/35">
+            {tasks.filter((task) => task.schedule).length} scheduled
+          </span>
+        </div>
         <div className="flex items-center gap-2">
           <button onClick={() => setExpanded(new Set(tasks.filter((task) => task.subtasks > 0).map((task) => task.ref)))}
             title="Expand all task groups" className="font-mono text-[11px] text-cyan-300/50 hover:text-cyan-100">▾</button>
@@ -316,10 +326,11 @@ export function JobsPaneBody() {
               )}
               {hasChildren ? <span /> : (
                 <select value={task.reasoning_effort}
+                  disabled={task.status === "running"}
                   onChange={(e) => setReasoning(task.ref, e.target.value as ReasoningEffort)}
                   title={`Reasoning effort for ${task.title}`}
                   aria-label={`Reasoning effort for ${task.title}`}
-                  className="w-[66px] justify-self-center rounded border border-cyan-300/20 bg-[#020a12] px-1 py-0.5 font-mono text-[8px] uppercase text-cyan-200/70 outline-none hover:border-cyan-300/40">
+                  className="w-[66px] justify-self-center rounded border border-cyan-300/20 bg-[#020a12] px-1 py-0.5 font-mono text-[8px] uppercase text-cyan-200/70 outline-none hover:border-cyan-300/40 disabled:opacity-45">
                   <option value="none">None</option><option value="low">Low</option>
                   <option value="medium">Medium</option><option value="high">High</option>
                 </select>
