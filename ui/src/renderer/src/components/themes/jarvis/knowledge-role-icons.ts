@@ -275,14 +275,17 @@ const PAINTERS: Record<KnowledgeRole, (c: CanvasRenderingContext2D, s: number) =
 };
 
 export function knowledgeRoleForAgent(agentId: string): KnowledgeRole {
-  // The role IS the stable agent id; unknown roles wear the executive
-  // glyph rather than nothing (fail visible).
-  return agentId === "curator" ||
-    agentId === "researcher" ||
-    agentId === "guardian" ||
-    agentId === "library"
-    ? agentId
-    : "executive";
+  // HEREBRUM uses stable role ids while Obsidience's graph satellites use
+  // their visible agent names. Resolve both forms centrally so DOM controls
+  // and the floating THREE.Sprite plates can never disagree.
+  const identity = agentId.trim().split("/").filter(Boolean).pop()?.toLowerCase() ?? "";
+  if (identity === "alexandria" || identity === "curator") return "curator";
+  if (identity === "darwin" || identity === "researcher") return "researcher";
+  if (identity === "heimdall" || identity === "guardian") return "guardian";
+  if (identity === "athenaeum" || identity === "library") return "library";
+  // The main agent and unknown future roles remain visibly executive rather
+  // than losing their nameplate.
+  return "executive";
 }
 
 /** Paint a role glyph onto a fresh square canvas (transparent background,

@@ -8,16 +8,9 @@ import { API_BASE, api, openReader, type ReasoningEffort, type TaskRow } from "@
 import {
   knowledgeRoleForAgent,
   paintKnowledgeRoleIcon,
-  type KnowledgeRole,
 } from "@/components/themes/jarvis/knowledge-role-icons";
 
 interface AgentOption { ref: string; title: string }
-
-const AGENT_ROLE_BY_NAME: Record<string, KnowledgeRole> = {
-  alexandria: "curator",
-  darwin: "researcher",
-  heimdall: "guardian",
-};
 
 function cleanLink(value: string): string {
   return value.trim().replace(/^\[\[/, "").replace(/\]\]$/, "").split("|")[0];
@@ -27,16 +20,12 @@ function agentName(value: string): string {
   return cleanLink(value).split("/").pop() ?? "";
 }
 
-function roleForAgent(name: string): KnowledgeRole {
-  return AGENT_ROLE_BY_NAME[name.toLowerCase()] ?? knowledgeRoleForAgent(name.toLowerCase());
-}
-
 function AgentGlyph({ name, size = 14 }: { name: string; size?: number }) {
   const holder = useRef<HTMLSpanElement | null>(null);
   useEffect(() => {
     const element = holder.current;
     if (!element) return;
-    const canvas = paintKnowledgeRoleIcon(roleForAgent(name), Math.max(48, size * 3));
+    const canvas = paintKnowledgeRoleIcon(knowledgeRoleForAgent(name), Math.max(48, size * 3));
     canvas.style.width = `${size}px`;
     canvas.style.height = `${size}px`;
     element.replaceChildren(canvas);
