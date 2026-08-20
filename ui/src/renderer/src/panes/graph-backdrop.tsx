@@ -406,7 +406,7 @@ export function GraphBackdrop() {
         onNodeAction={(kind, id) => {
           const parsed = parseKnowledgeAgentNodeId(id);
           const ref = parsed.nodeId;
-          if (kind === "click" && !ref.startsWith("@")) openReader(ref);
+          if (kind === "click") openReader(ref);
         }}
         onProjected={() => undefined}
         onContextLost={() => setSceneKey((k) => k + 1)}

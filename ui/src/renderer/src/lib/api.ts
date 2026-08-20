@@ -45,6 +45,7 @@ export interface CheckoutAssignment { agent: CheckoutAgent; ref: string; kind: s
 export const api = {
   status: () => json<HarnessStatus>("/api/status"),
   graph: () => json<{ nodes: GraphNode[]; links: GraphLink[] }>("/api/graph"),
+  article: (ref: string) => json<NoteDoc>(`/api/articles/${encodeURI(ref)}`),
   checkouts: () => json<{ assignments: CheckoutAssignment[] }>("/api/library/checkouts"),
   setCheckout: (ref: string, agent: CheckoutAgent, checkedOut: boolean) =>
     json<{ agent: CheckoutAgent; ref: string; kind: string; checked_out: boolean }>(

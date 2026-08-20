@@ -21,6 +21,9 @@ section is binding. Rules for working here:
 - Library checkout state is stored as typed wikilinks on the target identity
   note, never as a second ledger or a copied canonical note. UI order is
   Executive, Guardian, Curator, Researcher; highlighted means checked out.
+- Graph hierarchy nodes are articles in the Reader. Never discard `@` node
+  clicks: prefer the subject's authored `index.md` or `README.md`, then use a
+  read-only generated index over its children when no authored hub exists.
 
 ## Phase 1 directive (owner, 2026-08-20) — finish before anything else
 

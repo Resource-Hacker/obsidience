@@ -99,6 +99,12 @@ the durable assignment state. Checkouts are projections, not duplicate source
 notes: the Library remains canonical, checked-out items appear on the target
 agent's graph, and tool checkouts narrow that agent's executable surface.
 
+Every graph hierarchy node is readable as an article. A subject absorbs its
+authored `index.md` or `README.md` when one exists; otherwise the harness
+provides a read-only index article over the node's current children. Clicking
+either an article or a hierarchy node always opens that article-shaped view in
+the Reader.
+
 The **Jobs** pane is the scheduler surface: it creates, edits, runs, and watches
 scheduled task definitions. It does not double as the task catalog. "Job" is
 operational vocabulary for scheduled work under the interpreter — it is not a

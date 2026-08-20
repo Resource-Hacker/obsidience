@@ -40,6 +40,29 @@ def _link_values(value) -> list[str]:
     return [str(item) for item in (value if isinstance(value, list) else [value])]
 
 
+def _note_doc(note):
+    return {"ref": note.ref, "title": note.title, "kind": note.kind,
+            "meta": {k: str(v) for k, v in note.meta.items()}, "body": note.body}
+
+
+def _folder_index(folder: str):
+    """Resolve the authored hub a graph subject absorbs, if one exists."""
+    return load_note(f"{folder}/index.md") or load_note(f"{folder}/README.md")
+
+
+def _virtual_index(ref: str, title: str, summary: str, children) -> dict:
+    unique = {note.ref: note for note in children}
+    ordered = sorted(unique.values(), key=lambda note: (note.title.lower(), note.ref.lower()))
+    contents = "\n".join(f"- [[{note.ref}|{note.title}]] · {note.kind}" for note in ordered)
+    body = summary
+    if contents:
+        body += f"\n\n## Indexed articles\n\n{contents}"
+    else:
+        body += "\n\n*No articles are currently indexed beneath this node.*"
+    return {"ref": ref, "title": title, "kind": "index",
+            "meta": {"node": "true", "articles": str(len(ordered))}, "body": body}
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     INDEX.sync()
@@ -78,6 +101,81 @@ def _count_by(tasks):
 @app.get("/api/graph")
 def graph():
     return INDEX.graph()
+
+
+@app.get("/api/articles/{ref:path}")
+def get_article(ref: str):
+    """Resolve real notes and graph subject nodes through one Reader path."""
+    note = load_note(ref + ".md") or resolver().resolve(ref)
+    if note:
+        return _note_doc(note)
+
+    # Match the main graph's visible vault pool. Receipts are regular graph
+    # articles too, so their generated subject index must retain them.
+    notes = [item for item in iter_notes() if not item.ref.startswith("Agents/")]
+    if ref == "@vault":
+        home = load_note("Home.md")
+        return _note_doc(home) if home else _virtual_index(
+            ref, "Obsidience", "The root index for this vault.", notes)
+    if ref == "@library":
+        primitives = [item for item in notes if item.kind in CHECKOUT_FIELDS]
+        return _virtual_index(
+            ref, "Library",
+            "The curated canonical repository for Tools, Skills, Runbooks, and Tasks.",
+            primitives,
+        )
+    if ref.startswith("@library/"):
+        folder = ref.removeprefix("@library/").strip("/")
+        kind = folder.rstrip("s").lower()
+        if kind not in CHECKOUT_FIELDS:
+            raise HTTPException(404, f"library node not found: {ref}")
+        authored = _folder_index(folder)
+        if authored:
+            return _note_doc(authored)
+        return _virtual_index(
+            ref, f"Library · {folder}",
+            f"The Library's accepted {folder.lower()} shelf.",
+            [item for item in notes if item.kind == kind],
+        )
+    if ref.startswith("@branch/"):
+        folder = ref.removeprefix("@branch/").strip("/")
+        authored = _folder_index(folder)
+        if authored:
+            return _note_doc(authored)
+        kind = folder.rstrip("s").lower()
+        if kind in CHECKOUT_FIELDS:
+            res = resolver()
+            identity = res.resolve(CHECKOUT_AGENTS["executive"])
+            raw_checkouts = _link_values(identity.meta.get(CHECKOUT_FIELDS[kind])) if identity else []
+            children = [target for raw in raw_checkouts
+                        if (target := res.resolve(raw)) and target.kind == kind]
+        else:
+            children = [item for item in notes if item.ref.startswith(f"{folder}/")]
+        return _virtual_index(ref, folder, f"The {folder} index node.", children)
+    if ref.startswith("@sat/"):
+        parts = ref.split("/")
+        if len(parts) != 3:
+            raise HTTPException(404, f"agent node not found: {ref}")
+        _, agent_name, folder_key = parts
+        folder = folder_key.capitalize()
+        kind = folder.rstrip("s").lower()
+        if kind not in CHECKOUT_FIELDS:
+            raise HTTPException(404, f"agent node not found: {ref}")
+        identity = resolver().resolve(f"Agents/{agent_name}/{agent_name}")
+        if not identity:
+            raise HTTPException(404, f"agent not found: {agent_name}")
+        res = resolver()
+        children = [target for raw in _link_values(identity.meta.get(CHECKOUT_FIELDS[kind]))
+                    if (target := res.resolve(raw)) and target.kind == kind]
+        if kind == "task":
+            children.extend(item for item in notes if item.kind == "task" and
+                            f"Agents/{agent_name}" in str(item.meta.get("assignee", "")))
+        return _virtual_index(
+            ref, f"{agent_name} · {folder}",
+            f"{agent_name}'s active and checked-out {folder.lower()}.",
+            children,
+        )
+    raise HTTPException(404, f"article not found: {ref}")
 
 
 @app.get("/api/library/checkouts")
@@ -140,8 +238,7 @@ def get_note(ref: str):
     note = load_note(ref + ".md") or resolver().resolve(ref)
     if not note:
         raise HTTPException(404, f"note not found: {ref}")
-    return {"ref": note.ref, "title": note.title, "kind": note.kind,
-            "meta": {k: str(v) for k, v in note.meta.items()}, "body": note.body}
+    return _note_doc(note)
 
 
 @app.get("/api/search")

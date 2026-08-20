@@ -98,7 +98,7 @@ export function ReaderPaneBody() {
     setError(null);
     setNotice(null);
     try {
-      const [nextNote, tasks, graph] = await Promise.all([api.note(ref), api.tasks(), api.graph()]);
+      const [nextNote, tasks, graph] = await Promise.all([api.article(ref), api.tasks(), api.graph()]);
       const nextAgents = graph.nodes.filter((node) => node.kind === "agent")
         .sort((left, right) => left.title.localeCompare(right.title));
       const nextRunbooks = graph.nodes.filter((node) => node.kind === "runbook")
