@@ -81,7 +81,12 @@ export function GraphBackdrop() {
     const pull = () => api.graph().then((g) => { if (live) setGraph(g); }).catch(() => undefined);
     pull();
     const t = setInterval(pull, 15_000);
-    return () => { live = false; clearInterval(t); };
+    window.addEventListener("obsidience:graph-refresh", pull);
+    return () => {
+      live = false;
+      clearInterval(t);
+      window.removeEventListener("obsidience:graph-refresh", pull);
+    };
   }, []);
 
   const model = useMemo(() => {
@@ -101,14 +106,26 @@ export function GraphBackdrop() {
       for (const id of pool) if (id.split("/").pop()!.toLowerCase() === base) return id;
       return null;
     };
+    const allIds = new Set(all.map((node) => node.id));
+    const checkoutIdsOf = (identity?: GraphNode): Set<string> => new Set(
+      Object.values(identity?.checkouts ?? {}).flatMap((values) => values ?? [])
+        .map((raw) => subRef(raw, allIds)).filter((ref): ref is string => Boolean(ref)),
+    );
     const libraryKinds = new Set(["tool", "skill", "runbook", "task"]);
     const libraryNotes = all.filter((n) => libraryKinds.has(n.kind));
     // The four authoring primitives belong to the curated Library satellite;
-    // the executive ball retains ordinary knowledge and agent identity only.
-    const notes = all.filter((n) => !n.id.startsWith("Agents/") && !libraryKinds.has(n.kind));
+    // the executive ball carries only its checked-out projections.
+    const executiveCheckouts = checkoutIdsOf(all.find((node) => node.id === "Agent/Obsidience"));
+    const executivePrimitives = libraryNotes.filter((node) => executiveCheckouts.has(node.id));
+    const notes = [
+      ...all.filter((n) => !n.id.startsWith("Agents/") && !libraryKinds.has(n.kind)),
+      ...executivePrimitives,
+    ];
     const branchOf = (id: string): string | null => (id.includes("/") ? id.split("/", 1)[0] : null);
+    const primitiveFolders = ["Tools", "Skills", "Runbooks", "Tasks"]
+      .filter((folder) => executivePrimitives.some((node) => branchOf(node.id) === folder));
     const folders = [...new Set(notes.map((n) => branchOf(n.id)).filter(Boolean))] as string[];
-    const worldFolders = folders.filter((f) => f !== "Agent").sort();
+    const worldFolders = folders.filter((f) => f !== "Agent" && !primitiveFolders.includes(f)).sort();
     const branches = ["Agent", ...worldFolders];
 
     const degree = new Map<string, number>();
@@ -126,11 +143,18 @@ export function GraphBackdrop() {
         id: `@branch/${b}`, degree: notes.filter((n) => branchOf(n.id) === b).length,
         kind: "concept" as never, label: b, role: "section" as never, parentId: ROOT_ID, order: i,
       })),
+      ...primitiveFolders.map((folder, index) => ({
+        id: `@branch/${folder}`, degree: executivePrimitives.filter((node) => branchOf(node.id) === folder).length,
+        kind: "concept" as never, label: folder, role: "section" as never, parentId: "@branch/Agent", order: index,
+      })),
       ...notes.map((n, i) => {
+        const container = executivePrimitives.find((candidate) => candidate.kind === "task" &&
+          (candidate.subtasks ?? []).some((raw) => subRef(raw, allIds) === n.id));
+        const isTaskContainer = n.kind === "task" && (n.subtasks ?? []).length > 0;
         return {
           id: n.id, degree: degree.get(n.id) ?? 0, kind: "note" as never, label: n.title,
-          role: "claim" as never,
-          parentId: n.id.includes("/") ? `@branch/${branchOf(n.id)}` : ROOT_ID,
+          role: (isTaskContainer ? "section" : "claim") as never,
+          parentId: container?.id ?? (n.id.includes("/") ? `@branch/${branchOf(n.id)}` : ROOT_ID),
           order: i,
         };
       }),
@@ -158,7 +182,7 @@ export function GraphBackdrop() {
     const meta = new Map(notes.map((n) => [n.id, n]));
     titles.current = new Map([
       [ROOT_ID, "Obsidience"],
-      ...branches.map((b) => [`@branch/${b}`, b] as [string, string]),
+      ...[...branches, ...primitiveFolders].map((b) => [`@branch/${b}`, b] as [string, string]),
       ...notes.map((n) => [n.id, n.title] as [string, string]),
     ]);
 
@@ -204,11 +228,14 @@ export function GraphBackdrop() {
     const linkPairs = graph.links;
     const agentSatellites = agentNames.map((name) => {
       const identityRef = `Agents/${name}/${name}`;
+      const checkedOut = checkoutIdsOf(all.find((node) => node.id === identityRef));
       const members = all.filter((n) =>
         (n.id.startsWith(`Agents/${name}/`) && n.id !== identityRef) ||
-        (n.kind === "task" && assigneeOf(n) === name));
+        (n.kind === "task" && assigneeOf(n) === name) || checkedOut.has(n.id));
       const taskMembers = members.filter((m) => m.kind === "task");
-      const tasksNode = `@sat/${name}/tasks`;
+      const primitiveMembers = members.filter((member) => libraryKinds.has(member.kind));
+      const satelliteFolders = ["Tools", "Skills", "Runbooks", "Tasks"]
+        .filter((folder) => primitiveMembers.some((member) => branchOf(member.id) === folder));
       const memberPool = new Set(members.map((m) => m.id));
       const parentTaskOf = (id: string): string | null => {
         const c = taskMembers.find((t) => (t.subtasks ?? []).some((r) => subRef(r, memberPool) === id));
@@ -216,11 +243,15 @@ export function GraphBackdrop() {
       };
       const satLayoutNodes = [
         { id: identityRef, degree: members.length, kind: "concept" as never, label: name, role: "root" as never, parentId: null as string | null, order: 0 },
-        ...(taskMembers.length ? [{ id: tasksNode, degree: taskMembers.length, kind: "concept" as never, label: "Tasks", role: "section" as never, parentId: identityRef, order: 0 }] : []),
+        ...satelliteFolders.map((folder, index) => ({
+          id: `@sat/${name}/${folder.toLowerCase()}`, degree: primitiveMembers.filter((member) => branchOf(member.id) === folder).length,
+          kind: "concept" as never, label: folder, role: "section" as never, parentId: identityRef, order: index,
+        })),
         ...members.map((n, i) => ({
           id: n.id, degree: 0, kind: "note" as never, label: n.title,
           role: ((n.subtasks ?? []).length ? "section" : "claim") as never,
-          parentId: parentTaskOf(n.id) ?? (n.kind === "task" ? tasksNode : identityRef),
+          parentId: parentTaskOf(n.id) ?? (libraryKinds.has(n.kind)
+            ? `@sat/${name}/${String(branchOf(n.id)).toLowerCase()}` : identityRef),
           order: i,
         })),
       ];
@@ -262,7 +293,7 @@ export function GraphBackdrop() {
       for (const ref of memberSet) {
         const n = all.find((x) => x.id === ref);
         titles.current.set(`agent:${name}/${ref}`,
-          n?.title ?? (ref === identityRef ? name : ref === tasksNode ? "Tasks" : ref));
+          n?.title ?? (ref === identityRef ? name : satelliteFolders.find((folder) => ref === `@sat/${name}/${folder.toLowerCase()}`) ?? ref));
       }
       return { agentId: name, nodes: satNodes, edges: satEdges, tuning };
     });

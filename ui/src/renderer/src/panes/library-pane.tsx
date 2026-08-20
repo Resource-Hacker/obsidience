@@ -7,7 +7,13 @@ import {
   knowledgeRoleForAgent,
   paintKnowledgeRoleIcon,
 } from "@/components/themes/jarvis/knowledge-role-icons";
-import { api, openReader, type GraphNode, type TaskRow } from "@/lib/api";
+import {
+  api,
+  openReader,
+  type CheckoutAgent,
+  type GraphNode,
+  type TaskRow,
+} from "@/lib/api";
 
 const SHELVES = ["tool", "skill", "runbook", "task"] as const;
 type Shelf = (typeof SHELVES)[number];
@@ -18,6 +24,24 @@ const SHELF_LABELS: Record<Shelf, string> = {
   runbook: "Runbooks",
   task: "Tasks",
 };
+
+const CHECKOUT_AGENTS: ReadonlyArray<{ id: CheckoutAgent; label: string }> = [
+  { id: "executive", label: "Executive" },
+  { id: "guardian", label: "Guardian" },
+  { id: "curator", label: "Curator" },
+  { id: "researcher", label: "Researcher" },
+];
+
+const CHECKED_STYLE: Record<CheckoutAgent, string> = {
+  executive: "border-cyan-200/70 bg-cyan-300/15 shadow-[0_0_9px_rgba(103,232,249,0.45)]",
+  guardian: "border-amber-200/70 bg-amber-300/15 shadow-[0_0_9px_rgba(252,211,77,0.4)]",
+  curator: "border-violet-200/70 bg-violet-300/15 shadow-[0_0_9px_rgba(196,181,253,0.4)]",
+  researcher: "border-emerald-200/70 bg-emerald-300/15 shadow-[0_0_9px_rgba(110,231,183,0.4)]",
+};
+
+function checkoutKey(ref: string, agent: CheckoutAgent): string {
+  return `${ref}\u0000${agent}`;
+}
 
 function cleanLink(value: string): string {
   return value.trim().replace(/^\[\[/, "").replace(/\]\]$/, "").split("|")[0];
@@ -36,6 +60,50 @@ function LibraryGlyph() {
   return <span ref={holder} className="block h-6 w-6 shrink-0" />;
 }
 
+function CheckoutGlyph({ agent, size = 17 }: { agent: CheckoutAgent; size?: number }) {
+  const holder = useRef<HTMLSpanElement | null>(null);
+  useEffect(() => {
+    const element = holder.current;
+    if (!element) return;
+    const canvas = paintKnowledgeRoleIcon(knowledgeRoleForAgent(agent), Math.max(48, size * 3));
+    canvas.style.width = `${size}px`;
+    canvas.style.height = `${size}px`;
+    element.replaceChildren(canvas);
+  }, [agent, size]);
+  return <span ref={holder} className="block shrink-0" style={{ width: size, height: size }} />;
+}
+
+function CheckoutControls({
+  itemRef,
+  selected,
+  busy,
+  onToggle,
+}: {
+  itemRef: string;
+  selected: Set<string>;
+  busy: Set<string>;
+  onToggle: (ref: string, agent: CheckoutAgent) => void;
+}) {
+  return (
+    <div className="ml-2 flex shrink-0 items-center gap-1" aria-label="Agent checkouts">
+      {CHECKOUT_AGENTS.map(({ id, label }) => {
+        const key = checkoutKey(itemRef, id);
+        const checked = selected.has(key);
+        return (
+          <button key={id} type="button" aria-pressed={checked}
+            disabled={busy.has(key)} title={`${checked ? "Return from" : "Check out to"} ${label}`}
+            onClick={(event) => { event.stopPropagation(); onToggle(itemRef, id); }}
+            className={`flex h-6 w-6 items-center justify-center rounded border transition-all disabled:opacity-35 ${
+              checked ? CHECKED_STYLE[id] : "border-emerald-300/10 bg-[#020a0c]/70 opacity-55 hover:border-emerald-200/35 hover:opacity-100"
+            }`}>
+            <CheckoutGlyph agent={id} />
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export function LibraryPaneBody() {
   const [nodes, setNodes] = useState<GraphNode[]>([]);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
@@ -43,12 +111,16 @@ export function LibraryPaneBody() {
   const [shelf, setShelf] = useState<Shelf>("task");
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [checkouts, setCheckouts] = useState<Set<string>>(new Set());
+  const [busyCheckouts, setBusyCheckouts] = useState<Set<string>>(new Set());
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
-    Promise.all([api.graph(), api.tasks(), api.reviews()]).then(([graph, taskRows, reviews]) => {
+    Promise.all([api.graph(), api.tasks(), api.reviews(), api.checkouts()]).then(([graph, taskRows, reviews, checkoutSnapshot]) => {
       setNodes(graph.nodes.filter((node) => SHELVES.includes(node.kind as Shelf)));
       setTasks(taskRows);
       setReviewCount(reviews.length);
+      setCheckouts(new Set(checkoutSnapshot.assignments.map((assignment) => checkoutKey(assignment.ref, assignment.agent))));
     }).catch(() => undefined);
   }, []);
 
@@ -119,6 +191,36 @@ export function LibraryPaneBody() {
     });
   }
 
+  async function toggleCheckout(ref: string, agent: CheckoutAgent) {
+    const key = checkoutKey(ref, agent);
+    if (busyCheckouts.has(key)) return;
+    const checkedOut = !checkouts.has(key);
+    setCheckoutError(null);
+    setBusyCheckouts((current) => new Set(current).add(key));
+    setCheckouts((current) => {
+      const next = new Set(current);
+      if (checkedOut) next.add(key); else next.delete(key);
+      return next;
+    });
+    try {
+      await api.setCheckout(ref, agent, checkedOut);
+      window.dispatchEvent(new Event("obsidience:graph-refresh"));
+    } catch (error) {
+      setCheckouts((current) => {
+        const next = new Set(current);
+        if (checkedOut) next.delete(key); else next.add(key);
+        return next;
+      });
+      setCheckoutError(String(error).slice(0, 180));
+    } finally {
+      setBusyCheckouts((current) => {
+        const next = new Set(current);
+        next.delete(key);
+        return next;
+      });
+    }
+  }
+
   return (
     <div className="flex h-full flex-col bg-[#02080e]/70">
       <div className="flex shrink-0 items-center gap-2 border-b border-emerald-300/15 px-3 py-2">
@@ -151,6 +253,16 @@ export function LibraryPaneBody() {
           className="min-w-0 flex-1 bg-transparent font-mono text-[10px] text-emerald-50 outline-none placeholder:text-emerald-200/25" />
       </label>
 
+      <div className="mx-2 mt-1.5 flex shrink-0 items-center justify-end gap-2 border-b border-emerald-300/10 pb-1.5">
+        <span className="mr-auto font-mono text-[8px] uppercase tracking-[0.14em] text-emerald-200/30">Checkout</span>
+        {CHECKOUT_AGENTS.map(({ id, label }) => (
+          <span key={id} className="flex items-center gap-0.5 font-mono text-[7px] uppercase text-emerald-100/45" title={label}>
+            <CheckoutGlyph agent={id} size={13} /> {label.slice(0, 3)}
+          </span>
+        ))}
+      </div>
+      {checkoutError ? <p className="shrink-0 px-3 py-1 font-mono text-[9px] text-rose-300">{checkoutError}</p> : null}
+
       <div className="mt-1 min-h-0 flex-1 overflow-y-auto">
         {shelf === "task" ? visibleTasks.map(({ task, depth }) => {
           const children = taskTree.children.get(task.ref) ?? [];
@@ -171,14 +283,17 @@ export function LibraryPaneBody() {
                   {task.schedule ? <span className="truncate">scheduled {task.schedule}</span> : null}
                 </span>
               </button>
+              <CheckoutControls itemRef={task.ref} selected={checkouts} busy={busyCheckouts} onToggle={toggleCheckout} />
             </div>
           );
         }) : shelfNodes.map((node) => (
-          <button key={node.id} onClick={() => openReader(node.id)}
-            className="block w-full border-b border-emerald-300/[0.07] px-3 py-2 text-left hover:bg-emerald-300/[0.04]">
-            <span className="block truncate font-mono text-[11px] text-emerald-100/85 hover:text-emerald-100">{node.title}</span>
-            <span className="block truncate font-mono text-[8px] text-emerald-200/30">{node.id}</span>
-          </button>
+          <div key={node.id} className="flex items-center border-b border-emerald-300/[0.07] px-3 py-1.5 hover:bg-emerald-300/[0.04]">
+            <button onClick={() => openReader(node.id)} className="min-w-0 flex-1 text-left">
+              <span className="block truncate font-mono text-[11px] text-emerald-100/85 hover:text-emerald-100">{node.title}</span>
+              <span className="block truncate font-mono text-[8px] text-emerald-200/30">{node.id}</span>
+            </button>
+            <CheckoutControls itemRef={node.id} selected={checkouts} busy={busyCheckouts} onToggle={toggleCheckout} />
+          </div>
         ))}
         {(shelf === "task" ? visibleTasks.length === 0 : shelfNodes.length === 0) ? (
           <p className="p-4 font-mono text-[10px] text-emerald-200/35">No matching {SHELF_LABELS[shelf].toLowerCase()}.</p>

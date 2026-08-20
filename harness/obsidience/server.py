@@ -15,7 +15,29 @@ from . import llm, retrieval, review, scheduler, trace, voice
 from .config import CONFIG
 from .executor import run_task
 from .indexer import INDEX
-from .vault import iter_notes, load_note, resolver
+from .vault import iter_notes, load_note, resolver, write_note
+
+
+# One-vault checkout ledger: each principal owns typed links to the accepted
+# Library primitives it currently carries. Order is the owner's UI order.
+CHECKOUT_AGENTS = {
+    "executive": "Agent/Obsidience",
+    "guardian": "Agents/Heimdall/Heimdall",
+    "curator": "Agents/Alexandria/Alexandria",
+    "researcher": "Agents/Darwin/Darwin",
+}
+CHECKOUT_FIELDS = {
+    "tool": "tools",
+    "skill": "skills",
+    "runbook": "runbooks",
+    "task": "tasks",
+}
+
+
+def _link_values(value) -> list[str]:
+    if not value:
+        return []
+    return [str(item) for item in (value if isinstance(value, list) else [value])]
 
 
 @asynccontextmanager
@@ -56,6 +78,61 @@ def _count_by(tasks):
 @app.get("/api/graph")
 def graph():
     return INDEX.graph()
+
+
+@app.get("/api/library/checkouts")
+def library_checkouts():
+    """Return exact accepted Library assignments for all four principals."""
+    res = resolver()
+    assignments = []
+    for agent, identity_ref in CHECKOUT_AGENTS.items():
+        identity = res.resolve(identity_ref)
+        if not identity:
+            continue
+        for kind, field in CHECKOUT_FIELDS.items():
+            for raw in _link_values(identity.meta.get(field)):
+                target = res.resolve(raw)
+                if target and target.kind == kind:
+                    assignments.append({"agent": agent, "ref": target.ref, "kind": kind})
+    return {"assignments": assignments}
+
+
+@app.put("/api/library/checkouts/{ref:path}")
+def set_library_checkout(ref: str, payload: dict):
+    """Owner toggle for one typed Library item on one principal."""
+    agent = str(payload.get("agent") or "").strip().lower()
+    if agent not in CHECKOUT_AGENTS:
+        raise HTTPException(400, f"unknown checkout agent: {agent or '(empty)'}")
+    checked_out = payload.get("checked_out")
+    if not isinstance(checked_out, bool):
+        raise HTTPException(400, "checked_out must be boolean")
+
+    res = resolver()
+    target = res.resolve(ref)
+    if not target or target.kind not in CHECKOUT_FIELDS:
+        raise HTTPException(404, f"library item not found: {ref}")
+    identity = res.resolve(CHECKOUT_AGENTS[agent])
+    if not identity:
+        raise HTTPException(500, f"checkout identity missing: {CHECKOUT_AGENTS[agent]}")
+
+    field = CHECKOUT_FIELDS[target.kind]
+    current = _link_values(identity.meta.get(field))
+    retained = []
+    for raw in current:
+        resolved = res.resolve(raw)
+        if not resolved or resolved.ref != target.ref:
+            retained.append(raw)
+    if checked_out:
+        retained.append(f"[[{target.ref}]]")
+
+    meta = dict(identity.meta)
+    if retained:
+        meta[field] = retained
+    else:
+        meta.pop(field, None)
+    write_note(identity.path, meta, identity.body)
+    INDEX.sync()
+    return {"agent": agent, "ref": target.ref, "kind": target.kind, "checked_out": checked_out}
 
 
 @app.get("/api/notes/{ref:path}")

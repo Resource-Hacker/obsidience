@@ -18,6 +18,9 @@ section is binding. Rules for working here:
 - The Library is the curated canonical repository and green book satellite for
   Tools, Skills, Runbooks, and Tasks. Jobs is only the scheduler surface for
   creating and operating scheduled tasks; do not turn it back into the catalog.
+- Library checkout state is stored as typed wikilinks on the target identity
+  note, never as a second ledger or a copied canonical note. UI order is
+  Executive, Guardian, Curator, Researcher; highlighted means checked out.
 
 ## Phase 1 directive (owner, 2026-08-20) — finish before anything else
 

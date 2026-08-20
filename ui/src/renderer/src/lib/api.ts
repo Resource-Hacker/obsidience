@@ -16,6 +16,7 @@ export interface GraphNode {
   status?: string | null;
   assignee?: string | null;
   subtasks?: string[];
+  checkouts?: Partial<Record<"tools" | "skills" | "runbooks" | "tasks", string[]>>;
   tags?: string[];
 }
 export interface GraphLink { source: string; target: string }
@@ -38,10 +39,20 @@ export interface HarnessStatus {
   llm: { base_url: string; model: string }; vault: string; time: string;
 }
 export type ReasoningEffort = "none" | "low" | "medium" | "high";
+export type CheckoutAgent = "executive" | "guardian" | "curator" | "researcher";
+export interface CheckoutAssignment { agent: CheckoutAgent; ref: string; kind: string }
 
 export const api = {
   status: () => json<HarnessStatus>("/api/status"),
   graph: () => json<{ nodes: GraphNode[]; links: GraphLink[] }>("/api/graph"),
+  checkouts: () => json<{ assignments: CheckoutAssignment[] }>("/api/library/checkouts"),
+  setCheckout: (ref: string, agent: CheckoutAgent, checkedOut: boolean) =>
+    json<{ agent: CheckoutAgent; ref: string; kind: string; checked_out: boolean }>(
+      `/api/library/checkouts/${encodeURI(ref)}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ agent, checked_out: checkedOut }),
+      }),
   note: (ref: string) => json<NoteDoc>(`/api/notes/${encodeURI(ref)}`),
   tasks: () => json<TaskRow[]>("/api/tasks"),
   runTask: (ref: string, reasoningEffort: ReasoningEffort) => json<{ started: string; reasoning_effort: string }>(

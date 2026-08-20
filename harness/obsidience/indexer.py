@@ -38,6 +38,12 @@ _embedder = None
 _embed_lock = threading.Lock()
 
 
+def _meta_links(value) -> list[str]:
+    if not value:
+        return []
+    return [str(item) for item in (value if isinstance(value, list) else [value])]
+
+
 def _get_embedder():
     global _embedder
     with _embed_lock:
@@ -141,6 +147,9 @@ class Index:
             nodes.append({"id": ref, "title": title, "kind": kind,
                           "status": m.get("status"), "assignee": m.get("assignee"),
                           "subtasks": [str(x).strip("[]") for x in subtasks] if isinstance(subtasks, list) else [],
+                          "checkouts": {field: _meta_links(m.get(field))
+                                        for field in ("tools", "skills", "runbooks", "tasks")
+                                        if m.get(field)},
                           "tags": m.get("tags") or []})
             for target in json.loads(link_json):
                 t = resolver.resolve(target)

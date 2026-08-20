@@ -92,6 +92,13 @@ and Tasks. It renders as HEREBRUM's green book satellite and as a searchable
 four-shelf pane. Agent changes remain proposals until accepted through the
 Review Queue.
 
+Library items are checked out through typed wikilink lists on each principal's
+identity note (`tools:`, `skills:`, `runbooks:`, `tasks:`). The Library row
+controls are ordered Executive, Guardian, Curator, Researcher; a lit icon is
+the durable assignment state. Checkouts are projections, not duplicate source
+notes: the Library remains canonical, checked-out items appear on the target
+agent's graph, and tool checkouts narrow that agent's executable surface.
+
 The **Jobs** pane is the scheduler surface: it creates, edits, runs, and watches
 scheduled task definitions. It does not double as the task catalog. "Job" is
 operational vocabulary for scheduled work under the interpreter — it is not a

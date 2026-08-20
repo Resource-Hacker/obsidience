@@ -130,11 +130,16 @@ async def run_task(task: Note, depth: int = 0, reasoning_effort: str | None = No
 
     # Agent identity: the task's assignee is a literal agent note; the
     # interpreter executes the session AS that agent (HEREBRUM model).
-    agent = res.resolve(str(task.meta.get("assignee", ""))) if task.meta.get("assignee") else None
+    agent = (res.resolve(str(task.meta.get("assignee", "")))
+             if task.meta.get("assignee") else res.resolve("Agent/Obsidience"))
     agent_name = agent.title if agent and agent.kind == "agent" else "Obsidience"
     action_trace.emit("run", f"{agent_name} started {task.title}", [f"reasoning: {effort}"])
     if agent and agent.meta.get("tools"):
-        grant = {str(t).strip("[]") for t in agent.meta.get("tools")} | set(ALWAYS_ALLOWED)
+        grant = set(ALWAYS_ALLOWED)
+        for raw in _links(agent.meta.get("tools")):
+            tool_note = res.resolve(raw)
+            binding = str(tool_note.meta.get("binding", "")) if tool_note and tool_note.kind == "tool" else ""
+            grant.add(binding.removeprefix("builtin:") if binding else raw.strip("[]"))
         allowed = [t for t in allowed if t in grant]
 
     queries = [task.title, runbook.title]
