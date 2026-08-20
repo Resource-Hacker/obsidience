@@ -79,12 +79,16 @@ def tasks():
             continue
         subtasks = n.meta.get("subtasks") or []
         refs = [str(x).strip("[]") for x in subtasks] if isinstance(subtasks, list) else []
+        effort = str(n.meta.get("reasoning_effort", "medium")).lower()
+        if effort not in llm.REASONING_BUDGETS:
+            effort = "medium"
         out.append({"ref": n.ref, "title": n.title,
                     "status": n.meta.get("status", "draft"),
                     "assignee": str(n.meta.get("assignee", "")),
                     "runbook": str(n.meta.get("runbook", "")),
                     "subtasks": len(refs),
                     "subtask_refs": refs,
+                    "reasoning_effort": effort,
                     "schedule": n.meta.get("schedule"),
                     "blocked_reason": n.meta.get("blocked_reason"),
                     "last_run": n.meta.get("last_run")})
@@ -121,6 +125,25 @@ async def create_task(payload: dict):
     write_note(ref, meta, str(payload.get("body", "")))
     INDEX.sync()
     return {"created": ref[:-3], "status": meta["status"]}
+
+
+@app.patch("/api/tasks/{ref:path}/reasoning")
+async def set_task_reasoning(ref: str, payload: dict):
+    """Persist an owner-selected inference setting on one task."""
+    from .vault import write_note
+
+    note = load_note(ref + ".md") or resolver().resolve(ref)
+    if not note or note.kind != "task":
+        raise HTTPException(404, f"task not found: {ref}")
+    try:
+        effort = llm.normalize_reasoning_effort(payload.get("reasoning_effort"))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    meta = dict(note.meta)
+    meta["reasoning_effort"] = effort
+    write_note(note.path, meta, note.body)
+    INDEX.sync()
+    return {"task": note.ref, "reasoning_effort": effort}
 
 
 @app.post("/api/tasks/{ref:path}/run")

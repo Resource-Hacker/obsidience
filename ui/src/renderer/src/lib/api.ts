@@ -22,6 +22,7 @@ export interface GraphLink { source: string; target: string }
 export interface TaskRow {
   ref: string; title: string; status: string; assignee: string; runbook: string; subtasks: number;
   subtask_refs?: string[];
+  reasoning_effort: ReasoningEffort;
   schedule?: string | null; blocked_reason?: string | null; last_run?: string | null;
 }
 export interface Proposal {
@@ -46,6 +47,12 @@ export const api = {
   runTask: (ref: string, reasoningEffort: ReasoningEffort) => json<{ started: string; reasoning_effort: string }>(
     `/api/tasks/${encodeURI(ref)}/run`, {
       method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ reasoning_effort: reasoningEffort }),
+    }),
+  setTaskReasoning: (ref: string, reasoningEffort: ReasoningEffort) => json<{ task: string; reasoning_effort: string }>(
+    `/api/tasks/${encodeURI(ref)}/reasoning`, {
+      method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ reasoning_effort: reasoningEffort }),
     }),

@@ -23,9 +23,10 @@ export function JobsPaneBody() {
   const [busyRef, setBusyRef] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [runbooks, setRunbooks] = useState<string[]>([]);
-  const [form, setForm] = useState({ title: "", runbook: "", schedule: "", body: "" });
+  const [form, setForm] = useState<{
+    title: string; runbook: string; schedule: string; body: string; reasoningEffort: ReasoningEffort;
+  }>({ title: "", runbook: "", schedule: "", body: "", reasoningEffort: "medium" });
   const [error, setError] = useState<string | null>(null);
-  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>("medium");
 
   const refresh = useCallback(() => {
     api.tasks().then(setTasks).catch(() => undefined);
@@ -95,9 +96,15 @@ export function JobsPaneBody() {
     ).catch(() => undefined);
   }, [creating]);
 
-  async function runNow(ref: string) {
-    setBusyRef(ref);
-    try { await api.runTask(ref, reasoningEffort); } catch { /* surfaced via status poll */ }
+  async function setReasoning(ref: string, reasoningEffort: ReasoningEffort) {
+    setTasks((current) => current.map((task) =>
+      task.ref === ref ? { ...task, reasoning_effort: reasoningEffort } : task));
+    try { await api.setTaskReasoning(ref, reasoningEffort); } catch { refresh(); }
+  }
+
+  async function runNow(task: TaskRow) {
+    setBusyRef(task.ref);
+    try { await api.runTask(task.ref, task.reasoning_effort); } catch { /* surfaced via status poll */ }
     setBusyRef(null);
     refresh();
   }
@@ -113,13 +120,13 @@ export function JobsPaneBody() {
           runbook: form.runbook ? `[[${form.runbook}]]` : undefined,
           schedule: form.schedule || undefined,
           body: form.body,
-          reasoning_effort: reasoningEffort,
+          reasoning_effort: form.reasoningEffort,
           start: !form.schedule,
         }),
       });
       if (!res.ok) throw new Error(await res.text());
       setCreating(false);
-      setForm({ title: "", runbook: "", schedule: "", body: "" });
+      setForm({ title: "", runbook: "", schedule: "", body: "", reasoningEffort: "medium" });
       refresh();
     } catch (e) {
       setError(String(e).slice(0, 200));
@@ -133,16 +140,6 @@ export function JobsPaneBody() {
           {hierarchy.roots.length} roots · {tasks.length} tasks
         </span>
         <div className="flex items-center gap-2">
-          <select value={reasoningEffort}
-            onChange={(e) => setReasoningEffort(e.target.value as ReasoningEffort)}
-            title="Reasoning effort for tasks launched from this pane"
-            aria-label="Reasoning effort"
-            className="rounded border border-cyan-300/20 bg-[#020a12] px-1 py-0.5 font-mono text-[9px] uppercase tracking-[0.08em] text-cyan-200/70 outline-none hover:border-cyan-300/40">
-            <option value="none">Reason: none</option>
-            <option value="low">Reason: low</option>
-            <option value="medium">Reason: medium</option>
-            <option value="high">Reason: high</option>
-          </select>
           <button onClick={() => setExpanded(new Set(tasks.filter((task) => task.subtasks > 0).map((task) => task.ref)))}
             title="Expand all task groups" className="font-mono text-[11px] text-cyan-300/50 hover:text-cyan-100">▾</button>
           <button onClick={() => setExpanded(new Set())}
@@ -170,6 +167,13 @@ export function JobsPaneBody() {
             <input value={form.schedule} placeholder="cron (optional)"
               onChange={(e) => setForm({ ...form, schedule: e.target.value })}
               className="w-32 rounded border border-cyan-300/20 bg-[#020a12] px-2 py-1 font-mono text-[10px] text-cyan-50 outline-none" />
+            <select value={form.reasoningEffort}
+              onChange={(e) => setForm({ ...form, reasoningEffort: e.target.value as ReasoningEffort })}
+              title="Reasoning effort for this task"
+              className="w-24 rounded border border-cyan-300/20 bg-[#020a12] px-1 py-1 font-mono text-[9px] uppercase text-cyan-100">
+              <option value="none">None</option><option value="low">Low</option>
+              <option value="medium">Medium</option><option value="high">High</option>
+            </select>
           </div>
           <textarea value={form.body} placeholder="what needs to be accomplished"
             onChange={(e) => setForm({ ...form, body: e.target.value })} rows={2}
@@ -184,8 +188,8 @@ export function JobsPaneBody() {
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {tasks.length > 0 ? (
-          <div className="sticky top-0 z-10 grid grid-cols-[minmax(0,1fr)_72px_70px_28px] border-b border-cyan-300/15 bg-[#03101a]/95 px-2 py-1 font-mono text-[8px] uppercase tracking-[0.16em] text-cyan-300/40">
-            <span>Task</span><span>State</span><span>Agent</span><span />
+          <div className="sticky top-0 z-10 grid grid-cols-[minmax(0,1fr)_64px_64px_72px_28px] border-b border-cyan-300/15 bg-[#03101a]/95 px-2 py-1 font-mono text-[8px] uppercase tracking-[0.16em] text-cyan-300/40">
+            <span>Task</span><span>State</span><span>Agent</span><span>Reason</span><span />
           </div>
         ) : null}
         {visibleRows.map(({ task, depth }) => {
@@ -195,7 +199,7 @@ export function JobsPaneBody() {
           const agent = task.assignee.replace(/\[\[Agents\//, "").replace(/\]\]/, "");
           return (
             <div key={task.ref}
-              className="grid grid-cols-[minmax(0,1fr)_72px_70px_28px] items-center border-b border-cyan-300/8 px-2 py-1.5 hover:bg-cyan-300/[0.035]">
+              className="grid grid-cols-[minmax(0,1fr)_64px_64px_72px_28px] items-center border-b border-cyan-300/8 px-2 py-1.5 hover:bg-cyan-300/[0.035]">
               <div className="flex min-w-0 items-start" style={{ paddingLeft: depth * 17 }}>
                 <button onClick={() => hasChildren && toggleExpanded(task.ref)} disabled={!hasChildren}
                   title={hasChildren ? `${isExpanded ? "Collapse" : "Expand"} ${task.title}` : undefined}
@@ -222,8 +226,18 @@ export function JobsPaneBody() {
               )}
               <span className="truncate font-mono text-[8px] text-teal-300/70" title={agent}>{agent || "—"}</span>
               {hasChildren ? <span /> : (
-                <button onClick={() => runNow(task.ref)}
-                  disabled={busyRef === task.ref || task.status === "running"} title={`Run now with ${reasoningEffort} reasoning`}
+                <select value={task.reasoning_effort}
+                  onChange={(e) => setReasoning(task.ref, e.target.value as ReasoningEffort)}
+                  title={`Reasoning effort for ${task.title}`}
+                  aria-label={`Reasoning effort for ${task.title}`}
+                  className="w-[66px] rounded border border-cyan-300/20 bg-[#020a12] px-1 py-0.5 font-mono text-[8px] uppercase text-cyan-200/70 outline-none hover:border-cyan-300/40">
+                  <option value="none">None</option><option value="low">Low</option>
+                  <option value="medium">Medium</option><option value="high">High</option>
+                </select>
+              )}
+              {hasChildren ? <span /> : (
+                <button onClick={() => runNow(task)}
+                  disabled={busyRef === task.ref || task.status === "running"} title={`Run now with ${task.reasoning_effort} reasoning`}
                   className="rounded border border-cyan-300/25 p-1 text-cyan-300/60 hover:bg-cyan-300/10 disabled:opacity-30">
                   <Play size={10} />
                 </button>
