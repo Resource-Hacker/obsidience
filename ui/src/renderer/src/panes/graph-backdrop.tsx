@@ -107,6 +107,8 @@ export function GraphBackdrop() {
       return null;
     };
     const childRefsOf = (node: GraphNode): string[] => node.children ?? node.subtasks ?? [];
+    const checkoutChildRefsOf = (node: GraphNode): string[] =>
+      node.kind === "task" && !node.synthetic ? node.subtasks ?? [] : childRefsOf(node);
     const hierarchyParents = (members: GraphNode[]): Map<string, string> => {
       const pool = new Set(members.map((node) => node.id));
       const byId = new Map(members.map((node) => [node.id, node]));
@@ -144,7 +146,7 @@ export function GraphBackdrop() {
       while (queue.length) {
         const parent = byId.get(queue.shift() as string);
         if (!parent) continue;
-        for (const raw of childRefsOf(parent)) {
+        for (const raw of checkoutChildRefsOf(parent)) {
           const child = subRef(raw, pool);
           if (!child || closure.has(child) || byId.get(child)?.kind !== parent.kind) continue;
           closure.add(child);

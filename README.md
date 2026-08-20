@@ -29,6 +29,9 @@ field: `subtasks`, `subrunbooks`, `subskills`, or `subtools`. The Library,
 graph, Reader, validator, and interpreter all follow those exact ordered edges.
 Dotted Tool bindings also receive generated namespace parents in the Library,
 so `task.*` and `vault.*` display as expandable trees without duplicate notes.
+The Task shelf likewise projects the owner-defined `wiki` and `research`
+taxonomy as stateless Reader indexes; real runbook-backed tasks occupy its
+leaves as they are implemented.
 
 ## Layout
 - `vault/` — the system itself (charters, runbooks, tasks, knowledge, receipts)

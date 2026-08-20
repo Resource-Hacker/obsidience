@@ -15,6 +15,14 @@ from . import llm, retrieval, review, scheduler, trace, voice
 from .config import CONFIG
 from .executor import run_task
 from .indexer import INDEX
+from .task_taxonomy import (
+    TASK_TAXONOMY_BY_PATH,
+    TASK_TAXONOMY_NODES,
+    canonical_members as task_taxonomy_members,
+    child_ids as task_taxonomy_child_ids,
+    descendant_count as task_taxonomy_descendant_count,
+    node_id as task_taxonomy_node_id,
+)
 from .vault import iter_notes, load_note, resolver, write_note
 
 
@@ -104,6 +112,36 @@ def _tool_namespace_article(ref: str, namespace: str | None = None) -> dict:
     article_count = len(_tool_namespace_members(namespace)) if namespace else len(eligible)
     return {"ref": ref, "title": title, "kind": "index",
             "meta": {"node": "true", "articles": str(article_count)}, "body": body}
+
+
+def _task_taxonomy_article(ref: str, path: str | None = None) -> dict:
+    known = {note.ref for note in iter_notes() if note.kind == "task"}
+    if path is None:
+        children = [node for node in TASK_TAXONOMY_NODES if "/" not in node.path]
+        title = "Library · Tasks"
+        summary = "The Task shelf, organized by the owner-defined wiki and research taxonomy."
+        article_count = len(TASK_TAXONOMY_NODES)
+    else:
+        node = TASK_TAXONOMY_BY_PATH[path]
+        children = [TASK_TAXONOMY_BY_PATH[child] for child in node.children]
+        title = node.title
+        summary = f"The `{path}` Task taxonomy node."
+        article_count = task_taxonomy_descendant_count(path)
+    lines = [
+        f"- [[{task_taxonomy_node_id(child.path, known)}|{child.title}]] · task node"
+        for child in children
+    ]
+    body = summary + "\n\n## Indexed subtasks\n\n" + (
+        "\n".join(lines)
+        if lines else "*No executable task is defined at this leaf yet.*"
+    )
+    return {
+        "ref": ref,
+        "title": title,
+        "kind": "task" if path is not None else "index",
+        "meta": {"node": "true", "articles": str(article_count), "generated": "true"},
+        "body": body,
+    }
 
 
 def _primitive_closure(roots, catalog) -> list:
@@ -253,6 +291,13 @@ def get_article(ref: str):
             if namespace not in _tool_namespace_catalog()[1]:
                 raise HTTPException(404, f"tool namespace not found: {namespace}")
             return _tool_namespace_article(ref, namespace)
+        if relative == "Tasks":
+            return _task_taxonomy_article(ref)
+        if relative.startswith("Tasks/"):
+            path = relative.removeprefix("Tasks/")
+            if path not in TASK_TAXONOMY_BY_PATH:
+                raise HTTPException(404, f"task taxonomy node not found: {path}")
+            return _task_taxonomy_article(ref, path)
         folder = relative
         kind = folder.rstrip("s").lower()
         if kind not in CHECKOUT_FIELDS:
@@ -334,6 +379,19 @@ def library_checkouts():
                             "ref": f"@library/Tools/{namespace}",
                             "kind": "tool",
                         })
+            if kind == "task":
+                known = {note.ref for note in iter_notes() if note.kind == "task"}
+                for path in TASK_TAXONOMY_BY_PATH:
+                    synthetic_ref = f"@library/Tasks/{path}"
+                    if task_taxonomy_node_id(path, known) != synthetic_ref:
+                        continue
+                    members = set(task_taxonomy_members(path, known))
+                    if members and members <= selected:
+                        assignments.append({
+                            "agent": agent,
+                            "ref": synthetic_ref,
+                            "kind": "task",
+                        })
     return {"assignments": assignments}
 
 
@@ -349,21 +407,35 @@ def set_library_checkout(ref: str, payload: dict):
 
     res = resolver()
     namespace = ref.removeprefix("@library/Tools/") if ref.startswith("@library/Tools/") else None
-    targets = _tool_namespace_members(namespace) if namespace else []
+    task_path = ref.removeprefix("@library/Tasks/") if ref.startswith("@library/Tasks/") else None
+    if task_path and task_path not in TASK_TAXONOMY_BY_PATH:
+        raise HTTPException(404, f"task taxonomy node not found: {task_path}")
+    known_tasks = {note.ref for note in iter_notes() if note.kind == "task"}
+    if namespace:
+        targets = _tool_namespace_members(namespace)
+    elif task_path:
+        targets = [
+            target for target_ref in task_taxonomy_members(task_path, known_tasks)
+            if (target := res.resolve(target_ref))
+        ]
+    else:
+        targets = []
     if namespace and namespace not in _tool_namespace_catalog()[1]:
         raise HTTPException(404, f"tool namespace not found: {namespace}")
-    target = res.resolve(ref) if not namespace else None
+    if task_path and not targets:
+        raise HTTPException(409, "task taxonomy node has no executable tasks to check out yet")
+    target = res.resolve(ref) if not namespace and not task_path else None
     if not targets and (not target or target.kind not in CHECKOUT_FIELDS):
         raise HTTPException(404, f"library item not found: {ref}")
     identity = res.resolve(CHECKOUT_AGENTS[agent])
     if not identity:
         raise HTTPException(500, f"checkout identity missing: {CHECKOUT_AGENTS[agent]}")
 
-    kind = "tool" if namespace else target.kind
+    kind = "tool" if namespace else "task" if task_path else target.kind
     field = CHECKOUT_FIELDS[kind]
     current = _link_values(identity.meta.get(field))
     retained = []
-    target_refs = {item.ref for item in targets} if namespace else {target.ref}
+    target_refs = {item.ref for item in targets} if namespace or task_path else {target.ref}
     for raw in current:
         resolved = res.resolve(raw)
         if not resolved or resolved.ref not in target_refs:
@@ -378,7 +450,7 @@ def set_library_checkout(ref: str, payload: dict):
         meta.pop(field, None)
     write_note(identity.path, meta, identity.body)
     INDEX.sync()
-    return {"agent": agent, "ref": ref if namespace else target.ref,
+    return {"agent": agent, "ref": ref if namespace or task_path else target.ref,
             "kind": kind, "checked_out": checked_out}
 
 

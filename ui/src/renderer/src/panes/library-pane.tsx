@@ -82,11 +82,13 @@ function CheckoutGlyph({ agent, size = 17 }: { agent: CheckoutAgent; size?: numb
 
 function CheckoutControls({
   itemRef,
+  enabled,
   selected,
   busy,
   onToggle,
 }: {
   itemRef: string;
+  enabled: boolean;
   selected: Set<string>;
   busy: Set<string>;
   onToggle: (ref: string, agent: CheckoutAgent) => void;
@@ -98,7 +100,9 @@ function CheckoutControls({
         const checked = selected.has(key);
         return (
           <button key={id} type="button" aria-pressed={checked}
-            disabled={busy.has(key)} title={`${checked ? "Return from" : "Check out to"} ${label}`}
+            disabled={!enabled || busy.has(key)} title={enabled
+              ? `${checked ? "Return from" : "Check out to"} ${label}`
+              : "No executable tasks are defined beneath this index yet"}
             onClick={(event) => { event.stopPropagation(); onToggle(itemRef, id); }}
             className={`flex h-6 w-6 items-center justify-center rounded border transition-all disabled:opacity-35 ${
               checked ? CHECKED_STYLE[id] : "border-emerald-300/10 bg-[#020a0c]/70 opacity-55 hover:border-emerald-200/35 hover:opacity-100"
@@ -147,7 +151,8 @@ export function LibraryPaneBody() {
   const taskByRef = useMemo(() => new Map(tasks.map((task) => [task.ref, task])), [tasks]);
   const shelfNodes = useMemo(() => nodes
     .filter((node) => node.kind === shelf)
-    .sort((left, right) => left.title.localeCompare(right.title)), [nodes, shelf]);
+    .sort((left, right) => (left.order ?? Number.MAX_SAFE_INTEGER) - (right.order ?? Number.MAX_SAFE_INTEGER)
+      || left.title.localeCompare(right.title)), [nodes, shelf]);
 
   const hierarchy = useMemo(() => {
     const byRef = new Map(shelfNodes.map((node) => [node.id, node]));
@@ -314,11 +319,14 @@ export function LibraryPaneBody() {
                   {displayTitle}
                 </span>
                 <span className="flex gap-2 font-mono text-[8px] text-emerald-200/35">
-                  {hasChildren ? <span>{children.length} {CHILD_LABELS[shelf]}</span> : <span>{task?.status ?? node.id}</span>}
+                  {hasChildren
+                    ? <span>{children.length} {CHILD_LABELS[shelf]}</span>
+                    : <span>{node.synthetic ? "index" : task?.status ?? node.id}</span>}
                   {task?.schedule ? <span className="truncate">scheduled {task.schedule}</span> : null}
                 </span>
               </button>
-              <CheckoutControls itemRef={node.id} selected={checkouts} busy={busyCheckouts} onToggle={toggleCheckout} />
+              <CheckoutControls itemRef={node.id} enabled={node.checkoutable !== false}
+                selected={checkouts} busy={busyCheckouts} onToggle={toggleCheckout} />
             </div>
           );
         })}

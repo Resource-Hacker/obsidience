@@ -18,6 +18,8 @@ export interface GraphNode {
   children?: string[];
   subtasks?: string[];
   synthetic?: boolean;
+  checkoutable?: boolean;
+  order?: number;
   checkouts?: Partial<Record<"tools" | "skills" | "runbooks" | "tasks", string[]>>;
   tags?: string[];
 }

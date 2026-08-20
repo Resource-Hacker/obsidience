@@ -32,6 +32,11 @@ section is binding. Rules for working here:
   Library (`task` → `complete`, `create`; `vault` → its callable leaves). Keep
   canonical checkout storage on the real descendant Tool refs, never the
   generated `@library/Tools/*` presentation IDs.
+- The Task shelf projects the owner-authored `wiki` and `research` taxonomy
+  from `harness/obsidience/task_taxonomy.py`. Taxonomy nodes are stateless
+  Reader articles, not runnable tasks; real Task notes absorb matching leaves,
+  and only their authored `subtasks:` dispatch. The detailed `wiki/guard` tree
+  supersedes the earlier short guard sketch.
 
 ## Phase 1 directive (owner, 2026-08-20) — finish before anything else
 

@@ -123,6 +123,14 @@ index articles: `task.complete` and `task.create` render beneath `task`, while
 the `vault.*` capabilities render beneath `vault`. Checking out a namespace
 stores only its canonical descendant Tool links on the identity note.
 
+The Task shelf also carries the owner's stateless `wiki` and `research`
+taxonomy. Its generated nodes are readable indexes with no state or play
+control; they describe where task definitions belong, but never execute.
+Existing canonical tasks occupy their closest matching leaf without changing
+their stable ref, history, schedule, or authored executable `subtasks:`. A
+taxonomy checkout stores only real descendant Task refs and is disabled while
+a branch contains none.
+
 The **Jobs** pane is the scheduler surface: it creates, edits, runs, and watches
 scheduled task definitions. It does not double as the task catalog. "Job" is
 operational vocabulary for scheduled work under the interpreter — it is not a

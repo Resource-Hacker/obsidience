@@ -15,6 +15,12 @@ from pathlib import Path
 import numpy as np
 
 from .config import CONFIG
+from .task_taxonomy import (
+    TASK_TAXONOMY_NODES,
+    canonical_members,
+    child_ids,
+    node_id,
+)
 from .vault import Note, iter_notes
 
 _SCHEMA = """
@@ -199,6 +205,39 @@ class Index:
                 "tags": ["generated-index", "tool-namespace"],
                 "synthetic": True,
             })
+
+        # The owner's wiki/research ontology is a stateless Task index. Real
+        # Task notes occupy matching leaves, but their authored subtasks remain
+        # the interpreter's only executable control-flow edges.
+        by_id = {node["id"]: node for node in nodes}
+        for taxonomy_order, taxonomy_node in enumerate(TASK_TAXONOMY_NODES):
+            projected_id = node_id(taxonomy_node.path, known)
+            projected_children = child_ids(taxonomy_node.path, known)
+            members = canonical_members(taxonomy_node.path, known)
+            existing = by_id.get(projected_id)
+            if existing:
+                existing["title"] = taxonomy_node.title
+                existing["children"] = projected_children
+                existing["tags"] = [*existing.get("tags", []), "task-taxonomy"]
+                existing["checkoutable"] = True
+                existing["order"] = taxonomy_order
+                continue
+            projected = {
+                "id": projected_id,
+                "title": taxonomy_node.title,
+                "kind": "task",
+                "status": None,
+                "assignee": None,
+                "children": projected_children,
+                "subtasks": [],
+                "checkouts": {},
+                "tags": ["generated-index", "task-taxonomy"],
+                "synthetic": True,
+                "checkoutable": bool(members),
+                "order": taxonomy_order,
+            }
+            nodes.append(projected)
+            by_id[projected_id] = projected
         return {"nodes": nodes, "links": links}
 
     # ---------- runs ----------

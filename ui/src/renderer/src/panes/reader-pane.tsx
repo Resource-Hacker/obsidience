@@ -130,7 +130,7 @@ export function ReaderPaneBody() {
   // A task Reader is a live operational view, not a snapshot. Poll only the
   // tiny task projection so running/completion and the next firing stay fresh.
   useEffect(() => {
-    if (!note || note.kind !== "task") return;
+    if (!note || note.kind !== "task" || articleNode?.synthetic) return;
     let live = true;
     const pull = () => api.tasks().then((rows) => {
       if (!live) return;
@@ -139,7 +139,7 @@ export function ReaderPaneBody() {
     }).catch(() => undefined);
     const timer = setInterval(pull, 2_000);
     return () => { live = false; clearInterval(timer); };
-  }, [note]);
+  }, [articleNode?.synthetic, note]);
 
   function updateDraft(update: Partial<TaskDraft>) {
     setDraft((current) => current ? { ...current, ...update } : current);
@@ -193,6 +193,9 @@ export function ReaderPaneBody() {
   if (note.kind === "task" && task && draft) {
     const container = task.subtasks > 0;
     const running = task.status === "running";
+    const operationalRefs = new Set((task.subtask_refs ?? []).map(cleanLink));
+    const taxonomyRefs = (articleNode?.children ?? [])
+      .filter((ref) => !operationalRefs.has(cleanLink(ref)));
     return (
       <div className="h-full overflow-y-auto p-3">
         <div className="mb-3 flex items-start justify-between gap-3">
@@ -280,6 +283,20 @@ export function ReaderPaneBody() {
               <p className="mb-1 font-mono text-[8px] uppercase tracking-[0.16em] text-cyan-300/45">Subtasks</p>
               <div className="flex flex-wrap gap-1">
                 {task.subtask_refs.map((ref) => (
+                  <button key={ref} onClick={() => openReader(cleanLink(ref))}
+                    className="rounded border border-cyan-300/20 px-2 py-1 font-mono text-[9px] text-cyan-100/70 hover:border-cyan-300/45 hover:text-cyan-50">
+                    {cleanLink(ref).split("/").pop()}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {taxonomyRefs.length ? (
+            <div>
+              <p className="mb-1 font-mono text-[8px] uppercase tracking-[0.16em] text-cyan-300/45">Task hierarchy</p>
+              <div className="flex flex-wrap gap-1">
+                {taxonomyRefs.map((ref) => (
                   <button key={ref} onClick={() => openReader(cleanLink(ref))}
                     className="rounded border border-cyan-300/20 px-2 py-1 font-mono text-[9px] text-cyan-100/70 hover:border-cyan-300/45 hover:text-cyan-50">
                     {cleanLink(ref).split("/").pop()}
