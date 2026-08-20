@@ -59,7 +59,7 @@ function AssigneeSelect({
     cleanLink(task.assignee) === agent.ref || selectedName.toLowerCase() === agent.title.toLowerCase());
   const label = selected?.title ?? (selectedName || "Assign");
   return (
-    <div className="relative mr-1" onBlur={(event) => {
+    <div className="relative justify-self-center" onBlur={(event) => {
       if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
     }}>
       <button type="button" onClick={() => setOpen((current) => !current)}
@@ -283,8 +283,12 @@ export function JobsPaneBody() {
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {tasks.length > 0 ? (
-          <div className="sticky top-0 z-10 grid grid-cols-[minmax(0,1fr)_60px_104px_72px_28px] border-b border-cyan-300/15 bg-[#03101a]/95 px-2 py-1 font-mono text-[8px] uppercase tracking-[0.16em] text-cyan-300/40">
-            <span>Task</span><span>State</span><span>Agent</span><span>Reason</span><span />
+          <div className="sticky top-0 z-10 grid grid-cols-[minmax(0,1fr)_60px_116px_72px_28px] border-b border-cyan-300/15 bg-[#03101a]/95 px-2 py-1 font-mono text-[8px] uppercase tracking-[0.16em] text-cyan-300/40">
+            <span>Task</span>
+            <span className="justify-self-center">State</span>
+            <span className="justify-self-center">Agent</span>
+            <span className="justify-self-center">Reason</span>
+            <span />
           </div>
         ) : null}
         {visibleRows.map(({ task, depth }) => {
@@ -293,7 +297,7 @@ export function JobsPaneBody() {
           const isExpanded = expanded.has(task.ref);
           return (
             <div key={task.ref}
-              className="grid grid-cols-[minmax(0,1fr)_60px_104px_72px_28px] items-center border-b border-cyan-300/8 px-2 py-1.5 hover:bg-cyan-300/[0.035]">
+              className="grid grid-cols-[minmax(0,1fr)_60px_116px_72px_28px] items-center border-b border-cyan-300/8 px-2 py-1.5 hover:bg-cyan-300/[0.035]">
               <div className="flex min-w-0 items-start" style={{ paddingLeft: depth * 17 }}>
                 <button onClick={() => hasChildren && toggleExpanded(task.ref)} disabled={!hasChildren}
                   title={hasChildren ? `${isExpanded ? "Collapse" : "Expand"} ${task.title}` : undefined}
@@ -314,7 +318,7 @@ export function JobsPaneBody() {
                 </div>
               </div>
               {hasChildren ? <span /> : (
-                <span className={`w-fit rounded border px-1.5 py-0.5 font-mono text-[8px] uppercase tracking-wider ${STATUS_STYLE[task.status] ?? STATUS_STYLE.draft}`}>
+                <span className={`w-fit justify-self-center rounded border px-1.5 py-0.5 font-mono text-[8px] uppercase tracking-wider ${STATUS_STYLE[task.status] ?? STATUS_STYLE.draft}`}>
                   {task.status}
                 </span>
               )}
@@ -326,7 +330,7 @@ export function JobsPaneBody() {
                   onChange={(e) => setReasoning(task.ref, e.target.value as ReasoningEffort)}
                   title={`Reasoning effort for ${task.title}`}
                   aria-label={`Reasoning effort for ${task.title}`}
-                  className="w-[66px] rounded border border-cyan-300/20 bg-[#020a12] px-1 py-0.5 font-mono text-[8px] uppercase text-cyan-200/70 outline-none hover:border-cyan-300/40">
+                  className="w-[66px] justify-self-center rounded border border-cyan-300/20 bg-[#020a12] px-1 py-0.5 font-mono text-[8px] uppercase text-cyan-200/70 outline-none hover:border-cyan-300/40">
                   <option value="none">None</option><option value="low">Low</option>
                   <option value="medium">Medium</option><option value="high">High</option>
                 </select>
@@ -334,7 +338,7 @@ export function JobsPaneBody() {
               {hasChildren ? <span /> : (
                 <button onClick={() => runNow(task)}
                   disabled={busyRef === task.ref || task.status === "running"} title={`Run now with ${task.reasoning_effort} reasoning`}
-                  className="rounded border border-cyan-300/25 p-1 text-cyan-300/60 hover:bg-cyan-300/10 disabled:opacity-30">
+                  className="justify-self-center rounded border border-cyan-300/25 p-1 text-cyan-300/60 hover:bg-cyan-300/10 disabled:opacity-30">
                   <Play size={10} />
                 </button>
               )}
