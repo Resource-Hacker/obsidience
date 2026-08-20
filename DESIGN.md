@@ -16,10 +16,17 @@ architecture; everything else is either knowledge (notes) or runtime state.
 | **Skill** | How to use one or more tools *correctly* — parameters, safety rules, interpretation, failure handling | `Skills/` | `tools:` |
 | **Tool** | The executable capability itself | `Tools/` | `binding:` → a registry implementation |
 
-- **Tasks are recursive.** A task either has ordered `subtasks:` (a container —
-  its subtasks are how it completes, no runbook needed) or it is a leaf and
-  **must** link a runbook. Missing runbook → `blocked/awaiting-runbook`, never
-  improvised.
+- **Tasks are recursive, and trees flow from the graph.** A task either has
+  ordered `subtasks:` (a container — its subtasks are how it completes, no
+  runbook needed) or it is a leaf and **must** link a runbook. Missing
+  runbook → `blocked/awaiting-runbook`, never improvised. The target model:
+  a task is `action × target` — the action names a semantic operation (see
+  [[Agent/action-ontology]]), the target is a graph node, and **the subtask
+  tree derives from the target's node → subnode → article structure** rather
+  than being hand-authored: applying an action to a node expands it over the
+  node's children at runtime (generated task instances, receipts per child).
+  Hand-wired `subtasks:` lists are the bootstrap form; generative expansion
+  is the destination (Phase 2).
 - **Runbooks are procedural.** Imperative steps with stop-and-report
   conditions. They name the skills they need; they never explain tool usage
   inline — that's what skills are for.

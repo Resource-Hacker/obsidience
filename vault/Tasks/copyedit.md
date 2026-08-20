@@ -6,11 +6,11 @@ assignee: '[[Agents/Alexandria]]'
 auto_done: true
 blocked_reason: null
 kind: task
-last_run: f5a1d9a4a35c
+last_run: 50c73b33db42
 runbook: '[[Runbooks/lint-notes]]'
-status: running
-status_updated: '2026-08-20T11:04:27'
-title: lint-notes
+status: completed
+status_updated: '2026-08-20T11:36:40'
+title: Copyedit
 ---
 
 Run one lint pass over the vault's notes.

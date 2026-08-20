@@ -20,3 +20,7 @@ Append-only chronology: `## [date] op | title` — query with `grep "^## \[" log
 ## [2026-08-20 11:03] run | validate-links (completed)
 ## [2026-08-20 11:07] run | validate-links (completed)
 ## [2026-08-20 11:08] run | validate-links (completed)
+## [2026-08-20 11:34] run | Copyedit (completed)
+## [2026-08-20 11:36] run | Validate Links (completed)
+## [2026-08-20 11:36] run | Categorize (failed)
+## [2026-08-20 11:34] run | Lint (failed)

@@ -100,10 +100,7 @@ export function GraphBackdrop() {
       for (const id of pool) if (id.split("/").pop()!.toLowerCase() === base) return id;
       return null;
     };
-    const satelliteRefs = new Set(all.filter((n) =>
-      n.id.startsWith("Agents/") || (n.kind === "task" && assigneeOf(n) && agentNames.includes(assigneeOf(n)!)),
-    ).map((n) => n.id));
-    const notes = all.filter((n) => !satelliteRefs.has(n.id));
+    const notes = all.filter((n) => !n.id.startsWith("Agents/"));
     const branchOf = (id: string): string | null => (id.includes("/") ? id.split("/", 1)[0] : null);
     // HEREBRUM agent-node structure: the four primitive collections nest
     // UNDER the Agent branch; every other folder is a sibling subject branch.

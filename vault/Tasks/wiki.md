@@ -6,15 +6,10 @@ schedule: 0 */6 * * *
 status: running
 status_updated: '2026-08-20T11:00:03'
 subtasks:
-- '[[Tasks/ingest-sources]]'
-- '[[Tasks/lint-notes]]'
-- '[[Tasks/validate-links]]'
-- '[[Tasks/categorize-notes]]'
-- '[[Tasks/detect-contradictions]]'
-- '[[Tasks/expand-stubs]]'
+- '[[Tasks/ingest]]'
+- '[[Tasks/lint]]'
+- '[[Tasks/improve]]'
 title: Wiki
 ---
 
-The self-maintenance loop (Wikipedia Task Center × llm-wiki): ingest new
-sources, copyedit, validate links, categorize, detect contradictions, expand
-stubs. Runs every six hours; all output lands in `_staging/` for owner review.
+The wiki maintenance loop (karpathy llm-wiki method): Ingest new sources, Lint the graph's health, Improve the weakest article. Query is the live Operator chat. Runs every six hours; every change waits in _staging/ for owner review.
