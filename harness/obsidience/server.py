@@ -77,14 +77,40 @@ def tasks():
     for n in iter_notes():
         if n.kind != "task":
             continue
+        subtasks = n.meta.get("subtasks") or []
         out.append({"ref": n.ref, "title": n.title,
                     "status": n.meta.get("status", "draft"),
-                    "assignee": str(n.meta.get("assignee", "")),
                     "runbook": str(n.meta.get("runbook", "")),
+                    "subtasks": len(subtasks) if isinstance(subtasks, list) else 0,
                     "schedule": n.meta.get("schedule"),
                     "blocked_reason": n.meta.get("blocked_reason"),
                     "last_run": n.meta.get("last_run")})
     return out
+
+
+@app.post("/api/tasks")
+async def create_task(payload: dict):
+    """Owner surface (Jobs pane / CLI): assign a task directly — trusted writer."""
+    from .vault import slugify, write_note
+    title = str(payload.get("title", "")).strip()
+    if not title:
+        raise HTTPException(400, "title required")
+    ref = f"Tasks/{slugify(title)}.md"
+    if load_note(ref):
+        raise HTTPException(409, f"task already exists: {ref}")
+    meta: dict = {"title": title, "kind": "task",
+                  "status": "pending" if payload.get("start") else "draft"}
+    if payload.get("runbook"):
+        meta["runbook"] = str(payload["runbook"])
+    if payload.get("subtasks"):
+        meta["subtasks"] = [str(s) for s in payload["subtasks"]][:9]
+    if payload.get("schedule"):
+        meta["schedule"] = str(payload["schedule"])
+    if payload.get("params"):
+        meta["params"] = payload["params"]
+    write_note(ref, meta, str(payload.get("body", "")))
+    INDEX.sync()
+    return {"created": ref[:-3], "status": meta["status"]}
 
 
 @app.post("/api/tasks/{ref:path}/run")
@@ -92,7 +118,8 @@ async def run_now(ref: str):
     note = load_note(ref + ".md") or resolver().resolve(ref)
     if not note or note.kind != "task":
         raise HTTPException(404, f"task not found: {ref}")
-    return await run_task(note)
+    asyncio.create_task(run_task(note))  # fire-and-poll: watch /api/tasks + /api/runs
+    return {"started": note.ref}
 
 
 @app.get("/api/runs")
@@ -139,10 +166,22 @@ async def chat_ws(ws: WebSocket):
     await ws.accept()
     history: list[dict] = []
     res = resolver()
-    charter = res.resolve("Operator")
-    system = ("You are the Obsidience Operator — the voice of this Obsidian vault. "
-              "Ground answers in the vault context provided; cite notes as [[wikilinks]]. "
-              "Be concise and direct.\n\n" + (charter.body if charter else ""))
+    # "Answer the user" is a runbook (the taxonomy's own example): the chat
+    # session is the interpreter running it continuously, with its skills.
+    runbook = res.resolve("Runbooks/answer-the-user")
+    skill_bodies = []
+    if runbook:
+        for ref in (runbook.meta.get("skills") or []):
+            skill = res.resolve(str(ref))
+            if skill:
+                skill_bodies.append(f"### Skill: {skill.title}\n{skill.body.strip()[:1500]}")
+    system = "\n\n".join(filter(None, [
+        "You are the Obsidience interpreter in conversation with the owner. "
+        "Ground answers in the vault context provided; cite notes as [[wikilinks]]. "
+        "Be concise and direct.",
+        f"# Runbook: {runbook.title}\n{runbook.body.strip()}" if runbook else "",
+        "\n\n".join(skill_bodies),
+    ]))
     try:
         while True:
             raw = await ws.receive_text()

@@ -24,7 +24,7 @@ def due_tasks() -> list:
             continue
         status = str(note.meta.get("status", "draft"))
         schedule = note.meta.get("schedule")
-        if schedule and status in ("ready", "done", "review", "failed"):
+        if schedule and status in ("pending", "completed", "review", "failed"):
             base = _last_fired.get(note.ref) or note.mtime
             try:
                 nxt = croniter(str(schedule), base).get_next(float)
@@ -32,7 +32,7 @@ def due_tasks() -> list:
                 continue
             if nxt <= now and status != "review":  # never re-fire past an unreviewed result
                 due.append(note)
-        elif not schedule and status == "ready":
+        elif not schedule and status == "pending":
             due.append(note)
     return due
 

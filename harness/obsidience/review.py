@@ -76,6 +76,8 @@ def approve(name: str) -> dict:
     note_meta["provenance"] = f"proposed by {meta.get('agent', '?')} (task {meta.get('task', '-')})"
     write_note(target, note_meta, body)
     path.unlink()
+    from .receipts import _append_log
+    _append_log("approve", target, time.time())
     git_commit(f"[review] approve: {target} (from {meta.get('agent', '?')})", [target])
     from .indexer import INDEX
     INDEX.sync()

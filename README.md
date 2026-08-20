@@ -6,6 +6,7 @@ executor + the HEREBRUM HUD, standalone. See `DESIGN.md` for the laws.
 ## Quickstart
 
 ```sh
+./scripts/llm.sh &          # Obsidience's own Gemma server (:8089, RTX 4000 Ada)
 ./scripts/dev.sh            # harness daemon (:8765) + Electron UI with HMR
 ```
 
@@ -14,7 +15,7 @@ or piecewise:
 ```sh
 ./scripts/obsidience serve      # daemon: API, scheduler, indexer
 ./scripts/obsidience status     # what the harness sees
-./scripts/obsidience run Tasks/vault-gardening   # run one task now
+./scripts/obsidience run Tasks/maintain-wiki     # run the self-maintenance loop now
 ./scripts/obsidience review     # list staged proposals (approve/reject <file>)
 cd ui && pnpm dev               # the HUD
 ```
@@ -33,6 +34,15 @@ review decisions are git-committed.
 - TTS: kokoro-js in the app, using the local model at
   `/var/lib/ai/models/kokoro-82m-v1.0-onnx` (override: `HEREBRUM_KOKORO_CACHE_DIR`).
 
+## Self-maintenance
+`Tasks/maintain-wiki` (every 6h, Wikipedia Task Center × karpathy llm-wiki):
+ingest-sources → lint-notes → validate-links → categorize-notes →
+detect-contradictions → expand-stubs. Leaves auto-complete; every change they
+want lands in `_staging/` for your review — **staging is the human gate**.
+Drop raw documents into `vault/Sources/` and the next cycle integrates them.
+`vault/log.md` is the append-only chronology (`grep "^## \[" vault/log.md`).
+
 ## Requires
-- `jarvis-gemma` llama.cpp server on `127.0.0.1:8081` (any OpenAI-compatible
-  endpoint works — set `llm_base_url`/`llm_model` in `obsidience.toml`).
+- Any OpenAI-compatible LLM endpoint — default is Obsidience's own
+  `scripts/llm.sh` (llama.cpp, local Gemma GGUF, `:8089`); change
+  `llm_base_url`/`llm_model` in `obsidience.toml` to point elsewhere.

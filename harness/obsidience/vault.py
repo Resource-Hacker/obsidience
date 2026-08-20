@@ -39,8 +39,8 @@ class Note:
         if k:
             return str(k)
         top = self.path.split("/", 1)[0].lower()
-        return {"charters": "charter", "runbooks": "runbook", "tasks": "task",
-                "receipts": "receipt"}.get(top, "note")
+        return {"runbooks": "runbook", "tasks": "task", "skills": "skill",
+                "tools": "tool", "receipts": "receipt"}.get(top, "note")
 
     def text(self) -> str:
         return f"# {self.title}\n\n{self.body}"
@@ -52,7 +52,7 @@ def _title_of(path: Path, meta: dict) -> str:
 
 def _extract_links(meta: dict, body: str) -> list[str]:
     links = WIKILINK_RE.findall(body)
-    for key in ("runbook", "assignee", "parent", "links"):
+    for key in ("runbook", "subtasks", "skills", "parent", "links"):
         val = meta.get(key)
         vals = val if isinstance(val, list) else [val] if val else []
         for v in vals:

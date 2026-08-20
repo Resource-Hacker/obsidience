@@ -1,7 +1,7 @@
 /** Slim workspace registry for Obsidience (replaces HEREBRUM's Hermes-coupled one).
  *  Keeps the same contracts pane-frame.tsx expects: PaneRect/PaneViewport/clampPaneRect. */
 
-export type JarvisPaneId = "chat" | "tasks" | "reviews" | "reader" | "status";
+export type JarvisPaneId = "chat" | "jobs" | "reviews" | "reader" | "status";
 
 export interface PaneRect {
   x: number;
@@ -34,7 +34,7 @@ export const OBSIDIENCE_PANES: readonly PaneDefinition[] = [
     defaultRect: (v) => ({ x: v.width - 500, y: v.height - 620, width: 460, height: 560 }),
   },
   {
-    id: "tasks", title: "Tasks", minWidth: 380, minHeight: 240,
+    id: "jobs", title: "Jobs", minWidth: 380, minHeight: 240,
     resizable: true, defaultOpen: true,
     defaultRect: () => ({ x: 40, y: 80, width: 460, height: 340 }),
   },
@@ -80,7 +80,7 @@ export interface PaneState {
 
 export type WorkspaceState = Record<JarvisPaneId, PaneState>;
 
-const STORAGE_KEY = "obsidience.workspace.v1";
+const STORAGE_KEY = "obsidience.workspace.v2";
 
 export function defaultWorkspace(): WorkspaceState {
   const out = {} as WorkspaceState;

@@ -62,6 +62,8 @@ const FOLDER_PALETTES: Record<string, KnowledgeBranchPalette> = {
   Tasks: chromaticKnowledgePalette(271, 91, 75),      // projects violet
   Knowledge: chromaticKnowledgePalette(199, 91, 60),  // workstation cyan
   Receipts: chromaticKnowledgePalette(239, 84, 74),   // news indigo
+  Skills: chromaticKnowledgePalette(350, 94, 72),     // personal rose
+  Tools: chromaticKnowledgePalette(130, 88, 62),      // websites green
 };
 const SPARE_HUES = [350, 130, 239, 20, 90];
 

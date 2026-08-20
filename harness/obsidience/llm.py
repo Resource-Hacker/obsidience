@@ -21,9 +21,9 @@ Respond with exactly ONE fenced action block per turn and nothing after it:
 ```action
 {"tool": "<tool-name>", "args": { ... }}
 ```
-To finish, use:
+To complete the task, use:
 ```action
-{"tool": "finish", "args": {"status": "done|failed|review", "summary": "<one paragraph result>"}}
+{"tool": "task.complete", "args": {"status": "completed|failed|review", "summary": "<one paragraph result>"}}
 ```
 Think briefly before the block if useful. Never invent tool names.
 """

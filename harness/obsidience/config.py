@@ -21,8 +21,8 @@ class Config:
     llm_base_url: str = "http://127.0.0.1:8081/v1"
     llm_model: str = "jarvis-gemma"
     llm_temperature: float = 0.4
-    llm_max_tokens: int = 2048
-    max_steps: int = 12  # tool-loop cap per session
+    llm_max_tokens: int = 3584
+    max_steps: int = 24  # tool-loop cap per session
 
     # Embeddings (fastembed; reuse the machine's offline BGE model dir if present)
     embed_model: str = "BAAI/bge-small-en-v1.5"

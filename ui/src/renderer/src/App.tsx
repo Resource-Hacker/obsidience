@@ -12,7 +12,7 @@ import {
 } from "@/components/themes/jarvis/workspace/workspace-state";
 import { GraphBackdrop } from "@/panes/graph-backdrop";
 import { ChatPaneBody } from "@/panes/chat-pane";
-import { TasksPaneBody } from "@/panes/tasks-pane";
+import { JobsPaneBody } from "@/panes/jobs-pane";
 import { ReviewsPaneBody } from "@/panes/reviews-pane";
 import { ReaderPaneBody } from "@/panes/reader-pane";
 import { StatusPaneBody } from "@/panes/status-pane";
@@ -21,7 +21,7 @@ import { onOpenReader } from "@/lib/api";
 function paneBody(id: JarvisPaneId) {
   switch (id) {
     case "chat": return <ChatPaneBody />;
-    case "tasks": return <TasksPaneBody />;
+    case "jobs": return <JobsPaneBody />;
     case "reviews": return <ReviewsPaneBody />;
     case "reader": return <ReaderPaneBody />;
     case "status": return <StatusPaneBody />;
