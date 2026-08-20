@@ -207,11 +207,13 @@ export function JobsPaneBody() {
                 {task.status}
               </span>
               <span className="truncate font-mono text-[8px] text-teal-300/70" title={agent}>{agent || "—"}</span>
-              <button onClick={() => runNow(task.ref)}
-                disabled={busyRef === task.ref || task.status === "running"} title="Run now"
-                className="rounded border border-cyan-300/25 p-1 text-cyan-300/60 hover:bg-cyan-300/10 disabled:opacity-30">
-                <Play size={10} />
-              </button>
+              {hasChildren ? <span /> : (
+                <button onClick={() => runNow(task.ref)}
+                  disabled={busyRef === task.ref || task.status === "running"} title="Run now"
+                  className="rounded border border-cyan-300/25 p-1 text-cyan-300/60 hover:bg-cyan-300/10 disabled:opacity-30">
+                  <Play size={10} />
+                </button>
+              )}
             </div>
           );
         })}
