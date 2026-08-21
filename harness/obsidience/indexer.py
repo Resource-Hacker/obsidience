@@ -17,7 +17,6 @@ import numpy as np
 from .config import CONFIG
 from .task_taxonomy import (
     TASK_TAXONOMY_NODES,
-    canonical_members,
     child_ids,
     node_id,
 )
@@ -213,7 +212,6 @@ class Index:
         for taxonomy_order, taxonomy_node in enumerate(TASK_TAXONOMY_NODES):
             projected_id = node_id(taxonomy_node.path, known)
             projected_children = child_ids(taxonomy_node.path, known)
-            members = canonical_members(taxonomy_node.path, known)
             existing = by_id.get(projected_id)
             if existing:
                 existing["title"] = taxonomy_node.title
@@ -233,7 +231,7 @@ class Index:
                 "checkouts": {},
                 "tags": ["generated-index", "task-taxonomy"],
                 "synthetic": True,
-                "checkoutable": bool(members),
+                "checkoutable": True,
                 "order": taxonomy_order,
             }
             nodes.append(projected)

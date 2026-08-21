@@ -35,8 +35,10 @@ section is binding. Rules for working here:
 - The Task shelf projects the owner-authored `wiki` and `research` taxonomy
   from `harness/obsidience/task_taxonomy.py`. Taxonomy nodes are stateless
   Reader articles, not runnable tasks; real Task notes absorb matching leaves,
-  and only their authored `subtasks:` dispatch. The detailed `wiki/guard` tree
-  supersedes the earlier short guard sketch.
+  and only their authored `subtasks:` dispatch. Their stable
+  `@library/Tasks/*` refs may be stored in an identity's `tasks:` checkout list
+  and project the selected taxonomy closure without making it executable. The
+  detailed `wiki/guard` tree supersedes the earlier short guard sketch.
 
 ## Phase 1 directive (owner, 2026-08-20) — finish before anything else
 

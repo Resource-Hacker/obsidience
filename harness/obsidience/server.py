@@ -48,6 +48,11 @@ def _link_values(value) -> list[str]:
     return [str(item) for item in (value if isinstance(value, list) else [value])]
 
 
+def _link_ref(value: str) -> str:
+    return (value.strip().removeprefix("[[").removesuffix("]]")
+            .split("|", 1)[0].split("#", 1)[0].strip())
+
+
 def _note_doc(note):
     return {"ref": note.ref, "title": note.title, "kind": note.kind,
             "meta": {k: str(v) for k, v in note.meta.items()}, "body": note.body}
@@ -365,6 +370,12 @@ def library_checkouts():
         for kind, field in CHECKOUT_FIELDS.items():
             selected = set()
             for raw in _link_values(identity.meta.get(field)):
+                raw_ref = _link_ref(raw)
+                if kind == "task" and raw_ref.startswith("@library/Tasks/"):
+                    path = raw_ref.removeprefix("@library/Tasks/")
+                    if path in TASK_TAXONOMY_BY_PATH:
+                        assignments.append({"agent": agent, "ref": raw_ref, "kind": kind})
+                    continue
                 target = res.resolve(raw)
                 if target and target.kind == kind:
                     assignments.append({"agent": agent, "ref": target.ref, "kind": kind})
@@ -410,22 +421,14 @@ def set_library_checkout(ref: str, payload: dict):
     task_path = ref.removeprefix("@library/Tasks/") if ref.startswith("@library/Tasks/") else None
     if task_path and task_path not in TASK_TAXONOMY_BY_PATH:
         raise HTTPException(404, f"task taxonomy node not found: {task_path}")
-    known_tasks = {note.ref for note in iter_notes() if note.kind == "task"}
     if namespace:
         targets = _tool_namespace_members(namespace)
-    elif task_path:
-        targets = [
-            target for target_ref in task_taxonomy_members(task_path, known_tasks)
-            if (target := res.resolve(target_ref))
-        ]
     else:
         targets = []
     if namespace and namespace not in _tool_namespace_catalog()[1]:
         raise HTTPException(404, f"tool namespace not found: {namespace}")
-    if task_path and not targets:
-        raise HTTPException(409, "task taxonomy node has no executable tasks to check out yet")
     target = res.resolve(ref) if not namespace and not task_path else None
-    if not targets and (not target or target.kind not in CHECKOUT_FIELDS):
+    if not namespace and not task_path and (not target or target.kind not in CHECKOUT_FIELDS):
         raise HTTPException(404, f"library item not found: {ref}")
     identity = res.resolve(CHECKOUT_AGENTS[agent])
     if not identity:
@@ -435,10 +438,12 @@ def set_library_checkout(ref: str, payload: dict):
     field = CHECKOUT_FIELDS[kind]
     current = _link_values(identity.meta.get(field))
     retained = []
-    target_refs = {item.ref for item in targets} if namespace or task_path else {target.ref}
+    target_refs = ({ref} if task_path else {item.ref for item in targets}
+                   if namespace else {target.ref})
     for raw in current:
         resolved = res.resolve(raw)
-        if not resolved or resolved.ref not in target_refs:
+        current_ref = resolved.ref if resolved else _link_ref(raw)
+        if current_ref not in target_refs:
             retained.append(raw)
     if checked_out:
         retained.extend(f"[[{target_ref}]]" for target_ref in sorted(target_refs))

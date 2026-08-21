@@ -128,8 +128,9 @@ taxonomy. Its generated nodes are readable indexes with no state or play
 control; they describe where task definitions belong, but never execute.
 Existing canonical tasks occupy their closest matching leaf without changing
 their stable ref, history, schedule, or authored executable `subtasks:`. A
-taxonomy checkout stores only real descendant Task refs and is disabled while
-a branch contains none.
+taxonomy checkout stores the selected stable `@library/Tasks/*` index ref on
+the identity and projects that hierarchy closure onto the agent. This works
+even before the branch receives a runnable task and never grants execution.
 
 The **Jobs** pane is the scheduler surface: it creates, edits, runs, and watches
 scheduled task definitions. It does not double as the task catalog. "Job" is
