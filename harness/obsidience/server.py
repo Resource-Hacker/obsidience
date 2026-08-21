@@ -22,6 +22,12 @@ from .task_taxonomy import (
     child_ids as task_taxonomy_child_ids,
     descendant_count as task_taxonomy_descendant_count,
     node_id as task_taxonomy_node_id,
+    event_node as task_taxonomy_event_node,
+)
+from .skill_mirror import (
+    build_skill_mirror,
+    descendant_count as skill_mirror_descendant_count,
+    node_id as skill_mirror_node_id,
 )
 from .vault import iter_notes, load_note, resolver, write_note
 
@@ -124,13 +130,13 @@ def _task_taxonomy_article(ref: str, path: str | None = None) -> dict:
     if path is None:
         children = [node for node in TASK_TAXONOMY_NODES if "/" not in node.path]
         title = "Library · Tasks"
-        summary = "The Task shelf, organized by the owner-defined wiki and research taxonomy."
+        summary = "The Task shelf, organized by the owner-defined executive, wiki, and research taxonomy."
         article_count = len(TASK_TAXONOMY_NODES)
     else:
         node = TASK_TAXONOMY_BY_PATH[path]
         children = [TASK_TAXONOMY_BY_PATH[child] for child in node.children]
         title = node.title
-        summary = f"The `{path}` Task taxonomy node."
+        summary = node.summary or f"The `{path}` Task taxonomy node."
         article_count = task_taxonomy_descendant_count(path)
     lines = [
         f"- [[{task_taxonomy_node_id(child.path, known)}|{child.title}]] · task node"
@@ -140,10 +146,78 @@ def _task_taxonomy_article(ref: str, path: str | None = None) -> dict:
         "\n".join(lines)
         if lines else "*No executable task is defined at this leaf yet.*"
     )
+    meta = {"node": "true", "articles": str(article_count), "generated": "true"}
+    if path is not None and TASK_TAXONOMY_BY_PATH[path].event:
+        meta["trigger"] = TASK_TAXONOMY_BY_PATH[path].event
+        body += f"\n\n## Trigger\n\n`{TASK_TAXONOMY_BY_PATH[path].event}`"
     return {
         "ref": ref,
         "title": title,
         "kind": "task" if path is not None else "index",
+        "meta": meta,
+        "body": body,
+    }
+
+
+def _skill_mirror_catalog():
+    notes = iter_notes()
+    nodes = build_skill_mirror(notes)
+    return notes, nodes, {node.path: node for node in nodes}
+
+
+def _skill_mirror_article(ref: str, path: str | None = None) -> dict:
+    notes, nodes, by_path = _skill_mirror_catalog()
+    by_ref = {note.ref: note for note in notes}
+    if path is None:
+        children = [node for node in nodes if "/" not in node.path]
+        title = "Library · Skills"
+        summary = "Skills mirror the Tool shelf: each callable Tool has one article explaining how to use it."
+        article_count = len(nodes)
+    else:
+        node = by_path[path]
+        children = [by_path[child] for child in node.children]
+        title = node.title
+        article_count = skill_mirror_descendant_count(path, nodes)
+        if node.tool_ref:
+            tool = by_ref[node.tool_ref]
+            guidance = [by_ref[skill_ref] for skill_ref in node.source_skills if skill_ref in by_ref]
+            sections = [
+                f"How to use [[{tool.ref}|{tool.title}]].",
+                f"## Tool contract\n\n{tool.body.strip()}",
+            ]
+            if guidance:
+                sections.append("## Authored guidance\n\n" + "\n\n".join(
+                    f"### [[{skill.ref}|{skill.title}]]\n\n{skill.body.strip()}" for skill in guidance
+                ))
+            else:
+                sections.append(
+                    "## Usage guidance\n\nFollow the Tool contract exactly and verify its returned observation "
+                    "before treating the action as complete."
+                )
+            return {
+                "ref": ref,
+                "title": title,
+                "kind": "skill",
+                "meta": {
+                    "node": "true",
+                    "generated": "true",
+                    "tool": tool.ref,
+                    "source_skills": ", ".join(node.source_skills),
+                },
+                "body": "\n\n".join(sections),
+            }
+        summary = f"Usage Skills for the `{path.replace('/', '.')}` Tool namespace."
+    lines = [
+        f"- [[{skill_mirror_node_id(child.path)}|{child.title}]] · skill node"
+        for child in children
+    ]
+    body = summary + "\n\n## Indexed subskills\n\n" + (
+        "\n".join(lines) if lines else "*No callable Tool is indexed here.*"
+    )
+    return {
+        "ref": ref,
+        "title": title,
+        "kind": "skill" if path is not None else "index",
         "meta": {"node": "true", "articles": str(article_count), "generated": "true"},
         "body": body,
     }
@@ -296,6 +370,14 @@ def get_article(ref: str):
             if namespace not in _tool_namespace_catalog()[1]:
                 raise HTTPException(404, f"tool namespace not found: {namespace}")
             return _tool_namespace_article(ref, namespace)
+        if relative == "Skills":
+            return _skill_mirror_article(ref)
+        if relative.startswith("Skills/"):
+            path = relative.removeprefix("Skills/")
+            _notes, _nodes, by_path = _skill_mirror_catalog()
+            if path not in by_path:
+                raise HTTPException(404, f"skill mirror node not found: {path}")
+            return _skill_mirror_article(ref, path)
         if relative == "Tasks":
             return _task_taxonomy_article(ref)
         if relative.startswith("Tasks/"):
@@ -371,6 +453,11 @@ def library_checkouts():
             selected = set()
             for raw in _link_values(identity.meta.get(field)):
                 raw_ref = _link_ref(raw)
+                if kind == "skill" and raw_ref.startswith("@library/Skills/"):
+                    path = raw_ref.removeprefix("@library/Skills/")
+                    if path in _skill_mirror_catalog()[2]:
+                        assignments.append({"agent": agent, "ref": raw_ref, "kind": kind})
+                    continue
                 if kind == "task" and raw_ref.startswith("@library/Tasks/"):
                     path = raw_ref.removeprefix("@library/Tasks/")
                     if path in TASK_TAXONOMY_BY_PATH:
@@ -418,7 +505,10 @@ def set_library_checkout(ref: str, payload: dict):
 
     res = resolver()
     namespace = ref.removeprefix("@library/Tools/") if ref.startswith("@library/Tools/") else None
+    skill_path = ref.removeprefix("@library/Skills/") if ref.startswith("@library/Skills/") else None
     task_path = ref.removeprefix("@library/Tasks/") if ref.startswith("@library/Tasks/") else None
+    if skill_path and skill_path not in _skill_mirror_catalog()[2]:
+        raise HTTPException(404, f"skill mirror node not found: {skill_path}")
     if task_path and task_path not in TASK_TAXONOMY_BY_PATH:
         raise HTTPException(404, f"task taxonomy node not found: {task_path}")
     if namespace:
@@ -427,18 +517,18 @@ def set_library_checkout(ref: str, payload: dict):
         targets = []
     if namespace and namespace not in _tool_namespace_catalog()[1]:
         raise HTTPException(404, f"tool namespace not found: {namespace}")
-    target = res.resolve(ref) if not namespace and not task_path else None
-    if not namespace and not task_path and (not target or target.kind not in CHECKOUT_FIELDS):
+    target = res.resolve(ref) if not namespace and not skill_path and not task_path else None
+    if not namespace and not skill_path and not task_path and (not target or target.kind not in CHECKOUT_FIELDS):
         raise HTTPException(404, f"library item not found: {ref}")
     identity = res.resolve(CHECKOUT_AGENTS[agent])
     if not identity:
         raise HTTPException(500, f"checkout identity missing: {CHECKOUT_AGENTS[agent]}")
 
-    kind = "tool" if namespace else "task" if task_path else target.kind
+    kind = "tool" if namespace else "skill" if skill_path else "task" if task_path else target.kind
     field = CHECKOUT_FIELDS[kind]
     current = _link_values(identity.meta.get(field))
     retained = []
-    target_refs = ({ref} if task_path else {item.ref for item in targets}
+    target_refs = ({ref} if skill_path or task_path else {item.ref for item in targets}
                    if namespace else {target.ref})
     for raw in current:
         resolved = res.resolve(raw)
@@ -455,7 +545,7 @@ def set_library_checkout(ref: str, payload: dict):
         meta.pop(field, None)
     write_note(identity.path, meta, identity.body)
     INDEX.sync()
-    return {"agent": agent, "ref": ref if namespace or task_path else target.ref,
+    return {"agent": agent, "ref": ref if namespace or skill_path or task_path else target.ref,
             "kind": kind, "checked_out": checked_out}
 
 
@@ -759,13 +849,34 @@ async def chat_ws(ws: WebSocket):
             raw = await ws.receive_text()
             msg = json.loads(raw)
             text = str(msg.get("text", "")).strip()
+            source = str(msg.get("source", "text")).strip().lower()
+            if source not in {"text", "voice"}:
+                source = "text"
             if not text:
                 continue
+            event_context = ""
+            if source == "voice":
+                assistant_task = task_taxonomy_event_node("voice.activation")
+                if assistant_task:
+                    task_ref = task_taxonomy_node_id(
+                        assistant_task.path,
+                        {note.ref for note in iter_notes() if note.kind == "task"},
+                    )
+                    event_context = (
+                        f"# Event Task: {assistant_task.title}\n"
+                        f"Task ref: [[{task_ref}]]\n"
+                        "This turn originated from voice activation. Handle it as the current "
+                        "executive assistant while retaining the active runbook and tool authority."
+                    )
+                    trace.emit("event", f"{assistant_task.title} activated", [task_ref, "voice.activation"])
             brief = retrieval.briefing([text], exclude=set(), budget=1200)
             history.append({"role": "user", "content": (brief + "\n\n" if brief else "") + text})
-            messages = [{"role": "system", "content": system}] + history[-12:]
+            messages = [{"role": "system", "content": system}]
+            if event_context:
+                messages.append({"role": "system", "content": event_context})
+            messages += history[-12:]
             full = ""
-            await ws.send_json({"type": "start"})
+            await ws.send_json({"type": "start", "source": source})
             async for delta in llm.chat_stream(messages):
                 full += delta
                 await ws.send_json({"type": "delta", "text": delta})

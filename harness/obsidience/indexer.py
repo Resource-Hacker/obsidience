@@ -20,6 +20,7 @@ from .task_taxonomy import (
     child_ids,
     node_id,
 )
+from .skill_mirror import build_skill_mirror, node_id as skill_mirror_node_id
 from .vault import Note, iter_notes
 
 _SCHEMA = """
@@ -205,7 +206,30 @@ class Index:
                 "synthetic": True,
             })
 
-        # The owner's wiki/research ontology is a stateless Task index. Real
+        # Skills mirror dotted callable Tools one-for-one. Each generated leaf
+        # is an article about how to use its Tool; authored technique notes are
+        # retained as its guidance sources and remain canonical at runtime.
+        note_stubs = [
+            _N(path=ref + ".md", title=title, meta=json.loads(meta), body="")
+            for ref, title, _kind, meta, _links in rows
+        ]
+        for skill_order, skill_node in enumerate(build_skill_mirror(note_stubs)):
+            nodes.append({
+                "id": skill_mirror_node_id(skill_node.path),
+                "title": skill_node.title,
+                "kind": "skill",
+                "status": None,
+                "assignee": None,
+                "children": [skill_mirror_node_id(child) for child in skill_node.children],
+                "subtasks": [],
+                "checkouts": {},
+                "tags": ["generated-index", "skill-tool-mirror"],
+                "synthetic": True,
+                "checkoutable": True,
+                "order": skill_order,
+            })
+
+        # The owner's executive/wiki/research ontology is a stateless Task index. Real
         # Task notes occupy matching leaves, but their authored subtasks remain
         # the interpreter's only executable control-flow edges.
         by_id = {node["id"]: node for node in nodes}
@@ -219,6 +243,9 @@ class Index:
                 existing["tags"] = [*existing.get("tags", []), "task-taxonomy"]
                 existing["checkoutable"] = True
                 existing["order"] = taxonomy_order
+                if taxonomy_node.event:
+                    existing["event"] = taxonomy_node.event
+                    existing["tags"] = [*existing.get("tags", []), "event-triggered"]
                 continue
             projected = {
                 "id": projected_id,
@@ -234,6 +261,9 @@ class Index:
                 "checkoutable": True,
                 "order": taxonomy_order,
             }
+            if taxonomy_node.event:
+                projected["event"] = taxonomy_node.event
+                projected["tags"].append("event-triggered")
             nodes.append(projected)
             by_id[projected_id] = projected
         return {"nodes": nodes, "links": links}

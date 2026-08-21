@@ -32,13 +32,22 @@ section is binding. Rules for working here:
   Library (`task` → `complete`, `create`; `vault` → its callable leaves). Keep
   canonical checkout storage on the real descendant Tool refs, never the
   generated `@library/Tools/*` presentation IDs.
-- The Task shelf projects the owner-authored `wiki` and `research` taxonomy
+- The Task shelf projects the owner-authored `executive`, `wiki`, and `research` taxonomy
   from `harness/obsidience/task_taxonomy.py`. Taxonomy nodes are stateless
   Reader articles, not runnable tasks; real Task notes absorb matching leaves,
   and only their authored `subtasks:` dispatch. Their stable
   `@library/Tasks/*` refs may be stored in an identity's `tasks:` checkout list
   and project the selected taxonomy closure without making it executable. The
   detailed `wiki/guard` tree supersedes the earlier short guard sketch.
+- `Tasks/executive/assistant` is displayed as `Executive Subtask Assistant`
+  and is the `voice.activation` event task. Voice-originated Operator turns
+  enter that task context; typed turns do not. HEREBRUM remains read-only source
+  provenance and is never modified from this project.
+- The Skill shelf projects a generated one-for-one mirror of dotted callable
+  Tools (`task/complete`, `task/create`, `vault/list`, and so on). Each Skill
+  leaf reads as how to use its Tool and incorporates any authored Skill notes
+  that declare that Tool. Authored Skills remain the canonical runtime
+  authorization primitives; mirrors are Library navigation/checkouts.
 
 ## Phase 1 directive (owner, 2026-08-20) — finish before anything else
 

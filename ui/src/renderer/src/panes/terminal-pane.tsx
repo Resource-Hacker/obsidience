@@ -14,6 +14,7 @@ interface TraceEntry {
 }
 
 const TRACE_STYLE: Record<string, string> = {
+  event: "border-sky-300/40 text-sky-200",
   run: "border-cyan-300/35 text-cyan-200",
   tool: "border-amber-300/40 text-amber-200",
   result: "border-teal-300/35 text-teal-200",

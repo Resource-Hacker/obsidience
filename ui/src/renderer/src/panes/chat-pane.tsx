@@ -64,14 +64,14 @@ export function ChatPaneBody() {
     }
   }
 
-  const send = useCallback((text: string) => {
+  const send = useCallback((text: string, source: "text" | "voice" = "text") => {
     const clean = text.trim();
     if (!clean || busy) return;
     setTurns((t) => [...t, { role: "user", text: clean }]);
     setDraft("");
     setBusy(true);
     const sock = ensureSocket();
-    const payload = JSON.stringify({ text: clean });
+    const payload = JSON.stringify({ text: clean, source });
     if (sock.readyState === WebSocket.OPEN) sock.send(payload);
     else sock.onopen = () => sock.send(payload);
   }, [busy, ensureSocket]);
@@ -91,7 +91,7 @@ export function ChatPaneBody() {
         setRecording(false);
         try {
           const text = await api.transcribe(new Blob(chunks, { type: "audio/webm" }));
-          if (text) send(text);
+          if (text) send(text, "voice");
         } catch {
           setTurns((t) => [...t, { role: "assistant", text: "_(transcription failed)_" }]);
         }

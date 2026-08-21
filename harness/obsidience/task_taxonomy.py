@@ -18,6 +18,16 @@ def _leaves(*names: str) -> Tree:
 
 
 TASK_TAXONOMY: Tree = {
+    "executive": {
+        "assistant": {
+            "conversation": _leaves("answer", "clarify", "follow-up"),
+            "computer": _leaves("observe", "interact", "launch"),
+            "knowledge": _leaves("recall", "relate"),
+            "research": _leaves("search", "browse"),
+            "delegation": _leaves("assign", "reconcile"),
+            "operations": _leaves("plan", "schedule", "monitor"),
+        },
+    },
     "wiki": {
         "ingest": _leaves("collect", "extract", "normalize", "resolve", "index", "stage"),
         "curate": {
@@ -98,6 +108,22 @@ TASK_TAXONOMY: Tree = {
     },
 }
 
+TASK_DISPLAY_TITLES = {
+    "executive/assistant": "Executive Subtask Assistant",
+}
+
+TASK_EVENTS = {
+    "executive/assistant": "voice.activation",
+}
+
+TASK_SUMMARIES = {
+    "executive": "Work owned by the current HEREBRUM executive agent.",
+    "executive/assistant": (
+        "The event-triggered executive task context for voice-originated owner requests. "
+        "Computer use and the executive's other assistant work live beneath this node."
+    ),
+}
+
 
 # Existing executable tasks occupy their closest semantic taxonomy leaf. This
 # is a Library projection only; the notes keep their stable refs and runtime
@@ -118,6 +144,8 @@ class TaskTaxonomyNode:
     path: str
     title: str
     children: tuple[str, ...]
+    event: str | None = None
+    summary: str | None = None
 
 
 def _flatten(tree: Tree, parent: str = "") -> tuple[TaskTaxonomyNode, ...]:
@@ -126,8 +154,10 @@ def _flatten(tree: Tree, parent: str = "") -> tuple[TaskTaxonomyNode, ...]:
         path = f"{parent}/{title}" if parent else title
         rows.append(TaskTaxonomyNode(
             path=path,
-            title=title,
+            title=TASK_DISPLAY_TITLES.get(path, title),
             children=tuple(f"{path}/{child}" for child in children),
+            event=TASK_EVENTS.get(path),
+            summary=TASK_SUMMARIES.get(path),
         ))
         rows.extend(_flatten(children, path))
     return tuple(rows)
@@ -157,3 +187,7 @@ def canonical_members(path: str, known_refs: set[str]) -> list[str]:
 def descendant_count(path: str) -> int:
     prefix = path + "/"
     return sum(1 for node in TASK_TAXONOMY_NODES if node.path.startswith(prefix))
+
+
+def event_node(event: str) -> TaskTaxonomyNode | None:
+    return next((node for node in TASK_TAXONOMY_NODES if node.event == event), None)

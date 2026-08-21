@@ -29,9 +29,11 @@ field: `subtasks`, `subrunbooks`, `subskills`, or `subtools`. The Library,
 graph, Reader, validator, and interpreter all follow those exact ordered edges.
 Dotted Tool bindings also receive generated namespace parents in the Library,
 so `task.*` and `vault.*` display as expandable trees without duplicate notes.
-The Task shelf likewise projects the owner-defined `wiki` and `research`
-taxonomy as stateless Reader indexes; real runbook-backed tasks occupy its
-leaves as they are implemented.
+The Skill shelf mirrors the dotted Tool tree one-for-one, so every callable has
+an article explaining how to use it while authored Skills remain the runtime
+authorization source. The Task shelf likewise projects the owner-defined
+`executive`, `wiki`, and `research` taxonomy as stateless Reader indexes; real
+runbook-backed tasks occupy its leaves as they are implemented.
 
 ## Layout
 - `vault/` — the system itself (charters, runbooks, tasks, knowledge, receipts)
@@ -42,6 +44,9 @@ leaves as they are implemented.
 - STT: faster-whisper (CPU) via `/api/voice/transcribe`; mic button in the chat pane.
 - TTS: kokoro-js in the app, using the local model at
   `/var/lib/ai/models/kokoro-82m-v1.0-onnx` (override: `HEREBRUM_KOKORO_CACHE_DIR`).
+- Voice-originated Operator turns activate the stateless
+  `Tasks/executive/assistant` context (`Executive Subtask Assistant`); typed
+  turns keep the ordinary Operator context.
 
 ## Self-maintenance
 `Tasks/wiki` (every 6h, Wikipedia Task Center × karpathy llm-wiki):

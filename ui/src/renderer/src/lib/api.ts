@@ -20,6 +20,7 @@ export interface GraphNode {
   synthetic?: boolean;
   checkoutable?: boolean;
   order?: number;
+  event?: string;
   checkouts?: Partial<Record<"tools" | "skills" | "runbooks" | "tasks", string[]>>;
   tags?: string[];
 }
