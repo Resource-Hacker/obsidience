@@ -1,13 +1,33 @@
 ---
-approved_at: '2026-08-20T10:42:33'
-provenance: proposed by interpreter (task Tasks/expand-stubs)
-title: Obsidience
+approved_at: '2026-08-21T03:38:44'
+jarvis_source_citation: jarvis://claim/f26441df-73c3-4431-9050-10742e3c33db
+jarvis_source_claim: f26441df-73c3-4431-9050-10742e3c33db
+provenance: proposed by Codex (task owner knowledge request)
+tasks:
+- '[[@library/Tasks/executive]]'
+title: JARVIS
 ---
 
-# Obsidience
+# JARVIS
 
-Obsidience is a graph-native agent harness: a plain Obsidian vault plus a small interpreter. Four authoring primitives — recursive [[Tasks/maintain-vault|tasks]], procedural runbooks, skills (reusable tool knowledge), and executable tools — resolve through exact wikilinks (edges dispatch); hybrid retrieval assembles each session's briefing (vectors inform).
+JARVIS is the user-facing executive identity. In this greenfield build,
+Obsidience is its graph-native runtime: a plain Obsidian vault plus a small
+interpreter. The knowledge graph drives activation and retrieval while JARVIS
+coordinates the literal Alexandria, Darwin, and Heimdall agents.
 
-The runtime follows a sequence: task → runbook/subtasks → skills → authorized tools → evidence ([[Receipts|receipts]]) → task state [[Home|task state]].
+Four authoring primitives — recursive Tasks, procedural Runbooks, one Skill
+per Tool, and executable Tools — continue to resolve through exact wikilinks:
+edges dispatch and vectors inform. Their Obsidience-native catalogs remain in
+place; the legacy JARVIS Tools, Skills, Runbooks, and Tasks have deliberately
+not been imported yet.
 
-Sessions may invoke only the tools their skills grant. Agents stage proposals in `_staging/` for owner review; approvals and receipts are git-committed. LLM: local Gemma via llama.cpp. Voice: faster-whisper STT, kokoro-js TTS.
+The whole system follows node → subnode → child node → article at any
+meaningful depth. Tasks retain task → subtask structure where it fits; Tools,
+Skills, Runbooks, and ordinary knowledge use the same recursive pattern with
+their own child types. New material belongs at the narrowest fitting place in
+an existing semantic hierarchy. Names stay short and human-readable instead
+of flattening paths into hyphenated compound labels.
+
+Sessions may invoke only the Tools paired with their Skills. Agents stage
+proposals in `_staging/` for owner review, while approvals and immutable
+receipts remain git-audited.
