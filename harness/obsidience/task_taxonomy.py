@@ -108,7 +108,7 @@ TASK_TAXONOMY: Tree = {
 }
 
 TASK_DISPLAY_TITLES = {
-    "executive/assistant": "Executive Subtask Assistant",
+    "executive/assistant": "Voice Assistant",
 }
 
 TASK_EVENTS = {

@@ -39,7 +39,7 @@ section is binding. Rules for working here:
   `@library/Tasks/*` refs may be stored in an identity's `tasks:` checkout list
   and project the selected taxonomy closure without making it executable. The
   detailed `wiki/guard` tree supersedes the earlier short guard sketch.
-- `Tasks/executive/assistant` is displayed as `Executive Subtask Assistant`
+- `Tasks/executive/assistant` is displayed as `Voice Assistant`
   and is the `voice.activation` event task. Voice-originated Operator turns
   enter that task context; typed turns do not. Executive task families are its
   siblings directly beneath `executive`, not children of `assistant`. HEREBRUM
