@@ -144,7 +144,7 @@ def _task_taxonomy_article(ref: str, path: str | None = None) -> dict:
     ]
     body = summary + "\n\n## Indexed subtasks\n\n" + (
         "\n".join(lines)
-        if lines else "*No executable task is defined at this leaf yet.*"
+        if lines else "This is a terminal Task article. It becomes executable when a runbook-backed Task occupies this leaf."
     )
     meta = {"node": "true", "articles": str(article_count), "generated": "true"}
     if path is not None and TASK_TAXONOMY_BY_PATH[path].event:

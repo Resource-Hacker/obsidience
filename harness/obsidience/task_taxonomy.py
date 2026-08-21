@@ -19,14 +19,13 @@ def _leaves(*names: str) -> Tree:
 
 TASK_TAXONOMY: Tree = {
     "executive": {
-        "assistant": {
-            "conversation": _leaves("answer", "clarify", "follow-up"),
-            "computer": _leaves("observe", "interact", "launch"),
-            "knowledge": _leaves("recall", "relate"),
-            "research": _leaves("search", "browse"),
-            "delegation": _leaves("assign", "reconcile"),
-            "operations": _leaves("plan", "schedule", "monitor"),
-        },
+        "assistant": {},
+        "conversation": _leaves("answer", "clarify", "follow-up"),
+        "computer": _leaves("observe", "interact", "launch"),
+        "knowledge": _leaves("recall", "relate"),
+        "research": _leaves("search", "browse"),
+        "delegation": _leaves("assign", "reconcile"),
+        "operations": _leaves("plan", "schedule", "monitor"),
     },
     "wiki": {
         "ingest": _leaves("collect", "extract", "normalize", "resolve", "index", "stage"),
@@ -120,7 +119,7 @@ TASK_SUMMARIES = {
     "executive": "Work owned by the current HEREBRUM executive agent.",
     "executive/assistant": (
         "The event-triggered executive task context for voice-originated owner requests. "
-        "Computer use and the executive's other assistant work live beneath this node."
+        "The executive's task families live beside this event entry beneath Executive."
     ),
 }
 

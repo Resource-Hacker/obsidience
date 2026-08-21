@@ -46,7 +46,9 @@ runbook-backed tasks occupy its leaves as they are implemented.
   `/var/lib/ai/models/kokoro-82m-v1.0-onnx` (override: `HEREBRUM_KOKORO_CACHE_DIR`).
 - Voice-originated Operator turns activate the stateless
   `Tasks/executive/assistant` context (`Executive Subtask Assistant`); typed
-  turns keep the ordinary Operator context.
+  turns keep the ordinary Operator context. Conversation, computer, knowledge,
+  research, delegation, and operations are sibling task families directly
+  beneath `executive`.
 
 ## Self-maintenance
 `Tasks/wiki` (every 6h, Wikipedia Task Center × karpathy llm-wiki):

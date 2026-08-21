@@ -256,7 +256,10 @@ class Index:
                 "children": projected_children,
                 "subtasks": [],
                 "checkouts": {},
-                "tags": ["generated-index", "task-taxonomy"],
+                "tags": [
+                    "generated-index" if taxonomy_node.children else "generated-article",
+                    "task-taxonomy",
+                ],
                 "synthetic": True,
                 "checkoutable": True,
                 "order": taxonomy_order,

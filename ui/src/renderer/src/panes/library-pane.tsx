@@ -321,7 +321,7 @@ export function LibraryPaneBody() {
                 <span className="flex gap-2 font-mono text-[8px] text-emerald-200/35">
                   {hasChildren
                     ? <span>{children.length} {CHILD_LABELS[shelf]}</span>
-                    : <span>{node.synthetic ? "index" : task?.status ?? node.id}</span>}
+                    : <span>{node.synthetic ? "article" : task?.status ?? node.id}</span>}
                   {task?.schedule ? <span className="truncate">scheduled {task.schedule}</span> : null}
                 </span>
               </button>
