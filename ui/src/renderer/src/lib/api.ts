@@ -21,6 +21,7 @@ export interface GraphNode {
   checkoutable?: boolean;
   order?: number;
   event?: string;
+  routing?: string;
   checkouts?: Partial<Record<"tools" | "skills" | "runbooks" | "tasks", string[]>>;
   tags?: string[];
 }

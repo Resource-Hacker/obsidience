@@ -44,11 +44,10 @@ runbook-backed tasks occupy its leaves as they are implemented.
 - STT: faster-whisper (CPU) via `/api/voice/transcribe`; mic button in the chat pane.
 - TTS: kokoro-js in the app, using the local model at
   `/var/lib/ai/models/kokoro-82m-v1.0-onnx` (override: `HEREBRUM_KOKORO_CACHE_DIR`).
-- Voice-originated Operator turns activate the stateless
-  `Tasks/executive/assistant` context (`Voice Assistant`); typed
-  turns keep the ordinary Operator context. Conversation, computer, knowledge,
-  research, delegation, and operations are sibling task families directly
-  beneath `executive`.
+- Voice-originated Operator turns activate the stateless `Tasks/executive`
+  context; typed turns keep the ordinary Operator context. Executive adaptively
+  selects the relevant conversation, computer, knowledge, research, delegation,
+  or operations child tasks for each request.
 
 ## Self-maintenance
 `Tasks/wiki` (every 6h, Wikipedia Task Center × karpathy llm-wiki):

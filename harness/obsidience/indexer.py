@@ -246,6 +246,8 @@ class Index:
                 if taxonomy_node.event:
                     existing["event"] = taxonomy_node.event
                     existing["tags"] = [*existing.get("tags", []), "event-triggered"]
+                if taxonomy_node.routing:
+                    existing["routing"] = taxonomy_node.routing
                 continue
             projected = {
                 "id": projected_id,
@@ -267,6 +269,8 @@ class Index:
             if taxonomy_node.event:
                 projected["event"] = taxonomy_node.event
                 projected["tags"].append("event-triggered")
+            if taxonomy_node.routing:
+                projected["routing"] = taxonomy_node.routing
             nodes.append(projected)
             by_id[projected_id] = projected
         return {"nodes": nodes, "links": links}

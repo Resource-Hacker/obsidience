@@ -39,11 +39,11 @@ section is binding. Rules for working here:
   `@library/Tasks/*` refs may be stored in an identity's `tasks:` checkout list
   and project the selected taxonomy closure without making it executable. The
   detailed `wiki/guard` tree supersedes the earlier short guard sketch.
-- `Tasks/executive/assistant` is displayed as `Voice Assistant`
-  and is the `voice.activation` event task. Voice-originated Operator turns
-  enter that task context; typed turns do not. Executive task families are its
-  siblings directly beneath `executive`, not children of `assistant`. HEREBRUM
-  remains read-only source provenance and is never modified from this project.
+- `Tasks/executive` itself is the `voice.activation` event task. Voice-originated
+  Operator turns enter Executive; it adaptively selects only the relevant child
+  task families for the request. There is no separate Voice Assistant node.
+  Typed turns do not enter this event context. HEREBRUM remains read-only source
+  provenance and is never modified from this project.
 - Expandable generated taxonomy rows are indexes; terminal generated leaves are
   articles. The Library must label them accordingly.
 - The Skill shelf projects a generated one-for-one mirror of dotted callable

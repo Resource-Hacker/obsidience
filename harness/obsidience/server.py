@@ -150,6 +150,12 @@ def _task_taxonomy_article(ref: str, path: str | None = None) -> dict:
     if path is not None and TASK_TAXONOMY_BY_PATH[path].event:
         meta["trigger"] = TASK_TAXONOMY_BY_PATH[path].event
         body += f"\n\n## Trigger\n\n`{TASK_TAXONOMY_BY_PATH[path].event}`"
+    if path is not None and TASK_TAXONOMY_BY_PATH[path].routing:
+        meta["routing"] = TASK_TAXONOMY_BY_PATH[path].routing
+        body += (
+            "\n\n## Routing\n\nSelect and activate only the relevant child task families "
+            "for the current request."
+        )
     return {
         "ref": ref,
         "title": title,
@@ -856,19 +862,20 @@ async def chat_ws(ws: WebSocket):
                 continue
             event_context = ""
             if source == "voice":
-                assistant_task = task_taxonomy_event_node("voice.activation")
-                if assistant_task:
+                executive_task = task_taxonomy_event_node("voice.activation")
+                if executive_task:
                     task_ref = task_taxonomy_node_id(
-                        assistant_task.path,
+                        executive_task.path,
                         {note.ref for note in iter_notes() if note.kind == "task"},
                     )
                     event_context = (
-                        f"# Event Task: {assistant_task.title}\n"
+                        f"# Event Task: {executive_task.title}\n"
                         f"Task ref: [[{task_ref}]]\n"
                         "This turn originated from voice activation. Handle it as the current "
-                        "executive assistant while retaining the active runbook and tool authority."
+                        "executive, selecting only the relevant child task families automatically "
+                        "while retaining the active runbook and tool authority."
                     )
-                    trace.emit("event", f"{assistant_task.title} activated", [task_ref, "voice.activation"])
+                    trace.emit("event", f"{executive_task.title} activated", [task_ref, "voice.activation"])
             brief = retrieval.briefing([text], exclude=set(), budget=1200)
             history.append({"role": "user", "content": (brief + "\n\n" if brief else "") + text})
             messages = [{"role": "system", "content": system}]

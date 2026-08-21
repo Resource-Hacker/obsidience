@@ -19,7 +19,6 @@ def _leaves(*names: str) -> Tree:
 
 TASK_TAXONOMY: Tree = {
     "executive": {
-        "assistant": {},
         "conversation": _leaves("answer", "clarify", "follow-up"),
         "computer": _leaves("observe", "interact", "launch"),
         "knowledge": _leaves("recall", "relate"),
@@ -107,19 +106,18 @@ TASK_TAXONOMY: Tree = {
     },
 }
 
-TASK_DISPLAY_TITLES = {
-    "executive/assistant": "Voice Assistant",
+TASK_EVENTS = {
+    "executive": "voice.activation",
 }
 
-TASK_EVENTS = {
-    "executive/assistant": "voice.activation",
+TASK_ROUTING = {
+    "executive": "adaptive",
 }
 
 TASK_SUMMARIES = {
-    "executive": "Work owned by the current HEREBRUM executive agent.",
-    "executive/assistant": (
-        "The event-triggered executive task context for voice-originated owner requests. "
-        "The executive's task families live beside this event entry beneath Executive."
+    "executive": (
+        "The voice-activated task context owned by the current HEREBRUM executive agent. "
+        "It selects the relevant child task families automatically for each request."
     ),
 }
 
@@ -144,6 +142,7 @@ class TaskTaxonomyNode:
     title: str
     children: tuple[str, ...]
     event: str | None = None
+    routing: str | None = None
     summary: str | None = None
 
 
@@ -153,9 +152,10 @@ def _flatten(tree: Tree, parent: str = "") -> tuple[TaskTaxonomyNode, ...]:
         path = f"{parent}/{title}" if parent else title
         rows.append(TaskTaxonomyNode(
             path=path,
-            title=TASK_DISPLAY_TITLES.get(path, title),
+            title=title,
             children=tuple(f"{path}/{child}" for child in children),
             event=TASK_EVENTS.get(path),
+            routing=TASK_ROUTING.get(path),
             summary=TASK_SUMMARIES.get(path),
         ))
         rows.extend(_flatten(children, path))
