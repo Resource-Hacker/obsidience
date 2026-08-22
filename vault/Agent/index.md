@@ -1,5 +1,5 @@
 ---
-approved_at: '2026-08-22T05:23:23'
+approved_at: '2026-08-22T05:23:24'
 kind: knowledge
 provenance: proposed by Alexandria (task Tasks/curate)
 title: Agent
