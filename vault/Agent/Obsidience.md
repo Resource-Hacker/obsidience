@@ -1,11 +1,36 @@
 ---
-approved_at: '2026-08-21T03:38:44'
+approved_at: '2026-08-22T05:23:25'
 jarvis_source_citation: jarvis://claim/f26441df-73c3-4431-9050-10742e3c33db
 jarvis_source_claim: f26441df-73c3-4431-9050-10742e3c33db
-provenance: proposed by Codex (task owner knowledge request)
+kind: agent
+provenance: proposed by Alexandria (task Tasks/curate)
+runbooks:
+- '[[Runbooks/answer-the-user]]'
+- '[[Runbooks/observations/executive]]'
+skills:
+- '[[@library/Skills/observations/temporary/append]]'
+- '[[@library/Skills/task/complete]]'
+- '[[@library/Skills/task/create]]'
+- '[[@library/Skills/vault/list]]'
+- '[[@library/Skills/vault/propose]]'
+- '[[@library/Skills/vault/read]]'
+- '[[@library/Skills/vault/search]]'
+- '[[@library/Skills/vault/validate]]'
 tasks:
+- '[[@library/Tasks/observations]]'
 - '[[@library/Tasks/executive]]'
+- '[[Tasks/query]]'
+- '[[@library/Tasks/executive/conversation]]'
 title: JARVIS
+tools:
+- '[[Tools/observations.temporary.append]]'
+- '[[Tools/task.complete]]'
+- '[[Tools/task.create]]'
+- '[[Tools/vault.list]]'
+- '[[Tools/vault.propose]]'
+- '[[Tools/vault.read]]'
+- '[[Tools/vault.search]]'
+- '[[Tools/vault.validate]]'
 ---
 
 # JARVIS
@@ -29,5 +54,5 @@ an existing semantic hierarchy. Names stay short and human-readable instead
 of flattening paths into hyphenated compound labels.
 
 Sessions may invoke only the Tools paired with their Skills. Agents stage
-proposals in `_staging/` for owner review, while approvals and immutable
-receipts remain git-audited.
+proposals in `_staging/` for owner review. Execution attempts remain in the
+bounded run ledger, while accepted knowledge changes remain git-audited.
