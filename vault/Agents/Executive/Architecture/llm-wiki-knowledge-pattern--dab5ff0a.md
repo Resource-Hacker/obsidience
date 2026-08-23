@@ -1,7 +1,7 @@
 ---
-approved_at: '2026-08-22T18:11:08'
+approved_at: '2026-08-22T20:47:24'
 kind: knowledge
-provenance: proposed by Alexandria (task Tasks/link)
+provenance: proposed by Alexandria (task Tasks/merge)
 title: LLM-wiki knowledge pattern
 ---
 
@@ -45,6 +45,6 @@ than demanding broad latent recall.
 
 ## Relationships
 
-- `governs` [[Agents/Executive/Subagents/alexandria-curator-role--dcde65f2|Alexandria role charter]] - Alexandria maintains accepted Knowledge.
+- `governs` [[Agents/Alexandria/Alexandria|Alexandria]] - Alexandria maintains accepted Knowledge.
 - `governs` [[Agents/Executive/Subagents/darwin-researcher-role--de1c05ce|Darwin role charter]] - Darwin acquires missing external knowledge.
 - `governs` [[Agents/Executive/Subagents/heimdall-guardian-role--3d93da53|Heimdall role charter]] - Heimdall verifies evidence and graph integrity.
