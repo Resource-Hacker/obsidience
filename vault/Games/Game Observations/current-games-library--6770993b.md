@@ -1,5 +1,5 @@
 ---
-approved_at: '2026-08-25T09:27:24'
+approved_at: '2026-08-25T14:36:59'
 kind: knowledge
 provenance: proposed by Alexandria (task Tasks/link)
 tags:
@@ -17,3 +17,4 @@ The workstation's playable game library consists of Battle.net, World of Warcraf
 - `related_to` [[Games/WoW/primary-world-of-warcraft-profile--f2cc8948|Primary World of Warcraft profile]] — The current library’s World of Warcraft Retail (Smooth Motion) entry is the workstation route where the user’s primary World of Warcraft profile applies.
 - `related_to` [[ADMECH Workstation/Software/Games/Teamfight Tactics/tft-launch-via-rtx-4080-android-avd--3e5726a8|TFT launch via RTX 4080 Android AVD]] — The TFT entry is the managed RTX 4080 Android AVD route.
 - `related_to` [[Games/TFT/tft-next-best-play-policy--50fb5e13|TFT next-best-play policy]] — The current library’s Teamfight Tactics entry is the game route where a requested next-best TFT decision is governed by that bounded policy.
+- `related_to` [[Agents/Executive/Observations/plain-language-game-assistance--c7b2f41f|Plain-language game assistance preference]] — This library is the observed route inventory for the World of Warcraft and Teamfight Tactics games named in the plain-language assistance preference.
