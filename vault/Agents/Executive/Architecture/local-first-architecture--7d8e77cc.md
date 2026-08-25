@@ -1,5 +1,5 @@
 ---
-approved_at: '2026-08-25T06:51:22'
+approved_at: '2026-08-25T07:07:48'
 kind: knowledge
 provenance: proposed by Alexandria (task Tasks/link)
 title: Local-first architecture
@@ -26,3 +26,4 @@ becomes active only when a real Tool binding and its paired Skill validate.
 - `related_to` [[Agents/Executive/Executive|Executive]] - Executive is the user-facing role of the local runtime.
 - `implements` [[Agents/Executive/Architecture/activation-briefing-protocol--21d7f1ad|Activation packet protocol]] - Bounded activation makes local small-model execution practical.
 - `implements` [[Agents/Executive/Architecture/task-activation--b30a4642|Task activation]] - Task activation is where the architecture's exact-edge contract is realized: a capability is active only when its Tool binding and paired Skill resolve and validate.
+- `implements` [[Agents/Executive/Architecture/llm-wiki-knowledge-pattern--dab5ff0a|LLM-wiki knowledge pattern]] - The accepted Markdown vault, immutable Source, exact-edge capability activation, and low-parameter local target realize the wiki's maintenance and retrieval pattern.
