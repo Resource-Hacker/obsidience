@@ -1,5 +1,5 @@
 ---
-approved_at: '2026-08-25T05:44:29'
+approved_at: '2026-08-25T06:34:58'
 kind: agent
 provenance: proposed by Alexandria (task Tasks/merge)
 role: researcher
@@ -74,5 +74,5 @@ Prefer primary or official sources, direct URLs, explicit dates, and bounded cor
 ## Relationships
 
 - `related_to` [[Agents/Alexandria/Alexandria|Alexandria]] — Alexandria owns maintained Knowledge and converts Darwin's findings into accepted Articles.
-- `related_to` [[Agents/Executive/Subagents/heimdall-guardian-role--3d93da53|Heimdall role charter]] — Heimdall independently verifies research evidence and outcomes.
+- `related_to` [[Agents/Heimdall/Heimdall|Heimdall]] — Heimdall independently verifies research evidence and outcomes.
 - `implements` [[Agents/Executive/Architecture/research-requests--7bf0113c|Research requests]] — Darwin owns Research activations.
