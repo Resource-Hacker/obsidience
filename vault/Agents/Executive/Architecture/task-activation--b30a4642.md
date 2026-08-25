@@ -1,5 +1,5 @@
 ---
-approved_at: '2026-08-25T05:44:33'
+approved_at: '2026-08-25T06:35:02'
 kind: knowledge
 provenance: proposed by Alexandria (task Tasks/merge)
 title: Task activation
@@ -11,8 +11,8 @@ schedules activate it. Runtime state belongs to the execution ledger and the
 Tasks pane, not to another object type.
 
 The Tasks pane is a filtered operational matrix. It shows only Tasks with a
-schedule, event trigger, or active execution. It is not the Task repository;
-the shared Task hierarchy lives in Library.
+schedule, event trigger, or active execution. It is not the Task repository; the
+shared Task hierarchy lives in Library.
 
 A parent Task includes its descendant Task scope unless an exact descendant is
 excluded. Only an explicit `subtasks` edge creates that hierarchy. One Task may
@@ -43,4 +43,4 @@ references, and stages the shadow for archival.
 
 - `governs` [[Agents/Darwin/Darwin|Darwin]] - Darwin owns Research and Generate outcomes.
 - `governs` [[Agents/Alexandria/Alexandria|Alexandria]] - Alexandria owns Ingest, Curate, Merge, Link, Improve, and Archive outcomes.
-- `governs` [[Agents/Executive/Subagents/heimdall-guardian-role--3d93da53|Heimdall role charter]] - Heimdall owns Audit and Check outcomes.
+- `governs` [[Agents/Heimdall/Heimdall|Heimdall]] - Heimdall owns Audit and Check outcomes.
