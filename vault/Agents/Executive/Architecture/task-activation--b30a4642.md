@@ -1,5 +1,5 @@
 ---
-approved_at: '2026-08-22T20:47:25'
+approved_at: '2026-08-25T05:44:33'
 kind: knowledge
 provenance: proposed by Alexandria (task Tasks/merge)
 title: Task activation
@@ -41,6 +41,6 @@ references, and stages the shadow for archival.
 
 ## Relationships
 
-- `governs` [[Agents/Executive/Subagents/darwin-researcher-role--de1c05ce|Darwin role charter]] - Darwin owns Research and Generate outcomes.
+- `governs` [[Agents/Darwin/Darwin|Darwin]] - Darwin owns Research and Generate outcomes.
 - `governs` [[Agents/Alexandria/Alexandria|Alexandria]] - Alexandria owns Ingest, Curate, Merge, Link, Improve, and Archive outcomes.
 - `governs` [[Agents/Executive/Subagents/heimdall-guardian-role--3d93da53|Heimdall role charter]] - Heimdall owns Audit and Check outcomes.
