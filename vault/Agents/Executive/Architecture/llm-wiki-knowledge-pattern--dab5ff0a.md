@@ -1,13 +1,13 @@
 ---
-approved_at: '2026-08-22T20:47:24'
+approved_at: '2026-08-25T05:44:31'
 kind: knowledge
 provenance: proposed by Alexandria (task Tasks/merge)
 title: LLM-wiki knowledge pattern
 ---
 
 Obsidience uses a Karpathy-style wiki as the durable brain of the agent fleet.
-Knowledge compounds in concise, linked, human-editable Articles instead of
-being buried in transcripts or one oversized prompt. Agents continuously
+Knowledge compounds in concise, linked, human-editable Articles instead
+of being buried in transcripts or one oversized prompt. Agents continuously
 ingest, improve, verify, and retrieve this wiki through explicit Tasks and
 Runbooks.
 
@@ -46,5 +46,5 @@ than demanding broad latent recall.
 ## Relationships
 
 - `governs` [[Agents/Alexandria/Alexandria|Alexandria]] - Alexandria maintains accepted Knowledge.
-- `governs` [[Agents/Executive/Subagents/darwin-researcher-role--de1c05ce|Darwin role charter]] - Darwin acquires missing external knowledge.
+- `governs` [[Agents/Darwin/Darwin|Darwin]] - Darwin acquires missing external knowledge.
 - `governs` [[Agents/Executive/Subagents/heimdall-guardian-role--3d93da53|Heimdall role charter]] - Heimdall verifies evidence and graph integrity.
