@@ -1,5 +1,5 @@
 ---
-approved_at: '2026-08-25T05:04:00'
+approved_at: '2026-08-25T06:34:57'
 kind: agent
 provenance: proposed by Alexandria (task Tasks/merge)
 role: curator
@@ -81,5 +81,5 @@ integrity.
 ## Relationships
 
 - `related_to` [[Agents/Darwin/Darwin|Darwin]] — Darwin supplies bounded sourced findings.
-- `related_to` [[Agents/Executive/Subagents/heimdall-guardian-role--3d93da53|Heimdall role charter]] — Heimdall independently verifies evidence and integrity.
+- `related_to` [[Agents/Heimdall/Heimdall|Heimdall]] — Heimdall independently verifies evidence and integrity.
 - `implements` [[Agents/Executive/Architecture/llm-wiki-knowledge-pattern--dab5ff0a|LLM-wiki knowledge pattern]] — Alexandria owns ingestion and curation.
