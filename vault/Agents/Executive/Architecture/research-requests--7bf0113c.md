@@ -1,5 +1,5 @@
 ---
-approved_at: '2026-08-22T21:01:24'
+approved_at: '2026-08-25T05:04:02'
 kind: knowledge
 provenance: proposed by Alexandria (task Tasks/merge)
 title: Research requests
@@ -27,6 +27,6 @@ binding and paired Skill both exist and validate.
 
 ## Relationships
 
-- `uses` [[Agents/Executive/Subagents/darwin-researcher-role--de1c05ce|Darwin role charter]] - Darwin owns research acquisition and synthesis.
+- `uses` [[Agents/Darwin/Darwin|Darwin]] - Darwin owns research acquisition and synthesis.
 - `depends_on` [[Agents/Alexandria/Alexandria|Alexandria]] - Alexandria turns findings into maintained Knowledge.
 - `implements` [[Agents/Executive/Architecture/task-activation--b30a4642|Task activation]] - Research uses the same activation law as all work.
