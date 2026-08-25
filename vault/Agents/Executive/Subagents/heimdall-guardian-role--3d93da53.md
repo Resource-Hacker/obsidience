@@ -1,5 +1,5 @@
 ---
-approved_at: '2026-08-22T20:47:23'
+approved_at: '2026-08-25T05:04:03'
 kind: knowledge
 provenance: proposed by Alexandria (task Tasks/merge)
 title: Heimdall role charter
@@ -33,5 +33,5 @@ his own consequential change. A clean audit is a valid result.
 
 - `related_to` [[Agents/Heimdall/Heimdall|Heimdall]] — The Agent Brain Article carries the live assignments.
 - `governs` [[Agents/Alexandria/Alexandria|Alexandria]] — Heimdall verifies curator evidence and graph effects.
-- `governs` [[Agents/Executive/Subagents/darwin-researcher-role--de1c05ce|Darwin role charter]] — Heimdall verifies research acquisition and findings.
+- `governs` [[Agents/Darwin/Darwin|Darwin]] — Heimdall verifies research acquisition and findings.
 - `governs` [[Agents/Executive/Architecture/task-activation--b30a4642|Task activation]] — Heimdall audits execution evidence without becoming another scheduler.
