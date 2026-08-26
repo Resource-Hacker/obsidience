@@ -1,5 +1,5 @@
 ---
-approved_at: '2026-08-25T18:04:05'
+approved_at: '2026-08-25T18:10:35'
 kind: skill
 provenance: proposed by Codex (task codex:knowledge-handoff)
 title: Benchmark a model
