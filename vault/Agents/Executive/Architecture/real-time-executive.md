@@ -1,5 +1,5 @@
 ---
-approved_at: '2026-08-26T03:44:50'
+approved_at: '2026-08-26T04:10:36'
 kind: knowledge
 provenance: proposed by Alexandria (task Tasks/link)
 title: Real-time Executive
@@ -24,8 +24,7 @@ The duplex receiver is the same Gemma 4 E2B Duplex hardware component profiled i
 
 E2B answers first to preserve the proven conversational latency. Its completed
 response is a bounded semantic rendering of the acoustic turn, not a claimed
-verbatim transcript. That rendering enters the same Task selector and activation
-compiler used by text, manual, scheduled, and event-triggered work. Enabling
+verbatim transcript. That rendering enters the same [[Agents/Executive/Architecture/task-activation--b30a4642|Task activation]] selector and compiler used by text, manual, scheduled, and event-triggered work. Enabling
 the interface opens the single [[Tasks/executive/realtime|Realtime]] Task and
 keeps it running until the owner disables the interface or the runtime fails.
 The packet
