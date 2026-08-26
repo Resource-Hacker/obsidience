@@ -1,7 +1,7 @@
 ---
-approved_at: '2026-08-22T12:41:06'
+approved_at: '2026-08-26T10:34:40'
 kind: knowledge
-provenance: proposed by Codex (task codex:knowledge-handoff)
+provenance: proposed by Alexandria (task Tasks/link)
 title: Current Executive model
 ---
 
@@ -11,7 +11,7 @@ Gemma is the responsive Executive model at `127.0.0.1:8089`. The Qwen3.8 9B Dist
 
 Muse Glimmer 30B at `127.0.0.1:8095` has two valid layouts. RTX 4000 text-only measured 19.21 tok/s. Both GPUs enable the official vision projector and DFlash drafter and measured 42.46 tok/s with 45.2 percent draft acceptance; this is the preferred Task layout. RTX 4080-only is rejected because the official 17 GB quant does not fit fully resident there.
 
-MiniCPM-o 4.5 and Gemma 4 E2B Duplex are Hardware and Harness interface components, not Task models. MiniCPM at `127.0.0.1:8093` loaded its complete language, audio, vision, TTS, and Token2Wav graph on the RTX 4080 at 11.2 GiB and passed CUDA audio prefill plus a duplex listen decision. Gemma Duplex at `127.0.0.1:8094` used 10.5 GiB, produced first text at 111.9 ms, acknowledged interruption at 112.1 ms, and emitted zero late text events. Both are loopback-only. Obsidience retains the canonical transcript, local speech broker, generation cancellation, graph retrieval, Task selection, and Tool authority.
+Realtime speech is not a selectable reasoning model. Pipecat and NVIDIA NeMo use Nemotron Speech Streaming EN 0.6B on the RTX 4080 for streaming transcription and turn taking; Pocket TTS runs on CPU. The [[Agents/Executive/Architecture/real-time-executive|Real-time Executive]] sends each final transcript through the model and reasoning effort selected on its Task, so the Executive model remains Gemma unless the Task explicitly selects another valid reasoning model.
 
 Model servers and GPU leases are runtime plumbing, not Tools, Skills, Tasks, Runbooks, or knowledge authorities. Every activation still requires the exact Task, Runbook, Tool, Skill, Knowledge, and acceptance context; greater model capacity does not weaken that contract.
 
