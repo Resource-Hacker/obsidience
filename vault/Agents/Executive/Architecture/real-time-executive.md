@@ -1,5 +1,5 @@
 ---
-approved_at: '2026-08-25T18:08:41'
+approved_at: '2026-08-26T03:44:50'
 kind: knowledge
 provenance: proposed by Alexandria (task Tasks/link)
 title: Real-time Executive
@@ -12,15 +12,19 @@ one-authority, local-model, and exact-activation contract constrains its
 models, Task selection, and Tool execution. It uses two local models because
 conversation and planning have different timing requirements:
 
-- Gemma 4 E2B Duplex receives the live stream, owns interruption timing, and
-  is the only model allowed to publish the Executive's spoken response.
+- Gemma 4 E2B Duplex directly receives and understands the live audio stream,
+  owns interruption timing, and is the only model allowed to publish the
+  Executive's spoken response. No separate speech recognizer sits in front of
+  it.
 - DiffusionGemma 26B-A4B privately plans a response from the exact activation
   packet. Its output is advisory until the duplex receiver accepts it for the
   current, non-cancelled generation.
 
 The duplex receiver is the same Gemma 4 E2B Duplex hardware component profiled in [[Agents/Executive/Architecture/current-executive-model--3745813a|Current Executive model]].
 
-Every completed utterance enters the same Task selector and activation
+E2B answers first to preserve the proven conversational latency. Its completed
+response is a bounded semantic rendering of the acoustic turn, not a claimed
+verbatim transcript. That rendering enters the same Task selector and activation
 compiler used by text, manual, scheduled, and event-triggered work. Enabling
 the interface opens the single [[Tasks/executive/realtime|Realtime]] Task and
 keeps it running until the owner disables the interface or the runtime fails.
@@ -30,7 +34,7 @@ Knowledge Articles. The graph therefore shows the exact Articles that are
 active while the Executive thinks and speaks, and the completed turn returns
 through the ordinary bounded Temporary Observations path. The packet's
 construction rules are specified by
-[[Agents/Executive/Architecture/activation-briefing-protocol--21d7f1ad|Activation packet protocol]].
+[[Agents/Executive/Architecture/activation-briefing-protocol--21d7f1ad|Activation packet protocol]]. This packet is one execution-surface realization of [[Agents/Executive/Architecture/llm-wiki-knowledge-pattern--dab5ff0a|LLM-wiki knowledge pattern]], whose exact accepted graph edges select the active capability spine and bounded Knowledge.
 
 Obsidience alone selects Tasks, retrieves Knowledge, authorizes and invokes
 Tools, records evidence, and decides whether an outcome succeeded. Neither
@@ -49,10 +53,16 @@ creator provenance as the only exception. Causal ordering never makes that
 peer a subtask. Turning Realtime off releases the pause without rewriting the
 pending Tasks.
 
-The microphone transcript remains mutable until endpointing, so private
-planner overlap is disabled in the production path. Loopback activation
-requests run on a sidecar thread with a fresh bounded HTTP connection; they
-never block the receiver's 80 ms interruption loop. For a Tool turn, E2B begins
-the planner's short immediate sentence before the Tool observation returns;
-the verified result follows on a fresh generation after that first segment is
-finished. Mutable Moonshine transcripts never enable speculative overlap.
+The microphone remains live while E2B speaks, so a fresh acoustic turn can
+interrupt the current generation without waiting for output to finish. One
+temporary PipeWire WebRTC echo-cancel source/sink pair filters the selected
+physical microphone against the exact assistant-output reference. It is
+session plumbing rather than a model or speech recognizer, changes no global
+default, and is removed when Realtime ends.
+Loopback activation requests run on a sidecar thread with a fresh bounded HTTP
+connection; they never block the receiver's 80 ms interruption loop. The
+completed semantic rendering and packet go privately to DiffusionGemma. It may
+accept the response, replace a material error, or propose one packet-authorized
+Tool. Obsidience executes that Tool and returns its observation to the reasoner;
+E2B alone voices the grounded final result. Planner overlap stays off unless the
+controller can bind an immutable exact packet.
