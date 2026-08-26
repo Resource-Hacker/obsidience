@@ -1,14 +1,16 @@
 ---
-approved_at: '2026-08-25T05:04:02'
+approved_at: '2026-08-26T06:56:58'
 kind: knowledge
-provenance: proposed by Alexandria (task Tasks/merge)
+provenance: proposed by Alexandria (task Tasks/link)
 title: Research requests
 ---
 
 When accepted Knowledge is insufficient, Executive activates one bounded Darwin
 outcome: Question, Learn, News, or Model. An ad hoc request runs immediately; a
-recurring request adds a schedule to the same Task. Both use ordinary Task
-activation.
+recurring request adds a schedule to the same Task and remains pending while
+[[Agents/Executive/Architecture/real-time-executive|Real-time Executive]] runs,
+because that surface leaves autonomous specialist schedules and triggers
+unclaimed. Both use ordinary Task activation.
 
 The Task states the gap, target, expected artifact, and acceptance conditions.
 Its Runbook owns framing, discovery, collection, screening, assessment,
