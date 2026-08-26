@@ -1,5 +1,5 @@
 ---
-approved_at: '2026-08-25T18:10:36'
+approved_at: '2026-08-25T18:19:11'
 binding: builtin:model.benchmark
 kind: tool
 provenance: proposed by Codex (task codex:knowledge-handoff)
