@@ -1,5 +1,5 @@
 ---
-approved_at: '2026-08-25T17:51:14'
+approved_at: '2026-08-25T18:08:41'
 kind: knowledge
 provenance: proposed by Alexandria (task Tasks/link)
 title: Real-time Executive
@@ -17,6 +17,8 @@ conversation and planning have different timing requirements:
 - DiffusionGemma 26B-A4B privately plans a response from the exact activation
   packet. Its output is advisory until the duplex receiver accepts it for the
   current, non-cancelled generation.
+
+The duplex receiver is the same Gemma 4 E2B Duplex hardware component profiled in [[Agents/Executive/Architecture/current-executive-model--3745813a|Current Executive model]].
 
 Every completed utterance enters the same Task selector and activation
 compiler used by text, manual, scheduled, and event-triggered work. Enabling
