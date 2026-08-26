@@ -1,7 +1,7 @@
 ---
-approved_at: '2026-08-25T06:35:00'
+approved_at: '2026-08-26T03:02:43'
 kind: knowledge
-provenance: proposed by Alexandria (task Tasks/merge)
+provenance: proposed by Alexandria (task Tasks/link)
 title: LLM-wiki knowledge pattern
 ---
 
@@ -13,6 +13,8 @@ Obsidience uses a Karpathy-style wiki as the durable brain of the agent fleet. K
 2. **Knowledge Articles** contain the maintained synthesis. Every Article is readable, and any Article with descendants is their index and condensation.
 3. **Typed work Articles** separate outcomes, procedures, capability, capability guidance, and accountable executors into Task, Runbook, Tool, Skill, and Agent kinds.
 4. **RAPTOR activation** fuses direct lexical and semantic matches, adds at most two linked Knowledge neighbors, and packs the useful result with the exact capability spine into one semantically labeled activation packet.
+
+The packet's labels, packing order, and Knowledge allowance are specified in [[Agents/Executive/Architecture/activation-briefing-protocol--21d7f1ad|Activation packet protocol]].
 
 The capability spine is the exact accepted Task's resolved Runbook, Skills, and Tools, as defined in [[Agents/Executive/Architecture/task-activation--b30a4642|Task activation]].
 
