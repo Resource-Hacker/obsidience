@@ -1,7 +1,7 @@
 ---
-approved_at: '2026-08-27T15:34:54'
+approved_at: '2026-08-27T16:17:18'
 kind: knowledge
-provenance: proposed by Alexandria (task Tasks/link)
+provenance: proposed by Codex (task codex:knowledge-handoff)
 title: Real-time Executive
 ---
 
@@ -48,10 +48,11 @@ Executive Thinking Packet by exact Article identity. It contains the newest
 cumulative Temporary Observation summary followed by exact completed
 user-and-reply pairs after that summary's sequence boundary. It grants no Task,
 Tool, Policy, or durable Knowledge authority. Enabling Realtime rotates once to
-a fresh conversation. Typed Chat and speech share that identity until the next
-Realtime enable or the owner's explicit New Conversation action. Disabling
-Realtime does not rotate on its own, and rotation never deletes earlier SQLite
-rows.
+a fresh conversation without waiting on prior-session maintenance. Typed Chat
+and speech share that identity until the next Realtime enable or the owner's
+explicit New Conversation action. The outgoing Chat session is retained for
+finalization when Realtime ends, preserving startup latency. Disabling Realtime
+does not rotate on its own, and rotation never deletes earlier SQLite rows.
 
 At 80 percent of the selected Task model's usable input context by default,
 [[Tasks/observations/immediate/compact|Compact Immediate Observations]] runs as
@@ -63,10 +64,14 @@ the Task completes; failed, blocked, canceled, or stale attempts cannot advance
 the context boundary. Exact public turns remain in SQLite. Executive Chat and
 Realtime do not emit the retired per-turn Temporary Observation Task.
 
-Temporary summaries are transient, unverified working context. A later Darwin
-Durable Observation Task may distill selected Temporary Observations into normal
-owner-review candidates for durable Articles. This is promotion through the
-existing Observation and review system, not a parallel memory store.
+Temporary summaries are transient, unverified working context. At an explicit
+Chat conversation rotation, or after Realtime fully stops, Alexandria's
+[[Tasks/observations/durable/promote|Promote Temporary Observations]] Task force-
+compacts the final completed prefix, archives the exact bound Temporary bundle
+in immutable Source, and stages only justified Knowledge creates or updates for
+owner review. Merge and Link remain ordinary peer Tasks when needed. Accepted
+Knowledge in the normal graph is the durable context; Source archival and
+pending proposals do not create a parallel memory store or accepted truth.
 
 Obsidience alone selects Tasks, retrieves Knowledge, authorizes and invokes
 Tools, records evidence, and decides whether an outcome succeeded. Neither
@@ -80,7 +85,8 @@ triggers pending instead of claiming them. An exact task.create emitted from
 Realtime may delegate a real peer Task to another Agent and carries immutable
 creator provenance as the only exception. Causal ordering never makes that peer
 a subtask. Turning Realtime off releases the pause without rewriting pending
-Tasks.
+Tasks. Session promotion is issued only after that release and waits until any
+other running Task has finished.
 
 The microphone remains live while Pocket speaks, so a fresh acoustic turn can
 cancel playback and the in-flight Task generation without waiting for output to
