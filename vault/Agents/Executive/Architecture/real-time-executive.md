@@ -1,5 +1,5 @@
 ---
-approved_at: '2026-08-27T14:09:26'
+approved_at: '2026-08-27T14:21:59'
 kind: knowledge
 provenance: proposed by Codex (task codex:knowledge-handoff)
 title: Real-time Executive
@@ -41,8 +41,10 @@ not conversation history.
 Only exact completed user-and-reply pairs may re-enter a later activation as a
 bounded, transient, unverified conversation section. That section is not
 indexed, does not participate in retrieval, and grants no Task or Tool authority.
-Realtime start and stop preserve it. The owner's explicit New conversation
-action rotates the active identity without deleting earlier SQLite rows. Each
+Enabling Realtime rotates once to a fresh conversation. Typed Chat and speech
+share that identity until the next Realtime enable or the owner's explicit New
+conversation action. Disabling Realtime does not rotate on its own. Rotation never
+deletes earlier SQLite rows. Each
 completed pair also emits the ordinary `turn.complete` graph event; the
 owner-enabled [[@agent/Temporary Observations|Temporary Observations]] Task may
 distill a small semantic cache, while the exact transcript remains runtime state
