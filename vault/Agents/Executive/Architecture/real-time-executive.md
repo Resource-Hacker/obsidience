@@ -1,49 +1,58 @@
 ---
-approved_at: '2026-08-26T04:10:36'
+approved_at: '2026-08-27T14:09:26'
 kind: knowledge
-provenance: proposed by Alexandria (task Tasks/link)
+provenance: proposed by Codex (task codex:knowledge-handoff)
 title: Real-time Executive
 ---
 
 The real-time Executive is one Obsidience execution surface, not another
 Agent, harness, scheduler, memory store, or Tool authority. It operates under
 [[Agents/Executive/Architecture/local-first-architecture--7d8e77cc|local-first architecture]], whose
-one-authority, local-model, and exact-activation contract constrains its
-models, Task selection, and Tool execution. It uses two local models because
-conversation and planning have different timing requirements:
+one-authority and local-model contract constrains its Task selection and Tool
+execution.
 
-- Gemma 4 E2B Duplex directly receives and understands the live audio stream,
-  owns interruption timing, and is the only model allowed to publish the
-  Executive's spoken response. No separate speech recognizer sits in front of
-  it.
-- DiffusionGemma 26B-A4B privately plans a response from the exact activation
-  packet. Its output is advisory until the duplex receiver accepts it for the
-  current, non-cancelled generation.
+Realtime has one reasoning pipeline. The model and reasoning effort selected on
+[[Tasks/executive/realtime|Realtime]] remain the sole source of intent, Tool
+selection, reasoning, and public answers. Pipecat and NVIDIA NeMo supply fixed
+speech transport around that Task: Nemotron Speech Streaming EN 0.6B converts
+the selected microphone stream into transcripts and manages turn boundaries;
+Pocket TTS converts the completed public answer into speech on CPU. Neither is
+an Agent or reasoning model. Pipecat's upstream `LocalAudioTransport` opens the
+Hardware-selected microphone and speaker through process-scoped Pulse routing;
+Obsidience adds no browser audio client, audio WebSocket, or custom
+capture/playback processor. Realtime ready enables the OBSBOT SDK's persistent
+microphone-during-sleep setting and Realtime off disables it.
 
-The duplex receiver is the same Gemma 4 E2B Duplex hardware component profiled in [[Agents/Executive/Architecture/current-executive-model--3745813a|Current Executive model]].
+Enabling the interface opens the Realtime Task and keeps it running until the
+owner disables it or the runtime fails. Each final transcript is one execution
+of that same Task through the normal activation compiler, so its Agent Identity,
+Task, Tools, Skills, Runbook, retrieved Knowledge, Tool calls, and evidence all
+follow the same graph path as scheduled or manually started work. The graph
+therefore shows real work rather than an output-only animation mirror.
 
-E2B answers first to preserve the proven conversational latency. Its completed
-response is a bounded semantic rendering of the acoustic turn, not a claimed
-verbatim transcript. That rendering enters the same [[Agents/Executive/Architecture/task-activation--b30a4642|Task activation]] selector and compiler used by text, manual, scheduled, and event-triggered work. Enabling
-the interface opens the single [[Tasks/executive/realtime|Realtime]] Task and
-keeps it running until the owner disables the interface or the runtime fails.
-The packet
-order is Agent Identity, Task, Tools, Skills, Runbook, and up to five Relevant
-Knowledge Articles. The graph therefore shows the exact Articles that are
-active while the Executive thinks and speaks, and the completed turn returns
-through the ordinary bounded Temporary Observations path. The packet's
-construction rules are specified by
-[[Agents/Executive/Architecture/activation-briefing-protocol--21d7f1ad|Activation packet protocol]]. This packet is one execution-surface realization of [[Agents/Executive/Architecture/llm-wiki-knowledge-pattern--dab5ff0a|LLM-wiki knowledge pattern]], whose exact accepted graph edges select the active capability spine and bounded Knowledge.
+Typed Executive Chat and Realtime speech share one active exact conversation.
+Its newest 80 turns remain in a bounded in-memory deque that rehydrates from the
+existing SQLite runtime ledger. A finalized user turn is persisted before model
+execution. An assistant turn is persisted only when the current generation
+finishes with a nonempty public reply, and it names the exact user turn it
+answers. Failed, blocked, interrupted, canceled, or generation-stale output is
+not conversation history.
+
+Only exact completed user-and-reply pairs may re-enter a later activation as a
+bounded, transient, unverified conversation section. That section is not
+indexed, does not participate in retrieval, and grants no Task or Tool authority.
+Realtime start and stop preserve it. The owner's explicit New conversation
+action rotates the active identity without deleting earlier SQLite rows. Each
+completed pair also emits the ordinary `turn.complete` graph event; the
+owner-enabled [[@agent/Temporary Observations|Temporary Observations]] Task may
+distill a small semantic cache, while the exact transcript remains runtime state
+rather than graph Knowledge.
 
 Obsidience alone selects Tasks, retrieves Knowledge, authorizes and invokes
 Tools, records evidence, and decides whether an outcome succeeded. Neither
-model may invent a capability, execute an unbound Tool, persist memory, or
-claim an external effect without verification. During Realtime, a Tool call is
-an ordinary step of that one Task rather than a synthetic Task of its own. The
-planner may propose one exact Tool present in the current packet; the harness
-validates and executes it off the receiver loop, and the returned observation
-grounds the final response. `task.complete` remains owned by the Realtime
-button lifecycle.
+the speech plumbing may invent a capability, execute an unbound Tool, persist
+memory, or claim an external effect without verification. `task.complete`
+remains owned by the Realtime button lifecycle.
 
 While Realtime runs, the scheduler leaves autonomous specialist schedules and
 triggers pending instead of claiming them. An exact `task.create` emitted from
@@ -52,16 +61,7 @@ creator provenance as the only exception. Causal ordering never makes that
 peer a subtask. Turning Realtime off releases the pause without rewriting the
 pending Tasks.
 
-The microphone remains live while E2B speaks, so a fresh acoustic turn can
-interrupt the current generation without waiting for output to finish. One
-temporary PipeWire WebRTC echo-cancel source/sink pair filters the selected
-physical microphone against the exact assistant-output reference. It is
-session plumbing rather than a model or speech recognizer, changes no global
-default, and is removed when Realtime ends.
-Loopback activation requests run on a sidecar thread with a fresh bounded HTTP
-connection; they never block the receiver's 80 ms interruption loop. The
-completed semantic rendering and packet go privately to DiffusionGemma. It may
-accept the response, replace a material error, or propose one packet-authorized
-Tool. Obsidience executes that Tool and returns its observation to the reasoner;
-E2B alone voices the grounded final result. Planner overlap stays off unless the
-controller can bind an immutable exact packet.
+The microphone remains live while Pocket speaks, so a fresh acoustic turn can
+cancel playback and the in-flight Task generation without waiting for output to
+finish. NeMo may classify a short backchannel without interrupting. These are
+speech-transport decisions, never Task, Tool, or Knowledge decisions.
