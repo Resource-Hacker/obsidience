@@ -1,7 +1,7 @@
 ---
-approved_at: '2026-08-27T15:16:58'
+approved_at: '2026-08-27T15:34:54'
 kind: knowledge
-provenance: proposed by Codex (task codex:knowledge-handoff)
+provenance: proposed by Alexandria (task Tasks/link)
 title: Real-time Executive
 ---
 
@@ -25,7 +25,9 @@ microphone-during-sleep setting and Realtime off disables it.
 
 Enabling the interface opens the Realtime Task and keeps it running until the
 owner disables it or the runtime fails. Each final transcript executes that same
-Task through the normal activation compiler. Agent Identity, Task, Tools,
+Task through the normal activation compiler described by
+[[Agents/Executive/Architecture/activation-briefing-protocol--21d7f1ad|Activation packet protocol]],
+which assembles the visible Thinking Packet. Agent Identity, Task, Tools,
 Skills, Runbook, retrieved Knowledge, and
 [[Agents/Executive/Observations/immediate-observations|Immediate Observations]]
 form one visible Thinking Packet. The exact packet refs drive graph activity, so
