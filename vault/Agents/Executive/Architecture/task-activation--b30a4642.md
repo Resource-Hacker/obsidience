@@ -1,7 +1,7 @@
 ---
-approved_at: '2026-08-25T06:35:02'
+approved_at: '2026-08-27T16:33:34'
 kind: knowledge
-provenance: proposed by Alexandria (task Tasks/merge)
+provenance: proposed by Codex (task codex:knowledge-handoff)
 title: Task activation
 ---
 
@@ -25,10 +25,12 @@ Skill resolves exactly one Tool, and the Agent checkout may narrow the resulting
 capability set. Missing or invalid links fail closed. Completion requires the
 Task's acceptance conditions, not merely reaching the end of the Runbook.
 
-Task families remain shallow by default: Wiki directly exposes Ingest, Query,
+Task catalog categories stay shallow by default: Wiki directly exposes Ingest, Query,
 Curate, Merge, Link, Improve, Archive, Audit, and Check; Research exposes
-Question, Learn, News, and Model; Generate is a peer; Observations keeps deeper Temporary and
-Durable lifecycles because those scopes are independently meaningful.
+Question, Learn, News, and Model; Generate remains its outcome-bearing Task
+family. Observations is an inert Knowledge category containing the peer Compact
+and Promote Tasks. Immediate and Temporary are Knowledge states, while durable
+context is the ordinary accepted graph.
 
 Generate → Task authors reusable Task definitions with `vault.propose`.
 `task.create` activates an exact accepted Task and never authors a Library
