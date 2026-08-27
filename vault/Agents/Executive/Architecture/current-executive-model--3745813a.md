@@ -1,5 +1,5 @@
 ---
-approved_at: '2026-08-26T10:34:40'
+approved_at: '2026-08-27T11:49:26'
 kind: knowledge
 provenance: proposed by Alexandria (task Tasks/link)
 title: Current Executive model
@@ -13,7 +13,7 @@ Muse Glimmer 30B at `127.0.0.1:8095` has two valid layouts. RTX 4000 text-only m
 
 Realtime speech is not a selectable reasoning model. Pipecat and NVIDIA NeMo use Nemotron Speech Streaming EN 0.6B on the RTX 4080 for streaming transcription and turn taking; Pocket TTS runs on CPU. The [[Agents/Executive/Architecture/real-time-executive|Real-time Executive]] sends each final transcript through the model and reasoning effort selected on its Task, so the Executive model remains Gemma unless the Task explicitly selects another valid reasoning model.
 
-Model servers and GPU leases are runtime plumbing, not Tools, Skills, Tasks, Runbooks, or knowledge authorities. Every activation still requires the exact Task, Runbook, Tool, Skill, Knowledge, and acceptance context; greater model capacity does not weaken that contract.
+Model servers and GPU leases are runtime plumbing, not Tools, Skills, Tasks, Runbooks, or knowledge authorities. Every activation still requires the exact Task, Runbook, Tool, Skill, Knowledge, and acceptance context; greater model capacity does not weaken that contract. The [[Agents/Executive/Observations/updateable-plugin-integration-preference--b7bed8fd|Updateable integration preference]] grounds the boundary that keeps model upgrades replaceable and outside the accepted graph and ontology.
 
 ## Relationships
 
