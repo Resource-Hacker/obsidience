@@ -1,5 +1,5 @@
 ---
-approved_at: '2026-08-27T16:17:18'
+approved_at: '2026-08-27T16:33:32'
 kind: knowledge
 provenance: proposed by Codex (task codex:knowledge-handoff)
 title: Real-time Executive
@@ -55,7 +55,7 @@ finalization when Realtime ends, preserving startup latency. Disabling Realtime
 does not rotate on its own, and rotation never deletes earlier SQLite rows.
 
 At 80 percent of the selected Task model's usable input context by default,
-[[Tasks/observations/immediate/compact|Compact Immediate Observations]] runs as
+[[Tasks/observations/compact|Compact Immediate Observations]] runs as
 an ordinary Executive Task with its authored Runbook, Skills, Tools, model, and
 reasoning effort. The owner may choose 60, 70, 80, or 90 percent or press
 Compact immediately. The Task condenses only the completed prefix into one
@@ -66,7 +66,7 @@ Realtime do not emit the retired per-turn Temporary Observation Task.
 
 Temporary summaries are transient, unverified working context. At an explicit
 Chat conversation rotation, or after Realtime fully stops, Alexandria's
-[[Tasks/observations/durable/promote|Promote Temporary Observations]] Task force-
+[[Tasks/observations/promote|Promote Temporary Observations]] Task force-
 compacts the final completed prefix, archives the exact bound Temporary bundle
 in immutable Source, and stages only justified Knowledge creates or updates for
 owner review. Merge and Link remain ordinary peer Tasks when needed. Accepted
