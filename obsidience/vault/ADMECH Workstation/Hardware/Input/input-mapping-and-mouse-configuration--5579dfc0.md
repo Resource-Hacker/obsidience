@@ -1,5 +1,5 @@
 ---
-approved_at: '2026-08-26T22:06:56'
+approved_at: '2026-08-28T10:50:42'
 kind: knowledge
 provenance: proposed by Codex (task codex:knowledge-handoff)
 tags:
@@ -27,9 +27,17 @@ The WoW launcher sources the selected exact anchored mouse-name expression from 
 
 Caps Lock remains mapped to Up through keyd for mouselook. Helper-created virtual devices remain excluded from keyd to avoid the prior keyd crash. Preserve raw mouse behavior and the intentional NumPad mapping for supported extra buttons. M33kAuras and Plater retain their local Retail API fixes.
 
+## Isolated-display bridge cursor control
+
+On the dual-screen AMD Xorg topology, USB-C is `:2.0` and DP-4 is `:2.1`. The shared `/home/wissenschafter/bin/dp4-edge-bridge` implementation uses a persistent native `libX11`/`libXfixes` connection to hide the inactive screen cursor and show only the active isolated-screen cursor. Python-Xlib remains responsible for the established XTest injection path but must not issue XFixes cursor hide/show on this topology: its corrected window method produced a `BadRRCrtcError` parsing failure and crashed the bridge on the first entry.
+
+Each command FIFO has exactly one intended reader. Never inspect `dp4-edge-bridge.cmd`, `usb-monitor-edge-bridge.cmd`, or `edge-main-cursor.cmd` with `cat`, `head`, or another reader because it can steal a handoff or Samsung-return command. Inspect the corresponding state file and use `fuser` to verify FIFO ownership.
+
 ## Verified activation
 
 On 2026-08-26 the original M.M.O.7 profile selected automatically, KWin reported flat acceleration `-0.875`, both isolated-display bridge services loaded the exact mouse and their profile scales, and a DP-4 to USB-C to Samsung traversal grabbed the exact physical endpoint on both isolated screens before returning with both bridges inactive and the handoff guard clear.
+
+On 2026-08-28 controlled acceptance passed the KWin-native Samsung bottom-edge entry for both the first-third DP-4 region and middle-third USB-C region, DP-4 to USB-C peer handoff, USB-C to Samsung return, a clear shared handoff guard, and zero restarts across both bridge services, the D-Bus router, and the Samsung EIS cursor service.
 
 ## Relationships
 
