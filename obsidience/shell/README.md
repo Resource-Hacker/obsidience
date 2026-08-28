@@ -3,7 +3,7 @@
 This Module is the native shell boundary beneath the existing Obsidience UI.
 It replaces `plasmashell`; KWin remains the unmodified compositor. Upstream
 Quickshell is the sole native renderer. The first native slice owns one exact
-Samsung Wayland background Surface and one 38-pixel exclusive top panel.
+Samsung Wayland Stage matching the current Obsidience visual language.
 
 The Electron/React interface remains unchanged on the isolated USB-C display
 while panes are ported. It is an ordinary development application, not the
@@ -12,7 +12,8 @@ shell host. Its complete pre-native state is preserved by Git branch
 
 The native renderer is one long-running process with a thin `shell.qml` entry
 point. Each real feature owns a direct folder matching its function; the
-canary has only `surfaces/background/` and `panels/top/`. Overlays,
+canary has only `surfaces/stage/` and its reusable `components/identity/`.
+Panels, overlays,
 notifications, the launcher, lock screen, providers, widgets and community
 packages are added only when a working implementation exists. A future package
 registry will use one versioned manifest contract for first-party and reviewed
@@ -20,7 +21,7 @@ community packages, while shared providers are instantiated once by the host
 and injected through the typed Obsidience Shell API.
 
 `qml/api/ShellApi.qml` is instantiated exactly once by the host and injected
-into both canary packages. Its first real contract is deliberately tiny: API
+into the Stage. Its first real contract is deliberately tiny: API
 version plus the exact KWin output that may receive shell surfaces. Compositor
 events and bounded commands join that same object only after the separate KWin
 adapter transport is live.

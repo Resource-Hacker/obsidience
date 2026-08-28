@@ -56,24 +56,30 @@ def test_shell_session_replaces_only_plasmashell() -> None:
 def test_quickshell_canary_owns_only_the_samsung_surface() -> None:
     shell = (SHELL_ROOT / "qml" / "shell.qml").read_text()
     shell_api = (SHELL_ROOT / "qml" / "api" / "ShellApi.qml").read_text()
-    background = (
-        SHELL_ROOT / "qml" / "surfaces" / "background" / "Background.qml"
-    ).read_text()
-    panel = (
-        SHELL_ROOT / "qml" / "panels" / "top" / "TopPanel.qml"
+    stage = (SHELL_ROOT / "qml" / "surfaces" / "stage" / "Stage.qml").read_text()
+    identity = (
+        SHELL_ROOT / "qml" / "components" / "identity" / "Identity.qml"
     ).read_text()
     assert 'primaryOutputName: "HDMI-A-1"' in shell_api
     assert "property ShellApi shellApi: ShellApi {}" in shell
     assert "Quickshell.screens.filter" in shell
-    assert shell.count("model: root.targetScreens") == 2
-    assert shell.count("shellApi: root.shellApi") == 2
-    assert 'import "surfaces/background"' in shell
-    assert 'import "panels/top"' in shell
-    assert "WlrLayer.Background" in background
-    assert "mask: Region {}" in background
-    assert "exclusiveZone: 38" in panel
-    assert "WlrLayer.Top" in panel
-    assert 'text: "OBSIDIENCE"' in panel
+    assert shell.count("model: root.targetScreens") == 1
+    assert shell.count("shellApi: root.shellApi") == 1
+    assert 'import "surfaces/stage"' in shell
+    assert "WlrLayer.Background" in stage
+    assert "mask: Region {}" in stage
+    assert 'color: "#02060c"' in stage
+    assert "anchors.leftMargin: 20" in stage
+    assert "anchors.topMargin: 12" in stage
+    assert 'text: "OBSIDIENCE"' in identity
+    assert "font.pixelSize: 13" in identity
+    assert "font.letterSpacing: 5.2" in identity
+    assert "blurMax: 12" in identity
+    assert "shadowEnabled: true" in identity
+    assert not (SHELL_ROOT / "qml" / "panels" / "top" / "TopPanel.qml").exists()
+    assert not (
+        SHELL_ROOT / "qml" / "surfaces" / "background" / "Background.qml"
+    ).exists()
 
 
 def test_login_entry_installs_as_a_greeter_readable_file() -> None:

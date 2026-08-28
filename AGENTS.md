@@ -118,8 +118,9 @@ after a real implementation or outcome contract exists.
   cutover may retain KWin as the compositor while Obsidience replaces
   `plasmashell`, the panel, and workspace surface. The native `Shell` Module now
   provides the first bounded slice: the default Obsidience KWin login session,
-  Samsung-only background and exclusive top-panel surfaces, and read-only KWin
-  state. `plasmashell` stays disabled so it cannot compete for shell ownership;
+  one Samsung-only Obsidience Stage matching the current background and identity
+  chrome, and read-only KWin state. It reserves no panel area and creates no
+  placeholder panel. `plasmashell` stays disabled so it cannot compete for shell ownership;
   the independent terminal is the recovery path. The current development UI
   remains on isolated USB-C Xorg, and live cross-display pane drag is not yet
   claimed. The project target is a full `plasmashell`

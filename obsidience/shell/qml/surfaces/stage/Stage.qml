@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Wayland
 import "../../api"
+import "../../components/identity"
 
 PanelWindow {
     required property ShellApi shellApi
@@ -18,8 +19,15 @@ PanelWindow {
     }
 
     WlrLayershell.layer: WlrLayer.Background
-    WlrLayershell.namespace: "obsidience-shell-background"
+    WlrLayershell.namespace: "obsidience-shell-stage"
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
 
     mask: Region {}
+
+    Identity {
+        anchors.left: parent.left
+        anchors.top: parent.top
+        anchors.leftMargin: 20
+        anchors.topMargin: 12
+    }
 }

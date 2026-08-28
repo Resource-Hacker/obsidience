@@ -2,8 +2,7 @@ pragma ComponentBehavior: Bound
 
 import Quickshell
 import "api"
-import "panels/top"
-import "surfaces/background"
+import "surfaces/stage"
 
 ShellRoot {
     id: root
@@ -16,18 +15,7 @@ ShellRoot {
     Variants {
         model: root.targetScreens
 
-        Background {
-            required property var modelData
-
-            screen: modelData
-            shellApi: root.shellApi
-        }
-    }
-
-    Variants {
-        model: root.targetScreens
-
-        TopPanel {
+        Stage {
             required property var modelData
 
             screen: modelData

@@ -125,8 +125,8 @@ filesystems, systemd, udev, PipeWire/WirePlumber, NetworkManager, and compositor
 protocols are reused rather than reimplemented. The first Samsung milestone
 keeps KWin as compositor and replaces only `plasmashell`. Its accepted
 development slice is the native `Shell` Module: a selectable Obsidience KWin
-session, an exact-output background surface, an exclusive top panel, and
-bounded read-only KWin state. The existing development UI remains on isolated
+session, one exact-output Obsidience Stage with the canonical identity chrome,
+and bounded read-only KWin state. The existing development UI remains on isolated
 USB-C Xorg; embedding that renderer and cross-display pane drag remain separate
 unclaimed slices.
 
