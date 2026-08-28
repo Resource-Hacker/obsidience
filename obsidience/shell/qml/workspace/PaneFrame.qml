@@ -11,26 +11,26 @@ Item {
     required property int revision
 
     signal dragStarted()
-    signal dragMoved(real deltaX, real deltaY)
+    signal dragMoved(real deltaX, real deltaY, real pointerX, real pointerY)
     signal dragFinished(bool moved)
 
     Rectangle {
         id: frame
 
         anchors.fill: parent
-        anchors.margins: 18
         radius: 12
         color: "#eb030a10"
         border.width: 1
-        border.color: "#4037d7ee"
+        border.color: "#4067e8f9"
         clip: true
 
         layer.enabled: true
         layer.effect: MultiEffect {
             shadowEnabled: true
-            shadowColor: "#2822d3ee"
+            shadowColor: "#22d3ee"
+            shadowOpacity: 0.08
             shadowBlur: 0.75
-            shadowScale: 1.015
+            shadowScale: 1.0
         }
 
         Rectangle {
@@ -39,8 +39,8 @@ Item {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
-            height: 38
-            color: "#120ea5b7"
+            height: 32
+            color: "transparent"
 
             property bool moved: false
 
@@ -49,7 +49,7 @@ Item {
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
                 height: 1
-                color: "#2637d7ee"
+                color: "#2667e8f9"
             }
 
             Text {
@@ -64,27 +64,23 @@ Item {
                 font.letterSpacing: 2.2
             }
 
-            Row {
+            Rectangle {
                 anchors.right: parent.right
-                anchors.rightMargin: 12
+                anchors.rightMargin: 10
                 anchors.verticalCenter: parent.verticalCenter
-                spacing: 8
+                width: 24
+                height: 17
+                radius: 4
+                color: "transparent"
+                border.width: 1
+                border.color: "#4067e8f9"
 
                 Text {
-                    text: root.surfaceLabel
-                    color: "#8ba5f3fc"
+                    anchors.centerIn: parent
+                    text: "×"
+                    color: "#9967e8f9"
                     font.family: "JetBrains Mono"
-                    font.pixelSize: 9
-                    font.capitalization: Font.AllUppercase
-                    font.letterSpacing: 1.4
-                }
-
-                Rectangle {
-                    width: 7
-                    height: 7
-                    radius: 4
-                    color: "#22d3ee"
-                    opacity: 0.8
+                    font.pixelSize: 10
                 }
             }
 
@@ -114,7 +110,17 @@ Item {
                     if (Math.abs(deltaX) > 0 || Math.abs(deltaY) > 0) {
                         titleBar.moved = true
                     }
-                    root.dragMoved(deltaX, deltaY)
+                    const localPointer = dragArea.mapToItem(
+                        root,
+                        mouse.x,
+                        mouse.y
+                    )
+                    root.dragMoved(
+                        deltaX,
+                        deltaY,
+                        localPointer.x,
+                        localPointer.y
+                    )
                 }
                 onReleased: {
                     cursorShape = Qt.OpenHandCursor
@@ -142,7 +148,7 @@ Item {
 
                 Text {
                     text: "ONE PANE · ONE OWNER"
-                    color: "#e2e8f0"
+                    color: "#cffafe"
                     font.family: "JetBrains Mono"
                     font.pixelSize: 16
                     font.weight: Font.Medium
@@ -153,7 +159,7 @@ Item {
                     width: parent.width
                     wrapMode: Text.WordWrap
                     text: "This is one logical Obsidience pane rendered by the active Surface. Drag its title bar through the Samsung bottom-middle edge or the USB-C top edge to transfer ownership."
-                    color: "#a9cbd5df"
+                    color: "#8c67e8f9"
                     font.family: "JetBrains Mono"
                     font.pixelSize: 11
                     lineHeight: 1.55
@@ -162,7 +168,7 @@ Item {
                 Rectangle {
                     width: parent.width
                     height: 1
-                    color: "#1937d7ee"
+                    color: "#1a67e8f9"
                 }
 
                 Row {
@@ -173,14 +179,14 @@ Item {
 
                         Text {
                             text: "ACTIVE SURFACE"
-                            color: "#708ba5b7"
+                            color: "#7367e8f9"
                             font.family: "JetBrains Mono"
                             font.pixelSize: 9
                             font.letterSpacing: 1.3
                         }
                         Text {
                             text: root.surfaceLabel
-                            color: "#67e8f9"
+                            color: "#9967e8f9"
                             font.family: "JetBrains Mono"
                             font.pixelSize: 12
                             font.capitalization: Font.AllUppercase
@@ -192,14 +198,14 @@ Item {
 
                         Text {
                             text: "PLACEMENT REVISION"
-                            color: "#708ba5b7"
+                            color: "#7367e8f9"
                             font.family: "JetBrains Mono"
                             font.pixelSize: 9
                             font.letterSpacing: 1.3
                         }
                         Text {
                             text: String(root.revision).padStart(3, "0")
-                            color: "#d8f7fb"
+                            color: "#a6cffafe"
                             font.family: "JetBrains Mono"
                             font.pixelSize: 12
                         }

@@ -104,11 +104,21 @@ def test_surface_hosts_share_one_pane_and_one_placement_record() -> None:
     assert 'surfaceId: "usb-c"' in usb_c
     assert "PaneFrame {" in pane
     assert "placement.transfer" in pane
+    assert "unboundedY + placement.height >= samsungHeight" in pane
+    assert "mappedPointerX - pointerX" in pane
+    assert '"enterxy "' in pane
+    assert '"exitxy "' in pane
+    assert "paneCenterX" not in pane
     assert "placementFile.setText" in placement
     assert "atomicWrites: true" in placement
     assert "watchChanges: true" in placement
     assert 'schema: "obsidience.surface-placement.v1"' in placement
     assert 'color: "#eb030a10"' in frame
+    assert 'border.color: "#4067e8f9"' in frame
+    assert 'shadowColor: "#22d3ee"' in frame
+    assert "shadowOpacity: 0.08" in frame
+    assert 'height: 32' in frame
+    assert 'color: "#2667e8f9"' in frame
     assert "QT_QPA_PLATFORM=xcb" in service
     assert "DISPLAY=:2.0" in service
     assert "surface.qml" in service

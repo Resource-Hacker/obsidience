@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import Quickshell
+import Quickshell.Io
 
 PanelWindow {
     id: root
@@ -19,6 +20,7 @@ PanelWindow {
     readonly property int samsungHeight: 1440
     readonly property int usbWidth: 1920
     readonly property int usbHeight: 1200
+    readonly property int usbScale: 2
 
     screen: surfaceScreen
     visible: placement.open && placement.surfaceId === surfaceId
@@ -48,18 +50,85 @@ PanelWindow {
         dragStartY = placement.y
     }
 
-    function moveDrag(deltaX, deltaY) {
+    function routePointer(command) {
+        pointerCommand.exec([
+            "/usr/bin/sh",
+            "-c",
+            "printf '%s\\n' \"$1\" > /run/user/1000/usb-monitor-edge-bridge.cmd",
+            "obsidience-surface",
+            command
+        ])
+    }
+
+    function moveDrag(deltaX, deltaY, pointerX, pointerY) {
         if (placement.surfaceId !== surfaceId) {
             return
         }
 
+        const unboundedX = dragStartX + deltaX
+        const unboundedY = dragStartY + deltaY
+        const contactX = unboundedX + pointerX
+
+        if (surfaceId === "samsung"
+                && deltaY > 0
+                && unboundedY + placement.height >= samsungHeight
+                && contactX >= samsungUsbStart
+                && contactX < samsungUsbEnd) {
+            const sourceSpan = samsungUsbEnd - samsungUsbStart - 1
+            const mappedPointerX = Math.round(
+                ((contactX - samsungUsbStart) / sourceSpan) * (usbWidth - 1)
+            )
+            const destinationX = clamp(
+                mappedPointerX - pointerX,
+                0,
+                usbWidth - placement.width
+            )
+            const destinationPointerX = destinationX + pointerX
+            const destinationPointerY = pointerY
+            placement.transfer("usb-c", destinationX, 0)
+            routePointer(
+                "enterxy "
+                    + Math.round(destinationPointerX * usbScale)
+                    + " "
+                    + Math.round(destinationPointerY * usbScale)
+            )
+            return
+        }
+
+        if (surfaceId === "usb-c"
+                && deltaY < 0
+                && unboundedY <= 0
+                && contactX >= 0
+                && contactX < usbWidth) {
+            const mappedPointerX = samsungUsbStart + Math.round(
+                (contactX / Math.max(1, usbWidth - 1))
+                    * (samsungUsbEnd - samsungUsbStart - 1)
+            )
+            const destinationX = clamp(
+                mappedPointerX - pointerX,
+                0,
+                samsungWidth - placement.width
+            )
+            const destinationY = samsungHeight - placement.height
+            const destinationPointerX = destinationX + pointerX
+            const destinationPointerY = destinationY + pointerY
+            placement.transfer("samsung", destinationX, destinationY)
+            routePointer(
+                "exitxy "
+                    + Math.round(destinationPointerX)
+                    + " "
+                    + Math.round(destinationPointerY)
+            )
+            return
+        }
+
         const nextX = clamp(
-            dragStartX + deltaX,
+            unboundedX,
             0,
             surfaceScreen.width - placement.width
         )
         const nextY = clamp(
-            dragStartY + deltaY,
+            unboundedY,
             0,
             surfaceScreen.height - placement.height
         )
@@ -71,40 +140,11 @@ PanelWindow {
             return
         }
 
-        const paneCenterX = placement.x + placement.width / 2
-        if (surfaceId === "samsung"
-                && placement.y >= surfaceScreen.height - placement.height
-                && paneCenterX >= samsungUsbStart
-                && paneCenterX < samsungUsbEnd) {
-            const span = samsungUsbEnd - samsungUsbStart - 1
-            const mappedCenterX = Math.round(
-                ((paneCenterX - samsungUsbStart) / span) * (usbWidth - 1)
-            )
-            const destinationX = clamp(
-                mappedCenterX - placement.width / 2,
-                0,
-                usbWidth - placement.width
-            )
-            placement.transfer("usb-c", destinationX, 0)
-            return
-        }
-
-        if (surfaceId === "usb-c" && placement.y <= 0) {
-            const mappedCenterX = samsungUsbStart + Math.round(
-                (paneCenterX / Math.max(1, usbWidth - 1))
-                    * (samsungUsbEnd - samsungUsbStart - 1)
-            )
-            const destinationX = clamp(
-                mappedCenterX - placement.width / 2,
-                0,
-                samsungWidth - placement.width
-            )
-            const destinationY = samsungHeight - placement.height - 12
-            placement.transfer("samsung", destinationX, destinationY)
-            return
-        }
-
         placement.commitMove()
+    }
+
+    Process {
+        id: pointerCommand
     }
 
     PaneFrame {
@@ -114,7 +154,12 @@ PanelWindow {
         revision: root.placement.revision
 
         onDragStarted: root.beginDrag()
-        onDragMoved: (deltaX, deltaY) => root.moveDrag(deltaX, deltaY)
+        onDragMoved: (deltaX, deltaY, pointerX, pointerY) => root.moveDrag(
+            deltaX,
+            deltaY,
+            pointerX,
+            pointerY
+        )
         onDragFinished: moved => root.finishDrag(moved)
     }
 }
