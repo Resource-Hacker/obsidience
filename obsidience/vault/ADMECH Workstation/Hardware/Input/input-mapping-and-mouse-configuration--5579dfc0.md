@@ -1,5 +1,5 @@
 ---
-approved_at: '2026-08-28T10:50:42'
+approved_at: '2026-08-28T13:48:09'
 kind: knowledge
 provenance: proposed by Codex (task codex:knowledge-handoff)
 tags:
@@ -29,7 +29,11 @@ Caps Lock remains mapped to Up through keyd for mouselook. Helper-created virtua
 
 ## Isolated-display bridge cursor control
 
-On the dual-screen AMD Xorg topology, USB-C is `:2.0` and DP-4 is `:2.1`. The shared `/home/wissenschafter/bin/dp4-edge-bridge` implementation uses a persistent native `libX11`/`libXfixes` connection to hide the inactive screen cursor and show only the active isolated-screen cursor. Python-Xlib remains responsible for the established XTest injection path but must not issue XFixes cursor hide/show on this topology: its corrected window method produced a `BadRRCrtcError` parsing failure and crashed the bridge on the first entry.
+On the dual-screen AMD Xorg topology, USB-C is `:2.0` and DP-4 is `:2.1`. Since 2026-08-28, `dp4-edge-bridge.service` runs the single-owner Obsidience router at `/home/wissenschafter/Projects/obsidience/obsidience/shell/input/router.py`; `usb-monitor-edge-bridge.service` is its compatibility alias. One evdev grab and one Python-Xlib XTest connection span both isolated screens. A DP-4 to USB-C transition retains ownership and held input state, while only a mapped return to Samsung releases evdev.
+
+KWin sends exact edge and local-pointer coordinates through `org.wissenschafter.DP4Bridge.EnterMapped`; the accepted Surface layout is the geometry and adjacency authority. The D-Bus adapter must retain its `dbus.service.BusName` by passing it to `SurfaceBridge`. Discarding that object leaves the service process running only on a unique bus name and makes every KWin edge call unreachable.
+
+The router owns one persistent native `libX11`/`libXfixes` connection per isolated X screen to hide the inactive cursor and show only the active Surface cursor. Python-Xlib remains responsible for XTest input but must not issue XFixes cursor hide or show on this topology: its window method produced an asynchronous `BadRRCrtcError` and restarted the router on entry. Cursor visibility changes must remain idempotent.
 
 Each command FIFO has exactly one intended reader. Never inspect `dp4-edge-bridge.cmd`, `usb-monitor-edge-bridge.cmd`, or `edge-main-cursor.cmd` with `cat`, `head`, or another reader because it can steal a handoff or Samsung-return command. Inspect the corresponding state file and use `fuser` to verify FIFO ownership.
 
@@ -37,7 +41,7 @@ Each command FIFO has exactly one intended reader. Never inspect `dp4-edge-bridg
 
 On 2026-08-26 the original M.M.O.7 profile selected automatically, KWin reported flat acceleration `-0.875`, both isolated-display bridge services loaded the exact mouse and their profile scales, and a DP-4 to USB-C to Samsung traversal grabbed the exact physical endpoint on both isolated screens before returning with both bridges inactive and the handoff guard clear.
 
-On 2026-08-28 controlled acceptance passed the KWin-native Samsung bottom-edge entry for both the first-third DP-4 region and middle-third USB-C region, DP-4 to USB-C peer handoff, USB-C to Samsung return, a clear shared handoff guard, and zero restarts across both bridge services, the D-Bus router, and the Samsung EIS cursor service.
+On 2026-08-28 live single-owner acceptance confirmed the well-known D-Bus name, the loaded KWin native-edge adapter, Samsung bottom-edge mapping into both DP-4 and USB-C, DP-4 to USB-C to DP-4 switching without releasing evdev, both Samsung returns, the same router PID, and zero service restarts. The focused D-Bus and cursor regressions passed inside the complete 126-test project suite; vault validation, Python compilation, UI typecheck, production build, API health, and the live USB-C interface also passed.
 
 ## Relationships
 
