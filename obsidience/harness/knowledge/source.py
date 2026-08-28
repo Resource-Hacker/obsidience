@@ -58,7 +58,7 @@ PROJECT_SOURCE_FILES = (
 SYSTEM_SOURCE_ROOT = Path("obsidience/state/system")
 PROJECT_SOURCE_SUFFIXES = frozenset({
     ".css", ".desktop", ".html", ".js", ".jsx", ".json", ".md",
-    ".py", ".pyi", ".service", ".sh", ".target", ".toml", ".ts",
+    ".py", ".pyi", ".qml", ".service", ".sh", ".target", ".toml", ".ts",
     ".tsx", ".txt", ".yaml", ".yml",
 })
 RAW_SOURCE_TYPES = frozenset({
@@ -540,6 +540,8 @@ def _safe_linked_source(value: str) -> Path:
 
 
 def _media_type(path: Path) -> str:
+    if path.suffix.lower() == ".qml":
+        return "text/x-qml"
     return mimetypes.guess_type(path.name)[0] or "application/octet-stream"
 
 

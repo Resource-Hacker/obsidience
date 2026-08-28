@@ -44,6 +44,9 @@ def test_source_reader_projects_knowledge_code_system_and_capability_links(
     shell_host = tmp_path / "obsidience" / "shell" / "host.py"
     shell_host.parent.mkdir(parents=True)
     shell_host.write_text("OUTPUT = 'HDMI-A-1'\n")
+    shell_stage = tmp_path / "obsidience" / "shell" / "qml" / "Stage.qml"
+    shell_stage.parent.mkdir(parents=True)
+    shell_stage.write_text("import QtQuick\n\nItem {}\n")
     inbox = (
         tmp_path / "obsidience" / "evidence" / "inbox" / "research--example.md"
     )
@@ -82,6 +85,7 @@ def test_source_reader_projects_knowledge_code_system_and_capability_links(
         "obsidience/harness/capabilities/task/complete.py",
         "obsidience/harness/execution/scheduler.py",
         "obsidience/shell/host.py",
+        "obsidience/shell/qml/Stage.qml",
         "obsidience/state/system/hardware/compute/cpu.json",
         "obsidience/ui/src/renderer/src/App.tsx",
         "obsidience/vault/_archived/retired.md",
@@ -103,6 +107,7 @@ def test_source_reader_projects_knowledge_code_system_and_capability_links(
     ] == []
     assert by_key["obsidience/ui/src/renderer/src/App.tsx"]["articles"] == []
     assert by_key["obsidience/shell/host.py"]["articles"] == []
+    assert by_key["obsidience/shell/qml/Stage.qml"]["media_type"] == "text/x-qml"
     assert by_key["obsidience/evidence/inbox/research--example.md"]["articles"] == []
     assert by_key["obsidience/evidence/inbox/research--example.md"]["storage"] == "blob"
     assert by_key["obsidience/state/system/hardware/compute/cpu.json"]["articles"] == [
@@ -134,6 +139,9 @@ def test_source_reader_projects_knowledge_code_system_and_capability_links(
     )
     assert handoff["content"] == inbox.read_text()
     assert handoff["path"] == "obsidience/evidence/inbox/research--example.md"
+
+    qml = source.get_source_file("obsidience/shell/qml/Stage.qml")
+    assert qml["content"] == shell_stage.read_text()
 
     with pytest.raises(source.SourceError, match="source file not found"):
         source.get_source_file("@view/system")
