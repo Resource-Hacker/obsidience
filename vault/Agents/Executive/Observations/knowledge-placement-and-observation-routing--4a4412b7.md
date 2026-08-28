@@ -1,7 +1,7 @@
 ---
-approved_at: '2026-08-27T16:33:31'
+approved_at: '2026-08-27T19:08:50'
 kind: knowledge
-provenance: proposed by Codex (task codex:knowledge-handoff)
+provenance: proposed by Alexandria (task Tasks/link)
 tags:
 - knowledge-placement
 - observations
@@ -29,7 +29,7 @@ Immediate and Temporary Observations are Knowledge states, while durable context
 is the ordinary accepted graph. The peer Compact and Promote Tasks transform or
 evaluate that Knowledge without making its lifecycle states Task ancestors.
 Durable candidates become ordinary Knowledge Articles under the correct subject
-rather than a Context or Log container.
+rather than a Context or Log container. The transient [[Agents/Executive/Observations/immediate-observations|Immediate Observations]] state is one of the Observation states whose placement and lifecycle are described in this Article.
 
 ## Relationships
 
