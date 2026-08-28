@@ -1,5 +1,5 @@
 ---
-approved_at: '2026-08-27T17:08:56'
+approved_at: '2026-08-27T17:41:35'
 kind: knowledge
 provenance: proposed by Alexandria (task Tasks/link)
 title: Real-time Executive
@@ -66,7 +66,8 @@ the context boundary. Exact public turns remain in SQLite. Executive Chat and
 Realtime do not emit the retired per-turn Temporary Observation Task.
 
 Temporary summaries are transient, unverified working context. At an explicit
-Chat conversation rotation, or after Realtime fully stops, Alexandria's
+Chat conversation rotation, or after Realtime fully stops,
+[[Agents/Alexandria/Alexandria|Alexandria]]'s
 [[Tasks/observations/promote|Promote Temporary Observations]] Task force-
 compacts the final completed prefix, archives the exact bound Temporary bundle
 in immutable Source, and stages only justified Knowledge creates or updates for
