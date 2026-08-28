@@ -1,7 +1,7 @@
 ---
-approved_at: '2026-08-27T16:33:32'
+approved_at: '2026-08-27T17:08:56'
 kind: knowledge
-provenance: proposed by Codex (task codex:knowledge-handoff)
+provenance: proposed by Alexandria (task Tasks/link)
 title: Real-time Executive
 ---
 
@@ -9,7 +9,8 @@ The real-time Executive is one Obsidience execution surface, not another
 Agent, harness, scheduler, memory store, or Tool authority. It operates under
 [[Agents/Executive/Architecture/local-first-architecture--7d8e77cc|local-first architecture]],
 whose one-authority and local-model contract constrains Task selection and Tool
-execution.
+execution. Its durable Knowledge context is the accepted vault described by
+[[Agents/Executive/Architecture/llm-wiki-knowledge-pattern--dab5ff0a|LLM-wiki knowledge pattern]].
 
 Realtime has one reasoning pipeline. The model and reasoning effort selected on
 [[Tasks/executive/realtime|Realtime]] remain the sole source of intent, Tool
