@@ -122,8 +122,10 @@ after a real implementation or outcome contract exists.
   chrome, and read-only KWin state. It reserves no panel area and creates no
   placeholder panel. `plasmashell` stays disabled so it cannot compete for shell ownership;
   the independent terminal is the recovery path. The current development UI
-  remains on isolated USB-C Xorg, and live cross-display pane drag is not yet
-  claimed. The project target is a full `plasmashell`
+  remains on isolated USB-C Xorg, alongside the native USB-C Surface render
+  host. One shared placement record now transfers a pane between Samsung and
+  USB-C render hosts; physical edge-drag acceptance remains an owner test. The
+  project target is a full `plasmashell`
   replacement on unmodified upstream KWin. Treat each physical display as one
   runtime Surface: Samsung is KWin/Wayland, USB-C is Xorg `:2.0`, and DP-4 is
   Xorg `:2.1`. Surface is not an Article kind or Capability. Every pane uses the
@@ -132,6 +134,7 @@ after a real implementation or outcome contract exists.
   window cannot cross these display-server boundaries, so a cross-Surface drag
   is one shell-host placement update followed by destination re-rendering. Do
   not create another coordinator service for this state change.
+  Only the active Surface displays its cursor; inactive Surface cursors stay hidden.
   Preserve Samsung-only KWin ownership and VRR isolation.
 
 Only these canonical kinds belong in accepted frontmatter: `knowledge`,

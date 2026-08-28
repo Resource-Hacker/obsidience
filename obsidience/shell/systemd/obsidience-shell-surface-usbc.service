@@ -1,0 +1,35 @@
+[Unit]
+Description=Native Obsidience USB-C Surface render host
+Requires=usb-monitor-xorg.service
+Wants=usb-monitor-openbox.service usb-monitor-xsettings.service
+After=usb-monitor-xorg.service usb-monitor-openbox.service usb-monitor-xsettings.service
+PartOf=usb-monitor-xorg.service graphical-session.target
+StartLimitIntervalSec=30
+StartLimitBurst=3
+
+[Service]
+Type=simple
+Slice=app.slice
+WorkingDirectory=/home/wissenschafter/Projects/obsidience
+Environment=DISPLAY=:2.0
+Environment=WAYLAND_DISPLAY=
+Environment=QT_QPA_PLATFORM=xcb
+Environment=XDG_SESSION_TYPE=x11
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+Environment=OBSIDIENCE_SURFACE_ID=usb-c
+Environment=QS_NO_RELOAD_POPUP=1
+Environment=XCURSOR_SIZE=48
+UnsetEnvironment=SESSION_MANAGER
+ExecStartPre=/usr/bin/bash -c 'for i in {1..80}; do DISPLAY=:2.0 /usr/bin/xdpyinfo >/dev/null 2>&1 && exit 0; /usr/bin/sleep 0.25; done; exit 1'
+ExecStartPre=/usr/bin/install -d -m 0700 %t/obsidience-shell
+ExecStartPre=/usr/bin/cp --no-clobber /home/wissenschafter/Projects/obsidience/obsidience/shell/state/initial-pane-placement.json %t/obsidience-shell/pane-placement.json
+ExecStart=/usr/bin/quickshell --no-duplicate --path /home/wissenschafter/Projects/obsidience/obsidience/shell/qml/surface.qml
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=5
+UMask=0077
+CPUWeight=25
+
+[Install]
+WantedBy=usb-monitor-xorg.service

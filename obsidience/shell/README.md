@@ -10,9 +10,13 @@ while panes are ported. It is an ordinary development application, not the
 shell host. Its complete pre-native state is preserved by Git branch
 `archive/electron-20260828` and tag `electron-v0-dev-20260828`.
 
-The native renderer is one long-running process with a thin `shell.qml` entry
-point. Each real feature owns a direct folder matching its function; the
-canary has only `surfaces/stage/` and its reusable `components/identity/`.
+Each display server has one long-running native Surface render host. Samsung
+uses `shell.qml`; isolated X11 Surfaces use the small `surface.qml` entrypoint.
+Both consume the same PaneFrame and placement components, so a pane changes
+one shell-owned placement record instead of pretending a native window can be
+reparented across display servers. Each real feature owns a direct folder
+matching its function; the initial native slice has `surfaces/stage/`, its
+reusable `components/identity/`, and the shared `workspace/` pane components.
 Panels, overlays,
 notifications, the launcher, lock screen, providers, widgets and community
 packages are added only when a working implementation exists. A future package
@@ -39,11 +43,12 @@ restart; the independent terminal is the recovery path.
 
 `Surface` is Obsidience's stable presentation endpoint, not a graph kind and
 not a raw Wayland object. Samsung, USB-C, and DP-4 remain separate display
-server clients. Every pane carries the same Surface-aware placement state; a
-future boundary drag transfers pane ownership and UI state to the destination
-render host instead of trying to move one native X11 window into Wayland. The
-same shell host owns this placement update; no extra coordinator service is
-introduced.
+server clients with independent render loops and performance budgets. Every
+pane carries the same Surface-aware placement state; a boundary drag transfers
+one logical pane and its UI state to the destination render host instead of
+trying to move one native X11 window into Wayland. The Surface hosts share one
+atomic shell-state projection; no coordinator daemon, harness coupling, or
+KWin mutation is introduced.
 
 KWin-specific observation and commands stay behind `adapter/kwin`. The
 renderer, panes, widgets, and extensions consume stable Obsidience state and do

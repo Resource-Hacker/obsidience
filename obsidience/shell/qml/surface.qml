@@ -2,7 +2,6 @@ pragma ComponentBehavior: Bound
 
 import Quickshell
 import "api"
-import "surfaces/stage"
 import "workspace"
 
 ShellRoot {
@@ -11,19 +10,8 @@ ShellRoot {
     property ShellApi shellApi: ShellApi {}
     property PanePlacement panePlacement: PanePlacement {}
     readonly property var targetScreens: Quickshell.screens.filter(
-        screen => screen.name === shellApi.primaryOutputName
+        screen => screen.name === shellApi.usbOutputName
     )
-
-    Variants {
-        model: root.targetScreens
-
-        Stage {
-            required property var modelData
-
-            screen: modelData
-            shellApi: root.shellApi
-        }
-    }
 
     Variants {
         model: root.targetScreens
@@ -32,7 +20,7 @@ ShellRoot {
             required property var modelData
 
             surfaceScreen: modelData
-            surfaceId: "samsung"
+            surfaceId: "usb-c"
             placement: root.panePlacement
         }
     }

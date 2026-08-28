@@ -432,6 +432,7 @@ def application_snapshot() -> dict[str, dict]:
             ]) or "unavailable",
             "components": {
                 "shell": "obsidience-shell-host.service",
+                "surface_usb_c": "obsidience-shell-surface-usbc.service",
                 "harness": "obsidience-harness-dev.service",
                 "development_ui": "obsidience-ui-usbc-dev.service",
             },

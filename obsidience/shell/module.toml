@@ -3,6 +3,9 @@ id = "shell"
 name = "Shell"
 summary = "Owns modular desktop Surfaces and isolates compositor-specific integration."
 package = "obsidience.shell"
-entrypoints = ["obsidience/shell/qml/shell.qml"]
+entrypoints = [
+    "obsidience/shell/qml/shell.qml",
+    "obsidience/shell/qml/surface.qml",
+]
 source_roots = ["obsidience/shell"]
 projections = ["obsidience/state/system/applications/obsidience"]

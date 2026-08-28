@@ -21,7 +21,10 @@ def test_shell_manifest_names_one_real_module() -> None:
         "name": "Shell",
         "summary": "Owns modular desktop Surfaces and isolates compositor-specific integration.",
         "package": "obsidience.shell",
-        "entrypoints": ["obsidience/shell/qml/shell.qml"],
+        "entrypoints": [
+            "obsidience/shell/qml/shell.qml",
+            "obsidience/shell/qml/surface.qml",
+        ],
         "source_roots": ["obsidience/shell"],
         "projections": ["obsidience/state/system/applications/obsidience"],
     }
@@ -63,7 +66,7 @@ def test_quickshell_canary_owns_only_the_samsung_surface() -> None:
     assert 'primaryOutputName: "HDMI-A-1"' in shell_api
     assert "property ShellApi shellApi: ShellApi {}" in shell
     assert "Quickshell.screens.filter" in shell
-    assert shell.count("model: root.targetScreens") == 1
+    assert shell.count("model: root.targetScreens") == 2
     assert shell.count("shellApi: root.shellApi") == 1
     assert 'import "surfaces/stage"' in shell
     assert "WlrLayer.Background" in stage
@@ -80,6 +83,37 @@ def test_quickshell_canary_owns_only_the_samsung_surface() -> None:
     assert not (
         SHELL_ROOT / "qml" / "surfaces" / "background" / "Background.qml"
     ).exists()
+
+
+def test_surface_hosts_share_one_pane_and_one_placement_record() -> None:
+    samsung = (SHELL_ROOT / "qml" / "shell.qml").read_text()
+    usb_c = (SHELL_ROOT / "qml" / "surface.qml").read_text()
+    placement = (SHELL_ROOT / "qml" / "workspace" / "PanePlacement.qml").read_text()
+    pane = (SHELL_ROOT / "qml" / "workspace" / "PaneWindow.qml").read_text()
+    frame = (SHELL_ROOT / "qml" / "workspace" / "PaneFrame.qml").read_text()
+    service = (
+        SHELL_ROOT / "systemd" / "obsidience-shell-surface-usbc.service"
+    ).read_text()
+    initial = json.loads(
+        (SHELL_ROOT / "state" / "initial-pane-placement.json").read_text()
+    )
+
+    assert samsung.count("PaneWindow {") == 1
+    assert usb_c.count("PaneWindow {") == 1
+    assert 'surfaceId: "samsung"' in samsung
+    assert 'surfaceId: "usb-c"' in usb_c
+    assert "PaneFrame {" in pane
+    assert "placement.transfer" in pane
+    assert "placementFile.setText" in placement
+    assert "atomicWrites: true" in placement
+    assert "watchChanges: true" in placement
+    assert 'schema: "obsidience.surface-placement.v1"' in placement
+    assert 'color: "#eb030a10"' in frame
+    assert "QT_QPA_PLATFORM=xcb" in service
+    assert "DISPLAY=:2.0" in service
+    assert "surface.qml" in service
+    assert initial["surface_id"] == "samsung"
+    assert initial["pane_id"] == "surface-probe"
 
 
 def test_login_entry_installs_as_a_greeter_readable_file() -> None:

@@ -99,6 +99,7 @@ def test_application_inventory_distinguishes_shell_from_external_browser(
     assert applications["obsidience"]["service"] == "obsidience-shell-host.service"
     assert applications["obsidience"]["components"] == {
         "shell": "obsidience-shell-host.service",
+        "surface_usb_c": "obsidience-shell-surface-usbc.service",
         "harness": "obsidience-harness-dev.service",
         "development_ui": "obsidience-ui-usbc-dev.service",
     }
