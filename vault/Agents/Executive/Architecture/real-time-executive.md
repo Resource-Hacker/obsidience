@@ -1,5 +1,5 @@
 ---
-approved_at: '2026-08-27T17:41:35'
+approved_at: '2026-08-27T18:05:01'
 kind: knowledge
 provenance: proposed by Alexandria (task Tasks/link)
 title: Real-time Executive
@@ -85,7 +85,10 @@ owned by the Realtime button lifecycle.
 While Realtime runs, the scheduler leaves autonomous specialist schedules and
 triggers pending instead of claiming them. An exact task.create emitted from
 Realtime may delegate a real peer Task to another Agent and carries immutable
-creator provenance as the only exception. Causal ordering never makes that peer
+creator provenance as the only exception, under
+[[Agents/Executive/Architecture/task-activation--b30a4642|Task activation]],
+whose `task.create` rule activates an exact accepted Task without creating a
+child or subtask relation. Causal ordering never makes that peer
 a subtask. Turning Realtime off releases the pause without rewriting pending
 Tasks. Session promotion is issued only after that release and waits until any
 other running Task has finished.
