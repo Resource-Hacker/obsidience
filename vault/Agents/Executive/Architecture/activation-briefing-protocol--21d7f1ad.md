@@ -1,7 +1,7 @@
 ---
-approved_at: '2026-08-27T18:10:12'
+approved_at: '2026-08-27T18:37:41'
 kind: knowledge
-provenance: proposed by Codex (task codex:knowledge-handoff)
+provenance: proposed by Alexandria (task Tasks/link)
 title: Activation packet protocol
 ---
 
@@ -13,7 +13,9 @@ exact Article refs and Objective the model received.
 
 Fast search may nominate a Task candidate, but the harness must select one exact
 accepted Task. Its authored links then resolve assignee, Runbook, Skills, and
-Tools; similarity cannot replace or broaden authority. The Knowledge lane
+Tools; similarity cannot replace or broaden authority. That exact accepted Task
+follows the [[Agents/Executive/Architecture/task-activation--b30a4642|Task
+activation]] model. The Knowledge lane
 combines lexical and vector search with weighted reciprocal-rank fusion, keeps
 three direct hits when available, and admits at most two directly linked
 neighbors. It has no generative expansion, cross-encoder pass, or elapsed-time
