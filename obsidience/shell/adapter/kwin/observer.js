@@ -1,7 +1,7 @@
 /*
  * Read-only KWin observer adapted from Noctalia v5.0.0-beta.10.
  * Copyright (c) 2026 noctalia-dev. Distributed under the MIT License.
- * Obsidience removes every mutation path and uses its own D-Bus namespace.
+ * The KWin adapter removes every mutation path and uses its own D-Bus namespace.
  */
 
 const BUS = "org.obsidience.Shell.WindowObserver";

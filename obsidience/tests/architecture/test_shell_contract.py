@@ -6,7 +6,7 @@ import json
 import tomllib
 from pathlib import Path
 
-from obsidience.shell.kwin import BUS_NAME, parse_window_list
+from obsidience.shell.adapter.kwin import BUS_NAME, parse_window_list
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -21,7 +21,7 @@ def test_shell_manifest_names_one_real_module() -> None:
         "name": "Shell",
         "summary": "Owns modular desktop Surfaces and isolates compositor-specific integration.",
         "package": "obsidience.shell",
-        "entrypoints": ["obsidience.shell.__main__"],
+        "entrypoints": ["obsidience/shell/qml/shell.qml"],
         "source_roots": ["obsidience/shell"],
         "projections": ["obsidience/state/system/applications/obsidience"],
     }
@@ -43,11 +43,37 @@ def test_shell_session_replaces_only_plasmashell() -> None:
     assert "plasmashell" not in target
     assert "kwin_wayland" in compositor
     assert "--xwayland" in compositor
-    assert "--output HDMI-A-1" in host
-    assert "LD_PRELOAD=/usr/lib/libgtk4-layer-shell.so" in host
+    assert "/usr/bin/quickshell" in host
+    assert "obsidience/shell/qml" in host
+    assert "QT_QPA_PLATFORM=wayland" in host
+    assert "LD_PRELOAD" not in host
+    assert "/usr/bin/python" not in host
     assert "StartLimitBurst=3" in host
     assert "DISPLAY=" not in host
     assert autostart_override.is_file()
+
+
+def test_quickshell_canary_owns_only_the_samsung_surface() -> None:
+    shell = (SHELL_ROOT / "qml" / "shell.qml").read_text()
+    shell_api = (SHELL_ROOT / "qml" / "api" / "ShellApi.qml").read_text()
+    background = (
+        SHELL_ROOT / "qml" / "surfaces" / "background" / "Background.qml"
+    ).read_text()
+    panel = (
+        SHELL_ROOT / "qml" / "panels" / "top" / "TopPanel.qml"
+    ).read_text()
+    assert 'primaryOutputName: "HDMI-A-1"' in shell_api
+    assert "property ShellApi shellApi: ShellApi {}" in shell
+    assert "Quickshell.screens.filter" in shell
+    assert shell.count("model: root.targetScreens") == 2
+    assert shell.count("shellApi: root.shellApi") == 2
+    assert 'import "surfaces/background"' in shell
+    assert 'import "panels/top"' in shell
+    assert "WlrLayer.Background" in background
+    assert "mask: Region {}" in background
+    assert "exclusiveZone: 38" in panel
+    assert "WlrLayer.Top" in panel
+    assert 'text: "OBSIDIENCE"' in panel
 
 
 def test_login_entry_installs_as_a_greeter_readable_file() -> None:
@@ -68,7 +94,7 @@ def test_noctalia_boundary_is_pinned_and_visual_neutral() -> None:
     assert len(noctalia["selected_sources"]) == 4
     excluded = noctalia["adaptation"].lower()
     assert all(word in excluded for word in ("renderer", "themes", "assets", "plugins"))
-    observer = (SHELL_ROOT / "kwin-observer.js").read_text()
+    observer = (SHELL_ROOT / "adapter" / "kwin" / "observer.js").read_text()
     assert BUS_NAME in observer
     assert "activateWindow" not in observer
     assert "closeWindow" not in observer

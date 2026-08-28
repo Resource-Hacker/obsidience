@@ -132,7 +132,7 @@ class KWinObserver:
             "loadScript",
             GLib.Variant(
                 "(ss)",
-                (str(Path(__file__).with_name("kwin-observer.js")), SCRIPT_NAME),
+                (str(Path(__file__).with_name("observer.js")), SCRIPT_NAME),
             ),
             GLib.VariantType.new("(i)"),
         )

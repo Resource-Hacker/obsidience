@@ -29,11 +29,18 @@
       "notice": "LICENSES/Noctalia-MIT.txt"
     },
     {
-      "name": "gtk4-layer-shell",
-      "package": "gtk4-layer-shell 1.3.0",
-      "repository": "https://github.com/wmww/gtk4-layer-shell",
+      "name": "Quickshell",
+      "package": "quickshell 0.3.0-2.1",
+      "repository": "https://git.outfoxxed.me/quickshell/quickshell",
+      "license": "LGPL-3.0-only",
+      "adaptation": "Used as the installed Qt Quick and Wayland layer-shell runtime. Obsidience owns all QML, presentation, state and behavior; no upstream source or visual design was copied."
+    },
+    {
+      "name": "Omarchy quattro shell",
+      "repository": "https://github.com/basecamp/omarchy/tree/quattro/shell",
+      "commit": "06e32d243d5c410e2421b9f3db5be3c3ae33d3e2",
       "license": "MIT",
-      "adaptation": "Used as an installed protocol adapter. No source was copied."
+      "adaptation": "Architecture reference only: one long-running Quickshell host, self-contained feature packages, shared service injection and on-demand loading. No source, renderer, visual design, Hyprland integration, shell scripts, configuration or IPC implementation was copied."
     }
   ]
 }

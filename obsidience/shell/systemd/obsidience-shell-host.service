@@ -9,11 +9,9 @@ StartLimitBurst=3
 [Service]
 Type=simple
 WorkingDirectory=/home/wissenschafter/Projects/obsidience
-Environment=PYTHONPATH=/home/wissenschafter/Projects/obsidience
-Environment=PYTHONUNBUFFERED=1
-Environment=GDK_BACKEND=wayland
-Environment=LD_PRELOAD=/usr/lib/libgtk4-layer-shell.so
-ExecStart=/usr/bin/python -m obsidience.shell --output HDMI-A-1
+Environment=QT_QPA_PLATFORM=wayland
+Environment=QS_NO_RELOAD_POPUP=1
+ExecStart=/usr/bin/quickshell --no-duplicate --path /home/wissenschafter/Projects/obsidience/obsidience/shell/qml
 Restart=on-failure
 RestartSec=2
 TimeoutStopSec=5
