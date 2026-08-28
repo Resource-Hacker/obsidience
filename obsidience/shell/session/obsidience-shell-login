@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+exec /usr/bin/uwsm start \
+    -e \
+    -D KDE:ObsidienceKWin \
+    -N "Obsidience" \
+    -C "Obsidience shell on KWin" \
+    -- /home/wissenschafter/Projects/obsidience/obsidience/shell/session/obsidience-shell-compositor

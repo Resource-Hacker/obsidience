@@ -1,0 +1,23 @@
+{
+  "after": {
+    "allowed_devices": [
+      "rtx4080"
+    ],
+    "context_tokens": 32768,
+    "gpu_memory_utilization": 0.95,
+    "max_num_seqs": 1,
+    "max_output_tokens": 8192
+  },
+  "before": {
+    "allowed_devices": [
+      "rtx4080"
+    ],
+    "context_tokens": 32768,
+    "gpu_memory_utilization": 0.95,
+    "max_num_seqs": 1,
+    "max_output_tokens": 8192
+  },
+  "model_id": "obsidience-qwen38-9b-distill",
+  "recorded_at": "2026-08-22T13:23:16-0700",
+  "schema": "obsidience.model-configuration.v1"
+}

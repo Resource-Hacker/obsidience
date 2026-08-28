@@ -1,0 +1,12 @@
+[Unit]
+Description=Obsidience KWin desktop session
+Requires=graphical-session.target main-compositor-ready.target obsidience-shell-host.service
+After=graphical-session.target main-compositor-ready.target
+Wants=at-spi-dbus-bus.service
+Wants=plasma-kglobalaccel.service
+Wants=plasma-kscreen.service
+Wants=plasma-polkit-agent.service
+Wants=obsidience-shell-notifications.service
+Wants=obsidience-harness-dev.service
+BindsTo=graphical-session.target
+PartOf=graphical-session.target

@@ -1,0 +1,15 @@
+{
+  "completion_tokens": 512,
+  "devices": [
+    "rtx4080",
+    "rtx4000"
+  ],
+  "kind": "tokens",
+  "model_id": "obsidience-qwen38-27b-q8",
+  "recorded_at": "2026-08-25T05:57:06-0700",
+  "schema": "obsidience.model-benchmark.v1",
+  "seconds": 21.212,
+  "summary": "24.14 tok/s",
+  "tested_at": "2026-08-25T05:57:06-0700",
+  "tokens_per_second": 24.14
+}

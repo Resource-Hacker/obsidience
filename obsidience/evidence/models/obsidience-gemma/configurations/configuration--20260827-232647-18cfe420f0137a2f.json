@@ -1,0 +1,23 @@
+{
+  "after": {
+    "allowed_devices": [
+      "rtx4000"
+    ],
+    "context_tokens": 16384,
+    "gpu_memory_utilization": 0.9,
+    "max_num_seqs": 1,
+    "max_output_tokens": 3584
+  },
+  "before": {
+    "allowed_devices": [
+      "rtx4000"
+    ],
+    "context_tokens": 16384,
+    "gpu_memory_utilization": 0.9,
+    "max_num_seqs": 1,
+    "max_output_tokens": 3584
+  },
+  "model_id": "obsidience-gemma",
+  "recorded_at": "2026-08-27T23:26:47-0700",
+  "schema": "obsidience.model-configuration.v1"
+}

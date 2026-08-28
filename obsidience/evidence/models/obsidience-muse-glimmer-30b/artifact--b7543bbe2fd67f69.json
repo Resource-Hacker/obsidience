@@ -1,0 +1,45 @@
+{
+  "artifact": {
+    "expected_size_bytes": 16756683904,
+    "installed": true,
+    "path": "/var/lib/ai/models/obsidience-muse-glimmer-30b/Muse-Glimmer-30B-KQuant-17GB-Q4_K_M.gguf",
+    "resolved_path": "/var/lib/ai/models/obsidience-muse-glimmer-30b/Muse-Glimmer-30B-KQuant-17GB-Q4_K_M.gguf",
+    "size_bytes": 16756683904
+  },
+  "benchmark_kind": "tokens",
+  "capabilities": [
+    "text",
+    "reasoning",
+    "tools",
+    "code",
+    "vision"
+  ],
+  "fingerprint": "sha256:b7543bbe2fd67f69b051727c5b3a5359d33c4e92d4e94df11fd854d342e1239c",
+  "label": "Muse Glimmer 30B",
+  "model_id": "obsidience-muse-glimmer-30b",
+  "quantization": "Official KQuant 17GB Q4_K_M",
+  "runtime": "llama.cpp b21e4de \u00b7 optional DFlash + vision",
+  "runtime_path": "/var/lib/ai/opt/llama.cpp-b21e4de/bin/llama-server",
+  "schema": "obsidience.model-source.v1",
+  "service": "obsidience-muse-glimmer.service",
+  "supported_device_sets": [
+    [
+      "rtx4080",
+      "rtx4000"
+    ],
+    [
+      "rtx4000"
+    ]
+  ],
+  "task_capable": true,
+  "verification": [
+    "repository=meta-models/Muse-Glimmer-30B-GGUF",
+    "revision=70bf1b61ac09f91b24d39038091b41c582bc5d7a",
+    "Muse-Glimmer-30B-KQuant-17GB-Q4_K_M.gguf=16756683904:4cc57c0f51040a226e5a72cc47b7613f7772950e460a665f7083de89f183f60e",
+    "dflash-Muse-Glimmer-30B-Q4_K_M.gguf=1631208128:b2e808bf656086fe86bd0d0bd990f01d33e377537a07c02d45371517c8b264ef",
+    "mmproj-Muse-Glimmer-30B-Q4_K_M.gguf=1400328928:f48b452316f9b213758e8659444029b961a24a07f99a1abb2a9f88b06f7c00c6",
+    "runtime=/var/lib/ai/opt/llama.cpp-b21e4de",
+    "verified_at=2026-08-22T12:24:00-07:00"
+  ],
+  "verification_path": "/var/lib/ai/models/obsidience-muse-glimmer-30b/.verified"
+}

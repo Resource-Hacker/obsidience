@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "artifacts": {
+    "nemotron_speech_streaming_en_0_6b": {
+      "repository": "https://huggingface.co/nvidia/nemotron-speech-streaming-en-0.6b",
+      "revision": "ebe59e5a817142986528bbbee5dba8db7b38ed50",
+      "path": "/var/lib/ai/models/obsidience-nemotron-speech-streaming-en-0.6b/nemotron-speech-streaming-en-0.6b.nemo",
+      "sha256": "283638054c44f6794e74fe9af9048d78a6d9d6c058c12131856c7859a62ac9cd",
+      "size": 2473041920
+    },
+    "pocket_tts_config": {
+      "path": "/var/lib/ai/models/obsidience-realtime/pocket-tts/english.yaml",
+      "sha256": "0faf97431dec482bf87a47390ab20e73b9181f90e6255e4ce6f593af79f51523",
+      "size": 1172
+    },
+    "pocket_tts_model": {
+      "path": "/var/lib/ai/models/obsidience-realtime/pocket-tts/model.safetensors",
+      "sha256": "be9c6b4876d3f30740a8225dfcaa2e43dc4aeb753c15272735bee16bbb4abb0a",
+      "size": 219029196
+    },
+    "pocket_tts_tokenizer": {
+      "path": "/var/lib/ai/models/obsidience-realtime/pocket-tts/tokenizer.model",
+      "sha256": "d461765ae179566678c93091c5fa6f2984c31bbe990bf1aa62d92c64d91bc3f6",
+      "size": 59339
+    },
+    "pocket_tts_voice_starfleet": {
+      "path": "/var/lib/ai/models/obsidience-realtime/pocket-tts/voices/starfleet.safetensors",
+      "sha256": "bb65e8932d5174465abc197e514bee741d133508c713490a1c10ee9eec954315",
+      "size": 6883128
+    },
+    "pocket_tts_voice_hal": {
+      "path": "/var/lib/ai/models/obsidience-realtime/pocket-tts/voices/hal.safetensors",
+      "sha256": "86573c4097ea1c5ab7654713904f5ce62393119017796455b2b8222fb4e5ac2f",
+      "size": 17745720
+    },
+    "pocket_tts_voice_ultron": {
+      "path": "/var/lib/ai/models/obsidience-realtime/pocket-tts/voices/ultron.safetensors",
+      "sha256": "3f0e6334368b7e3e8e4c871853ad492ecf7806a21b074dde87a9dc0d344b768e",
+      "size": 16811832
+    }
+  }
+}

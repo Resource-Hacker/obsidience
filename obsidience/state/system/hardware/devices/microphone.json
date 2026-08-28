@@ -1,0 +1,11 @@
+{
+  "schema": "obsidience.system-node.v1",
+  "id": "microphone",
+  "label": "Microphone input",
+  "category": "device",
+  "collector": "obsidience.harness.realtime.media.interface_catalog",
+  "selector": "microphone",
+  "configuration": "obsidience/state/media-settings.json",
+  "live_data_endpoint": "/api/hardware",
+  "read_only": true
+}

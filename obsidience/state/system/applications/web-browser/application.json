@@ -1,0 +1,11 @@
+{
+  "schema": "obsidience.system-node.v1",
+  "id": "web-browser",
+  "label": "Web Browser",
+  "category": "application",
+  "collector": "obsidience.harness.host.inventory.application_snapshot",
+  "selector": "web-browser",
+  "integration": "external-not-integrated",
+  "live_data_endpoint": "/api/system",
+  "read_only": true
+}

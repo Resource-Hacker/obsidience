@@ -1,0 +1,11 @@
+torch==2.13.0
+torchvision==0.28.0
+transformers==5.13.0
+protobuf==5.29.6
+soxr==0.5.0.post1
+tensorboard==2.19.0
+librosa==0.10.2.post1
+-e /var/lib/ai/src/obsidience-pipecat
+-e /var/lib/ai/src/obsidience-pocket-tts
+-e /var/lib/ai/src/obsidience-nemo-speech[asr]
+websockets==15.0.1

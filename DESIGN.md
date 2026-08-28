@@ -1,156 +1,610 @@
-# Obsidience — the knowledge graph *is* the harness
+# Obsidience design
 
-Dev-build design doc (v1). Parallel experiment to the Hermes-plugin conversion:
-this side bets on **pure graph-native**: one vault, one small interpreter, no
-agent framework underneath.
+Obsidience is a standalone, graph-native agent harness built first for small
+local models on consumer hardware. Its central premise is simple:
 
-## The four authoring primitives
+> The knowledge graph is the harness, and each activation should give the model
+> the smallest complete packet needed to succeed.
 
-The vault exposes exactly four primary authoring primitives. Nothing else is
-architecture; everything else is either knowledge (notes) or runtime state.
+The durable brain instantiates [Andrej Karpathy's LLM-wiki
+pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f):
+immutable raw sources, an agent-maintained Markdown wiki, and its schema are
+ordinary files. The
+runtime combines its recursive article summaries, typed graph relations,
+fast hybrid retrieval, and bounded graph expansion into an activation packet.
+The model does not need to memorize the harness, rediscover its Tool interfaces,
+or infer procedures from a giant system prompt.
 
-| Primitive | Question it answers | Folder | Links |
-|---|---|---|---|
-| **Task** | *What* needs to be accomplished | `Tasks/` | `subtasks:` (ordered, recursive), `runbook:` (leaf tasks) |
-| **Runbook** | *How* a task is completed — sequencing, branching, verification, recovery | `Runbooks/` | `subrunbooks:` (ordered, recursive), `skills:`, optional extra `tools:` |
-| **Skill** | How to use one or more tools *correctly* — parameters, safety rules, interpretation, failure handling | `Skills/` | `subskills:` (ordered, recursive), `tools:` |
-| **Tool** | The executable capability itself | `Tools/` | `subtools:` (ordered, recursive), `binding:` → a registry implementation |
+## Design laws
 
-- **Every primitive is recursive, and trees flow from the graph.** Tasks use
-  `subtasks:`, Runbooks use `subrunbooks:`, Skills use `subskills:`, and Tools
-  use `subtools:`. Each is an ordered same-kind wikilink list and may nest to
-  any authored level; cycles and wrong-kind children fail closed. The Library
-  and graph project this exact structure as index node → subnode → child node
-  → article.
-- **Tasks execute recursively.** A task either has
-  ordered `subtasks:` (a container — its subtasks are how it completes, no
-  runbook needed) or it is a leaf and **must** link a runbook. Missing
-  runbook → `blocked/awaiting-runbook`, never improvised. The target model:
-  a task is `action × target` — the action names a semantic operation (see
-  [[Agent/action-ontology]]), the target is a graph node, and **the subtask
-  tree derives from the target's node → subnode → article structure** rather
-  than being hand-authored: applying an action to a node expands it over the
-  node's children at runtime (generated task instances, receipts per child).
-  Hand-wired `subtasks:` lists are the bootstrap form; generative expansion
-  is the destination (Phase 2).
-- **Runbooks are procedural.** A Runbook tree is loaded in authored order.
-  Each article contributes imperative steps with stop-and-report
-  conditions. They name the skills they need; they never explain tool usage
-  inline — that's what skills are for.
-- **Skills are reusable tool knowledge.** A Skill tree is loaded in authored
-  order. One skill can cover several tools;
-  several runbooks can share one skill.
-- **Tools are executable.** A Tool tree expands to its bound descendants. A
-  leaf Tool note documents and *binds* a capability
-  implemented in the harness registry (`binding: builtin:vault.read`). Screen
-  capture, OCR, ASR, TTS, retrieval, shell execution, UI input, and model
-  delegation are all tools; instructions for operating them are skills;
-  "maintain the wiki" / "answer the user" / "research a question" are
-  runbooks; every user request or background job is a task.
+1. **One graph is authoritative.** The vault defines knowledge, work,
+   procedure, Tool authority, tool guidance, and agent identity. UI trees, menus,
+   schedules, and prompts are projections of that graph. The graph API's
+   navigation manifest resolves Agent card names and generated subject Articles
+   once; every UI consumes those exact IDs, titles, parents, and roles rather
+   than reconstructing labels from paths.
+2. **Every graph node is an Article.** A parent Article is the readable index
+   and condensation of its descendants. A leaf is the complete local article.
+   `index`, `folder`, and `domain` are therefore presentation roles, not kinds.
+   Generated index titles are human-facing and begin uppercase; terminal
+   executable identifiers such as `vault.read` retain their exact spelling.
+3. **Edges dispatch; retrieval informs.** Fast retrieval may nominate a Task
+   candidate, but the harness must select one exact accepted Task Article.
+   That Task's typed links select Runbooks, Skills, Tools, assignees, and
+   hierarchy. Similarity never grants executable authority.
+4. **Definitions and execution are separate.** Articles define reusable
+   objects. Schedules, event occurrences, attempts, status, traces, and results
+   live in runtime state and the bounded execution ledger.
+5. **Shallow is the default.** Prefer one meaningful level below a family.
+   Add depth only when every child is independently useful and explainable.
+6. **No fictional Tool.** A Tool exists only when the harness has one real
+   `capability:<exact Tool title>` binding and one matching Source-linked
+   entrypoint. Documentation, a package name, or remembered behavior is not a
+   Capability and cannot make a Tool executable.
+7. **Optimize for small models.** Prefer explicit contracts, narrow choices,
+   stable names, short articles, closed tool sets, and deterministic validation
+   over prompt cleverness or hidden convention.
+8. **Disk paths are literal.** The wiki and raw sources are the durable files;
+   indexes, graph DTOs, embeddings, and UI trees are disposable derivations.
+   A Source path shown in the UI is the exact project-relative path opened by
+   the Reader, never a copied file or synthetic alias.
 
-## Agents (who — principals, not a fifth authoring primitive)
+## Canonical Article kinds
 
-Subagents are **literal agents**, exactly like HEREBRUM's fleet: Alexandria
-(curator), Darwin (researcher), Heimdall (guardian). Each is an identity note
-plus a private subtree under `Agents/<Name>/`, and tasks bind to them with
-`assignee: "[[Agents/<Name>]]"`. The four authoring primitives describe the
-work (what/how/knowledge/capability); agents are *who*. One interpreter
-runtime executes every session — **as** the assigned agent (its identity is
-the persona, and an agent `tools:` list further narrows the skill-granted
-set). Visually each agent is its own satellite ball orbiting the main graph
-(the HEREBRUM satellite machinery), carrying its subtree and assigned tasks.
+Accepted frontmatter uses exactly six semantic kinds.
 
-## The runtime is not a primitive
+| Kind | Meaning |
+| --- | --- |
+| `knowledge` | Facts, constraints, context, explanations, indexes, domains, and observations |
+| `task` | A reusable outcome with inputs and acceptance conditions |
+| `runbook` | The ordered or branching process for completing a Task |
+| `tool` | One executable interface with declared arguments, effects, and failures |
+| `skill` | Exact practical instructions for using one Tool correctly |
+| `agent` | An accountable executor with a role and checked-out work and Tool+Skill pairs |
 
-The harness is the **interpreter**:
+Knowledge is the descriptive default. A domain such as Games or a subject such
+as Architecture is a Knowledge Article. It becomes an index by having children;
+it does not become a separate Domain or Index object.
 
+Source is intentionally outside this kind list:
+
+- **Source** is one typed, read-only view over the real Obsidience project tree:
+  `obsidience/vault/` contains wiki Markdown; `obsidience/evidence/` contains
+  immutable raw material; `obsidience/harness/`, `obsidience/ui/`,
+  `obsidience/scripts/`, and `obsidience/tests/` contain application code; and
+  `obsidience/state/system/` is the physical System inventory. Its real folders
+  are `hardware/{compute,drives,devices}`, `applications/`, and `network/`;
+  every descriptor remains an exact readable file. Source follows those
+  folders: `SYSTEM` owns peer `HARDWARE` and `APPLICATIONS` branches, while
+  Drives stays inside Hardware and exposes the actual files beneath each
+  volume. Private `@view/` keys stabilize UI identity but cannot invent a
+  branch or replace a leaf's exact path. These folders are not Article kinds.
+  Live sensor values stay on the Hardware API.
+  Source supports Articles but is not a second knowledge graph or mutation
+  authority.
+- Obsidience is an ordinary directory on `/home`; `/var/lib/ai` is the Models
+  storage location. `/home` and `/var/lib/ai` are separate Btrfs subvolume
+  mounts on one shared filesystem and therefore share free space. There is no
+  dedicated Obsidience partition or quota.
+- A newly created immutable raw Source emits one `source.added` event after its
+  bytes and ledger identity are durable. The event is one trigger on Darwin's
+  existing Learn research Task. Darwin writes one cited synthesis through
+  `source.handoff` into the physical `obsidience/evidence/inbox/`; that durable
+  transition emits `source.inbox` for Alexandria's centralized Ingest Task. Duplicate
+  capture or handoff emits nothing. Source never becomes accepted Knowledge or
+  an intermediate Review object.
+
+Capability and Module are also intentionally outside the Article-kind list:
+
+- **Capability** is executable machinery behind a Tool interface. Each accepted
+  leaf Tool binds one thin entrypoint at
+  `obsidience/harness/capabilities/<dotted Tool segments>/<leaf>.py`; its code
+  and provenance live in Source. It is not checked out or selected by a Task;
+  the Tool and paired Skill are the graph-facing authorization and guidance.
+- **Module** is a top-level Obsidience product component with a physical folder
+  and bounded contract: Harness, Shell, UI, Vault, or Tests. Execution, retrieval,
+  models, realtime, and the other Harness folders are Harness subsystems, not
+  Modules. Modules are neither Capabilities nor model-facing authority, and
+  their Source projection never manufactures Module Articles in the graph.
+
+The filesystem package hierarchy is the code-side projection of function just
+as the Article hierarchy is the knowledge-side projection of meaning. Packages
+stay shallow around real logical subsystems and declare a comprehensible import
+direction. No first-party folder is named `modules`, and speculative
+architectural layers are forbidden.
+
+Obsidience is currently an agent harness and developing Linux desktop shell,
+with `plasmashell` as its first replacement target and KWin as its compositor
+boundary. Its system architecture may later grow into an OS environment. KDE
+Plasma, GNOME, and Windows desktop functions are replacement targets, not
+inherited ontology terms. A function moves into Obsidience only when a real
+modular System or interface implementation exists and passes a bounded cutover
+with rollback; the development direction never creates a fictional Capability
+or a second authority path. Linux remains the plumbing: kernel drivers,
+filesystems, systemd, udev, PipeWire/WirePlumber, NetworkManager, and compositor
+protocols are reused rather than reimplemented. The first Samsung milestone
+keeps KWin as compositor and replaces only `plasmashell`. Its accepted
+development slice is the native `Shell` Module: a selectable Obsidience KWin
+session, an exact-output background surface, an exclusive top panel, and
+bounded read-only KWin state. The existing development UI remains on isolated
+USB-C Xorg; embedding that renderer and cross-display pane drag remain separate
+unclaimed slices.
+
+## Shell and Surface architecture
+
+Obsidience is designed as a complete `plasmashell` replacement while retaining
+an unmodified upstream KWin. KWin owns composition, presentation, VRR,
+fullscreen behavior, window management, outputs, input routing, effects,
+screen-lock enforcement, and XWayland. Obsidience owns the visible and
+interactive desktop shell. A KWin fork is outside the default architecture.
+
+The compatibility boundary is:
+
+```text
+upstream KWin and display servers
+  -> compositor adapters
+  -> stable Obsidience Shell API
+  -> Obsidience shell host
+  -> Surface render hosts
+  -> panes, widgets, providers, and AI surfaces
 ```
+
+Only a compositor adapter may call KWin-specific scripts, D-Bus interfaces, or
+private protocols. It translates detected KWin capabilities into stable shell
+objects and exposes observations separately from validated commands. The KWin
+component stays small and contains no graph retrieval, model reasoning, pane
+presentation, or business logic. Standard Wayland protocols are preferred;
+versioned KWin-specific behavior is isolated and tested against the supported
+KWin range.
+
+A **Surface** is a runtime presentation endpoint, not an Article kind, Tool,
+Capability, or synonym for a Wayland `wl_surface`. A Surface binds one physical
+display workspace to one render host and records its backend, output identity,
+geometry, scale, capabilities, and adjacency. Current physical Surfaces are:
+
+- Samsung: KWin Wayland on the RTX 4080, exact output `HDMI-A-1`;
+- USB-C: isolated AMD Xorg screen `:2.0`;
+- DP-4: isolated AMD Xorg screen `:2.1`.
+
+The side displays remain outside KWin. This is required for Samsung gaming and
+VRR behavior. Because Xorg and Wayland clients cannot move one native window
+between those display servers, Obsidience supplies continuity above them.
+
+Every pane, without exception, has one generic `PanePlacement`:
+
+```text
+pane_id + surface_id + local_rect + open + z_order
+```
+
+Pane-specific cross-display bridges are forbidden. A cross-Surface drag is one
+placement update owned by the shell host: the source render host releases the
+pane and the destination render host materializes the same pane with its bounded
+UI state. Domain data continues to come from the ordinary Obsidience APIs. The
+source never remains as a hidden second owner, and transfer failure leaves the
+last accepted placement intact. This does not require another coordinator
+process or pane-specific transport.
+
+Each Surface render host uses the same Obsidience visual language and pane
+registry. Shell packages may choose layouts and themes but never bind directly
+to KWin or become competing shell owners. Widgets, data providers, and AI
+surfaces receive only declared stable API capabilities. Basic launching,
+window switching, notifications, volume, session controls, and recovery must
+remain usable when models, retrieval, or the knowledge graph are unavailable.
+
+One shell host owns singleton shell responsibilities. Failure of a pane,
+extension, model, or graph view must not terminate KWin or the desktop session.
+KWin and applications remain alive across a shell restart. The independent
+terminal is the recovery path; `plasmashell` is not a runtime owner or fallback.
+
+```text
+obsidience/harness/
+  __init__.py
+  __main__.py
+  config.py
+  interfaces/{api,cli}/
+  {execution,knowledge,conversation,models,realtime,computer,web,host}/
+  capabilities/<exact dotted Tool ID as directories>/<leaf>.py
+```
+
+Filesystem depth expresses stable responsibility rather than wrapper-only
+folders. Prefer one meaningful subsystem level; use deeper structure only for a
+real hierarchy such as the speech worker or a dotted Tool ID. Cross-subsystem
+imports are explicit, package `__init__` files are side-effect-free, and generic
+`utils`, `common`, and `core` junk drawers are not architecture.
+
+## Recursive hierarchy
+
+The same article law applies at every depth:
+
+```text
+Article -> child Article -> child Article -> leaf Article
+```
+
+Primitive decomposition uses one exact same-kind field:
+
+- Task: `subtasks`
+- Runbook: `subrunbooks`
+- Tool: `subtools`
+- Skill: `subskills`
+
+The hierarchy must be acyclic. A selected descendant carries its ancestor
+Articles as condensed context. Selecting a parent Task includes its descendant
+Task scope unless an exact descendant is excluded.
+
+Hierarchy and causation are separate. Only an explicit `subtasks` edge makes
+one Task a child of another. `task.create` activates one exact accepted Task,
+which keeps its authored hierarchy. Activation provenance records why it ran
+and never changes either Task's hierarchy. Generate → Task authors reusable
+definitions with `vault.propose`; activation never authors a definition.
+
+One Task may have several ordered event triggers. The canonical `triggers`
+list identifies those activation routes; manual execution and scheduling remain
+available without manufacturing Task subtypes. A trigger changes runtime
+bindings, never the Task's identity, acceptance contract, or hierarchy.
+
+Do not use hierarchy merely to name procedure. Research framing, discovery,
+screening, extraction, analysis, and verification are Runbook stages unless
+one becomes a separately queueable outcome with its own acceptance condition.
+Observations is the model exception: Immediate, Temporary, and Durable have
+genuinely different lifecycles, so their deeper Task structure is useful.
+
+## Work, procedure, and capability
+
+A Task says what must become true. A Runbook says how to make it true. A Tool
+exposes one operation through one exact Capability entrypoint. Its one paired
+Skill tells a small model exactly how to use that Tool, including argument
+selection, interpretation, failure handling, and safety. Knowledge supplies the
+relevant facts and constraints. Modules operate the harness itself and do not
+enter this Task authorization spine.
+
+```text
 Task
-  → choose Runbook            (leaf) — or expand Subtasks (container, in order)
-  → load required Skills      (runbook.skills → union of their tools)
-  → authorize and invoke Tools (only the authorized set exists in-session)
-  → collect evidence          (immutable receipt per run)
-  → update Task state
+  -> Runbook
+     -> Skill
+        -> Tool interface
+           -> Capability in Source
+  + fast hybrid Knowledge context
+  -> evidence and acceptance
 ```
 
-A task instance carries runtime properties in system-written frontmatter —
-`status` (`draft → pending → running → blocked | review | completed | failed`),
-inputs (`params:`), outputs/evidence (receipt links), timestamps — without
-creating a fifth architectural category. The scheduler fires `pending` tasks
-(and cron-`schedule:`d ones); acceptance criteria route terminal success to
-`review` for the owner unless `auto_done: true`.
+A leaf Task must resolve a Runbook. A Runbook loads only its required Skills.
+Each Skill resolves exactly one Tool, each leaf Tool resolves exactly one
+Capability entrypoint in Source, and an Agent's checkout may narrow that set
+further. Missing or malformed links fail closed; the model does not invent a
+replacement Tool or procedure.
 
-## Laws
+Runbooks are agent-specific synthesized objects. The shared Library therefore
+contains Tasks and Tool+Skill pairs. Checking out a Tool includes its Skill.
+Checking out a Task activates Generate -> Runbook so Darwin can synthesize the
+procedure for that Task, Agent, and available Tool set.
 
-1. **Edges dispatch, vectors inform.** Control flow resolves through exact
-   wikilinks (task → subtasks/runbook tree → skill tree → tool tree). Retrieval only
-   assembles the activation briefing. Similarity never selects what runs.
-2. **Owner writes freely; agents propose.** The owner edits the vault in
-   Obsidian; agents write only staged proposals (`_staging/`) which the owner
-   approves/rejects. The harness itself writes only `Receipts/` and task
-   runtime frontmatter.
-3. **Mechanism in code, policy in vault.** The interpreter contains no policy.
-4. **Tool authorization is closed.** A session gets exactly the tools its
-   skills (plus runbook extras) grant — plus `task.complete`. Nothing else.
-5. **Receipts are immutable; git is the audit trail.**
+## Agent structure
 
-## UI vocabulary
+`Executive` is the user-facing role and the root Agent Article. A configured
+personal name is merely identity data on that Article and never appears in
+paths, protocols, object kinds, or architecture.
 
-The **Library** is the curated repository for accepted Tools, Skills, Runbooks,
-and Tasks. It renders as HEREBRUM's green book satellite and as a searchable
-four-shelf pane. Agent changes remain proposals until accepted through the
-Review Queue.
+- **Executive** interprets the owner's request, chooses work, delegates,
+  operates, and returns the verified result.
+- **Alexandria** is the Curator. She owns Ingest, Curate, Merge, Link,
+  Improve, and Archive and maintains the accepted wiki from bounded findings.
+- **Darwin** is the Researcher. He owns Question, Learn, News, Model, and Generate.
+- **Heimdall** is the Guardian. He owns Audit, Check, and independent acceptance
+  and integrity checks.
 
-Library items are checked out through typed wikilink lists on each principal's
-identity note (`tools:`, `skills:`, `runbooks:`, `tasks:`). The Library row
-controls are ordered Executive, Guardian, Curator, Researcher; a lit icon is
-the durable assignment state. Checkouts are projections, not duplicate source
-notes: the Library remains canonical, checked-out items appear on the target
-agent's graph, a checked-out parent projects its complete descendant closure,
-and tool checkouts narrow that agent's executable surface.
+Each Agent Article directly owns Architecture, Tools, Skills, Runbooks, Tasks,
+Other Agents or Subagents, and Observations. There is no extra Agent wrapper
+beneath Executive or any specialist.
 
-Every graph hierarchy node is readable as an article. A subject absorbs its
-authored `index.md` or `README.md` when one exists; otherwise the harness
-provides a read-only index article over the node's current children. Clicking
-either an article or a hierarchy node always opens that article-shaped view in
-the Reader.
+Each named Agent has one canonical `kind: agent` Brain Article. A parallel
+Knowledge role charter is an architectural duplicate of that Agent, even when
+it contains unique detail or relationships. Merge must absorb that material
+into the Agent Article, redirect references and meaningful edges, then stage the
+ordinary shadow Article for archival.
 
-All four Library shelves use the same recursive matrix interaction. A row with
-same-kind children expands in authored order, search preserves matching ancestor
-paths, and every row remains an independently readable and check-outable article.
-Callable Tool names additionally project their dotted namespace as generated
-index articles: `task.complete` and `task.create` render beneath `task`, while
-the `vault.*` capabilities render beneath `vault`. Checking out a namespace
-stores only its canonical descendant Tool links on the identity note.
+## Activation and RAPTOR retrieval
 
-The Task shelf also carries the owner's stateless `wiki` and `research`
-taxonomy. Its generated nodes are readable indexes with no state or play
-control; they describe where task definitions belong, but never execute.
-Existing canonical tasks occupy their closest matching leaf without changing
-their stable ref, history, schedule, or authored executable `subtasks:`. A
-taxonomy checkout stores the selected stable `@library/Tasks/*` index ref on
-the identity and projects that hierarchy closure onto the agent. This works
-even before the branch receives a runnable task and never grants execution.
+Every live, manual, scheduled, or event-triggered request follows one executor
+and one visible path:
 
-The **Jobs** pane is the scheduler surface: it creates, edits, runs, and watches
-scheduled task definitions. It does not double as the task catalog. "Job" is
-operational vocabulary for scheduled work under the interpreter — it is not a
-fifth primitive.
-
-## Components
-
-```
-vault/      Tasks/ Runbooks/ Skills/ Tools/ Knowledge/ Receipts/ _staging/
-harness/    the interpreter: indexer (FTS5+BGE hybrid, RRF), briefing,
-            executor, scheduler, review ops, FastAPI :8765, STT
-ui/         Electron HUD: the 3D graph backdrop (original HEREBRUM engine,
-            paint pipeline, and the owner's recovered tuning) + floating
-            panes: Library, Jobs, Operator (chat+voice), Review Queue, Reader,
-            Harness, Terminal
+```text
+request or event
+  -> select exact Task and assignee
+  -> resolve Runbook, Skills, and Tools by graph edge
+  -> retrieve Knowledge with lexical and vector lanes
+  -> fuse ranks deterministically
+  -> attach at most two direct typed graph neighbors
+  -> pack one token-budgeted activation packet
+  -> execute, verify, and record the attempt
 ```
 
-## Non-goals for v0
+The one visible Thinking Packet is semantically labeled and packed in this
+order:
 
-Adjudication lanes, sealed validators, per-agent vault
-isolation, secrets. Trust model: one owner + staged proposals + git. Add
-ceremony only when the dev build earns it.
+1. Agent Identity Article;
+2. exact Task Article and acceptance conditions;
+3. immutable runtime Objective for this activation;
+4. authorized Tool Articles;
+5. their exact paired Skill Articles;
+6. applicable Runbook Articles;
+7. typed bindings and exclusions that are not the Objective or controller
+   provenance;
+8. up to five accepted Knowledge Articles from fast lexical+dense RRF,
+   preserving at least three direct hits when available and admitting at most
+   two direct graph neighbors;
+9. the exact model-facing `Immediate Observations` Article for an activation in
+   the active Executive conversation.
+
+All activations use the same 1,200-estimated-token Knowledge allowance. The
+fast search has no elapsed-time deadline, generative expansion, or
+cross-encoder pass. One immutable Objective drives retrieval, graph activity,
+the provider packet, and the run ledger. It is the exact bound owner request
+when present; otherwise it is the deterministic Task title followed by ordered
+Runbook titles. Request, source, event, and response-contract controller data
+are not duplicated into Bindings. Objective is runtime data, not an Article.
+One typed result set may supply Knowledge and nominate a Task candidate, but
+only the selected Task's authored edges fill the Agent, Runbook, Skill, and
+Tool slots. The retrieval path is prewarmed before the API accepts its first
+activation. It degrades without widening authority.
+The Executive's exact public dialogue is runtime state. One active conversation
+uses an 80-turn in-memory deque backed by complete SQLite history; typed Chat and
+Realtime speech append to that same ordered conversation. Enabling Realtime
+rotates once to a fresh conversation, which remains active until the next enable
+or the owner's explicit New conversation action. A final user transcript is
+stored before execution, while an assistant turn is stored only after one
+current execution produces a completed, nonempty public reply. Each assistant
+row names its exact user row. Rotation never deletes prior SQLite rows.
+
+That dialogue projects into one transient, unverified Knowledge Article named
+`Immediate Observations`. The Article contains the newest cumulative Temporary
+Observation summary, when present, followed by every exact completed pair after
+its SQLite sequence boundary. It rides inside every Thinking Packet for that
+conversation and its ref drives the same visible graph activation. It is never a
+similarity-search candidate, executable authority, or durable claim. The current
+owner request remains the Task binding and therefore is not duplicated into the
+Article before execution.
+
+The ordinary `observations/immediate/compact` Task runs at a configurable
+60-to-90-percent model occupancy threshold, default 80 percent, or when the
+owner presses Compact. Occupancy is measured against the active Task's selected
+model; Compact uses its own authored resident Executive model to reduce the completed
+Immediate prefix into one self-contained cumulative Temporary Observation of at
+most 2,000 characters. Every compaction summary is a separate transient,
+unverified Article; exact SQLite turns remain unchanged. At a real conversation
+boundary, Alexandria's `observations/durable/promote` Task archives the exact
+Temporary bundle in Source and stages only justified owner-review candidates.
+Realtime defers the final compaction and event until Realtime ends so activation
+latency is unchanged; promotion then waits for the executor to become idle.
+Compaction and Source archival never create accepted durable Knowledge, and the
+retired per-turn Maintain Temporary Observations activation does not run for
+Executive Chat or Realtime.
+
+Task-selected reasoning remains private and may use the model's full configured
+effort. Every public executor response is provider-constrained to one JSON
+action object before parsing; the model never handwrites a fenced Tool call.
+Provider finish state and bounded parse diagnostics belong in the run ledger,
+while complete malformed responses do not.
+
+The executor publishes the packet's exact Article refs and measured retrieval
+duration for every activation. The graph animates that real path whether work
+began in live text, live voice, Tasks, a schedule, or an event. Automatic speed
+matches the measured retrieval duration without a time clamp; disabling its
+checkbox gives the graph's Animation speed slider manual control.
+
+Model and reasoning effort are per-Task execution settings. Automatic routing
+selects responsive Gemma for Executive and the fully GPU-resident Qwen3.8 9B
+Distill for specialist Agents. Hardware is a set of independent component
+slots, not a global model profile. The fallback configuration places Gemma on
+the RTX 4000 Ada and OmniParser on the RTX 4080 SUPER, while persisted Hardware
+selections remain authoritative; the AMD iGPU remains the USB-C display/media
+device. A Task lease displaces only overlapping GPU components and restores
+the saved selection afterward. Model layers never spill to CPU.
+
+Muse supports two explicit layouts: RTX 4000 text-only, or both GPUs with
+vision and DFlash. The
+dual layout is preferred for Tasks; RTX 4080-only is rejected because the
+official 17 GB quant does not fit. Selection never changes Task identity, graph
+authority, or the activation contract.
+
+## Model addition loop
+
+A catalog addition or artifact revision emits the ordinary `model.added`
+event. Darwin's Model Task follows one accepted Runbook using four strict
+Tool+Skill pairs: inspect the registered artifact, register its immutable
+Source manifest, benchmark each relevant valid GPU layout, and apply only the
+smallest measured configuration change. Benchmarking temporarily leases the
+requested GPUs and restores the saved Hardware assignment afterward. Existing
+catalog entries are baselined on first registration so enabling this mechanism
+does not create a retroactive activation storm.
+
+The Models pane projects supported modalities and features, quantization,
+context, valid hardware,
+current residency, the latest commensurate benchmark, and the model Source
+manifest. Hardware separately owns saved component residency. Source stores
+small immutable manifests and measurement records that attest the external
+model blobs; it never duplicates multi-gigabyte weight files.
+
+Every text-generating model benchmark has one standalone primary contract:
+the exact same prompt, a 256-token ceiling, temperature zero where supported,
+one discarded warmup, and three measured samples. TTFT is the median time from
+request dispatch to first public output. End-to-end tok/s is aggregate actual
+completion tokens divided by aggregate complete request wall time, including
+TTFT and prompt processing. Frame cadence, interruption acknowledgement, audio
+prefill, and startup remain useful secondary diagnostics; they never substitute
+for a standalone per-model receipt.
+
+Models presents Task reasoning models only. Hardware presents the fixed speech
+runtime: Pipecat transport, NeMo turn taking, Nemotron streaming ASR on the RTX
+4080, and Pocket TTS on CPU. Hardware selects the Star Trek Computer, HAL, or
+Ultron Pocket voice. The raw voice-training corpus is not imported.
+
+Hardware cards are also compact read-only sensor suites. Every card exposes a
+memory meter and utilization meter, then the device-specific live readings
+available from `/proc`, Linux hwmon/amdgpu, or `nvidia-smi`. Sensor polling is
+visible-pane only and does not change component assignment, Task routing, or
+model configuration.
+
+Hardware owns exact microphone input and speaker output for the next Realtime
+start, plus one preferred physical camera for future camera-capable Tools.
+Choices project the live PipeWire and physical V4L2 inventory and never change
+system-wide defaults. Agent video feeds are a separate input class: the TFT ADB
+feed belongs to the Realtime experiment and is never listed or persisted as a
+camera. Video and camera must not share one UI or semantic slot.
+
+The thinking graph visualizes this actual activation path. It stays static when
+the harness is not resolving a request.
+
+## Missing-knowledge loop
+
+A small model must not guess around a real gap.
+
+1. Executive identifies the missing fact, procedure, Tool, or Capability.
+2. Executive activates Darwin's Question or Learn Task with one bounded gap.
+3. Darwin gathers direct evidence and stores immutable raw Source objects. Each
+   `source.added` occurrence routes through the existing Learn Task; supporting
+   captures inside that active occurrence coalesce into the same commitment.
+4. Darwin drops one bounded source-backed synthesis into the physical
+   `obsidience/evidence/inbox/` through `source.handoff`.
+5. The durable `source.inbox` event activates Alexandria's centralized Ingest
+   Task, which reconciles the handoff and its cited Sources into the smallest
+   coherent set of Articles and links.
+6. Heimdall verifies evidence, graph integrity, or acceptance when the change
+   is risky or consequential.
+7. The original Task is retried with the newly retrievable knowledge.
+
+If the gap is reusable work or a Tool interface, Generate creates the
+appropriate Task, Runbook, Tool, or Skill. A proposed Tool cannot activate
+until its exact Capability binding, singular Source-linked entrypoint, and one
+paired Skill all validate.
+
+## Wiki maintenance
+
+The main maintenance families stay shallow:
+
+- **Wiki:** Ingest, Query, Curate, Merge, Link, Improve, Archive, Audit,
+  Check.
+- **Research:** Question, Learn, News, Model. Learn accepts `source.added` as
+  one trigger without becoming a Source-specific Task.
+- **Generate:** Tool, Skill, Task, Runbook.
+- **Observations:** Immediate, Temporary, and Durable lifecycle Tasks.
+
+Curate performs one bounded scheduled inspection. When its Runbook detects a
+high-signal maintenance lead, it may activate the exact accepted Merge or Link
+Task; that Task independently confirms and completes its bounded outcome
+through its own Runbook. Merge owns duplicate consolidation, while Link owns
+missing Article relationships. Editorial actions such as copyedit, categorize,
+split, and retitle remain branches within the Improve Runbook. Evidence-grounded routine
+maintenance may be accepted automatically after deterministic validation.
+Conflicts, destructive lifecycle actions,
+authority changes, and high-risk effects require independent Guardian or owner
+review. Review is a risk control, not the normal wiki-writing mechanism.
+
+Review is serialized at the Article boundary. Only one unresolved proposal may
+target an accepted Article, and updates or archives pin the exact accepted base
+revision they were drafted from. A Task in `review` cannot be reactivated by
+`task.create`. Redirect updates are decided before their dependent archive;
+the Review projection disables a dependency-blocked decision instead of
+letting an ordinary click fail or overwrite another complete replacement.
+Review decision and execution finalization are order-independent: deciding all
+proposals from an exact run while it is still finishing completes the Task and
+the late `task.complete` result may not restore stale `review` state.
+The accepted Task taxonomy also classifies the review object: a proposal staged
+by the exact Link Task is a first-class Link review, while every other proposal
+is an Article review. The harness records that class, derives it for older
+proposals, and projects the exact added and removed Article links. The model and
+UI may not guess or override it. Approval still applies the complete Article
+replacement atomically, so Link reviews do not create a second mutation path.
+
+Articles should be concise, self-contained, current, and pleasant to read.
+Remove duplicated summaries, migration history, receipts, generic filler,
+unresolved framework vocabulary, and facts that do not improve retrieval or
+execution.
+
+## Runtime and interface projections
+
+The Python harness owns indexing, retrieval, activation, execution, scheduling,
+Source integrity, and the run ledger. The Electron UI is a thin projection.
+
+- **Graph** shows the real hierarchy and active retrieval path.
+- **Reader** reads and edits Articles and opens linked Source files in the same
+  center surface.
+- **Knowledge explorer** shows the real vault hierarchy.
+- **Source explorer** shows the exact bounded project filesystem: wiki
+  Markdown, application code, stable System descriptors, and immutable raw
+  sources. Its System branch follows the physical
+  `state/system/{hardware,applications,network}` folders, and Drive nodes mount
+  the exact files at the recorded storage locations. The UI may format a real
+  folder label, but cannot invent its existence or contents; every leaf still
+  carries its exact project-relative disk path. Selecting
+  an Article cross-filters this one view to its Markdown and associated files;
+  clicking any result opens the bytes at that exact displayed disk path in the
+  same Reader. Tool Capability
+  files carry their exact Article link, while internal Modules, interfaces, UI
+  code, scripts, tests, and telemetry remain outside the graph.
+- **Source checkout** assigns one subtree independently to any Agent as a
+  Knowledge scope. It maps only to related accepted Articles and biases the
+  existing five-Article fast retrieval. Source files never become graph nodes,
+  Library assets, executable authority, or unconditional prompt content.
+  The exact System scope maps to ADMECH Workstation; Hardware and Applications
+  narrow that priority to ADMECH Hardware and ADMECH Software respectively.
+- **Library** shows shared accepted Tasks and Tool+Skill pairs and their
+  checkout state.
+- **Tasks** shows only scheduled, event-triggered, or active Tasks, including
+  inherited descendant scope.
+- **Review** shows only material that actually requires a decision, with Link
+  reviews visually distinct from ordinary Article reviews and their exact
+  relationship delta visible before approval.
+- **Terminal** mirrors the current shared development tmux window without
+  owning or renaming it.
+
+No UI module may carry a copied claim catalog, static semantic ontology, second
+scheduler, second memory store, hidden activation path, or duplicated Agent
+subject/name dictionary.
+
+## Realtime Executive
+
+The Realtime button owns one leaf Task, `Tasks/executive/realtime`, for the
+complete live session. Its ordinary `model` and `reasoning_effort` fields are
+the only reasoning selection. Pipecat and NVIDIA NeMo provide speech transport;
+Nemotron transcribes on the RTX 4080 and Pocket speaks on CPU. No second Agent,
+planner, verifier, Tool authority, or Realtime-specific model selector exists.
+Pipecat's upstream `LocalAudioTransport` owns the selected local input and
+output. Obsidience does not add a browser audio client, audio WebSocket, or
+custom capture/playback processor.
+Realtime ready wakes the OBSBOT camera through its official SDK and Realtime off
+sleeps it. While Realtime is on, that SDK command disables the camera's 120-second
+no-video auto-sleep timer; off restores it. The camera's real hardware state owns
+its microphone state.
+
+Each final transcript executes the Realtime Task through the ordinary activation
+compiler, model lease, Tool path, ledger, and graph activity. Speech onset
+cancels Pocket playback and the in-flight Task generation. Backchannels may be
+filtered without granting semantic authority to the speech layer.
+NeMo's serialized `UserStoppedSpeaking` edge owns the persistent user-speaking
+state; a visible final transcript never substitutes for that turn boundary.
+The final transcript and final public reply also project into the same Executive
+Chat conversation used by typed input. Canceled, failed, blocked, interrupted,
+or generation-stale output never becomes an assistant conversation row.
+
+At session start, Realtime validates and freezes the selected microphone,
+speaker, and Pocket voice. Hardware changes made while it runs are saved for
+later and never mutate the active audio graph.
+
+While Realtime is active, autonomous specialist schedules and triggers remain
+pending before claim. Only `task.create` from the exact Realtime Task can mark
+a peer specialist Task as an explicit delegation exception. This provenance
+does not create hierarchy and cannot be supplied by caller arguments.
+
+## Definition of done
+
+An architecture change is complete only when:
+
+- the vault validates with no broken load-bearing edges;
+- every Tool has exactly one paired Skill, exact Capability binding, and
+  singular Source-linked entrypoint;
+- the filesystem, Source explorer, graph, Reader, Library, and Tasks projections agree;
+- Python compilation, UI typecheck, and production build pass;
+- both development services have been restarted;
+- the actual USB-C interface and core API endpoints have been verified; and
+- accepted project text contains no predecessor architecture or Tool claim
+  without its real Capability binding and entrypoint.

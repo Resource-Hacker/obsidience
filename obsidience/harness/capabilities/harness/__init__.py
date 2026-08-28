@@ -1,0 +1,1 @@
+"""Harness Capability adapters."""

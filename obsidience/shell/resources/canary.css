@@ -1,0 +1,25 @@
+window#obsidience-shell-background {
+  background: #02060c;
+}
+
+window#obsidience-shell-panel {
+  background: rgba(2, 8, 16, 0.96);
+  border-bottom: 1px solid rgba(42, 221, 255, 0.72);
+  color: #f4fbff;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+}
+
+.shell-identity {
+  color: #55e5ff;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.shell-state {
+  color: #c5d8e6;
+}
+
+.shell-muted {
+  color: #7f9bac;
+}

@@ -1,0 +1,23 @@
+{
+  "schema": "obsidience.system-node.v1",
+  "id": "obsidience",
+  "label": "Obsidience",
+  "description": "Graph-native local-agent harness and modular plasmashell replacement for KWin",
+  "category": "application",
+  "role": "desktop-shell",
+  "state": "development",
+  "replacement_target": "plasmashell",
+  "compositor_boundary": "KWin",
+  "surface_contract": "obsidience.surface.v1",
+  "collector": "obsidience.harness.host.inventory.application_snapshot",
+  "selector": "obsidience",
+  "project_path": "obsidience",
+  "service": "obsidience-shell-host.service",
+  "components": {
+    "shell": "obsidience-shell-host.service",
+    "harness": "obsidience-harness-dev.service",
+    "development_ui": "obsidience-ui-usbc-dev.service"
+  },
+  "live_data_endpoint": "/api/system",
+  "read_only": true
+}

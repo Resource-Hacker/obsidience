@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "component": "NVIDIA NeMo Voice Agent",
+  "role": "streaming speech recognition and turn taking",
+  "repository": "https://github.com/NVIDIA-NeMo/Speech",
+  "revision": "b17490a705707c09700166d764b3842ab7c1fd4d",
+  "license": "Apache-2.0",
+  "source_path": "/var/lib/ai/src/obsidience-nemo-speech",
+  "integration": "Official NeMo Pipecat STT and turn-taking services; no NeMo LLM, Tool, memory, or TTS authority",
+  "network": "disabled at runtime"
+}

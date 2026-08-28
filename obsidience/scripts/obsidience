@@ -1,0 +1,5 @@
+#!/bin/sh
+PRODUCT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PROJECT_ROOT="$(dirname "$PRODUCT_ROOT")"
+export PYTHONPATH="$PROJECT_ROOT"
+exec "$PROJECT_ROOT/.venv/bin/python" -m obsidience.harness "$@"

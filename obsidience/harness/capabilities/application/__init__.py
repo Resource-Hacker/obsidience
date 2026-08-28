@@ -1,0 +1,1 @@
+"""Application Capability adapters."""

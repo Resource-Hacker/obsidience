@@ -1,0 +1,13 @@
+{
+  "schema": "obsidience.system-node.v1",
+  "id": "obsidience",
+  "label": "Obsidience",
+  "category": "storage",
+  "collector": "obsidience.harness.host.inventory.storage_snapshot",
+  "selector": "obsidience",
+  "path": "/home/wissenschafter/Projects/obsidience/obsidience",
+  "allocation": "shared_filesystem",
+  "quota_bytes": null,
+  "live_data_endpoint": "/api/hardware",
+  "read_only": true
+}

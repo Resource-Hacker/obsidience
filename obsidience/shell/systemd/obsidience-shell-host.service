@@ -1,0 +1,21 @@
+[Unit]
+Description=Native Obsidience Wayland shell host
+Requires=main-compositor-ready.target
+After=main-compositor-ready.target
+PartOf=obsidience-shell-session.target graphical-session.target
+StartLimitIntervalSec=30
+StartLimitBurst=3
+
+[Service]
+Type=simple
+WorkingDirectory=/home/wissenschafter/Projects/obsidience
+Environment=PYTHONPATH=/home/wissenschafter/Projects/obsidience
+Environment=PYTHONUNBUFFERED=1
+Environment=GDK_BACKEND=wayland
+Environment=LD_PRELOAD=/usr/lib/libgtk4-layer-shell.so
+ExecStart=/usr/bin/python -m obsidience.shell --output HDMI-A-1
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=5
+UMask=0077
+CPUWeight=25

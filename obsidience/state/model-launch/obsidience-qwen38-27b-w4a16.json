@@ -1,0 +1,15 @@
+{
+  "context_tokens": 65536,
+  "devices": [
+    "rtx4080",
+    "rtx4000"
+  ],
+  "gpu_memory_utilization": 0.82,
+  "gpu_uuids": [
+    "GPU-4332e1a5-17a8-7e18-5347-5a296549ee81",
+    "GPU-3b820ab6-b7e7-c26b-b400-136780611a3e"
+  ],
+  "max_num_seqs": 2,
+  "max_output_tokens": 10240,
+  "model_id": "obsidience-qwen38-27b-w4a16"
+}

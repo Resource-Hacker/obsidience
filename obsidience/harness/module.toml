@@ -1,0 +1,11 @@
+schema = "obsidience.module.v1"
+id = "harness"
+name = "Harness"
+summary = "Activates and executes Tasks using the graph, local models, capabilities, and system services."
+package = "obsidience.harness"
+entrypoints = [
+  "obsidience.harness.__main__",
+  "obsidience.harness.interfaces.api.app",
+]
+source_roots = ["obsidience/harness"]
+projections = ["obsidience/state/system"]

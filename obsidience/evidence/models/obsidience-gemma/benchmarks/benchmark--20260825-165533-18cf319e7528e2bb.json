@@ -1,0 +1,16 @@
+{
+  "completion_tokens": 512,
+  "devices": [
+    "rtx4000"
+  ],
+  "generation_seconds": 4.968,
+  "kind": "tokens",
+  "model_id": "obsidience-gemma",
+  "recorded_at": "2026-08-25T16:55:33-0700",
+  "schema": "obsidience.model-benchmark.v1",
+  "summary": "TTFT 129.1 ms \u00b7 103.06 tok/s",
+  "tested_at": "2026-08-25T16:55:33-0700",
+  "tokens_per_second": 103.06,
+  "total_seconds": 5.097,
+  "ttft_ms": 129.07
+}

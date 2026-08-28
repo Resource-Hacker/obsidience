@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "component": "Pocket TTS",
+  "role": "fixed local speech synthesis",
+  "repository": "https://github.com/kyutai-labs/pocket-tts",
+  "version": "3.0.2",
+  "revision": "f5fa841aa8702d7f15ea9e344bec5290bf42a446",
+  "license": "MIT",
+  "source_path": "/var/lib/ai/src/obsidience-pocket-tts",
+  "execution": "CPU only",
+  "sample_rate_hz": 24000,
+  "temperature": 0.3,
+  "streaming": true,
+  "raw_training_audio_imported": false,
+  "artifacts": [
+    {
+      "path": "/var/lib/ai/models/obsidience-realtime/pocket-tts/english.yaml",
+      "sha256": "0faf97431dec482bf87a47390ab20e73b9181f90e6255e4ce6f593af79f51523",
+      "size_bytes": 1172
+    },
+    {
+      "path": "/var/lib/ai/models/obsidience-realtime/pocket-tts/model.safetensors",
+      "sha256": "be9c6b4876d3f30740a8225dfcaa2e43dc4aeb753c15272735bee16bbb4abb0a",
+      "size_bytes": 219029196
+    },
+    {
+      "path": "/var/lib/ai/models/obsidience-realtime/pocket-tts/tokenizer.model",
+      "sha256": "d461765ae179566678c93091c5fa6f2984c31bbe990bf1aa62d92c64d91bc3f6",
+      "size_bytes": 59339
+    }
+  ],
+  "voices": [
+    {
+      "id": "starfleet",
+      "label": "Star Trek Computer",
+      "path": "/var/lib/ai/models/obsidience-realtime/pocket-tts/voices/starfleet.safetensors",
+      "sha256": "bb65e8932d5174465abc197e514bee741d133508c713490a1c10ee9eec954315",
+      "size_bytes": 6883128,
+      "sampler_decode_steps": 5
+    },
+    {
+      "id": "hal",
+      "label": "HAL",
+      "path": "/var/lib/ai/models/obsidience-realtime/pocket-tts/voices/hal.safetensors",
+      "sha256": "86573c4097ea1c5ab7654713904f5ce62393119017796455b2b8222fb4e5ac2f",
+      "size_bytes": 17745720,
+      "sampler_decode_steps": 1
+    },
+    {
+      "id": "ultron",
+      "label": "Ultron",
+      "path": "/var/lib/ai/models/obsidience-realtime/pocket-tts/voices/ultron.safetensors",
+      "sha256": "3f0e6334368b7e3e8e4c871853ad492ecf7806a21b074dde87a9dc0d344b768e",
+      "size_bytes": 16811832,
+      "sampler_decode_steps": 1
+    }
+  ]
+}

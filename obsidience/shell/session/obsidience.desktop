@@ -1,0 +1,5 @@
+[Desktop Entry]
+Name=Obsidience
+Comment=Obsidience shell on KWin
+Exec=/home/wissenschafter/Projects/obsidience/obsidience/shell/session/obsidience-shell-login
+Type=Application
