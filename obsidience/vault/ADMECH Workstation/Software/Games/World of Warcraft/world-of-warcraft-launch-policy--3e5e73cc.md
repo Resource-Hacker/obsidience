@@ -1,7 +1,7 @@
 ---
-approved_at: '2026-08-26T20:18:46'
+approved_at: '2026-08-31T09:58:12'
 kind: knowledge
-provenance: proposed by Alexandria (task Tasks/merge)
+provenance: proposed by Alexandria (task Tasks/link)
 tags:
 - software
 - games
@@ -28,3 +28,4 @@ Preserve raw mouse behavior, the G502 NumPad mapping, keyd exclusions for helper
 ## Relationships
 
 - `related_to` [[Agents/Executive/Observations/game-interaction-authority-and-interests--463cc7c8|Game interaction authority and interests]] — The launch contract and the verified movement/input suite give Executive the actuation substrate for game interaction under standing owner authority.
+- `related_to` [[ADMECH Workstation/Hardware/Input/input-mapping-and-mouse-configuration--5579dfc0|Input Mapping and Mouse Configuration]] — The launch policy's helper chain consumes the active mouse profile, keyd exclusions, Caps Lock mapping, and G502 NumPad mapping described there.
