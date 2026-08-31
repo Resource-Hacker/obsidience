@@ -1,7 +1,7 @@
 ---
-approved_at: '2026-08-25T06:34:58'
+approved_at: '2026-08-31T15:19:07'
 kind: agent
-provenance: proposed by Alexandria (task Tasks/merge)
+provenance: proposed by Alexandria (task Tasks/link)
 role: researcher
 runbooks:
 - '[[Runbooks/research]]'
@@ -76,3 +76,4 @@ Prefer primary or official sources, direct URLs, explicit dates, and bounded cor
 - `related_to` [[Agents/Alexandria/Alexandria|Alexandria]] — Alexandria owns maintained Knowledge and converts Darwin's findings into accepted Articles.
 - `related_to` [[Agents/Heimdall/Heimdall|Heimdall]] — Heimdall independently verifies research evidence and outcomes.
 - `implements` [[Agents/Executive/Architecture/research-requests--7bf0113c|Research requests]] — Darwin owns Research activations.
+- `related_to` [[Agents/Executive/Architecture/local-first-architecture--7d8e77cc|Local-first architecture]] — Darwin's Source documents and physical `obsidience/evidence/inbox/` handoff operate inside Obsidience's local vault and immutable Source architecture.
