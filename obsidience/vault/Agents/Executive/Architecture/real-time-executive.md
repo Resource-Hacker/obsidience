@@ -1,5 +1,5 @@
 ---
-approved_at: '2026-08-27T18:05:01'
+approved_at: '2026-08-31T09:34:12'
 kind: knowledge
 provenance: proposed by Alexandria (task Tasks/link)
 title: Real-time Executive
@@ -48,7 +48,8 @@ Knowledge Article. It has retrieval disabled and always rides in the active
 Executive Thinking Packet by exact Article identity. It contains the newest
 cumulative Temporary Observation summary followed by exact completed
 user-and-reply pairs after that summary's sequence boundary. It grants no Task,
-Tool, Policy, or durable Knowledge authority. Enabling Realtime rotates once to
+Tool, Policy, or durable Knowledge authority. Its placement and lifecycle follow
+[[Agents/Executive/Observations/knowledge-placement-and-observation-routing--4a4412b7|Knowledge placement and observation routing]]. Enabling Realtime rotates once to
 a fresh conversation without waiting on prior-session maintenance. Typed Chat
 and speech share that identity until the next Realtime enable or the owner's
 explicit New Conversation action. The outgoing Chat session is retained for
