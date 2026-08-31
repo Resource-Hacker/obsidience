@@ -1,7 +1,7 @@
 ---
-approved_at: '2026-08-27T16:33:34'
+approved_at: '2026-08-31T15:11:17'
 kind: knowledge
-provenance: proposed by Codex (task codex:knowledge-handoff)
+provenance: proposed by Alexandria (task Tasks/link)
 title: Task activation
 ---
 
@@ -29,8 +29,9 @@ Task catalog categories stay shallow by default: Wiki directly exposes Ingest, Q
 Curate, Merge, Link, Improve, Archive, Audit, and Check; Research exposes
 Question, Learn, News, and Model; Generate remains its outcome-bearing Task
 family. Observations is an inert Knowledge category containing the peer Compact
-and Promote Tasks. Immediate and Temporary are Knowledge states, while durable
-context is the ordinary accepted graph.
+and Promote Tasks. Immediate and Temporary are Knowledge states, such as the
+transient [[Agents/Executive/Observations/immediate-observations|Immediate Observations]]
+Article, while durable context is the ordinary accepted graph.
 
 Generate → Task authors reusable Task definitions with `vault.propose`.
 `task.create` activates an exact accepted Task and never authors a Library
