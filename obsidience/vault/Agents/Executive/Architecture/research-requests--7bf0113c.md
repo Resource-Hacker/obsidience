@@ -1,5 +1,5 @@
 ---
-approved_at: '2026-08-26T06:56:58'
+approved_at: '2026-08-31T07:38:14'
 kind: knowledge
 provenance: proposed by Alexandria (task Tasks/link)
 title: Research requests
@@ -33,3 +33,4 @@ binding and paired Skill both exist and validate.
 - `uses` [[Agents/Darwin/Darwin|Darwin]] - Darwin owns research acquisition and synthesis.
 - `depends_on` [[Agents/Alexandria/Alexandria|Alexandria]] - Alexandria turns findings into maintained Knowledge.
 - `implements` [[Agents/Executive/Architecture/task-activation--b30a4642|Task activation]] - Research uses the same activation law as all work.
+- `implements` [[Agents/Executive/Architecture/llm-wiki-knowledge-pattern--dab5ff0a|LLM-wiki knowledge pattern]] - Research requests instantiate the pattern's bounded Darwin research, source handoff, and Alexandria ingestion loop.
