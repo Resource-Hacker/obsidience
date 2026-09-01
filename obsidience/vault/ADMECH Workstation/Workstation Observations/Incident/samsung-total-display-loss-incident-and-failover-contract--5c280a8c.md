@@ -1,5 +1,7 @@
 ---
+approved_at: '2026-09-01T05:34:34'
 kind: knowledge
+provenance: proposed by Alexandria (task Tasks/link)
 title: Samsung total display-loss incident and failover contract
 ---
 
@@ -14,3 +16,4 @@ The durable contract is: automatic idle suspend is disabled for every power prof
 - `related_to` [[ADMECH Workstation/Hardware/Displays/display-topology-and-isolation-strategy--a8755cfa|Display Topology and Isolation Strategy]] — The incident and repaired failover traverse the Samsung, DP-4, and AMD USB-C paths in the established topology.
 - `related_to` [[ADMECH Workstation/Hardware/Displays/DP-4 Display/dp-4-workspace-and-service-management--c6db7c16|DP-4 Workspace and Service Management]] — DP-4 is the first isolated fallback when its independently verified workspace is healthy.
 - `related_to` [[ADMECH Workstation/Workstation Observations/workstation-observation-if-vrr-dsc-blackouts-return-use-the-validated-14--c05b5d51|Workstation observation: If VRR/DSC blackouts return, use the validated 144 Hz fallback rather than sacrificing HDR or image quality]] — The validated Samsung fallback remains separate from the bounded cross-display input failover.
+- `related_to` [[ADMECH Workstation/Hardware/Displays/Samsung Odyssey OLED G9/samsung-display-vrr-and-edid-configuration--96ccfd7b|Samsung Display VRR and EDID Configuration]] — The contract's DDC-attested Samsung force-reprobe (off-then-detect) operates on the display whose active EDID and refresh configuration are documented in that article.
