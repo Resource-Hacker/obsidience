@@ -84,42 +84,55 @@ Rectangle {
             return
         }
         tasksRequestActive = true
-        requestJson("GET", "/api/tasks", null, function(ok, payload, error) {
-            tasksRequestActive = false
-            tasksLoaded = true
-            if (!ok || !Array.isArray(payload)) {
-                taskLoadError = error || "Task activations unavailable."
+        requestJson("GET", "/api/tasks", null, (ok, payload, error) => {
+            if (!root) {
                 return
             }
-            taskLoadError = ""
-            tasks = payload
-            taskCatalog = payload.slice().sort((left, right) =>
+            root.tasksRequestActive = false
+            root.tasksLoaded = true
+            if (!ok || !Array.isArray(payload)) {
+                root.taskLoadError = error || "Task activations unavailable."
+                return
+            }
+            root.taskLoadError = ""
+            root.tasks = payload
+            root.taskCatalog = payload.slice().sort((left, right) =>
                 String(left.title).localeCompare(String(right.title)))
-            rebuildRows()
+            root.rebuildRows()
         })
     }
 
     function refreshReferenceData() {
         if (!graphRequestActive) {
             graphRequestActive = true
-        requestJson("GET", "/api/graph", null, function(ok, payload) {
-            graphRequestActive = false
+        requestJson("GET", "/api/graph", null, (ok, payload) => {
+            if (!root) {
+                return
+            }
+            root.graphRequestActive = false
             if (!ok || !payload || !Array.isArray(payload.nodes)) {
                 return
             }
-            graphNodes = payload.nodes
+            root.graphNodes = payload.nodes
             const groups = payload.navigation && Array.isArray(payload.navigation.groups)
                 ? payload.navigation.groups : []
-            navigationAgents = groups.filter(group => group && group.role !== "library")
-            rebuildRows()
+            root.navigationAgents = groups.filter(
+                group => group && group.role !== "library"
+            )
+            root.rebuildRows()
         })
         }
         if (!modelsRequestActive) {
             modelsRequestActive = true
-        requestJson("GET", "/api/models", null, function(ok, payload) {
-            modelsRequestActive = false
+        requestJson("GET", "/api/models", null, (ok, payload) => {
+            if (!root) {
+                return
+            }
+            root.modelsRequestActive = false
             if (ok && payload && Array.isArray(payload.models)) {
-                models = payload.models.filter(model => model && model.task_capable)
+                root.models = payload.models.filter(
+                    model => model && model.task_capable
+                )
             }
         })
         }

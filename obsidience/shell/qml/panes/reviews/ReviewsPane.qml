@@ -59,7 +59,10 @@ Rectangle {
     }
 
     function refresh() {
-        requestJson("GET", "/api/reviews", function(ok, payload, error) {
+        requestJson("GET", "/api/reviews", (ok, payload, error) => {
+            if (!root) {
+                return
+            }
             root.loading = false
             if (!ok || !Array.isArray(payload)) {
                 root.loadError = "Review service unavailable: " + error
@@ -83,7 +86,10 @@ Rectangle {
         const action = approve ? "approve" : "reject?reason="
             + encodeURIComponent("rejected from review pane")
         requestJson("POST", "/api/reviews/" + encodeURIComponent(proposal.file)
-            + "/" + action, function(ok, payload, error) {
+            + "/" + action, (ok, payload, error) => {
+            if (!root) {
+                return
+            }
             root.decidingFile = ""
             if (!ok) {
                 root.actionError = error
