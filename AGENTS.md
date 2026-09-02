@@ -138,13 +138,17 @@ after a real implementation or outcome contract exists.
 - Treat each physical display as one runtime Surface. Surface is not an Article
   kind or Capability. Every pane uses the same
   `pane_id + surface_id + local_rect + open + z_order` contract, with an
-  optional `tile_home` only while tiled, and the shared
+  optional current `tile_bounds` only while tiled, and the shared
   `PaneItem`/`PaneFrame` interaction path. `SurfaceLayout` owns boundary clamps
   and one global logical-pixel grid, 10 px by default. It also owns the default
   proportional tile layouts: Samsung 8 by 2, USB-C 3 by 2, and DP-4 4 by 1.
-  `Meta+Arrow` expands or collapses around the pane's minimum tile home;
-  `Ctrl+Meta+Arrow` moves the complete tiled pane one tile; manual drag or resize
-  clears the tile home. Pointer dragging remains local. When multiple Surfaces
+  Tiled chrome has exact 5 logical px outer and inter-pane gaps. From freeform,
+  `Meta+Arrow` selects the full edge row or column; once tiled it expands toward
+  the arrow or collapses from the opposite side at that edge.
+  `Ctrl+Meta+Arrow` moves existing tile bounds one cell; manual drag or resize
+  clears them. Tiled bounds override only freeform pane minimums. The gap math
+  adapts the MIT Omarchy Windows Aero Snap geometry pattern; no external tiler
+  or second placement authority runs. Pointer dragging remains local. When multiple Surfaces
   are active, `Meta+Shift+Arrow` creates one primary-shell placement revision to
   the nearest mapped Surface. Transfer preserves logical pane size and shrinks
   only a dimension that is larger than the complete destination workspace. No

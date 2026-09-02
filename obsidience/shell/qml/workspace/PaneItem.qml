@@ -23,24 +23,27 @@ FocusScope {
     readonly property int dockRevision: dockLayout.revision
     readonly property bool paneVisible: !moduleDocked && placement.open
         && placement.surfaceId === surfaceId
-    readonly property int renderWidth: currentSurface
+    readonly property bool tiled: shellApi.surfaceLayout.validTileBounds(
+        surfaceId, placement.tileBounds
+    )
+    readonly property int renderWidth: tiled ? placement.width : currentSurface
         ? shellApi.surfaceLayout.clampPaneSize(
             placement.width,
             paneDefinition.minWidth,
             currentSurface.logical_width
         ) : placement.width
-    readonly property int renderHeight: currentSurface
+    readonly property int renderHeight: tiled ? placement.height : currentSurface
         ? shellApi.surfaceLayout.clampPaneSize(
             placement.height,
             paneDefinition.minHeight,
             currentSurface.logical_height
         ) : placement.height
     readonly property int renderX: dragOwnsPane ? dragSession.x
-        : shellApi.surfaceLayout.clampPaneX(
+        : tiled ? placement.x : shellApi.surfaceLayout.clampPaneX(
             currentSurface, renderWidth, placement.x
         )
     readonly property int renderY: dragOwnsPane ? dragSession.y
-        : shellApi.surfaceLayout.clampPaneY(
+        : tiled ? placement.y : shellApi.surfaceLayout.clampPaneY(
             currentSurface, renderHeight, placement.y
         )
     property Region inputRegion: Region { item: root }

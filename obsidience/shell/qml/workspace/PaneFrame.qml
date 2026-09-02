@@ -223,10 +223,9 @@ Item {
     // complete chrome follows PaneItem.z as one stacking unit.
     Rectangle {
         anchors.fill: frame
-        anchors.margins: -2.5
         z: 1
         color: "transparent"
-        radius: root.theme.cornerRadius + 2.5
+        radius: root.theme.cornerRadius
         border.width: 2.5
         border.pixelAligned: false
         border.color: Qt.rgba(

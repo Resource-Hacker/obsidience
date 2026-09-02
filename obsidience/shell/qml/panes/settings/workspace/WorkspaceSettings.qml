@@ -14,6 +14,7 @@ Item {
     property int maximumPaneGridSize: 100
     property int minimumTileCount: 1
     property int maximumTileCount: 16
+    property int workspaceTileGap: 5
     property var workspaceTiling: []
     property bool stateReady: false
     property string errorMessage: ""
@@ -42,6 +43,7 @@ Item {
                 || !Number.isInteger(message.maximum_pane_grid_size)
                 || !Number.isInteger(message.minimum_tile_count)
                 || !Number.isInteger(message.maximum_tile_count)
+                || !Number.isInteger(message.workspace_tile_gap)
                 || !Array.isArray(message.workspace_tiling)
                 || message.workspace_tiling.length !== 3) {
             return
@@ -51,6 +53,7 @@ Item {
         paneGridSize = message.pane_grid_size
         minimumTileCount = message.minimum_tile_count
         maximumTileCount = message.maximum_tile_count
+        workspaceTileGap = message.workspace_tile_gap
         workspaceTiling = message.workspace_tiling
         stateReady = true
         errorMessage = ""
@@ -312,7 +315,8 @@ Item {
 
                 Text {
                     width: parent.width
-                    text: "Each Surface has its own proportional tile grid."
+                    text: "Each Surface has its own proportional tile grid · "
+                        + root.workspaceTileGap + " px gaps."
                     color: "#758db8c7"
                     font.family: "JetBrains Mono"
                     font.pixelSize: 8

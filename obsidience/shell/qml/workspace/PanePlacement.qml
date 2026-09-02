@@ -30,7 +30,7 @@ QtObject {
     property int height: defaultHeight
     property bool open: defaultOpen
     property int zOrder: defaultZOrder
-    property var tileHome: null
+    property var tileBounds: null
     property int revision: 0
     property bool authoritative: false
 
@@ -38,7 +38,7 @@ QtObject {
         return typeof value === "number" && isFinite(value)
     }
 
-    function normalizeTileHome(value) {
+    function normalizeTileBounds(value) {
         if (!value) {
             return null
         }
@@ -49,7 +49,11 @@ QtObject {
                 || !Number.isInteger(value.left)
                 || !Number.isInteger(value.top)
                 || !Number.isInteger(value.right)
-                || !Number.isInteger(value.bottom)) {
+                || !Number.isInteger(value.bottom)
+                || value.columns < 1 || value.rows < 1
+                || value.left < 0 || value.top < 0
+                || value.right <= value.left || value.bottom <= value.top
+                || value.right > value.columns || value.bottom > value.rows) {
             return null
         }
         return {
@@ -84,7 +88,9 @@ QtObject {
         height = Math.max(240, Math.round(rect.height))
         open = record.open === true
         zOrder = isNumber(record.z_order) ? Math.round(record.z_order) : 10
-        tileHome = normalizeTileHome(record.tile_home)
+        // tile_home was an immutable minimum footprint and is intentionally
+        // not migrated. The next Meta+Arrow establishes current tile bounds.
+        tileBounds = normalizeTileBounds(record.tile_bounds)
         revision = Math.round(record.revision)
     }
 
@@ -113,7 +119,7 @@ QtObject {
             },
             "open": open,
             "z_order": zOrder,
-            "tile_home": tileHome,
+            "tile_bounds": tileBounds,
             "revision": revision
         }
     }
@@ -132,14 +138,14 @@ QtObject {
         surfaceId = nextSurfaceId
         x = Math.round(nextX)
         y = Math.round(nextY)
-        tileHome = null
+        tileBounds = null
         revision += 1
         writeState()
         return true
     }
 
     function commitGeometry(expectedRevision, nextSurfaceId, nextX, nextY,
-                            nextWidth, nextHeight, nextZOrder, nextTileHome) {
+                            nextWidth, nextHeight, nextZOrder, nextTileBounds) {
         if (!authoritative || revision !== expectedRevision
                 || (nextSurfaceId !== "samsung" && nextSurfaceId !== "usb-c"
                     && nextSurfaceId !== "dp-4")
@@ -155,7 +161,7 @@ QtObject {
         height = Math.round(nextHeight)
         open = true
         zOrder = isNumber(nextZOrder) ? Math.round(nextZOrder) : zOrder
-        tileHome = normalizeTileHome(nextTileHome)
+        tileBounds = normalizeTileBounds(nextTileBounds)
         revision += 1
         writeState()
         return true
@@ -167,7 +173,7 @@ QtObject {
     }
 
     function commitResize() {
-        tileHome = null
+        tileBounds = null
         revision += 1
         writeState()
     }
@@ -181,7 +187,7 @@ QtObject {
 
     function presentOn(nextSurfaceId, nextX, nextY, nextZOrder) {
         if (surfaceId !== nextSurfaceId) {
-            tileHome = null
+            tileBounds = null
         }
         surfaceId = nextSurfaceId
         x = Math.round(nextX)

@@ -70,6 +70,7 @@ QtObject {
             "maximum_pane_grid_size": surfaceLayout.maximumPaneGridSize,
             "minimum_tile_count": surfaceLayout.minimumTileCount,
             "maximum_tile_count": surfaceLayout.maximumTileCount,
+            "workspace_tile_gap": surfaceLayout.workspaceTileGap,
             "workspace_tiling": surfaceLayout.workspaceTilingState()
         }
     }
@@ -412,11 +413,9 @@ QtObject {
     }
 
     function tilePane(socket, placement, direction, translate) {
-        const definition = placement
-            ? paneWorkspace.definitionFor(placement.paneId) : null
         const surface = placement
             ? surfaceLayout.surface(placement.surfaceId) : null
-        if (!placement || !definition || !surface || placement.open !== true
+        if (!placement || !surface || placement.open !== true
                 || ["left", "right", "top", "bottom"].indexOf(direction) < 0) {
             failPaneCommand(socket, "pane.tile.failed", "", "invalid")
             return
@@ -429,10 +428,8 @@ QtObject {
                 "width": placement.width,
                 "height": placement.height
             },
-            definition.minWidth,
-            definition.minHeight,
             direction,
-            placement.tileHome,
+            placement.tileBounds,
             translate === true
         )
         if (!result) {
@@ -447,7 +444,7 @@ QtObject {
                 result.width,
                 result.height,
                 placement.zOrder,
-                result.tile_home
+                result.tile_bounds
         )) {
             failPaneCommand(socket, "pane.tile.failed", "", "stale_commit")
             return

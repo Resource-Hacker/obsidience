@@ -361,6 +361,7 @@ def test_one_shell_host_shares_displays_pane_and_surface_layout() -> None:
     shell = (SHELL_ROOT / "qml" / "shell.qml").read_text()
     shell_api = (SHELL_ROOT / "qml" / "api" / "ShellApi.qml").read_text()
     layout = (SHELL_ROOT / "qml" / "api" / "SurfaceLayout.qml").read_text()
+    tiler = (SHELL_ROOT / "qml" / "api" / "WorkspaceTiler.qml").read_text()
     placement = (SHELL_ROOT / "qml" / "workspace" / "PanePlacement.qml").read_text()
     pane = (SHELL_ROOT / "qml" / "workspace" / "PaneItem.qml").read_text()
     canvas = (SHELL_ROOT / "qml" / "workspace" / "PaneCanvas.qml").read_text()
@@ -420,9 +421,14 @@ def test_one_shell_host_shares_displays_pane_and_surface_layout() -> None:
     assert '"samsung": {"columns": 8, "rows": 2}' in layout
     assert '"usb-c": {"columns": 3, "rows": 2}' in layout
     assert '"dp-4": {"columns": 4, "rows": 1}' in layout
-    assert "function tileBoundary(surfaceId, axis, index)" in layout
-    assert "function tileHomeForRect(" in layout
+    assert "readonly property int workspaceTileGap: 5" in layout
+    assert "function validTileBounds(" in layout
     assert "function tiledPaneRect(" in layout
+    assert "function initialBounds(" in tiler
+    assert "function resizeBounds(" in tiler
+    assert "function translateBounds(" in tiler
+    assert "function rectForBounds(" in tiler
+    assert "extent - gap * (count + 1)" in tiler
     assert "function commitWorkspaceTiling(" in layout
     assert '"workspace_tiling": workspaceTiling' in layout
     assert "function clampPaneX(surfaceRecord, paneWidth, value)" in layout
@@ -558,7 +564,9 @@ def test_one_shell_host_shares_displays_pane_and_surface_layout() -> None:
     assert "return paneWorkspace.topPlacement(surfaceId)" not in command_server
     assert "function commitDrag(" in placement
     assert "function commitGeometry(" in placement
-    assert '"tile_home": tileHome' in placement
+    assert '"tile_bounds": tileBounds' in placement
+    assert "record.tile_home" not in placement
+    assert "tiled ? placement.width" in pane
     assert "!authoritative || revision !== expectedRevision" in placement
     assert "function transfer(" not in placement
     assert "samsungUsbStart" not in pane
@@ -613,7 +621,8 @@ def test_one_shell_host_shares_displays_pane_and_surface_layout() -> None:
     assert "color: root.theme.surface" in frame
     assert "border.color: root.theme.accent" in frame
     assert "RectangularShadow {" not in frame
-    assert "anchors.margins: -2.5" in frame
+    assert "anchors.margins: -2.5" not in frame
+    assert "border.width: 2.5" in frame
     assert "border.width: 2.5" in frame
     assert "border.pixelAligned: false" in frame
     assert "z: 1" in frame
@@ -1146,6 +1155,18 @@ def test_live_shell_runtime_dependencies_are_pinned_without_kde_shell_entries() 
     assert "KScreenLocker" not in packages
     assert "Qt WebEngine" not in packages
     assert "KWin MCP" not in packages
+
+
+def test_workspace_tiler_reuses_only_attested_omarchy_geometry() -> None:
+    manifest = json.loads((SHELL_ROOT / "REUSE_MANIFEST.json").read_text())
+    upstreams = {item["name"]: item for item in manifest["upstreams"]}
+    geometry = upstreams["Omarchy Windows Aero Snap geometry"]
+    assert geometry["commit"] == "8337344c69046f09f59c68280e5df2577d3273c5"
+    assert geometry["license"] == "MIT"
+    assert geometry["notice"] == "LICENSES/Omarchy-Windows-MIT.txt"
+    assert "arbitrary integer NxM bounds" in geometry["adaptation"]
+    assert "plugin" in geometry["adaptation"]
+    assert (SHELL_ROOT / geometry["notice"]).is_file()
 
 
 def test_every_pane_uses_the_generic_surface_placement_contract() -> None:

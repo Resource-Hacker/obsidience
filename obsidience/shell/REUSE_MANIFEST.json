@@ -72,6 +72,24 @@
       "adaptation": "Used as the installed QML WebSocket transport for bounded loopback Reader state and Terminal action trace events. No upstream source was copied."
     },
     {
+      "name": "Omarchy Windows Aero Snap geometry",
+      "repository": "https://github.com/jwm3000/omarchy-windows",
+      "commit": "8337344c69046f09f59c68280e5df2577d3273c5",
+      "license": "MIT",
+      "selected_sources": [
+        {
+          "path": "contrib/aero-snap/geometry.hpp",
+          "sha256": "c2357931579e0e2d600870e2094e5e03d7e6df35d0866db0ba4ad2499c8ea33a"
+        },
+        {
+          "path": "contrib/aero-snap/geometry.test.cpp",
+          "sha256": "6abe3d704fb2f06b4d539ec8a6e93746e1ac9000af8e9665d641de2749f5b8af"
+        }
+      ],
+      "adaptation": "The small tested gap-subtraction geometry pattern is adapted into WorkspaceTiler.qml and generalized from fixed window zones to arbitrary integer NxM bounds for embedded Obsidience panes. The Hyprland plugin, window-management runtime, animations, configuration, and visual design are not imported.",
+      "notice": "LICENSES/Omarchy-Windows-MIT.txt"
+    },
+    {
       "name": "Omarchy quattro theme system",
       "repository": "https://github.com/omacom/omarchy",
       "commit": "4d017913d06f715da9d960021861cf535e4f15aa",

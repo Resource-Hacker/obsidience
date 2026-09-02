@@ -222,7 +222,7 @@ load remain explicit physical acceptance gates.
 Every pane, without exception, has one generic `PanePlacement`:
 
 ```text
-pane_id + surface_id + local_rect + open + z_order + optional tile_home
+pane_id + surface_id + local_rect + open + z_order + optional tile_bounds
 ```
 
 Pane-specific cross-display bridges and pane-specific outer drag handlers are
@@ -237,11 +237,17 @@ defaulting to 10 px. It rounds pane x, y, width, and height to that grid before
 minimum-size and Surface-boundary clamps; those safety bounds win at an edge.
 Settings > Workspace changes that single value, while pane Modules contain no
 snap policy. The same `SurfaceLayout` owns proportional workspace tiling:
-Samsung is 8 by 2, USB-C is 3 by 2, and DP-4 is 4 by 1 by default. Exact tile
-edges are calculated from each Surface's logical extent. `Meta+Arrow` grows or
-collapses the active pane around its persisted minimum `tile_home`, while
-`Ctrl+Meta+Arrow` moves that tiled rectangle one cell without resizing it.
-Manual drag or resize clears `tile_home`. `Meta+Shift+Arrow` asks the shell host
+Samsung is 8 by 2, USB-C is 3 by 2, and DP-4 is 4 by 1 by default. Tiled panes
+retain current integer `tile_bounds`; their complete chrome footprint has an
+exact 5 logical px outer and inter-pane gap. The pure gap geometry adapts the
+MIT Omarchy Windows Aero Snap pattern to arbitrary grids, but no compositor
+plugin or second placement authority is loaded. From freeform, `Meta+Arrow`
+selects the complete edge row or column. Once tiled, the same chord expands one
+cell toward the arrow or, at that edge, collapses one cell from the opposite
+edge. `Ctrl+Meta+Arrow` translates existing tile bounds one cell without
+resizing and is a no-op for freeform panes. Tiled bounds override pane-specific
+freeform minimum sizes; ordinary freeform resizing keeps those limits. Manual
+drag or resize clears `tile_bounds`. `Meta+Shift+Arrow` asks the shell host
 to transfer the active pane to the nearest mapped Surface in that direction,
 preserving logical width and height; only a dimension larger than the complete
 destination workspace is minimally reduced to fit. The compositor adapter
