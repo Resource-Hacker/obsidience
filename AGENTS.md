@@ -144,7 +144,9 @@ after a real implementation or outcome contract exists.
   proportional tile layouts: Samsung 8 by 2, USB-C 3 by 2, and DP-4 4 by 1.
   Tiled chrome has exact 5 logical px outer and inter-pane gaps. From freeform,
   `Meta+Arrow` selects the full edge row or column; once tiled it expands toward
-  the arrow or collapses from the opposite side at that edge.
+  the arrow or collapses from the opposite side at that edge. If a tiled pane
+  has no remaining local resize in that direction, the same chord moves it into
+  the corresponding single edge tile of the adjacent mapped Surface.
   `Ctrl+Meta+Arrow` moves existing tile bounds one cell; manual drag or resize
   clears them. Tiled bounds override only freeform pane minimums. The gap math
   adapts the MIT Omarchy Windows Aero Snap geometry pattern; no external tiler

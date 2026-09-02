@@ -46,6 +46,29 @@ QtObject {
         return null
     }
 
+    function entryBounds(surfaceId, columns, rows, edge, axisRatio) {
+        if (columns < 1 || rows < 1 || typeof axisRatio !== "number"
+                || !isFinite(axisRatio)) {
+            return null
+        }
+        const ratio = Math.max(0, Math.min(1, axisRatio))
+        if (edge === "top" || edge === "bottom") {
+            const column = Math.min(columns - 1, Math.floor(ratio * columns))
+            const row = edge === "top" ? 0 : rows - 1
+            return makeBounds(
+                surfaceId, columns, rows, column, row, column + 1, row + 1
+            )
+        }
+        if (edge === "left" || edge === "right") {
+            const column = edge === "left" ? 0 : columns - 1
+            const row = Math.min(rows - 1, Math.floor(ratio * rows))
+            return makeBounds(
+                surfaceId, columns, rows, column, row, column + 1, row + 1
+            )
+        }
+        return null
+    }
+
     function makeBounds(surfaceId, columns, rows, left, top, right, bottom) {
         return {
             "surface_id": surfaceId,

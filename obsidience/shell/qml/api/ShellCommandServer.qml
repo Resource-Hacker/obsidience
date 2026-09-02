@@ -420,7 +420,11 @@ QtObject {
             failPaneCommand(socket, "pane.tile.failed", "", "invalid")
             return
         }
-        const result = surfaceLayout.tiledPaneRect(
+        const wasTiled = surfaceLayout.validTileBounds(
+            surface.id, placement.tileBounds
+        )
+        let destination = surface
+        let result = surfaceLayout.tiledPaneRect(
             surface.id,
             {
                 "x": placement.x,
@@ -432,22 +436,44 @@ QtObject {
             placement.tileBounds,
             translate === true
         )
+        if (result && !result.changed && wasTiled && translate !== true) {
+            const handoff = surfaceLayout.tiledHandoffRect(
+                surface.id,
+                direction,
+                placement.x + placement.width / 2,
+                placement.y + placement.height / 2
+            )
+            if (handoff) {
+                result = handoff
+                destination = surfaceLayout.surface(handoff.surface_id)
+            }
+        }
         if (!result) {
             failPaneCommand(socket, "pane.tile.failed", "", "invalid_geometry")
             return
         }
         if (result.changed && !placement.commitGeometry(
                 placement.revision,
-                surface.id,
+                destination.id,
                 result.x,
                 result.y,
                 result.width,
                 result.height,
-                placement.zOrder,
+                destination.id === surface.id
+                    ? placement.zOrder
+                    : paneWorkspace.nextZOrder(destination.id),
                 result.tile_bounds
         )) {
             failPaneCommand(socket, "pane.tile.failed", "", "stale_commit")
             return
+        }
+        if (destination.id !== surface.id) {
+            const next = Object.assign({}, activePaneBySurface)
+            if (next[surface.id] === placement.paneId) {
+                delete next[surface.id]
+            }
+            next[destination.id] = placement.paneId
+            activePaneBySurface = next
         }
         const event = {
             "schema": eventSchema,

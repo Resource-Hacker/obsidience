@@ -227,6 +227,36 @@ QtObject {
         return tiled
     }
 
+    function tiledHandoffRect(sourceId, direction, localX, localY) {
+        const routeRecord = moveRoute(sourceId, direction, localX, localY, 0)
+        const destination = routeRecord
+            ? surface(routeRecord.destination_id) : null
+        const tiling = destination ? tilingFor(destination.id) : null
+        if (!destination || !tiling) {
+            return null
+        }
+        const horizontal = routeRecord.destination_edge === "top"
+            || routeRecord.destination_edge === "bottom"
+        const axisRatio = horizontal
+            ? routeRecord.x / Math.max(1, destination.logical_width - 1)
+            : routeRecord.y / Math.max(1, destination.logical_height - 1)
+        const bounds = workspaceTiler.entryBounds(
+            destination.id,
+            tiling.columns,
+            tiling.rows,
+            routeRecord.destination_edge,
+            axisRatio
+        )
+        const tiled = tileRect(destination.id, bounds)
+        if (!tiled) {
+            return null
+        }
+        tiled.surface_id = destination.id
+        tiled.tile_bounds = bounds
+        tiled.changed = true
+        return tiled
+    }
+
     function clampPaneSize(value, minimum, maximum) {
         if (!isNumber(value) || !isNumber(minimum) || !isNumber(maximum)) {
             return 0

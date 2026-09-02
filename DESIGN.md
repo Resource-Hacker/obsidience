@@ -244,10 +244,13 @@ MIT Omarchy Windows Aero Snap pattern to arbitrary grids, but no compositor
 plugin or second placement authority is loaded. From freeform, `Meta+Arrow`
 selects the complete edge row or column. Once tiled, the same chord expands one
 cell toward the arrow or, at that edge, collapses one cell from the opposite
-edge. `Ctrl+Meta+Arrow` translates existing tile bounds one cell without
-resizing and is a no-op for freeform panes. Tiled bounds override pane-specific
-freeform minimum sizes; ordinary freeform resizing keeps those limits. Manual
-drag or resize clears `tile_bounds`. `Meta+Shift+Arrow` asks the shell host
+edge. If neither operation can change the bounds and a mapped Surface touches
+that edge, the pane enters its corresponding single edge tile; without an
+adjacent Surface it remains unchanged. `Ctrl+Meta+Arrow` translates existing
+tile bounds one cell without resizing and is a no-op for freeform panes. Tiled
+bounds override pane-specific freeform minimum sizes; ordinary freeform
+resizing keeps those limits. Manual drag or resize clears `tile_bounds`.
+`Meta+Shift+Arrow` asks the shell host
 to transfer the active pane to the nearest mapped Surface in that direction,
 preserving logical width and height; only a dimension larger than the complete
 destination workspace is minimally reduced to fit. The compositor adapter

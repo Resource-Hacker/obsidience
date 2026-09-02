@@ -60,6 +60,30 @@ QtObject {
             topLeft,
             "translation at a Surface edge is a no-op"
         )
+        const dpFirstBounds = tiler.makeBounds("dp-4", 4, 1, 0, 0, 1, 1)
+        expectBounds(
+            tiler.resizeBounds(dpFirstBounds, "top"),
+            dpFirstBounds,
+            "DP-4 has no local tile above its only row"
+        )
+        const samsungEntry = tiler.entryBounds(
+            "samsung", 8, 2, "bottom", 242 / 5119
+        )
+        expectBounds(
+            samsungEntry,
+            tiler.makeBounds("samsung", 8, 2, 0, 1, 1, 2),
+            "DP-4 upper-edge handoff enters Samsung bottom-left"
+        )
+        expectRect(
+            tiler.rectForBounds(5120, 1440, 0, samsungEntry),
+            5, 723, 634, 712,
+            "Samsung bottom-left entry retains exact gaps"
+        )
+        expectBounds(
+            tiler.entryBounds("usb-c", 3, 2, "left", 0.75),
+            tiler.makeBounds("usb-c", 3, 2, 0, 1, 1, 2),
+            "horizontal handoff maps to the matching destination row"
+        )
 
         expectRect(
             tiler.rectForBounds(5120, 1440, 0, leftColumn),
