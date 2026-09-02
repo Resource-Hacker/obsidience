@@ -222,7 +222,7 @@ load remain explicit physical acceptance gates.
 Every pane, without exception, has one generic `PanePlacement`:
 
 ```text
-pane_id + surface_id + local_rect + open + z_order
+pane_id + surface_id + local_rect + open + z_order + optional tile_home
 ```
 
 Pane-specific cross-display bridges and pane-specific outer drag handlers are
@@ -236,13 +236,20 @@ handle. The same authority owns one global Surface-local logical-pixel grid,
 defaulting to 10 px. It rounds pane x, y, width, and height to that grid before
 minimum-size and Surface-boundary clamps; those safety bounds win at an edge.
 Settings > Workspace changes that single value, while pane Modules contain no
-snap policy. When multiple Surfaces are active, `Meta+Shift+Arrow` asks the
-shell host to move the active pane to the nearest mapped Surface in
-that direction. The compositor adapter captures the physical shortcut and
-calls the same bounded shell command. The host writes one accepted placement
-revision and the destination Surface renders it. An unmapped direction
-changes nothing. This deliberately uses no held-pointer handoff, pane-drag
-lease, coordinator process, or pane-specific transport.
+snap policy. The same `SurfaceLayout` owns proportional workspace tiling:
+Samsung is 8 by 2, USB-C is 3 by 2, and DP-4 is 4 by 1 by default. Exact tile
+edges are calculated from each Surface's logical extent. `Meta+Arrow` grows or
+collapses the active pane around its persisted minimum `tile_home`, while
+`Ctrl+Meta+Arrow` moves that tiled rectangle one cell without resizing it.
+Manual drag or resize clears `tile_home`. `Meta+Shift+Arrow` asks the shell host
+to transfer the active pane to the nearest mapped Surface in that direction,
+preserving logical width and height; only a dimension larger than the complete
+destination workspace is minimally reduced to fit. The compositor adapter
+captures all three physical shortcuts and calls the same bounded shell command.
+The host writes one accepted placement revision and the destination Surface
+renders it. An unmapped direction changes nothing. This deliberately uses no
+held-pointer handoff, pane-drag lease, coordinator process, or pane-specific
+transport.
 
 Settings > Input projects one physical input truth through the compositor
 adapter. The classic M.M.O.7 stays at its independently verified 6400-DPI top

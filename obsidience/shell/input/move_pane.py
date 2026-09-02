@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Move the active Obsidience pane through the shell command authority."""
+"""Apply one active-pane shortcut through the shell command authority."""
 
 from __future__ import annotations
 
@@ -15,6 +15,11 @@ SHELL_URL = "ws://127.0.0.1:8768"
 SUBPROTOCOL = "obsidience.shell.v1"
 SURFACES = frozenset(("samsung", "usb-c", "dp-4"))
 DIRECTIONS = frozenset(("left", "right", "top", "bottom"))
+ACTIONS = {
+    "surface": ("pane.move_active", "pane.moved", "pane.move.failed"),
+    "resize": ("pane.tile_active", "pane.tiled", "pane.tile.failed"),
+    "tile": ("pane.tile_move_active", "pane.tiled", "pane.tile.failed"),
+}
 SURFACE_BY_OUTPUT = {
     "HDMI-A-1": "samsung",
     "DP-8": "usb-c",
@@ -42,9 +47,16 @@ def focused_surface() -> str | None:
     return None
 
 
-def move_active_pane(surface_id: str, direction: str) -> bool:
-    if surface_id not in SURFACES or direction not in DIRECTIONS:
+def apply_active_pane_action(
+    surface_id: str, action: str, direction: str
+) -> bool:
+    if (
+        surface_id not in SURFACES
+        or action not in ACTIONS
+        or direction not in DIRECTIONS
+    ):
         return False
+    command_type, success_type, failure_type = ACTIONS[action]
     try:
         with connect(
             SHELL_URL,
@@ -60,7 +72,7 @@ def move_active_pane(surface_id: str, direction: str) -> bool:
                 json.dumps(
                     {
                         "schema": "obsidience.shell.command.v1",
-                        "type": "pane.move_active",
+                        "type": command_type,
                         "source_surface_id": surface_id,
                         "direction": direction,
                     },
@@ -73,23 +85,34 @@ def move_active_pane(surface_id: str, direction: str) -> bool:
                 event = json.loads(message)
                 if event.get("schema") != "obsidience.shell.event.v1":
                     continue
-                if event.get("type") == "pane.moved":
+                if event.get("type") == success_type:
                     return True
-                if event.get("type") == "pane.move.failed":
+                if event.get("type") == failure_type:
                     return False
     except (OSError, TimeoutError, ValueError, json.JSONDecodeError):
         return False
     return False
 
 
+def move_active_pane(surface_id: str, direction: str) -> bool:
+    """Retain the original surface-transfer entrypoint."""
+
+    return apply_active_pane_action(surface_id, "surface", direction)
+
+
 def main(argv: list[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
-    if len(arguments) != 2:
+    if len(arguments) == 2:
+        surface_argument, direction = arguments
+        action = "surface"
+    elif len(arguments) == 3:
+        surface_argument, action, direction = arguments
+    else:
         return 2
-    surface_id = focused_surface() if arguments[0] == "focused" else arguments[0]
+    surface_id = focused_surface() if surface_argument == "focused" else surface_argument
     if surface_id is None:
         return 1
-    return 0 if move_active_pane(surface_id, arguments[1]) else 1
+    return 0 if apply_active_pane_action(surface_id, action, direction) else 1
 
 
 if __name__ == "__main__":

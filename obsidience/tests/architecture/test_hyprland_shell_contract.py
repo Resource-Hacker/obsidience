@@ -164,6 +164,11 @@ def test_hyprland_state_is_canonical_without_a_second_ui() -> None:
         )
     )
     assert initial["graph_surface_id"] == "samsung"
+    assert initial["workspace_tiling"] == {
+        "samsung": {"columns": 8, "rows": 2},
+        "usb-c": {"columns": 3, "rows": 2},
+        "dp-4": {"columns": 4, "rows": 1},
+    }
     surfaces = {surface["id"]: surface for surface in initial["surfaces"]}
     assert {surface["backend"] for surface in surfaces.values()} == {
         "hyprland-wayland"

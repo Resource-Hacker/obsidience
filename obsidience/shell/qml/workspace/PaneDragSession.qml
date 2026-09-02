@@ -126,13 +126,26 @@ QtObject {
         })
     }
 
+    function deactivatePane(placement) {
+        if (!placement || placement.surfaceId !== surfaceId) {
+            return false
+        }
+        return send({
+            "type": "pane.deactivate",
+            "pane_id": placement.paneId,
+            "surface_id": placement.surfaceId,
+            "expected_revision": placement.revision
+        })
+    }
+
     function applyDragEvent(event) {
         if (!event || event.schema !== eventSchema
                 || typeof event.type !== "string") {
             return
         }
         if ((event.type === "pane.drag.committed"
-                || event.type === "pane.moved") && event.pane) {
+                || event.type === "pane.moved"
+                || event.type === "pane.tiled") && event.pane) {
             placementAccepted(event.pane)
             if (event.token === token) {
                 reset()

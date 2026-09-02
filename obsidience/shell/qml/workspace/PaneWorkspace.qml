@@ -206,9 +206,14 @@ Scope {
     property Component terminalComponent: Component { TerminalPane {} }
 
     function placementFor(paneId) {
+        const definition = definitionFor(paneId)
+        return definition ? definition.placement : null
+    }
+
+    function definitionFor(paneId) {
         for (const definition of paneDefinitions) {
             if (definition.placement.paneId === paneId) {
-                return definition.placement
+                return definition
             }
         }
         return null

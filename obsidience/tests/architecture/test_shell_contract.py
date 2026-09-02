@@ -417,6 +417,14 @@ def test_one_shell_host_shares_displays_pane_and_surface_layout() -> None:
     assert "function clampPaneSize(value, minimum, maximum)" in layout
     assert "function commitPaneGridSize(value)" in layout
     assert '"pane_grid_size": paneGridSize' in layout
+    assert '"samsung": {"columns": 8, "rows": 2}' in layout
+    assert '"usb-c": {"columns": 3, "rows": 2}' in layout
+    assert '"dp-4": {"columns": 4, "rows": 1}' in layout
+    assert "function tileBoundary(surfaceId, axis, index)" in layout
+    assert "function tileHomeForRect(" in layout
+    assert "function tiledPaneRect(" in layout
+    assert "function commitWorkspaceTiling(" in layout
+    assert '"workspace_tiling": workspaceTiling' in layout
     assert "function clampPaneX(surfaceRecord, paneWidth, value)" in layout
     assert "function clampPaneY(surfaceRecord, paneHeight, value)" in layout
     clamp_x = layout.split("function clampPaneX", 1)[1].split(
@@ -509,6 +517,7 @@ def test_one_shell_host_shares_displays_pane_and_surface_layout() -> None:
     assert "function presentPaneOn(" in workspace
     assert "onPresentRequested:" in workspace
     assert "function placementFor(paneId)" in workspace
+    assert "function definitionFor(paneId)" in workspace
     assert shell.count("authoritative: true") == 1
     assert 'url: "ws://127.0.0.1:8768"' in drag_session
     assert "Math.round(startX) : placement.x" in drag_session
@@ -537,9 +546,19 @@ def test_one_shell_host_shares_displays_pane_and_surface_layout() -> None:
     assert "y = surfaceLayout.paneTopInset" in command_server
     assert "shellApi.surfaceLayout.clampPaneX(" in launcher
     assert "shellApi.surfaceLayout.clampPaneY(" in launcher
-    assert "paneWorkspace.presentPaneOn(placement, destination.id, x, y)" in command_server
+    assert "placement.commitGeometry(" in command_server
     assert '"type": "pane.moved"' in command_server
+    assert "function tilePane(socket, placement, direction, translate)" in command_server
+    assert 'command.type === "pane.tile_active"' in command_server
+    assert 'command.type === "pane.tile_move_active"' in command_server
+    assert '"type": "pane.tiled"' in command_server
+    assert 'event.type === "pane.tiled"' in drag_session
+    assert "function deactivatePane(placement)" in drag_session
+    assert 'command.type === "pane.deactivate"' in command_server
+    assert "return paneWorkspace.topPlacement(surfaceId)" not in command_server
     assert "function commitDrag(" in placement
+    assert "function commitGeometry(" in placement
+    assert '"tile_home": tileHome' in placement
     assert "!authoritative || revision !== expectedRevision" in placement
     assert "function transfer(" not in placement
     assert "samsungUsbStart" not in pane
@@ -567,6 +586,11 @@ def test_one_shell_host_shares_displays_pane_and_surface_layout() -> None:
     assert "function dismiss()" in placement
     assert 'record.surface_id !== "dp-4"' in placement
     assert 'schema: "obsidience.surface-layout.v1"' in layout
+    assert initial_layout["workspace_tiling"] == {
+        "samsung": {"columns": 8, "rows": 2},
+        "usb-c": {"columns": 3, "rows": 2},
+        "dp-4": {"columns": 4, "rows": 1},
+    }
     for pane_path in (SHELL_ROOT / "qml" / "panes").rglob("*.qml"):
         pane_source = pane_path.read_text()
         assert "PaneFrame {" not in pane_source
@@ -883,11 +907,15 @@ def test_settings_sections_share_one_pane_without_a_second_store() -> None:
     assert 'HYPRCTL = "/usr/bin/hyprctl"' in input_adapter
     assert '"schema": "obsidience.input.v1"' in input_adapter
     assert 'text: "PANE GRID"' in workspace_settings
+    assert '"id": "tiling", "label": "Workspace tiling"' in workspace_settings
+    assert 'text: "WORKSPACE TILING"' in workspace_settings
     assert "property int paneGridSize: 10" in workspace_settings
     assert "property int minimumPaneGridSize: 1" in workspace_settings
     assert "property int maximumPaneGridSize: 100" in workspace_settings
     assert 'send("workspace.state.request")' in workspace_settings
     assert 'send("workspace.grid.set", {"pane_grid_size": next})' in workspace_settings
+    assert 'send("workspace.tiling.set", {' in workspace_settings
+    assert "property var workspaceTiling: []" in workspace_settings
     assert 'message.type !== "workspace.state"' in workspace_settings
     assert "SpinBox {" in workspace_settings
     assert "FileView" not in workspace_settings
@@ -896,6 +924,8 @@ def test_settings_sections_share_one_pane_without_a_second_store() -> None:
     assert 'command.type === "workspace.state.request"' in command_server
     assert 'command.type === "workspace.grid.set"' in command_server
     assert "surfaceLayout.commitPaneGridSize(command.pane_grid_size)" in command_server
+    assert 'command.type === "workspace.tiling.set"' in command_server
+    assert "surfaceLayout.commitWorkspaceTiling(" in command_server
     assert "GraphStylePortrait {" in tuning
     assert "ToolTip.text:" in tuning
     assert "resetArmed" in tuning
@@ -991,23 +1021,30 @@ def test_pane_shortcut_move_is_atomic_and_has_one_owner_per_display_path() -> No
     assert '"expected_revision": placement.revision' in drag_session
     assert 'command.type === "pane.move_active"' in command_server
     assert "activePaneBySurface" in command_server
-    assert "paneWorkspace.topPlacement(surfaceId)" in command_server
+    assert "paneWorkspace.topPlacement(surfaceId)" not in command_server
     assert "placement.open !== true" in move
     assert "surfaceLayout.moveRoute(" in move
-    assert "paneWorkspace.presentPaneOn(" in move
-    assert '"type": "pane.move_active"' in move_client
+    assert "placement.commitGeometry(" in move
+    assert '"pane.move_active"' in move_client
+    assert '"pane.tile_active"' in move_client
+    assert '"pane.tile_move_active"' in move_client
     assert '"source_surface_id": surface_id' in move_client
     assert 'subprotocols=[SUBPROTOCOL]' in move_client
     assert compositor.count('hl.bind("SUPER + SHIFT +') == 5
-    assert "move_pane.py focused left" in compositor
-    assert "move_pane.py focused right" in compositor
-    assert "move_pane.py focused top" in compositor
-    assert "move_pane.py focused bottom" in compositor
+    assert compositor.count('hl.bind("SUPER + LEFT"') == 1
+    assert compositor.count('hl.bind("SUPER + RIGHT"') == 1
+    assert compositor.count('hl.bind("SUPER + UP"') == 1
+    assert compositor.count('hl.bind("SUPER + DOWN"') == 1
+    assert compositor.count('hl.bind("SUPER + CTRL +') == 4
+    assert "move_pane.py focused resize left" in compositor
+    assert "move_pane.py focused tile right" in compositor
+    assert "move_pane.py focused surface top" in compositor
+    assert "move_pane.py focused surface bottom" in compositor
     assert '"HDMI-A-1": "samsung"' in move_client
     assert '"DP-8": "usb-c"' in move_client
     assert '"HDMI-A-2": "dp-4"' in move_client
     assert '["/usr/bin/hyprctl", "monitors", "-j"]' in move_client
-    assert 'arguments[0] == "focused"' in move_client
+    assert 'surface_argument == "focused"' in move_client
     assert not (SHELL_ROOT / "input" / "router.py").exists()
     assert not (SHELL_ROOT / "input" / "dbus_bridge.py").exists()
     assert "router" not in move.lower()

@@ -137,11 +137,17 @@ after a real implementation or outcome contract exists.
   no second graph, and no second Reader.
 - Treat each physical display as one runtime Surface. Surface is not an Article
   kind or Capability. Every pane uses the same
-  `pane_id + surface_id + local_rect + open + z_order` contract and the shared
+  `pane_id + surface_id + local_rect + open + z_order` contract, with an
+  optional `tile_home` only while tiled, and the shared
   `PaneItem`/`PaneFrame` interaction path. `SurfaceLayout` owns boundary clamps
-  and one global logical-pixel grid, 10 px by default. Pointer dragging remains
-  local. When multiple Surfaces are active, `Meta+Shift+Arrow` creates one
-  primary-shell placement revision to the nearest mapped Surface. No
+  and one global logical-pixel grid, 10 px by default. It also owns the default
+  proportional tile layouts: Samsung 8 by 2, USB-C 3 by 2, and DP-4 4 by 1.
+  `Meta+Arrow` expands or collapses around the pane's minimum tile home;
+  `Ctrl+Meta+Arrow` moves the complete tiled pane one tile; manual drag or resize
+  clears the tile home. Pointer dragging remains local. When multiple Surfaces
+  are active, `Meta+Shift+Arrow` creates one primary-shell placement revision to
+  the nearest mapped Surface. Transfer preserves logical pane size and shrinks
+  only a dimension that is larger than the complete destination workspace. No
   pane-specific bridge, held-pointer lease, or coordinator process is allowed.
 - Input has one physical/compositor truth. The connected classic M.M.O.7 is
   verified at its 6400-DPI top stage and Hyprland applies one per-device custom

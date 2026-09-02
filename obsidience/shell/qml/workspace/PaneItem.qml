@@ -65,6 +65,8 @@ FocusScope {
     onActiveFocusChanged: {
         if (activeFocus) {
             activated(placement.paneId)
+        } else {
+            dragSession.deactivatePane(placement)
         }
     }
 

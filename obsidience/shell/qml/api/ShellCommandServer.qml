@@ -67,7 +67,10 @@ QtObject {
             "revision": surfaceLayout.revision,
             "pane_grid_size": surfaceLayout.paneGridSize,
             "minimum_pane_grid_size": surfaceLayout.minimumPaneGridSize,
-            "maximum_pane_grid_size": surfaceLayout.maximumPaneGridSize
+            "maximum_pane_grid_size": surfaceLayout.maximumPaneGridSize,
+            "minimum_tile_count": surfaceLayout.minimumTileCount,
+            "maximum_tile_count": surfaceLayout.maximumTileCount,
+            "workspace_tiling": surfaceLayout.workspaceTilingState()
         }
     }
 
@@ -317,6 +320,18 @@ QtObject {
         activePaneBySurface = next
     }
 
+    function deactivatePane(command) {
+        const placement = placementFor(command.pane_id)
+        if (!placement || placement.surfaceId !== command.surface_id
+                || placement.revision !== command.expected_revision
+                || activePaneBySurface[command.surface_id] !== placement.paneId) {
+            return
+        }
+        const next = Object.assign({}, activePaneBySurface)
+        delete next[command.surface_id]
+        activePaneBySurface = next
+    }
+
     function activePlacement(surfaceId) {
         const paneId = activePaneBySurface[surfaceId]
         const placement = placementFor(paneId)
@@ -324,7 +339,7 @@ QtObject {
                 && placement.surfaceId === surfaceId) {
             return placement
         }
-        return paneWorkspace.topPlacement(surfaceId)
+        return null
     }
 
     function movePane(socket, placement, direction) {
@@ -348,20 +363,37 @@ QtObject {
             failPaneCommand(socket, "pane.move.failed", "", "boundary")
             return
         }
-        let x = route.x - placement.width / 2
-        let y = route.y - placement.height / 2
+        const width = Math.min(placement.width, destination.logical_width)
+        const height = Math.min(
+            placement.height,
+            destination.logical_height - surfaceLayout.paneTopInset
+        )
+        let x = route.x - width / 2
+        let y = route.y - height / 2
         if (route.destination_edge === "left") {
             x = 12
         } else if (route.destination_edge === "right") {
-            x = destination.logical_width - placement.width - 12
+            x = destination.logical_width - width - 12
         } else if (route.destination_edge === "top") {
             y = surfaceLayout.paneTopInset
         } else {
-            y = destination.logical_height - placement.height - 12
+            y = destination.logical_height - height - 12
         }
-        x = surfaceLayout.clampPaneX(destination, placement.width, x)
-        y = surfaceLayout.clampPaneY(destination, placement.height, y)
-        paneWorkspace.presentPaneOn(placement, destination.id, x, y)
+        x = surfaceLayout.clampPaneX(destination, width, x)
+        y = surfaceLayout.clampPaneY(destination, height, y)
+        if (!placement.commitGeometry(
+                placement.revision,
+                destination.id,
+                x,
+                y,
+                width,
+                height,
+                paneWorkspace.nextZOrder(destination.id),
+                null
+        )) {
+            failPaneCommand(socket, "pane.move.failed", "", "stale_commit")
+            return
+        }
         const next = Object.assign({}, activePaneBySurface)
         if (next[source.id] === placement.paneId) {
             delete next[source.id]
@@ -371,6 +403,58 @@ QtObject {
         const event = {
             "schema": eventSchema,
             "type": "pane.moved",
+            "pane": placement.record()
+        }
+        broadcastToPaneClients(event)
+        if (paneClients.indexOf(socket) < 0) {
+            send(socket, event)
+        }
+    }
+
+    function tilePane(socket, placement, direction, translate) {
+        const definition = placement
+            ? paneWorkspace.definitionFor(placement.paneId) : null
+        const surface = placement
+            ? surfaceLayout.surface(placement.surfaceId) : null
+        if (!placement || !definition || !surface || placement.open !== true
+                || ["left", "right", "top", "bottom"].indexOf(direction) < 0) {
+            failPaneCommand(socket, "pane.tile.failed", "", "invalid")
+            return
+        }
+        const result = surfaceLayout.tiledPaneRect(
+            surface.id,
+            {
+                "x": placement.x,
+                "y": placement.y,
+                "width": placement.width,
+                "height": placement.height
+            },
+            definition.minWidth,
+            definition.minHeight,
+            direction,
+            placement.tileHome,
+            translate === true
+        )
+        if (!result) {
+            failPaneCommand(socket, "pane.tile.failed", "", "invalid_geometry")
+            return
+        }
+        if (result.changed && !placement.commitGeometry(
+                placement.revision,
+                surface.id,
+                result.x,
+                result.y,
+                result.width,
+                result.height,
+                placement.zOrder,
+                result.tile_home
+        )) {
+            failPaneCommand(socket, "pane.tile.failed", "", "stale_commit")
+            return
+        }
+        const event = {
+            "schema": eventSchema,
+            "type": "pane.tiled",
             "pane": placement.record()
         }
         broadcastToPaneClients(event)
@@ -395,6 +479,10 @@ QtObject {
             activatePane(command)
             return true
         }
+        if (command.type === "pane.deactivate") {
+            deactivatePane(command)
+            return true
+        }
         if (command.type === "pane.move_active") {
             const source = surfaceLayout.surface(command.source_surface_id)
             const direction = command.direction
@@ -404,6 +492,23 @@ QtObject {
                 return true
             }
             movePane(socket, placement, direction)
+            return true
+        }
+        if (command.type === "pane.tile_active"
+                || command.type === "pane.tile_move_active") {
+            const source = surfaceLayout.surface(command.source_surface_id)
+            const direction = command.direction
+            const placement = source ? activePlacement(source.id) : null
+            if (!placement) {
+                failPaneCommand(socket, "pane.tile.failed", "", "no_active_pane")
+                return true
+            }
+            tilePane(
+                socket,
+                placement,
+                direction,
+                command.type === "pane.tile_move_active"
+            )
             return true
         }
         if (command.type === "pane.dock") {
@@ -748,7 +853,19 @@ QtObject {
             return true
         }
         if (command.type === "workspace.grid.set") {
-            surfaceLayout.commitPaneGridSize(command.pane_grid_size)
+            if (surfaceLayout.commitPaneGridSize(command.pane_grid_size)) {
+                broadcast(workspaceState())
+            }
+            return true
+        }
+        if (command.type === "workspace.tiling.set") {
+            if (surfaceLayout.commitWorkspaceTiling(
+                    command.surface_id,
+                    command.columns,
+                    command.rows
+            )) {
+                broadcast(workspaceState())
+            }
             return true
         }
         return false

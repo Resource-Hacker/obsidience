@@ -30,11 +30,37 @@ QtObject {
     property int height: defaultHeight
     property bool open: defaultOpen
     property int zOrder: defaultZOrder
+    property var tileHome: null
     property int revision: 0
     property bool authoritative: false
 
     function isNumber(value) {
         return typeof value === "number" && isFinite(value)
+    }
+
+    function normalizeTileHome(value) {
+        if (!value) {
+            return null
+        }
+        if ((value.surface_id !== "samsung" && value.surface_id !== "usb-c"
+                && value.surface_id !== "dp-4")
+                || !Number.isInteger(value.columns)
+                || !Number.isInteger(value.rows)
+                || !Number.isInteger(value.left)
+                || !Number.isInteger(value.top)
+                || !Number.isInteger(value.right)
+                || !Number.isInteger(value.bottom)) {
+            return null
+        }
+        return {
+            "surface_id": value.surface_id,
+            "columns": value.columns,
+            "rows": value.rows,
+            "left": value.left,
+            "top": value.top,
+            "right": value.right,
+            "bottom": value.bottom
+        }
     }
 
     function applyRecord(record) {
@@ -58,6 +84,7 @@ QtObject {
         height = Math.max(240, Math.round(rect.height))
         open = record.open === true
         zOrder = isNumber(record.z_order) ? Math.round(record.z_order) : 10
+        tileHome = normalizeTileHome(record.tile_home)
         revision = Math.round(record.revision)
     }
 
@@ -86,6 +113,7 @@ QtObject {
             },
             "open": open,
             "z_order": zOrder,
+            "tile_home": tileHome,
             "revision": revision
         }
     }
@@ -104,6 +132,30 @@ QtObject {
         surfaceId = nextSurfaceId
         x = Math.round(nextX)
         y = Math.round(nextY)
+        tileHome = null
+        revision += 1
+        writeState()
+        return true
+    }
+
+    function commitGeometry(expectedRevision, nextSurfaceId, nextX, nextY,
+                            nextWidth, nextHeight, nextZOrder, nextTileHome) {
+        if (!authoritative || revision !== expectedRevision
+                || (nextSurfaceId !== "samsung" && nextSurfaceId !== "usb-c"
+                    && nextSurfaceId !== "dp-4")
+                || !isNumber(nextX) || !isNumber(nextY)
+                || !isNumber(nextWidth) || !isNumber(nextHeight)
+                || nextWidth <= 0 || nextHeight <= 0) {
+            return false
+        }
+        surfaceId = nextSurfaceId
+        x = Math.round(nextX)
+        y = Math.round(nextY)
+        width = Math.round(nextWidth)
+        height = Math.round(nextHeight)
+        open = true
+        zOrder = isNumber(nextZOrder) ? Math.round(nextZOrder) : zOrder
+        tileHome = normalizeTileHome(nextTileHome)
         revision += 1
         writeState()
         return true
@@ -115,6 +167,7 @@ QtObject {
     }
 
     function commitResize() {
+        tileHome = null
         revision += 1
         writeState()
     }
@@ -127,6 +180,9 @@ QtObject {
     }
 
     function presentOn(nextSurfaceId, nextX, nextY, nextZOrder) {
+        if (surfaceId !== nextSurfaceId) {
+            tileHome = null
+        }
         surfaceId = nextSurfaceId
         x = Math.round(nextX)
         y = Math.round(nextY)

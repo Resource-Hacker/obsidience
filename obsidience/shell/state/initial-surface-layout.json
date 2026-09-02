@@ -3,6 +3,11 @@
   "revision": 0,
   "graph_surface_id": "samsung",
   "pane_grid_size": 10,
+  "workspace_tiling": {
+    "samsung": { "columns": 8, "rows": 2 },
+    "usb-c": { "columns": 3, "rows": 2 },
+    "dp-4": { "columns": 4, "rows": 1 }
+  },
   "surfaces": [
     {
       "id": "samsung",
