@@ -17,21 +17,21 @@
     },
     {
       "name": "Hyprland",
-      "package": "hyprland 0.55.2-2",
+      "package": "hyprland 0.56.2-1",
       "repository": "https://github.com/hyprwm/Hyprland",
       "license": "BSD-3-Clause",
       "adaptation": "Used as the installed live Wayland compositor for Samsung, USB-C, and logical DP-4. Obsidience supplies its own minimal Lua configuration, supported custom layout provider, and shell surfaces; no Hyprland source or visual design was copied."
     },
     {
       "name": "Universal Wayland Session Manager",
-      "package": "uwsm 0.26.4-1",
+      "package": "uwsm 0.26.7-1",
       "repository": "https://github.com/Vladimir-csp/uwsm",
       "license": "MIT",
       "adaptation": "Used unchanged to generate and supervise the Hyprland graphical-session lifecycle. Obsidience does not duplicate UWSM session management and copied no source."
     },
     {
       "name": "Quickshell",
-      "package": "quickshell 0.3.0-2.1",
+      "package": "quickshell 0.3.1-1.1",
       "repository": "https://git.outfoxxed.me/quickshell/quickshell",
       "license": "LGPL-3.0-only",
       "adaptation": "Used as the installed Qt Quick and Wayland layer-shell runtime. Obsidience owns all QML, presentation, state and behavior; no upstream source or visual design was copied."
@@ -45,7 +45,7 @@
     },
     {
       "name": "WebKitGTK",
-      "package": "webkit2gtk-4.1 2.52.4-1",
+      "package": "webkit2gtk-4.1 2.52.6-1",
       "repository": "https://webkitgtk.org",
       "license": "LGPL-2.1-or-later and bundled component licenses",
       "adaptation": "Used as the installed hardware-accelerated web runtime for the one canonical Three.js graph bundle. No WebKit source was copied."

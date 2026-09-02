@@ -1171,9 +1171,9 @@ def test_live_shell_runtime_dependencies_are_pinned_without_kde_shell_entries() 
         upstream["name"]: upstream.get("package")
         for upstream in manifest["upstreams"]
     }
-    assert packages["Quickshell"] == "quickshell 0.3.0-2.1"
+    assert packages["Quickshell"] == "quickshell 0.3.1-1.1"
     assert packages["gtk-layer-shell"] == "gtk-layer-shell 0.10.1-1.1"
-    assert packages["WebKitGTK"] == "webkit2gtk-4.1 2.52.4-1"
+    assert packages["WebKitGTK"] == "webkit2gtk-4.1 2.52.6-1"
     assert packages["PyGObject"] == "python-gobject 3.56.3-1"
     assert packages["QMLTermWidget"] == "qmltermwidget 2.0.0.git1-1.1"
     assert packages["Qt WebSockets"] == "qt6-websockets 6.11.1-1.1"

@@ -165,11 +165,13 @@ after a real implementation or outcome contract exists.
   or application-specific placement path. `Meta+Esc` dismisses the active QML
   pane first and closes the exact active native application only after the
   shell returns `no_active_pane`; it never closes the shell host itself.
-  Native application pointer movement uses Hyprland's compositor-owned
-  `Meta+left-drag`; QML panes retain direct title-bar dragging. Do not intercept
-  an unmodified primary-button drag or add an application wrapper. When
-  Hyprland retiles the application on release, the native layout adopts its
-  dropped grid cell instead of restoring the pre-drag placement.
+  Native applications use their own client-side title or tab-bar drag regions:
+  the client sends the standard Wayland interactive-move request and Hyprland
+  0.56.2 performs the move. QML panes retain their shared direct title-bar drag
+  path. Do not add a modifier bind, global primary-button interception,
+  synthetic title bar, or application wrapper. When Hyprland retiles the
+  application on release, the native layout adopts its dropped grid cell
+  instead of restoring the pre-drag placement.
 - Input has one physical/compositor truth. The connected classic M.M.O.7 is
   verified at its 6400-DPI top stage and Hyprland applies one per-device custom
   linear `0.125` multiplier for 800-effective-DPI motion on all

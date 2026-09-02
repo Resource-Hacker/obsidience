@@ -68,7 +68,8 @@ def test_hyprland_config_is_one_compositor_with_three_real_outputs() -> None:
     assert "uwsm finalize" not in config
     assert "obsidience-shell-session.target" in config
     assert 'hl.bind("SUPER + RETURN"' in config
-    assert 'hl.bind("SUPER + mouse:272", hl.dsp.window.drag(), { mouse = true })' in config
+    assert "mouse:272" not in config
+    assert "hl.dsp.window.drag()" not in config
     assert 'hl.bind("SUPER + SHIFT + ESCAPE"' in config
     assert 'hl.bind("SUPER + ESCAPE"' in config
     assert "move_pane.py focused close" in config
@@ -206,9 +207,9 @@ def test_hyprland_and_uwsm_are_declared_runtime_plumbing() -> None:
         (SHELL_ROOT / "REUSE_MANIFEST.json").read_text(encoding="utf-8")
     )
     upstreams = {item["name"]: item for item in manifest["upstreams"]}
-    assert upstreams["Hyprland"]["package"] == "hyprland 0.55.2-2"
+    assert upstreams["Hyprland"]["package"] == "hyprland 0.56.2-1"
     assert upstreams["Universal Wayland Session Manager"]["package"] == (
-        "uwsm 0.26.4-1"
+        "uwsm 0.26.7-1"
     )
     assert "no Hyprland source" in upstreams["Hyprland"]["adaptation"]
     assert "does not duplicate UWSM" in upstreams[
