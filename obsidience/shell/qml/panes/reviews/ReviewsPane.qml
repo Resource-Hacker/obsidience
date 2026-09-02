@@ -60,15 +60,16 @@ Rectangle {
 
     function refresh() {
         requestJson("GET", "/api/reviews", function(ok, payload, error) {
-            loading = false
+            root.loading = false
             if (!ok || !Array.isArray(payload)) {
-                loadError = "Review service unavailable: " + error
+                root.loadError = "Review service unavailable: " + error
                 return
             }
-            proposals = payload
-            loadError = ""
-            if (expandedFile && !payload.some(proposal => proposal.file === expandedFile)) {
-                expandedFile = ""
+            root.proposals = payload
+            root.loadError = ""
+            if (root.expandedFile
+                    && !payload.some(proposal => proposal.file === root.expandedFile)) {
+                root.expandedFile = ""
             }
         })
     }
@@ -83,12 +84,12 @@ Rectangle {
             + encodeURIComponent("rejected from review pane")
         requestJson("POST", "/api/reviews/" + encodeURIComponent(proposal.file)
             + "/" + action, function(ok, payload, error) {
-            decidingFile = ""
+            root.decidingFile = ""
             if (!ok) {
-                actionError = error
+                root.actionError = error
                 return
             }
-            refresh()
+            root.refresh()
         })
     }
 
