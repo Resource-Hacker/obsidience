@@ -38,7 +38,7 @@ The normal development services are:
 
 - `obsidience-harness-dev.service` - API, interpreter, and real-time supervisor on `127.0.0.1:8765`
 - `obsidience-shell-session.target` - live Hyprland session boundary
-- `obsidience-shell-host.service` - native Samsung Wayland shell host
+- `obsidience-shell-host.service` - native Wayland shell host for every display
 - `obsidience-shell-knowledge.service` - canonical Three.js knowledge desktop
 - `obsidience-shell-notifications.service` - session-local notification owner
 
@@ -54,7 +54,7 @@ Graph Settings → Display selects the one Surface that owns the whole live
 knowledge graph. The setting is global for this development slice; individual
 Agent placement is intentionally deferred.
 
-The Electron development service is disabled on `native-shell`; its complete
+The Electron development service is disabled on `main`; its complete
 pre-cutover implementation remains on `archive/electron-20260828`. The harness
 and affected native shell hosts are restarted after every project change so
 the live workspace always matches the working tree.
