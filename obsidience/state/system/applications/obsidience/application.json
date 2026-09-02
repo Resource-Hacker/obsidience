@@ -16,7 +16,8 @@
   "components": {
     "shell": "obsidience-shell-host.service",
     "harness": "obsidience-harness-dev.service",
-    "development_ui": "obsidience-ui-usbc-dev.service"
+    "development_ui": "obsidience-ui-usbc-dev.service",
+    "software_management": "PackageKit (alpm)"
   },
   "live_data_endpoint": "/api/system",
   "read_only": true

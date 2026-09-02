@@ -404,8 +404,12 @@ def test_restart_retries_active_event_without_losing_fifo(monkeypatch) -> None:
         if status not in {"blocked", "failed"}:
             task.meta.pop("blocked_reason", None)
 
+    def mutate(_note, operation) -> None:
+        operation(task.meta)
+
     monkeypatch.setattr(scheduler, "iter_notes", lambda: [task])
     monkeypatch.setattr(scheduler, "update_status", update)
+    monkeypatch.setattr(scheduler, "mutate_note_metadata", mutate)
     monkeypatch.setattr(scheduler.INDEX, "record_run", lambda **values: recorded.append(values))
 
     assert scheduler.reconcile_interrupted_runs() == ["Tasks/ingest"]
@@ -413,6 +417,125 @@ def test_restart_retries_active_event_without_losing_fifo(monkeypatch) -> None:
     assert task.meta["params"] == active
     assert task.meta["event_queue"] == [waiting]
     assert recorded[0]["status"] == "failed"
+
+
+def test_restart_recovers_exact_failed_interruption_and_dedupes_candidate_pair(
+    monkeypatch,
+) -> None:
+    active = {
+        "event": "task.create",
+        "activation_key": "a" * 20,
+        "target_task": "Tasks/link",
+        "candidate_refs": ["Knowledge/one", "Knowledge/two"],
+    }
+    duplicate = {
+        "event": "task.create",
+        "activation_key": "b" * 20,
+        "target_task": "Tasks/link",
+        "candidate_refs": ["Knowledge/two", "Knowledge/one"],
+    }
+    waiting = {
+        "event": "task.create",
+        "activation_key": "c" * 20,
+        "target_task": "Tasks/link",
+        "candidate_refs": ["Knowledge/one", "Knowledge/three"],
+    }
+    task = SimpleNamespace(
+        kind="task",
+        ref="Tasks/link",
+        title="Link",
+        path="Tasks/link.md",
+        mtime=1.0,
+        meta={
+            "status": "failed",
+            "blocked_reason": "interrupted by harness restart; outcome is unknown",
+            "triggers": ["task.create"],
+            "params": active,
+            "event_queue": [duplicate, waiting],
+            "reasoning_effort": "xhigh",
+        },
+    )
+    recorded: list[dict] = []
+
+    def mutate(_note, operation) -> None:
+        operation(task.meta)
+
+    monkeypatch.setattr(scheduler, "iter_notes", lambda: [task])
+    monkeypatch.setattr(scheduler, "mutate_note_metadata", mutate)
+    monkeypatch.setattr(scheduler.INDEX, "record_run", lambda **values: recorded.append(values))
+
+    assert scheduler.reconcile_interrupted_runs() == ["Tasks/link"]
+    assert task.meta["status"] == "pending"
+    assert "blocked_reason" not in task.meta
+    assert task.meta["params"] == active
+    assert task.meta["event_queue"] == [waiting]
+    assert recorded == []
+
+
+def test_restart_does_not_retry_an_ordinary_failed_event(monkeypatch) -> None:
+    task = SimpleNamespace(
+        kind="task",
+        ref="Tasks/link",
+        title="Link",
+        path="Tasks/link.md",
+        mtime=1.0,
+        meta={
+            "status": "failed",
+            "blocked_reason": "provider unavailable",
+            "triggers": ["task.create"],
+            "params": {
+                "event": "task.create",
+                "activation_key": "a" * 20,
+            },
+        },
+    )
+    monkeypatch.setattr(scheduler, "iter_notes", lambda: [task])
+
+    assert scheduler.reconcile_interrupted_runs() == []
+    assert task.meta["status"] == "failed"
+
+
+def test_advancing_candidate_event_skips_same_pair_with_a_new_content_key(
+    monkeypatch,
+) -> None:
+    active = {
+        "event": "task.create",
+        "activation_key": "a" * 20,
+        "target_task": "Tasks/link",
+        "candidate_refs": ["Knowledge/one", "Knowledge/two"],
+    }
+    duplicate = {
+        "event": "task.create",
+        "activation_key": "b" * 20,
+        "target_task": "Tasks/link",
+        "candidate_refs": ["Knowledge/two", "Knowledge/one"],
+    }
+    waiting = {
+        "event": "task.create",
+        "activation_key": "c" * 20,
+        "target_task": "Tasks/link",
+        "candidate_refs": ["Knowledge/one", "Knowledge/three"],
+    }
+    task = SimpleNamespace(
+        path="Tasks/link.md",
+        meta={
+            "status": "completed",
+            "params": active,
+            "event_queue": [duplicate, waiting],
+        },
+    )
+
+    def mutate(_task, operation) -> None:
+        operation(task.meta)
+
+    monkeypatch.setattr(scheduler, "mutate_note_metadata", mutate)
+
+    result = scheduler.advance_event_queue(task)
+
+    assert result == {"promoted": True, "queue_depth": 0}
+    assert task.meta["status"] == "pending"
+    assert task.meta["params"] == waiting
+    assert "event_queue" not in task.meta
 
 
 def test_failed_event_keeps_active_params_and_waiting_fifo(monkeypatch) -> None:

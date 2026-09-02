@@ -2,7 +2,23 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from obsidience.harness.capabilities.vault import maintenance
 from obsidience.harness.interfaces.api import app as server
+
+
+def test_maintenance_claim_identity_is_the_stable_article_pair() -> None:
+    current = {
+        "candidate_key": "a" * 20,
+        "refs": ["Knowledge/one", "Knowledge/two"],
+    }
+    queued_older_revision = {
+        "candidate_key": "b" * 20,
+        "candidate_refs": ["Knowledge/two", "Knowledge/one"],
+    }
+
+    assert maintenance._candidate_identity(current) == maintenance._candidate_identity(
+        queued_older_revision,
+    )
 
 
 def test_enabling_turn_event_task_waits_for_a_real_event(monkeypatch) -> None:

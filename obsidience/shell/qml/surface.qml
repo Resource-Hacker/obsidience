@@ -1,27 +1,44 @@
+//@ pragma NativeTextRendering
 pragma ComponentBehavior: Bound
 
 import Quickshell
+import QtQml
 import "api"
+import "surfaces/stage"
 import "workspace"
 
 ShellRoot {
     id: root
 
     property ShellApi shellApi: ShellApi {}
-    property PanePlacement panePlacement: PanePlacement {}
-    readonly property var targetScreens: Quickshell.screens.filter(
-        screen => screen.name === shellApi.usbOutputName
+    property LockState lockState: LockState {}
+    readonly property string surfaceId: String(
+        Quickshell.env("OBSIDIENCE_SURFACE_ID") ?? ""
     )
+    readonly property var targetSurface: shellApi.surfaceLayout.surface(surfaceId)
+    readonly property var targetScreens: Quickshell.screens.filter(
+        screen => targetSurface && screen.name === targetSurface.output
+    )
+
+    PaneWorkspace {
+        shellApi: root.shellApi
+        surfaceId: root.surfaceId
+        targetScreens: root.targetScreens
+        authoritative: false
+        locked: root.lockState.active
+    }
 
     Variants {
         model: root.targetScreens
 
-        PaneWindow {
+        X11Stage {
             required property var modelData
 
-            surfaceScreen: modelData
-            surfaceId: "usb-c"
-            placement: root.panePlacement
+            screen: modelData
+            surfaceId: root.surfaceId
+            shellApi: root.shellApi
+            locked: root.lockState.active
         }
     }
+
 }

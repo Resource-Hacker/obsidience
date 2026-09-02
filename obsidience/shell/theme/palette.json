@@ -1,0 +1,26 @@
+{
+  "schema": "obsidience.shell-theme.v1",
+  "name": "Obsidience",
+  "colors": {
+    "surface": "#eb030a10",
+    "inactive_surface": "#f002080e",
+    "accent": "#4067e8f9",
+    "strong_accent": "#6667e8f9",
+    "inactive_border": "#294b54",
+    "separator": "#2667e8f9",
+    "hover": "#1a67e8f9",
+    "text": "#cffafe",
+    "muted": "#9967e8f9",
+    "inactive_text": "#7dd3fc",
+    "selection": "#102a36",
+    "shadow": "#22d3ee"
+  },
+  "metrics": {
+    "border_width": 1,
+    "corner_radius": 12,
+    "title_height": 32,
+    "title_font": "JetBrains Mono",
+    "title_font_size": 10,
+    "title_letter_spacing": 2.2
+  }
+}

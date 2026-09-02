@@ -2,32 +2,37 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Effects
+import "../api"
 
 Item {
     id: root
 
     required property string title
-    required property string surfaceLabel
-    required property int revision
+    required property ShellTheme theme
+    default property alias contentData: content.data
 
     signal dragStarted()
     signal dragMoved(real deltaX, real deltaY, real pointerX, real pointerY)
     signal dragFinished(bool moved)
+    signal resizeStarted()
+    signal resizeMoved(real deltaX, real deltaY)
+    signal resizeFinished(bool moved)
+    signal closeRequested()
 
     Rectangle {
         id: frame
 
         anchors.fill: parent
-        radius: 12
-        color: "#eb030a10"
-        border.width: 1
-        border.color: "#4067e8f9"
+        radius: root.theme.cornerRadius
+        color: root.theme.surface
+        border.width: root.theme.borderWidth
+        border.color: root.theme.accent
         clip: true
 
         layer.enabled: true
         layer.effect: MultiEffect {
             shadowEnabled: true
-            shadowColor: "#22d3ee"
+            shadowColor: root.theme.shadow
             shadowOpacity: 0.08
             shadowBlur: 0.75
             shadowScale: 1.0
@@ -39,7 +44,7 @@ Item {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
-            height: 32
+            height: root.theme.titleHeight
             color: "transparent"
 
             property bool moved: false
@@ -49,7 +54,7 @@ Item {
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
                 height: 1
-                color: "#2667e8f9"
+                color: root.theme.separator
             }
 
             Text {
@@ -57,37 +62,51 @@ Item {
                 anchors.leftMargin: 13
                 anchors.verticalCenter: parent.verticalCenter
                 text: root.title
-                color: "#cffafe"
-                font.family: "JetBrains Mono"
-                font.pixelSize: 10
+                color: root.theme.text
+                font.family: root.theme.titleFont
+                font.pixelSize: root.theme.titleFontSize
                 font.capitalization: Font.AllUppercase
-                font.letterSpacing: 2.2
+                font.letterSpacing: root.theme.titleLetterSpacing
             }
 
             Rectangle {
+                id: closeButton
+
                 anchors.right: parent.right
                 anchors.rightMargin: 10
                 anchors.verticalCenter: parent.verticalCenter
                 width: 24
                 height: 17
                 radius: 4
-                color: "transparent"
-                border.width: 1
-                border.color: "#4067e8f9"
+                color: closeMouse.containsMouse ? root.theme.hover : "transparent"
+                border.width: root.theme.borderWidth
+                border.color: root.theme.accent
 
                 Text {
                     anchors.centerIn: parent
                     text: "×"
-                    color: "#9967e8f9"
-                    font.family: "JetBrains Mono"
-                    font.pixelSize: 10
+                    color: closeMouse.containsMouse ? root.theme.text : root.theme.muted
+                    font.family: root.theme.titleFont
+                    font.pixelSize: root.theme.titleFontSize
+                }
+
+                MouseArea {
+                    id: closeMouse
+
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.closeRequested()
                 }
             }
 
             MouseArea {
                 id: dragArea
 
-                anchors.fill: parent
+                anchors.left: parent.left
+                anchors.right: closeButton.left
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
                 acceptedButtons: Qt.LeftButton
                 preventStealing: true
                 cursorShape: Qt.OpenHandCursor
@@ -134,83 +153,77 @@ Item {
         }
 
         Item {
+            id: content
+
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: titleBar.bottom
             anchors.bottom: parent.bottom
+        }
 
-            Column {
-                anchors.left: parent.left
+        Item {
+            id: resizeHandle
+
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            width: 22
+            height: 22
+
+            Rectangle {
                 anchors.right: parent.right
-                anchors.top: parent.top
-                anchors.margins: 24
-                spacing: 15
+                anchors.bottom: parent.bottom
+                anchors.rightMargin: 4
+                anchors.bottomMargin: 4
+                width: 8
+                height: 8
+                color: "transparent"
+                border.width: 0
 
-                Text {
-                    text: "ONE PANE · ONE OWNER"
-                    color: "#cffafe"
-                    font.family: "JetBrains Mono"
-                    font.pixelSize: 16
-                    font.weight: Font.Medium
-                    font.letterSpacing: 1.1
-                }
-
-                Text {
-                    width: parent.width
-                    wrapMode: Text.WordWrap
-                    text: "This is one logical Obsidience pane rendered by the active Surface. Drag its title bar through the Samsung bottom-middle edge or the USB-C top edge to transfer ownership."
-                    color: "#8c67e8f9"
-                    font.family: "JetBrains Mono"
-                    font.pixelSize: 11
-                    lineHeight: 1.55
+                Rectangle {
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    width: 2
+                    height: parent.height
+                    color: root.theme.strongAccent
                 }
 
                 Rectangle {
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
                     width: parent.width
-                    height: 1
-                    color: "#1a67e8f9"
+                    height: 2
+                    color: root.theme.strongAccent
                 }
+            }
 
-                Row {
-                    spacing: 26
+            MouseArea {
+                anchors.fill: parent
+                acceptedButtons: Qt.LeftButton
+                preventStealing: true
+                cursorShape: Qt.SizeFDiagCursor
 
-                    Column {
-                        spacing: 5
+                property point pressGlobal: Qt.point(0, 0)
+                property bool moved: false
 
-                        Text {
-                            text: "ACTIVE SURFACE"
-                            color: "#7367e8f9"
-                            font.family: "JetBrains Mono"
-                            font.pixelSize: 9
-                            font.letterSpacing: 1.3
-                        }
-                        Text {
-                            text: root.surfaceLabel
-                            color: "#9967e8f9"
-                            font.family: "JetBrains Mono"
-                            font.pixelSize: 12
-                            font.capitalization: Font.AllUppercase
-                        }
-                    }
-
-                    Column {
-                        spacing: 5
-
-                        Text {
-                            text: "PLACEMENT REVISION"
-                            color: "#7367e8f9"
-                            font.family: "JetBrains Mono"
-                            font.pixelSize: 9
-                            font.letterSpacing: 1.3
-                        }
-                        Text {
-                            text: String(root.revision).padStart(3, "0")
-                            color: "#a6cffafe"
-                            font.family: "JetBrains Mono"
-                            font.pixelSize: 12
-                        }
-                    }
+                onPressed: mouse => {
+                    moved = false
+                    pressGlobal = resizeHandle.mapToGlobal(mouse.x, mouse.y)
+                    root.resizeStarted()
                 }
+                onPositionChanged: mouse => {
+                    if (!pressed) {
+                        return
+                    }
+                    const pointer = resizeHandle.mapToGlobal(mouse.x, mouse.y)
+                    const deltaX = pointer.x - pressGlobal.x
+                    const deltaY = pointer.y - pressGlobal.y
+                    if (Math.abs(deltaX) > 0 || Math.abs(deltaY) > 0) {
+                        moved = true
+                    }
+                    root.resizeMoved(deltaX, deltaY)
+                }
+                onReleased: root.resizeFinished(moved)
+                onCanceled: root.resizeFinished(moved)
             }
         }
     }

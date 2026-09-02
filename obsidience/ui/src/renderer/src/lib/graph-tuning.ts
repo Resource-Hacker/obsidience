@@ -9,6 +9,89 @@ import {
 export const MAIN_GRAPH_ID = "main";
 export const LIBRARY_GRAPH_ID = "library";
 
+const PROFILE_KEY = "obsidience.graph-tuning-profiles.v2";
+export const DEFAULT_GRAPH_TUNING_PROFILE = "Default";
+
+export interface GraphTuningProfiles {
+  active: string;
+  profiles: Record<string, Knowledge3dTuning>;
+}
+
+export type GraphTuningProfileStore = Record<string, GraphTuningProfiles>;
+
+export function loadGraphTuningProfileStore(): GraphTuningProfileStore {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PROFILE_KEY) ?? "{}") as GraphTuningProfileStore;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function persistGraphTuningProfileStore(store: GraphTuningProfileStore): void {
+  try {
+    localStorage.setItem(PROFILE_KEY, JSON.stringify(store));
+  } catch {
+    // Presentation persistence is best-effort.
+  }
+}
+
+export function graphTuningProfilesFor(
+  store: GraphTuningProfileStore,
+  graphId: string,
+): GraphTuningProfiles {
+  const current = store[graphId];
+  if (current?.profiles[current.active]) return current;
+  return {
+    active: DEFAULT_GRAPH_TUNING_PROFILE,
+    profiles: { [DEFAULT_GRAPH_TUNING_PROFILE]: loadGraphTuning(graphId) },
+  };
+}
+
+export function saveGraphTuningProfile(
+  graphId: string,
+  name: string,
+  tuning: Knowledge3dTuning,
+): GraphTuningProfileStore {
+  const profile = name.trim().slice(0, 24);
+  const store = loadGraphTuningProfileStore();
+  if (!profile || profile === "__new__") return store;
+  const current = graphTuningProfilesFor(store, graphId);
+  if (!(profile in current.profiles) && Object.keys(current.profiles).length >= 32) {
+    return store;
+  }
+  const record = clampKnowledge3dTuning(tuning);
+  const next = {
+    ...store,
+    [graphId]: {
+      active: profile,
+      profiles: { ...current.profiles, [profile]: record },
+    },
+  };
+  persistGraphTuningProfileStore(next);
+  saveGraphTuning(graphId, record);
+  announceGraphTuning({ graphId, tuning: record });
+  return next;
+}
+
+export function selectGraphTuningProfile(
+  graphId: string,
+  name: string,
+): GraphTuningProfileStore {
+  const store = loadGraphTuningProfileStore();
+  const current = graphTuningProfilesFor(store, graphId);
+  const record = current.profiles[name];
+  if (!record) return store;
+  const next = {
+    ...store,
+    [graphId]: { ...current, active: name },
+  };
+  persistGraphTuningProfileStore(next);
+  saveGraphTuning(graphId, record);
+  announceGraphTuning({ graphId, tuning: record });
+  return next;
+}
+
 /**
  * The exact active Obsidience records recovered from its Chromium Local Storage
  * on 2026-08-20.  Keep these role-keyed: Obsidience uses visible agent names

@@ -19,6 +19,7 @@ _background: set[asyncio.Task] = set()
 _last_fired: dict[str, float] = {}
 _ACTIVE_EVENT_STATUSES = {"pending", "running"}
 REALTIME_TASK_REF = "Tasks/executive/realtime"
+INTERRUPTED_RUN_SUMMARY = "interrupted by harness restart; outcome is unknown"
 
 
 def _is_specialist_task(note: Note) -> bool:
@@ -65,33 +66,52 @@ def reconcile_interrupted_runs() -> list[str]:
     """Close interrupted attempts and retry their durable event commitment."""
     interrupted = []
     for note in iter_notes():
-        if note.kind != "task" or str(note.meta.get("status", "")) != "running":
+        if note.kind != "task":
             continue
-        run_id = str(note.meta.get("last_run") or f"interrupted-{int(time.time())}")
-        summary = "interrupted by harness restart; outcome is unknown"
+        status = str(note.meta.get("status", ""))
+        was_running = status == "running"
         params = note.meta.get("params")
         retry_event = bool(
             task_triggers(note.meta)
             and isinstance(params, dict)
             and (params.get("activation_key") or params.get("event"))
         )
-        update_status(
-            note,
-            "pending" if retry_event else "failed",
-            {"summary": summary} if retry_event else {"blocked_reason": summary},
+        was_interrupted = (
+            status == "failed"
+            and str(note.meta.get("blocked_reason", "")) == INTERRUPTED_RUN_SUMMARY
+            and retry_event
         )
-        INDEX.record_run(
-            id=run_id,
-            task_ref=note.ref,
-            objective=note.title,
-            agent="interpreter",
-            started=note.mtime,
-            finished=time.time(),
-            status="failed",
-            summary=summary,
-            trace="[]",
-            reasoning_effort=str(note.meta.get("reasoning_effort", "")),
-        )
+        if not was_running and not was_interrupted:
+            continue
+        run_id = str(note.meta.get("last_run") or f"interrupted-{int(time.time())}")
+        if retry_event:
+            def requeue(meta: dict) -> None:
+                meta["status"] = "pending"
+                meta["status_updated"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+                meta["summary"] = INTERRUPTED_RUN_SUMMARY
+                meta.pop("blocked_reason", None)
+                queue = _dedupe_waiting_events(meta)
+                if queue:
+                    meta["event_queue"] = queue
+                else:
+                    meta.pop("event_queue", None)
+
+            mutate_note_metadata(note, requeue)
+        else:
+            update_status(note, "failed", {"blocked_reason": INTERRUPTED_RUN_SUMMARY})
+        if was_running:
+            INDEX.record_run(
+                id=run_id,
+                task_ref=note.ref,
+                objective=note.title,
+                agent="interpreter",
+                started=note.mtime,
+                finished=time.time(),
+                status="failed",
+                summary=INTERRUPTED_RUN_SUMMARY,
+                trace="[]",
+                reasoning_effort=str(note.meta.get("reasoning_effort", "")),
+            )
         interrupted.append(note.ref)
     return interrupted
 
@@ -104,6 +124,11 @@ def _event_queue(meta: dict) -> list[dict]:
 
 
 def _event_key(params: dict) -> tuple[str, ...]:
+    candidate_refs = params.get("candidate_refs")
+    if params.get("event") == "task.create" and isinstance(candidate_refs, list):
+        refs = tuple(sorted({str(ref).strip() for ref in candidate_refs if str(ref).strip()}))
+        if refs:
+            return ("task.create-candidate", str(params.get("target_task", "")), *refs)
     activation_key = str(params.get("activation_key", ""))
     if activation_key:
         return ("activation", activation_key)
@@ -126,6 +151,20 @@ def _event_key(params: dict) -> tuple[str, ...]:
         str(params.get("target_task", "")),
         str(params.get("output_runbook", "")),
     )
+
+
+def _dedupe_waiting_events(meta: dict) -> list[dict]:
+    """Keep one FIFO occurrence per active event identity."""
+    active = meta.get("params")
+    seen = {_event_key(active)} if isinstance(active, dict) else set()
+    queue = []
+    for waiting in _event_queue(meta):
+        key = _event_key(waiting)
+        if key in seen:
+            continue
+        seen.add(key)
+        queue.append(waiting)
+    return queue
 
 
 def enqueue_named_event(

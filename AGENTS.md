@@ -121,21 +121,57 @@ after a real implementation or outcome contract exists.
   one Samsung-only Obsidience Stage matching the current background and identity
   chrome, and read-only KWin state. It reserves no panel area and creates no
   placeholder panel. `plasmashell` stays disabled so it cannot compete for shell ownership;
-  the independent terminal is the recovery path. The current development UI
-  remains on isolated USB-C Xorg, alongside the native USB-C Surface render
-  host. One shared placement record now transfers a pane between Samsung and
-  USB-C render hosts; physical edge-drag acceptance remains an owner test. The
+  the independent terminal is the recovery path. The Electron development UI
+  is disabled on `native-shell` and retained only on
+  `archive/electron-20260828`. The native Samsung, USB-C, and DP-4 hosts all
+  instantiate the same registry for Chat, Library, Tasks, Reviews, Reader,
+  Knowledge, Source, Models, Hardware, Camera, Settings, Applications,
+  Terminal, and Displays. The far-left bar control remains the transient
+  Start-style launcher. Its menu is one shared button-anchored shell popup on
+  every Surface. The Obsidience bar is the sole side-Surface bar; legacy tint2
+  panels must not run or be restored by display wake repair. Applications is
+  the ordinary movable software-management pane backed by PackageKit/Polkit.
+  One shared placement record transfers and
+  resizes every pane. The
   project target is a full `plasmashell`
   replacement on unmodified upstream KWin. Treat each physical display as one
   runtime Surface: Samsung is KWin/Wayland, USB-C is Xorg `:2.0`, and DP-4 is
   Xorg `:2.1`. Surface is not an Article kind or Capability. Every pane uses the
   same `pane_id + surface_id + local_rect + open + z_order` placement contract;
-  never create a Reader-specific or pane-specific display bridge. A native
-  window cannot cross these display-server boundaries, so a cross-Surface drag
-  is one shell-host placement update followed by destination re-rendering. Do
-  not create another coordinator service for this state change.
+  never create a Reader-specific or pane-specific display bridge. Every
+  floating pane is wrapped by the shared `PaneItem` and `PaneFrame`; pane
+  Modules must not implement their own outer movement or focus shim. The shared
+  passive press observer must activate and raise a pane on its first primary
+  click without consuming that click from terminal or control content. Pointer dragging is
+  local to the current Surface and `SurfaceLayout` clamps every preview,
+  commit, reopen, and transfer to the shared usable bounds so the title-bar
+  handle cannot be stranded behind shell chrome. `SurfaceLayout` also owns one
+  global logical-pixel pane grid. Its default is 10 px, it snaps pane position
+  and size before safety clamping, and Settings > Workspace is its only human
+  control; individual pane Modules must never implement their own snap logic.
+  `Meta+Shift+Arrow` moves the active pane to the nearest mapped Surface in
+  that direction through one primary-shell placement revision. KWin owns the
+  physical shortcut on Samsung. On USB-C and DP-4, the existing single-owner
+  input router consumes that exact chord before XTest forwarding and calls the
+  same bounded shell command client. The primary shell remains the only
+  placement writer. No held-pointer transfer, pane-drag lease, coordinator
+  service, Openbox binding, or pane-specific bridge is permitted for this state
+  change. An unmapped direction is a no-op.
   Only the active Surface displays its cursor; inactive Surface cursors stay hidden.
   Preserve Samsung-only KWin ownership and VRR isolation.
+  KWin and KScreenLocker remain the sole session-lock and PAM authority.
+  One `graph_surface_id` in the existing Surface layout selects Samsung, USB-C,
+  or DP-4 for the whole graph; per-Agent placement is deferred. Obsidience
+  keeps the top-left Obsidience identity mark on that selected Surface and
+  centers the Executive root at the selected Surface's exact midpoint.
+  projects one lock event to all three Surfaces. The selected Surface shows the
+  canonical graph, each nonselected side Surface is an opaque input-empty
+  privacy cover, and Samsung retains KDE's compositor-enforced stock greeter
+  over a real graph-rendering wallpaper when selected. The root input router
+  rejects every side-Surface lease. Unlock is accepted only from KScreenLocker
+  and never restores prior side ownership. Settings is one sectioned pane;
+  Graph is its first section, Workspace owns shared pane behavior, and neither
+  has a standalone bar button.
 
 Only these canonical kinds belong in accepted frontmatter: `knowledge`,
 `task`, `runbook`, `tool`, `skill`, and `agent`.
@@ -311,6 +347,12 @@ remain digitally silent. Do not substitute custom wake frames or a keepalive.
   lead and performs only its bounded outcome through its own Runbook.
 - The scheduler claims a due Task before it waits for the executor semaphore;
   later ticks must never queue a second copy of that same activation.
+- A restart-interrupted event Task retains its bound activation and FIFO and
+  returns to `pending`, including an exact older `failed` interruption marker.
+  Ordinary provider, model, Tool, and acceptance failures remain `failed` for
+  explicit resolution. Merge and Link candidate occurrences are deduplicated
+  by their exact destination Task plus sorted Article refs; a changed content
+  evidence hash never manufactures another activation for the same pair.
 - A Task awaiting an owner decision is not idle. `task.create` must not rerun,
   overwrite, or queue another occurrence of that Task while it is in `review`.
 - Review decision and execution finalization are order-independent. If the owner
@@ -406,12 +448,22 @@ Tool bindings, generic hierarchy edges, and framework-specific vocabulary.
   checkbox yields to the per-graph Animation speed slider when disabled.
 - The Reader is the single Article and Source viewer. Knowledge and Source
   explorers are dockable views, not separate truth stores.
-- The Terminal mirrors the current shared Codex tmux window; it does not own or
-  rename the external terminal session.
+- External applications remain native KWin/Openbox clients, never PaneItems or
+  embedded mirrors. One Shell palette feeds PaneFrame and bounded native theme
+  adapters; application content remains owned by the application.
+- Reader docking has one primary-owned atomic layout: Knowledge defaults left,
+  Source defaults right, same-side explorers stack evenly, and collapsed
+  explorers use a narrow rail. Docked explorers follow Reader between Surfaces;
+  detached explorers resume their own generic PanePlacement. Never add a web
+  Reader, second document loader, or display-transfer path for docking.
+- The native Terminal owns the `obsidience-ui` tmux session view and window
+  sizing. Its fixed readable font and viewport follow the pane, and tmux uses
+  the largest attached client so the full pane reflows without letterboxing.
+  DP-4 is a passive mirror and must not constrain Obsidience's terminal size.
 
-After every project change, rebuild as needed and restart both development
-services so the owner can test the exact current state. Verify the API and the
-actual USB-C display, not only command exit codes.
+After every project change, rebuild as needed and restart the harness plus each
+affected native shell host so the owner can test the exact current state.
+Verify the API and the actual USB-C display, not only command exit codes.
 
 ## Required validation
 
@@ -422,7 +474,7 @@ Before handoff:
 3. run `pnpm --dir obsidience/ui typecheck` and
    `pnpm --dir obsidience/ui build`;
 4. confirm Source integrity and the exact Tool-to-Skill-to-Capability pairing;
-5. restart both development services;
+5. restart the harness and affected native shell services;
 6. verify `/api/status`, `/api/graph`, `/api/tasks`, and the USB-C UI;
 7. ensure accepted graph text contains no stale framework architecture or Tool
    claim without its exact Capability binding and singular entrypoint.

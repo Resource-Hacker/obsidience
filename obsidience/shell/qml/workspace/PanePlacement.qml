@@ -8,19 +8,30 @@ QtObject {
     id: root
 
     readonly property string schema: "obsidience.surface-placement.v1"
-    readonly property string paneId: "surface-probe"
+    property string paneId: "displays"
+    property string stateFileName: paneId === "displays"
+        ? "pane-placement.json" : paneId + "-placement.json"
     readonly property string statePath: StandardPaths.writableLocation(
         StandardPaths.RuntimeLocation
-    ) + "/obsidience-shell/pane-placement.json"
+    ) + "/obsidience-shell/" + stateFileName
 
-    property string surfaceId: "samsung"
-    property int x: 2180
-    property int y: 260
-    property int width: 720
-    property int height: 420
-    property bool open: true
-    property int zOrder: 10
+    property string defaultSurfaceId: "samsung"
+    property int defaultX: 2180
+    property int defaultY: 260
+    property int defaultWidth: 720
+    property int defaultHeight: 420
+    property bool defaultOpen: true
+    property int defaultZOrder: 10
+
+    property string surfaceId: defaultSurfaceId
+    property int x: defaultX
+    property int y: defaultY
+    property int width: defaultWidth
+    property int height: defaultHeight
+    property bool open: defaultOpen
+    property int zOrder: defaultZOrder
     property int revision: 0
+    property bool authoritative: false
 
     function isNumber(value) {
         return typeof value === "number" && isFinite(value)
@@ -30,7 +41,8 @@ QtObject {
         if (!record || record.schema !== schema || record.pane_id !== paneId) {
             return
         }
-        if (record.surface_id !== "samsung" && record.surface_id !== "usb-c") {
+        if (record.surface_id !== "samsung" && record.surface_id !== "usb-c"
+                && record.surface_id !== "dp-4") {
             return
         }
         const rect = record.local_rect
@@ -82,20 +94,53 @@ QtObject {
         placementFile.setText(JSON.stringify(record(), null, 2) + "\n")
     }
 
-    function previewMove(nextX, nextY) {
+    function commitDrag(expectedRevision, nextSurfaceId, nextX, nextY) {
+        if (!authoritative || revision !== expectedRevision
+                || (nextSurfaceId !== "samsung" && nextSurfaceId !== "usb-c"
+                    && nextSurfaceId !== "dp-4")
+                || !isNumber(nextX) || !isNumber(nextY)) {
+            return false
+        }
+        surfaceId = nextSurfaceId
         x = Math.round(nextX)
         y = Math.round(nextY)
+        revision += 1
+        writeState()
+        return true
     }
 
-    function commitMove() {
+    function previewResize(nextWidth, nextHeight) {
+        width = Math.max(360, Math.round(nextWidth))
+        height = Math.max(240, Math.round(nextHeight))
+    }
+
+    function commitResize() {
         revision += 1
         writeState()
     }
 
-    function transfer(nextSurfaceId, nextX, nextY) {
+    function present() {
+        open = true
+        zOrder += 1
+        revision += 1
+        writeState()
+    }
+
+    function presentOn(nextSurfaceId, nextX, nextY, nextZOrder) {
         surfaceId = nextSurfaceId
         x = Math.round(nextX)
         y = Math.round(nextY)
+        open = true
+        zOrder = isNumber(nextZOrder) ? Math.round(nextZOrder) : zOrder + 1
+        revision += 1
+        writeState()
+    }
+
+    function dismiss() {
+        if (!open) {
+            return
+        }
+        open = false
         revision += 1
         writeState()
     }

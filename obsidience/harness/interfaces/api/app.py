@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from croniter import croniter
 
 from ...conversation.store import CONVERSATION
@@ -54,6 +55,7 @@ from ...models import llm
 from ...models import runtime as model_runtime
 from ...realtime import media as media_runtime
 from ...realtime import runtime as realtime
+from obsidience.shell.applications import packagekit as application_packages
 
 
 # Each principal owns typed links to the capabilities it currently carries.
@@ -831,6 +833,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Obsidience", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app.mount(
+    "/shell/knowledge",
+    StaticFiles(
+        directory=CONFIG.project_root / "obsidience" / "ui" / "out" / "renderer",
+        html=True,
+        check_dir=False,
+    ),
+    name="shell-knowledge",
+)
 
 
 @app.get("/api/status")
@@ -889,6 +900,45 @@ def hardware():
 def system():
     """Actual host, application, and network inventory behind Source."""
     return inventory.system_snapshot()
+
+
+@app.get("/api/applications")
+def applications():
+    """Installed desktop applications projected from the real local system."""
+    return application_packages.installed_applications()
+
+
+@app.get("/api/applications/search")
+def search_applications(q: str):
+    """Search the native PackageKit catalog without inventing an app database."""
+    try:
+        return application_packages.search_packages(q)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+
+@app.post("/api/applications/install")
+async def install_application(payload: dict):
+    """Install one exact PackageKit result through the system policy boundary."""
+    try:
+        return await asyncio.to_thread(application_packages.install_package, payload)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.post("/api/applications/remove")
+async def remove_application(payload: dict):
+    """Remove one installed desktop application without dependency autoremove."""
+    try:
+        return await asyncio.to_thread(application_packages.remove_application, payload)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 @app.patch("/api/hardware")

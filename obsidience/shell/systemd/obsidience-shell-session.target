@@ -8,5 +8,7 @@ Wants=plasma-kscreen.service
 Wants=plasma-polkit-agent.service
 Wants=obsidience-shell-notifications.service
 Wants=obsidience-harness-dev.service
+Wants=obsidience-shell-knowledge.service
+Wants=obsidience-shell-window-adapter.service
 BindsTo=graphical-session.target
 PartOf=graphical-session.target

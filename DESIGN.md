@@ -125,10 +125,59 @@ filesystems, systemd, udev, PipeWire/WirePlumber, NetworkManager, and compositor
 protocols are reused rather than reimplemented. The first Samsung milestone
 keeps KWin as compositor and replaces only `plasmashell`. Its accepted
 development slice is the native `Shell` Module: a selectable Obsidience KWin
-session, one exact-output Obsidience Stage with the canonical identity chrome,
-and bounded read-only KWin state. The existing development UI remains on isolated
-USB-C Xorg; embedding that renderer and cross-display pane drag remain separate
-unclaimed slices.
+session, one Samsung Wayland Stage, independent USB-C and DP-4 X11 Stages, the
+canonical identity chrome and graph background, bounded read-only KWin state,
+and one shared native pane registry. The Electron application is disabled on
+the native branch and retained only on the archive branch; it is not a parallel
+runtime owner.
+
+The native knowledge desktop is a Shell component rather than a pane or
+separate Module. One `graph_surface_id` inside the existing revisioned Surface
+layout selects Samsung, USB-C, or DP-4 for the whole graph. The selected host
+alone presents the existing standalone `GraphBackdrop` bundle from the
+harness's loopback origin, preserving the one canonical Three.js and
+`d3-force-3d` implementation without running Electron. This global selector is
+presentation state, not per-Agent graph state or a second settings store.
+The selected host retains the top-left Obsidience identity mark and places the
+Executive root at the exact center of its own Surface.
+
+Node selection sends one bounded `pane.present` command over the loopback
+`obsidience.shell.v1` WebSocket to the primary host's `ShellCommandServer`.
+The command carries a generic `pane_id` plus the exact Article selection; the
+current allowlist admits Reader Article and exact Source selections. The server validates
+the typed command, updates Reader's ordinary `PanePlacement`, and broadcasts
+one typed `pane.state` event. Each Surface host owns one full-Surface
+`PaneCanvas`; all registered panes are sibling items within it, and the
+accepted placement makes each pane visible on exactly one host. Its native
+input mask is the union of the open pane rectangles, leaving all uncovered
+desktop space click-through. Reader consumes the typed selection, reads either
+the exact Article through `/api/articles/{ref}` or the exact Source bytes
+through `/api/source-files/{key}`, and renders the result in a translucent
+native Qt Quick pane. The WebKit surface is
+graph-only: the shell has no `?surface=reader` route, Reader web view, or
+React Reader wrapper. This preserves one graph implementation and one generic
+shell placement contract without Electron IPC or a second coordinator.
+
+Reader also owns the native docking composition preserved from the archived
+Electron interface. Knowledge defaults to its cyan left explorer and Source to
+its violet right explorer; either can collapse into a 28-pixel rail, stack
+above or below the other on one side, or detach back into its generic floating
+pane. The primary shell owns one atomic `obsidience.pane-dock-layout.v1`
+record. A docked explorer follows Reader across Surfaces, while its last
+floating `PanePlacement` remains untouched for later detachment. Reader stays
+the only Article and Source document surface.
+
+The native Terminal is another ordinary Surface-aware pane. It uses the
+installed QML terminal emulator to attach to the existing `obsidience-ui`
+linked tmux session as its sizing owner. The emulator fills the pane at a fixed
+readable font, and tmux uses its largest attached client so rows and columns
+reflow with the pane rather than leaving an out-of-grid field. DP-4 remains a
+passive mirror and no longer constrains the native Terminal's dimensions. Pane
+transfer replaces only the terminal view; the user tmux service continues to
+keep the live Codex process persistent.
+The prior Electron PTY bridge and xterm renderer are removed after this native
+cutover; they are preserved only on the archived Electron branch and rollback
+backup, never as a concurrent terminal path.
 
 ## Shell and Surface architecture
 
@@ -176,13 +225,27 @@ Every pane, without exception, has one generic `PanePlacement`:
 pane_id + surface_id + local_rect + open + z_order
 ```
 
-Pane-specific cross-display bridges are forbidden. A cross-Surface drag is one
-placement update owned by the shell host: the source render host releases the
-pane and the destination render host materializes the same pane with its bounded
-UI state. Domain data continues to come from the ordinary Obsidience APIs. The
-source never remains as a hidden second owner, and transfer failure leaves the
-last accepted placement intact. This does not require another coordinator
-process or pane-specific transport.
+Pane-specific cross-display bridges and pane-specific outer drag handlers are
+forbidden. `PaneItem` and `PaneFrame` provide the one shared floating-pane
+interaction path. A passive press observer activates and raises the whole pane
+on the first primary click without consuming that click from its content.
+Pointer dragging remains inside the current Surface;
+`SurfaceLayout` applies one usable-bounds rule to preview, authoritative
+commit, reopen, and transfer so shell chrome can never cover the title-bar
+handle. The same authority owns one global Surface-local logical-pixel grid,
+defaulting to 10 px. It rounds pane x, y, width, and height to that grid before
+minimum-size and Surface-boundary clamps; those safety bounds win at an edge.
+Settings > Workspace changes that single value, while pane Modules contain no
+snap policy. `Meta+Shift+Arrow` asks
+the primary shell host to move the active pane to the nearest mapped Surface in
+that direction. KWin captures the physical shortcut on Samsung and forwards it
+through the existing input D-Bus adapter. On USB-C and DP-4, the existing
+single-owner input router consumes that exact chord before XTest forwarding and
+calls the same bounded shell command client. The primary host derives the
+destination from `SurfaceLayout`, writes one accepted placement revision, and
+the destination host renders that same pane state. An unmapped direction
+changes nothing. This deliberately uses no held-pointer handoff, pane-drag
+lease, Openbox shortcut, coordinator process, or pane-specific transport.
 
 Each Surface render host uses the same Obsidience visual language and pane
 registry. Shell packages may choose layouts and themes but never bind directly
@@ -195,6 +258,28 @@ One shell host owns singleton shell responsibilities. Failure of a pane,
 extension, model, or graph view must not terminate KWin or the desktop session.
 KWin and applications remain alive across a shell restart. The independent
 terminal is the recovery path; `plasmashell` is not a runtime owner or fallback.
+
+The Shell owns one semantic presentation palette. PaneFrame reads it directly;
+small target adapters flatten the same tokens into KWin, Openbox, and supported
+application-native theme contracts such as Edge's Chromium policy. External
+applications remain native compositor clients and are never embedded,
+reparented, mirrored, or made dependent on the Shell host's lifetime. Website
+and application content stays application-owned.
+
+Session locking retains one existing Linux authority. KWin and KScreenLocker
+own the compositor lock, PAM prompt, credential handling, failure fallback, and
+the only successful-unlock transition. Obsidience consumes `AboutToLock` and
+`ActiveChanged` through its existing Surface D-Bus adapter, atomically projects
+one private lock-state byte, and quarantines the existing root input router
+before the greeter appears. The selected Surface alone shows the canonical
+graph. On Samsung, a local Plasma Wallpaper renders that same loopback graph
+beneath KDE's unchanged greeter. On USB-C and DP-4, the selected Surface uses
+an input-empty graph cover while the other uses a solid opaque privacy cover
+with no WebView. They never display or transport credentials. Pane placement
+is preserved but every pane and launcher is hidden until KScreenLocker reports
+unlock. The ordinary Samsung graph host pauses while the lock wallpaper owns
+its presentation, so only one simulation remains active. The router then
+remains on Samsung until a deliberate later edge crossing.
 
 ```text
 obsidience/harness/
@@ -525,7 +610,9 @@ execution.
 The Python harness owns indexing, retrieval, activation, execution, scheduling,
 Source integrity, and the run ledger. The Electron UI is a thin projection.
 
-- **Graph** shows the real hierarchy and active retrieval path.
+- **Graph** shows the real hierarchy and active retrieval path. Graph Settings
+  also selects the one physical Surface for the whole graph; per-Agent
+  placement is not part of this slice.
 - **Reader** reads and edits Articles and opens linked Source files in the same
   center surface.
 - **Knowledge explorer** shows the real vault hierarchy.
@@ -554,8 +641,16 @@ Source integrity, and the run ledger. The Electron UI is a thin projection.
 - **Review** shows only material that actually requires a decision, with Link
   reviews visually distinct from ordinary Article reviews and their exact
   relationship delta visible before approval.
+- **Applications** lists real desktop entries and uses PackageKit through the
+  system Polkit boundary for native package search, install, and removal. It is
+  an ordinary pane; the far-left bar button remains a separate transient
+  Start-style launcher for opening applications.
 - **Terminal** mirrors the current shared development tmux window without
   owning or renaming it.
+- **Settings** is one sectioned shell pane. Graph owns its first section and
+  continues to command the canonical Three.js store. Workspace owns shared
+  pane behavior, beginning with the global 10 px pane-grid selector. Neither
+  section is a separate pane or bar item.
 
 No UI module may carry a copied claim catalog, static semantic ontology, second
 scheduler, second memory store, hidden activation path, or duplicated Agent

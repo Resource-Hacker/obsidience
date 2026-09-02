@@ -1,6 +1,6 @@
 {
   "schema": "obsidience.surface-placement.v1",
-  "pane_id": "surface-probe",
+  "pane_id": "displays",
   "surface_id": "samsung",
   "local_rect": {
     "x": 2180,

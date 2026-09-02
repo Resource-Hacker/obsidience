@@ -1,0 +1,18 @@
+[Unit]
+Description=Obsidience Surface application-window adapter
+Requires=main-compositor-ready.target obsidience-shell-host.service usb-monitor-xorg.service
+After=main-compositor-ready.target obsidience-shell-host.service usb-monitor-xorg.service
+PartOf=obsidience-shell-session.target graphical-session.target
+StartLimitIntervalSec=30
+StartLimitBurst=3
+
+[Service]
+Type=simple
+WorkingDirectory=/home/wissenschafter/Projects/obsidience
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python -m obsidience.shell.adapter.windows.host
+Restart=on-failure
+RestartSec=1
+TimeoutStopSec=5
+UMask=0077
+CPUWeight=25

@@ -1,16 +1,18 @@
 ---
 assignee: '[[Agents/Alexandria/Alexandria]]'
 kind: task
-last_run: f9e2ef8ebba6
+last_run: 13b76e532b98
 model: obsidience-qwen38-27b-q8
 reasoning_effort: xhigh
 runbook: '[[Runbooks/curate]]'
 schedule: '*/30 * * * *'
 status: completed
-status_updated: '2026-08-28T08:31:07'
-summary: Curate inspected the current vault snapshot with vault.maintenance once.
-  It checked 62 Articles and returned 0 unclaimed candidates (14 claimed), so no Task
-  was activated. This is a clean no-change result.
+status_updated: '2026-09-01T20:01:04'
+summary: Inspected 60 Articles with vault.maintenance, found 8 unclaimed candidates,
+  and activated only the first ranked Link candidate a90e34363e33c89c48ea for the
+  two exact incident Articles. task.create returned started with target_status pending
+  and hierarchy unchanged, recording Tasks/curate as causal provenance without creating
+  a hierarchy relation.
 taxonomy_path: wiki/curate
 title: Curate
 ---

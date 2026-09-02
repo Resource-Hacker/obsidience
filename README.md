@@ -34,10 +34,19 @@ cd obsidience/ui && pnpm dev
 The normal development services are:
 
 - `obsidience-harness-dev.service` - API, interpreter, and real-time supervisor on `127.0.0.1:8765`
-- `obsidience-ui-usbc-dev.service` - Electron UI on isolated USB-C Xorg `:2`
+- `obsidience-shell-host.service` - native Samsung Wayland shell host
+- `obsidience-shell-knowledge.service` - canonical Three.js knowledge desktop
+- `obsidience-shell-surface-usbc.service` - native USB-C X11 Surface host
+- `obsidience-shell-surface-dp4.service` - native DP-4 X11 Surface host
 
-Both services are restarted after every project change so the live UI always
-matches the working tree.
+Graph Settings → Display selects the one Surface that owns the whole live
+knowledge graph. The setting is global for this development slice; individual
+Agent placement is intentionally deferred.
+
+The Electron development service is disabled on `native-shell`; its complete
+pre-cutover implementation remains on `archive/electron-20260828`. The harness
+and affected native shell hosts are restarted after every project change so
+the live workspace always matches the working tree.
 
 ### Real-time command mode
 
@@ -112,8 +121,10 @@ the new Knowledge.
   `{config,execution,knowledge,conversation,models,realtime,computer,web,host}`
   subsystems, and `capabilities/` paths mirroring exact dotted Tool IDs
 - `obsidience/shell/` - the native Shell Module: KWin session lifecycle,
-  Wayland layer surfaces, and bounded read-only compositor state
-- `obsidience/ui/` - Electron graph, Reader, Library, Tasks, Review, Terminal, and voice UI
+  native Surfaces, panes, desktop graph, Reader, Terminal, and bounded
+  compositor integration
+- `obsidience/ui/` - the canonical React/Three.js knowledge-graph bundle used
+  by the native graph-only WebKit surface
 - `obsidience/scripts/` - development and runtime entry points
 - `obsidience/tests/` - executable architecture and behavior contracts
 - `obsidience/state/` - the runtime database, model settings, launch contracts,
@@ -157,16 +168,21 @@ z-order. Moving any pane between Surfaces is an atomic Obsidience state handoff
 and destination re-render, not an impossible attempt to reparent one native
 X11 window into Wayland. This preserves Samsung-only KWin ownership and the
 existing VRR boundary while presenting one continuous Obsidience workspace.
+Pointer dragging stays within a Surface; `Meta+Shift+Arrow` performs the atomic
+move to the nearest mapped Surface in that direction. Each Surface's existing
+window manager captures the chord, while the primary shell remains the sole
+placement writer.
 
 The first Samsung slice keeps KWin as compositor and replaces only
 `plasmashell`. Obsidience is the default login session and the competing
-`plasma-plasmashell.service` is disabled. The native Shell Module now
-owns an exact Samsung background Surface, a 38-pixel exclusive top panel, and
-read-only KWin state. The current Electron UI remains on isolated USB-C Xorg.
-The shared `PanePlacement` state seam is present for every pane; adding the
-destination Surface render host and live drag handoff through the same shell
-host remains the next independently verified slice. The independent terminal is
-the recovery path.
+`plasma-plasmashell.service` is disabled. The native Shell Module owns the
+Samsung background Surface, the matching USB-C and DP-4 Stages, one shared
+launcher, read-only KWin state, and one common registry for Chat, Library,
+Tasks, Reviews, Reader, Knowledge, Source, Models, Hardware, Camera, Graph
+Tuning, Terminal, and Displays. Every pane uses the same live
+`PanePlacement`, can be resized, and can transfer between the three Surface
+hosts. The launcher overlays without reserving gaming-screen geometry. The
+independent terminal remains the recovery path.
 
 Obsidience is an ordinary directory backed by `/home`; `/var/lib/ai` is the
 Models storage location. `/home` and `/var/lib/ai` are separate Btrfs subvolume
