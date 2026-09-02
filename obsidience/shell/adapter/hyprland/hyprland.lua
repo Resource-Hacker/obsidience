@@ -94,6 +94,7 @@ hl.on("hyprland.start", function()
 end)
 
 hl.bind("SUPER + RETURN", hl.dsp.exec_cmd("uwsm app -- kitty"))
+hl.bind("SUPER + mouse:272", hl.dsp.window.drag(), { mouse = true })
 hl.bind("SUPER + Q", hl.dsp.window.close())
 hl.bind("SUPER + ESCAPE", hl.dsp.exec_cmd("/usr/bin/python /home/wissenschafter/Projects/obsidience/obsidience/shell/input/move_pane.py focused close"))
 hl.bind("SUPER + SHIFT + ESCAPE", hl.dsp.exit())

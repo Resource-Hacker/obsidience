@@ -10,6 +10,7 @@ local DEFAULT_GRIDS = {
 local grid_overrides = {}
 local contexts = {}
 local transfers = {}
+local last_placed = {}
 
 local function rounded(value)
     return math.floor(value + 0.5)
@@ -78,6 +79,14 @@ local function infer(ctx, target, grid)
     return bounds(grid, left, top, right, bottom)
 end
 
+local function same_box(left, right)
+    return left and right
+        and rounded(left.x) == rounded(right.x)
+        and rounded(left.y) == rounded(right.y)
+        and rounded(left.w) == rounded(right.w)
+        and rounded(left.h) == rounded(right.h)
+end
+
 local function first_free(placements, grid)
     for row = 0, grid.rows - 1 do
         for column = 0, grid.columns - 1 do
@@ -97,9 +106,10 @@ local function first_free(placements, grid)
     return bounds(grid, 0, 0, 1, 1)
 end
 
-local function unoccupied(candidate, placements)
-    for _, value in pairs(placements) do
-        if candidate.left < value.right and candidate.right > value.left
+local function unoccupied(candidate, placements, ignored_id)
+    for id, value in pairs(placements) do
+        if id ~= ignored_id
+                and candidate.left < value.right and candidate.right > value.left
                 and candidate.top < value.bottom and candidate.bottom > value.top then
             return false
         end
@@ -169,6 +179,13 @@ local function sync_context(ctx)
         if transfer and transfer.surface == grid.surface then
             value = transferred(ctx, transfer, grid)
             transfers[id] = nil
+        elseif last_placed[id] and not same_box(target.box, last_placed[id]) then
+            local candidate = infer(ctx, target, grid)
+            if candidate and unoccupied(candidate, state.placements, id) then
+                value = candidate
+            elseif value then
+                value = adapt(value, grid)
+            end
         elseif value then
             value = adapt(value, grid)
         elseif fresh then
@@ -209,7 +226,10 @@ local provider = {
             return
         end
         for _, target in ipairs(ctx.targets) do
-            target:place(rect_for_bounds(ctx.area, state.placements[target_id(target)]))
+            local id = target_id(target)
+            local box = rect_for_bounds(ctx.area, state.placements[id])
+            target:place(box)
+            last_placed[id] = box
         end
     end,
 

@@ -273,6 +273,10 @@ the shared outer pane chrome; application content remains native and unmodified.
 `Meta+Esc` follows that same ownership rule: dismiss the active QML pane first,
 then close the exact active native client only when no QML pane owns the action.
 It never sends a generic close to the Quickshell host.
+Native application windows move through Hyprland's standard `Meta+left-drag`
+gesture. QML panes retain direct title-bar dragging; an unmodified primary drag
+stays owned by application content. The native layout adopts the dropped grid
+cell when Hyprland retiles the application on release.
 
 Settings > Input projects one physical input truth through the compositor
 adapter. The classic M.M.O.7 stays at its independently verified 6400-DPI top

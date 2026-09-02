@@ -96,3 +96,28 @@ provider.recalculate({
 })
 assert(second_target.placed.x == 5)
 assert(third_target.placed.x == 484)
+
+local drop_window = {
+    stable_id = 10,
+    active = true,
+    monitor = { name = "HDMI-A-1" },
+    workspace = { id = 11 },
+}
+local drop_target = {
+    index = 1,
+    window = drop_window,
+    box = { x = 5, y = 5, w = 634, h = 713 },
+}
+function drop_target:place(box)
+    self.placed = box
+    self.box = box
+end
+local drop_context = {
+    area = { x = 0, y = 0, w = 5120, h = 1440 },
+    targets = { drop_target },
+}
+provider.recalculate(drop_context)
+drop_target.box = { x = 1284, y = 723, w = 634, h = 712 }
+provider.recalculate(drop_context)
+assert(drop_target.placed.x == 1284 and drop_target.placed.y == 723)
+assert(drop_target.placed.w == 634 and drop_target.placed.h == 712)

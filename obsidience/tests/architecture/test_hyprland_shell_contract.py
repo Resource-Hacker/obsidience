@@ -68,6 +68,7 @@ def test_hyprland_config_is_one_compositor_with_three_real_outputs() -> None:
     assert "uwsm finalize" not in config
     assert "obsidience-shell-session.target" in config
     assert 'hl.bind("SUPER + RETURN"' in config
+    assert 'hl.bind("SUPER + mouse:272", hl.dsp.window.drag(), { mouse = true })' in config
     assert 'hl.bind("SUPER + SHIFT + ESCAPE"' in config
     assert 'hl.bind("SUPER + ESCAPE"' in config
     assert "move_pane.py focused close" in config
@@ -95,7 +96,8 @@ def test_native_windows_use_the_obsidience_grid_and_theme() -> None:
     assert '["HDMI-A-1"] = { surface = "samsung", columns = 8, rows = 2 }' in layout
     assert '["DP-8"] = { surface = "usb-c", columns = 3, rows = 2 }' in layout
     assert '["HDMI-A-2"] = { surface = "dp-4", columns = 4, rows = 1 }' in layout
-    assert "target:place(rect_for_bounds" in layout
+    assert "target:place(box)" in layout
+    assert "last_placed[id] = box" in layout
 
 
 def test_greetd_launches_the_one_hyprland_session() -> None:
