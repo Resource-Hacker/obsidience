@@ -556,6 +556,8 @@ def test_one_shell_host_shares_displays_pane_and_surface_layout() -> None:
     assert '"type": "pane.moved"' in command_server
     assert "function tilePane(socket, placement, direction, translate)" in command_server
     assert "surfaceLayout.tiledHandoffRect(" in command_server
+    assert 'direction === "top"' in command_server
+    assert "surfaceLayout.tilingFor(surface.id).rows === 1" in command_server
     assert "function tiledHandoffRect(" in layout
     assert "workspaceTiler.entryBounds(" in layout
     assert 'command.type === "pane.tile_active"' in command_server

@@ -436,7 +436,9 @@ QtObject {
             placement.tileBounds,
             translate === true
         )
-        if (result && !result.changed && wasTiled && translate !== true) {
+        if (result && !result.changed && wasTiled && translate !== true
+                && direction === "top"
+                && surfaceLayout.tilingFor(surface.id).rows === 1) {
             const handoff = surfaceLayout.tiledHandoffRect(
                 surface.id,
                 direction,

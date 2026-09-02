@@ -66,6 +66,14 @@ QtObject {
             dpFirstBounds,
             "DP-4 has no local tile above its only row"
         )
+        const samsungBottomLeft = tiler.makeBounds(
+            "samsung", 8, 2, 0, 1, 1, 2
+        )
+        expectBounds(
+            tiler.resizeBounds(samsungBottomLeft, "bottom"),
+            samsungBottomLeft,
+            "Meta+Down at Samsung's bottom edge is a local no-op"
+        )
         const samsungEntry = tiler.entryBounds(
             "samsung", 8, 2, "bottom", 242 / 5119
         )
