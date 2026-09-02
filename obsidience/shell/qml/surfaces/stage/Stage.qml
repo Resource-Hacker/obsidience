@@ -1,15 +1,23 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import Quickshell
 import Quickshell.Wayland
 import "../../api"
-import "../../components/identity"
 
 PanelWindow {
-    required property ShellApi shellApi
+    id: stage
 
-    color: "#02060c"
+    required property ShellApi shellApi
+    required property string surfaceId
+    required property bool locked
+
+    color: "transparent"
     focusable: false
     exclusiveZone: 0
+    aboveWindows: false
+    implicitWidth: screen ? screen.width : 0
+    implicitHeight: screen ? screen.height : 0
 
     anchors {
         top: true
@@ -18,16 +26,16 @@ PanelWindow {
         left: true
     }
 
-    WlrLayershell.layer: WlrLayer.Background
+    mask: Region {}
+
+    WlrLayershell.layer: WlrLayer.Bottom
     WlrLayershell.namespace: "obsidience-shell-stage"
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
 
-    mask: Region {}
-
-    Identity {
-        anchors.left: parent.left
-        anchors.top: parent.top
-        anchors.leftMargin: 20
-        anchors.topMargin: 12
+    StageContent {
+        width: stage.screen ? stage.screen.width : 0
+        height: stage.screen ? stage.screen.height : 0
+        surfaceId: stage.surfaceId
+        locked: stage.locked
     }
 }

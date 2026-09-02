@@ -1,0 +1,17 @@
+{
+  "KPackageStructure": "Plasma/Wallpaper",
+  "KPlugin": {
+    "Authors": [
+      {
+        "Name": "Obsidience"
+      }
+    ],
+    "Description": "Renders the canonical Obsidience graph behind KScreenLocker.",
+    "Icon": "system-lock-screen",
+    "Id": "org.obsidience.lockgraph",
+    "License": "GPL-2.0-or-later",
+    "Name": "Obsidience Lock Graph",
+    "Version": "0.1.0"
+  },
+  "X-KDE-ParentApp": "org.kde.plasmashell"
+}

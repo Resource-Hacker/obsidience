@@ -26,7 +26,6 @@ import {
   type ReaderDockingProps,
 } from "@/panes/reader-pane";
 import { StatusPaneBody } from "@/panes/status-pane";
-import { TerminalPaneBody } from "@/panes/terminal-pane";
 import { TuningPaneBody } from "@/panes/tuning-pane";
 import {
   WS_BASE,
@@ -52,7 +51,6 @@ function staticPaneBody(id: PaneId) {
     case "reviews": return <ReviewsPaneBody />;
     case "status": return <StatusPaneBody />;
     case "hardware": return <HardwarePaneBody />;
-    case "terminal": return <TerminalPaneBody />;
     case "tuning": return <TuningPaneBody />;
     case "reader": case "knowledge": case "source": case "camera": return null;
   }

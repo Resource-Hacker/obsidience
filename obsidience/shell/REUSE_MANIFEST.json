@@ -29,6 +29,34 @@
       "notice": "LICENSES/Noctalia-MIT.txt"
     },
     {
+      "name": "KWin MCP",
+      "repository": "https://github.com/isac322/kwin-mcp",
+      "commit": "43c94eca93bbf0f1cd7c8a73585c8cbafed84931",
+      "license": "MIT",
+      "selected_sources": [
+        {
+          "path": "src/kwin_mcp/window_control.py",
+          "sha256": "d0516e105ecd2cef5812f897cb849e2554987577fa6e2a336b3cc8cb99cb68b4"
+        }
+      ],
+      "adaptation": "The reviewed exact internal-ID KWin activation pattern was reduced to a bounded Shell-only focus adapter. Fuzzy title matching, placement, pointer control, MCP transport and every other mutation path were excluded.",
+      "notice": "LICENSES/KWin-MCP-MIT.txt"
+    },
+    {
+      "name": "Lucide",
+      "package": "lucide-react 1.33.0",
+      "repository": "https://github.com/lucide-icons/lucide",
+      "license": "ISC",
+      "selected_sources": [
+        {
+          "path": "dist/esm/icons/brain-circuit.mjs",
+          "sha256": "024e5cfba2dfaca60358a426abd1e08faac2194ee09722af10c3fc5d91cd6f04"
+        }
+      ],
+      "adaptation": "The Electron Models pane's existing BrainCircuit path is rendered directly by the native QML Shape scene graph. No Lucide runtime, React component, theme or additional icon system is loaded by the Shell.",
+      "notice": "LICENSES/Lucide-ISC.txt"
+    },
+    {
       "name": "Quickshell",
       "package": "quickshell 0.3.0-2.1",
       "repository": "https://git.outfoxxed.me/quickshell/quickshell",
@@ -36,11 +64,71 @@
       "adaptation": "Used as the installed Qt Quick and Wayland layer-shell runtime. Obsidience owns all QML, presentation, state and behavior; no upstream source or visual design was copied."
     },
     {
-      "name": "Omarchy quattro shell",
-      "repository": "https://github.com/basecamp/omarchy/tree/quattro/shell",
-      "commit": "06e32d243d5c410e2421b9f3db5be3c3ae33d3e2",
+      "name": "gtk-layer-shell",
+      "package": "gtk-layer-shell 0.10.1-1.1",
+      "repository": "https://github.com/wmww/gtk-layer-shell",
+      "license": "LGPL-3.0-or-later",
+      "adaptation": "Used as the installed GTK Wayland layer-shell binding for the Samsung knowledge background. No upstream source or visual design was copied."
+    },
+    {
+      "name": "WebKitGTK",
+      "package": "webkit2gtk-4.1 2.52.4-1",
+      "repository": "https://webkitgtk.org",
+      "license": "LGPL-2.1-or-later and bundled component licenses",
+      "adaptation": "Used as the installed hardware-accelerated web runtime for the one canonical Three.js graph bundle. No WebKit source was copied."
+    },
+    {
+      "name": "PyGObject",
+      "package": "python-gobject 3.56.3-1",
+      "repository": "https://pygobject.gnome.org",
+      "license": "LGPL-2.1-or-later",
+      "adaptation": "Used as the installed Python binding for GTK, GDK, WebKitGTK and gtk-layer-shell. No upstream source was copied."
+    },
+    {
+      "name": "QMLTermWidget",
+      "package": "qmltermwidget 2.0.0.git1-1.1",
+      "repository": "https://github.com/Swordfish90/qmltermwidget",
+      "license": "GPL-2.0-only",
+      "adaptation": "Used as the installed native Qt Quick terminal emulator. Obsidience supplies pane presentation and attaches it to the existing persistent tmux session. No upstream source was copied."
+    },
+    {
+      "name": "Qt WebSockets",
+      "package": "qt6-websockets 6.11.1-1.1",
+      "repository": "https://code.qt.io/cgit/qt/qtwebsockets.git",
+      "license": "LGPL-3.0-only or GPL-2.0-only or GPL-3.0-only and commercial licenses",
+      "adaptation": "Used as the installed QML WebSocket transport for bounded loopback Reader state and Terminal action trace events. No upstream source was copied."
+    },
+    {
+      "name": "Qt WebEngine",
+      "package": "qt6-webengine 6.11.1-2",
+      "repository": "https://code.qt.io/cgit/qt/qtwebengine.git",
+      "license": "LGPL-3.0-only or GPL-2.0-only or GPL-3.0-only and bundled component licenses",
+      "adaptation": "Used only inside the KScreenLocker wallpaper process to render the existing canonical loopback GraphBackdrop behind KDE's stock greeter. It is not a Shell host, graph authority, authentication path, or ordinary pane runtime; no upstream source was copied."
+    },
+    {
+      "name": "KScreenLocker",
+      "package": "kscreenlocker 6.6.5-1.1",
+      "repository": "https://invent.kde.org/plasma/kscreenlocker",
+      "license": "GPL-2.0-or-later and KDE accepted licenses",
+      "adaptation": "Retained unchanged as the sole compositor lock, greeter and PAM authentication authority. Obsidience supplies one local Plasma Wallpaper that renders the canonical loopback graph beneath KDE's stock prompt and consumes KScreenLocker's documented D-Bus lock state; no authentication source was copied."
+    },
+    {
+      "name": "Omarchy quattro theme system",
+      "repository": "https://github.com/omacom/omarchy",
+      "commit": "4d017913d06f715da9d960021861cf535e4f15aa",
       "license": "MIT",
-      "adaptation": "Architecture reference only: one long-running Quickshell host, self-contained feature packages, shared service injection and on-demand loading. No source, renderer, visual design, Hyprland integration, shell scripts, configuration or IPC implementation was copied."
+      "selected_sources": [
+        {
+          "path": "bin/omarchy-theme-set-browser",
+          "sha256": "fe364314149eb2c86681d671f1f4fb77953c9d47eb5c8708fde20f2ff9a246a7"
+        },
+        {
+          "path": "install/helpers/browser-policy.sh",
+          "sha256": "ee6742bbfbbf1a68f00352bf23dbca9a2e1c221b2743378e6b54f4c98dbe6174"
+        }
+      ],
+      "adaptation": "Obsidience independently implements the same bounded pattern: one semantic palette projects into shell tokens, native window-manager colors, and a fixed Chromium-family BrowserThemeColor policy with a live refresh. Hyprland code, visual design, shell scripts, launch architecture, plugins and arbitrary application hooks were excluded.",
+      "notice": "LICENSES/Omarchy-MIT.txt"
     }
   ]
 }

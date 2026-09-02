@@ -25,6 +25,16 @@ def _curation_words(value: str, *, title: bool = False) -> set[str]:
     return words - _CURATION_TITLE_NOISE if title else words
 
 
+def _candidate_identity(item: dict) -> tuple[str, ...]:
+    refs = item.get("candidate_refs", item.get("refs"))
+    if isinstance(refs, list):
+        stable_refs = tuple(sorted({str(ref).strip() for ref in refs if str(ref).strip()}))
+        if stable_refs:
+            return ("refs", *stable_refs)
+    candidate_key = str(item.get("candidate_key", ""))
+    return ("key", candidate_key) if candidate_key else ()
+
+
 def _maintenance_candidates() -> dict:
     from obsidience.harness.knowledge.vault import iter_notes, resolver
 
@@ -162,14 +172,15 @@ def _maintenance_candidates() -> dict:
         queued = destination.meta.get("event_queue")
         occurrences = [active] + (queued if isinstance(queued, list) else [])
         claimed_by_task[recommendation] = {
-            str(item.get("candidate_key", ""))
+            identity
             for item in occurrences
-            if isinstance(item, dict) and item.get("candidate_key")
+            if isinstance(item, dict) and (identity := _candidate_identity(item))
         }
     unclaimed = [
         row
         for row in rows
-        if row["candidate_key"] not in claimed_by_task.get(row["recommended_task"], set())
+        if _candidate_identity(row)
+        not in claimed_by_task.get(row["recommended_task"], set())
     ]
     return {
         "checked_articles": len(notes),

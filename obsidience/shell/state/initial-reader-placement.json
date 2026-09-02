@@ -1,0 +1,14 @@
+{
+  "schema": "obsidience.surface-placement.v1",
+  "pane_id": "reader",
+  "surface_id": "samsung",
+  "local_rect": {
+    "x": 3400,
+    "y": 90,
+    "width": 1600,
+    "height": 980
+  },
+  "open": false,
+  "z_order": 20,
+  "revision": 0
+}

@@ -5,9 +5,10 @@
  *  never enters the Executive article tree. Wikilinks render as cross-link
  *  tendrils distinct from hierarchy edges. */
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Knowledge3dScene,
+  type Knowledge3dLabelMeta,
   type Knowledge3dRenderEdge,
   type Knowledge3dRenderNode,
 } from "@/components/themes/obsidience/knowledge-3d-scene";
@@ -22,7 +23,10 @@ import {
   type Knowledge3dTuning,
 } from "@/components/themes/obsidience/knowledge-3d";
 import { layoutKnowledgeGraph } from "@/components/themes/obsidience/knowledge-layout";
-import { DEFAULT_KNOWLEDGE_HUB_ANCHOR } from "@/components/themes/obsidience/knowledge-geometry";
+import {
+  DEFAULT_KNOWLEDGE_HUB_ANCHOR,
+  type KnowledgeLayoutAnchor,
+} from "@/components/themes/obsidience/knowledge-geometry";
 import {
   knowledgeAmbientEdgeStroke,
   knowledgeNodeBaseAlpha,
@@ -182,23 +186,6 @@ function isArticleEndpoint(node: GraphNode, hierarchyContainers: ReadonlySet<str
     && !hasChildren;
 }
 
-interface ProjectedLabelMeta {
-  label: string;
-  role: "root" | "section" | "claim";
-  depth: number;
-  branch: string;
-  radius: number;
-  accent: string;
-  accentSoft: string;
-}
-
-function projectedLabelStyle(meta: ProjectedLabelMeta): CSSProperties {
-  return {
-    "--obsidience-knowledge-accent": meta.accent,
-    "--obsidience-knowledge-accent-soft": meta.accentSoft,
-  } as CSSProperties;
-}
-
 function buildThinkingRoute(cloud: GraphCloud, refs: readonly string[]): ThinkingRoute | null {
   const byId = new Map(cloud.nodes.map((node) => [node.id, node]));
   const targets = [...new Set(refs)].filter((ref) => byId.has(ref));
@@ -293,113 +280,15 @@ function NodeActionMenu({ menu, title, canEdit, onSelect, onRead, onClose, onCle
   );
 }
 
-function labelLines(label: string, maximumLineLength = 24): string[] {
-  const normalized = label.trim().replace(/\s+/gu, " ");
-  if (normalized.length <= maximumLineLength || !normalized.includes(" ")) return [normalized];
-  const words = normalized.split(" ");
-  let split = 1;
-  let best = Number.POSITIVE_INFINITY;
-  for (let index = 1; index < words.length; index += 1) {
-    const longest = Math.max(words.slice(0, index).join(" ").length, words.slice(index).join(" ").length);
-    if (longest < best) { best = longest; split = index; }
-  }
-  return [words.slice(0, split).join(" "), words.slice(split).join(" ")];
-}
-
-/** Obsidience's ambient label contract: the resting graph stays geometric;
- *  hover/selection and the transient thinking path get projected word tags. */
-function ProjectedGraphLabels({ ids, activeIds, projected, metadata, width, height }: {
-  ids: readonly string[];
-  activeIds: ReadonlySet<string>;
-  projected: ReadonlyMap<string, { x: number; y: number }>;
-  metadata: ReadonlyMap<string, ProjectedLabelMeta>;
-  width: number;
-  height: number;
-}) {
-  const activeNodes = [...activeIds].flatMap((id) => {
-    const point01 = projected.get(id);
-    const meta = metadata.get(id);
-    if (!point01 || !meta || meta.role === "root") return [];
-    return [{ id, meta, point: { x: point01.x * width, y: point01.y * height } }];
-  });
-  const occupied: Array<{ left: number; right: number; top: number; bottom: number }> = [];
-  const labels = ids.slice(0, 18).flatMap((id) => {
-    const point01 = projected.get(id);
-    const meta = metadata.get(id);
-    if (!point01 || !meta || point01.x < -0.05 || point01.x > 1.05 || point01.y < -0.05 || point01.y > 1.05) return [];
-    const point = { x: point01.x * width, y: point01.y * height };
-    const lines = labelLines(meta.label, meta.role === "root" ? 28 : 24);
-    // SVG's actual monospace advance also includes role-specific letter
-    // spacing. These conservative widths and the extra horizontal inset keep
-    // the final glyph from touching or clipping through the capsule edge.
-    const characterWidth = meta.role === "root" ? 10.7 : meta.role === "section" ? 7.35 : 7;
-    const textWidth = Math.max(...lines.map((line) => line.length)) * characterWidth;
-    const boxWidth = Math.max(48, textWidth + 24);
-    const boxHeight = lines.length * 13 + 10;
-    const outward = point.x >= width / 2 ? 1 : -1;
-    const offset = meta.role === "root" ? 36 : meta.role === "section" ? 30 : 18;
-    let centerX = meta.role === "root" ? point.x : point.x + outward * (offset + boxWidth / 2);
-    let centerY = meta.role === "root" ? point.y - offset - boxHeight / 2 : point.y - 6;
-    centerX = Math.max(boxWidth / 2 + 8, Math.min(width - boxWidth / 2 - 8, centerX));
-    centerY = Math.max(boxHeight / 2 + 8, Math.min(height - boxHeight / 2 - 8, centerY));
-    let bounds = { left: centerX - boxWidth / 2, right: centerX + boxWidth / 2, top: centerY - boxHeight / 2, bottom: centerY + boxHeight / 2 };
-    for (let lane = 0; lane < 10 && occupied.some((other) => !(bounds.right + 4 < other.left || bounds.left - 4 > other.right || bounds.bottom + 4 < other.top || bounds.top - 4 > other.bottom)); lane += 1) {
-      centerY = Math.max(boxHeight / 2 + 8, Math.min(height - boxHeight / 2 - 8, centerY + (lane % 2 === 0 ? 1 : -1) * (Math.floor(lane / 2) + 1) * 28));
-      bounds = { left: centerX - boxWidth / 2, right: centerX + boxWidth / 2, top: centerY - boxHeight / 2, bottom: centerY + boxHeight / 2 };
-    }
-    occupied.push(bounds);
-    const endX = Math.max(bounds.left, Math.min(bounds.right, point.x));
-    const endY = Math.max(bounds.top, Math.min(bounds.bottom, point.y));
-    const deltaX = endX - point.x;
-    const deltaY = endY - point.y;
-    const distance = Math.max(1, Math.hypot(deltaX, deltaY));
-    const startRadius = meta.role === "root" ? 22 : meta.role === "section" ? 16 : 9;
-    return [{ id, meta, point, lines, bounds, centerX, centerY, endX, endY,
-      startX: point.x + deltaX / distance * Math.min(distance, startRadius),
-      startY: point.y + deltaY / distance * Math.min(distance, startRadius) }];
-  });
-  return (
-    <svg className="pointer-events-none absolute inset-0 z-10 h-full w-full" viewBox={`0 0 ${width} ${height}`} aria-hidden="true">
-      <g>
-        {activeNodes.map((entry, index) => {
-          const radius = entry.meta.radius + (entry.meta.role === "claim" ? 4 : 3);
-          return (
-            <g key={`active:${entry.id}`} className="obsidience-knowledge-active-node"
-              data-knowledge-branch={entry.meta.branch} data-knowledge-depth={entry.meta.depth}
-              style={projectedLabelStyle(entry.meta)}>
-              <circle cx={entry.point.x} cy={entry.point.y} r={radius + 7}
-                className="obsidience-knowledge-node-wave"
-                style={{ animationDelay: `${-(index % 5) * 0.72}s` }} />
-              <circle cx={entry.point.x} cy={entry.point.y} r={radius}
-                className="obsidience-knowledge-node-focus" />
-            </g>
-          );
-        })}
-      </g>
-      {labels.map((entry) => entry.meta.role === "root" ? null : (
-        <line key={`leader:${entry.id}`} x1={entry.startX} y1={entry.startY} x2={entry.endX} y2={entry.endY}
-          className="obsidience-knowledge-label-leader obsidience-knowledge-label-leader--active"
-          data-knowledge-branch={entry.meta.branch} style={projectedLabelStyle(entry.meta)} />
-      ))}
-      {labels.map((entry, index) => (
-        <g key={entry.id} className={`obsidience-knowledge-tag obsidience-knowledge-tag--active obsidience-knowledge-tag--${entry.meta.role}`}
-          data-knowledge-branch={entry.meta.branch} data-knowledge-depth={entry.meta.depth}
-          style={{ ...projectedLabelStyle(entry.meta), animationDelay: `${Math.min(index, 16) * 18}ms` }}>
-          <rect x={entry.bounds.left} y={entry.bounds.top} width={entry.bounds.right - entry.bounds.left}
-            height={entry.bounds.bottom - entry.bounds.top} rx={entry.meta.depth === 1 ? 3 : 2} className="obsidience-knowledge-tag-shell" />
-          <line x1={entry.bounds.left + 3} y1={entry.bounds.top + 4} x2={entry.bounds.left + 3}
-            y2={entry.bounds.bottom - 4} className="obsidience-knowledge-tag-accent" />
-          <text x={entry.centerX} y={entry.centerY - (entry.lines.length - 1) * 6 + 4} textAnchor="middle"
-            className={`obsidience-knowledge-label obsidience-knowledge-label--active obsidience-knowledge-label--${entry.meta.role}`}>
-            {entry.lines.map((line, lineIndex) => <tspan key={`${entry.id}:${lineIndex}`} x={entry.centerX} dy={lineIndex === 0 ? 0 : 13}>{line}</tspan>)}
-          </text>
-        </g>
-      ))}
-    </svg>
-  );
-}
-
-export function GraphBackdrop() {
+export function GraphBackdrop({
+  visible = true,
+  lockMode = false,
+  hub = DEFAULT_KNOWLEDGE_HUB_ANCHOR,
+}: {
+  visible?: boolean;
+  lockMode?: boolean;
+  hub?: KnowledgeLayoutAnchor;
+} = {}) {
   const [graph, setGraph] = useState<VaultGraphSnapshot>({
     nodes: [], links: [], auto_curated: [], navigation: { groups: [] },
   });
@@ -408,7 +297,6 @@ export function GraphBackdrop() {
   const [nodeMenu, setNodeMenu] = useState<NodeMenuState | null>(null);
   const [activity, setActivity] = useState<ActiveThinking | null>(null);
   const [sceneKey, setSceneKey] = useState(0);
-  const [projected, setProjected] = useState<Map<string, { x: number; y: number }>>(new Map());
   const [viewport, setViewport] = useState({ width: window.innerWidth, height: window.innerHeight });
   const titles = useRef(new Map<string, string>());
   const graphFingerprint = useRef<string | null>(null);
@@ -419,6 +307,13 @@ export function GraphBackdrop() {
   const [satelliteTest, setSatelliteTest] = useState<SatelliteThinkingTest | null>(null);
   const [tuning, setTuning] = useState<Knowledge3dTuning>(() => loadGraphTuning(MAIN_GRAPH_ID));
   const [satelliteTunings, setSatelliteTunings] = useState<Record<string, Knowledge3dTuning>>({});
+
+  useEffect(() => {
+    if (!lockMode) return;
+    setHoveredId(null);
+    setSelectedId(null);
+    setNodeMenu(null);
+  }, [lockMode]);
 
   useEffect(() => {
     const onResize = () => setViewport({ width: window.innerWidth, height: window.innerHeight });
@@ -755,7 +650,7 @@ export function GraphBackdrop() {
     }));
 
     const layout = layoutKnowledgeGraph({
-      anchor: DEFAULT_KNOWLEDGE_HUB_ANCHOR,
+      anchor: hub,
       viewport: {
         width: viewport.width,
         height: viewport.height,
@@ -1038,7 +933,7 @@ export function GraphBackdrop() {
       tuning: satelliteTunings.library ?? loadGraphTuning("library"),
     };
     const satellites = [...agentSatellites, librarySatellite];
-    const labelMetadata = new Map<string, ProjectedLabelMeta>();
+    const labelMetadata = new Map<string, Knowledge3dLabelMeta>();
     for (const node of renderNodes) {
       const branch = firstLevelBranchOf(node.id) ?? "brain";
       const palette = paletteOf(node.id);
@@ -1068,7 +963,7 @@ export function GraphBackdrop() {
       }
     }
     return { nodes: renderNodes, edges: renderEdges, satellites, labelMetadata };
-  }, [graph, satelliteTunings, viewport, tuning]);
+  }, [graph, hub, satelliteTunings, viewport, tuning]);
 
   useEffect(() => onGraphThinkingTest((graphId) => {
     testTimers.current.forEach((timer) => window.clearTimeout(timer));
@@ -1092,8 +987,8 @@ export function GraphBackdrop() {
     activityKey.current += 1;
     const key = activityKey.current;
     if (graphId !== MAIN_GRAPH_ID) {
-      // Obsidience satellite tests use the cloud's own non-held sweep timeline;
-      // they do not wake the Executive path or its whole-map breathing drift.
+      // Satellite tests use the cloud's own non-held sweep timeline and do not
+      // wake the Executive retrieval path.
       setSatelliteTest({ agentId: graphId, route, key });
       satelliteTestTimer.current = window.setTimeout(() => {
         setSatelliteTest((current) => current?.key === key ? null : current);
@@ -1151,6 +1046,7 @@ export function GraphBackdrop() {
       setFocusProgress(0);
       return;
     }
+    if (!visible) return;
     const startedAt = performance.now();
     const base = focusProgressRef.current;
     const pathSpec = mainRoute.pathSpec;
@@ -1175,7 +1071,7 @@ export function GraphBackdrop() {
       frame = window.requestAnimationFrame(animate);
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [activity?.key, activity?.phase, effectiveSweepSpeed, mainRoute]);
+  }, [activity?.key, activity?.phase, effectiveSweepSpeed, mainRoute, visible]);
   const gatedMainNodeIds = useMemo(() => {
     if (!mainRoute) return new Set<string>();
     const pathSpec = mainRoute.pathSpec;
@@ -1232,7 +1128,7 @@ export function GraphBackdrop() {
     setNodeMenu(null);
     selectGraph(MAIN_GRAPH_ID);
   };
-  const highlightedId = hoveredId ?? selectedId;
+  const highlightedId = lockMode ? null : hoveredId ?? selectedId;
   const menuParsed = nodeMenu ? parseKnowledgeAgentNodeId(nodeMenu.id) : null;
   const menuNode = menuParsed
     ? graph.nodes.find((node) => node.id === menuParsed.nodeId) ?? null
@@ -1254,53 +1150,48 @@ export function GraphBackdrop() {
         for (const id of route.nodeIds) add(knowledgeAgentNodeId(route.agentId, id));
       }
     }
-    return ordered;
-  }, [activity, gatedMainNodeIds, hoveredId, satelliteRoutes, selectedId]);
+    return lockMode ? [] : ordered;
+  }, [activity, gatedMainNodeIds, hoveredId, lockMode, satelliteRoutes, selectedId]);
 
   return (
-    <div className="absolute inset-0" data-knowledge-focus={activity ? "active" : "default"} data-knowledge-visible="true">
-      <div className="obsidience-knowledge-map absolute inset-0" style={{
-        "--obsidience-knowledge-hub-x": `${DEFAULT_KNOWLEDGE_HUB_ANCHOR.x * 100}%`,
-        "--obsidience-knowledge-hub-y": `${DEFAULT_KNOWLEDGE_HUB_ANCHOR.y * 100}%`,
-      } as CSSProperties}>
-        <Knowledge3dScene
+    <div className="absolute inset-0">
+      <Knowledge3dScene
           key={sceneKey}
           nodes={model.nodes}
           edges={model.edges}
-          hub={DEFAULT_KNOWLEDGE_HUB_ANCHOR}
+          hub={hub}
           focusNodeIds={mainRoute?.nodeIds ?? new Set<string>()}
           pathSpec={mainRoute?.pathSpec ?? null}
           focusActive={Boolean(activity)}
           focusPhase={activity ? activity.phase : null}
-          visible
+          visible={visible}
           reducedMotion={false}
           adapterPreference="system"
           animationProfile="maximum"
           hoveredNodeId={highlightedId}
+          labelIds={labelIds}
+          activeLabelNodeIds={lockMode ? new Set<string>() : gatedMainNodeIds}
+          labelMetadata={model.labelMetadata}
           tuning={effectiveTuning}
           satellites={model.satellites}
           satelliteSweeps={satelliteRoutes}
-          cameraFocus={cameraFocus}
-          onBackgroundClick={clearSelection}
-          onHover={setHoveredId}
+          cameraFocus={lockMode ? null : cameraFocus}
+          onBackgroundClick={lockMode ? undefined : clearSelection}
+          onHover={lockMode ? undefined : setHoveredId}
           onNodeAction={(kind, id, at) => {
+            if (lockMode) return;
             if (kind === "click") selectNode(id, true);
             else setNodeMenu({ id, x: at.x, y: at.y });
           }}
-          onProjected={setProjected}
           onContextLost={() => setSceneKey((k) => k + 1)}
         />
-        <ProjectedGraphLabels ids={labelIds} activeIds={gatedMainNodeIds}
-          projected={projected} metadata={model.labelMetadata}
-          width={viewport.width} height={viewport.height} />
-      </div>
-      {activity?.refs.length ? (
+      {!lockMode && activity?.refs.length ? (
         <div className="pointer-events-none absolute left-5 top-16 max-w-[34rem] rounded border border-violet-300/20 bg-[#030a10]/75 px-3 py-1.5 font-mono text-[9px] uppercase tracking-[0.16em] text-violet-200/75 backdrop-blur">
           {activity.phase === "thinking" ? "consulting" : "resolved"} · {activity.refs.length} graph article{activity.refs.length === 1 ? "" : "s"}
           {activity.query ? <span className="ml-2 normal-case tracking-normal text-cyan-100/55">{activity.query}</span> : null}
         </div>
       ) : null}
-      {nodeMenu ? (
+      {!lockMode && nodeMenu ? (
         <NodeActionMenu
           menu={nodeMenu}
           title={titles.current.get(nodeMenu.id) ?? menuParsed?.nodeId ?? nodeMenu.id}

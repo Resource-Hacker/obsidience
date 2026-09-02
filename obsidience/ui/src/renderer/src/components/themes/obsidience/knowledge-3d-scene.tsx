@@ -11,7 +11,7 @@
 // (main: true — raw node ids, no orbit transform, no ballScale shrink).
 // This module owns what is genuinely scene-global: the shader sources, the
 // camera/orbit/pointer surface, the sweep timeline clock, role nameplates,
-// orbit rings, the SVG-overlay projection, and the per-frame loop.
+// orbit rings, screen-space labels, and the per-frame loop.
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import {
@@ -42,6 +42,10 @@ import {
   paintKnowledgeRoleIcon,
 } from "./knowledge-role-icons";
 import {
+  createKnowledge3dLabelLayer,
+  type Knowledge3dLabelMeta,
+} from "./knowledge-3d-labels";
+import {
   createKnowledge3dOrbitRing,
   createKnowledge3dDeliveryComet,
   createKnowledge3dSatellite,
@@ -56,7 +60,11 @@ import {
 
 // The render-model types live with the one cloud implementation; re-export
 // so the backdrop's import surface is unchanged.
-export type { Knowledge3dRenderEdge, Knowledge3dRenderNode };
+export type {
+  Knowledge3dLabelMeta,
+  Knowledge3dRenderEdge,
+  Knowledge3dRenderNode,
+};
 
 export interface Knowledge3dSceneProps {
   nodes: Knowledge3dRenderNode[];
@@ -81,6 +89,9 @@ export interface Knowledge3dSceneProps {
   adapterPreference: GraphicsAdapterPreference;
   animationProfile: GraphicsAnimationProfile;
   hoveredNodeId: string | null;
+  labelIds: readonly string[];
+  activeLabelNodeIds: ReadonlySet<string>;
+  labelMetadata: ReadonlyMap<string, Knowledge3dLabelMeta>;
   /** Live operator tuning from the ambient slider panel. */
   tuning: Knowledge3dTuning;
   /** Satellite knowledge balls — one per has_knowledge subagent, each a
@@ -132,25 +143,11 @@ export interface Knowledge3dSceneProps {
     id: string,
     at: { x: number; y: number },
   ) => void;
-  /** Normalized screen positions, published ONLY while the SVG overlay has
-   *  something to draw (focus/hover) so idle motion costs zero React. */
-  onProjected: (positions: Map<string, { x: number; y: number }>) => void;
   onContextLost: () => void;
 }
 
-/** Synthetic projection-map key for the world origin — the executive
- *  ball's center; consumers must never treat it as a node. */
-export const KNOWLEDGE_3D_ORIGIN_KEY = "@origin";
-
 const FOV_DEGREES = 45;
 const HOVER_RADIUS_PX = 26;
-/** Overlay projection cadence: labels/waves ride these published
- *  positions, so while the sweep is live they refresh at 25 Hz — at the
- *  hover-only 12.5 Hz the plates visibly juddered against the rotating
- *  ball (owner 2026-08-02). */
-const PROJECT_INTERVAL_MS = 80;
-const PROJECT_FOCUS_INTERVAL_MS = 40;
-const PROJECT_MAXIMUM_INTERVAL_MS = 1000 / 60;
 /** Whole-path neon pulse duration once the solid fill completes. */
 const PATH_GLOW_SECONDS = 0.55;
 
@@ -833,7 +830,7 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
     try {
       created = new THREE.WebGLRenderer({
         alpha: true,
-        antialias: false,
+        antialias: true,
         powerPreference: knowledge3dWebglPowerPreference(
           props.adapterPreference,
         ),
@@ -847,6 +844,7 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
     }
     const renderer: THREE.WebGLRenderer = created;
     renderer.setClearColor(0x000000, 0);
+    renderer.autoClear = false;
     host.appendChild(renderer.domElement);
     renderer.domElement.style.width = "100%";
     renderer.domElement.style.height = "100%";
@@ -854,6 +852,7 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
 
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(FOV_DEGREES, 1, 1, 4000);
+    const labelLayer = createKnowledge3dLabelLayer();
     const framed = knowledge3dFramedDistance(FOV_DEGREES);
     const orbit = {
       azimuth: 0,
@@ -1154,6 +1153,7 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
       pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
       renderer.setPixelRatio(pixelRatio);
       renderer.setSize(width, height, false);
+      labelLayer.resize(width, height, pixelRatio);
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
       applyViewAnchor();
@@ -1164,26 +1164,15 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
     observer.observe(host);
     resize();
 
-    const projectionVector = new THREE.Vector3();
-
     function projectAll(): Map<string, { x: number; y: number }> {
       const projected = new Map<string, { x: number; y: number }>();
       // Main entries keep raw ids (main: true); satellite entries merge
-      // under their agent-namespaced ids, so hover picking and the SVG
-      // overlay see one flat map.
+      // under their agent-namespaced ids, so picking and labels see one
+      // flat map.
       mainCloud?.projectInto(projected, camera);
       for (const cloud of satelliteClouds.values()) {
         cloud.projectInto(projected, camera);
       }
-      // The projected WORLD ORIGIN (the executive ball's center): the theme
-      // slides the arc-reactor backdrop onto it so the reactor always sits
-      // behind the executive agent, even while the camera is parked on a
-      // satellite (owner 2026-08-03). Never a pick target.
-      projectionVector.set(0, 0, 0).project(camera);
-      projected.set(KNOWLEDGE_3D_ORIGIN_KEY, {
-        x: (projectionVector.x + 1) / 2,
-        y: (1 - projectionVector.y) / 2,
-      });
       return projected;
     }
 
@@ -1196,7 +1185,6 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
       let best: string | null = null;
       let bestDistance = HOVER_RADIUS_PX;
       for (const [id, point] of projected) {
-        if (id === KNOWLEDGE_3D_ORIGIN_KEY) continue;
         const distance = Math.hypot(
           (point.x - px) * bounds.width,
           (point.y - py) * bounds.height,
@@ -1300,7 +1288,7 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
     let rafId = 0;
     let frameDeadline = 0;
     let lastTick = performance.now();
-    let lastProjected = 0;
+    const emptyProjection = new Map<string, { x: number; y: number }>();
 
     function frame(now: number): void {
       if (disposed) return;
@@ -1797,21 +1785,20 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
           }
         });
       }
+      const labelsNeeded =
+        current.labelIds.length > 0 || current.activeLabelNodeIds.size > 0;
+      labelLayer.update(
+        labelsNeeded ? projectAll() : emptyProjection,
+        current.labelIds,
+        current.activeLabelNodeIds,
+        current.labelMetadata,
+        current.focusActive,
+        now,
+      );
+      renderer.clear(true, true, true);
       renderer.render(scene, camera);
-
-      // React work only when the SVG overlay has content to place.
-      if (
-        (current.focusActive || current.hoveredNodeId || focusBlend > 0.001) &&
-        now - lastProjected >=
-          (current.animationProfile === "maximum"
-            ? PROJECT_MAXIMUM_INTERVAL_MS
-            : current.focusActive
-              ? PROJECT_FOCUS_INTERVAL_MS
-              : PROJECT_INTERVAL_MS)
-      ) {
-        lastProjected = now;
-        current.onProjected(projectAll());
-      }
+      renderer.clearDepth();
+      labelLayer.render(renderer);
     }
     rafId = requestAnimationFrame(frame);
 
@@ -1837,6 +1824,7 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
       rolePlates.clear();
       if (mainPlate) disposeRolePlate(mainPlate);
       mainPlate = null;
+      labelLayer.dispose();
       renderer.dispose();
       renderer.domElement.remove();
     };

@@ -1,0 +1,24 @@
+#!/usr/bin/bash
+set -eu
+
+tmux=/usr/bin/tmux
+
+"$tmux" has-session -t =codex
+if ! "$tmux" has-session -t =obsidience-ui 2>/dev/null; then
+    "$tmux" new-session -d -t =codex -s obsidience-ui
+fi
+
+source_index=$("$tmux" display-message -p -t '=obsidience-ui:' '#{window_index}')
+case "$source_index" in
+    ''|*[!0-9]*) exit 1 ;;
+esac
+"$tmux" select-window -t "=obsidience-ui:${source_index}"
+"$tmux" detach-client -s =obsidience-ui 2>/dev/null || true
+while IFS= read -r window_index; do
+    "$tmux" set-window-option -t "=obsidience-ui:${window_index}" \
+        window-size largest
+done < <("$tmux" list-windows -t =obsidience-ui -F '#{window_index}')
+
+export TERM=xterm-256color
+export COLORTERM=truecolor
+exec "$tmux" attach-session -t =obsidience-ui

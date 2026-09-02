@@ -1,0 +1,50 @@
+{
+  "schema": "obsidience.surface-layout.v1",
+  "revision": 0,
+  "graph_surface_id": "samsung",
+  "pane_grid_size": 10,
+  "surfaces": [
+    {
+      "id": "samsung",
+      "label": "Samsung G95SC",
+      "backend": "kwin-wayland",
+      "display": "wayland",
+      "output": "HDMI-A-1",
+      "x_screen": null,
+      "pixel_width": 5120,
+      "pixel_height": 1440,
+      "logical_width": 5120,
+      "logical_height": 1440,
+      "device_scale": 1,
+      "map_rect": { "x": 0, "y": 0, "width": 5120, "height": 1440 }
+    },
+    {
+      "id": "dp-4",
+      "label": "DP-4",
+      "backend": "x11",
+      "display": ":2",
+      "output": "HDMI-A-1",
+      "x_screen": 1,
+      "pixel_width": 3840,
+      "pixel_height": 1100,
+      "logical_width": 1920,
+      "logical_height": 550,
+      "device_scale": 2,
+      "map_rect": { "x": 0, "y": 1440, "width": 1706, "height": 489 }
+    },
+    {
+      "id": "usb-c",
+      "label": "USB-C",
+      "backend": "x11",
+      "display": ":2",
+      "output": "DisplayPort-7",
+      "x_screen": 0,
+      "pixel_width": 3840,
+      "pixel_height": 2400,
+      "logical_width": 1920,
+      "logical_height": 1200,
+      "device_scale": 2,
+      "map_rect": { "x": 1706, "y": 1440, "width": 1707, "height": 1067 }
+    }
+  ]
+}

@@ -3,7 +3,7 @@
 
 export type PaneId =
   | "chat" | "library" | "tasks" | "reviews" | "reader" | "knowledge" | "source"
-  | "status" | "hardware" | "camera" | "terminal" | "tuning";
+  | "status" | "hardware" | "camera" | "tuning";
 
 export interface PaneRect {
   x: number;
@@ -87,11 +87,6 @@ export const OBSIDIENCE_PANES: readonly PaneDefinition[] = [
       const height = Math.min(480, v.height - 160);
       return { x: (v.width - width) / 2, y: 100, width, height };
     },
-  },
-  {
-    id: "terminal", title: "Terminal", minWidth: 620, minHeight: 300,
-    resizable: true, defaultOpen: true,
-    defaultRect: (v) => ({ x: v.width / 2 - 350, y: 80, width: 700, height: 480 }),
   },
   {
     id: "tuning", title: "Graph Tuning", minWidth: 520, minHeight: 360,

@@ -1,6 +1,8 @@
+//@ pragma NativeTextRendering
 pragma ComponentBehavior: Bound
 
 import Quickshell
+import QtQml
 import "api"
 import "surfaces/stage"
 import "workspace"
@@ -9,10 +11,30 @@ ShellRoot {
     id: root
 
     property ShellApi shellApi: ShellApi {}
-    property PanePlacement panePlacement: PanePlacement {}
+    property FullscreenState fullscreenState: FullscreenState {}
+    property LockState lockState: LockState {}
     readonly property var targetScreens: Quickshell.screens.filter(
         screen => screen.name === shellApi.primaryOutputName
     )
+    readonly property bool knowledgeVisible: !lockState.active && !fullscreenState.active
+
+    PaneWorkspace {
+        id: paneWorkspace
+
+        shellApi: root.shellApi
+        surfaceId: "samsung"
+        targetScreens: root.targetScreens
+        authoritative: true
+        locked: root.lockState.active
+    }
+
+    ShellCommandServer {
+        readerPlacement: paneWorkspace.readerPlacement
+        paneWorkspace: paneWorkspace
+        dockLayout: paneWorkspace.dockLayout
+        surfaceLayout: root.shellApi.surfaceLayout
+        knowledgeVisible: root.knowledgeVisible
+    }
 
     Variants {
         model: root.targetScreens
@@ -21,19 +43,10 @@ ShellRoot {
             required property var modelData
 
             screen: modelData
-            shellApi: root.shellApi
-        }
-    }
-
-    Variants {
-        model: root.targetScreens
-
-        PaneWindow {
-            required property var modelData
-
-            surfaceScreen: modelData
             surfaceId: "samsung"
-            placement: root.panePlacement
+            shellApi: root.shellApi
+            locked: root.lockState.active
         }
     }
+
 }

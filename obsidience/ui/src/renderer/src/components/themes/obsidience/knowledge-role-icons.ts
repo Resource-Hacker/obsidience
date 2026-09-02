@@ -298,7 +298,11 @@ export function paintKnowledgeRoleIcon(
   const canvas = document.createElement("canvas");
   canvas.width = size;
   canvas.height = size;
-  const ctx = canvas.getContext("2d");
+  // Qt WebEngine 6.11 currently aborts when its GPU Skia path compiles the
+  // small shadow blur used by these one-time icon canvases. A software-backed
+  // Canvas2D preserves the exact pixels while the Three.js scene stays on GPU.
+  const shellSurface = document.documentElement.dataset.obsidienceSurface !== undefined;
+  const ctx = canvas.getContext("2d", shellSurface ? { willReadFrequently: true } : undefined);
   if (ctx) PAINTERS[role](ctx, size);
   return canvas;
 }

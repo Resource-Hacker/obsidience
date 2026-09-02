@@ -13,17 +13,15 @@ import {
   MAIN_GRAPH_ID,
   announceGraphTuning,
   defaultGraphTuning,
-  loadGraphTuning,
+  graphTuningProfilesFor,
+  loadGraphTuningProfileStore,
   onGraphSelected,
   requestGraphThinkingTest,
-  saveGraphTuning,
+  saveGraphTuningProfile,
+  type GraphTuningProfileStore,
 } from "@/lib/graph-tuning";
 import { StyleSelect } from "@/panes/style-portraits";
 
-// v2 seeds every graph from the exact recovered Obsidience role profile.  The
-// retired v1 store contained the temporary shared Obsidience placeholder.
-const PROFILE_KEY = "obsidience.graph-tuning-profiles.v2";
-const DEFAULT_PROFILE = "Default";
 const LIBRARY_NODE_STYLE_KEYS = new Set<keyof Knowledge3dTuning>([
   "subjectStyle",
   "subnodeStyle",
@@ -31,28 +29,6 @@ const LIBRARY_NODE_STYLE_KEYS = new Set<keyof Knowledge3dTuning>([
 ]);
 
 interface GraphOption { id: string; label: string; order: number }
-interface GraphProfiles { active: string; profiles: Record<string, Knowledge3dTuning> }
-type ProfileStore = Record<string, GraphProfiles>;
-
-function loadProfiles(): ProfileStore {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(PROFILE_KEY) ?? "{}") as ProfileStore;
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-function persistProfiles(store: ProfileStore): void {
-  try { localStorage.setItem(PROFILE_KEY, JSON.stringify(store)); } catch { /* best effort */ }
-}
-
-function profilesFor(store: ProfileStore, graphId: string): GraphProfiles {
-  const current = store[graphId];
-  if (current?.profiles[current.active]) return current;
-  return { active: DEFAULT_PROFILE, profiles: { [DEFAULT_PROFILE]: loadGraphTuning(graphId) } };
-}
-
 function sameTuning(left: Knowledge3dTuning, right: Knowledge3dTuning): boolean {
   return KNOWLEDGE_3D_TUNING_FIELDS.every((field) => left[field.key] === right[field.key]);
 }
@@ -63,7 +39,7 @@ export function TuningPaneBody() {
     { id: LIBRARY_GRAPH_ID, label: "Library", order: 5 },
   ]);
   const [graphId, setGraphId] = useState(MAIN_GRAPH_ID);
-  const [store, setStore] = useState<ProfileStore>(loadProfiles);
+  const [store, setStore] = useState<GraphTuningProfileStore>(loadGraphTuningProfileStore);
   const [working, setWorking] = useState<Record<string, Knowledge3dTuning>>({});
   const [activeGroup, setActiveGroup] = useState<string | null>(null);
   const [newProfile, setNewProfile] = useState<string | null>(null);
@@ -105,7 +81,7 @@ export function TuningPaneBody() {
     setNewProfile(null);
   }, [graphId]);
 
-  const graphProfiles = profilesFor(store, graphId);
+  const graphProfiles = graphTuningProfilesFor(store, graphId);
   const saved = graphProfiles.profiles[graphProfiles.active];
   const active = working[graphId] ?? saved;
   const dirty = !sameTuning(active, saved);
@@ -127,22 +103,12 @@ export function TuningPaneBody() {
     preview(clampKnowledge3dTuning({ ...active, [key]: value }));
   };
   const applyProfile = (name: string, record: Knowledge3dTuning) => {
-    const next = {
-      ...store,
-      [graphId]: {
-        active: name,
-        profiles: { ...graphProfiles.profiles, [name]: record },
-      },
-    };
-    setStore(next);
-    persistProfiles(next);
+    setStore(saveGraphTuningProfile(graphId, name, record));
     setWorking((current) => {
       const copy = { ...current };
       delete copy[graphId];
       return copy;
     });
-    saveGraphTuning(graphId, record);
-    announceGraphTuning({ graphId, tuning: record });
   };
   const save = () => applyProfile(graphProfiles.active, active);
   const discard = () => {
