@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=Obsidience (Hyprland)
+Comment=Obsidience shell on Hyprland
+Exec=/home/wissenschafter/Projects/obsidience-hyprland/obsidience/shell/session/obsidience-hyprland-login
+TryExec=/home/wissenschafter/Projects/obsidience-hyprland/obsidience/shell/session/obsidience-hyprland-login
+Type=Application

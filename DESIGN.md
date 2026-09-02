@@ -113,23 +113,30 @@ stay shallow around real logical subsystems and declare a comprehensible import
 direction. No first-party folder is named `modules`, and speculative
 architectural layers are forbidden.
 
-Obsidience is currently an agent harness and developing Linux desktop shell,
-with `plasmashell` as its first replacement target and KWin as its compositor
-boundary. Its system architecture may later grow into an OS environment. KDE
-Plasma, GNOME, and Windows desktop functions are replacement targets, not
-inherited ontology terms. A function moves into Obsidience only when a real
-modular System or interface implementation exists and passes a bounded cutover
-with rollback; the development direction never creates a fictional Capability
-or a second authority path. Linux remains the plumbing: kernel drivers,
-filesystems, systemd, udev, PipeWire/WirePlumber, NetworkManager, and compositor
-protocols are reused rather than reimplemented. The first Samsung milestone
-keeps KWin as compositor and replaces only `plasmashell`. Its accepted
-development slice is the native `Shell` Module: a selectable Obsidience KWin
-session, one Samsung Wayland Stage, independent USB-C and DP-4 X11 Stages, the
-canonical identity chrome and graph background, bounded read-only KWin state,
-and one shared native pane registry. The Electron application is disabled on
-the native branch and retained only on the archive branch; it is not a parallel
-runtime owner.
+Obsidience is the agent harness and the visible shell of an Arch Linux system.
+Hyprland is the compositor boundary: it owns composition, outputs, windows,
+input routing, VRR, fullscreen behavior, and XWayland; Obsidience owns shell
+surfaces, panes, providers, and agent interaction. Linux remains the plumbing:
+kernel drivers, filesystems, systemd, udev, PipeWire/WirePlumber,
+NetworkManager, and compositor protocols are reused rather than reimplemented.
+A function moves into Obsidience only when one real Module slice passes a
+bounded cutover with rollback. This direction never creates a fictional
+Capability or a second authority path.
+
+The first Hyprland slice is a separate Samsung-only UWSM canary that reuses the
+one native Quickshell pane registry and one canonical graph. It has an isolated
+state namespace and does not change the active login default. The accepted KWin
+session, Plasma Login Manager, KScreenLocker, side-display Xorg services, and
+KDE packages remain recovery state until the canary passes lock/PAM, Polkit,
+portal, crash-recovery, HDR/VRR, and WoW acceptance. They are migration input,
+not the target architecture, and may be deleted after their replacements pass.
+The Electron application remains archive-only and is never a parallel runtime
+owner.
+
+Desired architecture and observed state stay distinct. The names-only Shell
+package policy describes the additive target. The read-only System Application
+record continues to report the live KWin service and compositor until the
+Hyprland session is physically accepted and actually becomes current.
 
 The native knowledge desktop is a Shell component rather than a pane or
 separate Module. One `graph_surface_id` inside the existing revisioned Surface
@@ -181,43 +188,31 @@ backup, never as a concurrent terminal path.
 
 ## Shell and Surface architecture
 
-Obsidience is designed as a complete `plasmashell` replacement while retaining
-an unmodified upstream KWin. KWin owns composition, presentation, VRR,
-fullscreen behavior, window management, outputs, input routing, effects,
-screen-lock enforcement, and XWayland. Obsidience owns the visible and
-interactive desktop shell. A KWin fork is outside the default architecture.
-
-The compatibility boundary is:
+The stable boundary is:
 
 ```text
-upstream KWin and display servers
-  -> compositor adapters
+Arch Linux services
+  -> Hyprland
+  -> adapter/hyprland
   -> stable Obsidience Shell API
-  -> Obsidience shell host
-  -> Surface render hosts
-  -> panes, widgets, providers, and AI surfaces
+  -> one Quickshell shell host
+  -> panes, providers, widgets, and AI surfaces
 ```
 
-Only a compositor adapter may call KWin-specific scripts, D-Bus interfaces, or
-private protocols. It translates detected KWin capabilities into stable shell
-objects and exposes observations separately from validated commands. The KWin
-component stays small and contains no graph retrieval, model reasoning, pane
-presentation, or business logic. Standard Wayland protocols are preferred;
-versioned KWin-specific behavior is isolated and tested against the supported
-KWin range.
+Only a compositor adapter may call Hyprland-specific event sockets or command
+interfaces. It translates compositor state into stable Shell objects and keeps
+observations separate from validated commands. No adapter contains graph
+retrieval, model reasoning, pane presentation, or Task logic. Standard Wayland
+protocols are preferred.
 
 A **Surface** is a runtime presentation endpoint, not an Article kind, Tool,
 Capability, or synonym for a Wayland `wl_surface`. A Surface binds one physical
-display workspace to one render host and records its backend, output identity,
-geometry, scale, capabilities, and adjacency. Current physical Surfaces are:
-
-- Samsung: KWin Wayland on the RTX 4080, exact output `HDMI-A-1`;
-- USB-C: isolated AMD Xorg screen `:2.0`;
-- DP-4: isolated AMD Xorg screen `:2.1`.
-
-The side displays remain outside KWin. This is required for Samsung gaming and
-VRR behavior. Because Xorg and Wayland clients cannot move one native window
-between those display servers, Obsidience supplies continuity above them.
+display workspace to one render host and records backend, output identity,
+geometry, scale, capabilities, and adjacency. The first Hyprland canary admits
+only Samsung `HDMI-A-1` on the RTX 4080 at `5120x1440@240`, scale 1, 10-bit,
+with fullscreen-only VRR. USB-C and DP-4 retain their current isolated Xorg
+recovery path until Samsung acceptance passes; they are introduced to the
+Hyprland topology one measured output at a time.
 
 Every pane, without exception, has one generic `PanePlacement`:
 
@@ -236,50 +231,37 @@ handle. The same authority owns one global Surface-local logical-pixel grid,
 defaulting to 10 px. It rounds pane x, y, width, and height to that grid before
 minimum-size and Surface-boundary clamps; those safety bounds win at an edge.
 Settings > Workspace changes that single value, while pane Modules contain no
-snap policy. `Meta+Shift+Arrow` asks
-the primary shell host to move the active pane to the nearest mapped Surface in
-that direction. KWin captures the physical shortcut on Samsung and forwards it
-through the existing input D-Bus adapter. On USB-C and DP-4, the existing
-single-owner input router consumes that exact chord before XTest forwarding and
-calls the same bounded shell command client. The primary host derives the
-destination from `SurfaceLayout`, writes one accepted placement revision, and
-the destination host renders that same pane state. An unmapped direction
+snap policy. When multiple Surfaces are active, `Meta+Shift+Arrow` asks the
+primary shell host to move the active pane to the nearest mapped Surface in
+that direction. The compositor adapter captures the physical shortcut and
+calls the same bounded shell command. The primary host writes one accepted
+placement revision and the destination host renders it. An unmapped direction
 changes nothing. This deliberately uses no held-pointer handoff, pane-drag
-lease, Openbox shortcut, coordinator process, or pane-specific transport.
+lease, coordinator process, or pane-specific transport.
 
 Each Surface render host uses the same Obsidience visual language and pane
 registry. Shell packages may choose layouts and themes but never bind directly
-to KWin or become competing shell owners. Widgets, data providers, and AI
+to Hyprland or become competing shell owners. Widgets, data providers, and AI
 surfaces receive only declared stable API capabilities. Basic launching,
-window switching, notifications, volume, session controls, and recovery must
-remain usable when models, retrieval, or the knowledge graph are unavailable.
+window switching, notifications, volume, session controls, and recovery remain
+usable when models, retrieval, or the graph are unavailable.
 
 One shell host owns singleton shell responsibilities. Failure of a pane,
-extension, model, or graph view must not terminate KWin or the desktop session.
-KWin and applications remain alive across a shell restart. The independent
-terminal is the recovery path; `plasmashell` is not a runtime owner or fallback.
+extension, model, or graph view must not terminate Hyprland or the desktop
+session. The independent terminal is the recovery path.
 
 The Shell owns one semantic presentation palette. PaneFrame reads it directly;
-small target adapters flatten the same tokens into KWin, Openbox, and supported
+small adapters flatten the same tokens into Hyprland and supported
 application-native theme contracts such as Edge's Chromium policy. External
 applications remain native compositor clients and are never embedded,
-reparented, mirrored, or made dependent on the Shell host's lifetime. Website
-and application content stays application-owned.
+reparented, mirrored, or made dependent on the Shell host's lifetime.
 
-Session locking retains one existing Linux authority. KWin and KScreenLocker
-own the compositor lock, PAM prompt, credential handling, failure fallback, and
-the only successful-unlock transition. Obsidience consumes `AboutToLock` and
-`ActiveChanged` through its existing Surface D-Bus adapter, atomically projects
-one private lock-state byte, and quarantines the existing root input router
-before the greeter appears. The selected Surface alone shows the canonical
-graph. On Samsung, a local Plasma Wallpaper renders that same loopback graph
-beneath KDE's unchanged greeter. On USB-C and DP-4, the selected Surface uses
-an input-empty graph cover while the other uses a solid opaque privacy cover
-with no WebView. They never display or transport credentials. Pane placement
-is preserved but every pane and launcher is hidden until KScreenLocker reports
-unlock. The ordinary Samsung graph host pauses while the lock wallpaper owns
-its presentation, so only one simulation remains active. The router then
-remains on Samsung until a deliberate later edge crossing.
+Session locking must retain one Linux/PAM authority. The first canary is
+explicitly unlocked development state and cannot become the default session.
+Production cutover requires Hyprlock or another accepted compositor lock,
+verified PAM behavior, one Polkit agent, privacy covers for every Surface,
+input quarantine before the prompt, and one successful-unlock event. The graph
+may decorate a lock surface but never handles credentials or decides unlock.
 
 ```text
 obsidience/harness/

@@ -1,0 +1,9 @@
+[Unit]
+Description=Obsidience Hyprland development session
+Requires=graphical-session.target obsidience-shell-hyprland-host.service
+After=graphical-session.target
+Wants=obsidience-harness-dev.service
+Wants=obsidience-shell-hyprland-knowledge.service
+Wants=obsidience-shell-hyprland-notifications.service
+BindsTo=graphical-session.target
+PartOf=graphical-session.target

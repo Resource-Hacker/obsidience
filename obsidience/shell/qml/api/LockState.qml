@@ -7,8 +7,14 @@ import Quickshell.Io
 QtObject {
     id: root
 
-    readonly property string statePath: Quickshell.env("XDG_RUNTIME_DIR")
-        + "/obsidience-shell/lock-state"
+    readonly property string stateNamespace: Quickshell.env(
+        "OBSIDIENCE_SHELL_STATE_NAMESPACE"
+    )
+    readonly property string statePath: stateNamespace
+        ? Quickshell.env("XDG_RUNTIME_DIR") + "/" + stateNamespace
+            + "/lock-state"
+        : Quickshell.env("XDG_RUNTIME_DIR")
+            + "/obsidience-shell/lock-state"
     property bool active: true
 
     function reloadState() {

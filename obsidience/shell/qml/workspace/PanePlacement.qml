@@ -2,18 +2,24 @@ pragma ComponentBehavior: Bound
 
 import QtCore
 import QtQml
+import Quickshell
 import Quickshell.Io
 
 QtObject {
     id: root
 
     readonly property string schema: "obsidience.surface-placement.v1"
+    readonly property string stateNamespace: Quickshell.env(
+        "OBSIDIENCE_SHELL_STATE_NAMESPACE"
+    )
     property string paneId: "displays"
     property string stateFileName: paneId === "displays"
         ? "pane-placement.json" : paneId + "-placement.json"
-    readonly property string statePath: StandardPaths.writableLocation(
-        StandardPaths.RuntimeLocation
-    ) + "/obsidience-shell/" + stateFileName
+    readonly property string statePath: stateNamespace
+        ? StandardPaths.writableLocation(StandardPaths.RuntimeLocation)
+            + "/" + stateNamespace + "/" + stateFileName
+        : StandardPaths.writableLocation(StandardPaths.RuntimeLocation)
+            + "/obsidience-shell/" + stateFileName
 
     property string defaultSurfaceId: "samsung"
     property int defaultX: 2180

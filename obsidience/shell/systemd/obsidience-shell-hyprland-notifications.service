@@ -1,0 +1,12 @@
+[Unit]
+Description=Wayland notifications for the Obsidience Hyprland session
+After=graphical-session.target
+PartOf=obsidience-hyprland-session.target graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/mako
+Restart=on-failure
+RestartSec=2
+CPUWeight=25
+IOWeight=25

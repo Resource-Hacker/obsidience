@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+drm_card="$(readlink -f /dev/dri/by-path/pci-0000:01:00.0-card)"
+[[ "$drm_card" == /dev/dri/card[0-9]* && -c "$drm_card" ]] || exit 1
+
+device_path="$(udevadm info -q property -n "$drm_card" \
+    | sed -n 's/^ID_PATH=//p')"
+[[ "$device_path" == "pci-0000:01:00.0" ]] || exit 1
+
+export AQ_DRM_DEVICES="$drm_card"
+
+exec /usr/bin/uwsm start \
+    -e \
+    -D Obsidience:Hyprland \
+    -N "Obsidience" \
+    -C "Obsidience shell on Hyprland" \
+    -- /usr/bin/Hyprland \
+    --config /home/wissenschafter/Projects/obsidience-hyprland/obsidience/shell/adapter/hyprland/hyprland.lua

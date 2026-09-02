@@ -2,15 +2,21 @@ pragma ComponentBehavior: Bound
 
 import QtCore
 import QtQml
+import Quickshell
 import Quickshell.Io
 
 QtObject {
     id: root
 
     readonly property string schema: "obsidience.surface-layout.v1"
-    readonly property string statePath: StandardPaths.writableLocation(
-        StandardPaths.ConfigLocation
-    ) + "/obsidience-shell/surface-layout.json"
+    readonly property string stateNamespace: Quickshell.env(
+        "OBSIDIENCE_SHELL_STATE_NAMESPACE"
+    )
+    readonly property string statePath: stateNamespace
+        ? StandardPaths.writableLocation(StandardPaths.ConfigLocation)
+            + "/" + stateNamespace + "/surface-layout.json"
+        : StandardPaths.writableLocation(StandardPaths.ConfigLocation)
+            + "/obsidience-shell/surface-layout.json"
     readonly property int snapThreshold: 120
     readonly property int minimumPaneGridSize: 1
     readonly property int maximumPaneGridSize: 100

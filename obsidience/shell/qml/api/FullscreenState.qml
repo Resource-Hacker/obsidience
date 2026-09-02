@@ -7,8 +7,14 @@ import Quickshell.Io
 QtObject {
     id: root
 
-    readonly property string statePath: Quickshell.env("XDG_RUNTIME_DIR")
-        + "/obsidience-shell-fullscreen.state"
+    readonly property string stateNamespace: Quickshell.env(
+        "OBSIDIENCE_SHELL_STATE_NAMESPACE"
+    )
+    readonly property string statePath: stateNamespace
+        ? Quickshell.env("XDG_RUNTIME_DIR") + "/" + stateNamespace
+            + "/fullscreen-state"
+        : Quickshell.env("XDG_RUNTIME_DIR")
+            + "/obsidience-shell-fullscreen.state"
     property bool active: false
 
     function reloadState() {

@@ -2,15 +2,21 @@ pragma ComponentBehavior: Bound
 
 import QtCore
 import QtQml
+import Quickshell
 import Quickshell.Io
 
 QtObject {
     id: root
 
     readonly property string schema: "obsidience.pane-dock-layout.v1"
-    readonly property string statePath: StandardPaths.writableLocation(
-        StandardPaths.ConfigLocation
-    ) + "/obsidience-shell/pane-dock-layout.json"
+    readonly property string stateNamespace: Quickshell.env(
+        "OBSIDIENCE_SHELL_STATE_NAMESPACE"
+    )
+    readonly property string statePath: stateNamespace
+        ? StandardPaths.writableLocation(StandardPaths.ConfigLocation)
+            + "/" + stateNamespace + "/pane-dock-layout.json"
+        : StandardPaths.writableLocation(StandardPaths.ConfigLocation)
+            + "/obsidience-shell/pane-dock-layout.json"
 
     property bool authoritative: false
     property int revision: 0

@@ -148,7 +148,7 @@ class KnowledgeDesktop:
 def main() -> int:
     display = Gdk.Display.get_default()
     if display is None:
-        raise RuntimeError("knowledge desktop requires the KWin Wayland display")
+        raise RuntimeError("knowledge desktop requires a Wayland display")
     desktop = KnowledgeDesktop(display)
     Gtk.main()
     del desktop

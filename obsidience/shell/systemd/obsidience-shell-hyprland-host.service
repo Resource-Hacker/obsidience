@@ -1,0 +1,29 @@
+[Unit]
+Description=Native Obsidience shell host for Hyprland
+After=graphical-session.target obsidience-harness-dev.service
+PartOf=obsidience-hyprland-session.target graphical-session.target
+StartLimitIntervalSec=30
+StartLimitBurst=3
+
+[Service]
+Type=simple
+WorkingDirectory=/home/wissenschafter/Projects/obsidience-hyprland
+Environment=QT_QPA_PLATFORM=wayland
+Environment=QS_NO_RELOAD_POPUP=1
+Environment=OBSIDIENCE_SHELL_STATE_NAMESPACE=obsidience-hyprland
+Environment=OBSIDIENCE_SHELL_PRIMARY_ONLY=1
+Environment=OBSIDIENCE_THEME_PATH=/home/wissenschafter/Projects/obsidience-hyprland/obsidience/shell/theme/palette.json
+ExecStartPre=/usr/bin/install -d -m 0700 %t/obsidience-hyprland
+ExecStartPre=/usr/bin/install -d -m 0700 %h/.config/obsidience-hyprland
+ExecStartPre=/usr/bin/cp --no-clobber /home/wissenschafter/Projects/obsidience-hyprland/obsidience/shell/state/initial-pane-placement.json %t/obsidience-hyprland/pane-placement.json
+ExecStartPre=/usr/bin/cp --no-clobber /home/wissenschafter/Projects/obsidience-hyprland/obsidience/shell/state/initial-reader-placement.json %t/obsidience-hyprland/reader-placement.json
+ExecStartPre=/usr/bin/cp --no-clobber /home/wissenschafter/Projects/obsidience-hyprland/obsidience/shell/state/initial-terminal-placement.json %t/obsidience-hyprland/terminal-placement.json
+ExecStartPre=/usr/bin/cp --no-clobber /home/wissenschafter/Projects/obsidience-hyprland/obsidience/shell/state/initial-unlocked-state %t/obsidience-hyprland/lock-state
+ExecStartPre=/usr/bin/cp --no-clobber /home/wissenschafter/Projects/obsidience-hyprland/obsidience/shell/state/initial-fullscreen-state %t/obsidience-hyprland/fullscreen-state
+ExecStartPre=/usr/bin/cp --no-clobber /home/wissenschafter/Projects/obsidience-hyprland/obsidience/shell/state/initial-hyprland-surface-layout.json %h/.config/obsidience-hyprland/surface-layout.json
+ExecStart=/usr/bin/quickshell --no-duplicate --path /home/wissenschafter/Projects/obsidience-hyprland/obsidience/shell/qml
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=5
+UMask=0077
+CPUWeight=25

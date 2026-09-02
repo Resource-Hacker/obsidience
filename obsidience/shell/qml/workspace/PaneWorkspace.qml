@@ -27,6 +27,9 @@ Scope {
     required property bool locked
     property bool authoritative: false
     property bool launcherOpen: false
+    readonly property string secondaryDefaultSurfaceId:
+        Quickshell.env("OBSIDIENCE_SHELL_PRIMARY_ONLY") === "1"
+            ? "samsung" : "usb-c"
 
     property PaneDockLayout dockLayout: PaneDockLayout {
         authoritative: root.authoritative
@@ -39,7 +42,7 @@ Scope {
     property PanePlacement chatPlacement: PanePlacement {
         paneId: "chat"
         authoritative: root.authoritative
-        defaultSurfaceId: "usb-c"
+        defaultSurfaceId: root.secondaryDefaultSurfaceId
         defaultX: 20
         defaultY: 58
         defaultWidth: 600
@@ -50,7 +53,7 @@ Scope {
     property PanePlacement libraryPlacement: PanePlacement {
         paneId: "library"
         authoritative: root.authoritative
-        defaultSurfaceId: "usb-c"
+        defaultSurfaceId: root.secondaryDefaultSurfaceId
         defaultX: 640
         defaultY: 58
         defaultWidth: 620
@@ -61,7 +64,7 @@ Scope {
     property PanePlacement tasksPlacement: PanePlacement {
         paneId: "tasks"
         authoritative: root.authoritative
-        defaultSurfaceId: "usb-c"
+        defaultSurfaceId: root.secondaryDefaultSurfaceId
         defaultX: 1280
         defaultY: 58
         defaultWidth: 620
@@ -72,7 +75,7 @@ Scope {
     property PanePlacement reviewsPlacement: PanePlacement {
         paneId: "reviews"
         authoritative: root.authoritative
-        defaultSurfaceId: "usb-c"
+        defaultSurfaceId: root.secondaryDefaultSurfaceId
         defaultX: 640
         defaultY: 598
         defaultWidth: 620
@@ -93,7 +96,7 @@ Scope {
     property PanePlacement knowledgePlacement: PanePlacement {
         paneId: "knowledge"
         authoritative: root.authoritative
-        defaultSurfaceId: "usb-c"
+        defaultSurfaceId: root.secondaryDefaultSurfaceId
         defaultX: 24
         defaultY: 100
         defaultWidth: 520
@@ -104,7 +107,7 @@ Scope {
     property PanePlacement sourcePlacement: PanePlacement {
         paneId: "source"
         authoritative: root.authoritative
-        defaultSurfaceId: "usb-c"
+        defaultSurfaceId: root.secondaryDefaultSurfaceId
         defaultX: 560
         defaultY: 100
         defaultWidth: 560
@@ -115,7 +118,7 @@ Scope {
     property PanePlacement statusPlacement: PanePlacement {
         paneId: "status"
         authoritative: root.authoritative
-        defaultSurfaceId: "usb-c"
+        defaultSurfaceId: root.secondaryDefaultSurfaceId
         defaultX: 160
         defaultY: 100
         defaultWidth: 1040
@@ -126,7 +129,7 @@ Scope {
     property PanePlacement hardwarePlacement: PanePlacement {
         paneId: "hardware"
         authoritative: root.authoritative
-        defaultSurfaceId: "usb-c"
+        defaultSurfaceId: root.secondaryDefaultSurfaceId
         defaultX: 180
         defaultY: 100
         defaultWidth: 1120
@@ -137,7 +140,7 @@ Scope {
     property PanePlacement cameraPlacement: PanePlacement {
         paneId: "camera"
         authoritative: root.authoritative
-        defaultSurfaceId: "usb-c"
+        defaultSurfaceId: root.secondaryDefaultSurfaceId
         defaultX: 260
         defaultY: 120
         defaultWidth: 960
@@ -148,7 +151,7 @@ Scope {
     property PanePlacement settingsPlacement: PanePlacement {
         paneId: "settings"
         authoritative: root.authoritative
-        defaultSurfaceId: "usb-c"
+        defaultSurfaceId: root.secondaryDefaultSurfaceId
         defaultX: 1080
         defaultY: 80
         defaultWidth: 800
@@ -159,7 +162,7 @@ Scope {
     property PanePlacement applicationsPlacement: PanePlacement {
         paneId: "applications"
         authoritative: root.authoritative
-        defaultSurfaceId: "usb-c"
+        defaultSurfaceId: root.secondaryDefaultSurfaceId
         defaultX: 420
         defaultY: 100
         defaultWidth: 1040

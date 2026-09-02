@@ -57,6 +57,20 @@
       "notice": "LICENSES/Lucide-ISC.txt"
     },
     {
+      "name": "Hyprland",
+      "package": "hyprland 0.55.2-2",
+      "repository": "https://github.com/hyprwm/Hyprland",
+      "license": "BSD-3-Clause",
+      "adaptation": "Used as the installed Wayland compositor for the isolated Samsung canary. Obsidience supplies its own minimal Lua configuration and shell surfaces; no Hyprland source or visual design was copied."
+    },
+    {
+      "name": "Universal Wayland Session Manager",
+      "package": "uwsm 0.26.4-1",
+      "repository": "https://github.com/Vladimir-csp/uwsm",
+      "license": "MIT",
+      "adaptation": "Used unchanged to generate and supervise the Hyprland graphical-session lifecycle. Obsidience does not duplicate UWSM session management and copied no source."
+    },
+    {
       "name": "Quickshell",
       "package": "quickshell 0.3.0-2.1",
       "repository": "https://git.outfoxxed.me/quickshell/quickshell",
@@ -127,7 +141,7 @@
           "sha256": "ee6742bbfbbf1a68f00352bf23dbca9a2e1c221b2743378e6b54f4c98dbe6174"
         }
       ],
-      "adaptation": "Obsidience independently implements the same bounded pattern: one semantic palette projects into shell tokens, native window-manager colors, and a fixed Chromium-family BrowserThemeColor policy with a live refresh. Hyprland code, visual design, shell scripts, launch architecture, plugins and arbitrary application hooks were excluded.",
+      "adaptation": "Obsidience independently applies two bounded reference patterns: one semantic palette projects into shell and supported application-native theme tokens, and one warm shell host loads small modular UI components. Omarchy source, visual design, shell scripts, Hyprland configuration, IPC, plugin runtime, and package authority were not imported.",
       "notice": "LICENSES/Omarchy-MIT.txt"
     }
   ]
