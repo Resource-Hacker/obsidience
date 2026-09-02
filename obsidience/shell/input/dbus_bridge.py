@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Small D-Bus boundary between KWin and the Surface input router."""
+"""Small D-Bus boundary for the isolated-Surface input router."""
 
 from __future__ import annotations
 
@@ -30,21 +30,17 @@ LOCK_STATE_DIR = RUNTIME_DIR / "obsidience-shell"
 LOCK_STATE = LOCK_STATE_DIR / "lock-state"
 ROUTER_SERVICE = "dp4-edge-bridge.service"
 PANE_MOVE_PYTHON = Path(
-    "/home/wissenschafter/Projects/obsidience/.venv/bin/python"
+    "/usr/bin/python"
 )
 PANE_MOVE_CLIENT = Path(
-    "/home/wissenschafter/Projects/obsidience/obsidience/shell/input/move_pane.py"
+    "/home/wissenschafter/Projects/obsidience-hyprland/obsidience/shell/input/move_pane.py"
 )
 EDGES = frozenset(("left", "right", "top", "bottom"))
 SURFACES = frozenset(("samsung", "usb-c", "dp-4"))
-SCREENSAVER_BUS = "org.freedesktop.ScreenSaver"
-SCREENSAVER_PATH = "/ScreenSaver"
-SCREENSAVER_IFACE = "org.freedesktop.ScreenSaver"
-KDE_SCREENSAVER_IFACE = "org.kde.screensaver"
 
 
 def write_lock_state(locked: bool) -> None:
-    """Atomically project KScreenLocker's state for every Surface host."""
+    """Atomically publish the current Obsidience lock state."""
 
     LOCK_STATE_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chmod(LOCK_STATE_DIR, 0o700)
@@ -63,7 +59,7 @@ def write_lock_state(locked: bool) -> None:
 
 
 def lock_active() -> bool:
-    """Fail closed until the KScreenLocker projection is available."""
+    """Fail closed if the Obsidience lock state cannot be read."""
 
     try:
         return LOCK_STATE.read_text(encoding="utf-8").strip() != "0"
@@ -205,56 +201,13 @@ class SurfaceBridge(dbus.service.Object):
         return result.returncode == 0
 
 
-class LockStateProjection:
-    """Translate KScreenLocker signals into one shell state and router gate."""
-
-    def __init__(self, bus, bridge: SurfaceBridge) -> None:
-        self.bridge = bridge
-        bus.add_signal_receiver(
-            self._about_to_lock,
-            signal_name="AboutToLock",
-            dbus_interface=KDE_SCREENSAVER_IFACE,
-            bus_name=SCREENSAVER_BUS,
-            path=SCREENSAVER_PATH,
-        )
-        bus.add_signal_receiver(
-            self._active_changed,
-            signal_name="ActiveChanged",
-            dbus_interface=SCREENSAVER_IFACE,
-            bus_name=SCREENSAVER_BUS,
-            path=SCREENSAVER_PATH,
-        )
-
-        # Seed before the router starts. A missing authority is treated as locked.
-        try:
-            proxy = bus.get_object(SCREENSAVER_BUS, SCREENSAVER_PATH)
-            screen_saver = dbus.Interface(proxy, dbus_interface=SCREENSAVER_IFACE)
-            active = bool(screen_saver.GetActive())
-        except Exception:
-            active = True
-        write_lock_state(active)
-
-    def _route(self, locked: bool) -> None:
-        write_lock_state(locked)
-        command = "lock" if locked else "unlock"
-        # Both compatibility FIFOs feed the same one-owner router. One command
-        # is the lock transition; duplicating it per Surface adds no authority.
-        self.bridge._send(DP4_FIFO, command)
-
-    def _about_to_lock(self) -> None:
-        self._route(True)
-
-    def _active_changed(self, active) -> None:
-        self._route(bool(active))
-
-
 def main() -> None:
     FULLSCREEN_STATE.write_text("0\n", encoding="utf-8")
+    write_lock_state(False)
     DBusGMainLoop(set_as_default=True)
     bus = dbus.SessionBus()
     bus_name = dbus.service.BusName(BUS_NAME, bus=bus)
-    bridge = SurfaceBridge(bus_name, OBJECT_PATH)
-    LockStateProjection(bus, bridge)
+    SurfaceBridge(bus_name, OBJECT_PATH)
     GLib.MainLoop().run()
 
 

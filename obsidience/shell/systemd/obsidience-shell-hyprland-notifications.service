@@ -1,7 +1,6 @@
 [Unit]
 Description=Wayland notifications for the Obsidience Hyprland session
-After=graphical-session.target
-PartOf=obsidience-hyprland-session.target graphical-session.target
+PartOf=obsidience-hyprland-session.target
 
 [Service]
 Type=simple

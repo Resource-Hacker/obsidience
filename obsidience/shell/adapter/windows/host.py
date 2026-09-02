@@ -7,7 +7,7 @@ import signal
 
 from gi.repository import GLib
 
-from .kwin import KWinSurfaceWindows
+from .hyprland import HyprlandSurfaceWindows
 from .model import ApplicationWindow, WindowStateStore
 from .transport import ShellWindowTransport
 from .x11 import X11SurfaceWindows
@@ -18,7 +18,7 @@ LOGGER = logging.getLogger(__name__)
 class WindowAdapterHost:
     def __init__(self) -> None:
         self.store = WindowStateStore()
-        self.kwin = KWinSurfaceWindows(self._update)
+        self.hyprland = HyprlandSurfaceWindows(self._update)
         self.x11 = {
             "usb-c": X11SurfaceWindows(
                 surface_id="usb-c", display_name=":2.0", on_change=self._update
@@ -31,7 +31,7 @@ class WindowAdapterHost:
         self.loop = GLib.MainLoop()
 
     def run(self) -> None:
-        self.kwin.start()
+        self.hyprland.start()
         for provider in self.x11.values():
             provider.start()
         self.transport.start()
@@ -43,7 +43,7 @@ class WindowAdapterHost:
             self.transport.stop()
             for provider in self.x11.values():
                 provider.stop()
-            self.kwin.stop()
+            self.hyprland.stop()
 
     def _update(
         self,
@@ -60,7 +60,7 @@ class WindowAdapterHost:
         if target is None:
             return False, "stale_or_invalid"
         if surface_id == "samsung":
-            dispatched, reason = self.kwin.activate(target.window_id)
+            dispatched, reason = self.hyprland.activate(target.window_id)
         else:
             provider = self.x11.get(surface_id)
             if provider is None:

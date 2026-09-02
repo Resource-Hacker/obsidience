@@ -1,8 +1,0 @@
-[Unit]
-Description=Suppress generic XDG autostart for the Obsidience KWin session
-Documentation=man:uwsm(1) man:systemd.special(7)
-PartOf=graphical-session.target
-After=wayland-session@%i.target graphical-session.target
-Conflicts=wayland-session-shutdown.target
-Before=wayland-session-shutdown.target
-StopWhenUnneeded=yes

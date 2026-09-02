@@ -705,7 +705,7 @@ class SurfaceInputRouter:
         log(f"released isolated input ownership: {reason}")
 
     def lock(self) -> None:
-        """Neutralize side-Surface input before KScreenLocker takes control."""
+        """Neutralize side-Surface input before the shell lock gate takes control."""
 
         already_quarantined = self.locked and not self.active
         self.locked = True

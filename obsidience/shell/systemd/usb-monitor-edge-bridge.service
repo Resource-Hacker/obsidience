@@ -1,8 +1,8 @@
 [Unit]
 Description=Compatibility alias for the Obsidience Surface input router
 Requires=dp4-edge-bridge.service
-After=dp4-edge-bridge.service graphical-session.target
-PartOf=graphical-session.target
+After=dp4-edge-bridge.service
+PartOf=dp4-edge-dbus.service
 
 [Service]
 Type=oneshot
@@ -10,4 +10,4 @@ ExecStart=/usr/bin/true
 RemainAfterExit=yes
 
 [Install]
-WantedBy=graphical-session.target
+WantedBy=main-compositor-ready.target

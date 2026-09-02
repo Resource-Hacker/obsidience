@@ -2,7 +2,7 @@
 Description=Obsidience Three.js knowledge desktop for Hyprland
 Requires=obsidience-shell-hyprland-host.service obsidience-harness-dev.service
 After=obsidience-shell-hyprland-host.service obsidience-harness-dev.service
-PartOf=obsidience-hyprland-session.target graphical-session.target
+PartOf=obsidience-hyprland-session.target
 StartLimitIntervalSec=30
 StartLimitBurst=3
 

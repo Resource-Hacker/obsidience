@@ -7,12 +7,12 @@ entrypoints = [
     "obsidience/shell/qml/shell.qml",
     "obsidience/shell/qml/surface.qml",
     "obsidience/shell/adapter/hyprland/hyprland.lua",
+    "obsidience/shell/session/greetd.toml",
     "obsidience/shell/session/obsidience-hyprland-login",
     "obsidience/shell/surfaces/knowledge/host.py",
     "obsidience/shell/surfaces/lock/host.py",
     "obsidience/shell/adapter/windows/host.py",
     "obsidience/shell/theme/apply.py",
-    "obsidience/shell/lock/wallpaper/contents/ui/main.qml",
 ]
 source_roots = ["obsidience/shell"]
 projections = ["obsidience/state/system/applications/obsidience"]

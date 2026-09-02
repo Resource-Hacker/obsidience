@@ -1,1 +1,1 @@
-"""Native KWin shell surfaces and read-only compositor observation."""
+"""Native Obsidience shell surfaces and compositor integration."""

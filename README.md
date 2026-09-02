@@ -37,26 +37,18 @@ retired Electron development helper beside either native shell.
 The normal development services are:
 
 - `obsidience-harness-dev.service` - API, interpreter, and real-time supervisor on `127.0.0.1:8765`
-- `obsidience-shell-host.service` - native Samsung Wayland shell host
-- `obsidience-shell-knowledge.service` - canonical Three.js knowledge desktop
+- `obsidience-hyprland-session.target` - live Hyprland session boundary
+- `obsidience-shell-hyprland-host.service` - native Samsung Wayland shell host
+- `obsidience-shell-hyprland-knowledge.service` - canonical Three.js knowledge desktop
+- `obsidience-shell-hyprland-notifications.service` - session-local notification owner
 - `obsidience-shell-surface-usbc.service` - native USB-C X11 Surface host
 - `obsidience-shell-surface-dp4.service` - native DP-4 X11 Surface host
 
-Those are the accepted KWin-session services still running on the workstation.
-The separate `hyprland-shell` branch adds an isolated Samsung-only canary:
-
-- `obsidience-hyprland-session.target` - Hyprland development-session boundary
-- `obsidience-shell-hyprland-host.service` - the same native Quickshell host
-- `obsidience-shell-hyprland-knowledge.service` - the same canonical graph host
-- `obsidience-shell-hyprland-notifications.service` - session-local mako owner
-
-The canary is not yet the login default and does not alter the accepted KWin
-layout or services.
-
-The read-only System Application record continues to describe that live KWin
-session until a physical Hyprland cutover succeeds. It is current-state
-inventory, not the desired-state declaration; this branch and
-`system-packages.toml` describe the target without falsifying the machine.
+greetd launches that Hyprland session directly. KWin, Plasma Shell, Plasma
+Login Manager, KScreenLocker, and SDDM are removed from the live installation;
+their Git archive and backup are rollback evidence only. The current session is
+an unlocked development build. Secure locking, a native Polkit UI, HDR,
+fullscreen VRR, and WoW remain explicit acceptance gates.
 
 Graph Settings → Display selects the one Surface that owns the whole live
 knowledge graph. The setting is global for this development slice; individual
@@ -141,7 +133,7 @@ the new Knowledge.
   subsystems, and `capabilities/` paths mirroring exact dotted Tool IDs
 - `obsidience/shell/` - the native Shell Module: Hyprland adapter and session,
   native Surfaces, panes, desktop graph, Reader, Terminal, and bounded
-  compositor integration; KWin code remains temporary migration rollback
+  compositor integration; former KWin source exists only in the archived branch
 - `obsidience/ui/` - the canonical React/Three.js knowledge-graph bundle used
   by the native graph-only WebKit surface
 - `obsidience/scripts/` - development and runtime entry points
@@ -181,22 +173,16 @@ PipeWire/WirePlumber, NetworkManager, and compositor protocols are reused.
 
 Every physical presentation endpoint is an Obsidience **Surface**. Every pane
 uses one generic placement contract: pane ID, Surface ID, local rectangle, open
-state, and z-order. The initial Hyprland canary admits only the Samsung
+state, and z-order. The live Hyprland session admits only the Samsung
 `HDMI-A-1` on the RTX 4080 at `5120x1440@240`, scale 1, 10-bit, with
-fullscreen-only VRR. USB-C and DP-4 stay on the accepted isolated Xorg recovery
-path until Samsung gaming and lock/session behavior pass physical acceptance.
+fullscreen-only VRR. USB-C and DP-4 stay on their isolated Xorg path until
+Samsung gaming and lock/session behavior pass physical acceptance.
 
 The same Quickshell registry, pane placement, graph, Reader, terminal, launcher,
-and theme run under both compositors during migration; there is no second UI.
-Canary state is namespaced so testing cannot overwrite the accepted KWin pane
-layout. Pointer dragging remains Surface-local, and later multi-Surface keyboard
-transfer remains one atomic placement revision owned by the primary shell.
-
-KWin, Plasma Login Manager, KScreenLocker, and KDE packages remain recoverable
-until Hyprland has working lock/PAM, Polkit, portals, crash recovery, HDR/VRR,
-and WoW acceptance. They are rollback, not the target architecture. Once those
-gates pass, obsolete KWin/Plasma/Openbox/Xorg paths are deleted instead of kept
-as a parallel deprecated system.
+and theme serve every Surface; there is no second UI. Hyprland state is
+namespaced while the development worktree is consolidated. Pointer dragging
+remains Surface-local, and multi-Surface keyboard transfer is one atomic
+placement revision owned by the primary shell.
 
 Obsidience is an ordinary directory backed by `/home`; `/var/lib/ai` is the
 Models storage location. `/home` and `/var/lib/ai` are separate Btrfs subvolume

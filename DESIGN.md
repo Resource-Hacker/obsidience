@@ -123,20 +123,18 @@ A function moves into Obsidience only when one real Module slice passes a
 bounded cutover with rollback. This direction never creates a fictional
 Capability or a second authority path.
 
-The first Hyprland slice is a separate Samsung-only UWSM canary that reuses the
-one native Quickshell pane registry and one canonical graph. It has an isolated
-state namespace and does not change the active login default. The accepted KWin
-session, Plasma Login Manager, KScreenLocker, side-display Xorg services, and
-KDE packages remain recovery state until the canary passes lock/PAM, Polkit,
-portal, crash-recovery, HDR/VRR, and WoW acceptance. They are migration input,
-not the target architecture, and may be deleted after their replacements pass.
-The Electron application remains archive-only and is never a parallel runtime
-owner.
+greetd launches the Samsung-only Hyprland UWSM session as the live default. It
+reuses the one native Quickshell pane registry and one canonical graph and has
+an isolated `obsidience-hyprland` state namespace. KWin, Plasma Shell, Plasma
+Login Manager, KScreenLocker, and SDDM are absent from the live installation;
+their Git archive and backup are evidence only. USB-C and DP-4 remain temporary
+isolated Xorg Surfaces. The Electron application remains archive-only and is
+never a parallel runtime owner.
 
-Desired architecture and observed state stay distinct. The names-only Shell
-package policy describes the additive target. The read-only System Application
-record continues to report the live KWin service and compositor until the
-Hyprland session is physically accepted and actually becomes current.
+Desired architecture and observed state stay distinct. The System Application
+record reports Hyprland as the live compositor. The current session is
+deliberately unlocked development state: secure locking, a native Polkit UI,
+HDR, fullscreen VRR, and WoW remain explicit acceptance gates.
 
 The native knowledge desktop is a Shell component rather than a pane or
 separate Module. One `graph_surface_id` inside the existing revisioned Surface
@@ -208,11 +206,11 @@ protocols are preferred.
 A **Surface** is a runtime presentation endpoint, not an Article kind, Tool,
 Capability, or synonym for a Wayland `wl_surface`. A Surface binds one physical
 display workspace to one render host and records backend, output identity,
-geometry, scale, capabilities, and adjacency. The first Hyprland canary admits
+geometry, scale, capabilities, and adjacency. The live Hyprland session admits
 only Samsung `HDMI-A-1` on the RTX 4080 at `5120x1440@240`, scale 1, 10-bit,
-with fullscreen-only VRR. USB-C and DP-4 retain their current isolated Xorg
-recovery path until Samsung acceptance passes; they are introduced to the
-Hyprland topology one measured output at a time.
+with fullscreen-only VRR. USB-C and DP-4 retain their current isolated Xorg path
+until Samsung acceptance passes; they are introduced to the Hyprland topology
+one measured output at a time.
 
 Every pane, without exception, has one generic `PanePlacement`:
 
@@ -256,12 +254,13 @@ application-native theme contracts such as Edge's Chromium policy. External
 applications remain native compositor clients and are never embedded,
 reparented, mirrored, or made dependent on the Shell host's lifetime.
 
-Session locking must retain one Linux/PAM authority. The first canary is
-explicitly unlocked development state and cannot become the default session.
-Production cutover requires Hyprlock or another accepted compositor lock,
-verified PAM behavior, one Polkit agent, privacy covers for every Surface,
-input quarantine before the prompt, and one successful-unlock event. The graph
-may decorate a lock surface but never handles credentials or decides unlock.
+Session locking must retain one Linux/PAM authority. The live default session
+is explicitly unlocked development state; greetd authenticates login but does
+not lock an active session. A secure release requires Hyprlock or another
+accepted compositor lock, verified PAM behavior, one Polkit agent, privacy
+covers for every Surface, input quarantine before the prompt, and one
+successful-unlock event. The graph may decorate a lock surface but never
+handles credentials or decides unlock.
 
 ```text
 obsidience/harness/

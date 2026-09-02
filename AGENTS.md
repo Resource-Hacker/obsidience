@@ -115,19 +115,18 @@ after a real implementation or outcome contract exists.
   Quickshell host -> panes, providers, widgets, and AI surfaces. Only the
   compositor adapter may consume Hyprland events or commands. No pane, widget,
   graph, or Harness subsystem may call the compositor directly.
-- The first Hyprland slice is the separate `Obsidience (Hyprland)` UWSM canary.
-  It targets only Samsung `HDMI-A-1` through the RTX 4080, reuses the one native
-  QML pane registry and one Three.js graph, and stores state under the isolated
-  `obsidience-hyprland` namespace. It is not the login default and initializes
-  its private lock byte as unlocked development state. Do not describe it as a
-  secure or accepted production session until lock/PAM, Polkit, portals, crash
-  recovery, HDR/VRR, and WoW acceptance pass physically.
-- The accepted KWin session, Plasma Login Manager, KScreenLocker, KDE packages,
-  and USB-C/DP-4 Xorg services remain recovery state during the canary. They are
-  migration input, not the target architecture. Do not remove them or change
-  `/etc/plasmalogin.conf` in this slice. After replacement adapters and services
-  pass, delete obsolete KWin/Plasma/Openbox/Xorg code instead of preserving a
-  second deprecated architecture.
+- greetd now launches the default `Obsidience (Hyprland)` UWSM session directly.
+  It targets Samsung `HDMI-A-1` through the RTX 4080, reuses the one native QML
+  pane registry and one Three.js graph, and stores state under the
+  `obsidience-hyprland` namespace. KWin, Plasma Shell, Plasma Login Manager,
+  KScreenLocker, and SDDM are removed from the live installation. Their Git
+  archive and backup are rollback evidence only, not an installed recovery
+  session.
+- This remains an unlocked development session. greetd authenticates a fresh
+  login but is not a screen locker; no secure lock authority is accepted yet.
+  Do not claim lock/PAM, Polkit UI, HDR, fullscreen VRR, or WoW acceptance until
+  each is implemented and physically verified. USB-C and DP-4 remain independent
+  Xorg Surfaces while their Hyprland replacements are developed.
 - Electron is disabled and retained only on `archive/electron-20260828`. The
   native Samsung and retained side hosts share one registry for Chat, Library,
   Tasks, Reviews, Reader, Knowledge, Source, Models, Hardware, Camera, Settings,
@@ -141,16 +140,17 @@ after a real implementation or outcome contract exists.
   local. When multiple Surfaces are active, `Meta+Shift+Arrow` creates one
   primary-shell placement revision to the nearest mapped Surface. No
   pane-specific bridge, held-pointer lease, or coordinator process is allowed.
-- The first canary does not start the USB-C or DP-4 hosts. Introduce those
-  outputs only after the Samsung gaming baseline passes, one measured Surface
-  at a time. One `graph_surface_id` selects the whole graph; per-Agent graph
-  placement remains deferred. Settings is one sectioned pane; Graph and
-  Workspace do not gain standalone bar buttons.
+- The Samsung is the sole Hyprland output. USB-C and DP-4 retain their isolated
+  Xorg render hosts and input bridge; do not add them to Hyprland until the
+  Samsung gaming baseline passes and each Surface is migrated deliberately.
+  One `graph_surface_id` selects the whole graph; per-Agent graph placement
+  remains deferred. Settings is one sectioned pane; Graph and Workspace do not
+  gain standalone bar buttons.
 - `obsidience/shell/system-packages.toml` is a names-only additive Arch package
   policy. Required groups describe the target shell; protected groups prevent
-  boot/graphics, KWin recovery, and workstation packages from being pruned.
-  Omission never authorizes removal, and observed versions remain evidence
-  rather than rolling-release policy.
+  boot/graphics and workstation packages from being pruned. Omission never
+  authorizes removal, and observed versions remain evidence rather than
+  rolling-release policy.
 
 Only these canonical kinds belong in accepted frontmatter: `knowledge`,
 `task`, `runbook`, `tool`, `skill`, and `agent`.
@@ -408,13 +408,15 @@ Tool bindings, generic hierarchy edges, and framework-specific vocabulary.
 
 ## Development workflow
 
-- Accepted live KWin root: `/home/wissenschafter/Projects/obsidience`.
-- Isolated Hyprland canary root:
+- Active Hyprland shell development root:
   `/home/wissenschafter/Projects/obsidience-hyprland`.
+- The harness and mutable vault temporarily remain rooted at
+  `/home/wissenschafter/Projects/obsidience` until the worktrees are consolidated;
+  do not let either API or Source claim KWin is still live.
 - Development harness: `obsidience-harness-dev.service` on `127.0.0.1:8765`.
-- Native UI: the current KWin hosts or the separately selected Hyprland
-  canary. `obsidience-ui-usbc-dev.service` is disabled Electron rollback and
-  must not be started as a parallel interface.
+- Native UI: the greetd-launched Hyprland host plus the isolated Xorg side
+  Surface hosts. `obsidience-ui-usbc-dev.service` is disabled Electron rollback
+  and must not be started as a parallel interface.
 - The UI is a thin projection of the live graph. It must not invent semantic
   kinds, static claim catalogs, trust rules, or a second scheduler.
 - `/api/graph.navigation` is the sole UI contract for Agent/Library card names,
@@ -444,11 +446,10 @@ Tool bindings, generic hierarchy edges, and framework-specific vocabulary.
   DP-4 is a passive mirror and must not constrain Obsidience's terminal size.
 
 After every project change, rebuild as needed and restart every affected live
-process so the owner can test the exact current state. A source-only Hyprland
-canary change must not restart the accepted KWin hosts; validate it statically,
-then restart it through a fresh canary login when that physical test is
-coordinated. Verify the API and the actual target Surface, not only command
-exit codes.
+process so the owner can test the exact current state. A compositor-config or
+session-boundary change requires a fresh greetd/Hyprland session; ordinary pane
+and service changes restart only their affected processes. Verify the API and
+the actual target Surface, not only command exit codes.
 
 ## Required validation
 
@@ -459,8 +460,8 @@ Before handoff:
 3. run `pnpm --dir obsidience/ui typecheck` and
    `pnpm --dir obsidience/ui build`;
 4. confirm Source integrity and the exact Tool-to-Skill-to-Capability pairing;
-5. restart affected live processes; for an inactive compositor canary, verify
-   its session and units and record the physical login test as pending;
+5. restart affected live processes and verify the greetd/Hyprland session and
+   its exact units;
 6. verify `/api/status`, `/api/graph`, `/api/tasks`, and the actual target
    Surface;
 7. ensure accepted graph text contains no stale framework architecture or Tool

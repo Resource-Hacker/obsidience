@@ -1,5 +1,0 @@
-#!/bin/sh
-
-export KWIN_DRM_NO_DIRECT_SCANOUT=1
-export QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1
-export XDG_SESSION_DESKTOP=obsidience-kwin

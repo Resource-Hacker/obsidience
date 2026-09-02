@@ -44,7 +44,7 @@ def layout() -> SurfaceLayout:
             "surfaces": [
                 {
                     "id": "samsung",
-                    "backend": "kwin-wayland",
+                    "backend": "hyprland-wayland",
                     "display": "wayland",
                     "pixel_width": 5120,
                     "pixel_height": 1440,
@@ -357,21 +357,21 @@ def test_dbus_main_keeps_the_well_known_name_owner(monkeypatch) -> None:
     bus_name = object()
     bus_name_factory = Mock(return_value=bus_name)
     bridge_factory = Mock()
-    projection_factory = Mock()
     loop = Mock()
+    write_lock_state = Mock()
 
     monkeypatch.setattr(dbus_bridge, "DBusGMainLoop", Mock())
     monkeypatch.setattr(dbus_bridge.dbus, "SessionBus", Mock(return_value=bus))
     monkeypatch.setattr(dbus_bridge.dbus.service, "BusName", bus_name_factory)
     monkeypatch.setattr(dbus_bridge, "SurfaceBridge", bridge_factory)
-    monkeypatch.setattr(dbus_bridge, "LockStateProjection", projection_factory)
+    monkeypatch.setattr(dbus_bridge, "write_lock_state", write_lock_state)
     monkeypatch.setattr(dbus_bridge.GLib, "MainLoop", Mock(return_value=loop))
 
     dbus_bridge.main()
 
     bus_name_factory.assert_called_once_with(dbus_bridge.BUS_NAME, bus=bus)
     bridge_factory.assert_called_once_with(bus_name, dbus_bridge.OBJECT_PATH)
-    projection_factory.assert_called_once_with(bus, bridge_factory.return_value)
+    write_lock_state.assert_called_once_with(False)
     loop.run.assert_called_once_with()
 
 
@@ -415,43 +415,6 @@ def test_dbus_pane_move_is_validated_and_bounded(monkeypatch, tmp_path: Path) ->
         timeout=1.5,
         check=False,
     )
-
-
-def test_dbus_lock_projection_is_atomic_and_routes_the_one_router(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    dbus_bridge = load_dbus_bridge()
-    lock_dir = tmp_path / "obsidience-shell"
-    lock_state = lock_dir / "lock-state"
-    monkeypatch.setattr(dbus_bridge, "LOCK_STATE_DIR", lock_dir)
-    monkeypatch.setattr(dbus_bridge, "LOCK_STATE", lock_state)
-    get_active = Mock(return_value=False)
-    monkeypatch.setattr(
-        dbus_bridge.dbus,
-        "Interface",
-        Mock(return_value=SimpleNamespace(GetActive=get_active)),
-    )
-    bus = SimpleNamespace(
-        add_signal_receiver=Mock(),
-        get_object=Mock(return_value=object()),
-    )
-    bridge = SimpleNamespace(_send=Mock(return_value=True))
-
-    projection = dbus_bridge.LockStateProjection(bus, bridge)
-
-    assert lock_state.read_text(encoding="utf-8") == "0\n"
-    assert lock_state.stat().st_mode & 0o777 == 0o600
-    assert bridge._send.call_count == 0
-    projection._about_to_lock()
-    assert lock_state.read_text(encoding="utf-8") == "1\n"
-    bridge._send.assert_called_once_with(dbus_bridge.DP4_FIFO, "lock")
-    projection._active_changed(False)
-    assert lock_state.read_text(encoding="utf-8") == "0\n"
-    assert bridge._send.call_args_list == [
-        ((dbus_bridge.DP4_FIFO, "lock"),),
-        ((dbus_bridge.DP4_FIFO, "unlock"),),
-    ]
 
 
 def test_locked_router_releases_once_rejects_entry_and_does_not_restore(

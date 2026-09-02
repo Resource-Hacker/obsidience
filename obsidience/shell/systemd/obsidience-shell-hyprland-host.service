@@ -1,7 +1,7 @@
 [Unit]
 Description=Native Obsidience shell host for Hyprland
-After=graphical-session.target obsidience-harness-dev.service
-PartOf=obsidience-hyprland-session.target graphical-session.target
+After=obsidience-harness-dev.service
+PartOf=obsidience-hyprland-session.target
 StartLimitIntervalSec=30
 StartLimitBurst=3
 

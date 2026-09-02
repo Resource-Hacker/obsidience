@@ -1,15 +1,17 @@
 [Unit]
 Description=Obsidience Surface application-window adapter
-Requires=main-compositor-ready.target obsidience-shell-host.service usb-monitor-xorg.service
-After=main-compositor-ready.target obsidience-shell-host.service usb-monitor-xorg.service
-PartOf=obsidience-shell-session.target graphical-session.target
+Requires=main-compositor-ready.target obsidience-shell-hyprland-host.service usb-monitor-xorg.service
+After=main-compositor-ready.target obsidience-shell-hyprland-host.service usb-monitor-xorg.service
+PartOf=obsidience-hyprland-session.target
 StartLimitIntervalSec=30
 StartLimitBurst=3
 
 [Service]
 Type=simple
-WorkingDirectory=/home/wissenschafter/Projects/obsidience
+WorkingDirectory=/home/wissenschafter/Projects/obsidience-hyprland
+Environment=PYTHONPATH=/home/wissenschafter/Projects/obsidience-hyprland
 Environment=PYTHONUNBUFFERED=1
+Environment=OBSIDIENCE_SHELL_STATE_NAMESPACE=obsidience-hyprland
 ExecStart=/usr/bin/python -m obsidience.shell.adapter.windows.host
 Restart=on-failure
 RestartSec=1

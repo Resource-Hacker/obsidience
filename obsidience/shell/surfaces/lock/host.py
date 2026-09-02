@@ -43,7 +43,7 @@ GRAPH_MODES = {"desktop-graph", "lock-graph"}
 
 
 def lock_active(path: Path = LOCK_STATE_PATH) -> bool:
-    """Fail closed unless KScreenLocker projects the exact unlocked value."""
+    """Fail closed unless Obsidience projects the exact unlocked value."""
 
     try:
         return path.read_bytes() not in (b"0", b"0\n")

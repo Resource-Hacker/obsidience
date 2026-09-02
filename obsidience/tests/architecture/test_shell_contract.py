@@ -6,9 +6,6 @@ import json
 import tomllib
 from pathlib import Path
 
-from obsidience.shell.adapter.kwin import BUS_NAME, parse_window_list
-
-
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SHELL_ROOT = PROJECT_ROOT / "obsidience" / "shell"
 
@@ -25,47 +22,19 @@ def test_shell_manifest_names_one_real_module() -> None:
             "obsidience/shell/qml/shell.qml",
             "obsidience/shell/qml/surface.qml",
             "obsidience/shell/adapter/hyprland/hyprland.lua",
+            "obsidience/shell/session/greetd.toml",
             "obsidience/shell/session/obsidience-hyprland-login",
             "obsidience/shell/surfaces/knowledge/host.py",
             "obsidience/shell/surfaces/lock/host.py",
             "obsidience/shell/adapter/windows/host.py",
             "obsidience/shell/theme/apply.py",
-            "obsidience/shell/lock/wallpaper/contents/ui/main.qml",
         ],
         "source_roots": ["obsidience/shell"],
         "projections": ["obsidience/state/system/applications/obsidience"],
         "system_package_manifest": "obsidience/shell/system-packages.toml",
     }
 
-
-def test_kwin_recovery_session_remains_intact_during_hyprland_canary() -> None:
-    target = (SHELL_ROOT / "systemd" / "obsidience-shell-session.target").read_text()
-    compositor = (SHELL_ROOT / "session" / "obsidience-shell-compositor").read_text()
-    host = (SHELL_ROOT / "systemd" / "obsidience-shell-host.service").read_text()
-    autostart_override = (
-        SHELL_ROOT
-        / "systemd"
-        / r"wayland-session-xdg-autostart@obsidience\x2dshell\x2dcompositor.target"
-    )
-    assert "main-compositor-ready.target" in target
-    assert "obsidience-shell-host.service" in target
-    assert "obsidience-shell-window-adapter.service" in target
-    assert "jarvis" not in target.lower()
-    assert "hermes" not in target.lower()
-    assert "plasmashell" not in target
-    assert "kwin_wayland" in compositor
-    assert "--xwayland" in compositor
-    assert "/usr/bin/quickshell" in host
-    assert "obsidience/shell/qml" in host
-    assert "QT_QPA_PLATFORM=wayland" in host
-    assert "LD_PRELOAD" not in host
-    assert "/usr/bin/python" not in host
-    assert "StartLimitBurst=3" in host
-    assert "DISPLAY=" not in host
-    assert autostart_override.is_file()
-
-
-def test_quickshell_canary_owns_only_the_samsung_surface() -> None:
+def test_quickshell_owns_only_the_samsung_surface() -> None:
     shell = (SHELL_ROOT / "qml" / "shell.qml").read_text()
     shell_api = (SHELL_ROOT / "qml" / "api" / "ShellApi.qml").read_text()
     stage = (SHELL_ROOT / "qml" / "surfaces" / "stage" / "Stage.qml").read_text()
@@ -121,10 +90,10 @@ def test_knowledge_graph_is_shell_owned_threejs_stage_content() -> None:
         / "app.py"
     ).read_text()
     service = (
-        SHELL_ROOT / "systemd" / "obsidience-shell-knowledge.service"
+        SHELL_ROOT / "systemd" / "obsidience-shell-hyprland-knowledge.service"
     ).read_text()
     target = (
-        SHELL_ROOT / "systemd" / "obsidience-shell-session.target"
+        SHELL_ROOT / "systemd" / "obsidience-hyprland-session.target"
     ).read_text()
     renderer_main = (
         PROJECT_ROOT / "obsidience" / "ui" / "src" / "renderer" / "src" / "main.tsx"
@@ -217,8 +186,8 @@ def test_knowledge_graph_is_shell_owned_threejs_stage_content() -> None:
     assert "WEBKIT_DMABUF_RENDERER_FORCE_SHM=1" in service
     assert "QT_QPA_PLATFORM" not in service
     assert "QSG_RHI_BACKEND" not in service
-    assert "PartOf=obsidience-shell-session.target" in service
-    assert "obsidience-shell-knowledge.service" in target
+    assert "PartOf=obsidience-hyprland-session.target" in service
+    assert "obsidience-shell-hyprland-knowledge.service" in target
     assert 'surface === "knowledge"' in renderer_main
     assert 'surface === "reader"' not in renderer_main
     assert "?surface=reader" not in renderer_main
@@ -252,10 +221,9 @@ def test_knowledge_graph_is_shell_owned_threejs_stage_content() -> None:
     fullscreen_state = (
         SHELL_ROOT / "qml" / "api" / "FullscreenState.qml"
     ).read_text()
-    edge_adapter = (
-        SHELL_ROOT / "adapter" / "kwin" / "surface_edges.js"
+    window_adapter = (
+        SHELL_ROOT / "adapter" / "windows" / "hyprland.py"
     ).read_text()
-    input_bridge = (SHELL_ROOT / "input" / "dbus_bridge.py").read_text()
     assert "property FullscreenState fullscreenState: FullscreenState {}" in samsung
     assert "knowledgeVisible: !lockState.active && !fullscreenState.active" in samsung
     assert "knowledgeVisible: root.knowledgeVisible" in samsung
@@ -265,11 +233,8 @@ def test_knowledge_graph_is_shell_owned_threejs_stage_content() -> None:
     assert "onFileChanged: stateFile.reload()" in fullscreen_state
     assert "onLoaded: root.reloadState()" in fullscreen_state
     assert 'active = stateFile.text().trim() === "1"' in fullscreen_state
-    assert "function reportFullscreen()" in edge_adapter
-    assert 'window.output.name === "HDMI-A-1"' in edge_adapter
-    assert '"ReportFullscreen"' in edge_adapter
-    assert "def ReportFullscreen(self, state: str)" in input_bridge
-    assert 'FULLSCREEN_STATE.write_text(value + "\\n"' in input_bridge
+    assert 'active.get("fullscreen", 0)' in window_adapter
+    assert '_FULLSCREEN_STATE.write_text("1\\n" if fullscreen else "0\\n"' in window_adapter
     assert "ShellCommandServer" not in isolated
     assert "WebSocketServer" in command_server
     assert 'host: "127.0.0.1"' in command_server
@@ -772,8 +737,8 @@ def test_window_state_and_activation_use_one_bounded_shell_transport() -> None:
     launcher = (
         SHELL_ROOT / "qml" / "workspace" / "PaneLauncher.qml"
     ).read_text()
-    observer = (
-        SHELL_ROOT / "adapter" / "kwin" / "observer.js"
+    hyprland = (
+        SHELL_ROOT / "adapter" / "windows" / "hyprland.py"
     ).read_text()
     host = (
         SHELL_ROOT / "adapter" / "windows" / "host.py"
@@ -788,10 +753,10 @@ def test_window_state_and_activation_use_one_bounded_shell_transport() -> None:
         SHELL_ROOT / "systemd" / "obsidience-shell-window-adapter.service"
     ).read_text()
     target = (
-        SHELL_ROOT / "systemd" / "obsidience-shell-session.target"
+        SHELL_ROOT / "systemd" / "obsidience-hyprland-session.target"
     ).read_text()
 
-    assert "KWinSurfaceWindows" in host
+    assert "HyprlandSurfaceWindows" in host
     assert '"type": "window.state.publish"' in model
     assert '"type": "application.state"' in server
     assert 'event.type === "application.state"' in launcher
@@ -801,9 +766,11 @@ def test_window_state_and_activation_use_one_bounded_shell_transport() -> None:
     assert '"surface_id": surfaceId' in launcher
     assert "windowStates[surfaceId]" in server
     assert "for (const surfaceId of Object.keys(windowStates))" in server
-    assert "activateWindow" not in observer
-    assert "closeWindow" not in observer
-    assert "/usr/bin/python -m obsidience.shell.adapter.windows.host" in service
+    assert '"dispatch", "focuswindow", f"address:{window_id}"' in hyprland
+    assert '"clients", "-j"' not in hyprland
+    assert 'self._json("clients")' in hyprland
+    assert ".socket2.sock" in hyprland
+    assert "-m obsidience.shell.adapter.windows.host" in service
     assert "obsidience-shell-window-adapter.service" in target
 
 
@@ -944,72 +911,24 @@ def test_graph_settings_live_in_one_sectioned_settings_pane_without_a_second_sto
     assert '"minWidth": 680, "minHeight": 440' in workspace
 
 
-def test_one_kscreenlocker_event_quarantines_and_covers_every_surface() -> None:
+def test_development_lock_projection_starts_unlocked_without_owning_authentication() -> None:
     shell = (SHELL_ROOT / "qml" / "shell.qml").read_text()
     isolated = (SHELL_ROOT / "qml" / "surface.qml").read_text()
     lock_state = (SHELL_ROOT / "qml" / "api" / "LockState.qml").read_text()
-    stage_content = (
-        SHELL_ROOT / "qml" / "surfaces" / "stage" / "StageContent.qml"
-    ).read_text()
-    x11_stage = (
-        SHELL_ROOT / "qml" / "surfaces" / "stage" / "X11Stage.qml"
-    ).read_text()
-    lock_graph = (SHELL_ROOT / "surfaces" / "lock" / "host.py").read_text()
-    workspace = (SHELL_ROOT / "qml" / "workspace" / "PaneWorkspace.qml").read_text()
-    canvas = (SHELL_ROOT / "qml" / "workspace" / "PaneCanvas.qml").read_text()
-    launcher = (SHELL_ROOT / "qml" / "workspace" / "PaneLauncher.qml").read_text()
-    wallpaper = (
-        SHELL_ROOT / "lock" / "wallpaper" / "contents" / "ui" / "main.qml"
-    ).read_text()
-    metadata = json.loads(
-        (SHELL_ROOT / "lock" / "wallpaper" / "metadata.json").read_text()
-    )
     dbus_bridge = (SHELL_ROOT / "input" / "dbus_bridge.py").read_text()
-    router = (SHELL_ROOT / "input" / "router.py").read_text()
-    bridge_unit = (SHELL_ROOT / "systemd" / "dp4-edge-dbus.service").read_text()
-    router_unit = (SHELL_ROOT / "systemd" / "dp4-edge-bridge.service").read_text()
+    initial = (SHELL_ROOT / "state" / "initial-unlocked-state").read_text()
 
     assert "property LockState lockState: LockState {}" in shell
     assert "property LockState lockState: LockState {}" in isolated
     assert "!lockState.active && !fullscreenState.active" in shell
     assert shell.count("locked: root.lockState.active") == 2
     assert isolated.count("locked: root.lockState.active") == 2
-    assert '"/obsidience-shell/lock-state"' in lock_state
     assert "property bool active: true" in lock_state
     assert 'active = stateFile.text().trim() !== "0"' in lock_state
-    assert "required property bool locked" in workspace
-    assert "visible: hasLocalPane && !locked" in canvas
-    assert "focusable: hasLocalPane && !locked" in canvas
-    assert "visible: !locked" in launcher
-    assert "visible: !content.locked" in stage_content
-    assert "aboveWindows: locked" in x11_stage
-    assert "mask: Region {}" in x11_stage
-    assert "QtWebEngine" not in x11_stage
-    assert "WebKit2.WebView" in lock_graph
-    assert "input_shape_combine_region(cairo.Region(), 0, 0)" in lock_graph
-    assert 'return "lock-graph" if selected else "lock-solid"' in lock_graph
-    assert 'return "desktop-graph" if selected else "hidden"' in lock_graph
-
-    assert metadata["KPackageStructure"] == "Plasma/Wallpaper"
-    assert metadata["KPlugin"]["Id"] == "org.obsidience.lockgraph"
-    assert "import QtWebEngine" in wallpaper
-    assert "WebEngineView" in wallpaper
-    assert "surface_id=samsung&lock=1" in wallpaper
-    assert "authenticator" not in wallpaper.lower()
-    assert "password" not in wallpaper.lower()
-
-    assert 'signal_name="AboutToLock"' in dbus_bridge
-    assert 'signal_name="ActiveChanged"' in dbus_bridge
-    assert "screen_saver.GetActive()" in dbus_bridge
-    assert "def lock(self)" in router
-    assert "def unlock(self)" in router
-    assert 'if command == "lock"' in router
-    assert 'if command == "unlock"' in router
-    assert "if self.locked:" in router
-    assert "BindsTo=dp4-edge-dbus.service" in router_unit
-    assert "After=dp4-edge-dbus.service" in router_unit
-    assert "ExecStartPost=/usr/bin/systemctl --user --no-block start dp4-edge-bridge.service" in bridge_unit
-    assert "ExecStopPost=/usr/bin/systemctl --user --no-block stop dp4-edge-bridge.service" in bridge_unit
+    assert initial == "0\n"
+    assert "write_lock_state(False)" in dbus_bridge
+    assert "org.freedesktop.ScreenSaver" not in dbus_bridge
+    assert not (SHELL_ROOT / "lock" / "wallpaper").exists()
 
 
 def test_pane_shortcut_move_is_atomic_and_has_one_owner_per_display_path() -> None:
@@ -1022,7 +941,9 @@ def test_pane_shortcut_move_is_atomic_and_has_one_owner_per_display_path() -> No
     canvas = (
         SHELL_ROOT / "qml" / "workspace" / "PaneCanvas.qml"
     ).read_text()
-    adapter = (SHELL_ROOT / "adapter" / "kwin" / "surface_edges.js").read_text()
+    compositor = (
+        SHELL_ROOT / "adapter" / "hyprland" / "hyprland.lua"
+    ).read_text()
     dbus_adapter = (SHELL_ROOT / "input" / "dbus_bridge.py").read_text()
     move_client = (SHELL_ROOT / "input" / "move_pane.py").read_text()
     input_router = (SHELL_ROOT / "input" / "router.py").read_text()
@@ -1046,12 +967,11 @@ def test_pane_shortcut_move_is_atomic_and_has_one_owner_per_display_path() -> No
     assert 'subprotocols=[SUBPROTOCOL]' in move_client
     assert "def MovePane(self, surface_id: str, direction: str)" in dbus_adapter
     assert "PANE_MOVE_CLIENT" in dbus_adapter
-    assert adapter.count("registerShortcut(") == 4
-    assert '"Meta+Shift+Left"' in adapter
-    assert '"Meta+Shift+Right"' in adapter
-    assert '"Meta+Shift+Up"' in adapter
-    assert '"Meta+Shift+Down"' in adapter
-    assert '"MovePane"' in adapter
+    assert compositor.count('hl.bind("SUPER + SHIFT +') == 5
+    assert "move_pane.py samsung left" in compositor
+    assert "move_pane.py samsung right" in compositor
+    assert "move_pane.py samsung top" in compositor
+    assert "move_pane.py samsung bottom" in compositor
     assert "PANE_MOVE_DIRECTIONS" in input_router
     assert "consumed_pane_move_keys" in input_router
     assert "self.pane_mover(surface_id, direction)" in input_router
@@ -1128,46 +1048,20 @@ def test_reader_explorers_share_one_native_dock_layout() -> None:
     assert 'title: "Knowledge"' in knowledge
 
 
-def test_surface_edge_adapter_is_execution_attested_and_cache_safe() -> None:
-    adapter = (SHELL_ROOT / "adapter" / "kwin" / "surface_edges.js").read_text()
-    loader = (SHELL_ROOT / "adapter" / "kwin" / "load_surface_edges.sh").read_text()
-    dbus_adapter = (SHELL_ROOT / "input" / "dbus_bridge.py").read_text()
-
-    assert "registerScreenEdge(KWin.ElectricBottom, enterFromBottomEdge)" in adapter
-    assert "workspace.cursorPosChanged.connect(trackBottomEdge)" in adapter
-    assert adapter.count("registerShortcut(") == 4
-    assert '"MovePane"' in adapter
-    assert '"AdapterReady"' in adapter
-    assert "assert(edgeRegistered" in adapter
-    assert 'if [[ "${1:-}" == "--check" ]]' in loader
-    assert 'generation="$(sha256sum "$script" | cut -c1-12)"' in loader
-    assert 'script="${adapter_dir}/surface_edges.js"' in loader
-    assert ".local/share/kwin/scripts" not in loader
-    assert "for attempt in 1 2" in loader
-    assert "failed_names=()" in loader
-    assert "did not execute its readiness handshake" in loader
-    assert "def AdapterReady(self, token: str)" in dbus_adapter
-    assert "def MovePane(self, surface_id: str, direction: str)" in dbus_adapter
-
-
 def test_login_entry_installs_as_a_greeter_readable_file() -> None:
-    desktop = (SHELL_ROOT / "session" / "obsidience.desktop").read_text()
-    installer = (SHELL_ROOT / "session" / "install-session").read_text()
-    assert "TryExec=" not in desktop
+    desktop = (SHELL_ROOT / "session" / "obsidience-hyprland.desktop").read_text()
+    greetd = (SHELL_ROOT / "session" / "greetd.toml").read_text()
+    installer = (SHELL_ROOT / "session" / "install-hyprland-session").read_text()
+    assert "TryExec=/home/wissenschafter/Projects/obsidience-hyprland/" in desktop
     assert "session_dir=/usr/local/share/wayland-sessions" in installer
     assert 'install -o root -g root -m 0644 "$session_source" "$session_target"' in installer
-    assert "chmod" not in installer
-    assert "/home/wissenschafter" not in installer
+    assert 'install -o root -g root -m 0600 "$greetd_source" "$greetd_target"' in installer
+    assert "[default_session]" in greetd
+    assert "obsidience-hyprland-login" in greetd
 
 
-def test_noctalia_boundary_is_pinned_and_visual_neutral() -> None:
+def test_live_shell_runtime_dependencies_are_pinned_without_kde_shell_entries() -> None:
     manifest = json.loads((SHELL_ROOT / "REUSE_MANIFEST.json").read_text())
-    noctalia = manifest["upstreams"][0]
-    assert noctalia["commit"] == "74e6c2790dd8f39bf496e90e479a9ae370846eed"
-    assert noctalia["license"] == "MIT"
-    assert len(noctalia["selected_sources"]) == 4
-    excluded = noctalia["adaptation"].lower()
-    assert all(word in excluded for word in ("renderer", "themes", "assets", "plugins"))
     packages = {
         upstream["name"]: upstream.get("package")
         for upstream in manifest["upstreams"]
@@ -1178,21 +1072,9 @@ def test_noctalia_boundary_is_pinned_and_visual_neutral() -> None:
     assert packages["PyGObject"] == "python-gobject 3.56.3-1"
     assert packages["QMLTermWidget"] == "qmltermwidget 2.0.0.git1-1.1"
     assert packages["Qt WebSockets"] == "qt6-websockets 6.11.1-1.1"
-    assert packages["KScreenLocker"] == "kscreenlocker 6.6.5-1.1"
-    assert packages["Qt WebEngine"] == "qt6-webengine 6.11.1-2"
-    observer = (SHELL_ROOT / "adapter" / "kwin" / "observer.js").read_text()
-    assert BUS_NAME in observer
-    assert "activateWindow" not in observer
-    assert "closeWindow" not in observer
-    assert "MoveMouse" not in observer
-
-
-def test_window_feed_is_bounded_and_rejects_malformed_rows() -> None:
-    field = "\x1e"
-    record = field.join(("id", "app", "Title", "desktop", "HDMI-A-1"))
-    assert parse_window_list(record)[0].title == "Title"
-    assert parse_window_list(field.join(("bad", "row"))) == ()
-    assert parse_window_list("x" * 128_001) == ()
+    assert "KScreenLocker" not in packages
+    assert "Qt WebEngine" not in packages
+    assert "KWin MCP" not in packages
 
 
 def test_every_pane_uses_the_generic_surface_placement_contract() -> None:
@@ -1239,7 +1121,9 @@ def test_native_terminal_is_one_tmux_view_inside_the_generic_pane() -> None:
     workspace = (
         SHELL_ROOT / "qml" / "workspace" / "PaneWorkspace.qml"
     ).read_text()
-    host = (SHELL_ROOT / "systemd" / "obsidience-shell-host.service").read_text()
+    host = (
+        SHELL_ROOT / "systemd" / "obsidience-shell-hyprland-host.service"
+    ).read_text()
 
     assert "import QMLTermWidget 2.0" in terminal
     assert "import QtWebSockets" in terminal
@@ -1257,7 +1141,7 @@ def test_native_terminal_is_one_tmux_view_inside_the_generic_pane() -> None:
     assert "fittedLineSpacing" not in terminal
     assert "width / 62" not in terminal
     assert "height / 30" not in terminal
-    assert 'shellProgram: "/home/wissenschafter/Projects/obsidience/' in terminal
+    assert 'shellProgram: "/home/wissenschafter/Projects/obsidience-hyprland/' in terminal
     assert 'url: "ws://127.0.0.1:8765/ws/trace"' in terminal
     assert "slice(-500)" in terminal
     assert '"snapshot"' in terminal

@@ -18,6 +18,8 @@ host = [
     "tmux",
 ]
 session = [
+    "greetd",
+    "greetd-agreety",
     "grim",
     "hypridle",
     "hyprland",
@@ -43,7 +45,6 @@ shell = [
     "qt6-multimedia",
     "qt6-svg",
     "qt6-wayland",
-    "qt6-webengine",
     "qt6-websockets",
     "quickshell",
     "ttf-jetbrains-mono",
@@ -98,20 +99,6 @@ boot_graphics = [
     "nvidia-utils",
     "opencl-nvidia",
     "vulkan-radeon",
-]
-kwin_rollback = [
-    "kconfig",
-    "kglobalacceld",
-    "kscreen",
-    "kscreenlocker",
-    "kwin",
-    "plasma-desktop",
-    "plasma-login-manager",
-    "plasma-workspace",
-    "polkit-kde-agent",
-    "powerdevil",
-    "qt6-tools",
-    "xdg-desktop-portal-kde",
 ]
 workstation = [
     "gamemode",

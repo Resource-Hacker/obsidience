@@ -1,7 +1,7 @@
 {
   "name": "obsidience-ui",
   "version": "0.1.0",
-  "description": "Obsidience modular plasmashell replacement and graph-native local-agent harness UI",
+  "description": "Obsidience modular Hyprland shell and graph-native local-agent harness UI",
   "private": true,
   "main": "./out/main/index.js",
   "scripts": {

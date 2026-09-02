@@ -144,7 +144,7 @@ Rectangle {
                 id: terminalSession
 
                 initialWorkingDirectory: "/home/wissenschafter"
-                shellProgram: "/home/wissenschafter/Projects/obsidience/obsidience/shell/qml/panes/terminal/attach-shared-tmux"
+                shellProgram: "/home/wissenschafter/Projects/obsidience-hyprland/obsidience/shell/qml/panes/terminal/attach-shared-tmux"
                 onFinished: root.terminalConnected = false
             }
 

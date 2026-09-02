@@ -10,6 +10,8 @@ session_dir=/usr/local/share/wayland-sessions
 session_target="$session_dir/obsidience-hyprland.desktop"
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 session_source="$script_dir/obsidience-hyprland.desktop"
+greetd_source="$script_dir/greetd.toml"
+greetd_target=/etc/greetd/config.toml
 
 if [[ -L "$session_target" || ( -e "$session_target" && ! -f "$session_target" ) ]]; then
     printf 'refusing to replace non-file session entry: %s\n' "$session_target" >&2
@@ -18,4 +20,6 @@ fi
 
 install -d -o root -g root -m 0755 "$session_dir"
 install -o root -g root -m 0644 "$session_source" "$session_target"
+install -d -o root -g root -m 0755 /etc/greetd
+install -o root -g root -m 0600 "$greetd_source" "$greetd_target"
 desktop-file-validate "$session_target"

@@ -107,7 +107,7 @@ def test_each_side_surface_has_one_lock_presenter_unit() -> None:
         ),
     }
     host_path = (
-        "/home/wissenschafter/Projects/obsidience/"
+        "/home/wissenschafter/Projects/obsidience-hyprland/"
         "obsidience/shell/surfaces/lock/host.py"
     )
 

@@ -18,7 +18,7 @@ QtObject {
     property bool active: true
 
     function reloadState() {
-        // Missing or incomplete state fails closed until KScreenLocker is known.
+        // Missing or incomplete state fails closed until a shell authority writes it.
         active = stateFile.text().trim() !== "0"
     }
 

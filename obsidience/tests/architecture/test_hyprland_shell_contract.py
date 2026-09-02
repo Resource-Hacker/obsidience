@@ -1,4 +1,4 @@
-"""Static contract for the isolated Hyprland shell slice."""
+"""Static contract for the live Hyprland shell slice."""
 
 from __future__ import annotations
 
@@ -23,9 +23,7 @@ def test_system_package_policy_is_small_additive_and_versionless() -> None:
     assert set(policy["required"]) == {
         "host", "session", "shell", "services", "compatibility"
     }
-    assert set(policy["protected"]) == {
-        "boot_graphics", "kwin_rollback", "workstation"
-    }
+    assert set(policy["protected"]) == {"boot_graphics", "workstation"}
 
     package_names: list[str] = []
     for group in (policy["required"], policy["protected"]):
@@ -35,10 +33,13 @@ def test_system_package_policy_is_small_additive_and_versionless() -> None:
             assert all(re.fullmatch(r"[a-z0-9@._+\-]+", name) for name in packages)
             package_names.extend(packages)
     assert len(package_names) == len(set(package_names))
+    assert "greetd" in policy["required"]["session"]
+    assert "greetd-agreety" in policy["required"]["session"]
     assert "hyprland" in policy["required"]["session"]
     assert "quickshell" in policy["required"]["shell"]
-    assert "kwin" in policy["protected"]["kwin_rollback"]
-    assert "plasma-workspace" in policy["protected"]["kwin_rollback"]
+    assert not {
+        "kwin", "plasma-workspace", "plasma-login-manager", "kscreenlocker"
+    }.intersection(package_names)
 
 
 def test_hyprland_config_is_one_samsung_only_compositor_contract() -> None:
@@ -54,7 +55,8 @@ def test_hyprland_config_is_one_samsung_only_compositor_contract() -> None:
     assert "direct_scanout = 0" in config
     assert "allow_tearing = false" in config
     assert 'hl.on("hyprland.start"' in config
-    assert "uwsm finalize && systemctl --user start" in config
+    assert "systemctl --user start --no-block" in config
+    assert "uwsm finalize" not in config
     assert "obsidience-hyprland-session.target" in config
     assert 'hl.bind("SUPER + RETURN"' in config
     assert 'hl.bind("SUPER + SHIFT + ESCAPE"' in config
@@ -62,14 +64,13 @@ def test_hyprland_config_is_one_samsung_only_compositor_contract() -> None:
     assert "plasmashell" not in config.casefold()
 
 
-def test_hyprland_session_coexists_with_the_kde_recovery_session() -> None:
+def test_greetd_launches_the_one_hyprland_session() -> None:
     session = SHELL_ROOT / "session"
     login = (session / "obsidience-hyprland-login").read_text(encoding="utf-8")
     desktop = (session / "obsidience-hyprland.desktop").read_text(encoding="utf-8")
     installer = (session / "install-hyprland-session").read_text(encoding="utf-8")
+    greetd = (session / "greetd.toml").read_text(encoding="utf-8")
 
-    assert (session / "obsidience.desktop").is_file()
-    assert (session / "obsidience-shell-login").is_file()
     assert (session / "obsidience-hyprland-login").stat().st_mode & 0o111
     assert (session / "install-hyprland-session").stat().st_mode & 0o111
     assert "/dev/dri/by-path/pci-0000:01:00.0-card" in login
@@ -83,6 +84,10 @@ def test_hyprland_session_coexists_with_the_kde_recovery_session() -> None:
     assert "obsidience-hyprland-login" in desktop
     assert "obsidience-hyprland.desktop" in installer
     assert "/usr/local/share/wayland-sessions" in installer
+    assert "/etc/greetd/config.toml" in installer
+    assert "-m 0600" in installer
+    assert "[initial_session]" in greetd
+    assert "obsidience-hyprland-login" in greetd
     assert "plasmalogin.conf" not in installer
 
 
@@ -101,6 +106,10 @@ def test_hyprland_services_reuse_one_shell_and_one_graph() -> None:
     assert "main-compositor-ready.target" not in combined
     assert "org.kde.KWin" not in combined
     assert "plasma-" not in combined
+    assert "graphical-session.target" not in combined
+    assert "After=wayland-session@Hyprland.target" in target
+    assert "BindsTo=wayland-session@Hyprland.target" in target
+    assert "PartOf=wayland-session@Hyprland.target" in target
     assert "obsidience-shell-surface-usbc.service" not in target
     assert "obsidience-shell-surface-dp4.service" not in target
     assert "obsidience-shell-hyprland-host.service" in target
@@ -115,7 +124,7 @@ def test_hyprland_services_reuse_one_shell_and_one_graph() -> None:
     assert "ExecStart=/usr/bin/mako" in notifications
 
 
-def test_hyprland_canary_state_is_isolated_without_a_second_ui() -> None:
+def test_hyprland_state_is_isolated_without_a_second_ui() -> None:
     qml = SHELL_ROOT / "qml"
     for path in (
         qml / "api" / "SurfaceLayout.qml",

@@ -37,6 +37,9 @@ hl.config({
         force_default_wallpaper = 0,
         focus_on_activate = true,
     },
+    ecosystem = {
+        no_donation_nag = true,
+    },
     render = {
         direct_scanout = 0,
     },
@@ -47,9 +50,13 @@ hl.config({
 })
 
 hl.on("hyprland.start", function()
-    hl.exec_cmd("uwsm finalize && systemctl --user start obsidience-hyprland-session.target")
+    hl.exec_cmd("systemctl --user start --no-block obsidience-hyprland-session.target")
 end)
 
 hl.bind("SUPER + RETURN", hl.dsp.exec_cmd("uwsm app -- kitty"))
 hl.bind("SUPER + Q", hl.dsp.window.close())
 hl.bind("SUPER + SHIFT + ESCAPE", hl.dsp.exit())
+hl.bind("SUPER + SHIFT + LEFT", hl.dsp.exec_cmd("/usr/bin/python /home/wissenschafter/Projects/obsidience-hyprland/obsidience/shell/input/move_pane.py samsung left"))
+hl.bind("SUPER + SHIFT + RIGHT", hl.dsp.exec_cmd("/usr/bin/python /home/wissenschafter/Projects/obsidience-hyprland/obsidience/shell/input/move_pane.py samsung right"))
+hl.bind("SUPER + SHIFT + UP", hl.dsp.exec_cmd("/usr/bin/python /home/wissenschafter/Projects/obsidience-hyprland/obsidience/shell/input/move_pane.py samsung top"))
+hl.bind("SUPER + SHIFT + DOWN", hl.dsp.exec_cmd("/usr/bin/python /home/wissenschafter/Projects/obsidience-hyprland/obsidience/shell/input/move_pane.py samsung bottom"))

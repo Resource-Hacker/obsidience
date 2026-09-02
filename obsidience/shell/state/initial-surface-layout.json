@@ -7,7 +7,7 @@
     {
       "id": "samsung",
       "label": "Samsung G95SC",
-      "backend": "kwin-wayland",
+      "backend": "hyprland-wayland",
       "display": "wayland",
       "output": "HDMI-A-1",
       "x_screen": null,

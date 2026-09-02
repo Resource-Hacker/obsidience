@@ -1,9 +1,10 @@
 [Unit]
 Description=Obsidience Hyprland development session
-Requires=graphical-session.target obsidience-shell-hyprland-host.service
-After=graphical-session.target
+Requires=obsidience-shell-hyprland-host.service
+After=wayland-session@Hyprland.target
+BindsTo=wayland-session@Hyprland.target
+PartOf=wayland-session@Hyprland.target
 Wants=obsidience-harness-dev.service
 Wants=obsidience-shell-hyprland-knowledge.service
 Wants=obsidience-shell-hyprland-notifications.service
-BindsTo=graphical-session.target
-PartOf=graphical-session.target
+Wants=obsidience-shell-window-adapter.service

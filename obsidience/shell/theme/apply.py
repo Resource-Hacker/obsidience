@@ -1,6 +1,6 @@
 """Project the Obsidience palette into native application chrome.
 
-Applications remain ordinary KWin/Openbox clients.  This module only writes
+Applications remain ordinary Hyprland/Openbox clients.  This module only writes
 supported theme surfaces; it never embeds, reparents, launches, or sizes an
 application window.
 """
@@ -255,37 +255,12 @@ def _install_edge_policy(content: str) -> None:
 
 
 def apply(theme: dict) -> None:
-    colors = theme["colors"]
     metrics = theme["metrics"]
     _atomic_write(OPENBOX_THEME_PATH, render_openbox_theme(theme))
     for path in OPENBOX_CONFIGS:
         _configure_openbox(path, metrics["title_font"])
 
-    kwin_colors = {
-        "activeBackground": opaque(colors["surface"]),
-        "activeBlend": opaque(colors["accent"]),
-        "activeForeground": opaque(colors["text"]),
-        "inactiveBackground": opaque(colors["inactive_surface"]),
-        "inactiveBlend": opaque(colors["inactive_border"]),
-        "inactiveForeground": opaque(colors["inactive_text"]),
-    }
-    for key, value in kwin_colors.items():
-        red, green, blue = (int(value[index : index + 2], 16) for index in (1, 3, 5))
-        _run(
-            [
-                "/usr/bin/kwriteconfig6",
-                "--file",
-                "kdeglobals",
-                "--group",
-                "WM",
-                "--key",
-                key,
-                f"{red},{green},{blue}",
-            ]
-        )
-
     _install_edge_policy(render_edge_policy(theme))
-    _run(["/usr/bin/qdbus6", "org.kde.KWin", "/KWin", "reconfigure"])
     for display in (":2.0", ":2.1"):
         _run(
             ["/usr/bin/openbox", "--reconfigure"],

@@ -53,7 +53,7 @@ intentionally small:
 - only the Samsung `HDMI-A-1` is admitted through the RTX 4080 DRM device;
 - mode is `5120x1440@240`, scale 1, 10-bit, fullscreen-only VRR;
 - direct scanout and tearing stay disabled for the first measured gaming
-  canary;
+  acceptance;
 - Obsidience starts through one session target;
 - `Super+Return` opens the independent terminal;
 - `Super+Shift+Escape` exits to the greeter.
@@ -63,7 +63,7 @@ Shell API, panes, graph, and Harness remain compositor-neutral. The eventual
 window provider will translate Hyprland state into the existing bounded window
 model rather than adding compositor calls to the bar or panes.
 
-## Development canary
+## Live development session
 
 `Obsidience (Hyprland)` is a separate UWSM session. Its services are:
 
@@ -72,28 +72,17 @@ model rather than adding compositor calls to the bar or panes.
 - `obsidience-shell-hyprland-knowledge.service`;
 - `obsidience-shell-hyprland-notifications.service`.
 
-The canary points at the `obsidience-hyprland` worktree and uses the isolated
-state namespace `obsidience-hyprland`. It does not overwrite the accepted KWin
-pane layout. Primary-only mode places pane defaults on Samsung so the existing
-USB-C defaults do not make a one-output canary appear empty.
+The live session points at the `obsidience-hyprland` worktree and uses the
+state namespace `obsidience-hyprland`. Primary-only mode places pane defaults
+on Samsung so the existing
+USB-C defaults do not make a one-output session appear empty.
 
-The canary is not yet the login default. The active KWin session, KDE packages,
-KScreenLocker, and side-display services remain recovery state until a physical
-Hyprland login passes. The canary deliberately initializes its private lock
-byte as unlocked; it is therefore a development session, not the final secure
-desktop. Hyprlock, PAM, idle behavior, Polkit, portals, crash recovery, and
-Samsung gaming acceptance are explicit later gates.
-
-The System Application record intentionally continues to report the live KWin
-session during this phase. It changes only after a successful physical cutover;
-the canary branch and additive package policy describe desired state without
-rewriting observed machine truth.
-
-The current KWin and X11 implementation stays in the branch only as migration
-input and rollback until those gates pass. It is not the target architecture.
-After replacement adapters and lock/session services are accepted, obsolete
-KWin, Plasma, Openbox, and isolated-Xorg source can be deleted instead of
-deprecated in parallel.
+greetd launches this session as the default. KWin, Plasma Shell, Plasma Login
+Manager, KScreenLocker, and SDDM are removed from the live installation. The
+session deliberately initializes its private lock byte as unlocked; it is a
+development desktop, not a secure lock implementation. Secure locking, a
+native Polkit UI, HDR, fullscreen VRR, and Samsung WoW behavior remain explicit
+acceptance gates. USB-C and DP-4 remain temporary isolated Xorg Surfaces.
 
 ## Surface contract
 
@@ -105,7 +94,7 @@ pane_id + surface_id + local_rect + open + z_order
 ```
 
 The existing three-Surface data model remains readable during migration.
-The first Hyprland canary renders only Samsung; USB-C and DP-4 are introduced
+Hyprland renders only Samsung; USB-C and DP-4 are introduced
 only after the Samsung VRR/HDR/WoW baseline is measured. No pane-specific
 display bridge is permitted. Pointer dragging stays local to one Surface and
 keyboard transfer remains one atomic placement revision when multiple Surfaces
@@ -116,8 +105,8 @@ are active.
 `system-packages.toml` is the names-only Arch package contract for this Module.
 It is additive: a missing name means "not managed here," never "remove it."
 The required groups describe the target Hyprland shell; protected groups mark
-the current boot/graphics, KWin recovery, and gaming packages that no cleanup
-may prune during migration. Exact observed versions and upstream provenance
+the current boot/graphics and gaming packages that no cleanup may prune. Exact
+observed versions and upstream provenance
 remain evidence in `REUSE_MANIFEST.json`, not rolling-release policy.
 
 The package manifest is separate from the Applications pane and from any future
@@ -126,7 +115,7 @@ removal by itself.
 
 ## Verification
 
-Before a live canary:
+Before a live session change:
 
 ```sh
 Hyprland --verify-config --config obsidience/shell/adapter/hyprland/hyprland.lua
@@ -136,8 +125,8 @@ systemd-analyze --user verify obsidience/shell/systemd/*hyprland*
 
 Live acceptance requires the exact Samsung geometry and GPU, one Hyprland
 process, one shell host, one graph host, healthy Harness API, usable tmux
-recovery, pane interaction, launcher behavior, and an explicit return to the
-preserved KWin session. KDE removal is outside this slice.
+recovery, pane interaction, and launcher behavior. Secure locking, HDR,
+fullscreen VRR, and WoW are separate physical gates.
 
 Obsidience borrows only architecture lessons and reviewed plumbing from
 upstream projects. Omarchy's single warm Quickshell host and modular package

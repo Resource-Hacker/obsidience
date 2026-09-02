@@ -94,14 +94,20 @@ def test_application_inventory_distinguishes_shell_from_external_browser(
     applications = inventory.application_snapshot()
 
     assert applications["obsidience"]["role"] == "desktop-shell"
-    assert applications["obsidience"]["replacement_target"] == "plasmashell"
+    assert applications["obsidience"]["compositor_boundary"] == "Hyprland"
+    assert "replacement_target" not in applications["obsidience"]
     assert applications["obsidience"]["service_state"] == "active"
-    assert applications["obsidience"]["service"] == "obsidience-shell-host.service"
+    assert applications["obsidience"]["service"] == (
+        "obsidience-shell-hyprland-host.service"
+    )
     assert applications["obsidience"]["components"] == {
-        "shell": "obsidience-shell-host.service",
+        "session": "obsidience-hyprland-session.target",
+        "shell": "obsidience-shell-hyprland-host.service",
+        "knowledge": "obsidience-shell-hyprland-knowledge.service",
+        "notifications": "obsidience-shell-hyprland-notifications.service",
         "surface_usb_c": "obsidience-shell-surface-usbc.service",
+        "surface_dp4": "obsidience-shell-surface-dp4.service",
         "harness": "obsidience-harness-dev.service",
-        "development_ui": "obsidience-ui-usbc-dev.service",
     }
     assert applications["web-browser"]["integrated"] is False
     assert applications["web-browser"]["default_desktop_entry"] == "browser.desktop"

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from obsidience.harness.host import inventory
 from obsidience.harness.knowledge import source
 
 
@@ -93,6 +94,28 @@ def test_application_and_system_descriptors_have_real_collectors() -> None:
             "obsidience.harness.host.inventory.application_snapshot"
         )
         assert payload["live_data_endpoint"] == "/api/system"
+
+
+def test_obsidience_application_descriptor_matches_live_inventory(monkeypatch) -> None:
+    monkeypatch.setattr(
+        inventory,
+        "_command_value",
+        lambda command: "active" if command[0] == "systemctl" else "browser.desktop",
+    )
+    descriptor = json.loads(
+        (
+            PROJECT_ROOT
+            / "obsidience/state/system/applications/obsidience/application.json"
+        ).read_text(encoding="utf-8")
+    )
+    live = inventory.application_snapshot()["obsidience"]
+    for field in ("id", "role", "state", "compositor_boundary", "service"):
+        assert descriptor[field] == live[field]
+    assert {
+        key: value
+        for key, value in descriptor["components"].items()
+        if key != "software_management"
+    } == live["components"]
 
     for key in (
         "obsidience/state/system/system.json",
