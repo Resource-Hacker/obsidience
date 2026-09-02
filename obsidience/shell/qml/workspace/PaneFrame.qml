@@ -19,6 +19,20 @@ Item {
     signal resizeFinished(bool moved)
     signal closeRequested()
 
+    RectangularShadow {
+        anchors.fill: frame
+        offset: Qt.vector2d(0, 0)
+        blur: 5
+        spread: 0
+        color: Qt.rgba(
+            root.theme.shadow.r,
+            root.theme.shadow.g,
+            root.theme.shadow.b,
+            0.08
+        )
+        radius: root.theme.cornerRadius
+    }
+
     Rectangle {
         id: frame
 
@@ -28,15 +42,6 @@ Item {
         border.width: root.theme.borderWidth
         border.color: root.theme.accent
         clip: true
-
-        layer.enabled: true
-        layer.effect: MultiEffect {
-            shadowEnabled: true
-            shadowColor: root.theme.shadow
-            shadowOpacity: 0.08
-            shadowBlur: 0.75
-            shadowScale: 1.0
-        }
 
         Rectangle {
             id: titleBar

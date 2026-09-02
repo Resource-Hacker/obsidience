@@ -585,8 +585,14 @@ def test_one_shell_host_shares_displays_pane_and_surface_layout() -> None:
     assert "theme: root.shellApi.theme" in pane
     assert "color: root.theme.surface" in frame
     assert "border.color: root.theme.accent" in frame
-    assert "shadowColor: root.theme.shadow" in frame
-    assert "shadowOpacity: 0.08" in frame
+    assert "RectangularShadow {" in frame
+    assert "blur: 5" in frame
+    assert "root.theme.shadow.r" in frame
+    assert "root.theme.shadow.g" in frame
+    assert "root.theme.shadow.b" in frame
+    assert "0.08" in frame
+    assert "Qt5Compat.GraphicalEffects" not in frame
+    assert "layer.effect: MultiEffect" not in frame
     assert "height: root.theme.titleHeight" in frame
     assert "color: root.theme.separator" in frame
     assert '"frame":' not in workspace
