@@ -59,6 +59,59 @@ def test_active_pane_actions_share_one_typed_client(
     ]
 
 
+def test_close_uses_the_active_qml_pane_first(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    socket = FakeSocket("pane.dismissed")
+    monkeypatch.setattr(move_pane, "connect", lambda *_args, **_kwargs: socket)
+
+    assert move_pane.apply_active_pane_action("samsung", "close") is True
+    assert socket.sent == [
+        {
+            "schema": "obsidience.shell.command.v1",
+            "type": "pane.dismiss_active",
+            "source_surface_id": "samsung",
+        }
+    ]
+
+
+def test_close_falls_through_to_the_exact_native_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    socket = FakeSocket(
+        [
+            {
+                "schema": "obsidience.shell.event.v1",
+                "type": "pane.dismiss.failed",
+                "reason": "no_active_pane",
+            },
+            {
+                "schema": "obsidience.shell.event.v1",
+                "type": "window.close.result",
+                "token": "native-token",
+                "success": True,
+            },
+        ]
+    )
+    monkeypatch.setattr(move_pane, "connect", lambda *_args, **_kwargs: socket)
+    monkeypatch.setattr(move_pane.secrets, "token_hex", lambda _size: "native-token")
+
+    assert move_pane.apply_active_pane_action("usb-c", "close") is True
+    assert socket.sent == [
+        {
+            "schema": "obsidience.shell.command.v1",
+            "type": "pane.dismiss_active",
+            "source_surface_id": "usb-c",
+        },
+        {
+            "schema": "obsidience.shell.command.v1",
+            "type": "window.close_active",
+            "token": "native-token",
+            "source_surface_id": "usb-c",
+        },
+    ]
+
+
 def test_legacy_two_argument_entrypoint_remains_surface_transfer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -74,6 +127,23 @@ def test_legacy_two_argument_entrypoint_remains_surface_transfer(
 
     assert move_pane.main(["focused", "left"]) == 0
     assert called == [("usb-c", "surface", "left")]
+
+
+def test_close_entrypoint_needs_no_direction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    called: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(move_pane, "focused_surface", lambda: "samsung")
+    monkeypatch.setattr(
+        move_pane,
+        "apply_active_pane_action",
+        lambda surface, action, direction: (
+            not called.append((surface, action, direction))
+        ),
+    )
+
+    assert move_pane.main(["focused", "close"]) == 0
+    assert called == [("samsung", "close", "")]
 
 
 def test_invalid_active_pane_action_fails_without_connecting(

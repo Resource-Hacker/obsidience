@@ -174,6 +174,20 @@ class HyprlandSurfaceWindows:
         self._publish()
         return True, ""
 
+    def close(self, window_id: str) -> tuple[bool, str]:
+        if _ADDRESS.fullmatch(window_id) is None:
+            return False, "invalid_window_id"
+        active = self._json("activewindow")
+        if not isinstance(active, dict) or active.get("address") != window_id:
+            return False, "focus_changed"
+        result = self._dispatch(
+            f'hl.dsp.window.close({{ window = "address:{window_id}" }})'
+        )
+        if not self._accepted(result):
+            return False, "hyprland_rejected"
+        self._publish()
+        return True, ""
+
     def layout(
         self,
         surface_id: str,

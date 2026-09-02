@@ -25,6 +25,7 @@ class ShellWindowTransport:
         self,
         store: WindowStateStore,
         activate: Callable[[str, str, int], tuple[bool, str]],
+        close: Callable[[str, str, int], tuple[bool, str]],
         layout: Callable[
             [str, str, int, str, str, dict[str, tuple[int, int]]],
             tuple[bool, str],
@@ -32,6 +33,7 @@ class ShellWindowTransport:
     ) -> None:
         self.store = store
         self.activate = activate
+        self.close = close
         self.layout = layout
         self._stop = threading.Event()
         self._thread = threading.Thread(
@@ -97,7 +99,11 @@ class ShellWindowTransport:
         ):
             return
         event_type = event.get("type")
-        if event_type not in ("window.activation.request", "window.layout.request"):
+        if event_type not in (
+            "window.activation.request",
+            "window.close.request",
+            "window.layout.request",
+        ):
             return
         token = event.get("token")
         surface_id = event.get("surface_id")
@@ -112,7 +118,14 @@ class ShellWindowTransport:
             or not isinstance(revision, int)
         ):
             return
-        if event_type == "window.layout.request":
+        if event_type == "window.close.request":
+            try:
+                success, reason = self.close(surface_id, window_id, revision)
+            except Exception as error:  # keep one failed command from dropping state
+                LOGGER.warning("Window close failed: %s", error)
+                success, reason = False, "close_error"
+            result_type = "window.close.result"
+        elif event_type == "window.layout.request":
             action = event.get("action")
             direction = event.get("direction")
             grids = self._grids(event.get("workspace_tiling"))

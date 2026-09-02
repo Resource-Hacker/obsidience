@@ -823,9 +823,13 @@ def test_window_state_and_activation_use_one_bounded_shell_transport() -> None:
     assert 'self._command("eval", f"hl.dispatch({expression})")' in hyprland
     assert 'command.type === "window.layout_active"' in server
     assert '"type": "window.layout.request"' in server
-    assert 'event_type not in ("window.activation.request", "window.layout.request")' in transport
+    assert '"window.close.request"' in transport
+    assert 'result_type = "window.close.result"' in transport
     assert "self.store.exact_active_window(" in host
+    assert "self.store.wait_absent(" in host
+    assert "self.hyprland.close(" in host
     assert 'self._layout_message(' in hyprland
+    assert 'hl.dsp.window.close({{ window = "address:{window_id}" }})' in hyprland
     assert '"clients", "-j"' not in hyprland
     assert 'self._json("clients")' in hyprland
     assert ".socket2.sock" in hyprland
@@ -1050,8 +1054,13 @@ def test_pane_shortcut_move_is_atomic_and_has_one_owner_per_display_path() -> No
     assert '"pane.move_active"' in move_client
     assert '"pane.tile_active"' in move_client
     assert '"pane.tile_move_active"' in move_client
+    assert '"pane.dismiss_active"' in move_client
     assert '"source_surface_id": surface_id' in move_client
-    assert '"type": "window.layout_active"' in move_client
+    assert '"window.layout_active"' in move_client
+    assert '"window.close_active"' in move_client
+    assert 'command.type === "pane.dismiss_active"' in command_server
+    assert 'command.type === "window.close_active"' in command_server
+    assert '"type": "window.close.request"' in command_server
     assert 'event.get("reason") == "no_active_pane"' in move_client
     assert 'subprotocols=[SUBPROTOCOL]' in move_client
     assert compositor.count('hl.bind("SUPER + SHIFT +') == 5
@@ -1064,6 +1073,7 @@ def test_pane_shortcut_move_is_atomic_and_has_one_owner_per_display_path() -> No
     assert "move_pane.py focused tile right" in compositor
     assert "move_pane.py focused surface top" in compositor
     assert "move_pane.py focused surface bottom" in compositor
+    assert "move_pane.py focused close" in compositor
     assert '"HDMI-A-1": "samsung"' in move_client
     assert '"DP-8": "usb-c"' in move_client
     assert '"HDMI-A-2": "dp-4"' in move_client

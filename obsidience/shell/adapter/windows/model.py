@@ -159,3 +159,16 @@ class WindowStateStore:
                     return True
                 self._condition.wait(max(0.01, deadline - time.monotonic()))
         return False
+
+    def wait_absent(self, window_id: str, timeout: float) -> bool:
+        deadline = time.monotonic() + timeout
+        with self._condition:
+            while time.monotonic() < deadline:
+                if all(
+                    window.window_id != window_id
+                    for state in self._states.values()
+                    for window in state.windows
+                ):
+                    return True
+                self._condition.wait(max(0.01, deadline - time.monotonic()))
+        return False

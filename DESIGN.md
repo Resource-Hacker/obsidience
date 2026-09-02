@@ -270,6 +270,9 @@ active address and revision immediately before one Hyprland command. All other
 failures are terminal, so the shell never guesses whether a pane or native
 window owns the action. Compositor border, rounding, and shadow tokens supply
 the shared outer pane chrome; application content remains native and unmodified.
+`Meta+Esc` follows that same ownership rule: dismiss the active QML pane first,
+then close the exact active native client only when no QML pane owns the action.
+It never sends a generic close to the Quickshell host.
 
 Settings > Input projects one physical input truth through the compositor
 adapter. The classic M.M.O.7 stays at its independently verified 6400-DPI top

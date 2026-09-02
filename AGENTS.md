@@ -162,7 +162,9 @@ after a real implementation or outcome contract exists.
   `no_active_pane`; every other pane result fails closed. The window adapter
   then pins the active native address and state revision before issuing one
   compositor command. There is no native-window wrapper, mirror, second tiler,
-  or application-specific placement path.
+  or application-specific placement path. `Meta+Esc` dismisses the active QML
+  pane first and closes the exact active native application only after the
+  shell returns `no_active_pane`; it never closes the shell host itself.
 - Input has one physical/compositor truth. The connected classic M.M.O.7 is
   verified at its 6400-DPI top stage and Hyprland applies one per-device custom
   linear `0.125` multiplier for 800-effective-DPI motion on all

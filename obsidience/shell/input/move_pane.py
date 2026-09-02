@@ -16,6 +16,7 @@ SUBPROTOCOL = "obsidience.shell.v1"
 SURFACES = frozenset(("samsung", "usb-c", "dp-4"))
 DIRECTIONS = frozenset(("left", "right", "top", "bottom"))
 ACTIONS = {
+    "close": ("pane.dismiss_active", "pane.dismissed", "pane.dismiss.failed"),
     "surface": ("pane.move_active", "pane.moved", "pane.move.failed"),
     "resize": ("pane.tile_active", "pane.tiled", "pane.tile.failed"),
     "tile": ("pane.tile_move_active", "pane.tiled", "pane.tile.failed"),
@@ -47,11 +48,11 @@ def focused_surface() -> str | None:
     return None
 
 
-def apply_active_pane_action(surface_id: str, action: str, direction: str) -> bool:
+def apply_active_pane_action(surface_id: str, action: str, direction: str = "") -> bool:
     if (
         surface_id not in SURFACES
         or action not in ACTIONS
-        or direction not in DIRECTIONS
+        or (action != "close" and direction not in DIRECTIONS)
     ):
         return False
     command_type, success_type, failure_type = ACTIONS[action]
@@ -66,17 +67,14 @@ def apply_active_pane_action(surface_id: str, action: str, direction: str) -> bo
             ping_interval=None,
             max_size=16_384,
         ) as socket:
-            socket.send(
-                json.dumps(
-                    {
-                        "schema": "obsidience.shell.command.v1",
-                        "type": command_type,
-                        "source_surface_id": surface_id,
-                        "direction": direction,
-                    },
-                    separators=(",", ":"),
-                )
-            )
+            command = {
+                "schema": "obsidience.shell.command.v1",
+                "type": command_type,
+                "source_surface_id": surface_id,
+            }
+            if action != "close":
+                command["direction"] = direction
+            socket.send(json.dumps(command, separators=(",", ":")))
             deadline = time.monotonic() + 0.75
             unowned = False
             while time.monotonic() < deadline:
@@ -92,26 +90,30 @@ def apply_active_pane_action(surface_id: str, action: str, direction: str) -> bo
             if not unowned:
                 return False
             token = secrets.token_hex(12)
-            socket.send(
-                json.dumps(
-                    {
-                        "schema": "obsidience.shell.command.v1",
-                        "type": "window.layout_active",
-                        "token": token,
-                        "source_surface_id": surface_id,
-                        "action": action,
-                        "direction": direction,
-                    },
-                    separators=(",", ":"),
-                )
-            )
+            native_command = {
+                "schema": "obsidience.shell.command.v1",
+                "type": "window.close_active"
+                if action == "close"
+                else "window.layout_active",
+                "token": token,
+                "source_surface_id": surface_id,
+            }
+            if action != "close":
+                native_command["action"] = action
+                native_command["direction"] = direction
+            socket.send(json.dumps(native_command, separators=(",", ":")))
             deadline = time.monotonic() + 0.75
             while time.monotonic() < deadline:
                 message = socket.recv(timeout=max(0.01, deadline - time.monotonic()))
                 event = json.loads(message)
                 if (
                     event.get("schema") == "obsidience.shell.event.v1"
-                    and event.get("type") == "window.layout.result"
+                    and event.get("type")
+                    == (
+                        "window.close.result"
+                        if action == "close"
+                        else "window.layout.result"
+                    )
                     and event.get("token") == token
                 ):
                     return event.get("success") is True
@@ -128,7 +130,10 @@ def move_active_pane(surface_id: str, direction: str) -> bool:
 
 def main(argv: list[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
-    if len(arguments) == 2:
+    if len(arguments) == 2 and arguments[1] == "close":
+        surface_argument, action = arguments
+        direction = ""
+    elif len(arguments) == 2:
         surface_argument, direction = arguments
         action = "surface"
     elif len(arguments) == 3:

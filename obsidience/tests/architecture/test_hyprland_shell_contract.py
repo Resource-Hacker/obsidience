@@ -69,6 +69,8 @@ def test_hyprland_config_is_one_compositor_with_three_real_outputs() -> None:
     assert "obsidience-shell-session.target" in config
     assert 'hl.bind("SUPER + RETURN"' in config
     assert 'hl.bind("SUPER + SHIFT + ESCAPE"' in config
+    assert 'hl.bind("SUPER + ESCAPE"' in config
+    assert "move_pane.py focused close" in config
     assert config.count("hl.device({") == 1
     assert 'name = "saitek-cyborg-m.m.o.7-gaming-mouse"' in config
     assert 'accel_profile = "custom 1 0 0.125"' in config

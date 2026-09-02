@@ -343,6 +343,26 @@ QtObject {
         return null
     }
 
+    function dismissPane(socket, placement) {
+        const surfaceId = placement.surfaceId
+        const paneId = placement.paneId
+        placement.dismiss()
+        const next = Object.assign({}, activePaneBySurface)
+        if (next[surfaceId] === paneId) {
+            delete next[surfaceId]
+        }
+        activePaneBySurface = next
+        const event = {
+            "schema": eventSchema,
+            "type": "pane.dismissed",
+            "pane": placement.record()
+        }
+        broadcastToPaneClients(event)
+        if (paneClients.indexOf(socket) < 0) {
+            send(socket, event)
+        }
+    }
+
     function movePane(socket, placement, direction) {
         const source = placement
             ? surfaceLayout.surface(placement.surfaceId) : null
@@ -506,6 +526,18 @@ QtObject {
         }
         if (command.type === "pane.deactivate") {
             deactivatePane(command)
+            return true
+        }
+        if (command.type === "pane.dismiss_active") {
+            const source = surfaceLayout.surface(command.source_surface_id)
+            const placement = source ? activePlacement(source.id) : null
+            if (!placement) {
+                failPaneCommand(
+                    socket, "pane.dismiss.failed", "", "no_active_pane"
+                )
+                return true
+            }
+            dismissPane(socket, placement)
             return true
         }
         if (command.type === "pane.move_active") {
@@ -673,6 +705,23 @@ QtObject {
         }
     }
 
+    function windowCloseResult(socket, command, success, reason) {
+        const event = {
+            "schema": eventSchema,
+            "type": "window.close.result",
+            "token": cleanDragToken(command.token),
+            "surface_id": cleanWindowText(command.surface_id, 32),
+            "window_id": cleanWindowText(command.window_id, 128),
+            "success": success === true,
+            "reason": cleanWindowText(reason, 96)
+        }
+        if (socket) {
+            send(socket, event)
+        } else {
+            broadcast(event)
+        }
+    }
+
     function handleWindowCommand(socket, command) {
         if (command.type === "window.adapter.subscribe") {
             if (windowAdapterSocket && windowAdapterSocket !== socket) {
@@ -714,6 +763,46 @@ QtObject {
                 null, command, command.success === true,
                 command.success === true ? "" : command.reason
             )
+            return true
+        }
+        if (command.type === "window.close.result") {
+            if (socket !== windowAdapterSocket || !cleanDragToken(command.token)) {
+                return true
+            }
+            windowCloseResult(
+                null, command, command.success === true,
+                command.success === true ? "" : command.reason
+            )
+            return true
+        }
+        if (command.type === "window.close_active") {
+            const token = cleanDragToken(command.token)
+            const surfaceId = cleanWindowText(command.source_surface_id, 32)
+            const state = windowStates[surfaceId]
+            const windowId = state ? state.active_window_id : ""
+            if (!token || !surfaceLayout.surface(surfaceId)) {
+                windowCloseResult(socket, command, false, "invalid")
+                return true
+            }
+            if (activePlacement(surfaceId)) {
+                windowCloseResult(socket, command, false, "qml_pane_active")
+                return true
+            }
+            const current = state && windowId
+                && state.windows.some(window => window.window_id === windowId)
+            if (!current || !windowAdapterSocket
+                    || windowAdapterSocket.status !== WebSocket.Open) {
+                windowCloseResult(socket, command, false, "stale_or_unavailable")
+                return true
+            }
+            send(windowAdapterSocket, {
+                "schema": eventSchema,
+                "type": "window.close.request",
+                "token": token,
+                "surface_id": surfaceId,
+                "window_id": windowId,
+                "expected_revision": state.revision
+            })
             return true
         }
         if (command.type === "window.layout_active") {

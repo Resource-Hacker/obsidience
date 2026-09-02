@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from obsidience.shell.adapter.windows.hyprland import _monitor_route
+from obsidience.shell.adapter.windows.hyprland import (
+    HyprlandSurfaceWindows,
+    _monitor_route,
+)
 from obsidience.shell.adapter.windows.model import (
     ApplicationWindow,
     WindowStateStore,
@@ -58,6 +61,25 @@ def test_exact_active_window_rejects_inactive_or_stale_target() -> None:
         store.exact_active_window("samsung", active.window_id, state.revision - 1)
         is None
     )
+
+
+def test_wait_absent_observes_window_removal() -> None:
+    store = WindowStateStore()
+    target = ApplicationWindow("closing-id", "example", "Closing")
+    assert store.update("samsung", target.window_id, (target,)) is not None
+    assert store.wait_absent(target.window_id, 0.01) is False
+    assert store.update("samsung", "", ()) is not None
+    assert store.wait_absent(target.window_id, 0.01) is True
+
+
+def test_close_rejects_a_stale_active_window(monkeypatch) -> None:
+    backend = HyprlandSurfaceWindows(lambda *_: None)
+    dispatched: list[str] = []
+    monkeypatch.setattr(backend, "_json", lambda *_: {"address": "0x222"})
+    monkeypatch.setattr(backend, "_dispatch", dispatched.append)
+
+    assert backend.close("0x111") == (False, "focus_changed")
+    assert dispatched == []
 
 
 def test_monitor_route_uses_logical_surface_geometry() -> None:
