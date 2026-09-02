@@ -246,8 +246,8 @@ lease, coordinator process, or pane-specific transport.
 
 Settings > Input projects one physical input truth through the compositor
 adapter. The classic M.M.O.7 stays at its independently verified 6400-DPI top
-stage; Hyprland applies one per-device flat `0.125` multiplier (`-0.875`
-sensitivity) to produce 800-effective-DPI motion across every Surface. No
+stage; Hyprland applies one per-device custom linear `0.125` multiplier to
+produce 800-effective-DPI motion across every Surface. No
 per-Surface mouse scale, second profile store, or pane-owned compositor command
 is permitted. Mouse is the live hardware/compositor view; Keyboard begins with
 the current layout, repeat timing, and system remap state.

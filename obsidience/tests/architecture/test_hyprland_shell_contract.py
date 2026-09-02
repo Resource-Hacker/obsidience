@@ -71,8 +71,8 @@ def test_hyprland_config_is_one_compositor_with_three_real_outputs() -> None:
     assert 'hl.bind("SUPER + SHIFT + ESCAPE"' in config
     assert config.count("hl.device({") == 1
     assert 'name = "saitek-cyborg-m.m.o.7-gaming-mouse"' in config
-    assert 'accel_profile = "flat"' in config
-    assert "sensitivity = -0.875" in config
+    assert 'accel_profile = "custom 1 0 0.125"' in config
+    assert "sensitivity = 0" in config
     assert "kwin" not in config.casefold()
     assert "plasmashell" not in config.casefold()
 

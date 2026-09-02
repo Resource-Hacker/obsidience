@@ -73,6 +73,19 @@ def _configured_mouse(name: str) -> tuple[str | None, float | None]:
     return None, None
 
 
+def _custom_linear_multiplier(profile: str | None) -> float | None:
+    if not profile:
+        return None
+    fields = profile.split()
+    if len(fields) != 4 or fields[0] != "custom":
+        return None
+    try:
+        step, origin, point = map(float, fields[1:])
+    except ValueError:
+        return None
+    return point / step if step > 0 and origin == 0 else None
+
+
 def _caps_lock_mapping() -> str | None:
     try:
         config = KEYD_CONFIG.read_text(encoding="utf-8")
@@ -97,7 +110,7 @@ def input_snapshot() -> dict:
     acceleration_profile, sensitivity = _configured_mouse(device_name)
     hardware_dpi = profile.get("hardware_dpi")
     hardware_dpi = hardware_dpi if isinstance(hardware_dpi, int) else None
-    multiplier = max(0.005, 1 + sensitivity) if sensitivity is not None else None
+    multiplier = _custom_linear_multiplier(acceleration_profile)
     effective_dpi = (
         round(hardware_dpi * multiplier)
         if hardware_dpi is not None and multiplier is not None else None
@@ -127,7 +140,7 @@ def input_snapshot() -> dict:
             "effective_dpi": effective_dpi,
             "compositor_applied": (
                 mouse_device is not None
-                and acceleration_profile == "flat"
+                and multiplier is not None
                 and not _hyprctl("configerrors").strip()
             ),
         },

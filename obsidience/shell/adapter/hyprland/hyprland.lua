@@ -69,11 +69,11 @@ hl.config({
 })
 
 -- The classic M.M.O.7 is physically verified at its 6400-DPI top stage.
--- A flat 0.125 multiplier gives one exact 800-effective-DPI desktop profile.
+-- This linear custom curve maps every motion delta to exactly one eighth.
 hl.device({
     name = "saitek-cyborg-m.m.o.7-gaming-mouse",
-    accel_profile = "flat",
-    sensitivity = -0.875,
+    accel_profile = "custom 1 0 0.125",
+    sensitivity = 0,
 })
 
 hl.on("hyprland.start", function()

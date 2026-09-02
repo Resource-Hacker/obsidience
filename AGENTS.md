@@ -144,8 +144,8 @@ after a real implementation or outcome contract exists.
   primary-shell placement revision to the nearest mapped Surface. No
   pane-specific bridge, held-pointer lease, or coordinator process is allowed.
 - Input has one physical/compositor truth. The connected classic M.M.O.7 is
-  verified at its 6400-DPI top stage and Hyprland applies one per-device flat
-  `0.125` multiplier (`sensitivity=-0.875`) for 800-effective-DPI motion on all
+  verified at its 6400-DPI top stage and Hyprland applies one per-device custom
+  linear `0.125` multiplier for 800-effective-DPI motion on all
   Surfaces. Never restore the retired DP-4/USB-C per-display scale split, add a
   second mouse profile store, or let a pane call Hyprland directly. Settings >
   Input projects Mouse and Keyboard state through the Hyprland adapter.
