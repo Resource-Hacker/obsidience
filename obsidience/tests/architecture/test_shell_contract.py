@@ -589,8 +589,9 @@ def test_one_shell_host_shares_displays_pane_and_surface_layout() -> None:
     assert "color: root.theme.surface" in frame
     assert "border.color: root.theme.accent" in frame
     assert "RectangularShadow {" not in frame
-    assert "anchors.margins: -5" in frame
-    assert "border.width: 5" in frame
+    assert "anchors.margins: -2.5" in frame
+    assert "border.width: 2.5" in frame
+    assert "border.pixelAligned: false" in frame
     assert "z: 1" in frame
     assert "root.theme.shadow.r" in frame
     assert "root.theme.shadow.g" in frame

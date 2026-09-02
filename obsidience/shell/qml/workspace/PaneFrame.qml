@@ -219,15 +219,16 @@ Item {
         }
     }
 
-    // Keep the five-pixel outline in the pane's ordinary scene subtree so the
+    // Keep the 2.5-pixel outline in the pane's ordinary scene subtree so the
     // complete chrome follows PaneItem.z as one stacking unit.
     Rectangle {
         anchors.fill: frame
-        anchors.margins: -5
+        anchors.margins: -2.5
         z: 1
         color: "transparent"
-        radius: root.theme.cornerRadius + 5
-        border.width: 5
+        radius: root.theme.cornerRadius + 2.5
+        border.width: 2.5
+        border.pixelAligned: false
         border.color: Qt.rgba(
             root.theme.shadow.r,
             root.theme.shadow.g,
