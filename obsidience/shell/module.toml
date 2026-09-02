@@ -6,6 +6,7 @@ package = "obsidience.shell"
 entrypoints = [
     "obsidience/shell/qml/shell.qml",
     "obsidience/shell/adapter/hyprland/hyprland.lua",
+    "obsidience/shell/adapter/hyprland/layout.lua",
     "obsidience/shell/session/greetd.toml",
     "obsidience/shell/session/obsidience-shell-login",
     "obsidience/shell/surfaces/knowledge/host.py",

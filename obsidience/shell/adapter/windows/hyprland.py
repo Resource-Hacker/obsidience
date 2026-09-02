@@ -14,6 +14,7 @@ from pathlib import Path
 from .model import ApplicationWindow
 
 _ADDRESS = re.compile(r"^0x[0-9a-fA-F]+$")
+_OUTPUT = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 _RUNTIME_DIR = Path(os.environ.get("XDG_RUNTIME_DIR", "/run/user/1000"))
 _FULLSCREEN_STATE = _RUNTIME_DIR / "obsidience-shell-fullscreen.state"
 _SURFACE_BY_OUTPUT = {
@@ -21,6 +22,127 @@ _SURFACE_BY_OUTPUT = {
     "DP-8": "usb-c",
     "HDMI-A-2": "dp-4",
 }
+_OUTPUT_BY_SURFACE = {surface: output for output, surface in _SURFACE_BY_OUTPUT.items()}
+_ACTIONS = frozenset(("resize", "tile", "surface"))
+_DIRECTIONS = frozenset(("left", "right", "top", "bottom"))
+
+
+def _number(value: object) -> float | None:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    return None
+
+
+def _monitor_route(
+    monitors: object,
+    active: object,
+    source_surface: str,
+    direction: str,
+) -> tuple[str, str, str, float] | None:
+    """Return destination Surface, output, entry edge, and axis ratio."""
+
+    if not isinstance(monitors, list) or not isinstance(active, dict):
+        return None
+    active_monitor = active.get("monitor")
+    at = active.get("at")
+    size = active.get("size")
+    if (
+        isinstance(active_monitor, bool)
+        or not isinstance(active_monitor, int)
+        or not isinstance(at, list)
+        or len(at) != 2
+        or not isinstance(size, list)
+        or len(size) != 2
+    ):
+        return None
+    rectangles: dict[int, tuple[str, str, float, float, float, float]] = {}
+    for monitor in monitors:
+        if not isinstance(monitor, dict):
+            continue
+        monitor_id = monitor.get("id")
+        output = str(monitor.get("name", ""))
+        surface = _SURFACE_BY_OUTPUT.get(output)
+        x = _number(monitor.get("x"))
+        y = _number(monitor.get("y"))
+        width = _number(monitor.get("width"))
+        height = _number(monitor.get("height"))
+        scale = _number(monitor.get("scale"))
+        if (
+            isinstance(monitor_id, bool)
+            or not isinstance(monitor_id, int)
+            or surface is None
+            or x is None
+            or y is None
+            or width is None
+            or height is None
+            or scale is None
+            or scale <= 0
+        ):
+            continue
+        rectangles[monitor_id] = (
+            surface,
+            output,
+            x,
+            y,
+            width / scale,
+            height / scale,
+        )
+    source = rectangles.get(active_monitor)
+    if source is None or source[0] != source_surface:
+        return None
+    at_x, at_y = _number(at[0]), _number(at[1])
+    size_x, size_y = _number(size[0]), _number(size[1])
+    if None in (at_x, at_y, size_x, size_y):
+        return None
+    source_x, source_y, source_w, source_h = source[2:]
+    horizontal = direction in ("top", "bottom")
+    axis = at_x + size_x / 2 if horizontal else at_y + size_y / 2
+    boundary = (
+        source_x
+        if direction == "left"
+        else source_x + source_w
+        if direction == "right"
+        else source_y
+        if direction == "top"
+        else source_y + source_h
+    )
+    entry_edge = {
+        "left": "right",
+        "right": "left",
+        "top": "bottom",
+        "bottom": "top",
+    }[direction]
+    best: tuple[float, str, str, str, float] | None = None
+    for monitor_id, target in rectangles.items():
+        if monitor_id == active_monitor:
+            continue
+        target_surface, output, x, y, width, height = target
+        target_boundary = (
+            x + width
+            if entry_edge == "right"
+            else x
+            if entry_edge == "left"
+            else y + height
+            if entry_edge == "bottom"
+            else y
+        )
+        if abs(boundary - target_boundary) >= 0.5:
+            continue
+        source_start = source_x if horizontal else source_y
+        source_extent = source_w if horizontal else source_h
+        target_start = x if horizontal else y
+        target_extent = width if horizontal else height
+        overlap_start = max(source_start, target_start)
+        overlap_end = min(source_start + source_extent, target_start + target_extent)
+        if overlap_end <= overlap_start:
+            continue
+        mapped = max(overlap_start, min(axis, overlap_end - 0.001))
+        distance = abs(axis - mapped)
+        ratio = max(0.0, min(1.0, (mapped - target_start) / target_extent))
+        candidate = (distance, target_surface, output, entry_edge, ratio)
+        if best is None or candidate < best:
+            best = candidate
+    return best[1:] if best else None
 
 
 class HyprlandSurfaceWindows:
@@ -46,9 +168,76 @@ class HyprlandSurfaceWindows:
     def activate(self, window_id: str) -> tuple[bool, str]:
         if _ADDRESS.fullmatch(window_id) is None:
             return False, "invalid_window_id"
-        result = self._command("dispatch", "focuswindow", f"address:{window_id}")
-        if result.returncode != 0:
+        result = self._dispatch(f'hl.dsp.focus({{ window = "address:{window_id}" }})')
+        if not self._accepted(result):
             return False, "hyprland_rejected"
+        self._publish()
+        return True, ""
+
+    def layout(
+        self,
+        surface_id: str,
+        window_id: str,
+        action: str,
+        direction: str,
+        grids: dict[str, tuple[int, int]],
+    ) -> tuple[bool, str]:
+        if (
+            surface_id not in _OUTPUT_BY_SURFACE
+            or _ADDRESS.fullmatch(window_id) is None
+            or action not in _ACTIONS
+            or direction not in _DIRECTIONS
+            or surface_id not in grids
+        ):
+            return False, "invalid_layout_command"
+        monitors = self._json("monitors", "all")
+        active = self._json("activewindow")
+        if not isinstance(active, dict) or active.get("address") != window_id:
+            return False, "focus_changed"
+        if action != "surface":
+            columns, rows = grids[surface_id]
+            operation = "resize" if action == "resize" else "translate"
+            result = self._layout_message(
+                f"{operation} {direction} {surface_id} {columns} {rows}"
+            )
+            if not self._accepted(result):
+                return False, "layout_rejected"
+            self._publish()
+            return True, ""
+
+        route = _monitor_route(monitors, active, surface_id, direction)
+        if route is None:
+            return False, "surface_boundary"
+        destination_surface, output, edge, ratio = route
+        if destination_surface not in grids or _OUTPUT.fullmatch(output) is None:
+            return False, "invalid_destination"
+        columns, rows = grids[destination_surface]
+        prepared = self._layout_message(
+            f"transfer {destination_surface} {columns} {rows} {edge} {ratio:.6f}"
+        )
+        if not self._accepted(prepared):
+            return False, "layout_rejected"
+        moved = self._dispatch(
+            "hl.dsp.window.move({ "
+            f'monitor = "{output}", follow = true, '
+            f'window = "address:{window_id}" }}'
+            ")"
+        )
+        if not self._accepted(moved):
+            self._layout_message("cancel")
+            return False, "move_rejected"
+        current = self._json("activewindow")
+        destination_ids = {
+            monitor.get("id")
+            for monitor in monitors
+            if isinstance(monitor, dict) and monitor.get("name") == output
+        }
+        if (
+            not isinstance(current, dict)
+            or current.get("address") != window_id
+            or current.get("monitor") not in destination_ids
+        ):
+            return False, "move_not_observed"
         self._publish()
         return True, ""
 
@@ -113,7 +302,9 @@ class HyprlandSurfaceWindows:
                         window_id=address,
                         app_id=app_id,
                         title=str(client.get("title") or app_id),
-                        pid=pid if isinstance(pid, int) and not isinstance(pid, bool) else 0,
+                        pid=pid
+                        if isinstance(pid, int) and not isinstance(pid, bool)
+                        else 0,
                         minimized=client.get("hidden") is True,
                     )
                 )
@@ -154,6 +345,16 @@ class HyprlandSurfaceWindows:
             timeout=2,
             check=False,
         )
+
+    def _dispatch(self, expression: str) -> subprocess.CompletedProcess[str]:
+        return self._command("eval", f"hl.dispatch({expression})")
+
+    def _layout_message(self, message: str) -> subprocess.CompletedProcess[str]:
+        return self._dispatch(f'hl.dsp.layout("{message}")')
+
+    @staticmethod
+    def _accepted(result: subprocess.CompletedProcess[str]) -> bool:
+        return result.returncode == 0 and result.stdout.strip().startswith("ok")
 
     @staticmethod
     def _event_socket() -> Path:

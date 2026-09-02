@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import json
 import re
-import tomllib
 from pathlib import Path
 
+import tomllib
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SHELL_ROOT = PROJECT_ROOT / "obsidience" / "shell"
@@ -75,6 +75,25 @@ def test_hyprland_config_is_one_compositor_with_three_real_outputs() -> None:
     assert "sensitivity = 0" in config
     assert "kwin" not in config.casefold()
     assert "plasmashell" not in config.casefold()
+
+
+def test_native_windows_use_the_obsidience_grid_and_theme() -> None:
+    adapter = SHELL_ROOT / "adapter" / "hyprland"
+    config = (adapter / "hyprland.lua").read_text(encoding="utf-8")
+    layout = (adapter / "layout.lua").read_text(encoding="utf-8")
+
+    assert config.count("layout.lua") == 1
+    assert 'layout = "lua:obsidience"' in config
+    assert 'active_border = "rgba(67e8f940)"' in config
+    assert 'inactive_border = "rgb(294b54)"' in config
+    assert "rounding = 12" in config
+    assert "range = 3" in config
+    assert 'hl.layout.register("obsidience"' in layout
+    assert "local GAP = 5" in layout
+    assert '["HDMI-A-1"] = { surface = "samsung", columns = 8, rows = 2 }' in layout
+    assert '["DP-8"] = { surface = "usb-c", columns = 3, rows = 2 }' in layout
+    assert '["HDMI-A-2"] = { surface = "dp-4", columns = 4, rows = 1 }' in layout
+    assert "target:place(rect_for_bounds" in layout
 
 
 def test_greetd_launches_the_one_hyprland_session() -> None:

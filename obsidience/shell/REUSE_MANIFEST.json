@@ -20,7 +20,7 @@
       "package": "hyprland 0.55.2-2",
       "repository": "https://github.com/hyprwm/Hyprland",
       "license": "BSD-3-Clause",
-      "adaptation": "Used as the installed live Wayland compositor for Samsung, USB-C, and logical DP-4. Obsidience supplies its own minimal Lua configuration and shell surfaces; no Hyprland source or visual design was copied."
+      "adaptation": "Used as the installed live Wayland compositor for Samsung, USB-C, and logical DP-4. Obsidience supplies its own minimal Lua configuration, supported custom layout provider, and shell surfaces; no Hyprland source or visual design was copied."
     },
     {
       "name": "Universal Wayland Session Manager",
@@ -86,7 +86,7 @@
           "sha256": "6abe3d704fb2f06b4d539ec8a6e93746e1ac9000af8e9665d641de2749f5b8af"
         }
       ],
-      "adaptation": "The small tested gap-subtraction geometry pattern is adapted into WorkspaceTiler.qml and generalized from fixed window zones to arbitrary integer NxM bounds for embedded Obsidience panes. The Hyprland plugin, window-management runtime, animations, configuration, and visual design are not imported.",
+      "adaptation": "The small tested gap-subtraction geometry pattern is adapted into WorkspaceTiler.qml and the matching Obsidience Hyprland Lua layout, generalized from fixed window zones to arbitrary integer NxM bounds. The Hyprland plugin, window-management runtime, animations, configuration, and visual design are not imported.",
       "notice": "LICENSES/Omarchy-Windows-MIT.txt"
     },
     {

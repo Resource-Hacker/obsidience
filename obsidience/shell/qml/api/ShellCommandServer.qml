@@ -656,6 +656,23 @@ QtObject {
         }
     }
 
+    function windowLayoutResult(socket, command, success, reason) {
+        const event = {
+            "schema": eventSchema,
+            "type": "window.layout.result",
+            "token": cleanDragToken(command.token),
+            "surface_id": cleanWindowText(command.surface_id, 32),
+            "window_id": cleanWindowText(command.window_id, 128),
+            "success": success === true,
+            "reason": cleanWindowText(reason, 96)
+        }
+        if (socket) {
+            send(socket, event)
+        } else {
+            broadcast(event)
+        }
+    }
+
     function handleWindowCommand(socket, command) {
         if (command.type === "window.adapter.subscribe") {
             if (windowAdapterSocket && windowAdapterSocket !== socket) {
@@ -687,6 +704,55 @@ QtObject {
                 null, command, command.success === true,
                 command.success === true ? "" : command.reason
             )
+            return true
+        }
+        if (command.type === "window.layout.result") {
+            if (socket !== windowAdapterSocket || !cleanDragToken(command.token)) {
+                return true
+            }
+            windowLayoutResult(
+                null, command, command.success === true,
+                command.success === true ? "" : command.reason
+            )
+            return true
+        }
+        if (command.type === "window.layout_active") {
+            const token = cleanDragToken(command.token)
+            const surfaceId = cleanWindowText(command.source_surface_id, 32)
+            const action = cleanWindowText(command.action, 16)
+            const direction = cleanWindowText(command.direction, 16)
+            const state = windowStates[surfaceId]
+            const windowId = state ? state.active_window_id : ""
+            const validAction = ["resize", "tile", "surface"].indexOf(action) >= 0
+            const validDirection = ["left", "right", "top", "bottom"]
+                .indexOf(direction) >= 0
+            if (!token || !surfaceLayout.surface(surfaceId)
+                    || !validAction || !validDirection) {
+                windowLayoutResult(socket, command, false, "invalid")
+                return true
+            }
+            if (activePlacement(surfaceId)) {
+                windowLayoutResult(socket, command, false, "qml_pane_active")
+                return true
+            }
+            const current = state && windowId
+                && state.windows.some(window => window.window_id === windowId)
+            if (!current || !windowAdapterSocket
+                    || windowAdapterSocket.status !== WebSocket.Open) {
+                windowLayoutResult(socket, command, false, "stale_or_unavailable")
+                return true
+            }
+            send(windowAdapterSocket, {
+                "schema": eventSchema,
+                "type": "window.layout.request",
+                "token": token,
+                "surface_id": surfaceId,
+                "window_id": windowId,
+                "expected_revision": state.revision,
+                "action": action,
+                "direction": direction,
+                "workspace_tiling": surfaceLayout.workspaceTilingState()
+            })
             return true
         }
         if (command.type !== "window.activate") {

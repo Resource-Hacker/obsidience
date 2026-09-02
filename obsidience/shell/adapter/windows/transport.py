@@ -15,6 +15,9 @@ from .model import WindowStateStore
 
 LOGGER = logging.getLogger(__name__)
 _TOKEN = re.compile(r"^[A-Za-z0-9._:-]{1,96}$")
+_SURFACES = frozenset(("samsung", "usb-c", "dp-4"))
+_ACTIONS = frozenset(("resize", "tile", "surface"))
+_DIRECTIONS = frozenset(("left", "right", "top", "bottom"))
 
 
 class ShellWindowTransport:
@@ -22,9 +25,14 @@ class ShellWindowTransport:
         self,
         store: WindowStateStore,
         activate: Callable[[str, str, int], tuple[bool, str]],
+        layout: Callable[
+            [str, str, int, str, str, dict[str, tuple[int, int]]],
+            tuple[bool, str],
+        ],
     ) -> None:
         self.store = store
         self.activate = activate
+        self.layout = layout
         self._stop = threading.Event()
         self._thread = threading.Thread(
             target=self._run,
@@ -62,7 +70,9 @@ class ShellWindowTransport:
                         for state in self.store.snapshots():
                             if sent.get(state.surface_id) == state.revision:
                                 continue
-                            socket.send(json.dumps(state.command(), separators=(",", ":")))
+                            socket.send(
+                                json.dumps(state.command(), separators=(",", ":"))
+                            )
                             sent[state.surface_id] = state.revision
                         try:
                             message = socket.recv(timeout=0.10)
@@ -81,9 +91,13 @@ class ShellWindowTransport:
             event = json.loads(message)
         except json.JSONDecodeError:
             return
-        if not isinstance(event, dict) or event.get("schema") != "obsidience.shell.event.v1":
+        if (
+            not isinstance(event, dict)
+            or event.get("schema") != "obsidience.shell.event.v1"
+        ):
             return
-        if event.get("type") != "window.activation.request":
+        event_type = event.get("type")
+        if event_type not in ("window.activation.request", "window.layout.request"):
             return
         token = event.get("token")
         surface_id = event.get("surface_id")
@@ -98,16 +112,32 @@ class ShellWindowTransport:
             or not isinstance(revision, int)
         ):
             return
-        try:
-            success, reason = self.activate(surface_id, window_id, revision)
-        except Exception as error:  # keep one failed command from dropping state
-            LOGGER.warning("Window activation failed: %s", error)
-            success, reason = False, "activation_error"
+        if event_type == "window.layout.request":
+            action = event.get("action")
+            direction = event.get("direction")
+            grids = self._grids(event.get("workspace_tiling"))
+            if action not in _ACTIONS or direction not in _DIRECTIONS or grids is None:
+                return
+            try:
+                success, reason = self.layout(
+                    surface_id, window_id, revision, action, direction, grids
+                )
+            except Exception as error:  # keep one failed command from dropping state
+                LOGGER.warning("Window layout command failed: %s", error)
+                success, reason = False, "layout_error"
+            result_type = "window.layout.result"
+        else:
+            try:
+                success, reason = self.activate(surface_id, window_id, revision)
+            except Exception as error:  # keep one failed command from dropping state
+                LOGGER.warning("Window activation failed: %s", error)
+                success, reason = False, "activation_error"
+            result_type = "window.activation.result"
         socket.send(
             json.dumps(
                 {
                     "schema": "obsidience.shell.command.v1",
-                    "type": "window.activation.result",
+                    "type": result_type,
                     "token": token,
                     "surface_id": surface_id,
                     "window_id": window_id,
@@ -118,3 +148,28 @@ class ShellWindowTransport:
                 separators=(",", ":"),
             )
         )
+
+    @staticmethod
+    def _grids(value: object) -> dict[str, tuple[int, int]] | None:
+        if not isinstance(value, list) or len(value) != len(_SURFACES):
+            return None
+        grids: dict[str, tuple[int, int]] = {}
+        for item in value:
+            if not isinstance(item, dict):
+                return None
+            surface_id = item.get("surface_id")
+            columns = item.get("columns")
+            rows = item.get("rows")
+            if (
+                surface_id not in _SURFACES
+                or surface_id in grids
+                or isinstance(columns, bool)
+                or not isinstance(columns, int)
+                or isinstance(rows, bool)
+                or not isinstance(rows, int)
+                or not 1 <= columns <= 16
+                or not 1 <= rows <= 16
+            ):
+                return None
+            grids[surface_id] = (columns, rows)
+        return grids if set(grids) == _SURFACES else None

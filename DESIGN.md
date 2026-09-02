@@ -260,6 +260,17 @@ renders it. An unmapped direction changes nothing. This deliberately uses no
 held-pointer handoff, pane-drag lease, coordinator process, or pane-specific
 transport.
 
+Native application windows use the same grid semantics without pretending to
+be QML PaneItems. Hyprland's supported `lua:obsidience` layout projects the
+Surface's columns, rows, five-pixel gap formula, resize, translation, and
+cross-Surface size preservation onto real compositor clients. The shortcut
+path always asks the primary QML authority first and falls through only on its
+exact `no_active_pane` result. The existing window adapter then binds the live
+active address and revision immediately before one Hyprland command. All other
+failures are terminal, so the shell never guesses whether a pane or native
+window owns the action. Compositor border, rounding, and shadow tokens supply
+the shared outer pane chrome; application content remains native and unmodified.
+
 Settings > Input projects one physical input truth through the compositor
 adapter. The classic M.M.O.7 stays at its independently verified 6400-DPI top
 stage; Hyprland applies one per-device custom linear `0.125` multiplier to

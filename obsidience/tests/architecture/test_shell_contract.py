@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
-import tomllib
 from pathlib import Path
+
+import tomllib
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SHELL_ROOT = PROJECT_ROOT / "obsidience" / "shell"
@@ -21,6 +22,7 @@ def test_shell_manifest_names_one_real_module() -> None:
         "entrypoints": [
             "obsidience/shell/qml/shell.qml",
             "obsidience/shell/adapter/hyprland/hyprland.lua",
+            "obsidience/shell/adapter/hyprland/layout.lua",
             "obsidience/shell/session/greetd.toml",
             "obsidience/shell/session/obsidience-shell-login",
             "obsidience/shell/surfaces/knowledge/host.py",
@@ -817,7 +819,13 @@ def test_window_state_and_activation_use_one_bounded_shell_transport() -> None:
     assert '"surface_id": surfaceId' in launcher
     assert "windowStates[surfaceId]" in server
     assert "for (const surfaceId of Object.keys(windowStates))" in server
-    assert '"dispatch", "focuswindow", f"address:{window_id}"' in hyprland
+    assert 'hl.dsp.focus({{ window = "address:{window_id}" }})' in hyprland
+    assert 'self._command("eval", f"hl.dispatch({expression})")' in hyprland
+    assert 'command.type === "window.layout_active"' in server
+    assert '"type": "window.layout.request"' in server
+    assert 'event_type not in ("window.activation.request", "window.layout.request")' in transport
+    assert "self.store.exact_active_window(" in host
+    assert 'self._layout_message(' in hyprland
     assert '"clients", "-j"' not in hyprland
     assert 'self._json("clients")' in hyprland
     assert ".socket2.sock" in hyprland
@@ -1043,6 +1051,8 @@ def test_pane_shortcut_move_is_atomic_and_has_one_owner_per_display_path() -> No
     assert '"pane.tile_active"' in move_client
     assert '"pane.tile_move_active"' in move_client
     assert '"source_surface_id": surface_id' in move_client
+    assert '"type": "window.layout_active"' in move_client
+    assert 'event.get("reason") == "no_active_pane"' in move_client
     assert 'subprotocols=[SUBPROTOCOL]' in move_client
     assert compositor.count('hl.bind("SUPER + SHIFT +') == 5
     assert compositor.count('hl.bind("SUPER + LEFT"') == 1

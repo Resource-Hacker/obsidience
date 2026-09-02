@@ -18,7 +18,7 @@ class WindowAdapterHost:
     def __init__(self) -> None:
         self.store = WindowStateStore()
         self.hyprland = HyprlandSurfaceWindows(self._update)
-        self.transport = ShellWindowTransport(self.store, self._activate)
+        self.transport = ShellWindowTransport(self.store, self._activate, self._layout)
         self.loop = GLib.MainLoop()
 
     def run(self) -> None:
@@ -52,6 +52,24 @@ class WindowAdapterHost:
         if self.store.wait_active(surface_id, target.window_id, 2.0):
             return True, ""
         return False, "activation_not_observed"
+
+    def _layout(
+        self,
+        surface_id: str,
+        window_id: str,
+        expected_revision: int,
+        action: str,
+        direction: str,
+        grids: dict[str, tuple[int, int]],
+    ) -> tuple[bool, str]:
+        target = self.store.exact_active_window(
+            surface_id, window_id, expected_revision
+        )
+        if target is None:
+            return False, "stale_or_inactive"
+        return self.hyprland.layout(
+            surface_id, target.window_id, action, direction, grids
+        )
 
 
 def main() -> None:

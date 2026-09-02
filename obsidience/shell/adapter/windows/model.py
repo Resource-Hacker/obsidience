@@ -30,7 +30,11 @@ class ApplicationWindow:
         app_id = clean_text(self.app_id, 256)
         if not window_id or not app_id:
             return None
-        pid = self.pid if isinstance(self.pid, int) and not isinstance(self.pid, bool) else 0
+        pid = (
+            self.pid
+            if isinstance(self.pid, int) and not isinstance(self.pid, bool)
+            else 0
+        )
         return ApplicationWindow(
             window_id=window_id,
             app_id=app_id,
@@ -84,14 +88,24 @@ class WindowStateStore:
                 continue
             seen.add(window.window_id)
             normalized.append(window)
-        normalized.sort(key=lambda item: (item.app_id.casefold(), item.title.casefold(), item.window_id))
+        normalized.sort(
+            key=lambda item: (
+                item.app_id.casefold(),
+                item.title.casefold(),
+                item.window_id,
+            )
+        )
         active = clean_text(active_window_id, 128)
         if active not in seen:
             active = ""
         window_tuple = tuple(normalized)
         with self._condition:
             previous = self._states.get(surface_id)
-            if previous and previous.active_window_id == active and previous.windows == window_tuple:
+            if (
+                previous
+                and previous.active_window_id == active
+                and previous.windows == window_tuple
+            ):
                 return previous
             state = SurfaceWindowState(
                 surface_id=surface_id,
@@ -114,6 +128,22 @@ class WindowStateStore:
         with self._condition:
             state = self._states.get(surface_id)
             if state is None or state.revision != expected_revision:
+                return None
+            return next(
+                (window for window in state.windows if window.window_id == window_id),
+                None,
+            )
+
+    def exact_active_window(
+        self, surface_id: str, window_id: str, expected_revision: int
+    ) -> ApplicationWindow | None:
+        with self._condition:
+            state = self._states.get(surface_id)
+            if (
+                state is None
+                or state.revision != expected_revision
+                or state.active_window_id != window_id
+            ):
                 return None
             return next(
                 (window for window in state.windows if window.window_id == window_id),

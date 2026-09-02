@@ -4,12 +4,12 @@
 from __future__ import annotations
 
 import json
+import secrets
 import subprocess
 import sys
 import time
 
 from websockets.sync.client import connect
-
 
 SHELL_URL = "ws://127.0.0.1:8768"
 SUBPROTOCOL = "obsidience.shell.v1"
@@ -47,9 +47,7 @@ def focused_surface() -> str | None:
     return None
 
 
-def apply_active_pane_action(
-    surface_id: str, action: str, direction: str
-) -> bool:
+def apply_active_pane_action(surface_id: str, action: str, direction: str) -> bool:
     if (
         surface_id not in SURFACES
         or action not in ACTIONS
@@ -80,6 +78,7 @@ def apply_active_pane_action(
                 )
             )
             deadline = time.monotonic() + 0.75
+            unowned = False
             while time.monotonic() < deadline:
                 message = socket.recv(timeout=max(0.01, deadline - time.monotonic()))
                 event = json.loads(message)
@@ -88,7 +87,34 @@ def apply_active_pane_action(
                 if event.get("type") == success_type:
                     return True
                 if event.get("type") == failure_type:
-                    return False
+                    unowned = event.get("reason") == "no_active_pane"
+                    break
+            if not unowned:
+                return False
+            token = secrets.token_hex(12)
+            socket.send(
+                json.dumps(
+                    {
+                        "schema": "obsidience.shell.command.v1",
+                        "type": "window.layout_active",
+                        "token": token,
+                        "source_surface_id": surface_id,
+                        "action": action,
+                        "direction": direction,
+                    },
+                    separators=(",", ":"),
+                )
+            )
+            deadline = time.monotonic() + 0.75
+            while time.monotonic() < deadline:
+                message = socket.recv(timeout=max(0.01, deadline - time.monotonic()))
+                event = json.loads(message)
+                if (
+                    event.get("schema") == "obsidience.shell.event.v1"
+                    and event.get("type") == "window.layout.result"
+                    and event.get("token") == token
+                ):
+                    return event.get("success") is True
     except (OSError, TimeoutError, ValueError, json.JSONDecodeError):
         return False
     return False
@@ -109,7 +135,9 @@ def main(argv: list[str] | None = None) -> int:
         surface_argument, action, direction = arguments
     else:
         return 2
-    surface_id = focused_surface() if surface_argument == "focused" else surface_argument
+    surface_id = (
+        focused_surface() if surface_argument == "focused" else surface_argument
+    )
     if surface_id is None:
         return 1
     return 0 if apply_active_pane_action(surface_id, action, direction) else 1

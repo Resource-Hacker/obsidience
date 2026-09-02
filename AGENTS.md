@@ -155,6 +155,14 @@ after a real implementation or outcome contract exists.
   the nearest mapped Surface. Transfer preserves logical pane size and shrinks
   only a dimension that is larger than the complete destination workspace. No
   pane-specific bridge, held-pointer lease, or coordinator process is allowed.
+  Native application windows remain compositor clients but use the same Surface
+  grids, gap formula, resize/move/transfer shortcut meanings, and semantic Shell
+  palette through Hyprland's supported `lua:obsidience` layout. A shortcut acts
+  on a native window only after the primary shell returns exact
+  `no_active_pane`; every other pane result fails closed. The window adapter
+  then pins the active native address and state revision before issuing one
+  compositor command. There is no native-window wrapper, mirror, second tiler,
+  or application-specific placement path.
 - Input has one physical/compositor truth. The connected classic M.M.O.7 is
   verified at its 6400-DPI top stage and Hyprland applies one per-device custom
   linear `0.125` multiplier for 800-effective-DPI motion on all
@@ -454,8 +462,10 @@ Tool bindings, generic hierarchy edges, and framework-specific vocabulary.
 - The Reader is the single Article and Source viewer. Knowledge and Source
   explorers are dockable views, not separate truth stores.
 - External applications remain native compositor clients, never PaneItems or
-  embedded mirrors. One Shell palette feeds PaneFrame and bounded native theme
-  adapters; application content remains owned by the application.
+  embedded mirrors. Hyprland's `lua:obsidience` layout projects the same Surface
+  grid and shortcut semantics onto them, while one Shell palette feeds
+  PaneFrame, compositor chrome, and bounded native theme adapters. Application
+  content remains owned by the application.
 - Reader docking has one primary-owned atomic layout: Knowledge defaults left,
   Source defaults right, same-side explorers stack evenly, and collapsed
   explorers use a narrow rail. Docked explorers follow Reader between Surfaces;

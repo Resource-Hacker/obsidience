@@ -8,8 +8,12 @@ from obsidience.shell.input import move_pane
 
 
 class FakeSocket:
-    def __init__(self, event_type: str) -> None:
-        self.event_type = event_type
+    def __init__(self, events: str | list[dict]) -> None:
+        self.events = (
+            [{"schema": "obsidience.shell.event.v1", "type": events}]
+            if isinstance(events, str)
+            else list(events)
+        )
         self.sent: list[dict] = []
 
     def __enter__(self) -> FakeSocket:
@@ -22,9 +26,9 @@ class FakeSocket:
         self.sent.append(json.loads(value))
 
     def recv(self, **_kwargs: float) -> str:
-        return json.dumps(
-            {"schema": "obsidience.shell.event.v1", "type": self.event_type}
-        )
+        if not self.events:
+            raise TimeoutError
+        return json.dumps(self.events.pop(0))
 
 
 @pytest.mark.parametrize(
@@ -63,8 +67,8 @@ def test_legacy_two_argument_entrypoint_remains_surface_transfer(
     monkeypatch.setattr(
         move_pane,
         "apply_active_pane_action",
-        lambda surface, action, direction: not called.append(
-            (surface, action, direction)
+        lambda surface, action, direction: (
+            not called.append((surface, action, direction))
         ),
     )
 
@@ -82,3 +86,62 @@ def test_invalid_active_pane_action_fails_without_connecting(
     )
 
     assert move_pane.apply_active_pane_action("samsung", "unknown", "right") is False
+
+
+def test_native_layout_runs_only_when_no_qml_pane_is_active(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    socket = FakeSocket(
+        [
+            {
+                "schema": "obsidience.shell.event.v1",
+                "type": "pane.tile.failed",
+                "reason": "no_active_pane",
+            },
+            {
+                "schema": "obsidience.shell.event.v1",
+                "type": "window.layout.result",
+                "token": "native-token",
+                "success": True,
+            },
+        ]
+    )
+    monkeypatch.setattr(move_pane, "connect", lambda *_args, **_kwargs: socket)
+    monkeypatch.setattr(move_pane.secrets, "token_hex", lambda _size: "native-token")
+
+    assert move_pane.apply_active_pane_action("usb-c", "tile", "left") is True
+    assert socket.sent == [
+        {
+            "schema": "obsidience.shell.command.v1",
+            "type": "pane.tile_move_active",
+            "source_surface_id": "usb-c",
+            "direction": "left",
+        },
+        {
+            "schema": "obsidience.shell.command.v1",
+            "type": "window.layout_active",
+            "token": "native-token",
+            "source_surface_id": "usb-c",
+            "action": "tile",
+            "direction": "left",
+        },
+    ]
+
+
+@pytest.mark.parametrize("reason", ["boundary", "stale_commit", "invalid_geometry"])
+def test_qml_failure_never_moves_a_native_window(
+    monkeypatch: pytest.MonkeyPatch, reason: str
+) -> None:
+    socket = FakeSocket(
+        [
+            {
+                "schema": "obsidience.shell.event.v1",
+                "type": "pane.tile.failed",
+                "reason": reason,
+            }
+        ]
+    )
+    monkeypatch.setattr(move_pane, "connect", lambda *_args, **_kwargs: socket)
+
+    assert move_pane.apply_active_pane_action("samsung", "resize", "right") is False
+    assert len(socket.sent) == 1

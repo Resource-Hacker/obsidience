@@ -1,6 +1,8 @@
 -- Obsidience's single-compositor Hyprland session.
 -- Quickshell owns the visible shell; Hyprland owns composition and windows.
 
+dofile("/home/wissenschafter/Projects/obsidience/obsidience/shell/adapter/hyprland/layout.lua")
+
 hl.monitor({
     output = "HDMI-A-1",
     mode = "5120x1440@240",
@@ -35,13 +37,24 @@ hl.config({
         gaps_out = 0,
         allow_tearing = false,
         resize_on_border = true,
+        layout = "lua:obsidience",
+        col = {
+            active_border = "rgba(67e8f940)",
+            inactive_border = "rgb(294b54)",
+        },
     },
     decoration = {
-        rounding = 0,
+        rounding = 12,
+        rounding_power = 2,
         active_opacity = 1.0,
         inactive_opacity = 1.0,
         blur = { enabled = false },
-        shadow = { enabled = false },
+        shadow = {
+            enabled = true,
+            range = 3,
+            render_power = 3,
+            color = "rgba(22d3ee14)",
+        },
     },
     animations = { enabled = false },
     input = {
