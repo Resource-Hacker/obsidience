@@ -30,11 +30,14 @@ class ShellWindowTransport:
             [str, str, int, str, str, dict[str, tuple[int, int]]],
             tuple[bool, str],
         ],
+        configure_grid: Callable[[str, int, int], tuple[bool, str]],
     ) -> None:
         self.store = store
         self.activate = activate
         self.close = close
         self.layout = layout
+        self.configure_grid = configure_grid
+        self._applied_grids: dict[str, tuple[int, int]] = {}
         self._stop = threading.Event()
         self._thread = threading.Thread(
             target=self._run,
@@ -99,6 +102,30 @@ class ShellWindowTransport:
         ):
             return
         event_type = event.get("type")
+        if event_type == "workspace.state":
+            grids = self._grids(event.get("workspace_tiling"))
+            if grids is None:
+                return
+            for surface_id in sorted(grids):
+                dimensions = grids[surface_id]
+                if self._applied_grids.get(surface_id) == dimensions:
+                    continue
+                try:
+                    success, reason = self.configure_grid(
+                        surface_id, dimensions[0], dimensions[1]
+                    )
+                except Exception as error:
+                    LOGGER.warning("Workspace grid update failed: %s", error)
+                    continue
+                if success:
+                    self._applied_grids[surface_id] = dimensions
+                else:
+                    LOGGER.warning(
+                        "Workspace grid update rejected for %s: %s",
+                        surface_id,
+                        reason,
+                    )
+            return
         if event_type not in (
             "window.activation.request",
             "window.close.request",

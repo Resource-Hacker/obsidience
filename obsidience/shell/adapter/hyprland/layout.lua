@@ -238,6 +238,18 @@ local provider = {
         for token in message:gmatch("%S+") do
             table.insert(tokens, token)
         end
+        if tokens[1] == "grid" then
+            local columns, rows = tonumber(tokens[3]), tonumber(tokens[4])
+            if #tokens ~= 4 or not valid_grid(tokens[2], columns, rows) then
+                return "obsidience: invalid grid"
+            end
+            grid_overrides[tokens[2]] = {
+                surface = tokens[2],
+                columns = columns,
+                rows = rows,
+            }
+            return true
+        end
         local target = active_target(ctx)
         if not target then
             return "obsidience: no active native window"

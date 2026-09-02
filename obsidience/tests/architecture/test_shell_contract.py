@@ -425,8 +425,10 @@ def test_one_shell_host_shares_displays_pane_and_surface_layout() -> None:
     assert '"dp-4": {"columns": 4, "rows": 1}' in layout
     assert "readonly property int workspaceTileGap: 5" in layout
     assert "function validTileBounds(" in layout
+    assert "function nearestTiledPaneRect(" in layout
     assert "function tiledPaneRect(" in layout
     assert "function initialBounds(" in tiler
+    assert "function boundsForRect(" in tiler
     assert "function resizeBounds(" in tiler
     assert "function translateBounds(" in tiler
     assert "function rectForBounds(" in tiler
@@ -542,7 +544,12 @@ def test_one_shell_host_shares_displays_pane_and_surface_layout() -> None:
     assert '"drag-route"' not in command_server
     assert '"drag-cancel"' not in command_server
     assert "obsidience-pane-drag" not in command_server
-    assert "placement.commitDrag(" in command_server
+    drag_commit = command_server.split("function commitLocalDrag", 1)[1].split(
+        "function activatePane", 1
+    )[0]
+    assert "surfaceLayout.nearestTiledPaneRect(" in drag_commit
+    assert "placement.commitGeometry(" in drag_commit
+    assert "placement.commitDrag(" not in drag_commit
     assert "paneWorkspace.placementFor(paneId)" in command_server
     assert "function broadcastToPaneClients(message)" in command_server
     assert "function activePlacement(surfaceId)" in command_server
@@ -569,7 +576,7 @@ def test_one_shell_host_shares_displays_pane_and_surface_layout() -> None:
     assert "function deactivatePane(placement)" in drag_session
     assert 'command.type === "pane.deactivate"' in command_server
     assert "return paneWorkspace.topPlacement(surfaceId)" not in command_server
-    assert "function commitDrag(" in placement
+    assert "function commitDrag(" not in placement
     assert "function commitGeometry(" in placement
     assert '"tile_bounds": tileBounds' in placement
     assert "record.tile_home" not in placement

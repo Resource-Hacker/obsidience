@@ -140,6 +140,55 @@ QtObject {
         expectRect(dpFirst, 5, 5, 474, 540, "DP-4 first cell")
         expectRect(dpThird, 963, 5, 473, 540, "DP-4 third cell")
 
+        expectBounds(
+            tiler.boundsForRect(
+                5120, 1440, 0, "samsung", 8, 2,
+                {"x": 1284, "y": 723, "width": 634, "height": 712}
+            ),
+            tiler.makeBounds("samsung", 8, 2, 2, 1, 3, 2),
+            "Samsung release adopts the nearest cell"
+        )
+        expectBounds(
+            tiler.boundsForRect(
+                5120, 1440, 0, "samsung", 8, 2,
+                {"x": 5, "y": 5, "width": 1274, "height": 713}
+            ),
+            tiler.makeBounds("samsung", 8, 2, 0, 0, 2, 1),
+            "Samsung release preserves the nearest two-cell span"
+        )
+        expectBounds(
+            tiler.boundsForRect(
+                1920, 1200, 0, "usb-c", 3, 2,
+                {"x": 643, "y": 5, "width": 634, "height": 593}
+            ),
+            tiler.makeBounds("usb-c", 3, 2, 1, 0, 2, 1),
+            "USB-C release uses its own Surface grid"
+        )
+        expectBounds(
+            tiler.boundsForRect(
+                1920, 550, 0, "dp-4", 4, 1,
+                {"x": 963, "y": 5, "width": 473, "height": 540}
+            ),
+            tiler.makeBounds("dp-4", 4, 1, 2, 0, 3, 1),
+            "DP-4 release uses its own Surface grid"
+        )
+        expectBounds(
+            tiler.boundsForRect(
+                5120, 1440, 0, "samsung", 8, 2,
+                {"x": 6000, "y": 1600, "width": 50, "height": 50}
+            ),
+            tiler.makeBounds("samsung", 8, 2, 7, 1, 8, 2),
+            "release beyond an edge clamps to at least one cell"
+        )
+        expectBounds(
+            tiler.boundsForRect(
+                5120, 1440, 0, "samsung", 8, 2,
+                {"x": 0, "y": 0, "width": 5120, "height": 1440}
+            ),
+            tiler.makeBounds("samsung", 8, 2, 0, 0, 8, 2),
+            "a full-Surface pane keeps the complete grid span"
+        )
+
         Qt.exit(0)
     }
 }

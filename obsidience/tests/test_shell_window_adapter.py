@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from obsidience.shell.adapter.windows.hyprland import (
     HyprlandSurfaceWindows,
     _monitor_route,
@@ -10,6 +12,7 @@ from obsidience.shell.adapter.windows.model import (
     ApplicationWindow,
     WindowStateStore,
 )
+from obsidience.shell.adapter.windows.transport import ShellWindowTransport
 
 
 def test_window_state_is_bounded_sanitized_and_revisioned() -> None:
@@ -133,3 +136,41 @@ def test_monitor_route_uses_logical_surface_geometry() -> None:
     assert destination is not None
     assert destination[:3] == ("usb-c", "DP-8", "top")
     assert _monitor_route(monitors, left_window, "samsung", "left") is None
+
+
+def test_workspace_state_applies_only_changed_native_grids() -> None:
+    applied: list[tuple[str, int, int]] = []
+    transport = ShellWindowTransport(
+        WindowStateStore(),
+        lambda *_args: (True, ""),
+        lambda *_args: (True, ""),
+        lambda *_args: (True, ""),
+        lambda surface_id, columns, rows: (
+            applied.append((surface_id, columns, rows)) or True,
+            "",
+        ),
+    )
+    event = {
+        "schema": "obsidience.shell.event.v1",
+        "type": "workspace.state",
+        "workspace_tiling": [
+            {"surface_id": "samsung", "columns": 8, "rows": 2},
+            {"surface_id": "usb-c", "columns": 3, "rows": 2},
+            {"surface_id": "dp-4", "columns": 4, "rows": 1},
+        ],
+    }
+
+    transport._handle(object(), json.dumps(event))
+    assert applied == [("dp-4", 4, 1), ("samsung", 8, 2), ("usb-c", 3, 2)]
+
+    transport._handle(object(), json.dumps(event))
+    assert len(applied) == 3
+
+    event["workspace_tiling"][1] = {
+        "surface_id": "usb-c",
+        "columns": 4,
+        "rows": 2,
+    }
+    transport._handle(object(), json.dumps(event))
+    assert applied[-1] == ("usb-c", 4, 2)
+    assert len(applied) == 4

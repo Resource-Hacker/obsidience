@@ -296,8 +296,22 @@ QtObject {
         const y = surfaceLayout.clampPaneY(
             surface, placement.height, rect.y
         )
-        if (!placement.commitDrag(
-                command.expected_revision, surface.id, x, y)) {
+        const tiled = surfaceLayout.nearestTiledPaneRect(surface.id, {
+            "x": x,
+            "y": y,
+            "width": placement.width,
+            "height": placement.height
+        })
+        if (!tiled || !placement.commitGeometry(
+                command.expected_revision,
+                surface.id,
+                tiled.x,
+                tiled.y,
+                tiled.width,
+                tiled.height,
+                placement.zOrder,
+                tiled.tile_bounds
+        )) {
             failPaneCommand(socket, "pane.drag.failed", token, "stale_commit")
             return
         }

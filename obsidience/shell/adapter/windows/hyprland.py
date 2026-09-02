@@ -188,6 +188,24 @@ class HyprlandSurfaceWindows:
         self._publish()
         return True, ""
 
+    def configure_grid(
+        self, surface_id: str, columns: int, rows: int
+    ) -> tuple[bool, str]:
+        if (
+            surface_id not in _OUTPUT_BY_SURFACE
+            or isinstance(columns, bool)
+            or not isinstance(columns, int)
+            or isinstance(rows, bool)
+            or not isinstance(rows, int)
+            or not 1 <= columns <= 16
+            or not 1 <= rows <= 16
+        ):
+            return False, "invalid_grid"
+        result = self._layout_message(f"grid {surface_id} {columns} {rows}")
+        if not self._accepted(result):
+            return False, "layout_rejected"
+        return True, ""
+
     def layout(
         self,
         surface_id: str,

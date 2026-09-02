@@ -19,7 +19,11 @@ class WindowAdapterHost:
         self.store = WindowStateStore()
         self.hyprland = HyprlandSurfaceWindows(self._update)
         self.transport = ShellWindowTransport(
-            self.store, self._activate, self._close, self._layout
+            self.store,
+            self._activate,
+            self._close,
+            self._layout,
+            self.hyprland.configure_grid,
         )
         self.loop = GLib.MainLoop()
 

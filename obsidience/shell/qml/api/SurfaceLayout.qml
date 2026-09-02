@@ -195,6 +195,29 @@ QtObject {
         )
     }
 
+    function nearestTiledPaneRect(surfaceId, rect) {
+        const surfaceRecord = surface(surfaceId)
+        const tiling = tilingFor(surfaceId)
+        if (!surfaceRecord || !tiling) {
+            return null
+        }
+        const bounds = workspaceTiler.boundsForRect(
+            surfaceRecord.logical_width,
+            surfaceRecord.logical_height,
+            paneTopInset,
+            surfaceId,
+            tiling.columns,
+            tiling.rows,
+            rect
+        )
+        const tiled = tileRect(surfaceId, bounds)
+        if (!tiled) {
+            return null
+        }
+        tiled.tile_bounds = bounds
+        return tiled
+    }
+
     function tiledPaneRect(surfaceId, rect, direction, tileBounds, translate) {
         const tiling = tilingFor(surfaceId)
         if (!tiling || ["left", "right", "top", "bottom"].indexOf(direction) < 0) {

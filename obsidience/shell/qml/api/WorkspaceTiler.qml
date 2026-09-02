@@ -81,6 +81,40 @@ QtObject {
         }
     }
 
+    function boundsForRect(width, height, topInset, surfaceId, columns, rows,
+                           rect) {
+        if (!rect || width <= 0 || height <= topInset
+                || !Number.isInteger(columns) || columns < 1
+                || !Number.isInteger(rows) || rows < 1
+                || typeof rect.x !== "number" || !isFinite(rect.x)
+                || typeof rect.y !== "number" || !isFinite(rect.y)
+                || typeof rect.width !== "number" || !isFinite(rect.width)
+                || typeof rect.height !== "number" || !isFinite(rect.height)
+                || rect.width <= 0 || rect.height <= 0) {
+            return null
+        }
+        const workspaceHeight = height - topInset
+        const left = Math.max(0, Math.min(
+            columns - 1, Math.round(rect.x * columns / width)
+        ))
+        const top = Math.max(0, Math.min(
+            rows - 1,
+            Math.round((rect.y - topInset) * rows / workspaceHeight)
+        ))
+        const right = Math.max(left + 1, Math.min(
+            columns, Math.round((rect.x + rect.width) * columns / width)
+        ))
+        const bottom = Math.max(top + 1, Math.min(
+            rows,
+            Math.round(
+                (rect.y + rect.height - topInset) * rows / workspaceHeight
+            )
+        ))
+        return makeBounds(
+            surfaceId, columns, rows, left, top, right, bottom
+        )
+    }
+
     function copyBounds(bounds) {
         return makeBounds(
             bounds.surface_id,

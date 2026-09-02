@@ -249,11 +249,12 @@ one-row lower Surface, which enters the corresponding bottom-edge tile above;
 every other exhausted edge remains unchanged. `Ctrl+Meta+Arrow` translates
 existing tile bounds one cell without resizing and is a no-op for freeform
 panes. Tiled bounds override pane-specific freeform minimum sizes; ordinary
-freeform resizing keeps those limits. Manual drag or resize clears
-`tile_bounds`. `Meta+Shift+Arrow` asks the shell host
-to transfer the active pane to the nearest mapped Surface in that direction,
-preserving logical width and height; only a dimension larger than the complete
-destination workspace is minimally reduced to fit. The compositor adapter
+freeform resizing keeps those limits. Manual title-bar drag snaps to the
+nearest tile bounds; manual resize clears `tile_bounds`.
+`Meta+Shift+Arrow` asks the shell host to transfer the active pane to the
+nearest mapped Surface in that direction, preserving logical width and height;
+only a dimension larger than the complete destination workspace is minimally
+reduced to fit. The compositor adapter
 captures all three physical shortcuts and calls the same bounded shell command.
 The host writes one accepted placement revision and the destination Surface
 renders it. An unmapped direction changes nothing. This deliberately uses no
@@ -277,8 +278,10 @@ Native applications use their own client-side title or tab-bar drag regions.
 The client sends the standard Wayland interactive-move request, Hyprland 0.56.2
 performs the move, and the native layout adopts the dropped grid cell when the
 application is retiled on release. QML panes retain their shared direct
-title-bar drag path. There is no modifier bind, global primary-button
-interception, synthetic title bar, or application wrapper.
+title-bar drag path and commit the same nearest Surface grid bounds on release.
+Both paths infer the nearest one-or-more-cell span from the released footprint.
+There is no modifier bind, global primary-button interception, synthetic title
+bar, or application wrapper.
 
 Settings > Input projects one physical input truth through the compositor
 adapter. The classic M.M.O.7 stays at its independently verified 6400-DPI top

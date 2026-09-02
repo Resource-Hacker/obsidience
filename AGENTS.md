@@ -147,8 +147,9 @@ after a real implementation or outcome contract exists.
   the arrow or collapses from the opposite side at that edge. Only an exhausted
   `Meta+Up` on a one-row lower Surface crosses without Shift, entering the
   corresponding bottom-edge tile above; every other exhausted edge is a no-op.
-  `Ctrl+Meta+Arrow` moves existing tile bounds one cell; manual drag or resize
-  clears them. Tiled bounds override only freeform pane minimums. The gap math
+  `Ctrl+Meta+Arrow` moves existing tile bounds one cell; manual title-bar drag
+  snaps to the nearest tile bounds, while manual resize clears them. Tiled
+  bounds override only freeform pane minimums. The gap math
   adapts the MIT Omarchy Windows Aero Snap geometry pattern; no external tiler
   or second placement authority runs. Pointer dragging remains local. When multiple Surfaces
   are active, `Meta+Shift+Arrow` creates one primary-shell placement revision to
@@ -168,10 +169,10 @@ after a real implementation or outcome contract exists.
   Native applications use their own client-side title or tab-bar drag regions:
   the client sends the standard Wayland interactive-move request and Hyprland
   0.56.2 performs the move. QML panes retain their shared direct title-bar drag
-  path. Do not add a modifier bind, global primary-button interception,
-  synthetic title bar, or application wrapper. When Hyprland retiles the
-  application on release, the native layout adopts its dropped grid cell
-  instead of restoring the pre-drag placement.
+  path and snap through the same Surface grid when released. Do not add a
+  modifier bind, global primary-button interception, synthetic title bar, or
+  application wrapper. Both paths infer the nearest one-or-more-cell span from
+  the released footprint instead of retaining arbitrary freeform placement.
 - Input has one physical/compositor truth. The connected classic M.M.O.7 is
   verified at its 6400-DPI top stage and Hyprland applies one per-device custom
   linear `0.125` multiplier for 800-effective-DPI motion on all

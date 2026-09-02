@@ -128,22 +128,6 @@ QtObject {
         placementFile.setText(JSON.stringify(record(), null, 2) + "\n")
     }
 
-    function commitDrag(expectedRevision, nextSurfaceId, nextX, nextY) {
-        if (!authoritative || revision !== expectedRevision
-                || (nextSurfaceId !== "samsung" && nextSurfaceId !== "usb-c"
-                    && nextSurfaceId !== "dp-4")
-                || !isNumber(nextX) || !isNumber(nextY)) {
-            return false
-        }
-        surfaceId = nextSurfaceId
-        x = Math.round(nextX)
-        y = Math.round(nextY)
-        tileBounds = null
-        revision += 1
-        writeState()
-        return true
-    }
-
     function commitGeometry(expectedRevision, nextSurfaceId, nextX, nextY,
                             nextWidth, nextHeight, nextZOrder, nextTileBounds) {
         if (!authoritative || revision !== expectedRevision

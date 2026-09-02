@@ -121,3 +121,15 @@ drop_target.box = { x = 1284, y = 723, w = 634, h = 712 }
 provider.recalculate(drop_context)
 assert(drop_target.placed.x == 1284 and drop_target.placed.y == 723)
 assert(drop_target.placed.w == 634 and drop_target.placed.h == 712)
+
+-- A Settings grid update is independent of focus and applies to the very next
+-- client-native pointer drop, before any keyboard layout command is needed.
+drop_window.active = false
+assert(provider.layout_msg(drop_context, "grid samsung 4 2") == true)
+assert(provider.layout_msg(drop_context, "grid samsung 0 2")
+    == "obsidience: invalid grid")
+provider.recalculate(drop_context)
+drop_target.box = { x = 2563, y = 723, w = 1273, h = 712 }
+provider.recalculate(drop_context)
+assert(drop_target.placed.x == 2563 and drop_target.placed.y == 723)
+assert(drop_target.placed.w == 1273 and drop_target.placed.h == 712)
