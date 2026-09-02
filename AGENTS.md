@@ -125,8 +125,11 @@ after a real implementation or outcome contract exists.
   session.
 - This remains an unlocked development session. greetd authenticates a fresh
   login but is not a screen locker; no secure lock authority is accepted yet.
-  Do not claim lock/PAM, Polkit UI, HDR, fullscreen VRR, or WoW acceptance until
-  each is implemented and physically verified.
+  Samsung desktop HDR is configured only on `HDMI-A-1` with the `hdr` color
+  preset, 10-bit scanout, and a 225-nit SDR mapping physically accepted by the
+  owner on 2026-09-02. Do not claim lock/PAM, Polkit UI, fullscreen HDR
+  application behavior, fullscreen VRR, or WoW acceptance until each is
+  implemented and physically verified.
 - Electron is disabled and retained only on `archive/electron-20260828`. The
   one native host shares one registry across Samsung, USB-C, and DP-4 for Chat, Library,
   Tasks, Reviews, Reader, Knowledge, Source, Models, Hardware, Camera, Settings,

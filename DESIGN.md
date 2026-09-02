@@ -135,7 +135,10 @@ never parallel runtime owners.
 Desired architecture and observed state stay distinct. The System Application
 record reports Hyprland as the live compositor. The current session is
 deliberately unlocked development state: secure locking, a native Polkit UI,
-HDR, fullscreen VRR, and WoW remain explicit acceptance gates.
+fullscreen HDR application behavior, fullscreen VRR, and WoW remain explicit
+acceptance gates. Samsung desktop HDR is active only on `HDMI-A-1` through the
+`hdr` preset and 10-bit scanout; a 225-nit SDR mapping restores the physically
+accepted desktop appearance.
 
 The native knowledge desktop is a Shell component rather than a pane or
 separate Module. One `graph_surface_id` inside the existing revisioned Surface
@@ -212,8 +215,9 @@ geometry, scale, capabilities, and adjacency. The live Hyprland session admits
 Samsung `HDMI-A-1` on the RTX 4080 at `5120x1440@240`, scale 1, 10-bit,
 with fullscreen-only VRR, plus AMD `DP-8` and `HDMI-A-2` for USB-C and logical
 DP-4. The RTX 4080 stays first in `AQ_DRM_DEVICES`; the RTX 4000 remains
-compute-only. Fullscreen WoW, HDR, and mixed-GPU presentation remain explicit
-physical acceptance gates.
+compute-only. Samsung desktop HDR is physically accepted. Fullscreen HDR
+application behavior, fullscreen WoW, and mixed-GPU presentation under gaming
+load remain explicit physical acceptance gates.
 
 Every pane, without exception, has one generic `PanePlacement`:
 

@@ -50,6 +50,8 @@ def test_hyprland_config_is_one_compositor_with_three_real_outputs() -> None:
     assert 'position = "0x0"' in config
     assert "scale = 1" in config
     assert "bitdepth = 10" in config
+    assert config.count('cm = "hdr"') == 1
+    assert config.count("sdr_max_luminance = 225") == 1
     assert "vrr = 2" in config
     assert 'output = "HDMI-A-2"' in config
     assert 'mode = "3840x1100@60"' in config
