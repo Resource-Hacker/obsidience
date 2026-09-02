@@ -583,6 +583,9 @@ def test_one_shell_host_shares_displays_pane_and_surface_layout() -> None:
     assert "watchChanges: true" in layout
     assert "required property ShellTheme theme" in frame
     assert "theme: root.shellApi.theme" in pane
+    assert "import Quickshell.Widgets" in frame
+    assert "ClippingRectangle {" in frame
+    assert "contentUnderBorder: true" in frame
     assert "color: root.theme.surface" in frame
     assert "border.color: root.theme.accent" in frame
     assert "RectangularShadow {" not in frame

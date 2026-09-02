@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import Quickshell.Widgets
 import "../api"
 
 Item {
@@ -18,7 +19,7 @@ Item {
     signal resizeFinished(bool moved)
     signal closeRequested()
 
-    Rectangle {
+    ClippingRectangle {
         id: frame
 
         anchors.fill: parent
@@ -26,7 +27,7 @@ Item {
         color: root.theme.surface
         border.width: root.theme.borderWidth
         border.color: root.theme.accent
-        clip: true
+        contentUnderBorder: true
 
         Rectangle {
             id: titleBar
