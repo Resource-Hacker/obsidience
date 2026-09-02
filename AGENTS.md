@@ -143,12 +143,18 @@ after a real implementation or outcome contract exists.
   local. When multiple Surfaces are active, `Meta+Shift+Arrow` creates one
   primary-shell placement revision to the nearest mapped Surface. No
   pane-specific bridge, held-pointer lease, or coordinator process is allowed.
+- Input has one physical/compositor truth. The connected classic M.M.O.7 is
+  verified at its 6400-DPI top stage and Hyprland applies one per-device flat
+  `0.125` multiplier (`sensitivity=-0.875`) for 800-effective-DPI motion on all
+  Surfaces. Never restore the retired DP-4/USB-C per-display scale split, add a
+  second mouse profile store, or let a pane call Hyprland directly. Settings >
+  Input projects Mouse and Keyboard state through the Hyprland adapter.
 - Hyprland owns all three outputs. The RTX 4080 is the primary renderer and
   owns Samsung; the AMD iGPU owns USB-C and logical DP-4 scanout. There is no
   per-Surface compositor, shell host, pointer router, clipboard bridge, Xorg,
   or Openbox path. One `graph_surface_id` selects the whole graph; per-Agent
-  graph placement remains deferred. Settings is one sectioned pane; Graph and
-  Workspace do not gain standalone bar buttons.
+  graph placement remains deferred. Settings is one sectioned pane; Graph,
+  Input, and Workspace do not gain standalone bar buttons.
 - `obsidience/shell/system-packages.toml` is a names-only additive Arch package
   policy. Required groups describe the target shell; protected groups prevent
   boot/graphics and workstation packages from being pruned. Omission never

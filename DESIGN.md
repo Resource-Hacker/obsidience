@@ -244,6 +244,14 @@ revision and the destination Surface renders it. An unmapped direction
 changes nothing. This deliberately uses no held-pointer handoff, pane-drag
 lease, coordinator process, or pane-specific transport.
 
+Settings > Input projects one physical input truth through the compositor
+adapter. The classic M.M.O.7 stays at its independently verified 6400-DPI top
+stage; Hyprland applies one per-device flat `0.125` multiplier (`-0.875`
+sensitivity) to produce 800-effective-DPI motion across every Surface. No
+per-Surface mouse scale, second profile store, or pane-owned compositor command
+is permitted. Mouse is the live hardware/compositor view; Keyboard begins with
+the current layout, repeat timing, and system remap state.
+
 Every Surface in the one host uses the same Obsidience visual language and pane
 registry. Shell packages may choose layouts and themes but never bind directly
 to Hyprland or become competing shell owners. Widgets, data providers, and AI
@@ -636,9 +644,10 @@ Source integrity, and the run ledger. The Electron UI is a thin projection.
 - **Terminal** mirrors the current shared development tmux window without
   owning or renaming it.
 - **Settings** is one sectioned shell pane. Graph owns its first section and
-  continues to command the canonical Three.js store. Workspace owns shared
-  pane behavior, beginning with the global 10 px pane-grid selector. Neither
-  section is a separate pane or bar item.
+  continues to command the canonical Three.js store. Input projects the live
+  Mouse and Keyboard state. Workspace owns shared pane behavior, beginning with
+  the global 10 px pane-grid selector. No section is a separate pane or bar
+  item.
 
 No UI module may carry a copied claim catalog, static semantic ontology, second
 scheduler, second memory store, hidden activation path, or duplicated Agent

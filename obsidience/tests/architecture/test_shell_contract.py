@@ -585,8 +585,10 @@ def test_one_shell_host_shares_displays_pane_and_surface_layout() -> None:
     assert "theme: root.shellApi.theme" in pane
     assert "color: root.theme.surface" in frame
     assert "border.color: root.theme.accent" in frame
-    assert "RectangularShadow {" in frame
-    assert "blur: 5" in frame
+    assert "RectangularShadow {" not in frame
+    assert "anchors.margins: -5" in frame
+    assert "border.width: 5" in frame
+    assert "z: 1" in frame
     assert "root.theme.shadow.r" in frame
     assert "root.theme.shadow.g" in frame
     assert "root.theme.shadow.b" in frame
@@ -781,7 +783,7 @@ def test_window_state_and_activation_use_one_bounded_shell_transport() -> None:
     assert "obsidience-shell-window-adapter.service" in target
 
 
-def test_graph_settings_live_in_one_sectioned_settings_pane_without_a_second_store() -> None:
+def test_settings_sections_share_one_pane_without_a_second_store() -> None:
     settings = (
         SHELL_ROOT / "qml" / "panes" / "settings" / "SettingsPane.qml"
     ).read_text()
@@ -803,6 +805,17 @@ def test_graph_settings_live_in_one_sectioned_settings_pane_without_a_second_sto
         / "settings"
         / "workspace"
         / "WorkspaceSettings.qml"
+    ).read_text()
+    input_settings = (
+        SHELL_ROOT
+        / "qml"
+        / "panes"
+        / "settings"
+        / "input"
+        / "InputSettings.qml"
+    ).read_text()
+    input_adapter = (
+        SHELL_ROOT / "adapter" / "hyprland" / "input.py"
     ).read_text()
     command_server = (
         SHELL_ROOT / "qml" / "api" / "ShellCommandServer.qml"
@@ -849,9 +862,22 @@ def test_graph_settings_live_in_one_sectioned_settings_pane_without_a_second_sto
     assert 'root.send("graph.thinking.test")' in tuning
     assert 'property string activeSection: "graph"' in settings
     assert '{"id": "graph", "label": "Graph"' in settings
+    assert '{"id": "input", "label": "Input"' in settings
     assert '{"id": "workspace", "label": "Workspace"' in settings
     assert "GraphSettings {}" in settings
+    assert "InputSettings {}" in settings
     assert "WorkspaceSettings {}" in settings
+    assert 'model: [\n                    {"id": "mouse", "label": "Mouse"},' in input_settings
+    assert '{"id": "keyboard", "label": "Keyboard"}' in input_settings
+    assert 'xhr.open("GET", apiBase + "/api/input")' in input_settings
+    assert '"HARDWARE DPI"' in input_settings
+    assert '"EFFECTIVE DPI"' in input_settings
+    assert '"REPEAT RATE"' in input_settings
+    assert '"CAPS LOCK"' in input_settings
+    assert "FileView" not in input_settings
+    assert "hyprctl" not in input_settings
+    assert 'HYPRCTL = "/usr/bin/hyprctl"' in input_adapter
+    assert '"schema": "obsidience.input.v1"' in input_adapter
     assert 'text: "PANE GRID"' in workspace_settings
     assert "property int paneGridSize: 10" in workspace_settings
     assert "property int minimumPaneGridSize: 1" in workspace_settings

@@ -56,6 +56,7 @@ from ...models import runtime as model_runtime
 from ...realtime import media as media_runtime
 from ...realtime import runtime as realtime
 from obsidience.shell.applications import packagekit as application_packages
+from obsidience.shell.adapter.hyprland import input as input_adapter
 
 
 # Each principal owns typed links to the capabilities it currently carries.
@@ -900,6 +901,12 @@ def hardware():
 def system():
     """Actual host, application, and network inventory behind Source."""
     return inventory.system_snapshot()
+
+
+@app.get("/api/input")
+def input_state():
+    """Live mouse and keyboard state from the compositor adapter."""
+    return input_adapter.input_snapshot()
 
 
 @app.get("/api/applications")

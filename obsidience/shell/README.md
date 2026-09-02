@@ -56,6 +56,8 @@ intentionally small:
 - the RTX 4080 stays the primary renderer and the RTX 4000 stays compute-only;
 - direct scanout and tearing stay disabled for the first measured gaming
   acceptance;
+- the classic M.M.O.7 uses one per-device flat 0.125 multiplier so its verified
+  6400-DPI top stage is 800-effective-DPI on every output;
 - Obsidience starts through one session target;
 - `Super+Return` opens the independent terminal;
 - `Super+Shift+Escape` exits to the greeter.

@@ -1,7 +1,6 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
-import QtQuick.Effects
 import "../api"
 
 Item {
@@ -18,20 +17,6 @@ Item {
     signal resizeMoved(real deltaX, real deltaY)
     signal resizeFinished(bool moved)
     signal closeRequested()
-
-    RectangularShadow {
-        anchors.fill: frame
-        offset: Qt.vector2d(0, 0)
-        blur: 5
-        spread: 0
-        color: Qt.rgba(
-            root.theme.shadow.r,
-            root.theme.shadow.g,
-            root.theme.shadow.b,
-            0.08
-        )
-        radius: root.theme.cornerRadius
-    }
 
     Rectangle {
         id: frame
@@ -231,5 +216,22 @@ Item {
                 onCanceled: root.resizeFinished(moved)
             }
         }
+    }
+
+    // Keep the five-pixel outline in the pane's ordinary scene subtree so the
+    // complete chrome follows PaneItem.z as one stacking unit.
+    Rectangle {
+        anchors.fill: frame
+        anchors.margins: -5
+        z: 1
+        color: "transparent"
+        radius: root.theme.cornerRadius + 5
+        border.width: 5
+        border.color: Qt.rgba(
+            root.theme.shadow.r,
+            root.theme.shadow.g,
+            root.theme.shadow.b,
+            0.08
+        )
     }
 }

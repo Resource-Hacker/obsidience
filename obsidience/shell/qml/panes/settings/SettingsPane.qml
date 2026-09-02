@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import "graph"
+import "input"
 import "workspace"
 
 Item {
@@ -10,6 +11,7 @@ Item {
     property string activeSection: "graph"
     readonly property var sections: [
         {"id": "graph", "label": "Graph", "accent": "#fb923c"},
+        {"id": "input", "label": "Input", "accent": "#a3e635"},
         {"id": "workspace", "label": "Workspace", "accent": "#67e8f9"}
     ]
 
@@ -99,13 +101,21 @@ Item {
         anchors.bottom: parent.bottom
         anchors.leftMargin: 8
         sourceComponent: root.activeSection === "workspace"
-            ? workspaceSettingsComponent : graphSettingsComponent
+            ? workspaceSettingsComponent
+            : root.activeSection === "input"
+                ? inputSettingsComponent : graphSettingsComponent
     }
 
     Component {
         id: graphSettingsComponent
 
         GraphSettings {}
+    }
+
+    Component {
+        id: inputSettingsComponent
+
+        InputSettings {}
     }
 
     Component {
