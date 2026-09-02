@@ -6,9 +6,6 @@ import json
 import tomllib
 from pathlib import Path
 
-from obsidience.shell.adapter.kwin import BUS_NAME, parse_window_list
-
-
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SHELL_ROOT = PROJECT_ROOT / "obsidience" / "shell"
 
@@ -23,61 +20,19 @@ def test_shell_manifest_names_one_real_module() -> None:
         "package": "obsidience.shell",
         "entrypoints": [
             "obsidience/shell/qml/shell.qml",
-            "obsidience/shell/qml/surface.qml",
+            "obsidience/shell/adapter/hyprland/hyprland.lua",
+            "obsidience/shell/session/greetd.toml",
+            "obsidience/shell/session/obsidience-shell-login",
             "obsidience/shell/surfaces/knowledge/host.py",
-            "obsidience/shell/surfaces/lock/host.py",
             "obsidience/shell/adapter/windows/host.py",
             "obsidience/shell/theme/apply.py",
-            "obsidience/shell/lock/wallpaper/contents/ui/main.qml",
         ],
         "source_roots": ["obsidience/shell"],
         "projections": ["obsidience/state/system/applications/obsidience"],
-        "runtime_dependencies": [
-            "packagekit 1.3.6-1.1",
-            "quickshell 0.3.0-2.1",
-            "gtk-layer-shell 0.10.1-1.1",
-            "kscreenlocker 6.6.5-1.1",
-            "webkit2gtk-4.1 2.52.4-1",
-            "python-gobject 3.56.3-1",
-            "python-dbus 1.4.0-2",
-            "python-websockets 16.1.1-1.1",
-            "python-xlib 0.33-6",
-            "qmltermwidget 2.0.0.git1-1.1",
-            "qt6-webengine 6.11.1-2",
-            "qt6-websockets 6.11.1-1.1",
-            "ttf-jetbrains-mono 2.304-2",
-        ],
+        "system_package_manifest": "obsidience/shell/system-packages.toml",
     }
 
-
-def test_shell_session_replaces_only_plasmashell() -> None:
-    target = (SHELL_ROOT / "systemd" / "obsidience-shell-session.target").read_text()
-    compositor = (SHELL_ROOT / "session" / "obsidience-shell-compositor").read_text()
-    host = (SHELL_ROOT / "systemd" / "obsidience-shell-host.service").read_text()
-    autostart_override = (
-        SHELL_ROOT
-        / "systemd"
-        / r"wayland-session-xdg-autostart@obsidience\x2dshell\x2dcompositor.target"
-    )
-    assert "main-compositor-ready.target" in target
-    assert "obsidience-shell-host.service" in target
-    assert "obsidience-shell-window-adapter.service" in target
-    assert "jarvis" not in target.lower()
-    assert "hermes" not in target.lower()
-    assert "plasmashell" not in target
-    assert "kwin_wayland" in compositor
-    assert "--xwayland" in compositor
-    assert "/usr/bin/quickshell" in host
-    assert "obsidience/shell/qml" in host
-    assert "QT_QPA_PLATFORM=wayland" in host
-    assert "LD_PRELOAD" not in host
-    assert "/usr/bin/python" not in host
-    assert "StartLimitBurst=3" in host
-    assert "DISPLAY=" not in host
-    assert autostart_override.is_file()
-
-
-def test_quickshell_canary_owns_only_the_samsung_surface() -> None:
+def test_one_quickshell_host_owns_all_three_logical_surfaces() -> None:
     shell = (SHELL_ROOT / "qml" / "shell.qml").read_text()
     shell_api = (SHELL_ROOT / "qml" / "api" / "ShellApi.qml").read_text()
     stage = (SHELL_ROOT / "qml" / "surfaces" / "stage" / "Stage.qml").read_text()
@@ -88,12 +43,22 @@ def test_quickshell_canary_owns_only_the_samsung_surface() -> None:
         SHELL_ROOT / "qml" / "components" / "identity" / "Identity.qml"
     ).read_text()
     assert 'primaryOutputName: "HDMI-A-1"' in shell_api
+    assert 'usbOutputName: "DP-8"' in shell_api
+    assert 'dp4OutputName: "HDMI-A-2"' in shell_api
     assert "property ShellApi shellApi: ShellApi {}" in shell
-    assert "Quickshell.screens.filter" in shell
-    assert shell.count("model: root.targetScreens") == 1
-    assert "PaneWorkspace {" in shell
-    assert "targetScreens: root.targetScreens" in shell
-    assert shell.count("shellApi: root.shellApi") == 2
+    assert shell.count("Quickshell.screens.filter") == 3
+    assert shell.count("PaneWorkspace {") == 3
+    assert shell.count("Stage {") == 3
+    assert shell.count("Variants {") == 3
+    assert "targetScreens: root.samsungScreens" in shell
+    assert "targetScreens: root.usbScreens" in shell
+    assert "targetScreens: root.dp4Screens" in shell
+    assert 'surfaceId: "samsung"' in shell
+    assert 'surfaceId: "usb-c"' in shell
+    assert 'surfaceId: "dp-4"' in shell
+    assert shell.count("shellApi: root.shellApi") == 6
+    assert "authoritative: true" in shell
+    assert shell.count("authoritative: true") == 1
     assert 'import "surfaces/stage"' in shell
     assert "WlrLayer.Bottom" in stage
     assert "aboveWindows: false" in stage
@@ -115,9 +80,6 @@ def test_quickshell_canary_owns_only_the_samsung_surface() -> None:
 
 def test_knowledge_graph_is_shell_owned_threejs_stage_content() -> None:
     stage = (SHELL_ROOT / "qml" / "surfaces" / "stage" / "Stage.qml").read_text()
-    x11_stage = (
-        SHELL_ROOT / "qml" / "surfaces" / "stage" / "X11Stage.qml"
-    ).read_text()
     desktop = (
         SHELL_ROOT
         / "surfaces"
@@ -180,23 +142,14 @@ def test_knowledge_graph_is_shell_owned_threejs_stage_content() -> None:
     workspace = (
         SHELL_ROOT / "qml" / "workspace" / "PaneWorkspace.qml"
     ).read_text()
-    samsung = (SHELL_ROOT / "qml" / "shell.qml").read_text()
-    isolated = (SHELL_ROOT / "qml" / "surface.qml").read_text()
+    shell = (SHELL_ROOT / "qml" / "shell.qml").read_text()
 
     assert "KnowledgeDesktop" not in stage
-    assert "WlrLayershell" not in x11_stage
-    assert "aboveWindows: locked" in x11_stage
-    assert "mask: Region {}" in x11_stage
-    assert 'surfaceId: "samsung"' in samsung
-    assert isolated.count("X11Stage {") == 1
-    assert isolated.count("model: root.targetScreens") == 1
-    assert "PaneWorkspace {" in samsung
-    assert "PaneWorkspace {" in isolated
-    assert "targetScreens: root.targetScreens" in samsung
-    assert "targetScreens: root.targetScreens" in isolated
-    assert "surfaceId: root.surfaceId" in isolated
+    assert not (SHELL_ROOT / "qml" / "surfaces" / "stage" / "X11Stage.qml").exists()
+    assert not (SHELL_ROOT / "qml" / "surface.qml").exists()
+    assert shell.count("PaneWorkspace {") == 3
+    assert shell.count("Stage {") == 3
     assert "KnowledgeDesktop" not in pane
-    assert "KnowledgeDesktop" not in x11_stage
     assert 'gi.require_version("GtkLayerShell", "0.1")' in desktop
     assert 'gi.require_version("Gdk", "3.0")' in desktop
     assert 'gi.require_version("WebKit2", "4.1")' in desktop
@@ -209,6 +162,12 @@ def test_knowledge_graph_is_shell_owned_threejs_stage_content() -> None:
     assert 'display.connect("monitor-added"' in desktop
     assert 'display.connect("monitor-removed"' in desktop
     assert 'monitor.connect("notify::geometry"' in desktop
+    assert "Gio.File.new_for_path" in desktop
+    assert 'monitor_directory(Gio.FileMonitorFlags.NONE, None)' in desktop
+    assert 'record.get("graph_surface_id")' in desktop
+    assert '"samsung": (5120, 1440)' in desktop
+    assert '"usb-c": (1920, 1200)' in desktop
+    assert '"dp-4": (1920, 550)' in desktop
     assert "self.window.hide()" in desktop
     assert "GtkLayerShell.set_monitor(self.window, monitor)" in desktop
     assert "self.window.show_all()" in desktop
@@ -260,29 +219,24 @@ def test_knowledge_graph_is_shell_owned_threejs_stage_content() -> None:
     assert 'type: "pane.present"' in shell_client
     assert 'pane_id: "reader"' in shell_client
     assert 'selection: { kind: "article", ref }' in shell_client
-    assert "ShellCommandServer {" in samsung
+    assert "ShellCommandServer {" in shell
     fullscreen_state = (
         SHELL_ROOT / "qml" / "api" / "FullscreenState.qml"
     ).read_text()
-    edge_adapter = (
-        SHELL_ROOT / "adapter" / "kwin" / "surface_edges.js"
+    window_adapter = (
+        SHELL_ROOT / "adapter" / "windows" / "hyprland.py"
     ).read_text()
-    input_bridge = (SHELL_ROOT / "input" / "dbus_bridge.py").read_text()
-    assert "property FullscreenState fullscreenState: FullscreenState {}" in samsung
-    assert "knowledgeVisible: !lockState.active && !fullscreenState.active" in samsung
-    assert "knowledgeVisible: root.knowledgeVisible" in samsung
+    assert "property FullscreenState fullscreenState: FullscreenState {}" in shell
+    assert "knowledgeVisible: !lockState.active && !fullscreenState.active" in shell
+    assert "knowledgeVisible: root.knowledgeVisible" in shell
     assert '"/obsidience-shell-fullscreen.state"' in fullscreen_state
     assert "preload: true" in fullscreen_state
     assert "watchChanges: true" in fullscreen_state
     assert "onFileChanged: stateFile.reload()" in fullscreen_state
     assert "onLoaded: root.reloadState()" in fullscreen_state
     assert 'active = stateFile.text().trim() === "1"' in fullscreen_state
-    assert "function reportFullscreen()" in edge_adapter
-    assert 'window.output.name === "HDMI-A-1"' in edge_adapter
-    assert '"ReportFullscreen"' in edge_adapter
-    assert "def ReportFullscreen(self, state: str)" in input_bridge
-    assert 'FULLSCREEN_STATE.write_text(value + "\\n"' in input_bridge
-    assert "ShellCommandServer" not in isolated
+    assert 'active.get("fullscreen", 0)' in window_adapter
+    assert '_FULLSCREEN_STATE.write_text("1\\n" if fullscreen else "0\\n"' in window_adapter
     assert "WebSocketServer" in command_server
     assert 'host: "127.0.0.1"' in command_server
     assert "port: 8768" in command_server
@@ -297,7 +251,7 @@ def test_knowledge_graph_is_shell_owned_threejs_stage_content() -> None:
     )
     assert "broadcast(readerState())" in command_server
     assert '"type": "surface.state"' in command_server
-    assert '"surface_id": "samsung"' in command_server
+    assert '"surface_id": surfaceLayout.graphSurfaceId' in command_server
     assert '"visible": knowledgeVisible' in command_server
     assert "onKnowledgeVisibleChanged: broadcast(knowledgeState())" in command_server
     assert "onShellKnowledgeVisibility" in shell_client
@@ -403,9 +357,8 @@ def test_knowledge_graph_is_shell_owned_threejs_stage_content() -> None:
     assert "Knowledge3dScene" not in renderer_surface
 
 
-def test_surface_hosts_share_displays_pane_and_surface_layout() -> None:
-    samsung = (SHELL_ROOT / "qml" / "shell.qml").read_text()
-    isolated = (SHELL_ROOT / "qml" / "surface.qml").read_text()
+def test_one_shell_host_shares_displays_pane_and_surface_layout() -> None:
+    shell = (SHELL_ROOT / "qml" / "shell.qml").read_text()
     shell_api = (SHELL_ROOT / "qml" / "api" / "ShellApi.qml").read_text()
     layout = (SHELL_ROOT / "qml" / "api" / "SurfaceLayout.qml").read_text()
     placement = (SHELL_ROOT / "qml" / "workspace" / "PanePlacement.qml").read_text()
@@ -428,12 +381,6 @@ def test_surface_hosts_share_displays_pane_and_surface_layout() -> None:
     displays = (
         SHELL_ROOT / "qml" / "panes" / "displays" / "DisplaysPane.qml"
     ).read_text()
-    usb_service = (
-        SHELL_ROOT / "systemd" / "obsidience-shell-surface-usbc.service"
-    ).read_text()
-    dp4_service = (
-        SHELL_ROOT / "systemd" / "obsidience-shell-surface-dp4.service"
-    ).read_text()
     initial_placement = json.loads(
         (SHELL_ROOT / "state" / "initial-pane-placement.json").read_text()
     )
@@ -447,19 +394,20 @@ def test_surface_hosts_share_displays_pane_and_surface_layout() -> None:
         (SHELL_ROOT / "state" / "initial-surface-layout.json").read_text()
     )
 
-    assert samsung.count("PaneWorkspace {") == 1
-    assert isolated.count("PaneWorkspace {") == 1
+    assert shell.count("PaneWorkspace {") == 3
+    assert shell.count("Stage {") == 3
+    assert shell.count("Variants {") == 3
     assert "PaneWindow" not in workspace
     assert workspace.count("PaneCanvas {") == 1
     assert 'readonly property var paneDefinitions' in workspace
     assert workspace.count('"label":') == 14
-    assert "targetScreens.length" not in workspace
-    assert 'surfaceId: "samsung"' in samsung
-    assert "shellApi: root.shellApi" in samsung
-    assert 'Quickshell.env("OBSIDIENCE_SURFACE_ID")' in isolated
-    assert "surfaceId: root.surfaceId" in isolated
-    assert "targetSurface.output" in isolated
-    assert "shellApi: root.shellApi" in isolated
+    assert 'surfaceId: "samsung"' in shell
+    assert 'surfaceId: "usb-c"' in shell
+    assert 'surfaceId: "dp-4"' in shell
+    assert "targetScreens: root.samsungScreens" in shell
+    assert "targetScreens: root.usbScreens" in shell
+    assert "targetScreens: root.dp4Screens" in shell
+    assert shell.count("shellApi: root.shellApi") == 6
     assert "SurfaceLayout surfaceLayout: SurfaceLayout {}" in shell_api
     assert "ShellTheme theme: ShellTheme {}" in shell_api
     assert "readonly property int paneTopInset: 0" in layout
@@ -561,8 +509,7 @@ def test_surface_hosts_share_displays_pane_and_surface_layout() -> None:
     assert "function presentPaneOn(" in workspace
     assert "onPresentRequested:" in workspace
     assert "function placementFor(paneId)" in workspace
-    assert "authoritative: true" in samsung
-    assert "authoritative: false" in isolated
+    assert shell.count("authoritative: true") == 1
     assert 'url: "ws://127.0.0.1:8768"' in drag_session
     assert "Math.round(startX) : placement.x" in drag_session
     assert "Math.round(startY) : placement.y" in drag_session
@@ -646,20 +593,14 @@ def test_surface_hosts_share_displays_pane_and_surface_layout() -> None:
     assert 'readonly property string schema: "obsidience.shell-theme.v1"' in theme
     assert "watchChanges: true" in theme
     assert "onFileChanged: paletteFile.reload()" in theme
-    assert "QT_QPA_PLATFORM=xcb" in usb_service
-    assert "OBSIDIENCE_THEME_PATH=" in usb_service
-    assert isolated.startswith("//@ pragma NativeTextRendering\n")
-    assert "DISPLAY=:2.0" in usb_service
-    assert "OBSIDIENCE_SURFACE_ID=usb-c" in usb_service
-    assert "DISPLAY=:2.1" in dp4_service
-    assert "OBSIDIENCE_SURFACE_ID=dp-4" in dp4_service
-    assert "OBSIDIENCE_THEME_PATH=" in dp4_service
-    assert "surface.qml" in usb_service
-    assert "surface.qml" in dp4_service
-    assert "--no-duplicate" not in usb_service
-    assert "--no-duplicate" not in dp4_service
-    assert "%h/.config/obsidience-shell/surface-layout.json" in usb_service
-    assert "%h/.config/obsidience-shell/surface-layout.json" in dp4_service
+    assert shell.startswith("//@ pragma NativeTextRendering\n")
+    assert not (SHELL_ROOT / "qml" / "surface.qml").exists()
+    assert not (
+        SHELL_ROOT / "systemd" / "obsidience-shell-surface-usbc.service"
+    ).exists()
+    assert not (
+        SHELL_ROOT / "systemd" / "obsidience-shell-surface-dp4.service"
+    ).exists()
     assert initial_placement["surface_id"] == "samsung"
     assert initial_placement["pane_id"] == "displays"
     assert initial_reader_placement["surface_id"] == "samsung"
@@ -669,32 +610,6 @@ def test_surface_hosts_share_displays_pane_and_surface_layout() -> None:
     assert initial_terminal_placement["pane_id"] == "terminal"
     assert initial_terminal_placement["open"] is True
 
-    placement_records = [
-        initial_placement,
-        initial_reader_placement,
-        initial_terminal_placement,
-        *(
-            json.loads(path.read_text())
-            for path in sorted((SHELL_ROOT / "state" / "placements").glob("*.json"))
-        ),
-    ]
-    assert {record["pane_id"] for record in placement_records} == {
-        "applications",
-        "camera",
-        "chat",
-        "displays",
-        "hardware",
-        "knowledge",
-        "library",
-        "reader",
-        "reviews",
-        "settings",
-        "source",
-        "status",
-        "tasks",
-        "terminal",
-    }
-
     assert initial_layout["schema"] == "obsidience.surface-layout.v1"
     assert initial_layout["revision"] == 0
     assert initial_layout["graph_surface_id"] == "samsung"
@@ -703,12 +618,24 @@ def test_surface_hosts_share_displays_pane_and_surface_layout() -> None:
     assert set(surfaces) == {"samsung", "usb-c", "dp-4"}
     assert surfaces["samsung"]["logical_width"] == 5120
     assert surfaces["samsung"]["logical_height"] == 1440
+    assert surfaces["samsung"]["backend"] == "hyprland-wayland"
+    assert surfaces["samsung"]["display"] == "wayland"
+    assert surfaces["samsung"]["output"] == "HDMI-A-1"
+    assert surfaces["samsung"]["x_screen"] is None
     assert surfaces["usb-c"]["logical_width"] == 1920
     assert surfaces["usb-c"]["logical_height"] == 1200
     assert surfaces["usb-c"]["device_scale"] == 2
+    assert surfaces["usb-c"]["backend"] == "hyprland-wayland"
+    assert surfaces["usb-c"]["display"] == "wayland"
+    assert surfaces["usb-c"]["output"] == "DP-8"
+    assert surfaces["usb-c"]["x_screen"] is None
     assert surfaces["dp-4"]["logical_width"] == 1920
     assert surfaces["dp-4"]["logical_height"] == 550
     assert surfaces["dp-4"]["device_scale"] == 2
+    assert surfaces["dp-4"]["backend"] == "hyprland-wayland"
+    assert surfaces["dp-4"]["display"] == "wayland"
+    assert surfaces["dp-4"]["output"] == "HDMI-A-2"
+    assert surfaces["dp-4"]["x_screen"] is None
 
     samsung_rect = surfaces["samsung"]["map_rect"]
     dp4_rect = surfaces["dp-4"]["map_rect"]
@@ -811,8 +738,8 @@ def test_window_state_and_activation_use_one_bounded_shell_transport() -> None:
     launcher = (
         SHELL_ROOT / "qml" / "workspace" / "PaneLauncher.qml"
     ).read_text()
-    observer = (
-        SHELL_ROOT / "adapter" / "kwin" / "observer.js"
+    hyprland = (
+        SHELL_ROOT / "adapter" / "windows" / "hyprland.py"
     ).read_text()
     host = (
         SHELL_ROOT / "adapter" / "windows" / "host.py"
@@ -830,7 +757,7 @@ def test_window_state_and_activation_use_one_bounded_shell_transport() -> None:
         SHELL_ROOT / "systemd" / "obsidience-shell-session.target"
     ).read_text()
 
-    assert "KWinSurfaceWindows" in host
+    assert "HyprlandSurfaceWindows" in host
     assert '"type": "window.state.publish"' in model
     assert '"type": "application.state"' in server
     assert 'event.type === "application.state"' in launcher
@@ -840,9 +767,11 @@ def test_window_state_and_activation_use_one_bounded_shell_transport() -> None:
     assert '"surface_id": surfaceId' in launcher
     assert "windowStates[surfaceId]" in server
     assert "for (const surfaceId of Object.keys(windowStates))" in server
-    assert "activateWindow" not in observer
-    assert "closeWindow" not in observer
-    assert "/usr/bin/python -m obsidience.shell.adapter.windows.host" in service
+    assert '"dispatch", "focuswindow", f"address:{window_id}"' in hyprland
+    assert '"clients", "-j"' not in hyprland
+    assert 'self._json("clients")' in hyprland
+    assert ".socket2.sock" in hyprland
+    assert "-m obsidience.shell.adapter.windows.host" in service
     assert "obsidience-shell-window-adapter.service" in target
 
 
@@ -983,74 +912,22 @@ def test_graph_settings_live_in_one_sectioned_settings_pane_without_a_second_sto
     assert '"minWidth": 680, "minHeight": 440' in workspace
 
 
-def test_one_kscreenlocker_event_quarantines_and_covers_every_surface() -> None:
+def test_development_lock_projection_starts_unlocked_without_owning_authentication() -> None:
     shell = (SHELL_ROOT / "qml" / "shell.qml").read_text()
-    isolated = (SHELL_ROOT / "qml" / "surface.qml").read_text()
     lock_state = (SHELL_ROOT / "qml" / "api" / "LockState.qml").read_text()
-    stage_content = (
-        SHELL_ROOT / "qml" / "surfaces" / "stage" / "StageContent.qml"
-    ).read_text()
-    x11_stage = (
-        SHELL_ROOT / "qml" / "surfaces" / "stage" / "X11Stage.qml"
-    ).read_text()
-    lock_graph = (SHELL_ROOT / "surfaces" / "lock" / "host.py").read_text()
-    workspace = (SHELL_ROOT / "qml" / "workspace" / "PaneWorkspace.qml").read_text()
-    canvas = (SHELL_ROOT / "qml" / "workspace" / "PaneCanvas.qml").read_text()
-    launcher = (SHELL_ROOT / "qml" / "workspace" / "PaneLauncher.qml").read_text()
-    wallpaper = (
-        SHELL_ROOT / "lock" / "wallpaper" / "contents" / "ui" / "main.qml"
-    ).read_text()
-    metadata = json.loads(
-        (SHELL_ROOT / "lock" / "wallpaper" / "metadata.json").read_text()
-    )
-    dbus_bridge = (SHELL_ROOT / "input" / "dbus_bridge.py").read_text()
-    router = (SHELL_ROOT / "input" / "router.py").read_text()
-    bridge_unit = (SHELL_ROOT / "systemd" / "dp4-edge-dbus.service").read_text()
-    router_unit = (SHELL_ROOT / "systemd" / "dp4-edge-bridge.service").read_text()
+    initial = (SHELL_ROOT / "state" / "initial-unlocked-state").read_text()
 
     assert "property LockState lockState: LockState {}" in shell
-    assert "property LockState lockState: LockState {}" in isolated
     assert "!lockState.active && !fullscreenState.active" in shell
-    assert shell.count("locked: root.lockState.active") == 2
-    assert isolated.count("locked: root.lockState.active") == 2
-    assert '"/obsidience-shell/lock-state"' in lock_state
+    assert shell.count("locked: root.lockState.active") == 6
     assert "property bool active: true" in lock_state
     assert 'active = stateFile.text().trim() !== "0"' in lock_state
-    assert "required property bool locked" in workspace
-    assert "visible: hasLocalPane && !locked" in canvas
-    assert "focusable: hasLocalPane && !locked" in canvas
-    assert "visible: !locked" in launcher
-    assert "visible: !content.locked" in stage_content
-    assert "aboveWindows: locked" in x11_stage
-    assert "mask: Region {}" in x11_stage
-    assert "QtWebEngine" not in x11_stage
-    assert "WebKit2.WebView" in lock_graph
-    assert "input_shape_combine_region(cairo.Region(), 0, 0)" in lock_graph
-    assert 'return "lock-graph" if selected else "lock-solid"' in lock_graph
-    assert 'return "desktop-graph" if selected else "hidden"' in lock_graph
-
-    assert metadata["KPackageStructure"] == "Plasma/Wallpaper"
-    assert metadata["KPlugin"]["Id"] == "org.obsidience.lockgraph"
-    assert "import QtWebEngine" in wallpaper
-    assert "WebEngineView" in wallpaper
-    assert "surface_id=samsung&lock=1" in wallpaper
-    assert "authenticator" not in wallpaper.lower()
-    assert "password" not in wallpaper.lower()
-
-    assert 'signal_name="AboutToLock"' in dbus_bridge
-    assert 'signal_name="ActiveChanged"' in dbus_bridge
-    assert "screen_saver.GetActive()" in dbus_bridge
-    assert 'signal_name="NameOwnerChanged"' in dbus_bridge
-    assert "self._route(self._authority_active())" in dbus_bridge
-    assert "def lock(self)" in router
-    assert "def unlock(self)" in router
-    assert 'if command == "lock"' in router
-    assert 'if command == "unlock"' in router
-    assert "if self.locked:" in router
-    assert "BindsTo=dp4-edge-dbus.service" in router_unit
-    assert "After=dp4-edge-dbus.service" in router_unit
-    assert "ExecStartPost=/usr/bin/systemctl --user --no-block start dp4-edge-bridge.service" in bridge_unit
-    assert "ExecStopPost=/usr/bin/systemctl --user --no-block stop dp4-edge-bridge.service" in bridge_unit
+    assert initial == "0\n"
+    assert not (SHELL_ROOT / "input" / "dbus_bridge.py").exists()
+    assert not (SHELL_ROOT / "lock" / "wallpaper" / "metadata.json").exists()
+    assert not (
+        SHELL_ROOT / "lock" / "wallpaper" / "contents" / "ui" / "main.qml"
+    ).exists()
 
 
 def test_pane_shortcut_move_is_atomic_and_has_one_owner_per_display_path() -> None:
@@ -1063,10 +940,10 @@ def test_pane_shortcut_move_is_atomic_and_has_one_owner_per_display_path() -> No
     canvas = (
         SHELL_ROOT / "qml" / "workspace" / "PaneCanvas.qml"
     ).read_text()
-    adapter = (SHELL_ROOT / "adapter" / "kwin" / "surface_edges.js").read_text()
-    dbus_adapter = (SHELL_ROOT / "input" / "dbus_bridge.py").read_text()
+    compositor = (
+        SHELL_ROOT / "adapter" / "hyprland" / "hyprland.lua"
+    ).read_text()
     move_client = (SHELL_ROOT / "input" / "move_pane.py").read_text()
-    input_router = (SHELL_ROOT / "input" / "router.py").read_text()
     move = command_server.split("function movePane", 1)[1].split(
         "function handlePaneCommand", 1
     )[0]
@@ -1085,18 +962,18 @@ def test_pane_shortcut_move_is_atomic_and_has_one_owner_per_display_path() -> No
     assert '"type": "pane.move_active"' in move_client
     assert '"source_surface_id": surface_id' in move_client
     assert 'subprotocols=[SUBPROTOCOL]' in move_client
-    assert "def MovePane(self, surface_id: str, direction: str)" in dbus_adapter
-    assert "PANE_MOVE_CLIENT" in dbus_adapter
-    assert adapter.count("registerShortcut(") == 4
-    assert '"Meta+Shift+Left"' in adapter
-    assert '"Meta+Shift+Right"' in adapter
-    assert '"Meta+Shift+Up"' in adapter
-    assert '"Meta+Shift+Down"' in adapter
-    assert '"MovePane"' in adapter
-    assert "PANE_MOVE_DIRECTIONS" in input_router
-    assert "consumed_pane_move_keys" in input_router
-    assert "self.pane_mover(surface_id, direction)" in input_router
-    assert "PANE_MOVE_CLIENT" in input_router
+    assert compositor.count('hl.bind("SUPER + SHIFT +') == 5
+    assert "move_pane.py focused left" in compositor
+    assert "move_pane.py focused right" in compositor
+    assert "move_pane.py focused top" in compositor
+    assert "move_pane.py focused bottom" in compositor
+    assert '"HDMI-A-1": "samsung"' in move_client
+    assert '"DP-8": "usb-c"' in move_client
+    assert '"HDMI-A-2": "dp-4"' in move_client
+    assert '["/usr/bin/hyprctl", "monitors", "-j"]' in move_client
+    assert 'arguments[0] == "focused"' in move_client
+    assert not (SHELL_ROOT / "input" / "router.py").exists()
+    assert not (SHELL_ROOT / "input" / "dbus_bridge.py").exists()
     assert "router" not in move.lower()
     assert "drag-start" not in command_server
     assert "drag-route" not in command_server
@@ -1169,46 +1046,20 @@ def test_reader_explorers_share_one_native_dock_layout() -> None:
     assert 'title: "Knowledge"' in knowledge
 
 
-def test_surface_edge_adapter_is_execution_attested_and_cache_safe() -> None:
-    adapter = (SHELL_ROOT / "adapter" / "kwin" / "surface_edges.js").read_text()
-    loader = (SHELL_ROOT / "adapter" / "kwin" / "load_surface_edges.sh").read_text()
-    dbus_adapter = (SHELL_ROOT / "input" / "dbus_bridge.py").read_text()
-
-    assert "registerScreenEdge(KWin.ElectricBottom, enterFromBottomEdge)" in adapter
-    assert "workspace.cursorPosChanged.connect(trackBottomEdge)" in adapter
-    assert adapter.count("registerShortcut(") == 4
-    assert '"MovePane"' in adapter
-    assert '"AdapterReady"' in adapter
-    assert "assert(edgeRegistered" in adapter
-    assert 'if [[ "${1:-}" == "--check" ]]' in loader
-    assert 'generation="$(sha256sum "$script" | cut -c1-12)"' in loader
-    assert 'script="${adapter_dir}/surface_edges.js"' in loader
-    assert ".local/share/kwin/scripts" not in loader
-    assert "for attempt in 1 2" in loader
-    assert "failed_names=()" in loader
-    assert "did not execute its readiness handshake" in loader
-    assert "def AdapterReady(self, token: str)" in dbus_adapter
-    assert "def MovePane(self, surface_id: str, direction: str)" in dbus_adapter
-
-
 def test_login_entry_installs_as_a_greeter_readable_file() -> None:
     desktop = (SHELL_ROOT / "session" / "obsidience.desktop").read_text()
+    greetd = (SHELL_ROOT / "session" / "greetd.toml").read_text()
     installer = (SHELL_ROOT / "session" / "install-session").read_text()
-    assert "TryExec=" not in desktop
+    assert "TryExec=/home/wissenschafter/Projects/obsidience/" in desktop
     assert "session_dir=/usr/local/share/wayland-sessions" in installer
     assert 'install -o root -g root -m 0644 "$session_source" "$session_target"' in installer
-    assert "chmod" not in installer
-    assert "/home/wissenschafter" not in installer
+    assert 'install -o root -g root -m 0600 "$greetd_source" "$greetd_target"' in installer
+    assert "[default_session]" in greetd
+    assert "obsidience-shell-login" in greetd
 
 
-def test_noctalia_boundary_is_pinned_and_visual_neutral() -> None:
+def test_live_shell_runtime_dependencies_are_pinned_without_kde_shell_entries() -> None:
     manifest = json.loads((SHELL_ROOT / "REUSE_MANIFEST.json").read_text())
-    noctalia = manifest["upstreams"][0]
-    assert noctalia["commit"] == "74e6c2790dd8f39bf496e90e479a9ae370846eed"
-    assert noctalia["license"] == "MIT"
-    assert len(noctalia["selected_sources"]) == 4
-    excluded = noctalia["adaptation"].lower()
-    assert all(word in excluded for word in ("renderer", "themes", "assets", "plugins"))
     packages = {
         upstream["name"]: upstream.get("package")
         for upstream in manifest["upstreams"]
@@ -1219,21 +1070,9 @@ def test_noctalia_boundary_is_pinned_and_visual_neutral() -> None:
     assert packages["PyGObject"] == "python-gobject 3.56.3-1"
     assert packages["QMLTermWidget"] == "qmltermwidget 2.0.0.git1-1.1"
     assert packages["Qt WebSockets"] == "qt6-websockets 6.11.1-1.1"
-    assert packages["KScreenLocker"] == "kscreenlocker 6.6.5-1.1"
-    assert packages["Qt WebEngine"] == "qt6-webengine 6.11.1-2"
-    observer = (SHELL_ROOT / "adapter" / "kwin" / "observer.js").read_text()
-    assert BUS_NAME in observer
-    assert "activateWindow" not in observer
-    assert "closeWindow" not in observer
-    assert "MoveMouse" not in observer
-
-
-def test_window_feed_is_bounded_and_rejects_malformed_rows() -> None:
-    field = "\x1e"
-    record = field.join(("id", "app", "Title", "desktop", "HDMI-A-1"))
-    assert parse_window_list(record)[0].title == "Title"
-    assert parse_window_list(field.join(("bad", "row"))) == ()
-    assert parse_window_list("x" * 128_001) == ()
+    assert "KScreenLocker" not in packages
+    assert "Qt WebEngine" not in packages
+    assert "KWin MCP" not in packages
 
 
 def test_every_pane_uses_the_generic_surface_placement_contract() -> None:
@@ -1275,12 +1114,13 @@ def test_native_terminal_is_one_tmux_view_inside_the_generic_pane() -> None:
         / "terminal"
         / "attach-shared-tmux"
     ).read_text()
-    samsung = (SHELL_ROOT / "qml" / "shell.qml").read_text()
-    isolated = (SHELL_ROOT / "qml" / "surface.qml").read_text()
+    shell = (SHELL_ROOT / "qml" / "shell.qml").read_text()
     workspace = (
         SHELL_ROOT / "qml" / "workspace" / "PaneWorkspace.qml"
     ).read_text()
-    host = (SHELL_ROOT / "systemd" / "obsidience-shell-host.service").read_text()
+    host = (
+        SHELL_ROOT / "systemd" / "obsidience-shell-host.service"
+    ).read_text()
 
     assert "import QMLTermWidget 2.0" in terminal
     assert "import QtWebSockets" in terminal
@@ -1320,8 +1160,8 @@ def test_native_terminal_is_one_tmux_view_inside_the_generic_pane() -> None:
     assert "kill-session" not in attach
     assert "codex exec" not in attach.lower()
     assert "codex resume" not in attach.lower()
-    assert "PaneWorkspace {" in samsung
-    assert "PaneWorkspace {" in isolated
+    assert shell.count("PaneWorkspace {") == 3
+    assert not (SHELL_ROOT / "qml" / "surface.qml").exists()
     assert "property Component terminalComponent: Component { TerminalPane {} }" in workspace
     assert '"label": "Terminal"' in workspace
     assert '"component": terminalComponent' in workspace

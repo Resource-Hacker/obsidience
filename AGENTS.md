@@ -104,74 +104,53 @@ after a real implementation or outcome contract exists.
   to ADMECH Hardware; Applications narrows it to ADMECH Software. This adds
   Knowledge priority only and never attaches Source bytes or executable
   authority.
-- Obsidience is the harness and developing desktop shell. Its first replacement
-  target is `plasmashell`, while KWin remains the compositor boundary. It is
-  neither the computer, the kernel, nor a System32 analogue: its actual code is
-  visible on the System Volume and its Applications record describes the shell
-  role. It may replace more KDE Plasma/GNOME/Windows desktop functions and eventually
-  become an OS environment. That direction adds no ontology kind and grants no
-  fictional capability: each replacement arrives as one real, modular System
-  or interface implementation with an explicit boundary, rollback, and
-  acceptance test. Reuse Linux itself for kernel, drivers, filesystems, systemd,
-  udev, PipeWire/WirePlumber, NetworkManager, and compositor protocols; do not
-  recreate operating-system plumbing inside the Harness. The first desktop
-  cutover may retain KWin as the compositor while Obsidience replaces
-  `plasmashell`, the panel, and workspace surface. The native `Shell` Module now
-  provides the first bounded slice: the default Obsidience KWin login session,
-  one Samsung-only Obsidience Stage matching the current background and identity
-  chrome, and read-only KWin state. It reserves no panel area and creates no
-  placeholder panel. `plasmashell` stays disabled so it cannot compete for shell ownership;
-  the independent terminal is the recovery path. The Electron development UI
-  is disabled on `native-shell` and retained only on
-  `archive/electron-20260828`. The native Samsung, USB-C, and DP-4 hosts all
-  instantiate the same registry for Chat, Library, Tasks, Reviews, Reader,
-  Knowledge, Source, Models, Hardware, Camera, Settings, Applications,
-  Terminal, and Displays. The far-left bar control remains the transient
-  Start-style launcher. Its menu is one shared button-anchored shell popup on
-  every Surface. The Obsidience bar is the sole side-Surface bar; legacy tint2
-  panels must not run or be restored by display wake repair. Applications is
-  the ordinary movable software-management pane backed by PackageKit/Polkit.
-  One shared placement record transfers and
-  resizes every pane. The
-  project target is a full `plasmashell`
-  replacement on unmodified upstream KWin. Treat each physical display as one
-  runtime Surface: Samsung is KWin/Wayland, USB-C is Xorg `:2.0`, and DP-4 is
-  Xorg `:2.1`. Surface is not an Article kind or Capability. Every pane uses the
-  same `pane_id + surface_id + local_rect + open + z_order` placement contract;
-  never create a Reader-specific or pane-specific display bridge. Every
-  floating pane is wrapped by the shared `PaneItem` and `PaneFrame`; pane
-  Modules must not implement their own outer movement or focus shim. The shared
-  passive press observer must activate and raise a pane on its first primary
-  click without consuming that click from terminal or control content. Pointer dragging is
-  local to the current Surface and `SurfaceLayout` clamps every preview,
-  commit, reopen, and transfer to the shared usable bounds so the title-bar
-  handle cannot be stranded behind shell chrome. `SurfaceLayout` also owns one
-  global logical-pixel pane grid. Its default is 10 px, it snaps pane position
-  and size before safety clamping, and Settings > Workspace is its only human
-  control; individual pane Modules must never implement their own snap logic.
-  `Meta+Shift+Arrow` moves the active pane to the nearest mapped Surface in
-  that direction through one primary-shell placement revision. KWin owns the
-  physical shortcut on Samsung. On USB-C and DP-4, the existing single-owner
-  input router consumes that exact chord before XTest forwarding and calls the
-  same bounded shell command client. The primary shell remains the only
-  placement writer. No held-pointer transfer, pane-drag lease, coordinator
-  service, Openbox binding, or pane-specific bridge is permitted for this state
-  change. An unmapped direction is a no-op.
-  Only the active Surface displays its cursor; inactive Surface cursors stay hidden.
-  Preserve Samsung-only KWin ownership and VRR isolation.
-  KWin and KScreenLocker remain the sole session-lock and PAM authority.
-  One `graph_surface_id` in the existing Surface layout selects Samsung, USB-C,
-  or DP-4 for the whole graph; per-Agent placement is deferred. Obsidience
-  keeps the top-left Obsidience identity mark on that selected Surface and
-  centers the Executive root at the selected Surface's exact midpoint.
-  projects one lock event to all three Surfaces. The selected Surface shows the
-  canonical graph, each nonselected side Surface is an opaque input-empty
-  privacy cover, and Samsung retains KDE's compositor-enforced stock greeter
-  over a real graph-rendering wallpaper when selected. The root input router
-  rejects every side-Surface lease. Unlock is accepted only from KScreenLocker
-  and never restores prior side ownership. Settings is one sectioned pane;
-  Graph is its first section, Workspace owns shared pane behavior, and neither
-  has a standalone bar button.
+- Obsidience is the harness and the visible shell of an Arch Linux system.
+  Hyprland is the compositor boundary; Linux, systemd, udev,
+  PipeWire/WirePlumber, NetworkManager, Polkit, PAM, and standard compositor
+  protocols remain upstream plumbing. Do not recreate them inside the Harness.
+  Obsidience may grow into a complete OS environment, but that direction adds
+  no ontology kind or fictional Capability: each responsibility arrives as one
+  real Module slice with rollback and an acceptance test.
+- The target stack is Hyprland -> `adapter/hyprland` -> stable Shell API -> one
+  Quickshell host -> panes, providers, widgets, and AI surfaces. Only the
+  compositor adapter may consume Hyprland events or commands. No pane, widget,
+  graph, or Harness subsystem may call the compositor directly.
+- greetd launches the default `Obsidience` UWSM session directly. One Hyprland
+  process owns Samsung `HDMI-A-1` through the RTX 4080 and USB-C `DP-8` plus
+  logical DP-4 `HDMI-A-2` through the AMD iGPU. One native QML host reuses the
+  pane registry and one Three.js graph across all three logical Surfaces and
+  stores state under `obsidience-shell`. KWin, Plasma Shell, Plasma Login Manager,
+  KScreenLocker, and SDDM are removed from the live installation. Their Git
+  archive and backup are rollback evidence only, not an installed recovery
+  session.
+- This remains an unlocked development session. greetd authenticates a fresh
+  login but is not a screen locker; no secure lock authority is accepted yet.
+  Do not claim lock/PAM, Polkit UI, HDR, fullscreen VRR, or WoW acceptance until
+  each is implemented and physically verified.
+- Electron is disabled and retained only on `archive/electron-20260828`. The
+  one native host shares one registry across Samsung, USB-C, and DP-4 for Chat, Library,
+  Tasks, Reviews, Reader, Knowledge, Source, Models, Hardware, Camera, Settings,
+  Applications, Terminal, and Displays. There is no Hyprland copy of any pane,
+  no second graph, and no second Reader.
+- Treat each physical display as one runtime Surface. Surface is not an Article
+  kind or Capability. Every pane uses the same
+  `pane_id + surface_id + local_rect + open + z_order` contract and the shared
+  `PaneItem`/`PaneFrame` interaction path. `SurfaceLayout` owns boundary clamps
+  and one global logical-pixel grid, 10 px by default. Pointer dragging remains
+  local. When multiple Surfaces are active, `Meta+Shift+Arrow` creates one
+  primary-shell placement revision to the nearest mapped Surface. No
+  pane-specific bridge, held-pointer lease, or coordinator process is allowed.
+- Hyprland owns all three outputs. The RTX 4080 is the primary renderer and
+  owns Samsung; the AMD iGPU owns USB-C and logical DP-4 scanout. There is no
+  per-Surface compositor, shell host, pointer router, clipboard bridge, Xorg,
+  or Openbox path. One `graph_surface_id` selects the whole graph; per-Agent
+  graph placement remains deferred. Settings is one sectioned pane; Graph and
+  Workspace do not gain standalone bar buttons.
+- `obsidience/shell/system-packages.toml` is a names-only additive Arch package
+  policy. Required groups describe the target shell; protected groups prevent
+  boot/graphics and workstation packages from being pruned. Omission never
+  authorizes removal, and observed versions remain evidence rather than
+  rolling-release policy.
 
 Only these canonical kinds belong in accepted frontmatter: `knowledge`,
 `task`, `runbook`, `tool`, `skill`, and `agent`.
@@ -429,10 +408,15 @@ Tool bindings, generic hierarchy edges, and framework-specific vocabulary.
 
 ## Development workflow
 
-- Project root: `/home/wissenschafter/Projects/obsidience`.
+- Canonical project and live shell root:
+  `/home/wissenschafter/Projects/obsidience`. The Harness, mutable Vault, Shell,
+  UI, tests, and Source projection all use that one root. Hyprland naming is
+  restricted to the compositor adapter and package profile; it is not a second
+  product, project, or runtime namespace.
 - Development harness: `obsidience-harness-dev.service` on `127.0.0.1:8765`.
-- Development UI: `obsidience-ui-usbc-dev.service` on isolated USB-C Xorg `:2`.
-- Use `obsidience/scripts/dev.sh` for an interactive combined launch.
+- Native UI: one greetd-launched Hyprland compositor and one Quickshell host
+  across all three outputs. `obsidience-ui-usbc-dev.service` is disabled
+  Electron rollback and must not be started as a parallel interface.
 - The UI is a thin projection of the live graph. It must not invent semantic
   kinds, static claim catalogs, trust rules, or a second scheduler.
 - `/api/graph.navigation` is the sole UI contract for Agent/Library card names,
@@ -448,7 +432,7 @@ Tool bindings, generic hierarchy edges, and framework-specific vocabulary.
   checkbox yields to the per-graph Animation speed slider when disabled.
 - The Reader is the single Article and Source viewer. Knowledge and Source
   explorers are dockable views, not separate truth stores.
-- External applications remain native KWin/Openbox clients, never PaneItems or
+- External applications remain native compositor clients, never PaneItems or
   embedded mirrors. One Shell palette feeds PaneFrame and bounded native theme
   adapters; application content remains owned by the application.
 - Reader docking has one primary-owned atomic layout: Knowledge defaults left,
@@ -461,9 +445,11 @@ Tool bindings, generic hierarchy edges, and framework-specific vocabulary.
   the largest attached client so the full pane reflows without letterboxing.
   DP-4 is a passive mirror and must not constrain Obsidience's terminal size.
 
-After every project change, rebuild as needed and restart the harness plus each
-affected native shell host so the owner can test the exact current state.
-Verify the API and the actual USB-C display, not only command exit codes.
+After every project change, rebuild as needed and restart every affected live
+process so the owner can test the exact current state. A compositor-config or
+session-boundary change requires a fresh greetd/Hyprland session; ordinary pane
+and service changes restart only their affected processes. Verify the API and
+the actual target Surface, not only command exit codes.
 
 ## Required validation
 
@@ -474,8 +460,10 @@ Before handoff:
 3. run `pnpm --dir obsidience/ui typecheck` and
    `pnpm --dir obsidience/ui build`;
 4. confirm Source integrity and the exact Tool-to-Skill-to-Capability pairing;
-5. restart the harness and affected native shell services;
-6. verify `/api/status`, `/api/graph`, `/api/tasks`, and the USB-C UI;
+5. restart affected live processes and verify the greetd/Hyprland session and
+   its exact units;
+6. verify `/api/status`, `/api/graph`, `/api/tasks`, and the actual target
+   Surface;
 7. ensure accepted graph text contains no stale framework architecture or Tool
    claim without its exact Capability binding and singular entrypoint.
 

@@ -1,8 +1,8 @@
 [Unit]
 Description=Obsidience Three.js knowledge desktop
-Requires=main-compositor-ready.target obsidience-shell-host.service obsidience-harness-dev.service
-After=main-compositor-ready.target obsidience-shell-host.service obsidience-harness-dev.service
-PartOf=obsidience-shell-session.target graphical-session.target
+Requires=obsidience-shell-host.service obsidience-harness-dev.service
+After=obsidience-shell-host.service obsidience-harness-dev.service
+PartOf=obsidience-shell-session.target
 StartLimitIntervalSec=30
 StartLimitBurst=3
 
@@ -11,7 +11,8 @@ Type=simple
 WorkingDirectory=/home/wissenschafter/Projects/obsidience
 Environment=GDK_BACKEND=wayland
 Environment=WEBKIT_DMABUF_RENDERER_FORCE_SHM=1
-Environment=OBSIDIENCE_KNOWLEDGE_URL=http://127.0.0.1:8765/shell/knowledge/?surface=knowledge&surface_id=samsung
+Environment=OBSIDIENCE_KNOWLEDGE_ORIGIN=http://127.0.0.1:8765/shell/knowledge/
+Environment=OBSIDIENCE_SURFACE_LAYOUT=%h/.config/obsidience-shell/surface-layout.json
 ExecStartPre=/usr/bin/curl --fail --silent --show-error --output /dev/null --retry 30 --retry-delay 1 --retry-connrefused http://127.0.0.1:8765/shell/knowledge/
 ExecStart=/usr/bin/python3 /home/wissenschafter/Projects/obsidience/obsidience/shell/surfaces/knowledge/host.py
 Restart=on-failure

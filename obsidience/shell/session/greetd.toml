@@ -1,0 +1,13 @@
+[terminal]
+vt = 1
+
+[general]
+runfile = "/run/greetd.run"
+
+[default_session]
+command = "agreety --cmd /home/wissenschafter/Projects/obsidience/obsidience/shell/session/obsidience-shell-login"
+user = "greeter"
+
+[initial_session]
+command = "/home/wissenschafter/Projects/obsidience/obsidience/shell/session/obsidience-shell-login"
+user = "wissenschafter"

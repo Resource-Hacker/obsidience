@@ -40,7 +40,7 @@ QtObject {
             "schema": eventSchema,
             "type": "surface.state",
             "surface": {
-                "surface_id": "samsung",
+                "surface_id": surfaceLayout.graphSurfaceId,
                 "visible": knowledgeVisible
             }
         }

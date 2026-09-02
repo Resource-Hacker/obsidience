@@ -1,43 +1,54 @@
 # Obsidience
 
-Obsidience is a graph-native local-agent harness and modular Linux desktop shell
-built as a full `plasmashell` replacement on unmodified upstream KWin. A
-maintained Markdown wiki is the durable brain; typed graph edges dispatch work,
-and a bounded RAPTOR retrieval pipeline supplies the exact Knowledge needed for
-each activation. The system is optimized first for small local models.
+Obsidience is a graph-native local-agent harness and modular Arch Linux desktop
+shell built on Hyprland. A maintained Markdown wiki is the durable brain; typed
+graph edges dispatch work, and a bounded RAPTOR retrieval pipeline supplies the
+exact Knowledge needed for each activation. The system is optimized first for
+small local models.
 
-The replacement target is the project identity, not a claim that the current
-development build already implements every Plasma Shell facility. Each shell
-responsibility is accepted as a small, independently testable Module slice while
-KWin, Linux, systemd, PipeWire, NetworkManager, and the other mature system
-plumbing remain upstream-owned.
+Obsidience owns the visible shell and agent surfaces. Hyprland owns composition,
+outputs, windows, input routing, VRR, fullscreen behavior, and XWayland. Linux,
+systemd, PipeWire, NetworkManager, and the other mature system services remain
+upstream plumbing. Each replacement arrives as a small, independently testable
+slice rather than another monolithic desktop environment.
 
 Read [DESIGN.md](DESIGN.md) for the canonical ontology and execution laws.
 
-## Start the development build
+## Development commands
 
 ```sh
-./obsidience/scripts/llm.sh &
-./obsidience/scripts/dev.sh
+./obsidience/scripts/obsidience status
+PYTHONPATH=. .venv/bin/pytest -q
+pnpm --dir obsidience/ui typecheck
+pnpm --dir obsidience/ui build
 ```
 
-Or run the pieces independently:
+Harness commands remain independently available:
 
 ```sh
 ./obsidience/scripts/obsidience serve
-./obsidience/scripts/obsidience status
 ./obsidience/scripts/obsidience run Tasks/improve
 ./obsidience/scripts/obsidience run Tasks/check
-cd obsidience/ui && pnpm dev
 ```
+
+The native UI starts with the selected desktop session. Do not launch the
+retired Electron development helper beside either native shell.
 
 The normal development services are:
 
 - `obsidience-harness-dev.service` - API, interpreter, and real-time supervisor on `127.0.0.1:8765`
+- `obsidience-shell-session.target` - live Hyprland session boundary
 - `obsidience-shell-host.service` - native Samsung Wayland shell host
 - `obsidience-shell-knowledge.service` - canonical Three.js knowledge desktop
-- `obsidience-shell-surface-usbc.service` - native USB-C X11 Surface host
-- `obsidience-shell-surface-dp4.service` - native DP-4 X11 Surface host
+- `obsidience-shell-notifications.service` - session-local notification owner
+
+The one shell host creates a logical Surface on every Hyprland output; there is
+no compositor, shell process, pointer bridge, or clipboard bridge per display.
+greetd launches that Hyprland session directly. KWin, Plasma Shell, Plasma
+Login Manager, KScreenLocker, and SDDM are removed from the live installation;
+their Git archive and backup are rollback evidence only. The current session is
+an unlocked development build. Secure locking, a native Polkit UI, HDR,
+fullscreen VRR, and WoW remain explicit acceptance gates.
 
 Graph Settings → Display selects the one Surface that owns the whole live
 knowledge graph. The setting is global for this development slice; individual
@@ -120,9 +131,9 @@ the new Knowledge.
 - `obsidience/harness/` - the Harness Module: `interfaces/{api,cli}`, direct
   `{config,execution,knowledge,conversation,models,realtime,computer,web,host}`
   subsystems, and `capabilities/` paths mirroring exact dotted Tool IDs
-- `obsidience/shell/` - the native Shell Module: KWin session lifecycle,
+- `obsidience/shell/` - the native Shell Module: Hyprland adapter and session,
   native Surfaces, panes, desktop graph, Reader, Terminal, and bounded
-  compositor integration
+  compositor integration; former KWin source exists only in the archived branch
 - `obsidience/ui/` - the canonical React/Three.js knowledge-graph bundle used
   by the native graph-only WebKit surface
 - `obsidience/scripts/` - development and runtime entry points
@@ -160,29 +171,20 @@ OS-like development tree. Obsidience is both the harness and the shell project.
 Linux remains the plumbing—kernel drivers, filesystems, systemd, udev,
 PipeWire/WirePlumber, NetworkManager, and compositor protocols are reused.
 
-Every physical presentation endpoint is an Obsidience **Surface**. The Samsung
-is a KWin/Wayland Surface; USB-C and DP-4 remain independent Xorg Surfaces so
-they never enter KWin's gaming topology. Every workspace pane uses one generic
-placement contract: pane ID, Surface ID, local rectangle, open state, and
-z-order. Moving any pane between Surfaces is an atomic Obsidience state handoff
-and destination re-render, not an impossible attempt to reparent one native
-X11 window into Wayland. This preserves Samsung-only KWin ownership and the
-existing VRR boundary while presenting one continuous Obsidience workspace.
-Pointer dragging stays within a Surface; `Meta+Shift+Arrow` performs the atomic
-move to the nearest mapped Surface in that direction. Each Surface's existing
-window manager captures the chord, while the primary shell remains the sole
-placement writer.
+Every physical presentation endpoint is an Obsidience **Surface**. Every pane
+uses one generic placement contract: pane ID, Surface ID, local rectangle, open
+state, and z-order. The live Hyprland session uses the RTX 4080 as its primary
+renderer for Samsung `HDMI-A-1` at `5120x1440@240`, scale 1, 10-bit, with
+fullscreen-only VRR. The AMD iGPU supplies USB-C `DP-8` and logical DP-4
+`HDMI-A-2`; one compositor owns all three outputs and native pointer, clipboard,
+focus, and window movement. Samsung gaming, HDR, and secure lock behavior remain
+physical acceptance gates.
 
-The first Samsung slice keeps KWin as compositor and replaces only
-`plasmashell`. Obsidience is the default login session and the competing
-`plasma-plasmashell.service` is disabled. The native Shell Module owns the
-Samsung background Surface, the matching USB-C and DP-4 Stages, one shared
-launcher, read-only KWin state, and one common registry for Chat, Library,
-Tasks, Reviews, Reader, Knowledge, Source, Models, Hardware, Camera, Graph
-Tuning, Terminal, and Displays. Every pane uses the same live
-`PanePlacement`, can be resized, and can transfer between the three Surface
-hosts. The launcher overlays without reserving gaming-screen geometry. The
-independent terminal remains the recovery path.
+The same Quickshell registry, pane placement, graph, Reader, terminal, launcher,
+and theme serve every Surface; there is no second UI or temporary runtime
+namespace. Pointer dragging remains Surface-local, and multi-Surface keyboard
+transfer is one atomic
+placement revision owned by the primary shell.
 
 Obsidience is an ordinary directory backed by `/home`; `/var/lib/ai` is the
 Models storage location. `/home` and `/var/lib/ai` are separate Btrfs subvolume

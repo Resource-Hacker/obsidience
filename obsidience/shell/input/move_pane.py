@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 import time
 
@@ -14,6 +15,31 @@ SHELL_URL = "ws://127.0.0.1:8768"
 SUBPROTOCOL = "obsidience.shell.v1"
 SURFACES = frozenset(("samsung", "usb-c", "dp-4"))
 DIRECTIONS = frozenset(("left", "right", "top", "bottom"))
+SURFACE_BY_OUTPUT = {
+    "HDMI-A-1": "samsung",
+    "DP-8": "usb-c",
+    "HDMI-A-2": "dp-4",
+}
+
+
+def focused_surface() -> str | None:
+    """Resolve the focused Hyprland output to one logical Surface."""
+
+    try:
+        result = subprocess.run(
+            ["/usr/bin/hyprctl", "monitors", "-j"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=0.5,
+        )
+        monitors = json.loads(result.stdout)
+    except (OSError, subprocess.SubprocessError, ValueError, TypeError):
+        return None
+    for monitor in monitors if isinstance(monitors, list) else ():
+        if isinstance(monitor, dict) and monitor.get("focused") is True:
+            return SURFACE_BY_OUTPUT.get(str(monitor.get("name", "")))
+    return None
 
 
 def move_active_pane(surface_id: str, direction: str) -> bool:
@@ -60,7 +86,10 @@ def main(argv: list[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
     if len(arguments) != 2:
         return 2
-    return 0 if move_active_pane(arguments[0], arguments[1]) else 1
+    surface_id = focused_surface() if arguments[0] == "focused" else arguments[0]
+    if surface_id is None:
+        return 1
+    return 0 if move_active_pane(surface_id, arguments[1]) else 1
 
 
 if __name__ == "__main__":

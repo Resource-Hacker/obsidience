@@ -1,171 +1,138 @@
 # Obsidience Shell
 
-This Module is the native shell boundary beneath the existing Obsidience UI.
-It replaces `plasmashell`; KWin remains the unmodified compositor. Upstream
-Quickshell is the shell host and native Qt Quick pane renderer. The bounded
-WebKitGTK host renders only the canonical Three.js graph. The first native
-slice owns one exact Samsung Wayland Stage matching the current Obsidience
-visual language.
+Obsidience Shell is the visible desktop and interaction layer. Hyprland owns
+composition, outputs, windows, input routing, VRR, fullscreen behavior, and
+XWayland. Quickshell owns the Obsidience stage, launcher, panes, and shell API.
+WebKitGTK renders the one canonical Three.js knowledge graph behind them.
 
-The Electron application is disabled on the `native-shell` branch. Its complete
-pre-native state is preserved by Git branch `archive/electron-20260828` and tag
-`electron-v0-dev-20260828`; it is not a concurrent shell or pane owner.
+```text
+Linux + systemd + PipeWire + NetworkManager
+                    |
+                Hyprland
+                    |
+       adapter/hyprland + Shell API
+                    |
+     one Quickshell host + one graph host
+                    |
+      panes, providers, and AI surfaces
+```
 
-Each display server has one long-running native Surface render host. Samsung
-uses `shell.qml`; isolated X11 Surfaces use the small `surface.qml` entrypoint.
-Both consume the same PaneFrame and placement components, so a pane changes
-one shell-owned placement record instead of pretending a native window can be
-reparented across display servers. Each real feature owns a direct folder
-matching its function; the initial native slice has `surfaces/stage/`, its
-reusable `components/identity/`, and the shared `workspace/` pane components.
+The shell is not another agent, scheduler, graph authority, or package manager.
+It projects typed state from the Harness and delegates privileged operations to
+the existing Linux services that already own them.
 
-The knowledge desktop is a Shell component, never a pane or separate Module.
-One global `graph_surface_id` in the existing Surface layout selects Samsung,
-USB-C, or DP-4. The selected host alone presents the existing `GraphBackdrop`
-bundle from the harness's loopback origin. The graph therefore keeps one active Three.js renderer,
-one `d3-force-3d` simulation, the existing shaders, satellites, labels,
-selection, camera controls, settings and ordered retrieval activity path; it
-does not have a second QML graph implementation or require Electron. The
-transparent Qt Quick Stage remains above it only for shell identity chrome and
-has an empty input mask. Graph Settings owns one immediate-persist Display
-selector; it is global and intentionally does not yet route individual Agents.
+## One UI implementation
 
-A graph node click sends its exact Article reference through one bounded
-`pane.present` command on the loopback `obsidience.shell.v1` WebSocket. The
-primary `shell.qml` host is the only `ShellCommandServer` owner. It validates
-the generic command envelope, permits exact Reader Article or Source targets,
-updates the Reader's ordinary `PanePlacement`, and broadcasts one typed
-`pane.state` event. Both `shell.qml` and `surface.qml` own one full-Surface
-`PaneCanvas`. Every registered pane is an ordinary sibling item inside that
-canvas, and the shared placement record makes each pane visible on exactly one
-Surface. The canvas's native input mask is only the union of its open pane
-rectangles, so the desktop between panes remains click-through. Reader consumes
-the selection, reads an exact Article from `/api/articles/{ref}` or exact Source
-bytes from `/api/source-files/{key}`, and renders the document in one
-translucent Qt Quick pane. The knowledge WebKit
-surface remains graph-only. There is deliberately no `?surface=reader` route,
-Reader web wrapper, Electron IPC path, or coordinator daemon.
+The Hyprland session reuses the existing native implementation unchanged:
 
-Knowledge and Source are native explorer Modules around that single Reader,
-matching the archived Electron composition and palette: Knowledge is cyan on
-`#020a12`, Reader remains the centered document surface, and Source is violet
-on `#08050f`. One primary-owned `PaneDockLayout` persists their left/right,
-top/bottom order and collapsed state. Docked explorers follow Reader to its
-Surface and split a shared side evenly; detaching restores each explorer's
-ordinary `PanePlacement`. The four docking targets live inside Reader, so this
-adds no window bridge, renderer, process, or second Article/Source viewer.
+- `qml/shell.qml` is the one shell host;
+- `qml/workspace/` supplies the shared pane frame, placement, drag, resize,
+  focus, docking, launcher, and 10-pixel grid behavior;
+- `qml/panes/` supplies Chat, Library, Tasks, Reviews, Reader, Knowledge,
+  Source, Models, Hardware, Camera, Settings, Applications, Terminal, and
+  Displays;
+- `surfaces/knowledge/host.py` presents the canonical React/Three.js graph;
+- `theme/palette.json` remains the visual authority;
+- the native Terminal remains one QMLTermWidget view of the persistent
+  `obsidience-ui` tmux session.
 
-The native Terminal pane uses the installed `QMLTermWidget` emulator for its
-Local Console and the existing bounded trace WebSocket for its Action Trace.
-Its fixed wrapper attaches to the existing `obsidience-ui` linked tmux session
-as the tmux sizing owner. The fixed readable font and viewport follow the pane,
-and tmux uses the largest attached client so the grid reflows across the full
-pane without letterboxing. DP-4 is a passive mirror and does not constrain the
-native Terminal's dimensions. Transferring or closing the pane replaces only
-that view; the user tmux service keeps the live Codex process persistent.
-The retired Electron terminal, PTY bridge, xterm renderer, and their packages
-are removed from the native-shell branch so they cannot attach a second client.
+There is no Hyprland edition of the panes, no second graph renderer, no
+Electron wrapper, and no compositor logic inside a pane. The archived Electron
+implementation remains only on `archive/electron-20260828`.
 
-`PaneWorkspace.qml` is the single pane registry used by every Surface host. It
-contains Chat, Library, Tasks, Reviews, Reader, Knowledge, Source, Models,
-Hardware, Camera, Settings, Terminal, and Displays. Each pane has the same
-generic frame, placement, resize, close, focus, and keyboard cross-Surface
-transfer behavior. `PaneItem` and `PaneFrame` are the sole floating-pane
-interaction path; individual pane Modules contain no outer drag code. One
-`SurfaceLayout` usable-bounds rule keeps every title-bar handle below shell
-chrome during drag, reopen, and Surface transfer. The same record owns one
-global logical-pixel pane grid: 10 px by default, applied to floating-pane
-position and size before minimum and boundary clamps. Settings uses a
-Reader-like section rail; Graph relays typed preview/save/test commands to the
-canonical Three.js graph store, while Workspace changes the shared pane grid.
-Neither creates a second settings database or standalone bar item.
+Reader stays the only Article and Source document viewer. Knowledge and Source
+can dock left or right, stack top or bottom, collapse to a rail, or detach as
+ordinary panes. A graph node opens the Reader through the bounded
+`obsidience.shell.v1` loopback command contract.
 
-Every Surface also instantiates one shared top bar in this exact order:
-application launcher, Realtime controls, Surface-local running applications,
-pane icons, and a minute-precision clock. The pane title, icon, and accent all
-come from the one pane registry. The human launcher uses Quickshell's native
-Desktop Entry API. A separate event-driven adapter observes KWin and the two
-X11 roots, projects one bounded application list per Surface, and activates
-only an exact current window ID at the current revision. The bar never polls
-`wmctrl`, matches a title, or talks directly to a compositor.
+## Compositor boundary
 
-Applications remain real KWin or Openbox windows rather than shell panes. One
-data-only `theme/palette.json` is the presentation authority for shared pane
-chrome and supported native application projections. `ShellTheme` watches that
-palette directly, while the bounded one-shot theme adapter flattens the same
-colors for KWin, both Openbox roots, and Edge's supported Chromium policy.
-This follows Omarchy's palette-to-native-adapter method without importing
-Hyprland or wrapping applications. Edge tabs and toolbar adopt the Obsidience
-surface color; websites and application content remain application-owned.
-The launcher and application-window adapter retain their existing dispatch,
-observation, and exact-ID activation responsibilities and never mutate theme
-state or window geometry.
+`adapter/hyprland/hyprland.lua` is the compositor configuration. It is
+intentionally small:
 
-The accepted native runtime packages are `quickshell 0.3.0-2.1`,
-`gtk-layer-shell 0.10.1-1.1`, `webkit2gtk-4.1 2.52.4-1`, and
-`python-gobject 3.56.3-1`, `python-dbus 1.4.0-2`,
-`python-websockets 16.1.1-1.1`, `python-xlib 0.33-6`,
-`qmltermwidget 2.0.0.git1-1.1`,
-`qt6-webengine 6.11.1-2`, `qt6-websockets 6.11.1-1.1`, and
-`kscreenlocker 6.6.5-1.1`.
-`module.toml` declares the executable
-entrypoints and these exact development dependencies; `REUSE_MANIFEST.json`
-records their upstream provenance. The knowledge surface uses the existing
-harness origin and does not start a second HTTP server or graph authority.
+- Samsung `HDMI-A-1` is admitted through the RTX 4080 at `5120x1440@240`,
+  scale 1, 10-bit, and fullscreen-only VRR;
+- USB-C `DP-8` and logical DP-4 `HDMI-A-2` are admitted through the AMD iGPU;
+- the RTX 4080 stays the primary renderer and the RTX 4000 stays compute-only;
+- direct scanout and tearing stay disabled for the first measured gaming
+  acceptance;
+- Obsidience starts through one session target;
+- `Super+Return` opens the independent terminal;
+- `Super+Shift+Escape` exits to the greeter.
 
-KScreenLocker and PAM remain the sole security and authentication authority.
-The local `org.obsidience.lockgraph` Plasma Wallpaper renders the canonical
-graph behind KDE's stock Samsung prompt when Samsung is selected. The same
-private lock-state byte hides every pane and bar. On USB-C and DP-4, the
-selected Surface receives one input-empty graph cover while the nonselected
-Surface receives an opaque graph-free privacy cover. The root input router
-stays closed until KDE reports successful unlock. USB-C and DP-4 never receive
-a password field, and unlock never restores their prior input lease. Providers,
-widgets and community packages are added
-only when a working implementation exists. A future package
-registry will use one versioned manifest contract for first-party and reviewed
-community packages, while shared providers are instantiated once by the host
-and injected through the typed Obsidience Shell API.
+Only `adapter/hyprland` may consume Hyprland-specific events or commands. The
+Shell API, panes, graph, and Harness remain compositor-neutral. The eventual
+window provider will translate Hyprland state into the existing bounded window
+model rather than adding compositor calls to the bar or panes.
 
-Each render host instantiates the same small `qml/api/ShellApi.qml` projection
-and injects it into its Stage and panes. Its current contract is deliberately
-tiny: API version, exact output identities, the shared semantic theme, and the
-shared Surface layout. The
-primary host alone instantiates `ShellCommandServer`; isolated render hosts
-consume the same atomic `PanePlacement` files and never bind the command port.
-Compositor events join the Shell API only after the separate KWin adapter
-transport is live.
+## Live development session
 
-This follows the useful host/package boundary in Omarchy's experimental
-`quattro/shell` architecture without importing its visual design, Hyprland
-integration, shell scripts, configuration authority or unsandboxed package
-policy. Community code will not replace the adapter, Shell API, lock presenter,
-approval presenter or other trusted infrastructure. Obsidience's graph and
-harness remain the semantic authority.
+`Obsidience` is the UWSM desktop session. Its services are:
 
-Obsidience is the default login session and `plasmashell` remains disabled so
-there is only one shell owner. KWin and running applications survive a shell
-restart; the independent terminal is the recovery path.
+- `obsidience-shell-session.target`;
+- `obsidience-shell-host.service`;
+- `obsidience-shell-knowledge.service`;
+- `obsidience-shell-notifications.service`.
 
-`Surface` is Obsidience's stable presentation endpoint, not a graph kind and
-not a raw Wayland object. Samsung, USB-C, and DP-4 remain separate display
-server clients with independent render loops and performance budgets. Every
-pane carries the same Surface-aware placement state. Pointer dragging clamps to
-the current Surface's shared usable bounds. `Meta+Shift+Arrow` transfers one logical pane and its UI
-state to the nearest mapped destination render host instead of trying to move
-one native X11 window into Wayland. KWin owns the physical chord on Samsung and
-uses the existing D-Bus adapter. The existing single-owner input router consumes
-the exact chord on USB-C and DP-4 before XTest forwarding; both paths call the
-same bounded shell command client. The Surface hosts share one atomic
-shell-state projection; no Openbox shortcut, coordinator daemon, harness
-coupling, or compositor-window mutation is introduced.
+The live session, Harness, Vault, UI, and Source projection all use the one
+canonical project at `/home/wissenschafter/Projects/obsidience` and the shared
+`obsidience-shell` state. One Quickshell process creates a pane canvas and bar
+on each Hyprland output. Hyprland is an adapter boundary, not a second product
+or runtime namespace.
 
-KWin-specific observation and commands stay behind `adapter/kwin`. The
-renderer, panes, widgets, and extensions consume stable Obsidience state and do
-not call KDE-private interfaces directly. The earlier general Python/GTK shell
-host remains retired; the bounded knowledge host owns only the canonical web
-graph's background layer surface.
+greetd launches this session as the default. KWin, Plasma Shell, Plasma Login
+Manager, KScreenLocker, and SDDM are removed from the live installation. The
+session deliberately initializes its private lock byte as unlocked; it is a
+development desktop, not a secure lock implementation. Secure locking, a
+native Polkit UI, HDR, fullscreen VRR, and Samsung WoW behavior remain explicit
+acceptance gates.
 
-No external project's visual design, assets, widgets, renderer, configuration,
-or IPC runtime are imported. The pinned Noctalia source contributes only the
-read-only KWin observation pattern documented in `REUSE_MANIFEST.json`.
+## Surface contract
+
+A Surface is an Obsidience presentation endpoint, not an Article kind or raw
+Wayland object. Every pane retains one generic record:
+
+```text
+pane_id + surface_id + local_rect + open + z_order
+```
+
+The three-Surface data model maps Samsung `HDMI-A-1`, USB-C `DP-8`, and logical
+DP-4 `HDMI-A-2` into one Hyprland layout. No pane-specific process or display
+bridge is permitted. Native pointer, clipboard, focus, and application movement
+belong to Hyprland; pointer pane dragging stays local to one Surface and keyboard
+pane transfer remains one atomic placement revision.
+
+## Package policy
+
+`system-packages.toml` is the names-only Arch package contract for this Module.
+It is additive: a missing name means "not managed here," never "remove it."
+The required groups describe the target Hyprland shell; protected groups mark
+the current boot/graphics and gaming packages that no cleanup may prune. Exact
+observed versions and upstream provenance
+remain evidence in `REUSE_MANIFEST.json`, not rolling-release policy.
+
+The package manifest is separate from the Applications pane and from any future
+community shell-package format. It performs no installation, update, or
+removal by itself.
+
+## Verification
+
+Before a live session change:
+
+```sh
+Hyprland --verify-config --config obsidience/shell/adapter/hyprland/hyprland.lua
+desktop-file-validate obsidience/shell/session/obsidience.desktop
+systemd-analyze --user verify obsidience/shell/systemd/*.service \
+  obsidience/shell/systemd/*.target
+```
+
+Live acceptance requires all three exact output geometries and GPUs, one
+Hyprland process, one shell host, one graph host, healthy Harness API, native
+pointer traversal, usable tmux recovery, pane interaction, and launcher
+behavior. Secure locking, HDR, fullscreen VRR, and WoW are separate physical
+gates.
+
+Obsidience borrows only architecture lessons and reviewed plumbing from
+upstream projects. Omarchy's single warm Quickshell host and modular package
+boundary are reference patterns; its visual design, scripts, Hyprland config,
+IPC, and package authority are not imported.

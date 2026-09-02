@@ -2,47 +2,6 @@
   "schema": "obsidience.reuse.v1",
   "upstreams": [
     {
-      "name": "Noctalia",
-      "repository": "https://github.com/noctalia-dev/noctalia",
-      "tag": "v5.0.0-beta.10",
-      "commit": "74e6c2790dd8f39bf496e90e479a9ae370846eed",
-      "license": "MIT",
-      "selected_sources": [
-        {
-          "path": "src/compositors/kde/kwin_active_window.cpp",
-          "sha256": "f5410c24fa5b5f63f6900cf0f7639088fb7784b3952997fc3022a0b1febd48c1"
-        },
-        {
-          "path": "src/compositors/kde/kwin_active_window.h",
-          "sha256": "6d23fb365b60dd15c4f578d808bb5e14e7b9e07ee7ee4436987a5ed6e9f4e017"
-        },
-        {
-          "path": "src/wayland/layer_surface.cpp",
-          "sha256": "4092d13628e7375d57a44872e76dc0577d4335d1ccfb0f7c8c1f430c33e733be"
-        },
-        {
-          "path": "src/wayland/layer_surface.h",
-          "sha256": "4e1cbfbd6545e60000593c7b78b8c3ab8d915e392c71302967777a4239c28b46"
-        }
-      ],
-      "adaptation": "The read-only KWin observer pattern was reduced to an Obsidience-namespaced script and bounded D-Bus state feed. Window activation, closing, pointer movement, renderer, UI, themes, assets, plugins, configuration, state and IPC were excluded.",
-      "notice": "LICENSES/Noctalia-MIT.txt"
-    },
-    {
-      "name": "KWin MCP",
-      "repository": "https://github.com/isac322/kwin-mcp",
-      "commit": "43c94eca93bbf0f1cd7c8a73585c8cbafed84931",
-      "license": "MIT",
-      "selected_sources": [
-        {
-          "path": "src/kwin_mcp/window_control.py",
-          "sha256": "d0516e105ecd2cef5812f897cb849e2554987577fa6e2a336b3cc8cb99cb68b4"
-        }
-      ],
-      "adaptation": "The reviewed exact internal-ID KWin activation pattern was reduced to a bounded Shell-only focus adapter. Fuzzy title matching, placement, pointer control, MCP transport and every other mutation path were excluded.",
-      "notice": "LICENSES/KWin-MCP-MIT.txt"
-    },
-    {
       "name": "Lucide",
       "package": "lucide-react 1.33.0",
       "repository": "https://github.com/lucide-icons/lucide",
@@ -55,6 +14,20 @@
       ],
       "adaptation": "The Electron Models pane's existing BrainCircuit path is rendered directly by the native QML Shape scene graph. No Lucide runtime, React component, theme or additional icon system is loaded by the Shell.",
       "notice": "LICENSES/Lucide-ISC.txt"
+    },
+    {
+      "name": "Hyprland",
+      "package": "hyprland 0.55.2-2",
+      "repository": "https://github.com/hyprwm/Hyprland",
+      "license": "BSD-3-Clause",
+      "adaptation": "Used as the installed live Wayland compositor for Samsung, USB-C, and logical DP-4. Obsidience supplies its own minimal Lua configuration and shell surfaces; no Hyprland source or visual design was copied."
+    },
+    {
+      "name": "Universal Wayland Session Manager",
+      "package": "uwsm 0.26.4-1",
+      "repository": "https://github.com/Vladimir-csp/uwsm",
+      "license": "MIT",
+      "adaptation": "Used unchanged to generate and supervise the Hyprland graphical-session lifecycle. Obsidience does not duplicate UWSM session management and copied no source."
     },
     {
       "name": "Quickshell",
@@ -99,20 +72,6 @@
       "adaptation": "Used as the installed QML WebSocket transport for bounded loopback Reader state and Terminal action trace events. No upstream source was copied."
     },
     {
-      "name": "Qt WebEngine",
-      "package": "qt6-webengine 6.11.1-2",
-      "repository": "https://code.qt.io/cgit/qt/qtwebengine.git",
-      "license": "LGPL-3.0-only or GPL-2.0-only or GPL-3.0-only and bundled component licenses",
-      "adaptation": "Used only inside the KScreenLocker wallpaper process to render the existing canonical loopback GraphBackdrop behind KDE's stock greeter. It is not a Shell host, graph authority, authentication path, or ordinary pane runtime; no upstream source was copied."
-    },
-    {
-      "name": "KScreenLocker",
-      "package": "kscreenlocker 6.6.5-1.1",
-      "repository": "https://invent.kde.org/plasma/kscreenlocker",
-      "license": "GPL-2.0-or-later and KDE accepted licenses",
-      "adaptation": "Retained unchanged as the sole compositor lock, greeter and PAM authentication authority. Obsidience supplies one local Plasma Wallpaper that renders the canonical loopback graph beneath KDE's stock prompt and consumes KScreenLocker's documented D-Bus lock state; no authentication source was copied."
-    },
-    {
       "name": "Omarchy quattro theme system",
       "repository": "https://github.com/omacom/omarchy",
       "commit": "4d017913d06f715da9d960021861cf535e4f15aa",
@@ -127,7 +86,7 @@
           "sha256": "ee6742bbfbbf1a68f00352bf23dbca9a2e1c221b2743378e6b54f4c98dbe6174"
         }
       ],
-      "adaptation": "Obsidience independently implements the same bounded pattern: one semantic palette projects into shell tokens, native window-manager colors, and a fixed Chromium-family BrowserThemeColor policy with a live refresh. Hyprland code, visual design, shell scripts, launch architecture, plugins and arbitrary application hooks were excluded.",
+      "adaptation": "Obsidience independently applies two bounded reference patterns: one semantic palette projects into shell and supported application-native theme tokens, and one warm shell host loads small modular UI components. Omarchy source, visual design, shell scripts, Hyprland configuration, IPC, plugin runtime, and package authority were not imported.",
       "notice": "LICENSES/Omarchy-MIT.txt"
     }
   ]

@@ -1,5 +1,6 @@
 [Desktop Entry]
 Name=Obsidience
-Comment=Obsidience shell on KWin
+Comment=Graph-native desktop shell
 Exec=/home/wissenschafter/Projects/obsidience/obsidience/shell/session/obsidience-shell-login
+TryExec=/home/wissenschafter/Projects/obsidience/obsidience/shell/session/obsidience-shell-login
 Type=Application

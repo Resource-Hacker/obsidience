@@ -272,8 +272,8 @@ Scope {
         }
     }
 
-    // The registry is Surface state, not screen-discovery state. In particular,
-    // X11 may populate targetScreens after this Scope is created.
+    // The registry is Surface state, not screen-discovery state. Outputs may
+    // populate after this Scope is created.
     readonly property var paneDefinitions: [
         {"label": "Chat", "title": "Chat", "icon": "chat", "accent": "#67e8f9",
             "placement": chatPlacement,

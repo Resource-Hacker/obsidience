@@ -1,11 +1,9 @@
 [Unit]
-Description=Wayland notifications for the Obsidience shell session
-After=main-compositor-ready.target
-PartOf=obsidience-shell-session.target graphical-session.target
+Description=Wayland notifications for the Obsidience shell
+PartOf=obsidience-shell-session.target
 
 [Service]
-Type=dbus
-BusName=org.freedesktop.Notifications
+Type=simple
 ExecStart=/usr/bin/mako
 Restart=on-failure
 RestartSec=2

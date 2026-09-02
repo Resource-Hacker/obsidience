@@ -1,9 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+main_drm_card="$(readlink -f /dev/dri/by-path/pci-0000:01:00.0-card)"
+side_drm_card="$(readlink -f /dev/dri/by-path/pci-0000:7a:00.0-card)"
+[[ "$main_drm_card" == /dev/dri/card[0-9]* && -c "$main_drm_card" ]] || exit 1
+[[ "$side_drm_card" == /dev/dri/card[0-9]* && -c "$side_drm_card" ]] || exit 1
+
+main_device_path="$(udevadm info -q property -n "$main_drm_card" \
+    | sed -n 's/^ID_PATH=//p')"
+side_device_path="$(udevadm info -q property -n "$side_drm_card" \
+    | sed -n 's/^ID_PATH=//p')"
+[[ "$main_device_path" == "pci-0000:01:00.0" ]] || exit 1
+[[ "$side_device_path" == "pci-0000:7a:00.0" ]] || exit 1
+
+export AQ_DRM_DEVICES="$main_drm_card:$side_drm_card"
+
 exec /usr/bin/uwsm start \
     -e \
-    -D KDE:ObsidienceKWin \
+    -D Obsidience:Hyprland \
     -N "Obsidience" \
-    -C "Obsidience shell on KWin" \
-    -- /home/wissenschafter/Projects/obsidience/obsidience/shell/session/obsidience-shell-compositor
+    -C "Obsidience desktop shell" \
+    -- /usr/bin/Hyprland \
+    --config /home/wissenschafter/Projects/obsidience/obsidience/shell/adapter/hyprland/hyprland.lua

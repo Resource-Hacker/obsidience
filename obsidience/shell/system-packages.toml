@@ -1,0 +1,93 @@
+schema = "obsidience.system-packages.v1"
+platform = "arch"
+profile = "hyprland"
+mode = "additive"
+
+[required]
+host = [
+    "bash",
+    "coreutils",
+    "curl",
+    "dbus",
+    "jq",
+    "polkit",
+    "procps-ng",
+    "sed",
+    "sudo",
+    "systemd",
+    "tmux",
+]
+session = [
+    "greetd",
+    "greetd-agreety",
+    "grim",
+    "hypridle",
+    "hyprland",
+    "hyprlock",
+    "hyprpolkitagent",
+    "kitty",
+    "mako",
+    "uwsm",
+    "wl-clipboard",
+    "xdg-desktop-portal",
+    "xdg-desktop-portal-gtk",
+    "xdg-desktop-portal-hyprland",
+    "xorg-xwayland",
+]
+shell = [
+    "gtk-layer-shell",
+    "packagekit",
+    "python-cairo",
+    "python-gobject",
+    "python-websockets",
+    "qmltermwidget",
+    "qt6-declarative",
+    "qt6-multimedia",
+    "qt6-svg",
+    "qt6-wayland",
+    "qt6-websockets",
+    "quickshell",
+    "ttf-jetbrains-mono",
+    "webkit2gtk-4.1",
+]
+services = [
+    "bluez",
+    "bluez-utils",
+    "networkmanager",
+    "pipewire",
+    "pipewire-alsa",
+    "pipewire-pulse",
+    "power-profiles-daemon",
+    "udisks2",
+    "upower",
+    "wireplumber",
+]
+[protected]
+boot_graphics = [
+    "amd-ucode",
+    "lib32-mesa",
+    "lib32-nvidia-utils",
+    "lib32-opencl-nvidia",
+    "lib32-vulkan-radeon",
+    "libxnvctrl",
+    "limine",
+    "linux-cachyos",
+    "linux-cachyos-headers",
+    "linux-cachyos-lts",
+    "linux-cachyos-lts-headers",
+    "linux-cachyos-lts-nvidia-open",
+    "linux-cachyos-nvidia-open",
+    "linux-firmware",
+    "mesa",
+    "mkinitcpio",
+    "nvidia-settings",
+    "nvidia-utils",
+    "opencl-nvidia",
+    "vulkan-radeon",
+]
+workstation = [
+    "gamemode",
+    "keyd",
+    "proton-cachyos",
+    "umu-launcher",
+]

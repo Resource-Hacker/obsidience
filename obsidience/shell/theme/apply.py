@@ -1,9 +1,4 @@
-"""Project the Obsidience palette into native application chrome.
-
-Applications remain ordinary KWin/Openbox clients.  This module only writes
-supported theme surfaces; it never embeds, reparents, launches, or sizes an
-application window.
-"""
+"""Project the Obsidience palette into supported application-native chrome."""
 
 from __future__ import annotations
 
@@ -19,11 +14,6 @@ from pathlib import Path
 
 PALETTE_PATH = Path(__file__).with_name("palette.json")
 EDGE_POLICY_PATH = Path("/etc/opt/edge/policies/managed/obsidience-theme.json")
-OPENBOX_THEME_PATH = Path.home() / ".themes/Obsidience/openbox-3/themerc"
-OPENBOX_CONFIGS = (
-    Path.home() / ".config/openbox/usb-monitor-rc.xml",
-    Path.home() / ".config/openbox/rc.xml",
-)
 COLOR_KEYS = frozenset(
     {
         "surface",
@@ -94,115 +84,6 @@ def render_edge_policy(theme: dict) -> str:
     return json.dumps(payload, indent=2) + "\n"
 
 
-def render_openbox_theme(theme: dict) -> str:
-    colors = theme["colors"]
-    metrics = theme["metrics"]
-    active = opaque(colors["surface"])
-    inactive = opaque(colors["inactive_surface"])
-    accent = opaque(colors["accent"])
-    inactive_border = opaque(colors["inactive_border"])
-    text = opaque(colors["text"])
-    inactive_text = opaque(colors["inactive_text"])
-    selection = opaque(colors["selection"])
-    border_width = metrics["border_width"]
-    return f"""# Generated from obsidience/shell/theme/palette.json.
-border.width: {border_width}
-padding.width: 4
-padding.height: 3
-window.client.padding.width: 0
-window.handle.width: 1
-menu.overlap: 0
-*.justify: center
-
-window.active.border.color: {accent}
-window.inactive.border.color: {inactive_border}
-window.active.title.bg: flat solid
-window.active.title.bg.color: {active}
-window.inactive.title.bg: flat solid
-window.inactive.title.bg.color: {inactive}
-window.active.title.separator.color: {accent}
-window.inactive.title.separator.color: {inactive_border}
-window.active.label.bg: parentrelative
-window.inactive.label.bg: parentrelative
-window.active.label.text.color: {text}
-window.inactive.label.text.color: {inactive_text}
-
-window.active.button.*.bg: parentrelative
-window.inactive.button.*.bg: parentrelative
-window.active.button.*.image.color: {text}
-window.inactive.button.*.image.color: {inactive_text}
-window.active.button.hover.bg: flat solid border
-window.active.button.hover.bg.color: {selection}
-window.active.button.hover.bg.border.color: {accent}
-window.active.button.hover.image.color: {text}
-window.active.button.pressed.bg: flat solid border
-window.active.button.pressed.bg.color: {accent}
-window.active.button.pressed.bg.border.color: {accent}
-
-window.*.handle.bg: flat solid
-window.*.handle.bg.color: {active}
-window.*.grip.bg: flat solid
-window.*.grip.bg.color: {active}
-
-menu.border.width: {border_width}
-menu.border.color: {accent}
-menu.title.bg: flat solid
-menu.title.bg.color: {active}
-menu.title.text.color: {text}
-menu.items.bg: flat solid
-menu.items.bg.color: {active}
-menu.items.text.color: {text}
-menu.items.disabled.text.color: {inactive_text}
-menu.items.active.bg: flat solid
-menu.items.active.bg.color: {selection}
-menu.items.active.text.color: {text}
-menu.separator.width: 1
-menu.separator.padding.width: 0
-menu.separator.padding.height: 3
-menu.separator.color: {inactive_border}
-
-osd.border.width: {border_width}
-osd.border.color: {accent}
-osd.bg: flat solid
-osd.bg.color: {active}
-osd.active.label.bg: parentrelative
-osd.active.label.text.color: {text}
-osd.inactive.label.bg: parentrelative
-osd.inactive.label.text.color: {inactive_text}
-osd.hilight.bg: flat solid
-osd.hilight.bg.color: {selection}
-osd.unhilight.bg: flat solid
-osd.unhilight.bg.color: {inactive}
-"""
-
-
-def _atomic_write(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            handle.write(content)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.chmod(temporary, 0o644)
-        os.replace(temporary, path)
-    finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
-
-
-def _configure_openbox(path: Path, font: str) -> None:
-    source = path.read_text(encoding="utf-8")
-    match = re.search(r"<theme>.*?</theme>", source, re.DOTALL)
-    if not match:
-        raise RuntimeError(f"Openbox theme block missing: {path}")
-    block = re.sub(r"<name>[^<]*</name>", "<name>Obsidience</name>", match.group(), count=1)
-    block = block.replace("<name>sans</name>", f"<name>{font}</name>")
-    updated = source[: match.start()] + block + source[match.end() :]
-    if updated != source:
-        _atomic_write(path, updated)
-
-
 def _run(command: list[str], *, env: dict[str, str] | None = None, timeout: int = 8) -> None:
     try:
         result = subprocess.run(
@@ -255,42 +136,7 @@ def _install_edge_policy(content: str) -> None:
 
 
 def apply(theme: dict) -> None:
-    colors = theme["colors"]
-    metrics = theme["metrics"]
-    _atomic_write(OPENBOX_THEME_PATH, render_openbox_theme(theme))
-    for path in OPENBOX_CONFIGS:
-        _configure_openbox(path, metrics["title_font"])
-
-    kwin_colors = {
-        "activeBackground": opaque(colors["surface"]),
-        "activeBlend": opaque(colors["accent"]),
-        "activeForeground": opaque(colors["text"]),
-        "inactiveBackground": opaque(colors["inactive_surface"]),
-        "inactiveBlend": opaque(colors["inactive_border"]),
-        "inactiveForeground": opaque(colors["inactive_text"]),
-    }
-    for key, value in kwin_colors.items():
-        red, green, blue = (int(value[index : index + 2], 16) for index in (1, 3, 5))
-        _run(
-            [
-                "/usr/bin/kwriteconfig6",
-                "--file",
-                "kdeglobals",
-                "--group",
-                "WM",
-                "--key",
-                key,
-                f"{red},{green},{blue}",
-            ]
-        )
-
     _install_edge_policy(render_edge_policy(theme))
-    _run(["/usr/bin/qdbus6", "org.kde.KWin", "/KWin", "reconfigure"])
-    for display in (":2.0", ":2.1"):
-        _run(
-            ["/usr/bin/openbox", "--reconfigure"],
-            env={**os.environ, "DISPLAY": display, "SESSION_MANAGER": ""},
-        )
     if subprocess.run(
         ["/usr/bin/pgrep", "-x", "msedge"],
         capture_output=True,
