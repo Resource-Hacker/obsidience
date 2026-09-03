@@ -459,6 +459,26 @@ def test_one_shell_host_shares_displays_pane_and_surface_layout() -> None:
     assert "bottom: true" in canvas
     assert "mask: Region { id: inputMask }" in canvas
     assert "focusable: hasLocalPane" in canvas
+    assert "readonly property bool compositorActive: contentItem.window" in canvas
+    assert "? contentItem.window.active : false" in canvas
+    assert "aboveWindows: compositorActive" in canvas
+    assert "onCompositorActiveChanged:" in canvas
+    assert 'if (compositorActive && activePaneId !== "")' in canvas
+    assert "notifyPaneActivated(activePaneId)" in canvas
+    assert 'if (!compositorActive && activePaneId !== "")' in canvas
+    assert "function deactivatePane(paneId)" in canvas
+    assert "function notifyPaneActivated(paneId)" in canvas
+    activate = canvas.split("function activatePane", 1)[1].split(
+        "function notifyPaneActivated", 1
+    )[0]
+    assert "if (compositorActive)" in activate
+    assert "notifyPaneActivated(paneId)" in activate
+    assert 'if (activePaneId !== paneId)' in canvas
+    assert 'activePaneId = ""' in canvas
+    deactivate = canvas.split("function deactivatePane", 1)[1].split(
+        "Item {", 1
+    )[0]
+    assert "dragSession.deactivatePane(placement)" in deactivate
     assert "Repeater {" in canvas
     assert "PaneItem {" in canvas
     assert "inputMask.regions.push(region)" in canvas
@@ -519,6 +539,10 @@ def test_one_shell_host_shares_displays_pane_and_surface_layout() -> None:
     assert "activeInCanvas: root.activePaneId === placement.paneId" in canvas
     assert "z: activeInCanvas ? 1000000 : placement.zOrder" in pane
     assert "signal activated(string paneId)" in pane
+    assert "signal deactivated(string paneId)" in pane
+    assert "deactivated(placement.paneId)" in pane
+    assert "dragSession.deactivatePane(placement)" not in pane
+    assert "onDeactivated: paneId => root.deactivatePane(paneId)" in canvas
     assert "forceActiveFocus(Qt.MouseFocusReason)" in pane
     assert "PointHandler {" in pane
     assert "acceptedButtons: Qt.LeftButton" in pane

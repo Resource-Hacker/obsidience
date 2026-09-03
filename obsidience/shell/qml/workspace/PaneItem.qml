@@ -55,6 +55,7 @@ FocusScope {
     property bool dragReady: false
 
     signal activated(string paneId)
+    signal deactivated(string paneId)
     signal inputRegionReady(var region)
 
     x: renderX
@@ -69,7 +70,7 @@ FocusScope {
         if (activeFocus) {
             activated(placement.paneId)
         } else {
-            dragSession.deactivatePane(placement)
+            deactivated(placement.paneId)
         }
     }
 

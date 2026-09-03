@@ -16,6 +16,8 @@ PanelWindow {
     required property bool locked
 
     property string activePaneId: ""
+    readonly property bool compositorActive: contentItem.window
+        ? contentItem.window.active : false
 
     readonly property bool hasLocalPane: {
         for (const definition of panes) {
@@ -31,8 +33,18 @@ PanelWindow {
     visible: hasLocalPane && !locked
     color: "transparent"
     focusable: hasLocalPane && !locked
-    aboveWindows: true
+    // Hyprland's real keyboard focus is the single stacking truth. An item may
+    // retain its local QML focus while an application owns compositor focus.
+    aboveWindows: compositorActive
     exclusiveZone: 0
+
+    onCompositorActiveChanged: {
+        if (compositorActive && activePaneId !== "") {
+            notifyPaneActivated(activePaneId)
+        } else if (!compositorActive && activePaneId !== "") {
+            deactivatePane(activePaneId)
+        }
+    }
 
     anchors {
         left: true
@@ -46,10 +58,30 @@ PanelWindow {
 
     function activatePane(paneId) {
         activePaneId = paneId
+        if (compositorActive) {
+            notifyPaneActivated(paneId)
+        }
+    }
+
+    function notifyPaneActivated(paneId) {
         for (const definition of panes) {
             const placement = definition.placement
             if (placement.paneId === paneId) {
                 dragSession.activatePane(placement)
+                return
+            }
+        }
+    }
+
+    function deactivatePane(paneId) {
+        if (activePaneId !== paneId) {
+            return
+        }
+        activePaneId = ""
+        for (const definition of panes) {
+            const placement = definition.placement
+            if (placement.paneId === paneId) {
+                dragSession.deactivatePane(placement)
                 return
             }
         }
@@ -73,6 +105,7 @@ PanelWindow {
                 activeInCanvas: root.activePaneId === placement.paneId
                 onInputRegionReady: region => inputMask.regions.push(region)
                 onActivated: paneId => root.activatePane(paneId)
+                onDeactivated: paneId => root.deactivatePane(paneId)
             }
         }
     }

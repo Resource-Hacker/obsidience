@@ -160,7 +160,11 @@ one typed `pane.state` event. The one shell host owns one full-Surface
 canvas, and the accepted placement makes each pane visible on exactly one
 Surface. Its native
 input mask is the union of the open pane rectangles, leaving all uncovered
-desktop space click-through. Reader consumes the typed selection, reads either
+desktop space click-through. A canvas occupies the top layer only while one of
+its module panes owns Hyprland keyboard focus; native application focus lowers
+that canvas below ordinary windows and clears its active shortcut owner, while
+the active module's local z-order keeps it above its module peers. Reader
+consumes the typed selection, reads either
 the exact Article through `/api/articles/{ref}` or the exact Source bytes
 through `/api/source-files/{key}`, and renders the result in a translucent
 native Qt Quick pane. The WebKit surface is
