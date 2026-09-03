@@ -659,13 +659,14 @@ def test_one_shell_host_shares_displays_pane_and_surface_layout() -> None:
     assert "ClippingRectangle {" in frame
     assert "contentUnderBorder: true" in frame
     assert "color: root.theme.surface" in frame
-    assert "border.width: 3" in frame
-    assert "border.color: root.active" in frame
-    assert "? root.theme.strongAccent : root.theme.inactiveBorder" in frame
+    assert "border.width: root.active ? 0 : root.theme.borderWidth" in frame
+    assert "border.color: root.theme.inactiveBorder" in frame
     assert "RectangularShadow {" not in frame
     assert "anchors.margins: -2.5" not in frame
-    assert "border.width: 2.5" not in frame
-    assert "border.pixelAligned: false" not in frame
+    assert frame.count("border.width: 2.5") == 1
+    assert "visible: root.active" in frame
+    assert "border.pixelAligned: true" in frame
+    assert "border.color: root.theme.strongAccent" in frame
     assert "root.theme.shadow.r" not in frame
     assert "Qt5Compat.GraphicalEffects" not in frame
     assert "layer.effect: MultiEffect" not in frame

@@ -164,9 +164,10 @@ desktop space click-through. A canvas occupies the top layer only while one of
 its module panes owns Hyprland keyboard focus; native application focus lowers
 that canvas below ordinary windows and clears its active shortcut owner, while
 the active module's local z-order keeps it above its module peers. The shared
-module chrome is one exact three-logical-pixel border, with a subdued inactive
-token and a stronger cyan token only for the pane that owns real keyboard
-focus. `Alt+Tab` and `Alt+Shift+Tab` ask this same shell authority to cycle a
+module chrome is a crisp one-pixel inactive edge plus a 2.5-logical-pixel
+outline shown only on the pane that owns real keyboard focus. The focused
+outline uses the same brighter cyan token as focused native applications.
+`Alt+Tab` and `Alt+Shift+Tab` ask this same shell authority to cycle a
 fresh deterministic ring of open native applications and undocked module panes
 on the focused Surface. Native selection reuses the exact-address window
 adapter; module selection reuses that Surface's canvas. Reader
