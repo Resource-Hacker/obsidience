@@ -162,6 +162,7 @@ FocusScope {
         anchors.fill: parent
         title: root.paneDefinition.title
         theme: root.shellApi.theme
+        active: root.activeInCanvas && root.activeFocus
 
         onDragStarted: root.beginDrag()
         onDragMoved: (deltaX, deltaY, pointerX, pointerY) => root.moveDrag(

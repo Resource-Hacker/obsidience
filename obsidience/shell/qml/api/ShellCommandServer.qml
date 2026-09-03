@@ -357,6 +357,104 @@ QtObject {
         return null
     }
 
+    function focusResult(socket, command, success, reason) {
+        send(socket, {
+            "schema": eventSchema,
+            "type": "focus.cycle.result",
+            "token": cleanDragToken(command.token),
+            "surface_id": cleanWindowText(command.source_surface_id, 32),
+            "success": success === true,
+            "reason": cleanWindowText(reason, 96)
+        })
+    }
+
+    function focusCandidates(surfaceId) {
+        const candidates = []
+        const state = windowStates[surfaceId]
+        if (state) {
+            for (const window of state.windows) {
+                candidates.push({
+                    "kind": "window",
+                    "id": window.window_id,
+                    "revision": state.revision
+                })
+            }
+        }
+        for (const definition of paneWorkspace.paneDefinitions) {
+            const placement = definition.placement
+            if (placement.open === true && placement.surfaceId === surfaceId
+                    && !dockLayout.isDocked(placement.paneId)) {
+                candidates.push({
+                    "kind": "pane",
+                    "id": placement.paneId,
+                    "revision": placement.revision
+                })
+            }
+        }
+        return candidates
+    }
+
+    function cycleFocus(socket, command) {
+        const token = cleanDragToken(command.token)
+        const surfaceId = cleanWindowText(command.source_surface_id, 32)
+        const direction = cleanWindowText(command.direction, 16)
+        if (!token || !surfaceLayout.surface(surfaceId)
+                || ["next", "previous"].indexOf(direction) < 0) {
+            focusResult(socket, command, false, "invalid")
+            return
+        }
+        const candidates = focusCandidates(surfaceId)
+        if (candidates.length === 0) {
+            focusResult(socket, command, false, "no_targets")
+            return
+        }
+
+        const activePane = activePlacement(surfaceId)
+        const state = windowStates[surfaceId]
+        const activeKind = activePane ? "pane" : "window"
+        const activeId = activePane ? activePane.paneId
+            : state ? state.active_window_id : ""
+        let activeIndex = -1
+        for (let index = 0; index < candidates.length; index += 1) {
+            const candidate = candidates[index]
+            if (candidate.kind === activeKind && candidate.id === activeId) {
+                activeIndex = index
+                break
+            }
+        }
+        const targetIndex = activeIndex < 0
+            ? (direction === "next" ? 0 : candidates.length - 1)
+            : (activeIndex + (direction === "next" ? 1 : -1)
+                + candidates.length) % candidates.length
+        const target = candidates[targetIndex]
+        if (target.kind === "pane") {
+            broadcastToPaneClients({
+                "schema": eventSchema,
+                "type": "pane.focus.request",
+                "token": token,
+                "surface_id": surfaceId,
+                "pane_id": target.id,
+                "expected_revision": target.revision
+            })
+            focusResult(socket, command, true, "")
+            return
+        }
+        if (!state || !windowAdapterSocket
+                || windowAdapterSocket.status !== WebSocket.Open) {
+            focusResult(socket, command, false, "adapter_unavailable")
+            return
+        }
+        send(windowAdapterSocket, {
+            "schema": eventSchema,
+            "type": "window.activation.request",
+            "token": token,
+            "surface_id": surfaceId,
+            "window_id": target.id,
+            "expected_revision": target.revision
+        })
+        focusResult(socket, command, true, "")
+    }
+
     function dismissPane(socket, placement) {
         const surfaceId = placement.surfaceId
         const paneId = placement.paneId
@@ -1076,6 +1174,10 @@ QtObject {
             return
         }
         if (!command || command.schema !== commandSchema) {
+            return
+        }
+        if (command.type === "focus.cycle") {
+            cycleFocus(socket, command)
             return
         }
         if (typeof command.type === "string"

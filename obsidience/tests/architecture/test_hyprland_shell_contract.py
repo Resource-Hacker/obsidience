@@ -68,6 +68,10 @@ def test_hyprland_config_is_one_compositor_with_three_real_outputs() -> None:
     assert "uwsm finalize" not in config
     assert "obsidience-shell-session.target" in config
     assert 'hl.bind("SUPER + RETURN"' in config
+    assert config.count('hl.bind("ALT + TAB"') == 1
+    assert config.count('hl.bind("ALT + SHIFT + TAB"') == 1
+    assert "move_pane.py focused focus next" in config
+    assert "move_pane.py focused focus previous" in config
     assert "mouse:272" not in config
     assert "hl.dsp.window.drag()" not in config
     assert 'hl.bind("SUPER + SHIFT + ESCAPE"' in config
@@ -88,7 +92,7 @@ def test_native_windows_use_the_obsidience_grid_and_theme() -> None:
 
     assert config.count("layout.lua") == 1
     assert 'layout = "lua:obsidience"' in config
-    assert 'active_border = "rgba(67e8f940)"' in config
+    assert 'active_border = "rgba(67e8f966)"' in config
     assert 'inactive_border = "rgb(294b54)"' in config
     assert "rounding = 12" in config
     assert "range = 3" in config

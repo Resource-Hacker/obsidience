@@ -9,6 +9,7 @@ Item {
 
     required property string title
     required property ShellTheme theme
+    required property bool active
     default property alias contentData: content.data
 
     signal dragStarted()
@@ -25,8 +26,9 @@ Item {
         anchors.fill: parent
         radius: root.theme.cornerRadius
         color: root.theme.surface
-        border.width: root.theme.borderWidth
-        border.color: root.theme.accent
+        border.width: 3
+        border.color: root.active
+            ? root.theme.strongAccent : root.theme.inactiveBorder
         contentUnderBorder: true
 
         Rectangle {
@@ -219,20 +221,4 @@ Item {
         }
     }
 
-    // Keep the 2.5-pixel outline in the pane's ordinary scene subtree so the
-    // complete chrome follows PaneItem.z as one stacking unit.
-    Rectangle {
-        anchors.fill: frame
-        z: 1
-        color: "transparent"
-        radius: root.theme.cornerRadius
-        border.width: 2.5
-        border.pixelAligned: false
-        border.color: Qt.rgba(
-            root.theme.shadow.r,
-            root.theme.shadow.g,
-            root.theme.shadow.b,
-            0.08
-        )
-    }
 }

@@ -146,6 +146,62 @@ def test_close_entrypoint_needs_no_direction(
     assert called == [("samsung", "close", "")]
 
 
+@pytest.mark.parametrize("direction", ["next", "previous"])
+def test_focus_cycle_uses_one_surface_scoped_command(
+    monkeypatch: pytest.MonkeyPatch, direction: str
+) -> None:
+    socket = FakeSocket(
+        [
+            {
+                "schema": "obsidience.shell.event.v1",
+                "type": "focus.cycle.result",
+                "token": "focus-token",
+                "success": True,
+            }
+        ]
+    )
+    monkeypatch.setattr(move_pane, "connect", lambda *_args, **_kwargs: socket)
+    monkeypatch.setattr(move_pane.secrets, "token_hex", lambda _size: "focus-token")
+
+    assert move_pane.cycle_focus("dp-4", direction) is True
+    assert socket.sent == [
+        {
+            "schema": "obsidience.shell.command.v1",
+            "type": "focus.cycle",
+            "token": "focus-token",
+            "source_surface_id": "dp-4",
+            "direction": direction,
+        }
+    ]
+
+
+def test_focus_entrypoint_uses_the_combined_cycle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    called: list[tuple[str, str]] = []
+    monkeypatch.setattr(move_pane, "focused_surface", lambda: "usb-c")
+    monkeypatch.setattr(
+        move_pane,
+        "cycle_focus",
+        lambda surface, direction: not called.append((surface, direction)),
+    )
+
+    assert move_pane.main(["focused", "focus", "next"]) == 0
+    assert called == [("usb-c", "next")]
+
+
+def test_invalid_focus_cycle_fails_without_connecting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        move_pane,
+        "connect",
+        lambda *_args, **_kwargs: pytest.fail("invalid focus opened a socket"),
+    )
+
+    assert move_pane.cycle_focus("samsung", "left") is False
+
+
 def test_invalid_active_pane_action_fails_without_connecting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

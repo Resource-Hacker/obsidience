@@ -652,22 +652,21 @@ def test_one_shell_host_shares_displays_pane_and_surface_layout() -> None:
     assert "atomicWrites: true" in layout
     assert "watchChanges: true" in layout
     assert "required property ShellTheme theme" in frame
+    assert "required property bool active" in frame
     assert "theme: root.shellApi.theme" in pane
+    assert "active: root.activeInCanvas && root.activeFocus" in pane
     assert "import Quickshell.Widgets" in frame
     assert "ClippingRectangle {" in frame
     assert "contentUnderBorder: true" in frame
     assert "color: root.theme.surface" in frame
-    assert "border.color: root.theme.accent" in frame
+    assert "border.width: 3" in frame
+    assert "border.color: root.active" in frame
+    assert "? root.theme.strongAccent : root.theme.inactiveBorder" in frame
     assert "RectangularShadow {" not in frame
     assert "anchors.margins: -2.5" not in frame
-    assert "border.width: 2.5" in frame
-    assert "border.width: 2.5" in frame
-    assert "border.pixelAligned: false" in frame
-    assert "z: 1" in frame
-    assert "root.theme.shadow.r" in frame
-    assert "root.theme.shadow.g" in frame
-    assert "root.theme.shadow.b" in frame
-    assert "0.08" in frame
+    assert "border.width: 2.5" not in frame
+    assert "border.pixelAligned: false" not in frame
+    assert "root.theme.shadow.r" not in frame
     assert "Qt5Compat.GraphicalEffects" not in frame
     assert "layer.effect: MultiEffect" not in frame
     assert "height: root.theme.titleHeight" in frame
@@ -1094,6 +1093,22 @@ def test_pane_shortcut_move_is_atomic_and_has_one_owner_per_display_path() -> No
     assert '"type": "window.close.request"' in command_server
     assert 'event.get("reason") == "no_active_pane"' in move_client
     assert 'subprotocols=[SUBPROTOCOL]' in move_client
+    assert 'command.type === "focus.cycle"' in command_server
+    assert '"type": "pane.focus.request"' in command_server
+    assert "function focusCandidates(surfaceId)" in command_server
+    assert "!dockLayout.isDocked(placement.paneId)" in command_server
+    assert '"type": "window.activation.request"' in command_server
+    assert "signal focusRequested(string paneId, int expectedRevision)" in drag_session
+    assert 'event.type === "pane.focus.request"' in drag_session
+    assert "function focusPane(paneId, expectedRevision)" in canvas
+    assert "pane.forceActiveFocus(Qt.ShortcutFocusReason)" in canvas
+    assert "contentItem.window.requestActivate()" in canvas
+    assert '"type": "focus.cycle"' in move_client
+    assert 'event.get("type") == "focus.cycle.result"' in move_client
+    assert compositor.count('hl.bind("ALT + TAB"') == 1
+    assert compositor.count('hl.bind("ALT + SHIFT + TAB"') == 1
+    assert "move_pane.py focused focus next" in compositor
+    assert "move_pane.py focused focus previous" in compositor
     assert compositor.count('hl.bind("SUPER + SHIFT +') == 5
     assert compositor.count('hl.bind("SUPER + LEFT"') == 1
     assert compositor.count('hl.bind("SUPER + RIGHT"') == 1

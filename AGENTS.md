@@ -158,7 +158,14 @@ after a real implementation or outcome contract exists.
   pane-specific bridge, held-pointer lease, or coordinator process is allowed.
   Native application windows remain compositor clients but use the same Surface
   grids, gap formula, resize/move/transfer shortcut meanings, and semantic Shell
-  palette through Hyprland's supported `lua:obsidience` layout. A shortcut acts
+  palette through Hyprland's supported `lua:obsidience` layout. Module panes use
+  one exact three-logical-pixel shared `PaneFrame` border: the inactive token is
+  subdued and real keyboard focus selects the stronger cyan token. `Alt+Tab`
+  cycles forward through open native applications and undocked module panes on
+  the focused Surface; `Alt+Shift+Tab` cycles backward. The shell host builds
+  that current mixed ring, the existing window adapter activates native clients,
+  and the existing Surface canvas activates modules. Do not add Hyprland's
+  native-only cycle command or another focus owner. A shortcut acts
   on a native window only after the primary shell returns exact
   `no_active_pane`; every other pane result fails closed. The window adapter
   then pins the active native address and state revision before issuing one

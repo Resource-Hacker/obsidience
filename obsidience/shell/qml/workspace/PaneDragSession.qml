@@ -23,6 +23,7 @@ QtObject {
     property int tokenCounter: 0
 
     signal placementAccepted(var record)
+    signal focusRequested(string paneId, int expectedRevision)
 
     function nextToken(pane) {
         tokenCounter += 1
@@ -141,6 +142,13 @@ QtObject {
     function applyDragEvent(event) {
         if (!event || event.schema !== eventSchema
                 || typeof event.type !== "string") {
+            return
+        }
+        if (event.type === "pane.focus.request"
+                && event.surface_id === surfaceId
+                && typeof event.pane_id === "string"
+                && Number.isInteger(event.expected_revision)) {
+            focusRequested(event.pane_id, event.expected_revision)
             return
         }
         if ((event.type === "pane.drag.committed"

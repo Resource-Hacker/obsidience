@@ -87,10 +87,37 @@ PanelWindow {
         }
     }
 
+    function focusPane(paneId, expectedRevision) {
+        for (let index = 0; index < paneRepeater.count; index += 1) {
+            const pane = paneRepeater.itemAt(index)
+            if (!pane || !pane.paneVisible
+                    || pane.placement.paneId !== paneId
+                    || pane.placement.revision !== expectedRevision) {
+                continue
+            }
+            activePaneId = paneId
+            pane.forceActiveFocus(Qt.ShortcutFocusReason)
+            if (contentItem.window) {
+                contentItem.window.requestActivate()
+            }
+            return
+        }
+    }
+
+    Connections {
+        target: root.dragSession
+
+        function onFocusRequested(paneId, expectedRevision) {
+            root.focusPane(paneId, expectedRevision)
+        }
+    }
+
     Item {
         anchors.fill: parent
 
         Repeater {
+            id: paneRepeater
+
             model: root.panes
 
             PaneItem {

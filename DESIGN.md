@@ -163,7 +163,13 @@ input mask is the union of the open pane rectangles, leaving all uncovered
 desktop space click-through. A canvas occupies the top layer only while one of
 its module panes owns Hyprland keyboard focus; native application focus lowers
 that canvas below ordinary windows and clears its active shortcut owner, while
-the active module's local z-order keeps it above its module peers. Reader
+the active module's local z-order keeps it above its module peers. The shared
+module chrome is one exact three-logical-pixel border, with a subdued inactive
+token and a stronger cyan token only for the pane that owns real keyboard
+focus. `Alt+Tab` and `Alt+Shift+Tab` ask this same shell authority to cycle a
+fresh deterministic ring of open native applications and undocked module panes
+on the focused Surface. Native selection reuses the exact-address window
+adapter; module selection reuses that Surface's canvas. Reader
 consumes the typed selection, reads either
 the exact Article through `/api/articles/{ref}` or the exact Source bytes
 through `/api/source-files/{key}`, and renders the result in a translucent

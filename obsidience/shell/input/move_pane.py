@@ -15,6 +15,7 @@ SHELL_URL = "ws://127.0.0.1:8768"
 SUBPROTOCOL = "obsidience.shell.v1"
 SURFACES = frozenset(("samsung", "usb-c", "dp-4"))
 DIRECTIONS = frozenset(("left", "right", "top", "bottom"))
+FOCUS_DIRECTIONS = frozenset(("next", "previous"))
 ACTIONS = {
     "close": ("pane.dismiss_active", "pane.dismissed", "pane.dismiss.failed"),
     "surface": ("pane.move_active", "pane.moved", "pane.move.failed"),
@@ -128,6 +129,50 @@ def move_active_pane(surface_id: str, direction: str) -> bool:
     return apply_active_pane_action(surface_id, "surface", direction)
 
 
+def cycle_focus(surface_id: str, direction: str) -> bool:
+    """Cycle native applications and module panes on one Surface."""
+
+    if surface_id not in SURFACES or direction not in FOCUS_DIRECTIONS:
+        return False
+    token = secrets.token_hex(12)
+    try:
+        with connect(
+            SHELL_URL,
+            subprotocols=[SUBPROTOCOL],
+            compression=None,
+            proxy=None,
+            open_timeout=0.5,
+            close_timeout=0.1,
+            ping_interval=None,
+            max_size=16_384,
+        ) as socket:
+            socket.send(
+                json.dumps(
+                    {
+                        "schema": "obsidience.shell.command.v1",
+                        "type": "focus.cycle",
+                        "token": token,
+                        "source_surface_id": surface_id,
+                        "direction": direction,
+                    },
+                    separators=(",", ":"),
+                )
+            )
+            deadline = time.monotonic() + 0.75
+            while time.monotonic() < deadline:
+                message = socket.recv(timeout=max(0.01, deadline - time.monotonic()))
+                event = json.loads(message)
+                if (
+                    event.get("schema") == "obsidience.shell.event.v1"
+                    and event.get("type") == "focus.cycle.result"
+                    and event.get("token") == token
+                ):
+                    return event.get("success") is True
+    except (OSError, TimeoutError, ValueError, json.JSONDecodeError):
+        return False
+    return False
+
+
 def main(argv: list[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
     if len(arguments) == 2 and arguments[1] == "close":
@@ -145,6 +190,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     if surface_id is None:
         return 1
+    if action == "focus":
+        return 0 if cycle_focus(surface_id, direction) else 1
     return 0 if apply_active_pane_action(surface_id, action, direction) else 1
 
 
