@@ -159,9 +159,9 @@ after a real implementation or outcome contract exists.
   Native application windows remain compositor clients but use the same Surface
   grids, gap formula, resize/move/transfer shortcut meanings, and semantic Shell
   palette through Hyprland's supported `lua:obsidience` layout. Module panes use
-  a crisp one-pixel inactive `PaneFrame` edge and a 2.5-logical-pixel outline
-  only on the genuinely focused module. That outline uses the same brighter cyan
-  token as focused native applications. `Alt+Tab`
+  one pixel-aligned one-logical-pixel `PaneFrame` outline with Hyprland's exact
+  application radius and active/inactive border tokens. Focus changes only that
+  native-matched token; no second module outline exists. `Alt+Tab`
   cycles forward through open native applications and undocked module panes on
   the focused Surface; `Alt+Shift+Tab` cycles backward. The shell host builds
   that current mixed ring, the existing window adapter activates native clients,

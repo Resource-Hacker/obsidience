@@ -26,8 +26,7 @@ Item {
         anchors.fill: parent
         radius: root.theme.cornerRadius
         color: root.theme.surface
-        border.width: root.active ? 0 : root.theme.borderWidth
-        border.color: root.theme.inactiveBorder
+        border.width: 0
         contentUnderBorder: true
 
         Rectangle {
@@ -223,11 +222,11 @@ Item {
     Rectangle {
         anchors.fill: frame
         z: 1
-        visible: root.active
         color: "transparent"
         radius: root.theme.cornerRadius
-        border.width: 2.5
+        border.width: root.theme.borderWidth
         border.pixelAligned: true
-        border.color: root.theme.strongAccent
+        border.color: root.active
+            ? root.theme.strongAccent : root.theme.inactiveBorder
     }
 }
