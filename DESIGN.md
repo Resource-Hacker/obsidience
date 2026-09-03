@@ -164,9 +164,12 @@ desktop space click-through. A canvas occupies the top layer only while one of
 its module panes owns Hyprland keyboard focus; native application focus lowers
 that canvas below ordinary windows and clears its active shortcut owner, while
 the active module's local z-order keeps it above its module peers. The shared
-module chrome is one pixel-aligned one-logical-pixel outline using Hyprland's
-exact application radius and active/inactive border tokens. Focus changes only
-that native-matched token; there is no second module outline or effect.
+module chrome projects Hyprland's two-part application decoration across the
+Qt client-to-HDR-compositor boundary: an opaque pixel-aligned one-logical-pixel
+active core in the same cyan hue plus the exact three-logical-pixel,
+`0x14`-alpha shadow halo. Inactive chrome remains the exact one-pixel slate
+token. The halo does not overlap or soften the focus line and uses no effect
+layer.
 `Alt+Tab` and `Alt+Shift+Tab` ask this same shell authority to cycle a
 fresh deterministic ring of open native applications and undocked module panes
 on the focused Surface. Native selection reuses the exact-address window

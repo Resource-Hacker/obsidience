@@ -221,12 +221,34 @@ Item {
 
     Rectangle {
         anchors.fill: frame
+        anchors.margins: -3
         z: 1
+        visible: root.active
+        color: "transparent"
+        radius: root.theme.cornerRadius + 3
+        border.width: 3
+        border.pixelAligned: false
+        border.color: Qt.rgba(
+            root.theme.shadow.r,
+            root.theme.shadow.g,
+            root.theme.shadow.b,
+            20 / 255
+        )
+    }
+
+    Rectangle {
+        anchors.fill: frame
+        z: 2
         color: "transparent"
         radius: root.theme.cornerRadius
         border.width: root.theme.borderWidth
         border.pixelAligned: true
         border.color: root.active
-            ? root.theme.strongAccent : root.theme.inactiveBorder
+            ? Qt.rgba(
+                root.theme.strongAccent.r,
+                root.theme.strongAccent.g,
+                root.theme.strongAccent.b,
+                1
+            ) : root.theme.inactiveBorder
     }
 }

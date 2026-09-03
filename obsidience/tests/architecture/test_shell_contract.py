@@ -654,20 +654,26 @@ def test_one_shell_host_shares_displays_pane_and_surface_layout() -> None:
     assert "required property ShellTheme theme" in frame
     assert "required property bool active" in frame
     assert "theme: root.shellApi.theme" in pane
-    assert "active: root.activeInCanvas && root.activeFocus" in pane
+    assert "active: root.activeInCanvas" in pane
+    assert "active: root.activeInCanvas && root.activeFocus" not in pane
     assert "import Quickshell.Widgets" in frame
     assert "ClippingRectangle {" in frame
     assert "contentUnderBorder: true" in frame
     assert "color: root.theme.surface" in frame
     assert "border.width: 0" in frame
     assert "RectangularShadow {" not in frame
-    assert "anchors.margins: -2.5" not in frame
-    assert "border.width: 2.5" not in frame
+    assert "anchors.margins: -3" in frame
+    assert "visible: root.active" in frame
+    assert "radius: root.theme.cornerRadius + 3" in frame
+    assert "border.width: 3" in frame
+    assert "border.pixelAligned: false" in frame
+    assert "20 / 255" in frame
+    assert "root.theme.shadow.r" in frame
     assert "border.width: root.theme.borderWidth" in frame
     assert "border.pixelAligned: true" in frame
     assert "border.color: root.active" in frame
-    assert "? root.theme.strongAccent : root.theme.inactiveBorder" in frame
-    assert "root.theme.shadow.r" not in frame
+    assert "root.theme.strongAccent.r" in frame
+    assert ") : root.theme.inactiveBorder" in frame
     assert "Qt5Compat.GraphicalEffects" not in frame
     assert "layer.effect: MultiEffect" not in frame
     assert "height: root.theme.titleHeight" in frame
