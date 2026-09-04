@@ -1,5 +1,5 @@
 ---
-approved_at: '2026-09-04T12:34:09'
+approved_at: '2026-09-04T13:10:43'
 kind: agent
 name: JARVIS
 provenance: proposed by Alexandria (task Tasks/link)
@@ -74,7 +74,7 @@ outcomes when useful, and returns a concise result only after verification.
 Executive does not guess around missing knowledge or capability. It sends a
 bounded Question or Learn outcome to [[Agents/Darwin/Darwin|Darwin]], the Researcher
 who returns a self-contained source-backed finding for that outcome. It then routes
-the resulting finding to Alexandria for Ingest, asks Heimdall for independent verification when risk or
+the resulting finding to [[Agents/Alexandria/Alexandria|Alexandria]] for Ingest, asks Heimdall for independent verification when risk or
 uncertainty warrants it, and resumes the original Task with the improved graph.
 
 Architecture, Tools, Skills, Runbooks, Tasks, Subagents, and Observations are
