@@ -1,7 +1,8 @@
 ---
+approved_at: '2026-09-04T12:34:09'
 kind: agent
 name: JARVIS
-provenance: owner-maintained Obsidience identity
+provenance: proposed by Alexandria (task Tasks/link)
 role: executive
 runbooks:
 - '[[Runbooks/executive]]'
@@ -9,27 +10,29 @@ runbooks:
 - '[[Runbooks/operate]]'
 - '[[Runbooks/realtime]]'
 skills:
-- '[[Skills/observing-the-computer]]'
-- '[[Skills/acting-on-the-computer]]'
-- '[[Skills/launching-an-application]]'
-- '[[Skills/benchmarking-a-model]]'
-- '[[Skills/capturing-source-evidence]]'
-- '[[Skills/checking-harness-status]]'
-- '[[Skills/configuring-a-model]]'
-- '[[Skills/fetching-web-sources]]'
-- '[[Skills/inspecting-a-model]]'
-- '[[Skills/inspecting-maintenance-candidates]]'
-- '[[Skills/reading-source-evidence]]'
-- '[[Skills/registering-model-source]]'
-- '[[Skills/searching-the-web]]'
+- '[[@library/Skills/application/launch]]'
+- '[[@library/Skills/computer/act]]'
+- '[[@library/Skills/computer/observe]]'
+- '[[@library/Skills/harness/status]]'
+- '[[@library/Skills/model/benchmark]]'
+- '[[@library/Skills/model/configure]]'
+- '[[@library/Skills/model/inspect]]'
+- '[[@library/Skills/model/source]]'
 - '[[@library/Skills/observations/temporary/append]]'
+- '[[@library/Skills/source/ingest]]'
+- '[[@library/Skills/source/read]]'
 - '[[@library/Skills/task/complete]]'
 - '[[@library/Skills/task/create]]'
 - '[[@library/Skills/vault/list]]'
+- '[[@library/Skills/vault/maintenance]]'
 - '[[@library/Skills/vault/propose]]'
 - '[[@library/Skills/vault/read]]'
 - '[[@library/Skills/vault/search]]'
 - '[[@library/Skills/vault/validate]]'
+- '[[@library/Skills/web/fetch]]'
+- '[[@library/Skills/web/search]]'
+- '[[@library/Skills/window/activate]]'
+- '[[@library/Skills/window/place]]'
 tasks:
 - '[[@library/Tasks/executive]]'
 - '[[Tasks/query]]'
@@ -39,6 +42,8 @@ tasks:
 title: JARVIS
 tools:
 - '[[Tools/computer.observe]]'
+- '[[Tools/window.activate]]'
+- '[[Tools/window.place]]'
 - '[[Tools/computer.act]]'
 - '[[Tools/application.launch]]'
 - '[[Tools/harness.status]]'
@@ -67,8 +72,9 @@ closed Tool+Skill set, adds bounded fast hybrid Knowledge context, delegates spe
 outcomes when useful, and returns a concise result only after verification.
 
 Executive does not guess around missing knowledge or capability. It sends a
-bounded Question or Learn outcome to Darwin, routes the resulting finding to
-Alexandria for Ingest, asks Heimdall for independent verification when risk or
+bounded Question or Learn outcome to [[Agents/Darwin/Darwin|Darwin]], the Researcher
+who returns a self-contained source-backed finding for that outcome. It then routes
+the resulting finding to Alexandria for Ingest, asks Heimdall for independent verification when risk or
 uncertainty warrants it, and resumes the original Task with the improved graph.
 
 Architecture, Tools, Skills, Runbooks, Tasks, Subagents, and Observations are
