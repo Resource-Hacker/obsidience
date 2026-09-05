@@ -2,78 +2,76 @@
 type: knowledge
 title: Top 10
 obsidience:
-  approved_at: '2026-09-04T22:06:08'
+  approved_at: '2026-09-04T22:15:17'
   provenance: proposed by Alexandria (task Tasks/ingest)
 ---
 
-Research timestamp: 2026-09-05T00:00:00Z
+Research timestamp: 2026-09-05 (UTC); handoff captured 2026-09-05T04:57:21.841Z.
 
-Scope: English-language world news over the previous 48 hours, screened from BBC World and Deutsche Welle World feeds. This is an editorial selection from the configured sources, not a universal ranking. Every story cites its direct article Source. These are dated reports from the configured sources, not confirmed permanent facts.
+Scope: English-language world news over the previous 48 hours, an editorial selection from BBC World and DW World discovery. This is an editorial selection from the configured sources, not a universal ranking. Every story cites its direct article Source. These are dated reports from the configured sources, not confirmed permanent facts.
 
-Handoff citation: source://a0c29aab-c26a-4181-8b34-b76cd0177ac8 (Top 10 World News — 4 September 2026, captured 2026-09-05T02:15:46.206Z).
+Recovery note: this edition is a reconstruction of failed News run 7e13935f4add, assembled from ten already-fetched 2026-09-05 article captures rather than a fresh news check.
+
+Handoff citation: source://ed59a69a-9fab-4c1b-a37d-2a823163c968 (Top 10 world news, research timestamp 2026-09-05).
 
 See the [News & Research index](/News%20%26%20Research/News%20%26%20Research.md).
 
-## 1. US judge declares mistrial in Lindsay Clancy murder case after jury deadlocks
-A Massachusetts judge declared a mistrial in the murder case of Lindsay Clancy after a jury deadlocked over whether she should be held criminally liable for killing her three young children. After about a week of deliberation, Judge Sullivan said the jury was deadlocked and declared a mistrial. The 36-year-old former nurse remains held on the murder charges; a hearing is scheduled for 29 September to determine next steps. The case deeply divided the American public and prompted remarks from the US president.
-- Report date: 4 September 2026
-- URL: https://www.bbc.co.uk/news/articles/cpwlrj2je1po
-- Citation: source://34b97efb-30e4-4d52-810c-60058dd38285
-
-## 2. Europe faces spiralling sabotage campaign; Russia named chief suspect
-Germany blames Russia for a surge in sabotage across Europe, beginning with an explosive drone discovery at Leipzig airport, followed by suspicious fires at defence facilities in Italy, Estonia, Slovakia and Poland. Poland's interior minister said there are "many, many signals that Russia is changing its strategy and intensifying its activities, including terrorist and sabotage activities." Experts say Moscow is using coercive signalling to pressure countries such as Germany, Ukraine's biggest military aid supplier. President Putin dismissed the accusations as absurd.
-- Report date: 4 September 2026
-- URL: https://www.bbc.co.uk/news/articles/c5y4g6meekro
-- Citation: source://537e1c76-b731-41e6-adf7-f8ed089e3693
-
-## 3. UN votes to adopt new world map correcting Africa's distorted size
-The UN General Assembly passed a "Correct the Map" resolution sponsored by Togo and backed by African Union members, with 164 votes in favour, the US the only nation to vote against, and six abstentions. The widely used Mercator projection (since 1569) distorts equatorial regions — Africa appears roughly the size of Greenland though it is 14 times larger. The non-binding resolution will prompt institutions to switch to the Equal Earth projection.
-- Report date: 4 September 2026
-- URL: https://www.bbc.co.uk/news/articles/ce30vp55dnlo
-- Citation: source://e05a6e02-8daa-4ec6-98bc-123fba4f4147
-
-## 4. Germany's far-right AfD bids for first state-level power in eastern vote
-Germany's Alternative für Deutschland (AfD) is contesting the Saxony-Anhalt state election aiming for an outright majority. An AfD win would mark the first time a far-right party has held state-level power in post-war Germany. Chancellor Friedrich Merz, whose approval ratings remain low, faces pressure; AfD lead candidate Ulrich Siegmund, dubbed "Germany's Most Dangerous Man" by Der Spiegel, appears ahead in polls.
-- Report date: 3 September 2026
-- URL: https://www.bbc.co.uk/news/articles/cvgypkzgy4wo
-- Citation: source://cb507333-44dd-49a7-ae6a-04409ee5e0d9
-
-## 5. Russian drone strikes Ukrainian Security Service headquarters in Kyiv
-Ukrainian President Volodymyr Zelensky confirmed a Russian drone struck the headquarters of the Security Service of Ukraine (SBU) in central Kyiv, targeting the office of security chief Oleksandr Poklad. Zelensky ordered an "appropriate, tangible response." Kyiv Mayor Vitali Klitschko said five people were injured. Foreign Minister Andriy Sybiha called it a "major escalation that demands resolute responses."
-- Report date: 4 September 2026
-- URL: https://www.bbc.co.uk/news/articles/c5yep7y48x2o
-- Citation: source://0f47b714-9928-4d1c-89f0-46ae4ecd6ac3
-
-## 6. Trump's peace envoys to visit Moscow and Kyiv this weekend
-Steve Witkoff and Jared Kushner, Donald Trump's designated peace envoys, are expected to visit Moscow on 5 September and Kyiv on 6 September. Trump told reporters "they are bringing with them a proposal to end the war." Zelensky confirmed he will meet the envoys on Sunday, said he would guarantee the safety of Russian airspace during the visit, and called on Russia to do the same.
+## 1. Trump's peace envoys to visit Moscow and Kyiv
+US negotiators Steve Witkoff and Jared Kushner are to visit Russia and Ukraine this weekend as peace efforts gather pace. Zelensky confirmed a Sunday meeting after the envoys meet Putin in Moscow on Saturday. Trump said the envoys carry a proposal to end the war, but a gulf remains over Putin's maximalist demands, including more territorial concessions that Kyiv and its European allies reject.
 - Report date: 4 September 2026
 - URL: https://www.bbc.co.uk/news/articles/c23x0z48x0no
-- Citation: source://1a1670a0-f893-40e8-b8c8-0ad8c560b914
+- Citation: source://b1889f61-bda3-43e1-bd4e-cd475b07ec5e
 
-## 7. UK says Falkland support "unwavering" after Argentina restates territorial claims
-Argentine President Javier Milei said in a televised speech that the "winds of change" favour Argentina's claim to the Falkland Islands and threatened sanctions on firms exploring oil near the territory. A British-Israeli partnership exploring the Sea Lion oilfield said it does not expect the developments to affect operations. A UK Downing Street spokesperson said the UK's position on the Falkland Islands is "unwavering" and that Prime Minister Andy Burnham "fully supports the wishes of the islanders to remain a British overseas territory."
+## 2. Explosion kills at Bolivian military barracks
+An explosion at a Bolivian military barracks in Viacha, about 30 km from La Paz, killed at least two people, with authorities fearing a higher toll. Defence Minister Ernesto Justiniano said at least 58 were injured when pyrotechnic material detonated around 14:30 local time on Friday; a health official told local TV that between 10 and 15 may have died. Dozens of homes were damaged and the cause remains under investigation.
+- Report date: 5 September 2026
+- URL: https://www.bbc.co.uk/news/articles/c3v45xy67g5o
+- Citation: source://ba4d333f-815c-4427-a868-958b68bedbc4
+
+## 3. Europe hit by spiralling sabotage campaign
+Germany's interior minister declared Russia responsible for explosive drones found at Leipzig airport, and a string of suspicious fires at defence sites from Italy to Estonia raised alarm. Poland's interior minister warned of intensified Russian sabotage. Analysts describe coercive signalling, with German media citing a federal report listing more than 165 suspected sabotage cases nationwide this year.
 - Report date: 4 September 2026
-- URL: https://www.bbc.co.uk/news/articles/cn45jg3zlz4o
-- Citation: source://1f488bc9-909e-41c4-9f4c-7f3206045e93
+- URL: https://www.bbc.co.uk/news/articles/c5y4g6meekro
+- Citation: source://b376856e-9bd0-48e1-9a51-8e4c93e35291
 
-## 8. Argentine couple agrees to return a Nazi-looted painting to its rightful owner
-A court ruled that Argentine couple Patricia Kadgien and Juan Carlos Corbeiro must return the baroque Portrait of a Lady, stolen by the Nazis in 1940 from Jewish art dealer Jacques Goudstikker's collection. Lost for 80 years, the painting was spotted in photos of a property for sale in Mar del Plata. Kadgien, whose father was a top adviser to Hermann Goring, will face no prosecution in exchange for returning the artwork. Marei von Saher, Goudstikker's heir, intends to display it temporarily at the Holocaust Museum of Buenos Aires.
+## 4. UN votes to adopt a corrected world map
+The UN General Assembly voted to replace the Mercator projection with one better reflecting Africa's true size. The "Correct the Map" resolution, sponsored by Togo and backed by African Union members, passed with 164 nations including France and the UK; the US was the only vote against, with six abstentions. The non-binding vote is expected to change maps used by institutions worldwide.
 - Report date: 4 September 2026
-- URL: https://www.bbc.co.uk/news/articles/cy0zxjp50j6o
-- Citation: source://c5d61418-5b0c-4bc0-8001-b3d52bad3f9f
+- URL: https://www.bbc.co.uk/news/articles/ce30vp55dnlo
+- Citation: source://ba10a93f-5885-4205-8085-b8fed9c06f46
 
-## 9. Nepal floods devastate hydropower infrastructure, exposing climate risk
-Flash floods killed over 1,300 people and destroyed 12 hydropower plants in the Trishuli River basin, knocking out more than 10% of Nepal's total power generation capacity. Nepal relies almost entirely on hydropower, producing around $200m annually from exports to India and Bangladesh. The Nepal Electricity Authority said climate disasters are forcing a "rethink of our hydropower policy."
+## 5. Nepal tunnel rescue after deadly flood
+Rescuers pulled two men alive from a blocked hydropower tunnel at Trishuli 3A in Nepal, hit by last week's massive border flash flood that has killed about 1,300 people. An adviser said it was "layer upon layer of miracles" to locate the buried entrance and dig through mud, rocks and water. Dozens remain thought trapped as crews head toward a "Goldilocks zone."
 - Report date: 4 September 2026
-- URL: https://www.bbc.co.uk/news/articles/cy0zx368prno
-- Citation: source://02f2a69f-573c-48f6-8451-5aa38bf4f427
+- URL: https://www.bbc.co.uk/news/articles/c9dwjv96qyqo
+- Citation: source://86b57ec2-728d-45e3-a433-1d9845759cbf
 
-## 10. Volkswagen board approves 50,000 job cuts as part of €50bn restructuring plan
-Volkswagen's board approved cuts of 50,000 jobs, bringing total planned reductions by 2030 to 100,000. The restructuring includes evaluating four German plants (Emden, Zwickau, Hanover, Neckarsulm) where capacity exceeds demand. CEO Oliver Blume called the moves a "strong signal" for the firm's future. The plan also cuts the model portfolio by 50% by 2035 and reduces product complexity by 75%, in response to falling profits and competition from Chinese brands.
+## 6. Norway seizes Russian ship in Svalbard
+Norwegian courts ordered the seizure of the Russian research vessel Professor Molchanov at Barentsburg, Svalbard, to enforce part of a $4.22 billion compensation claim won by Ukraine's Naftogaz over Moscow's annexation-era seizure of its assets. The ship was stopped from departing late Wednesday. Russia protested, summoned Norway's ambassador and said it would seek the vessel's release through legal channels.
+- Report date: 3 September 2026
+- URL: https://www.dw.com/en/svalbad-russian-ship-professor-molchanov-seized/a-78889005
+- Citation: source://0dee51f9-8f09-48ff-9ae2-cef17fe391dc
+
+## 7. Maltese tycoon acquitted in journalist's murder
+Maltese businessman Yorgen Fenech was acquitted of ordering the 2017 murder of investigative journalist Daphne Caruana Galizia, sparking street protests in Valletta. Eight of nine jurors rejected the prosecution case, which relied on the testimony of middleman Melvin Theuma. The verdict leaves unanswered who contracted her death; the police chief will now decide whether further proceedings follow.
 - Report date: 4 September 2026
-- URL: https://www.bbc.co.uk/news/articles/cx2z0kvy4n4o
-- Citation: source://d907f691-a9eb-423d-af11-7a838db486ed
+- URL: https://www.dw.com/en/outrage-as-maltese-tycoon-acquitted-in-journalists-murder/a-79027008
+- Citation: source://122d13d6-e839-4be8-967f-c4343120de3c
 
----
+## 8. Germany's far-right AfD eyes eastern power
+Germany's far-right AfD is seeking a majority in Sunday's Saxony-Anhalt state election, which would be the first time a far-right party holds state-level power in post-war Germany. Lead candidate Ulrich Siegmund leads the polls as voters cite immigration, safety and Ukraine aid. A win would test Chancellor Friedrich Merz and let the party implement local changes and gain a louder federal voice.
+- Report date: 5 September 2026
+- URL: https://www.bbc.co.uk/news/articles/cvgypkzgy4wo
+- Citation: source://ef73d134-877d-4604-a710-73f379c2bc59
 
-All ten stories were sourced via direct web.fetch by Darwin; raw feeds and full article captures remain in Source for provenance.
+## 9. Yemen fighting intensifies amid Houthi push
+The Iran-backed Houthis launched a ground offensive against the Saudi-led coalition in southwestern Yemen, seeking high ground and control of the Red Sea gateway near Bab el-Mandeb. AFP tallied 129 deaths as of Friday, while shelling and artillery forced hundreds of families to flee the coastal cities of Hodeidah and Mokha. Both sides have sustained losses as the July truce collapses.
+- Report date: 4 September 2026
+- URL: https://www.dw.com/en/houthis-yemen-fighting-intensifies/a-79039588
+- Citation: source://46ac1a70-5cbf-4894-886d-86f1dba8ad96
+
+## 10. Nigeria: oil thieves die after inhaling fumes
+A Nigerian environmental group said at least 37 people died trying to siphon crude oil from a loading vessel in Okrika, Rivers State, most from inhaling hazardous fumes overnight Thursday. Police confirmed deaths but gave fewer details, and the Nigeria Security and Civil Defense Corps called the circulating figures unverified. If confirmed, it would be the worst fatal oil-theft accident since October 2023.
+- Report date: 4 September 2026
+- URL: https://www.dw.com/en/nigeria-oil-theft-dozens-dead/a-79001997
+- Citation: source://c5505d1f-ff41-44ab-aa15-dc01576cb3c3
