@@ -1,25 +1,25 @@
 ---
 type: knowledge
 status: stable
-description: 'Germany''s far-right AfD is projected to win a record ~44% in Saxony-Anhalt,
-  far ahead of the CDU (~17%) but short of an outright majority. No far-right party
-  has run a German state since World War Two, so governing would give it police, local
-  education and culture powers. Opponents called it a watershed; the result is '
+description: Incomplete results put the far-right AfD on a record ~44% of the vote
+  in Saxony-Anhalt, well ahead of the CDU (~17%), but only 39 of 83 seats — three
+  short of a majority. No far-right party has held a German state since World War
+  II; governing at state level would mean powers over policing, local education and
+  culture.
 generated:
   by: obsidience/harness/knowledge/news.py
-  at: '2026-09-06T22:44:47.756Z'
+  at: '2026-09-06T23:49:56.098Z'
 resource: https://www.bbc.co.uk/news/articles/cy4zejgz3z9o
 sources:
-- resource: source://2d16913c-ebb1-4307-b8f9-4c5e66b90480
-- resource: source://997b4991-7788-47a1-bb60-89132d54c757
-stale_after: '2026-09-08T00:28:01.091Z'
-title: Germany's far-right AfD set for big win in Saxony-Anhalt
+- resource: source://46ce7820-66ff-41be-9ecc-cfcba09bc38c
+- resource: source://10bb33dc-305b-4761-bab3-85cbef4525d5
+stale_after: '2026-09-08T01:25:25.113Z'
+title: Germany's far-right AfD wins big in Saxony-Anhalt, just short of majority
 obsidience:
-  approved_at: '2026-09-06T15:44:53'
+  approved_at: '2026-09-06T16:50:02'
   provenance: proposed by Alexandria (task Tasks/ingest)
 ---
 
-Germany's far-right AfD is projected to win a record ~44% in Saxony-Anhalt, far ahead of the CDU (~17%) but short of an outright majority. No far-right party has run a German state since World War Two, so governing would give it police, local education and culture powers. Opponents called it a watershed; the result is watched as a possible signal for the whole country.
-Report date: 6 Sep 2026. https://www.bbc.co.uk/news/articles/cy4zejgz3z9o · source://2d16913c-ebb1-4307-b8f9-4c5e66b90480
+Incomplete results put the far-right AfD on a record ~44% of the vote in Saxony-Anhalt, well ahead of the CDU (~17%), but only 39 of 83 seats — three short of a majority. No far-right party has held a German state since World War II; governing at state level would mean powers over policing, local education and culture. The AfD claims a mandate to govern and refuses a minority government, threatening new elections; opponents call the result a watershed. Report date 2026-09-06 (BBC). URL: https://www.bbc.co.uk/news/articles/cy4zejgz3z9o · Source: source://46ce7820-66ff-41be-9ecc-cfcba09bc38c
 
-Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://997b4991-7788-47a1-bb60-89132d54c757.
+Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://10bb33dc-305b-4761-bab3-85cbef4525d5.

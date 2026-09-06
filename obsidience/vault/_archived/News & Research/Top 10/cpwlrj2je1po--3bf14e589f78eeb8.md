@@ -1,6 +1,6 @@
 ---
 type: knowledge
-status: stable
+status: deprecated
 description: A Massachusetts judge declared a mistrial in the Lindsay Clancy case
   after the jury deadlocked, leaving her criminal liability over the deaths of her
   three children in limbo. The high-profile case has divided the US over postpartum
@@ -18,6 +18,11 @@ title: Mistrial declared in Lindsay Clancy murder case
 obsidience:
   approved_at: '2026-09-06T15:44:54'
   provenance: proposed by Alexandria (task Tasks/ingest)
+  archived_at: '2026-09-06T23:50:04Z'
+  archive_reason: Replace current Top 10 edition with the new source-backed briefing
+    from Inbox 2026-09-06 23:00 UTC (captured 2026-09-06T23:25:25.113Z); all ten stories
+    verified against fetched direct articles; corrected Hungary story URL to exact
+    Source source_ref.
 ---
 
 A Massachusetts judge declared a mistrial in the Lindsay Clancy case after the jury deadlocked, leaving her criminal liability over the deaths of her three children in limbo. The high-profile case has divided the US over postpartum psychosis; a hearing later this month will set out next steps, with a retrial a live question.
