@@ -13,75 +13,19 @@ obsidience:
   - '[[Skills/computer.act]]'
   - '[[Skills/task.create]]'
   - '[[Skills/task.complete]]'
-  approved_at: '2026-09-05T22:48:14'
+  approved_at: '2026-09-06T01:04:55'
   provenance: proposed by Codex (task codex:knowledge-handoff)
 ---
 
-Produce one bounded computer effect requested by the owner.
+Produce the bounded computer outcome requested by the owner.
 
-1. Read the exact objective from the request and its retrieved rider Knowledge.
-   Classify it as exactly one requested outcome: launch, visual observation,
-   focus, placement, or in-client action. Do not turn an application, game,
-   button, or move into another Task. If a factual prerequisite requires
-   research before any effect, use `task.create` for exact
-   `Tasks/research/question` or `Tasks/research/learn` with one bounded question
-   and `wait_for_result: true`; resume from its evidence without replaying any
-   completed effect.
-   Resolve pronouns such as "it" from the explicit active conversation and the
-   current Shell Scene in Bindings. Use its concrete `kind: application|pane`
-   and canonical `name`, not the display title. Window enumeration and focus
-   are already in that scene; do not take a screenshot to discover them. If
-   context does not identify one target, ask which application or pane the
-   owner means through `task.complete` with `status: failed` and that question
-   in `summary`; never guess or ask the owner to click or focus it.
-2. For a launch outcome, call `application.launch` exactly once with the
-   supplied application identifier. Do not substitute or repeat the launch.
-3. For a visual-question outcome, call `computer.observe` once with
-   `kind: focused` and no name, or the exact application/pane selector from the
-   scene. It changes neither focus nor placement. Its returned target has
-   concrete kind and canonical name; display `title` is never a selector.
-4. For a focus outcome, call `window.activate` once for the existing exact
-   application or pane. Do not observe it first merely to establish focus.
-5. For a placement outcome, call `window.place` once and directly for the
-   existing exact application or pane and requested Surface or tile. Do not
-   call observation or activation as a prerequisite; placement resolves,
-   privately pins, applies, and freshly verifies its own Shell-scene lease.
-   Tile edges are integer grid coordinates from the current Shell Scene's
-   `tile_grids`, never pixels. Only an explicit `invalid_destination` result
-   with `delivery: not_dispatched` and `correction_allowed: true` permits one
-   distinct corrected request using its returned grid contract. Do not repeat
-   the same request or retry rejected, uncertain, or completed delivery.
-6. For an in-client action outcome, call computer.observe for the exact application
-   and locate the intended control in its attached image. In the immediately
-   next response call computer.act once with the application, target description,
-   normalized image point and intended postcondition. Keep that postcondition
-   within the owner's requested scope: "click Play" requests one button click,
-   not selecting a mode or starting a match. Never add those further outcomes
-   as completion requirements. Do not insert another Tool
-   between observation and action. Use vision for labels and icons alike. The
-   harness binds that point to this exact short-lived image and window, delivers
-   at most one click, and attaches a fresh post-image. If the intended point is
-   unclear, stop without input.
-7. Interpret only the selected Tool's returned evidence. For a launch, treat
-   `ready` as verified open, `starting` as dispatched but not ready, and
-   `failed` as failed. For every other outcome, complete only when its fresh
-   returned observation or Shell scene establishes the requested result. A
-   verified placement or active state needs no extra screenshot. A successful
-   `effect_applied: false` means the requested state was already present;
-   report that fact without claiming a move or focus change occurred. A scoped click witness with its fresh post-image establishes input at the
-   model-selected point; its label alone is not semantic verification. The
-   immediate post-image can precede an asynchronous application transition.
-   If that image is unchanged, transitional or inconclusive, call
-   computer.observe once more for the same application to clarify the result;
-   this is read-only verification and never permits another click. Report the
-   observed state. For an explicit button-click request, acknowledged delivery
-   completes the requested input; do not fail it because an unrequested larger
-   outcome such as starting a match has not occurred. For a genuinely requested
-   larger outcome, do not claim it unless the fresh image establishes it.
-8. Call `task.complete` with the same factual status and one concise public
-   result in `summary`.
+1. Read the exact Objective, current conversation, controller computer_outcome and computer_scope, and current Shell Scene in Bindings. A correction resolves the preceding request; it is not an unrelated new topic. Historical execution records say what earlier Tools delivered, not what is visible now. Prior assistant claims are not proof of action. Use one exact semantic target, never a display title as identity. If unresolved, finish failed with one concise clarification. If factual research is necessary before input, task.create may request exact Tasks/research/question or Tasks/research/learn with wait_for_result: true; resume without replaying earlier effects.
+2. For launch, use application.launch exactly once with the supplied registered identifier. If already ready, report that it is already open, not that you launched it. Opening an application is distinct from starting gameplay inside it.
+3. For observation, call computer.observe on the exact application/pane or kind: focused. The Shell Scene already provides enumeration and focus. Observation never changes focus or placement.
+4. For focus, call window.activate for an existing exact target. For placement, call window.place directly with the requested Surface and integer tile edges from shell_scene.tile_grids. Their returned verified scene is sufficient. A successful effect_applied: false means the state was already present. Only invalid_destination with delivery: not_dispatched and correction_allowed: true permits one distinct corrected placement request.
+5. For action, call computer.observe for the bound application and identify the intended control in the attached image. Immediately call computer.act with its application, target description, normalized image point and intended postcondition. No intervening Tool may occur. If the control is unclear, stop without input. Use native vision for labels and icons.
+6. With computer_scope=input, deliver exactly one requested click. Do not expand 'click Normal' into starting a match. With computer_scope=state, take only steps necessary for the requested state, at most three clicks in this Task. After each acknowledged click, interpret its fresh post-image. Proceed to another distinct step only if that image establishes the preceding step's result, then obtain a new computer.observe immediately before the next computer.act. The post-image itself never grants another action lease. Never repeat an uncertain, rejected or failed attempt. Stop on unavailable post-image. Stop once the requested outcome is established; do not begin further gameplay or unrelated choices.
+7. A post-image may precede an asynchronous transition. If it is unchanged, transitional or inconclusive, use computer.observe for read-only clarification. Do not repeat the input while its outcome is unresolved. A mode selector or an unchanged Play button does not establish a started match. Describe queueing as queueing; describe a match as started only when the visible state supports that claim.
+8. Finish with task.complete and one factual public summary. Launch needs a ready window; focus and placement need their matching verified scene. Input needs acknowledged delivery and fresh post-image. State additionally requires the immediately preceding model input to contain a current post-action image and verification: {"status":"established","observation":"concrete visible evidence for the requested state"}. This is your visual interpretation, not independent mechanical proof. If it cannot be established, finish failed with the exact observed limit. Historical evidence, a requested postcondition and a target label cannot replace current evidence.
 
-Stop after the single bounded action, allowing only the explicit pre-dispatch
-parameter correction above. Never replay uncertain delivery. A
-missing capability or malformed parameter is a failed Task, not permission to
-invent a Tool, a game-specific Task, or another mutation route.
+Use only the assigned Tools. Missing capability, invalid parameter, lock, stale identity or uncertain delivery is a blocker, not permission to invent a Tool, game-specific Task, or alternative mutation route.
