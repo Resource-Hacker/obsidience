@@ -13,7 +13,7 @@ obsidience:
   - '[[Skills/computer.act]]'
   - '[[Skills/task.create]]'
   - '[[Skills/task.complete]]'
-  approved_at: '2026-09-05T22:01:55'
+  approved_at: '2026-09-05T22:33:10'
   provenance: proposed by Codex (task codex:knowledge-handoff)
 ---
 
@@ -51,18 +51,22 @@ Produce one bounded computer effect requested by the owner.
    with `delivery: not_dispatched` and `correction_allowed: true` permits one
    distinct corrected request using its returned grid contract. Do not repeat
    the same request or retry rejected, uncertain, or completed delivery.
-6. For an in-client action outcome, call `computer.act` once with the semantic
-   application, target, and intended postcondition. It performs its own fresh
-   resolution and validation, delivers at most one click, and returns a fresh
-   post-observation without exposing privileged coordinates or tokens.
+6. For an in-client action outcome, call computer.observe for the exact application
+   and locate the intended control in its attached image. In the immediately
+   next response call computer.act once with the application, target description,
+   normalized image point and intended postcondition. Do not insert another Tool
+   between observation and action. Use vision for labels and icons alike. The
+   harness binds that point to this exact short-lived image and window, delivers
+   at most one click, and attaches a fresh post-image. If the intended point is
+   unclear, stop without input.
 7. Interpret only the selected Tool's returned evidence. For a launch, treat
    `ready` as verified open, `starting` as dispatched but not ready, and
    `failed` as failed. For every other outcome, complete only when its fresh
    returned observation or Shell scene establishes the requested result. A
    verified placement or active state needs no extra screenshot. A successful
    `effect_applied: false` means the requested state was already present;
-   report that fact without claiming a move or focus change occurred. A scoped click witness with its fresh post-image establishes the requested
-   named click. Describe the visible result from that image; input delivery
+   report that fact without claiming a move or focus change occurred. A scoped click witness with its fresh post-image establishes input at the
+   model-selected point; its label alone is not semantic verification. Describe the visible result from that image; input delivery
    never establishes a larger outcome such as starting a match. If the image
    does not establish that larger requested outcome, finish failed with the
    observed state and do not click again.
