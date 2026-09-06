@@ -9,35 +9,48 @@ obsidience:
   provenance: proposed by Alexandria (task Tasks/improve)
 ---
 
-The Executive's current-events briefing and source-backed research context.
-News is time-sensitive reporting, not permanent truth. Each briefing states
-when it was researched, distinguishes reports from confirmed facts, and links
-its evidence back to immutable Source material.
+The Executive's current-events collection. News is time-sensitive reporting,
+not permanent truth. Each edition preserves its research capture time,
+attribution, uncertainty, and immutable Source evidence.
 
 ## Contents
 
-- [Coverage](/News%20%26%20Research/Coverage.md) states the default English-language world-news coverage, BBC World and DW World discovery leads, 48-hour recency window, and story-attribution rules.
-- [Top 10](/News%20%26%20Research/Top%2010.md) is the current source-backed briefing edition, replacing the prior edition while preserving history and raw evidence.
+- [Coverage](/News%20%26%20Research/Coverage.md) states the publisher discovery scope, recency window, and evidence rules.
+- [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md) condenses the current edition and links its ten individual summarized story Articles.
 
-[Darwin](/Agents/Darwin/Darwin.md) selects ten distinct important world stories,
-reads their direct sources, and sends one concise, cited briefing to the
-physical Source Inbox. [Alexandria](/Agents/Alexandria/Alexandria.md) checks the
-handoff and maintains the **Top 10** Article through [Ingest](/Tasks/ingest.md).
-[News](/Tasks/research/news.md) refreshes hourly when autonomous work is permitted.
+[Darwin](/Agents/Darwin/Darwin.md) selects ten distinct world stories, reads
+their direct sources, and delivers one complete briefing to the physical
+Source Inbox through [News](/Tasks/research/news.md).
+[Alexandria](/Agents/Alexandria/Alexandria.md) checks that exact handoff through
+[Ingest](/Tasks/ingest.md). The existing proposal and Review authority publishes
+one complete edition: the Top 10 parent and ten separate story Articles.
+The hourly research schedule remains subject to ordinary autonomous-work availability.
 
-Auto-curate authorizes routine source-backed Knowledge creates and updates
-inside this branch. Turning the checkbox off sends those changes to the Review
-queue instead. It does not authorize deletions, permission changes, replacement
-of this policy, or publication outside this branch. Research and Ingest keep
-their ordinary Task-selected models and reasoning settings.
+The owner's Auto-curate permission authorizes source-backed Knowledge publication
+inside this branch. For a complete Top 10 replacement, it also authorizes retaining
+outgoing edition-owned story Articles below the existing archive, with native
+OKF `status: deprecated`, an archive timestamp, and a reason. Only exact prior-edition
+stories without remaining accepted inbound references qualify. No Source or
+Article history is deleted. A failed or older edition leaves the complete current
+edition intact. An explicit disabled selection on any affected Article retains
+one grouped Review for the entire edition.
 
-Raw feeds, fetched story text, and prior research handoffs remain in Source.
-The latest briefing replaces the current Top 10 Article; its history and the
-raw evidence preserve earlier editions without filling the graph with copies.
-The graph's dotted rings identify this Auto-curated branch and its descendants.
+This permission cannot change Agent or executable authority, grant itself
+permission, replace this policy, resolve unrelated conflicts, or publish outside
+this branch. General archival still follows [Archive](/Tasks/archive.md).
+
+Top 10 uses root OKF `resource`, `sources`, `description`, `generated`, and
+`stale_after` fields. Its freshness boundary is 26 hours after the immutable
+research handoff capture, not 26 hours after a delayed publication. Once that
+instant passes, the retained edition is stale and must be revalidated before
+being used as current context. Freshness and Auto-curate do not assert factual verification.
+
+Raw feeds, fetched story material, and prior handoffs remain in Source.
+The graph derives the Top 10 node and its children from this physical Article
+hierarchy; dotted rings reflect the one inherited Auto-curate policy.
 
 ## Related knowledge
 
-- [Executive](/Agents/Executive/Executive.md) uses this branch when a request needs current events.
-- [News procedure](/Runbooks/research/news.md) defines selection, evidence, and publication criteria.
-- [Ingest procedure](/Runbooks/ingest-sources.md) keeps publication centralized with the Curator.
+- [News procedure](/Runbooks/research/news.md) defines selection and evidence.
+- [Ingest procedure](/Runbooks/ingest-sources.md) defines complete publication.
+- [Curate](/Tasks/curate.md) routes explicit lifecycle leads to [Audit](/Tasks/audit.md) or [Archive](/Tasks/archive.md).
