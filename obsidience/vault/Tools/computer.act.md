@@ -4,7 +4,7 @@ title: computer.act
 obsidience:
   binding: capability:computer.act
   source: obsidience/harness/capabilities/computer/act.py
-  approved_at: '2026-09-05T22:33:07'
+  approved_at: '2026-09-06T01:04:54'
   provenance: proposed by Codex (task codex:knowledge-handoff)
 ---
 
@@ -15,4 +15,4 @@ Use the canonical application name or exact current app_id from the Shell Scene.
 
 The Capability requires the executor's private, one-use observation lease for exactly the immediately preceding model input. An intervening Tool, invalid response, cancellation or completion discards it. The exact native image, process instance, window identity, geometry and at-most-ten-second image age are validated. The existing Shell command owner activates the exact window if necessary, maps the selected image point into that window, checks its actual pointer position and unobstructed input, and delivers one framed Wayland click. No OCR, second vision model, text-matching gate, point relocation, daemon or alternative input owner is involved.
 
-One invocation consumes the Task's action attempt. Lost or uncertain delivery must never be replayed. A completed result verifies the delivered click and supplies a fresh exact post-image. The target label is the model's description, not independent semantic recognition. `semantic_postcondition_verified: false` means that input acknowledgement does not establish a larger outcome such as starting a match. Evaluate the post-image before reporting the visible result. Images, image points, capture leases and native identities stay private and ephemeral; they never enter durable trace, Source or Vault.
+Each invocation consumes one action attempt. Input scope permits one attempt. State scope permits at most three distinct steps, each requiring a new computer.observe after the preceding acknowledged click and fresh post-image. Any failed, rejected, uncertain or post-image-missing attempt ends that action sequence. The post-image never mints another action lease. Lost or uncertain delivery must never be replayed. A completed result verifies the delivered click and supplies a fresh exact post-image. The target label is the model's description, not independent semantic recognition. `semantic_postcondition_verified: false` means that input acknowledgement does not establish a larger outcome such as starting a match. Evaluate the post-image before reporting the visible result. Images, image points, capture leases and native identities stay private and ephemeral; they never enter durable trace, Source or Vault.
