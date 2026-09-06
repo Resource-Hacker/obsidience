@@ -2,76 +2,78 @@
 type: knowledge
 title: Top 10
 obsidience:
-  approved_at: '2026-09-06T02:37:38'
+  approved_at: '2026-09-06T08:28:28'
   provenance: proposed by Alexandria (task Tasks/ingest)
 ---
 
-Research timestamp: 2026-09-05 ~10:17 UTC; handoff captured 2026-09-05T10:24:10.103Z.
+Research timestamp: 2026-09-05 13:16 UTC; handoff captured 2026-09-05T13:16:10.278Z.
 
-Scope: English-language world news from BBC World and DW World RSS, selected editorially from distinct current events over the previous 48 hours. This is an editorial selection from the configured sources, not a universal ranking. Each story cites a fetched direct article Source. These are dated reports, not confirmed permanent facts; single-publisher claims are attributed, not treated as independent confirmation.
+Scope: English-language world news from BBC World and DW World RSS, selected editorially from distinct current events over the previous 48 hours. This is Darwin's editorial selection, not a universal ranking. Each item is a single development attributed to one fetched publisher; these are dated reports, not confirmed permanent facts. Single-publisher claims and developing counts are attributed, not treated as independent confirmation.
 
-Handoff citation: source://59d91a45-e84f-43bf-bc0c-0941c6c857d7 (Top 10 world news, researched 2026-09-05).
+Current handoff: `source://473ab8d1-cbb2-4e50-876e-efb1c046ae1e` (Top 10 world news, researched 2026-09-05). Prior edition: 2026-09-05 ~10:17 UTC; `source://59d91a45-e84f-43bf-bc0c-0941c6c857d7`.
+
+Discovery feeds: BBC World RSS `source://8b68c2cd-8bea-4b7a-b51b-24a8a81c6595`; DW World RSS `source://00cd7b7d-ebe6-46ce-b1c4-403e2b83f1c5`.
 
 See the [News & Research index](/News%20%26%20Research/News%20%26%20Research.md).
 
-## 1. US peace envoys head to Moscow and Kyiv
-US negotiators Steve Witkoff and Jared Kushner are to visit Russia and then Ukraine this weekend, the first US-led trip to Kyiv, as war-ending talks gather pace. Zelensky confirmed a Sunday meeting after the envoys meet Putin in Moscow on Saturday; Trump said they carry a proposal to end the war, although a gulf remains over Putin's maximalist demands, including more territorial concessions Kyiv and its European allies reject. A Russian drone hit the office of SBU chief Oleksandr Poklad in Kyiv, and four people were killed in a Russian strike on Kamianske.
-- Report date: 4 September 2026
-- URL: https://www.bbc.co.uk/news/articles/c23x0z48x0no
-- Citation: source://ea0cbe42-a434-41c1-80c0-6d15c4a2d589
+## 1. US envoys arrive in Moscow ahead of Ukraine talks
+US special envoys Steve Witkoff and Jared Kushner arrived in Moscow to hold talks before travelling to Kyiv on Sunday, a major diplomatic push to advance a framework for ending the war. Trump said they were bringing a proposal to end the war, while Russian state media reported that Putin ordered no strikes on Kyiv for three days because of the visit; Zelensky said overnight strikes on airports were a reaction to the planned visit and that a strike in the Dnipro region killed four people.
+- Report date: 5 September 2026
+- URL: https://www.bbc.co.uk/news/articles/cx2zqp46g8eo
+- Citation: source://3e8516cd-6778-43d7-80ae-48c248a48675
 
-## 2. Russia blamed for escalating European sabotage
-Germany's interior minister declared Russia responsible for the Leipzig airport drone attack, part of a wider August-September wave of suspicious fires at defence sites in Italy, Estonia, Bulgaria, Slovakia and Poland. Moscow calls the accusation 'absurd'; some fires may yet be ruled accidental. German media cited a federal police report listing more than 165 suspected sabotage cases nationwide this year. Analysts described the campaign as a pressure tactic and warning of escalation risk for NATO.
+## 2. Europe targeted by spiralling campaign of sabotage; Russia chief suspect
+Germany's interior minister declared Russia responsible for the Leipzig airport drone attack, part of an August-September pattern of suspicious fires and sabotage at defence and infrastructure sites in Bulgaria, Italy, Estonia, Slovakia, Poland and Germany. Russia called the accusation absurd, and the BBC noted that some fires may eventually be ruled accidental, exactly as such attacks are designed to seem.
 - Report date: 4 September 2026
 - URL: https://www.bbc.co.uk/news/articles/c5y4g6meekro
-- Citation: source://497cf292-1d9c-46a5-8ed5-aa5a82b72680
+- Citation: source://c7757f5e-33d5-4aae-adf5-68685f10350e
 
-## 3. Nepal rescuers reach trapped tunnel workers
-After a glacial flash flood near the Tibet border, Nepali rescuers pulled two hydropower-tunnel workers alive and found a third body at Trishuli 3A. Authorities reported 1,311 confirmed dead and 5,330 still missing across Nepal and Tibet, with 39 people feared still trapped in one tunnel. The flood is believed to have been triggered by a glacial collapse, and climate change may have been a factor.
-- Report date: 4 September 2026
-- URL: https://www.bbc.co.uk/news/articles/c7903j1vpe5o
-- Citation: source://6d1059e9-2f03-4118-a5fc-40eae1758964
-
-## 4. UN adopts new world map showing Africa's true size
-The UN General Assembly voted 164-1 to replace the distorted Mercator map, with the US the sole opposed vote and six abstentions. The non-binding 'Correct the Map' resolution, sponsored by Togo and backed by African Union members, encourages institutions to use the Equal Earth projection, which shows Africa at its true scale. The result is symbolic but is expected to change maps used by institutions.
-- Report date: 4 September 2026
-- URL: https://www.bbc.co.uk/news/articles/ce30vp55dnlo
-- Citation: source://2ada9c69-d3c5-4a7d-a3a0-6d9416178ecf
-
-## 5. Germany's far-right AfD seeks first state power
-The Alternative for Germany heads into Sunday's Saxony-Anhalt election aiming for an outright majority, which would be the first time a far-right party has held state power in post-war Germany. Lead candidate Ulrich Siegmund dominates the polls, and a win would bypass the opposition 'firewall' while testing Chancellor Friedrich Merz.
+## 3. Germany's far-right AfD bids for first taste of power in eastern vote
+The Alternative für Deutschland is aiming for an outright majority in the Saxony-Anhalt state election, which would make it the first far-right party to hold state-level power in post-war Germany. Lead candidate Ulrich Siegmund leads the polls; a win would reshape German politics and could add pressure to Chancellor Friedrich Merz's government.
 - Report date: 5 September 2026
 - URL: https://www.bbc.co.uk/news/articles/cvgypkzgy4wo
-- Citation: source://caa0cce3-cc83-421c-b88b-0ac5cbc3507f
+- Citation: source://86c52347-bac8-421d-80d2-ad766bcffce8
 
-## 6. Explosion at Bolivia military barracks
-An explosion of stored pyrotechnic material at a Bolivian artillery barracks in Viacha, about 30 km from La Paz, killed at least two people, injured at least 81 and left seven missing; a health official cited 10-15 possible deaths. Dozens of homes were damaged and officials warned of further blasts. President Rodrigo Paz ordered a technical investigation, and Viacha declared three days of mourning.
-- Report date: 5 September 2026
-- URL: https://www.bbc.co.uk/news/articles/c3v45xy67g5o
-- Citation: source://b90b3ccc-6901-4dba-9191-df23c7f486d1
+## 4. Nepal rescuers try to reach dozens trapped in tunnel after two found alive
+Rescuers in Nepal are working to reach workers trapped in hydropower tunnels after a glacial flash flood near the Tibet border. Two men were pulled alive and one body was found at Trishuli 3A, where officials believe another 39 people may be trapped; the BBC reported 1,311 confirmed dead and 5,330 still missing across Nepal and Tibet, with counts still developing.
+- Report date: 4 September 2026
+- URL: https://www.bbc.co.uk/news/articles/c7903j1vpe5o
+- Citation: source://65a3ca17-58ef-48a9-a4a6-9e6f382355bb
 
-## 7. Yemen fighting intensifies amid Houthi push
-Iran-backed Houthi forces launched a ground offensive against the Saudi-led coalition supporting the government-in-exile in southwestern Yemen, pressing for high ground and control of the Red Sea entry near Bab el-Mandeb after abandoning a shaky July truce. AFP tallied 129 deaths as of Friday; shelling and artillery forced hundreds of families to flee Hodeidah and Mokha, and both sides sustained losses.
+## 5. Yemen: Fighting intensifies amid Houthi push in the west
+Iran-backed Houthi forces launched a ground offensive against the Saudi-led coalition supporting the government-in-exile in southwestern Yemen, pressing for high ground and control of the entry to the Red Sea near Bab el-Mandeb after abandoning a shaky truce in July. AFP tallied 129 deaths as of Friday, while both sides reported dozens of casualties and shelling forced hundreds of families to flee Hodeidah and Mokha.
 - Report date: 4 September 2026
 - URL: https://www.dw.com/en/houthis-yemen-fighting-intensifies/a-79039588
-- Citation: source://6f5ddb5b-3dad-4808-8530-ed0622babee4
+- Citation: source://42f0ce74-5e99-4dd6-a8e4-f2532f6eb3e4
 
-## 8. Malta tycoon acquitted in journalist's murder
-Maltese businessman Yorgen Fenech was found not guilty of complicity in the 2017 murder of journalist Daphne Caruana Galizia, sparking protests outside Parliament. Eight of nine jurors rejected the prosecution case, which relied heavily on the testimony of middleman Melvin Theuma. Almost nine years after her killing, the question of who ordered it remains unanswered.
+## 6. Judge declares mistrial in Lindsay Clancy murder case as jury deadlocks
+A Massachusetts judge declared a mistrial after the jury deadlocked over whether Lindsay Clancy should be held criminally liable for the deaths of her three children. The former nurse remains held on the murder charges and housed in a mental health facility; a hearing on 29 September could determine whether prosecutors seek another trial or another resolution, with her defence citing postpartum psychosis.
 - Report date: 4 September 2026
-- URL: https://www.dw.com/en/outrage-as-maltese-tycoon-acquitted-in-journalists-murder/a-79027008
-- Citation: source://eb8ac7c4-c88b-4eab-8c09-e781494787ac
+- URL: https://www.bbc.co.uk/news/articles/cpwlrj2je1po
+- Citation: source://23b48f3a-25e9-4163-9709-823f79bc5c43
 
-## 9. Suspected Nigerian oil thieves die in fumes
-A Nigerian environmental group says at least 37 people died after inhaling fumes while illegally siphoning crude from a ship in Okrika, Rivers State. Police confirmed a fatal incident while investigation continues; the Nigeria Security and Civil Defense Corps called circulating figures unverified. If confirmed, the source reported it would be the worst fatal oil-theft accident since October 2023.
+## 7. At least two dead in blast at Bolivia military barracks
+An explosion at a military artillery barracks in Viacha, about 30 km from La Paz, killed at least two people, injured at least 81 and left seven missing, according to Bolivia's defence minister. A health official told local television that 10 to 15 people may have died; officials warned of further explosions and said the cause, involving stored pyrotechnic material, was under investigation.
+- Report date: 5 September 2026
+- URL: https://www.bbc.co.uk/news/articles/c3v45xy67g5o
+- Citation: source://31f407b2-8a83-49b0-acb0-2d0d6d82bc2e
+
+## 8. UN votes to adopt new world map to reflect Africa's true size
+The UN General Assembly voted to replace the traditional Mercator world map with one that more accurately reflects the size of Africa. The non-binding "Correct the Map" resolution, sponsored by Togo and backed by African Union members, passed with 164 nations in support, six abstentions and the United States as the only vote against; institutions are expected to change the maps they use.
+- Report date: 4 September 2026, updated 5 September 2026
+- URL: https://www.bbc.co.uk/news/articles/ce30vp55dnlo
+- Citation: source://11b18dd9-cfd1-4e36-813e-70217e18b6f6
+
+## 9. Nigeria: Suspected oil thieves dead after inhaling fumes
+A Nigerian environmental group says at least 37 people died after inhaling hazardous fumes while illegally siphoning crude oil from a loading vessel in Okrika, Rivers State. Police confirmed a fatal incident involving people allegedly attempting to steal crude oil, while the Nigeria Security and Civil Defense Corps said circulating casualty figures remained unverified and the investigation was continuing.
 - Report date: 4 September 2026
 - URL: https://www.dw.com/en/nigeria-oil-theft-dozens-dead/a-79001997
 - Citation: source://32feb77b-1fc0-43cb-8430-0c56a2d332b7
 
-## 10. Falklands dispute sharpens as Milei restates claim
-Argentina's president Javier Milei declared the Falklands 'historically and legally' Argentine, pledged sanctions on firms exploiting the nearby Sea Lion oilfield, and signalled a naval base in Tierra del Fuego. Downing Street said UK support is 'unwavering,' recalling that islanders voted 99.8% to remain British in 2013. The Sea Lion project, with an estimated 1.7 billion barrels and first oil due in 2028, is now a pressure point in the sovereignty dispute.
-- Report date: 4 September 2026
-- URL: https://www.bbc.co.uk/news/articles/cn45jg3zlz4o
-- Citation: source://9447ed48-0abf-4df5-8492-1543dafef83d
+## 10. Why many Syrians feel Assad's death sentence isn't enough
+DW reports that a Syrian court sentenced former president Bashar al-Assad to death for crimes against his own people, while many survivors and families say the verdict is not enough after 14 years of civil war. The article notes that Assad is in Russia, extradition is uncertain, and survivors are pressing for broader transitional justice; it also gives the sentencing timing inconsistently, first as July and later as mid-August.
+- Report date: 5 September 2026
+- URL: https://www.dw.com/en/why-many-syrians-feel-assads-death-sentence-isnt-enough/a-78985915
+- Citation: source://44329d3a-5b79-4c58-8d5d-fd0457af438f
 
-Limitations: single-publisher sourcing; the Bolivia and Nigeria death tolls are disputed; Afghanistan and other regions are not represented due to the configured BBC/DW world feeds. Delivery of this handoff is not publication.
+Limitations: each story is single-publisher reporting; casualty counts in Nepal, Yemen, Bolivia and Nigeria are developing or unverified; the Assad article's sentencing timing is internally inconsistent (July in the lead, mid-August later); and the handoff's selection is editorial, not a universal ranking.
