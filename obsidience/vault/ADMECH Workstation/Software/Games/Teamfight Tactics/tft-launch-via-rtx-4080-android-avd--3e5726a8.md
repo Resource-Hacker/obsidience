@@ -7,11 +7,11 @@ tags:
 - systemd
 title: TFT launch through Waydroid and Gamescope
 obsidience:
-  approved_at: '2026-09-05T21:32:22'
+  approved_at: '2026-09-06T01:05:05'
   provenance: proposed by Codex (task codex:knowledge-handoff)
 ---
 
-“TFT” and “Teamfight Tactics” mean the registered `teamfight_tactics` application route. Executive calls `application.launch` with that semantic application name. The shared application registry selects `tft-waydroid.desktop`, whose Exec is `/home/wissenschafter/.local/bin/tft-mobile`. The former `tft-mobile-waydroid.desktop`, RTX 4080 Android AVD launcher, and fixed emulator service are retired.
+For an explicit request to open or launch “TFT” or “Teamfight Tactics”, the registered application route is `teamfight_tactics`; Executive calls `application.launch` with that semantic application name. A mention of TFT, an already open window, or a request to start a normal game or match is not another launch instruction. Resolve that in-application outcome through the current conversation, Shell Scene and Computer Use Runbook. If the launcher reports an already ready window, say it is already open rather than claiming a new launch. The shared application registry selects `tft-waydroid.desktop`, whose Exec is `/home/wissenschafter/.local/bin/tft-mobile`. The former `tft-mobile-waydroid.desktop`, RTX 4080 Android AVD launcher, and fixed emulator service are retired.
 
 The current launcher runs the existing Waydroid Android session through the dedicated Gamescope 3.16.25 SDL build. Android renders on AMD; the accepted outer Gamescope path selects the RTX 4080. Its process-local `SDL_APP_ID=tft-waydroid` gives the native window one exact identity shared by launch readiness, observation, activation, and placement. Generic Gamescope windows and legacy emulator titles are not TFT evidence.
 
