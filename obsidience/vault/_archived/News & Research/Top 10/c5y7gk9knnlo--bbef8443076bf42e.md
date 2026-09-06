@@ -1,6 +1,6 @@
 ---
 type: knowledge
-status: stable
+status: deprecated
 description: Television presenter Sarah Khalifa and 11 others were sentenced to death
   by hanging in Egypt after being convicted of drug-trafficking charges, state media
   reported. Nine co-defendants received life sentences and seven were acquitted. Khalifa,
@@ -17,6 +17,9 @@ title: TV presenter among 12 sentenced to death in Egypt
 obsidience:
   approved_at: '2026-09-06T14:01:07'
   provenance: proposed by Alexandria (task Tasks/ingest)
+  archived_at: '2026-09-06T21:55:51Z'
+  archive_reason: Replace the current Top 10 edition with the complete verified 2026-09-06
+    Source Inbox edition and its ten direct-article citations.
 ---
 
 Television presenter Sarah Khalifa and 11 others were sentenced to death by hanging in Egypt after being convicted of drug-trafficking charges, state media reported. Nine co-defendants received life sentences and seven were acquitted. Khalifa, 39, known for her crime show Mission Impossible, denies the charges and plans to appeal. The verdict was confirmed only after Egypt's grand mufti gave a required religious opinion. Reported 5-6 Sept 2026.
