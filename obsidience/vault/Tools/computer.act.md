@@ -4,32 +4,15 @@ title: computer.act
 obsidience:
   binding: capability:computer.act
   source: obsidience/harness/capabilities/computer/act.py
-  approved_at: '2026-09-05T22:01:54'
+  approved_at: '2026-09-05T22:33:07'
   provenance: proposed by Codex (task codex:knowledge-handoff)
 ---
 
-Apply one foreground click on one exact visible text label in an existing
-application through the current Shell command owner. Arguments:
-`{"application": str, "action": "click", "target": str, "postcondition": str optional}`.
+Apply one click at the point selected by the Task's vision model in its immediately preceding computer.observe image. Arguments:
+`{"application": str, "action": "click", "target": str, "point": {"x": int, "y": int}, "postcondition": str optional}`.
 
-Use a canonical registered application name or exact current app_id from the
-Shell Scene. The application must resolve uniquely. `target` is the exact
-visible text label, up to 128 characters; icons without a legible unique label
-are not supported. `action` defaults to `click`; `postcondition` names the
-requested result to inspect, but cannot assert that the result happened.
+Use the canonical application name or exact current app_id from the Shell Scene. `target` describes the intended control, up to 128 characters. `point` is its center on a 1000 by 1000 normalized image grid: x grows right, y grows down, and both must be integers from 0 to 999. Coordinates refer only to the complete image just attached by computer.observe, never to the desktop or another image. Labels and unlabeled icons use the same vision path. `postcondition` names the result to inspect; it cannot assert that it happened.
 
-The Capability activates that exact application for foreground input, captures
-its native toplevel, and grounds the requested label with installed CPU
-Tesseract. It keeps process instances, Surface/window identities, pixels,
-coordinates and single-use command tokens private. The existing Shell adapter
-rechecks identity, geometry, awake/unlocked state, label, point and request
-ownership around one Wayland motion and click transaction. It adds no daemon,
-second input owner, game-specific Tool or GPU model lease.
+The Capability requires the executor's private, one-use observation lease for exactly the immediately preceding model input. An intervening Tool, invalid response, cancellation or completion discards it. The exact native image, process instance, window identity, geometry and at-most-ten-second image age are validated. The existing Shell command owner activates the exact window if necessary, maps the selected image point into that window, checks its actual pointer position and unobstructed input, and delivers one framed Wayland click. No OCR, second vision model, text-matching gate, point relocation, daemon or alternative input owner is involved.
 
-One invocation consumes the Task's action attempt. A lost receipt or uncertain
-delivery must never be replayed. A completed result verifies only the scoped
-click and includes a fresh exact post-action image for the Task-selected vision
-model. `semantic_postcondition_verified: false` means a larger outcome such as
-starting a match is not established by input acknowledgement. Interpret the
-returned image before reporting an application result. Pixels are ephemeral and
-never enter the durable trace, Source or Vault.
+One invocation consumes the Task's action attempt. Lost or uncertain delivery must never be replayed. A completed result verifies the delivered click and supplies a fresh exact post-image. The target label is the model's description, not independent semantic recognition. `semantic_postcondition_verified: false` means that input acknowledgement does not establish a larger outcome such as starting a match. Evaluate the post-image before reporting the visible result. Images, image points, capture leases and native identities stay private and ephemeral; they never enter durable trace, Source or Vault.
