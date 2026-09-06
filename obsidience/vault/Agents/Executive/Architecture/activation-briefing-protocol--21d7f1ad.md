@@ -1,29 +1,25 @@
 ---
-approved_at: '2026-08-27T18:37:41'
-kind: knowledge
-provenance: proposed by Alexandria (task Tasks/link)
+type: knowledge
 title: Activation packet protocol
+obsidience:
+  approved_at: '2026-09-06T08:28:26'
+  provenance: proposed by Alexandria (task Tasks/link)
 ---
 
-An activation packet gives a small local model the smallest complete set of
-Articles and runtime bindings needed for one outcome. The same executor compiles
-it for live text, live voice, manual Tasks, scheduled Tasks, and event-triggered
-Tasks. The visible packet is the Thinking Packet; graph activity publishes the
-exact Article refs and Objective the model received.
+The Thinking Packet is the one model-facing activation packet used for live
+text, live voice, manual Tasks, schedules, and event triggers. It gives a small
+local model the smallest complete set of Articles and runtime bindings needed
+for one outcome. Graph activity publishes the same Objective and Article refs
+that the model receives.
 
-Fast search may nominate a Task candidate, but the harness must select one exact
-accepted Task. Its authored links then resolve assignee, Runbook, Skills, and
-Tools; similarity cannot replace or broaden authority. That exact accepted Task
-follows the [[Agents/Executive/Architecture/task-activation--b30a4642|Task
-activation]] model. The Knowledge lane
-combines lexical and vector search with weighted reciprocal-rank fusion, keeps
-three direct hits when available, and admits at most two directly linked
-neighbors. It has no generative expansion, cross-encoder pass, or elapsed-time
-deadline.
+The harness first selects one exact accepted Task. That Task's authored edges
+resolve the assignee, Runbook, Skills, and Tools under
+[Task activation](/Agents/Executive/Architecture/task-activation--b30a4642.md).
+Similarity may supply Knowledge but cannot replace or broaden authority.
 
 ## Packing order
 
-1. Agent Identity Article.
+1. Agent Brain Article.
 2. Exact Task Article and acceptance conditions.
 3. Immutable runtime Objective for this activation.
 4. Authorized Tool Articles.
@@ -31,18 +27,15 @@ deadline.
 6. Applicable Runbook Articles.
 7. Typed bindings and exclusions that are not the Objective or controller
    provenance.
-8. Up to five relevant accepted Knowledge Articles, including bounded direct
-   graph neighbors.
+8. Up to five relevant accepted Knowledge Articles.
 9. For the active Executive conversation only, the single
-   [[Agents/Executive/Observations/immediate-observations|Immediate Observations]]
+   [Current conversation](/Agents/Executive/Observations/Immediate%20Observations/current-conversation.md)
    Article.
 
-The Objective is runtime data, not an Article kind. When an owner request is
-bound, its exact admitted text is the Objective. Without a request, the
-deterministic fallback is the selected Task title followed by its ordered
-Runbook titles. That one value drives retrieval, graph activity, the provider
-packet, and the run ledger. Request, source, event, and response-contract
-controller data are not duplicated into Bindings.
+The Objective is runtime data, not an Article kind. A bound owner request is
+preserved as the complete Objective; without one, the deterministic fallback is
+the Task title followed by its ordered Runbook titles. The same Objective drives
+retrieval, graph activity, the provider request, and the execution ledger.
 
 Immediate Observations is transient and unverified, has retrieval disabled, and
 grants no Task, Tool, or durable Knowledge authority. It contains the newest
@@ -50,17 +43,29 @@ cumulative Temporary Observation summary followed by exact completed public
 conversation pairs after that summary's boundary. The current Objective is not
 duplicated into Immediate Observations before execution.
 
-Every activation uses a 1,200-estimated-token Knowledge allowance. Every section
-keeps its semantic label. Retrieval failure may remove optional background
-Knowledge, but it can never invent authority, procedure, a Tool, or a success
-claim. Immediate Observations is attached by exact identity rather than search.
+The Knowledge lane uses lexical and vector search with weighted reciprocal-rank
+fusion, preserves three direct hits when available, and admits at most two
+directly linked Knowledge neighbors within a 1,200-estimated-token allowance.
+It performs no generative expansion, cross-encoder pass, or elapsed-time cutoff.
+Retrieval failure may remove optional context but can never invent authority,
+procedure, a Tool, or a success claim. Immediate Observations is attached by
+exact identity rather than search.
 
 A Tool Article is the graph-facing interface to a real Source-backed Capability.
 A Skill teaches that Tool. Internal Obsidience Modules such as retrieval,
 execution, scheduling, indexing, Source storage, review, and speech transport
 may support the runtime or a Capability adapter, but they never enter the
-Thinking Packet as checkout or Task authority.
+Thinking Packet as assignments or Task authority.
 
-The execution ledger records the exact Objective, Task, Runbook hash, reasoning
-effort, calls, evidence, and terminal result. Historical runs created before
-Objective binding remain honest empty values rather than fabricated backfills.
+Before inference, the selected model's tokenizer counts the actual provider
+request; an oversized request fails with required and available token counts
+rather than silently truncating the Objective. The execution ledger records the
+exact Objective, Task, Runbook hash, reasoning effort, calls, evidence, and
+terminal result.
+
+## Relationships
+
+- `implements` [Golden ontology](/Agents/Executive/Architecture/action-ontology.md) — Each packet section preserves one canonical semantic role.
+- `implements` [LLM-wiki knowledge pattern](/Agents/Executive/Architecture/llm-wiki-knowledge-pattern--dab5ff0a.md) — Bounded hybrid retrieval supplies the relevant Knowledge lane.
+- `depends_on` [Task activation](/Agents/Executive/Architecture/task-activation--b30a4642.md) — Exact Task edges establish the packet's executable authority.
+- `implements` [Local-first architecture](/Agents/Executive/Architecture/local-first-architecture--7d8e77cc.md) — The packet's bounded context, exact paired Tool/Skill edges, and pre-inference sizing operationalize the local-first model and authority contracts.
