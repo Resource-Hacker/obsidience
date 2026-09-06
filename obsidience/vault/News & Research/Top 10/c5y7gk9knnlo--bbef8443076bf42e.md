@@ -2,24 +2,26 @@
 type: knowledge
 status: stable
 description: Presenter Sarah Khalifa and 11 others were sentenced to death by hanging
-  in Egypt on drug-trafficking charges, including importing ingredients to make drugs
-  and holding illegal firearms. Nine others got life sentences, seven were acquitted.
-  Authorities said they seized over 750 kg of narcotics and raw materials. Khalif
+  in Egypt after convictions over drug trafficking and rape. State media reported
+  the gang imported drug-making ingredients and held illegal firearms and munitions;
+  authorities said over 750 kg of narcotics and raw materials were seized. Nine others
 generated:
   by: obsidience/harness/knowledge/news.py
-  at: '2026-09-06T19:05:24.473Z'
+  at: '2026-09-06T20:12:52.570Z'
 resource: https://www.bbc.co.uk/news/articles/c5y7gk9knnlo
 sources:
-- resource: source://90772168-292c-4724-91d3-25228dfd701f
-- resource: source://afef12c6-3bd2-45e5-927c-9b30f4403e6e
-stale_after: '2026-09-07T20:24:35.323Z'
-title: TV presenter among 12 sentenced to death in Egypt drugs case
+- resource: source://40029ff3-4d37-4443-862b-b57803810b8e
+- resource: source://e84a97e9-5159-46fb-a468-46e36a9d3aea
+stale_after: '2026-09-07T21:37:16.469Z'
+title: TV presenter among 12 sentenced to death in Egypt
 obsidience:
-  approved_at: '2026-09-06T12:05:30'
+  approved_at: '2026-09-06T13:12:58'
   provenance: proposed by Alexandria (task Tasks/ingest)
 ---
 
-Presenter Sarah Khalifa and 11 others were sentenced to death by hanging in Egypt on drug-trafficking charges, including importing ingredients to make drugs and holding illegal firearms. Nine others got life sentences, seven were acquitted. Authorities said they seized over 750 kg of narcotics and raw materials. Khalifa, 39, denies the charges; her lawyer said she would appeal. Uncertainty: the verdict, first announced last month, was only confirmed after the court obtained the grand mufti's required opinion.
-Reported 2026-09-05 (published 5 Sept, updated 09:05 BST). https://www.bbc.co.uk/news/articles/c5y7gk9knnlo — source://90772168-292c-4724-91d3-25228dfd701f
+Presenter Sarah Khalifa and 11 others were sentenced to death by hanging in Egypt after convictions over drug trafficking and rape. State media reported the gang imported drug-making ingredients and held illegal firearms and munitions; authorities said over 750 kg of narcotics and raw materials were seized. Nine others got life sentences and seven were acquitted. Khalifa denies the charges and will appeal. Amnesty questioned the death penalty for offences that did not amount to 'intentional killing'. The verdict was first announced last month and confirmed after a religious opinion.
+Reported 5 Sep 2026, updated 6 Sep 2026.
+URL: https://www.bbc.co.uk/news/articles/c5y7gk9knnlo
+Source: source://40029ff3-4d37-4443-862b-b57803810b8e
 
-Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://afef12c6-3bd2-45e5-927c-9b30f4403e6e.
+Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://e84a97e9-5159-46fb-a468-46e36a9d3aea.
