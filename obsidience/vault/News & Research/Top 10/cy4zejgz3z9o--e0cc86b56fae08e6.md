@@ -1,27 +1,26 @@
 ---
 type: knowledge
 status: stable
-description: Projections put Germany's far-right AfD above 44% in Saxony-Anhalt, far
-  ahead of the CDU on 18.2%, with turnout estimated at 78%. Whether the AfD reaches
-  a majority hinges on whether left-populist BSW clears the 5% threshold; if BSW fails,
-  the AfD's majority chances increase. No far-right party has won control of a Ger
+description: Germany's far-right AfD is projected to win a record 44% in Saxony-Anhalt,
+  well ahead of the CDU on 17.8%; no far-right party has held state power in Germany
+  since World War Two. Whether the AfD can govern depends partly on whether the left-wing
+  BSW crosses the 5% threshold. State leader Ulrich Siegmund declared a mand
 generated:
   by: obsidience/harness/knowledge/news.py
-  at: '2026-09-06T20:12:52.570Z'
+  at: '2026-09-06T21:01:01.883Z'
 resource: https://www.bbc.co.uk/news/articles/cy4zejgz3z9o
 sources:
-- resource: source://b4146472-96dc-432b-bf25-fca5f9805cdb
-- resource: source://e84a97e9-5159-46fb-a468-46e36a9d3aea
-stale_after: '2026-09-07T21:37:16.469Z'
-title: AfD set for historic win in Saxony-Anhalt
+- resource: source://6ba3baaa-b74e-4d26-b978-3091b5d3ec38
+- resource: source://98d7fb0e-09fd-43ca-afce-0d3b082e3401
+stale_after: '2026-09-07T22:47:56.291Z'
+title: German far-right AfD wins big in Saxony-Anhalt
 obsidience:
-  approved_at: '2026-09-06T13:12:57'
+  approved_at: '2026-09-06T14:01:06'
   provenance: proposed by Alexandria (task Tasks/ingest)
 ---
 
-Projections put Germany's far-right AfD above 44% in Saxony-Anhalt, far ahead of the CDU on 18.2%, with turnout estimated at 78%. Whether the AfD reaches a majority hinges on whether left-populist BSW clears the 5% threshold; if BSW fails, the AfD's majority chances increase. No far-right party has won control of a German state since World War Two; power would cover policing, education and culture. The AfD says it has won a mandate to govern.
-Reported 6 Sep 2026.
+Germany's far-right AfD is projected to win a record 44% in Saxony-Anhalt, well ahead of the CDU on 17.8%; no far-right party has held state power in Germany since World War Two. Whether the AfD can govern depends partly on whether the left-wing BSW crosses the 5% threshold. State leader Ulrich Siegmund declared a mandate to govern, while opponents called the result a watershed. Reported 6 Sept 2026.
 URL: https://www.bbc.co.uk/news/articles/cy4zejgz3z9o
-Source: source://b4146472-96dc-432b-bf25-fca5f9805cdb
+Source: source://6ba3baaa-b74e-4d26-b978-3091b5d3ec38
 
-Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://e84a97e9-5159-46fb-a468-46e36a9d3aea.
+Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://98d7fb0e-09fd-43ca-afce-0d3b082e3401.
