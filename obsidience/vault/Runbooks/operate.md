@@ -13,7 +13,7 @@ obsidience:
   - '[[Skills/computer.act]]'
   - '[[Skills/task.create]]'
   - '[[Skills/task.complete]]'
-  approved_at: '2026-09-05T22:33:10'
+  approved_at: '2026-09-05T22:48:14'
   provenance: proposed by Codex (task codex:knowledge-handoff)
 ---
 
@@ -54,7 +54,10 @@ Produce one bounded computer effect requested by the owner.
 6. For an in-client action outcome, call computer.observe for the exact application
    and locate the intended control in its attached image. In the immediately
    next response call computer.act once with the application, target description,
-   normalized image point and intended postcondition. Do not insert another Tool
+   normalized image point and intended postcondition. Keep that postcondition
+   within the owner's requested scope: "click Play" requests one button click,
+   not selecting a mode or starting a match. Never add those further outcomes
+   as completion requirements. Do not insert another Tool
    between observation and action. Use vision for labels and icons alike. The
    harness binds that point to this exact short-lived image and window, delivers
    at most one click, and attaches a fresh post-image. If the intended point is
@@ -66,10 +69,15 @@ Produce one bounded computer effect requested by the owner.
    verified placement or active state needs no extra screenshot. A successful
    `effect_applied: false` means the requested state was already present;
    report that fact without claiming a move or focus change occurred. A scoped click witness with its fresh post-image establishes input at the
-   model-selected point; its label alone is not semantic verification. Describe the visible result from that image; input delivery
-   never establishes a larger outcome such as starting a match. If the image
-   does not establish that larger requested outcome, finish failed with the
-   observed state and do not click again.
+   model-selected point; its label alone is not semantic verification. The
+   immediate post-image can precede an asynchronous application transition.
+   If that image is unchanged, transitional or inconclusive, call
+   computer.observe once more for the same application to clarify the result;
+   this is read-only verification and never permits another click. Report the
+   observed state. For an explicit button-click request, acknowledged delivery
+   completes the requested input; do not fail it because an unrequested larger
+   outcome such as starting a match has not occurred. For a genuinely requested
+   larger outcome, do not claim it unless the fresh image establishes it.
 8. Call `task.complete` with the same factual status and one concise public
    result in `summary`.
 
