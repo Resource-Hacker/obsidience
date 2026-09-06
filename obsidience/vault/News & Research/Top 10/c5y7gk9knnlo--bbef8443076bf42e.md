@@ -1,24 +1,24 @@
 ---
 type: knowledge
 status: stable
-description: BBC reported that television presenter Sarah Khalifa and 11 other defendants
-  received death sentences following drugs convictions. Nine others received life
-  terms and seven were acquitted. The court confirmed the verdict, initially announced
-  the previous month, after obtaining the legally required religious opinion. Kh
+description: Egyptian television presenter Sarah Khalifa and 11 others were sentenced
+  to death by hanging after being convicted of drugs charges, including importing
+  ingredients used to make drugs and possessing illegal firearms. Khalifa, 39, denies
+  the charges and her lawyer said she would appeal. Nine others got life imprisonment
 generated:
   by: obsidience/harness/knowledge/news.py
-  at: '2026-09-06T16:14:27.149Z'
+  at: '2026-09-06T17:49:35.727Z'
 resource: https://www.bbc.co.uk/news/articles/c5y7gk9knnlo
 sources:
-- resource: source://6bb2f022-0ab6-40b6-945a-2e1d9aa758e7
-- resource: source://68b01329-e574-4e2c-ba67-d14cfd403915
-stale_after: '2026-09-07T17:26:23.915Z'
-title: Egyptian presenter receives death sentence in drugs case
+- resource: source://ba2b93fb-1af6-429d-b42e-aa8b86712c0f
+- resource: source://a5c5e2e8-abde-43d8-80d1-993b436d5b56
+stale_after: '2026-09-07T19:22:11.397Z'
+title: TV presenter among 12 sentenced to death in Egypt
 obsidience:
-  approved_at: '2026-09-06T09:14:33'
-  provenance: proposed by Codex (task codex:owner-requested-top10-migration)
+  approved_at: '2026-09-06T10:49:41'
+  provenance: proposed by Alexandria (task Tasks/ingest)
 ---
 
-BBC reported that television presenter Sarah Khalifa and 11 other defendants received death sentences following drugs convictions. Nine others received life terms and seven were acquitted. The court confirmed the verdict, initially announced the previous month, after obtaining the legally required religious opinion. Khalifa denied the charges, and her lawyer said she would appeal. Egyptian state media described the prosecution's allegations and evidence; the summary does not independently validate them. Report date: 5 September 2026. URL: https://www.bbc.co.uk/news/articles/c5y7gk9knnlo · Source: source://6bb2f022-0ab6-40b6-945a-2e1d9aa758e7
+Egyptian television presenter Sarah Khalifa and 11 others were sentenced to death by hanging after being convicted of drugs charges, including importing ingredients used to make drugs and possessing illegal firearms. Khalifa, 39, denies the charges and her lawyer said she would appeal. Nine others got life imprisonment and seven were acquitted, state media reported, with the verdict confirmed after the grand mufti's required opinion. Source: https://www.bbc.co.uk/news/articles/c5y7gk9knnlo - source://ba2b93fb-1af6-429d-b42e-aa8b86712c0f.
 
-Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://68b01329-e574-4e2c-ba67-d14cfd403915.
+Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://a5c5e2e8-abde-43d8-80d1-993b436d5b56.
