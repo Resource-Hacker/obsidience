@@ -2,8 +2,8 @@
 type: knowledge
 title: Hyprland shell scene
 obsidience:
-  approved_at: '2026-09-06T01:05:02'
-  provenance: proposed by Codex (task codex:knowledge-handoff)
+  approved_at: '2026-09-07T12:48:21'
+  provenance: proposed by Alexandria (task Tasks/link)
 ---
 
 Obsidience has one live desktop scene. One Hyprland compositor owns Samsung,
@@ -22,8 +22,7 @@ module pane's semantic identity, visibility, local bounds, Surface, and Surface
 power state. Exact compositor identifiers, geometry revisions, and capture
 tokens remain private controller bindings. `application.state` reports the
 per-Surface window scene and `workspace.state` reports shared workspace state.
-Either typed Shell event may trigger an existing Task but never becomes a Task
-or creates hierarchy.
+Either typed Shell event may trigger an existing Task through [Task activation](/Agents/Executive/Architecture/task-activation--b30a4642.md) but never becomes a Task or creates hierarchy.
 
 The semantic projection uses concrete `kind: application|pane` and a callable
 `name`: the registered canonical application ID when available, otherwise the
