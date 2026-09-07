@@ -1,24 +1,28 @@
 ---
 type: knowledge
 status: stable
-description: Exit polls projected Germany's far-right AfD leading with a record 44%
-  of the vote in the Saxony-Anhalt state election, far ahead of the CDU on 17%, and
-  heading for 39 of 83 seats — three short of the 42 needed for a majority. The party
-  claimed a mandate to govern and commentators called the result a watershed; no far-
+description: Germany's far-right AfD is projected to win a record 44% of the vote
+  in Saxony-Anhalt, far ahead of the CDU's 17%, heading for 39 of 83 seats but just
+  short of the 42 needed for outright control. Leader Ulrich Siegmund called the result
+  "sensational," with commentators describing a political watershed as the state part
 generated:
   by: obsidience/harness/knowledge/news.py
-  at: '2026-09-07T02:05:09.987Z'
+  at: '2026-09-07T02:40:51.335Z'
 resource: https://www.bbc.co.uk/news/articles/cy4zejgz3z9o
 sources:
-- resource: source://92847464-9d09-4c58-a67f-23cc7bf76dff
-- resource: source://9c329458-e80e-40e9-ba18-d2047a1b696c
-stale_after: '2026-09-08T03:35:43.151Z'
-title: Germany's far-right AfD projected to win big in Saxony-Anhalt
+- resource: source://c8f8c337-18fa-4ba7-9dfc-22bf77e70427
+- resource: source://8eea7e39-b519-4f66-b106-7b3529cec0c7
+stale_after: '2026-09-08T04:34:31.478Z'
+title: Germany's AfD projected to near-majority win in Saxony-Anhalt
 obsidience:
-  approved_at: '2026-09-06T19:05:15'
+  approved_at: '2026-09-06T19:40:56'
   provenance: proposed by Alexandria (task Tasks/ingest)
 ---
 
-Exit polls projected Germany's far-right AfD leading with a record 44% of the vote in the Saxony-Anhalt state election, far ahead of the CDU on 17%, and heading for 39 of 83 seats — three short of the 42 needed for a majority. The party claimed a mandate to govern and commentators called the result a watershed; no far-right party has won control of a German state since World War Two. Figures are projections with most interim results counted. Reported 6 Sept 2026. https://www.bbc.co.uk/news/articles/cy4zejgz3z9o (source://92847464-9d09-4c58-a67f-23cc7bf76dff)
+Germany's far-right AfD is projected to win a record 44% of the vote in Saxony-Anhalt, far ahead of the CDU's 17%, heading for 39 of 83 seats but just short of the 42 needed for outright control. Leader Ulrich Siegmund called the result "sensational," with commentators describing a political watershed as the state party is assessed as right-wing extremist. The result is a projection pending final counts.
 
-Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://9c329458-e80e-40e9-ba18-d2047a1b696c.
+Report: 6 September 2026; accessed 7 September 2026.
+URL: https://www.bbc.co.uk/news/articles/cy4zejgz3z9o
+Source: source://c8f8c337-18fa-4ba7-9dfc-22bf77e70427
+
+Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://8eea7e39-b519-4f66-b106-7b3529cec0c7.

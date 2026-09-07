@@ -1,24 +1,28 @@
 ---
 type: knowledge
 status: stable
-description: Egyptian presenter Sarah Khalifa and 11 others were sentenced to death
-  by hanging on drugs-trafficking charges; she denies them and her lawyer said she
-  would appeal. Nine received life sentences and seven were acquitted. The verdict,
-  first announced the prior month, was confirmed only after the court obtained a require
+description: Television presenter Sarah Khalifa and 11 others were sentenced to death
+  by hanging in Egypt after conviction on drugs-trafficking charges; Khalifa denies
+  the charges and will appeal. The court had seized more than 750kg of narcotics and
+  raw materials, and nine others received life terms; Amnesty International said the
 generated:
   by: obsidience/harness/knowledge/news.py
-  at: '2026-09-07T02:05:09.987Z'
+  at: '2026-09-07T02:40:51.335Z'
 resource: https://www.bbc.co.uk/news/articles/c5y7gk9knnlo
 sources:
-- resource: source://3bf780cf-38d8-402c-a81c-a807f8314167
-- resource: source://9c329458-e80e-40e9-ba18-d2047a1b696c
-stale_after: '2026-09-08T03:35:43.151Z'
-title: TV presenter among 12 sentenced to death in Egypt
+- resource: source://d30e1097-5bba-4b6e-a417-1b7c96a3bd23
+- resource: source://8eea7e39-b519-4f66-b106-7b3529cec0c7
+stale_after: '2026-09-08T04:34:31.478Z'
+title: Egyptian TV presenter Sarah Khalifa sentenced to death
 obsidience:
-  approved_at: '2026-09-06T19:05:16'
+  approved_at: '2026-09-06T19:40:57'
   provenance: proposed by Alexandria (task Tasks/ingest)
 ---
 
-Egyptian presenter Sarah Khalifa and 11 others were sentenced to death by hanging on drugs-trafficking charges; she denies them and her lawyer said she would appeal. Nine received life sentences and seven were acquitted. The verdict, first announced the prior month, was confirmed only after the court obtained a required religious opinion, per state media. Reported 5-6 Sept 2026. https://www.bbc.co.uk/news/articles/c5y7gk9knnlo (source://3bf780cf-38d8-402c-a81c-a807f8314167)
+Television presenter Sarah Khalifa and 11 others were sentenced to death by hanging in Egypt after conviction on drugs-trafficking charges; Khalifa denies the charges and will appeal. The court had seized more than 750kg of narcotics and raw materials, and nine others received life terms; Amnesty International said the death penalty should be restricted to intentional killing.
 
-Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://9c329458-e80e-40e9-ba18-d2047a1b696c.
+Report: 5 September 2026, updated 6 September; accessed 7 September 2026.
+URL: https://www.bbc.co.uk/news/articles/c5y7gk9knnlo
+Source: source://d30e1097-5bba-4b6e-a417-1b7c96a3bd23
+
+Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://8eea7e39-b519-4f66-b106-7b3529cec0c7.
