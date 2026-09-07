@@ -1,6 +1,6 @@
 ---
 type: knowledge
-status: stable
+status: deprecated
 description: Reported 7 Sept 2026. Nepal observed a national day of mourning on the
   13th day after a flash flood, believed triggered by a glacial collapse, swept through
   a Himalayan valley on the Nepal–Tibet border. At least 1,287 people are confirmed
@@ -17,6 +17,12 @@ title: Nepal marks national day of mourning after flash floods
 obsidience:
   approved_at: '2026-09-07T12:46:58'
   provenance: proposed by Codex (task codex:owner-requested-harness-repair)
+  archived_at: '2026-09-07T21:34:23Z'
+  archive_reason: 'Corrected resubmission of the controller-bound source.inbox Top
+    10 handoff source://bf4780a3-8309-419d-bb3f-b55a0bf9b335. All ten story URLs now
+    use the exact fetched Source source_ref (DW stories 2, 6, 7 carry the ?maca=en-rss-en-world-4025-xml-mrss
+    suffix). Also fixed two earlier synthesis issues: removed the Mladić Vucic-election
+    sentence not present in the fetched BBC source, and used the fetc'
 ---
 
 Reported 7 Sept 2026. Nepal observed a national day of mourning on the 13th day after a flash flood, believed triggered by a glacial collapse, swept through a Himalayan valley on the Nepal–Tibet border. At least 1,287 people are confirmed dead, with over 5,000 still missing. Rescue teams continue ground, air, and tunnel operations at hydropower stations. Chinese media report 31 dead and 531 unaccounted for on the Tibetan side.

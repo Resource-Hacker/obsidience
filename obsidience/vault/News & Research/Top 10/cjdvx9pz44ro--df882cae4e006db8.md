@@ -1,27 +1,26 @@
 ---
 type: knowledge
 status: stable
-description: Reported 7 Sept 2026. BBC Verify analysis shows Kyiv is enduring more
-  daily air raid alerts than at any point since the 2022 invasion began, with sirens
-  sounding on average 10 times a day since Russia shifted to round-the-clock attacks
-  at the end of August. The seven days from 27 August saw 76 alerts. New jet-powered
-  d
+description: Kyiv has suffered more daily air raid alerts than at any time since Russia's
+  2022 invasion, BBC Verify found, averaging about 10 a day since late August as strikes
+  shifted to daytime. Alerts have disrupted schools, offices, and transit. Ukraine's
+  air force says Russia launched 2,800 fast jet-powered drones in August; K
 generated:
   by: obsidience/harness/knowledge/news.py
-  at: '2026-09-07T19:46:43.728Z'
+  at: '2026-09-07T21:34:14.209Z'
 resource: https://www.bbc.co.uk/news/articles/cjdvx9pz44ro
 sources:
-- resource: source://6d129e32-48e5-461f-b5f2-d5434d54787b
-- resource: source://0bda947b-2629-4a8b-939c-9f7b33a10c47
-stale_after: '2026-09-08T21:27:37.913Z'
-title: Kyiv air raid alerts hit record as Russia intensifies strikes
+- resource: source://3b44e7e7-ac99-4871-9c64-29425fbdb2f9
+- resource: source://bf4780a3-8309-419d-bb3f-b55a0bf9b335
+stale_after: '2026-09-08T22:43:14.207Z'
+title: Kyiv at record high for air raid alerts as Russia strikes round the clock
 obsidience:
-  approved_at: '2026-09-07T12:46:57'
-  provenance: proposed by Codex (task codex:owner-requested-harness-repair)
+  approved_at: '2026-09-07T14:34:20'
+  provenance: proposed by Alexandria (task Tasks/ingest)
 ---
 
-Reported 7 Sept 2026. BBC Verify analysis shows Kyiv is enduring more daily air raid alerts than at any point since the 2022 invasion began, with sirens sounding on average 10 times a day since Russia shifted to round-the-clock attacks at the end of August. The seven days from 27 August saw 76 alerts. New jet-powered drones fly nearly 370 mph, straining Ukraine's air defences. The government is planning a two-tier warning system.
-URL: https://www.bbc.co.uk/news/articles/cjdvx9pz44ro
-Source: source://6d129e32-48e5-461f-b5f2-d5434d54787b
+Kyiv has suffered more daily air raid alerts than at any time since Russia's 2022 invasion, BBC Verify found, averaging about 10 a day since late August as strikes shifted to daytime. Alerts have disrupted schools, offices, and transit. Ukraine's air force says Russia launched 2,800 fast jet-powered drones in August; Kyiv is developing interceptors, and analysts warn the campaign targets Ukraine's economy ahead of winter.
 
-Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://0bda947b-2629-4a8b-939c-9f7b33a10c47.
+Reported 7 September 2026. https://www.bbc.co.uk/news/articles/cjdvx9pz44ro — source://3b44e7e7-ac99-4871-9c64-29425fbdb2f9
+
+Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://bf4780a3-8309-419d-bb3f-b55a0bf9b335.

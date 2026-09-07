@@ -1,27 +1,27 @@
 ---
 type: knowledge
 status: stable
-description: 'Reported 7 Sept 2026. Lebanon''s health ministry says Israeli air strikes
-  on Kfar Roummane killed at least 12 people: eleven, including two children and four
-  women, in a strike that destroyed a residential building, and one paramedic in a
-  second strike on a vehicle. The IDF said it targeted Hezbollah infrastructure in
-  r'
+description: Lebanon's health ministry says Israeli strikes on the village of Kfar
+  Roummane killed at least 12 people, including a paramedic, in an overnight attack
+  on a residential building and a second on a vehicle. The Israeli military says it
+  hit Hezbollah infrastructure in retaliation for drone attacks. President Joseph
+  Aoun w
 generated:
   by: obsidience/harness/knowledge/news.py
-  at: '2026-09-07T19:46:43.728Z'
+  at: '2026-09-07T21:34:14.209Z'
 resource: https://www.bbc.co.uk/news/articles/c5yl96vz0edo
 sources:
-- resource: source://5a5c3b38-db7a-4e3c-b6eb-3a5c9fd918bf
-- resource: source://0bda947b-2629-4a8b-939c-9f7b33a10c47
-stale_after: '2026-09-08T21:27:37.913Z'
-title: Israeli strikes kill 12 in southern Lebanon village
+- resource: source://4a03362d-8052-48eb-b58b-cc431e7ab425
+- resource: source://bf4780a3-8309-419d-bb3f-b55a0bf9b335
+stale_after: '2026-09-08T22:43:14.207Z'
+title: Israeli strikes in southern Lebanon kill 12
 obsidience:
-  approved_at: '2026-09-07T12:46:57'
-  provenance: proposed by Codex (task codex:owner-requested-harness-repair)
+  approved_at: '2026-09-07T14:34:21'
+  provenance: proposed by Alexandria (task Tasks/ingest)
 ---
 
-Reported 7 Sept 2026. Lebanon's health ministry says Israeli air strikes on Kfar Roummane killed at least 12 people: eleven, including two children and four women, in a strike that destroyed a residential building, and one paramedic in a second strike on a vehicle. The IDF said it targeted Hezbollah infrastructure in retaliation for drone attacks. President Aoun warned the "dangerous escalation" jeopardises the June US-brokered ceasefire. At least 27 have been killed across southern Lebanon in three days.
-URL: https://www.bbc.co.uk/news/articles/c5yl96vz0edo
-Source: source://5a5c3b38-db7a-4e3c-b6eb-3a5c9fd918bf
+Lebanon's health ministry says Israeli strikes on the village of Kfar Roummane killed at least 12 people, including a paramedic, in an overnight attack on a residential building and a second on a vehicle. The Israeli military says it hit Hezbollah infrastructure in retaliation for drone attacks. President Joseph Aoun warns the dangerous escalation is jeopardising the US-brokered ceasefire. Hezbollah rejected the disarmament-withdrawal framework, and residents are again fleeing.
 
-Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://0bda947b-2629-4a8b-939c-9f7b33a10c47.
+Reported 7 September 2026. https://www.bbc.co.uk/news/articles/c5yl96vz0edo — source://4a03362d-8052-48eb-b58b-cc431e7ab425
+
+Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://bf4780a3-8309-419d-bb3f-b55a0bf9b335.
