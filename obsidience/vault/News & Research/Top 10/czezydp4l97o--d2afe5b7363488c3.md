@@ -1,26 +1,27 @@
 ---
 type: knowledge
 status: stable
-description: Anak Krakatau, 150km from Jakarta, erupted late Friday, sending ash over
-  the capital and forcing a second day of airport closures that stranded more than
-  340,000 passengers and disrupted nearly 3,000 flights. Jakarta's main airport will
-  not reopen until Monday night. Indonesia's Geological Agency warned the probability
+description: 'Anak Krakatau, 150 km from Jakarta, began erupting late Friday, forcing
+  a second day of airport closures and disrupting nearly 3,000 flights. Jakarta''s
+  main airport will not reopen until Monday night. Authorities warned the probability
+  of further eruptions remains high, with ash plumes reaching 15,000 m on the Sumatra '
 generated:
   by: obsidience/harness/knowledge/news.py
-  at: '2026-09-07T21:34:14.209Z'
+  at: '2026-09-07T23:00:28.444Z'
 resource: https://www.bbc.co.uk/news/articles/czezydp4l97o
 sources:
-- resource: source://87080e07-a202-4ee4-8e1b-b9aa158187ee
-- resource: source://bf4780a3-8309-419d-bb3f-b55a0bf9b335
-stale_after: '2026-09-08T22:43:14.207Z'
-title: Indonesia volcano eruption leaves 340,000 stranded as airports extend closure
+- resource: source://5e503353-fbee-4842-867b-4e6a9cf4b56f
+- resource: source://adb4de82-7864-44b1-be5e-3418d1505874
+stale_after: '2026-09-09T00:24:55.978Z'
+title: Indonesia volcano eruption strands 340,000 as airports extend closure
 obsidience:
-  approved_at: '2026-09-07T14:34:22'
+  approved_at: '2026-09-07T16:00:36'
   provenance: proposed by Alexandria (task Tasks/ingest)
 ---
 
-Anak Krakatau, 150km from Jakarta, erupted late Friday, sending ash over the capital and forcing a second day of airport closures that stranded more than 340,000 passengers and disrupted nearly 3,000 flights. Jakarta's main airport will not reopen until Monday night. Indonesia's Geological Agency warned the probability of further eruptions remains high; authorities set a 3km exclusion zone and said there is no tsunami warning.
+Anak Krakatau, 150 km from Jakarta, began erupting late Friday, forcing a second day of airport closures and disrupting nearly 3,000 flights. Jakarta's main airport will not reopen until Monday night. Authorities warned the probability of further eruptions remains high, with ash plumes reaching 15,000 m on the Sumatra side. A 3 km exclusion zone is in force; no tsunami warning has been issued.
+Reported 7 September 2026.
+https://www.bbc.co.uk/news/articles/czezydp4l97o
+source://5e503353-fbee-4842-867b-4e6a9cf4b56f
 
-Reported 7 September 2026. https://www.bbc.co.uk/news/articles/czezydp4l97o — source://87080e07-a202-4ee4-8e1b-b9aa158187ee
-
-Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://bf4780a3-8309-419d-bb3f-b55a0bf9b335.
+Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://adb4de82-7864-44b1-be5e-3418d1505874.

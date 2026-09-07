@@ -1,0 +1,28 @@
+---
+type: knowledge
+status: stable
+description: Nepalis observed a national day of mourning as flags flew at half mast,
+  marking the end of the traditional 13-day Hindu period. At least 1,287 people are
+  confirmed dead and more than 5,000 missing after a flash flood, believed triggered
+  by glacial collapse, hit a Himalayan border valley. Rescue operations continue in
+  h
+generated:
+  by: obsidience/harness/knowledge/news.py
+  at: '2026-09-07T23:00:28.444Z'
+resource: https://www.bbc.co.uk/news/articles/c2kw1qek7gdo
+sources:
+- resource: source://ce7f8ad9-58e9-4246-9bdd-7338dc10774e
+- resource: source://adb4de82-7864-44b1-be5e-3418d1505874
+stale_after: '2026-09-09T00:24:55.978Z'
+title: Nepal marks national day of mourning after glacial flood
+obsidience:
+  approved_at: '2026-09-07T16:00:35'
+  provenance: proposed by Alexandria (task Tasks/ingest)
+---
+
+Nepalis observed a national day of mourning as flags flew at half mast, marking the end of the traditional 13-day Hindu period. At least 1,287 people are confirmed dead and more than 5,000 missing after a flash flood, believed triggered by glacial collapse, hit a Himalayan border valley. Rescue operations continue in hydropower tunnels where hundreds of workers remain unaccounted for.
+Reported 7 September 2026.
+https://www.bbc.co.uk/news/articles/c2kw1qek7gdo
+source://ce7f8ad9-58e9-4246-9bdd-7338dc10774e
+
+Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://adb4de82-7864-44b1-be5e-3418d1505874.
