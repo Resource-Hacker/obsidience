@@ -1,100 +1,59 @@
 ---
-approved_at: '2026-08-31T09:34:12'
-kind: knowledge
-provenance: proposed by Alexandria (task Tasks/link)
+type: knowledge
 title: Real-time Executive
+obsidience:
+  approved_at: '2026-09-07T16:28:05'
+  provenance: proposed by Alexandria (task Tasks/link)
 ---
 
-The real-time Executive is one Obsidience execution surface, not another
-Agent, harness, scheduler, memory store, or Tool authority. It operates under
-[[Agents/Executive/Architecture/local-first-architecture--7d8e77cc|local-first architecture]],
-whose one-authority and local-model contract constrains Task selection and Tool
-execution. Its durable Knowledge context is the accepted vault described by
-[[Agents/Executive/Architecture/llm-wiki-knowledge-pattern--dab5ff0a|LLM-wiki knowledge pattern]].
+Realtime is the speech connection and session infrastructure controlled by the
+interface button. It keeps audio available between requests. The work itself
+uses the same [Query](/Tasks/query.md) and
+[Computer Use](/Tasks/executive/operate.md) definitions as typed Chat. Each selected
+Task owns its authored model, reasoning effort, Runbook, Tool authority, and
+acceptance condition; the connection has no Task or Runbook of its own.
 
-Realtime has one reasoning pipeline. The model and reasoning effort selected on
-[[Tasks/executive/realtime|Realtime]] remain the sole source of intent, Tool
-selection, reasoning, and public answers. Pipecat and NVIDIA NeMo supply fixed
-speech transport around that Task: Nemotron Speech Streaming EN 0.6B converts
-the selected microphone stream into transcripts and manages turn boundaries;
-Pocket TTS converts the completed public answer into speech on CPU. Neither is
-an Agent or reasoning model. Pipecat's upstream LocalAudioTransport opens the
-Hardware-selected microphone and speaker through process-scoped Pulse routing;
-Obsidience adds no browser audio client, audio WebSocket, or custom
-capture/playback processor. Realtime ready enables the OBSBOT SDK's persistent
-microphone-during-sleep setting and Realtime off disables it.
+Pipecat's upstream `LocalAudioTransport` opens the Hardware-selected microphone
+and speaker through process-scoped Pulse routing. NVIDIA NeMo owns streaming
+turn boundaries, Nemotron Speech Streaming EN 0.6B produces transcripts on the
+RTX 4080, and Pocket TTS produces speech on CPU. These fixed components only
+transport the turn. Obsidience adds no browser audio client, audio WebSocket, or
+second capture/playback lane.
 
-Enabling the interface opens the Realtime Task and keeps it running until the
-owner disables it or the runtime fails. Each final transcript executes that same
-Task through the normal activation compiler described by
-[[Agents/Executive/Architecture/activation-briefing-protocol--21d7f1ad|Activation packet protocol]],
-which assembles the visible Thinking Packet. Agent Identity, Task, Tools,
-Skills, Runbook, retrieved Knowledge, and
-[[Agents/Executive/Observations/immediate-observations|Immediate Observations]]
-form one visible Thinking Packet. The exact packet refs drive graph activity, so
-the graph shows what the model received rather than a second animation-only
-selection.
+At start, Realtime freezes the selected microphone, speaker, and Pocket voice,
+wakes the OBSBOT camera through its official SDK, and disables the camera's
+120-second no-video sleep timer. At stop, it restores that timer and sleeps the
+camera. The camera's physical state owns its microphone state.
 
-Typed Executive Chat and Realtime speech share one active exact conversation.
-Its newest 80 turns remain in a bounded in-memory deque that rehydrates from the
-SQLite execution store, while SQLite retains the complete public history. A
-finalized user turn is persisted before model execution. An assistant turn is
-persisted only when the current generation finishes with a nonempty public
-reply, and it names the exact user turn it answers. Failed, blocked,
-interrupted, canceled, or generation-stale output is not conversation history.
+Each final transcript selects an exact work Task and executes through the one
+activation compiler, model lease, Tool path, ledger, and graph activity.
+`task.complete` records the ordinary terminal result; its public summary is
+the same answer delivered to Chat or spoken by Pocket. The visible Thinking
+Packet and its exact refs are the graph animation source. Speech onset may
+cancel Pocket playback and the current execution without closing the
+microphone; NeMo may ignore a backchannel without gaining semantic authority.
 
-The active context window is one transient, unverified Immediate Observations
-Knowledge Article. It has retrieval disabled and always rides in the active
-Executive Thinking Packet by exact Article identity. It contains the newest
-cumulative Temporary Observation summary followed by exact completed
-user-and-reply pairs after that summary's sequence boundary. It grants no Task,
-Tool, Policy, or durable Knowledge authority. Its placement and lifecycle follow
-[[Agents/Executive/Observations/knowledge-placement-and-observation-routing--4a4412b7|Knowledge placement and observation routing]]. Enabling Realtime rotates once to
-a fresh conversation without waiting on prior-session maintenance. Typed Chat
-and speech share that identity until the next Realtime enable or the owner's
-explicit New Conversation action. The outgoing Chat session is retained for
-finalization when Realtime ends, preserving startup latency. Disabling Realtime
-does not rotate on its own, and rotation never deletes earlier SQLite rows.
+Typed Chat and Realtime share one exact SQLite-backed Executive conversation.
+Completed public turns project through the real
+[Current conversation](/Agents/Executive/Observations/Immediate%20Observations/current-conversation.md)
+Article beneath Immediate Observations; canceled, failed, blocked, interrupted,
+or stale output does not become conversation history. Conversation compaction
+and promotion use their ordinary Tasks and never create a second memory path.
 
-At 80 percent of the selected Task model's usable input context by default,
-[[Tasks/observations/compact|Compact Immediate Observations]] runs as
-an ordinary Executive Task with its authored Runbook, Skills, Tools, model, and
-reasoning effort. The owner may choose 60, 70, 80, or 90 percent or press
-Compact immediately. The Task condenses only the completed prefix into one
-cumulative Temporary Observation Article. Tool output remains provisional until
-the Task completes; failed, blocked, canceled, or stale attempts cannot advance
-the context boundary. Exact public turns remain in SQLite. Executive Chat and
-Realtime do not emit the retired per-turn Temporary Observation Task.
+While the connection is enabled, autonomous specialist schedules and triggers
+remain pending. An interactive Executive execution may use its authorized
+`task.create` to delegate a Research Question or Learn outcome along the
+[Research requests](/Agents/Executive/Architecture/research-requests--7bf0113c.md)
+path. The controller derives that interactive provenance from the real
+execution; caller arguments cannot grant it and causal order never creates
+hierarchy. Turning Realtime off closes the speech connection and releases the
+pause without rewriting pending Tasks. Individual work executions complete
+normally while the connection stays ready for the next request.
 
-Temporary summaries are transient, unverified working context. At an explicit
-Chat conversation rotation, or after Realtime fully stops,
-[[Agents/Alexandria/Alexandria|Alexandria]]'s
-[[Tasks/observations/promote|Promote Temporary Observations]] Task force-
-compacts the final completed prefix, archives the exact bound Temporary bundle
-in immutable Source, and stages only justified Knowledge creates or updates for
-owner review. Merge and Link remain ordinary peer Tasks when needed. Accepted
-Knowledge in the normal graph is the durable context; Source archival and
-pending proposals do not create a parallel memory store or accepted truth.
+## Relationships
 
-Obsidience alone selects Tasks, retrieves Knowledge, authorizes and invokes
-Tools, records evidence, and decides whether an outcome succeeded. Neither
-speech plumbing nor Observation projection may invent a capability, execute an
-unbound Tool, persist durable Knowledge, or claim an external effect without
-verification. Task completion for the long-running Realtime session remains
-owned by the Realtime button lifecycle.
-
-While Realtime runs, the scheduler leaves autonomous specialist schedules and
-triggers pending instead of claiming them. An exact task.create emitted from
-Realtime may delegate a real peer Task to another Agent and carries immutable
-creator provenance as the only exception, under
-[[Agents/Executive/Architecture/task-activation--b30a4642|Task activation]],
-whose `task.create` rule activates an exact accepted Task without creating a
-child or subtask relation. Causal ordering never makes that peer
-a subtask. Turning Realtime off releases the pause without rewriting pending
-Tasks. Session promotion is issued only after that release and waits until any
-other running Task has finished.
-
-The microphone remains live while Pocket speaks, so a fresh acoustic turn can
-cancel playback and the in-flight Task generation without waiting for output to
-finish. NeMo may classify a short backchannel without interrupting. These are
-speech-transport decisions, never Task, Tool, or Knowledge decisions.
+- `implements` [Activation packet protocol](/Agents/Executive/Architecture/activation-briefing-protocol--21d7f1ad.md) — Every final transcript uses the same packet and graph-activity path as other Tasks.
+- `implements` [Task activation](/Agents/Executive/Architecture/task-activation--b30a4642.md) — Spoken and typed requests select the same accepted work Tasks and complete through one executor.
+- `depends_on` [Executive model selection](/Agents/Executive/Architecture/current-executive-model--3745813a.md) — Each selected work Task supplies its model and reasoning effort.
+- `related_to` [Hyprland shell scene](/Agents/Executive/Architecture/hyprland-shell-scene.md) — Current focused and unfocused panes enter only as bounded runtime bindings.
+- `related_to` [Research requests](/Agents/Executive/Architecture/research-requests--7bf0113c.md) — Delegation from an interactive Realtime execution follows the Research delegation path to Darwin.
