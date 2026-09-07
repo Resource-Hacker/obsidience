@@ -1,28 +1,30 @@
 ---
 type: knowledge
 status: stable
-description: Germany's far-right AfD is projected to win a record 44% of the vote
-  in Saxony-Anhalt, far ahead of the CDU's 17%, heading for 39 of 83 seats but just
-  short of the 42 needed for outright control. Leader Ulrich Siegmund called the result
-  "sensational," with commentators describing a political watershed as the state part
+description: Interim results of the 6 September state election project the far-right
+  AfD at a record 44% of the vote, far ahead of the CDU's 17%, and 39 of 83 state
+  seats — three short of the 42 needed for an outright majority. The party claims
+  a governing mandate; a state government would be the first far-right one in Germany
+  sinc
 generated:
   by: obsidience/harness/knowledge/news.py
-  at: '2026-09-07T02:40:51.335Z'
+  at: '2026-09-07T03:46:41.370Z'
 resource: https://www.bbc.co.uk/news/articles/cy4zejgz3z9o
 sources:
-- resource: source://c8f8c337-18fa-4ba7-9dfc-22bf77e70427
-- resource: source://8eea7e39-b519-4f66-b106-7b3529cec0c7
-stale_after: '2026-09-08T04:34:31.478Z'
-title: Germany's AfD projected to near-majority win in Saxony-Anhalt
+- resource: source://49c5b7e5-a131-438b-a8ff-715b0a8ca4df
+- resource: source://609c9749-ca8d-49c3-ab81-75852ef106e8
+stale_after: '2026-09-08T05:26:55.592Z'
+title: Germany's far-right AfD wins big in Saxony-Anhalt, falls short of outright
+  majority
 obsidience:
-  approved_at: '2026-09-06T19:40:56'
+  approved_at: '2026-09-06T20:46:47'
   provenance: proposed by Alexandria (task Tasks/ingest)
 ---
 
-Germany's far-right AfD is projected to win a record 44% of the vote in Saxony-Anhalt, far ahead of the CDU's 17%, heading for 39 of 83 seats but just short of the 42 needed for outright control. Leader Ulrich Siegmund called the result "sensational," with commentators describing a political watershed as the state party is assessed as right-wing extremist. The result is a projection pending final counts.
+Interim results of the 6 September state election project the far-right AfD at a record 44% of the vote, far ahead of the CDU's 17%, and 39 of 83 state seats — three short of the 42 needed for an outright majority. The party claims a governing mandate; a state government would be the first far-right one in Germany since World War Two, with powers over policing, local education and culture. Domestic intelligence assesses the party as right-wing extremist.
 
-Report: 6 September 2026; accessed 7 September 2026.
-URL: https://www.bbc.co.uk/news/articles/cy4zejgz3z9o
-Source: source://c8f8c337-18fa-4ba7-9dfc-22bf77e70427
+Uncertainty: figures are interim projections, not final certified results; the "mandate to govern" is the party's own claim, not a constitutional fact.
 
-Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://8eea7e39-b519-4f66-b106-7b3529cec0c7.
+Reported 6 September 2026 (updated). [BBC](https://www.bbc.co.uk/news/articles/cy4zejgz3z9o) · source://49c5b7e5-a131-438b-a8ff-715b0a8ca4df
+
+Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://609c9749-ca8d-49c3-ab81-75852ef106e8.
