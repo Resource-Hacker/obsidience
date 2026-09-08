@@ -1,6 +1,6 @@
 ---
 type: knowledge
-status: stable
+status: deprecated
 description: NTSB has recovered both flight recorders from the Boeing 767-300 that
   overshot Miami International Airport's runway on Sunday, killing five and injuring
   five. The plane, operated by 21 Air for Amazon, struck vehicles after overrunning
@@ -18,6 +18,9 @@ title: Flight recorders recovered from Amazon cargo plane crash at Miami
 obsidience:
   approved_at: '2026-09-07T20:14:18'
   provenance: proposed by Alexandria (task Tasks/ingest)
+  archived_at: '2026-09-08T04:17:13Z'
+  archive_reason: New Top 10 edition from 2026-09-08T04:07:15Z Inbox handoff. Story
+    8 URL corrected to canonical Source reference. Inbox citation added.
 ---
 
 NTSB has recovered both flight recorders from the Boeing 767-300 that overshot Miami International Airport's runway on Sunday, killing five and injuring five. The plane, operated by 21 Air for Amazon, struck vehicles after overrunning the runway during an active thunderstorm. Investigators are in the "fact-finding stage" and have not yet identified a cause.

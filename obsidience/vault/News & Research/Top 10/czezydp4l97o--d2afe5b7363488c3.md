@@ -1,28 +1,26 @@
 ---
 type: knowledge
 status: stable
-description: 'Anak Krakatau''s eruption has disrupted nearly 3,000 flights, leaving
-  more than 340,000 passengers stranded. Jakarta''s main airport extended its closure
-  to Monday night due to persistent volcanic ash. The Geological Agency warns the
-  probability of further eruptions remains high, with ash reaching 15,000m on the
-  Sumatra '
+description: Five Indonesian airports reopened past midnight Tuesday after Anak Krakatau's
+  eruption forced two days of closures. Nearly 3,000 flights were disrupted and more
+  than 340,000 passengers were stranded. Volcanic ash reached 6,000m on Java's side
+  and 15,000m on Sumatra's. The Geological Agency warned the probability of fur
 generated:
   by: obsidience/harness/knowledge/news.py
-  at: '2026-09-08T03:14:12.230Z'
+  at: '2026-09-08T04:17:04.950Z'
 resource: https://www.bbc.co.uk/news/articles/czezydp4l97o
 sources:
-- resource: source://9d8c8a03-d72b-458d-a973-4171621fc11a
-- resource: source://69220778-273e-49fa-8357-358a392de2bb
-stale_after: '2026-09-09T05:05:41.432Z'
-title: Indonesia volcano eruption leaves 340,000 stranded as airports extend closure
+- resource: source://26b4585b-87c2-4711-a36e-4fd2d4c5416d
+- resource: source://562bccd2-1cd1-4c25-b4c5-1bf6d66a509b
+stale_after: '2026-09-09T06:07:15.558Z'
+title: Indonesia airports reopen after volcano eruption strands 340,000
 obsidience:
-  approved_at: '2026-09-07T20:14:18'
+  approved_at: '2026-09-07T21:17:11'
   provenance: proposed by Alexandria (task Tasks/ingest)
 ---
 
-Anak Krakatau's eruption has disrupted nearly 3,000 flights, leaving more than 340,000 passengers stranded. Jakarta's main airport extended its closure to Monday night due to persistent volcanic ash. The Geological Agency warns the probability of further eruptions remains high, with ash reaching 15,000m on the Sumatra side.
-Report date: 2026-09-07
-URL: https://www.bbc.co.uk/news/articles/czezydp4l97o
-Source: source://9d8c8a03-d72b-458d-a973-4171621fc11a
+Five Indonesian airports reopened past midnight Tuesday after Anak Krakatau's eruption forced two days of closures. Nearly 3,000 flights were disrupted and more than 340,000 passengers were stranded. Volcanic ash reached 6,000m on Java's side and 15,000m on Sumatra's. The Geological Agency warned the probability of further eruptions remains high. No tsunami warning was issued.
 
-Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://69220778-273e-49fa-8357-358a392de2bb.
+Reported: 2026-09-07. URL: https://www.bbc.co.uk/news/articles/czezydp4l97o. Source: source://26b4585b-87c2-4711-a36e-4fd2d4c5416d
+
+Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://562bccd2-1cd1-4c25-b4c5-1bf6d66a509b.
