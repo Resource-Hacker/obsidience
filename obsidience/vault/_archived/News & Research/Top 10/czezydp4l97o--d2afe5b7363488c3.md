@@ -1,6 +1,6 @@
 ---
 type: knowledge
-status: stable
+status: deprecated
 description: 'Anak Krakatau, 150 km from Jakarta, began erupting late Friday, forcing
   a second day of airport closures and disrupting nearly 3,000 flights. Jakarta''s
   main airport will not reopen until Monday night. Authorities warned the probability
@@ -17,6 +17,12 @@ title: Indonesia volcano eruption strands 340,000 as airports extend closure
 obsidience:
   approved_at: '2026-09-07T16:00:36'
   provenance: proposed by Alexandria (task Tasks/ingest)
+  archived_at: '2026-09-08T00:41:28Z'
+  archive_reason: 'New Top 10 edition from Inbox source://03c0cfca-405e-40c8-9953-5772530c63da
+    (captured 2026-09-08T00:21:46.523Z), newer than current accepted edition. Corrected
+    three minor handoff inaccuracies: Story 5 removed unsupported Bombardier commitment
+    claim; Story 6 removed unsupported upcoming-elections claim; Story 9 restored
+    ''believed'' qualifier for glacial collapse cause.'
 ---
 
 Anak Krakatau, 150 km from Jakarta, began erupting late Friday, forcing a second day of airport closures and disrupting nearly 3,000 flights. Jakarta's main airport will not reopen until Monday night. Authorities warned the probability of further eruptions remains high, with ash plumes reaching 15,000 m on the Sumatra side. A 3 km exclusion zone is in force; no tsunami warning has been issued.

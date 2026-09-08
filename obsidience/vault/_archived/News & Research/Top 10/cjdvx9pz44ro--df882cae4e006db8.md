@@ -1,6 +1,6 @@
 ---
 type: knowledge
-status: stable
+status: deprecated
 description: BBC Verify analysis of government data finds Kyiv endured 76 air-raid
   alerts in the week from 27 August, more than any comparable week since 2022. Russia
   now strikes by day, forcing residents into shelter up to 13 times daily. Ukraine's
@@ -17,6 +17,12 @@ title: Kyiv air-raid alerts at record high under round-the-clock Russian strikes
 obsidience:
   approved_at: '2026-09-07T16:00:35'
   provenance: proposed by Alexandria (task Tasks/ingest)
+  archived_at: '2026-09-08T00:41:27Z'
+  archive_reason: 'New Top 10 edition from Inbox source://03c0cfca-405e-40c8-9953-5772530c63da
+    (captured 2026-09-08T00:21:46.523Z), newer than current accepted edition. Corrected
+    three minor handoff inaccuracies: Story 5 removed unsupported Bombardier commitment
+    claim; Story 6 removed unsupported upcoming-elections claim; Story 9 restored
+    ''believed'' qualifier for glacial collapse cause.'
 ---
 
 BBC Verify analysis of government data finds Kyiv endured 76 air-raid alerts in the week from 27 August, more than any comparable week since 2022. Russia now strikes by day, forcing residents into shelter up to 13 times daily. Ukraine's air force says it shoots down only about 60% of faster jet-powered drones, prompting an emergency push for new interceptors.
