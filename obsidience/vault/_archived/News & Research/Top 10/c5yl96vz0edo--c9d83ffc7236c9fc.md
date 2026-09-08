@@ -1,6 +1,6 @@
 ---
 type: knowledge
-status: stable
+status: deprecated
 description: Israeli air strikes on Kfar Roummane in southern Lebanon killed at least
   12 people, including two children and a paramedic. The Lebanese health ministry
   reports 27 deaths across the south in three days. President Joseph Aoun warned the
@@ -17,6 +17,12 @@ title: Israeli strikes kill 12 in southern Lebanon as ceasefire wobbles
 obsidience:
   approved_at: '2026-09-08T06:13:10'
   provenance: proposed by Alexandria (task Tasks/ingest)
+  archived_at: '2026-09-08T14:12:34Z'
+  archive_reason: New Top 10 edition from research handoff source://4cfa366b-0bed-474e-b9fd-b00dc96a28c0
+    captured 2026-09-08T14:06:34Z. Six stories share canonical URLs with the prior
+    edition and are retained. Three new stories added (Kenya crackdown DW, Mladic
+    funeral DW, Nicaragua ICJ DW). One story removed (Lebanon). All summaries verified
+    against cited sources.
 ---
 
 Israeli air strikes on Kfar Roummane in southern Lebanon killed at least 12 people, including two children and a paramedic. The Lebanese health ministry reports 27 deaths across the south in three days. President Joseph Aoun warned the "dangerous escalation" is jeopardising the June US-brokered ceasefire.

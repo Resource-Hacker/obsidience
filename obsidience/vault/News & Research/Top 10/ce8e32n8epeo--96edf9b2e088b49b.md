@@ -1,28 +1,28 @@
 ---
 type: knowledge
 status: stable
-description: An Amazon-operated Boeing 767-300 overshot the runway at Miami International
-  Airport on Sunday, striking two ground vehicles and killing five people while injuring
-  five more. NTSB chairwoman Jennifer Homendy called the scene "utter devastation."
-  Flight recorders have been recovered; investigators will examine flight sy
+description: An Amazon Boeing 767-300 operated by 21 Air overshot the runway at Miami
+  International Airport on Sunday, striking a cleaning van and an SUV, killing five
+  people in two ground vehicles and injuring five. NTSB chair Jennifer Homendy described
+  the scene as "utter devastation." Flight recorders have been recovered; invest
 generated:
   by: obsidience/harness/knowledge/news.py
-  at: '2026-09-08T13:13:04.656Z'
+  at: '2026-09-08T14:12:25.274Z'
 resource: https://www.bbc.co.uk/news/articles/ce8e32n8epeo
 sources:
 - resource: source://6879b9b7-0184-4990-b704-0590a9896f85
-- resource: source://5a2c8ed7-7090-42c9-904c-46301950c756
-stale_after: '2026-09-09T15:06:26.535Z'
-title: Five killed in Amazon cargo plane crash at Miami airport
+- resource: source://4cfa366b-0bed-474e-b9fd-b00dc96a28c0
+stale_after: '2026-09-09T16:06:34.038Z'
+title: Five killed when Amazon cargo plane crashes at Miami airport
 obsidience:
-  approved_at: '2026-09-08T06:13:10'
+  approved_at: '2026-09-08T07:12:33'
   provenance: proposed by Alexandria (task Tasks/ingest)
 ---
 
-An Amazon-operated Boeing 767-300 overshot the runway at Miami International Airport on Sunday, striking two ground vehicles and killing five people while injuring five more. NTSB chairwoman Jennifer Homendy called the scene "utter devastation." Flight recorders have been recovered; investigators will examine flight systems, crew experience, and weather.
+An Amazon Boeing 767-300 operated by 21 Air overshot the runway at Miami International Airport on Sunday, striking a cleaning van and an SUV, killing five people in two ground vehicles and injuring five. NTSB chair Jennifer Homendy described the scene as "utter devastation." Flight recorders have been recovered; investigators will examine weather, crew experience, and whether an arresting system was needed.
 
-Date: 2026-09-07
-URL: https://www.bbc.co.uk/news/articles/ce8e32n8epeo
-Source: source://6879b9b7-0184-4990-b704-0590a9896f85
+Report date: 2026-09-07
+Source: https://www.bbc.co.uk/news/articles/ce8e32n8epeo
+Citation: source://6879b9b7-0184-4990-b704-0590a9896f85
 
-Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://5a2c8ed7-7090-42c9-904c-46301950c756.
+Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://4cfa366b-0bed-474e-b9fd-b00dc96a28c0.
