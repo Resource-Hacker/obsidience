@@ -2,9 +2,9 @@
 type: knowledge
 status: stable
 description: Nepal marked the last day of its 13-day Hindu mourning period for victims
-  of a glacial flash flood that killed at least 1,287 people. More than 5,000 remain
-  missing. Rescue teams continue searching ground, air, and tunnel sites at hydropower
-  stations. A 64-year-old woman was pulled alive from her buried house more than
+  of a flash flood that killed at least 1,287 people and is believed to have been
+  triggered by glacial collapse. More than 5,000 remain missing. Rescue teams continue
+  searching ground, air, and tunnel sites at hydropower stations. A 64-year-old wom
 generated:
   by: obsidience/harness/knowledge/news.py
   at: '2026-09-08T01:18:58.955Z'
@@ -15,11 +15,11 @@ sources:
 stale_after: '2026-09-09T03:06:46.161Z'
 title: Nepal observes national day of mourning for flash flood victims
 obsidience:
-  approved_at: '2026-09-07T18:19:06'
-  provenance: proposed by Alexandria (task Tasks/ingest)
+  approved_at: '2026-09-07T18:23:48'
+  provenance: proposed by Codex owner-authorized correction (task )
 ---
 
-Nepal marked the last day of its 13-day Hindu mourning period for victims of a glacial flash flood that killed at least 1,287 people. More than 5,000 remain missing. Rescue teams continue searching ground, air, and tunnel sites at hydropower stations. A 64-year-old woman was pulled alive from her buried house more than 10 days after the disaster.
+Nepal marked the last day of its 13-day Hindu mourning period for victims of a flash flood that killed at least 1,287 people and is believed to have been triggered by glacial collapse. More than 5,000 remain missing. Rescue teams continue searching ground, air, and tunnel sites at hydropower stations. A 64-year-old woman was pulled alive from her buried house more than 10 days after the disaster.
 
 Date: 2026-09-07
 URL: https://www.bbc.co.uk/news/articles/c2kw1qek7gdo

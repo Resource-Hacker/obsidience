@@ -1,10 +1,11 @@
 ---
 type: knowledge
 status: stable
-description: President Trump warned Bombardier it can "no longer sell" in the US unless
-  it moves manufacturing there, posting the threat hours before Canada imposed retaliatory
-  tariffs on $20 bn of US goods. The Montreal-based company employs thousands of American
-  workers and contributed C$7.4 bn to Canada's GDP in 2024. Trade talk
+description: 'President Trump warned Bombardier it can "no longer sell" in the US
+  unless it moves manufacturing there, posting the threat hours before Canada was
+  scheduled to impose retaliatory tariffs on $20 bn of US goods. The Montreal-based
+  company employs thousands of American workers and contributed C$7.4 bn to Canada''s
+  GDP in '
 generated:
   by: obsidience/harness/knowledge/news.py
   at: '2026-09-08T01:18:58.955Z'
@@ -15,11 +16,11 @@ sources:
 stale_after: '2026-09-09T03:06:46.161Z'
 title: Trump threatens to stop sale of Canadian Bombardier jets in US
 obsidience:
-  approved_at: '2026-09-07T18:19:05'
-  provenance: proposed by Alexandria (task Tasks/ingest)
+  approved_at: '2026-09-07T18:23:48'
+  provenance: proposed by Codex owner-authorized correction (task )
 ---
 
-President Trump warned Bombardier it can "no longer sell" in the US unless it moves manufacturing there, posting the threat hours before Canada imposed retaliatory tariffs on $20 bn of US goods. The Montreal-based company employs thousands of American workers and contributed C$7.4 bn to Canada's GDP in 2024. Trade talks between the two countries collapsed late last month.
+President Trump warned Bombardier it can "no longer sell" in the US unless it moves manufacturing there, posting the threat hours before Canada was scheduled to impose retaliatory tariffs on $20 bn of US goods. The Montreal-based company employs thousands of American workers and contributed C$7.4 bn to Canada's GDP in 2024. Trade talks between the two countries collapsed late last month.
 
 Date: 2026-09-07
 URL: https://www.bbc.co.uk/news/articles/c4gj8xx5010o

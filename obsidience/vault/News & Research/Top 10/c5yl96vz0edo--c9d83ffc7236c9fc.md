@@ -2,9 +2,10 @@
 type: knowledge
 status: stable
 description: Israeli air strikes destroyed a residential building in Kfar Roummane,
-  killing at least 12 people including two children and four women, the Lebanese health
-  ministry said. A second strike killed a paramedic. At least 27 people have been
-  killed in the south over three days. President Aoun warned the escalation is jeopar
+  killing 11 people including two children and four women, the Lebanese health ministry
+  said. A separate vehicle strike killed a paramedic, bringing the reported total
+  to at least 12. At least 27 people have been killed in the south over three days.
+  P
 generated:
   by: obsidience/harness/knowledge/news.py
   at: '2026-09-08T01:18:58.955Z'
@@ -15,11 +16,11 @@ sources:
 stale_after: '2026-09-09T03:06:46.161Z'
 title: Israeli strikes in southern Lebanese village kill 12
 obsidience:
-  approved_at: '2026-09-07T18:19:05'
-  provenance: proposed by Alexandria (task Tasks/ingest)
+  approved_at: '2026-09-07T18:23:48'
+  provenance: proposed by Codex owner-authorized correction (task )
 ---
 
-Israeli air strikes destroyed a residential building in Kfar Roummane, killing at least 12 people including two children and four women, the Lebanese health ministry said. A second strike killed a paramedic. At least 27 people have been killed in the south over three days. President Aoun warned the escalation is jeopardising the US-brokered ceasefire with Hezbollah.
+Israeli air strikes destroyed a residential building in Kfar Roummane, killing 11 people including two children and four women, the Lebanese health ministry said. A separate vehicle strike killed a paramedic, bringing the reported total to at least 12. At least 27 people have been killed in the south over three days. President Aoun warned the escalation is jeopardising the US-brokered ceasefire with Hezbollah.
 
 Date: 2026-09-07
 URL: https://www.bbc.co.uk/news/articles/c5yl96vz0edo
