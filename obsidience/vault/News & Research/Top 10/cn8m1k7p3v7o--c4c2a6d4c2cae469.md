@@ -1,28 +1,29 @@
 ---
 type: knowledge
 status: stable
-description: Russian forces launched drone strikes on Kyiv early Tuesday, killing
-  at least two people and injuring ten after both countries had agreed to halt capital
-  strikes during US envoys' visits. Zelensky said the war would continue into winter.
-  BBC Verify analysis shows Kyiv is suffering more daily air-raid alerts than at any
+description: A Russian drone struck the We Are Ukraine channel headquarters in Kyiv
+  during a live broadcast, President Zelensky said. Overnight and daytime strikes
+  killed at least five people and injured 25. Both nations had agreed to halt capital
+  strikes for three days while US envoys visited. Zelensky called the media strike
+  "a n
 generated:
   by: obsidience/harness/knowledge/news.py
-  at: '2026-09-08T15:13:52.048Z'
+  at: '2026-09-08T16:18:44.384Z'
 resource: https://www.bbc.co.uk/news/articles/cn8m1k7p3v7o
 sources:
-- resource: source://03e939cc-c537-44bd-86ca-bc6d40d1d2f6
-- resource: source://aae6c84f-320c-480d-b9b0-06ae8999e469
-stale_after: '2026-09-09T17:05:19.899Z'
-title: At least two killed in Russian drone strikes on Kyiv
+- resource: source://b99357fb-29db-4f16-9ed5-d25321ae75ba
+- resource: source://52a856a8-133b-4d66-9951-32f228637d2e
+stale_after: '2026-09-09T18:05:06.121Z'
+title: Russian drone kills five in Kyiv, strikes live TV broadcast
 obsidience:
-  approved_at: '2026-09-08T08:13:59'
+  approved_at: '2026-09-08T09:18:51'
   provenance: proposed by Alexandria (task Tasks/ingest)
 ---
 
-Russian forces launched drone strikes on Kyiv early Tuesday, killing at least two people and injuring ten after both countries had agreed to halt capital strikes during US envoys' visits. Zelensky said the war would continue into winter. BBC Verify analysis shows Kyiv is suffering more daily air-raid alerts than at any time since 2022.
+A Russian drone struck the We Are Ukraine channel headquarters in Kyiv during a live broadcast, President Zelensky said. Overnight and daytime strikes killed at least five people and injured 25. Both nations had agreed to halt capital strikes for three days while US envoys visited. Zelensky called the media strike "a new page in Russian degradation." The talks with US envoys Witkoff and Kushner ended without major breakthroughs.
 
-**Date:** 2026-09-08
-**URL:** https://www.bbc.co.uk/news/articles/cn8m1k7p3v7o
-**Source:** source://03e939cc-c537-44bd-86ca-bc6d40d1d2f6
+Date: 2026-09-08
+URL: https://www.bbc.co.uk/news/articles/cn8m1k7p3v7o
+Source: source://b99357fb-29db-4f16-9ed5-d25321ae75ba
 
-Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://aae6c84f-320c-480d-b9b0-06ae8999e469.
+Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://52a856a8-133b-4d66-9951-32f228637d2e.
