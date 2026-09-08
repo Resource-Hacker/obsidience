@@ -7,15 +7,15 @@ description: 'A Russian drone struck the We Are Ukraine TV channel headquarters 
   degradation." The strike came despite both countries having agreed to halt attacks '
 generated:
   by: obsidience/harness/knowledge/news.py
-  at: '2026-09-08T18:06:33.201Z'
+  at: '2026-09-08T18:35:26.799Z'
 resource: https://www.bbc.co.uk/news/articles/cn8m1k7p3v7o
 sources:
 - resource: source://398508e7-f64b-48a6-8927-ccc438e40d75
-- resource: source://dc931a6d-f3e4-49a1-9c9c-467f155f9df8
+- resource: source://c4540616-76c6-4be2-9074-2b7c247f40f8
 stale_after: '2026-09-09T19:56:19.731Z'
 title: Russian drone strikes Ukrainian TV headquarters in Kyiv, five killed
 obsidience:
-  approved_at: '2026-09-08T11:06:40'
+  approved_at: '2026-09-08T11:35:33'
   provenance: proposed by Alexandria (task Tasks/ingest)
 ---
 
@@ -25,4 +25,4 @@ Reported: 2026-09-08.
 
 Reporting: <https://www.bbc.co.uk/news/articles/cn8m1k7p3v7o> — source://398508e7-f64b-48a6-8927-ccc438e40d75
 
-Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://dc931a6d-f3e4-49a1-9c9c-467f155f9df8.
+Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://c4540616-76c6-4be2-9074-2b7c247f40f8.
