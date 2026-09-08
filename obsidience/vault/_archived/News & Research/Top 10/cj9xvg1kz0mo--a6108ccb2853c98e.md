@@ -1,6 +1,6 @@
 ---
 type: knowledge
-status: stable
+status: deprecated
 description: The first road bridge linking Russia and North Korea opened, allowing
   up to 300 vehicles and 2,323 people daily. Ukrainian investigators say it is primarily
   a covert military logistics corridor. The 1km bridge took 495 days to build after
@@ -17,6 +17,10 @@ title: North Korea and Russia open first road bridge across Tumen River
 obsidience:
   approved_at: '2026-09-08T09:18:51'
   provenance: proposed by Alexandria (task Tasks/ingest)
+  archived_at: '2026-09-08T17:28:27Z'
+  archive_reason: New Top 10 edition from 2026-09-08T17:17:17.719Z replaces prior
+    edition. Story 6 URL corrected to match its Source reference. No contextual Knowledge
+    matches found for any story.
 ---
 
 The first road bridge linking Russia and North Korea opened, allowing up to 300 vehicles and 2,323 people daily. Ukrainian investigators say it is primarily a covert military logistics corridor. The 1km bridge took 495 days to build after delays. An estimated 11,000 North Korean troops are fighting in Ukraine, and South Korea's spy agency estimates $7–14bn in weapons transferred. The bridge was agreed during Putin's 2024 visit to Pyongyang.

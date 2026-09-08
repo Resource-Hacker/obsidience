@@ -1,28 +1,28 @@
 ---
 type: knowledge
 status: stable
-description: Hungary ordered 10 Russian diplomats to leave Budapest for "unacceptable"
-  activities, Foreign Minister Anita Orbán said. The new government under PM Péter
-  Magyar has pivoted sharply from Viktor Orbán's pro-Kremlin position. Russia's ambassador
-  called the move "extremely unfriendly" and an "unprecedented escalation." Th
+description: Hungarian Foreign Minister Anita Orbán ordered 10 Russian diplomats to
+  leave Budapest for taking part in "unacceptable" activities, marking a sharp break
+  from the pro-Kremlin stance of the previous Viktor Orbán government. Prime Minister
+  Péter Magyar's Tisza party, elected in April, has pivoted toward pragmatic relatio
 generated:
   by: obsidience/harness/knowledge/news.py
-  at: '2026-09-08T16:18:44.384Z'
+  at: '2026-09-08T17:28:18.262Z'
 resource: https://www.bbc.co.uk/news/articles/cddvzd1z53lo
 sources:
-- resource: source://b4c35e88-2a1c-4c6a-bdc0-0fb09f8f48bd
-- resource: source://52a856a8-133b-4d66-9951-32f228637d2e
-stale_after: '2026-09-09T18:05:06.121Z'
-title: Hungary expels 10 Russian diplomats in break from pro-Kremlin stance
+- resource: source://303392d4-8675-46ea-8cde-3fa43bcc3c47
+- resource: source://83ef7318-565c-4f9e-a410-4bd3e3ff8979
+stale_after: '2026-09-09T19:17:17.719Z'
+title: Hungary expels 10 Russian diplomats as relations with Kremlin worsen
 obsidience:
-  approved_at: '2026-09-08T09:18:51'
+  approved_at: '2026-09-08T10:28:26'
   provenance: proposed by Alexandria (task Tasks/ingest)
 ---
 
-Hungary ordered 10 Russian diplomats to leave Budapest for "unacceptable" activities, Foreign Minister Anita Orbán said. The new government under PM Péter Magyar has pivoted sharply from Viktor Orbán's pro-Kremlin position. Russia's ambassador called the move "extremely unfriendly" and an "unprecedented escalation." The Russian foreign ministry warned the response to the "Russophobic lobby will be harsh and painful."
+Hungarian Foreign Minister Anita Orbán ordered 10 Russian diplomats to leave Budapest for taking part in "unacceptable" activities, marking a sharp break from the pro-Kremlin stance of the previous Viktor Orbán government. Prime Minister Péter Magyar's Tisza party, elected in April, has pivoted toward pragmatic relations with Moscow and called on Russia to end the war in Ukraine. Russia's ambassador called the move "an unprecedented and ungrounded escalation."
 
-Date: 2026-09-08
+Report date: 2026-09-08
 URL: https://www.bbc.co.uk/news/articles/cddvzd1z53lo
-Source: source://b4c35e88-2a1c-4c6a-bdc0-0fb09f8f48bd
+Source: source://303392d4-8675-46ea-8cde-3fa43bcc3c47
 
-Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://52a856a8-133b-4d66-9951-32f228637d2e.
+Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://83ef7318-565c-4f9e-a410-4bd3e3ff8979.
