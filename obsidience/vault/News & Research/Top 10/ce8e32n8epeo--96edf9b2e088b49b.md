@@ -1,28 +1,28 @@
 ---
 type: knowledge
 status: stable
-description: 'An Amazon cargo Boeing 767-300 operated by 21 Air overshot the runway
-  at Miami International Airport on Sunday, striking a cleaning van and an SUV. Five
-  people were killed and five injured, all in the two ground vehicles. NTSB chairwoman
-  Jennifer Homendy called the scene "utter devastation." Flight recorders have been '
+description: Five people were killed and five injured when an Amazon-operated Boeing
+  767-300 overshot the runway at Miami International Airport on Sunday, striking a
+  cleaning van and an SUV. The NTSB described the scene as utter devastation and says
+  it is too early to identify a cause.
 generated:
   by: obsidience/harness/knowledge/news.py
-  at: '2026-09-08T21:07:52.824Z'
+  at: '2026-09-08T22:08:43.769Z'
 resource: https://www.bbc.co.uk/news/articles/ce8e32n8epeo
 sources:
-- resource: source://bf7b8a7f-2958-46e4-9b96-17e15245e2da
-- resource: source://f7d4ffce-c50d-4edf-ae9b-b615248a5c97
-stale_after: '2026-09-09T19:17:17.719Z'
-title: Five killed in Miami airport plane crash, all in two ground vehicles
+- resource: source://c016d0e1-99ea-4a5e-ada3-fb594d84deb9
+- resource: source://45bcf533-998d-43a5-bdf2-9750962db44d
+stale_after: '2026-09-10T00:05:14.589Z'
+title: Five killed in Miami cargo plane crash that struck vehicles on ground
 obsidience:
-  approved_at: '2026-09-08T14:08:00'
+  approved_at: '2026-09-08T15:08:52'
   provenance: proposed by Alexandria (task Tasks/ingest)
 ---
 
-An Amazon cargo Boeing 767-300 operated by 21 Air overshot the runway at Miami International Airport on Sunday, striking a cleaning van and an SUV. Five people were killed and five injured, all in the two ground vehicles. NTSB chairwoman Jennifer Homendy called the scene "utter devastation." Flight recorders have been recovered; investigators will examine flight systems, crew experience, and weather. BBC Verify found an active thunderstorm with 26-knot gusts near the airport shortly before the crash.
+Five people were killed and five injured when an Amazon-operated Boeing 767-300 overshot the runway at Miami International Airport on Sunday, striking a cleaning van and an SUV. The NTSB described the scene as utter devastation and says it is too early to identify a cause.
 
-Report date: 2026-09-07
-URL: https://www.bbc.co.uk/news/articles/ce8e32n8epeo
-Source: source://bf7b8a7f-2958-46e4-9b96-17e15245e2da
+Reported: 2026-09-07.
 
-Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://f7d4ffce-c50d-4edf-ae9b-b615248a5c97.
+Reporting: <https://www.bbc.co.uk/news/articles/ce8e32n8epeo> — source://c016d0e1-99ea-4a5e-ada3-fb594d84deb9
+
+Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://45bcf533-998d-43a5-bdf2-9750962db44d.

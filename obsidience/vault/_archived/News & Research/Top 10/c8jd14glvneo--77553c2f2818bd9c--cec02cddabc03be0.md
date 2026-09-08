@@ -1,6 +1,6 @@
 ---
 type: knowledge
-status: stable
+status: deprecated
 description: Argentina will file criminal charges against Navitas Petroleum and its
   executives for operating in waters off the Falkland Islands, days after President
   Milei called drilling a clear and urgent danger to Argentine sovereignty. The company
@@ -17,6 +17,8 @@ title: Argentina to file criminal case against oil company operating in Falkland
 obsidience:
   approved_at: '2026-09-08T14:08:01'
   provenance: proposed by Alexandria (task Tasks/ingest)
+  archived_at: '2026-09-08T22:08:53Z'
+  archive_reason: Publish the complete source-backed Top 10 edition
 ---
 
 Argentina will file criminal charges against Navitas Petroleum and its executives for operating in waters off the Falkland Islands, days after President Milei called drilling a clear and urgent danger to Argentine sovereignty. The company holds a 65% stake in the Sea Lion project with production planned for 2028. Britain insisted its commitment to the islands was unwavering.
