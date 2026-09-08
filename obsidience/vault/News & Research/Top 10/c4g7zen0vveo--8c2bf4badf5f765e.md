@@ -7,15 +7,15 @@ description: The UK announced a comprehensive sanctions regime targeting illegal
   France and Canada, will ban settlement goods and target companies supporting se
 generated:
   by: obsidience/harness/knowledge/news.py
-  at: '2026-09-08T22:08:43.769Z'
+  at: '2026-09-08T23:10:47.162Z'
 resource: https://www.bbc.co.uk/news/articles/c4g7zen0vveo
 sources:
 - resource: source://c99a8c2a-5bc7-4dd2-b89f-36723b101b61
-- resource: source://45bcf533-998d-43a5-bdf2-9750962db44d
+- resource: source://058620ef-b321-416b-b4ce-3cbe4d8866ba
 stale_after: '2026-09-09T22:05:39.102Z'
 title: UK announces sanctions on West Bank settlements, Israel shuts UK consulate
 obsidience:
-  approved_at: '2026-09-08T15:08:50'
+  approved_at: '2026-09-08T16:10:54'
   provenance: proposed by Alexandria (task Tasks/ingest)
 ---
 
@@ -25,4 +25,4 @@ Reported: 2026-09-08.
 
 Reporting: <https://www.bbc.co.uk/news/articles/c4g7zen0vveo> — source://c99a8c2a-5bc7-4dd2-b89f-36723b101b61
 
-Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://45bcf533-998d-43a5-bdf2-9750962db44d.
+Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://058620ef-b321-416b-b4ce-3cbe4d8866ba.
