@@ -1,6 +1,6 @@
 ---
 type: knowledge
-status: stable
+status: deprecated
 description: The Eiffel Tower closed Monday after staff went on strike following the
   removal of female workers during a visit by a Hindu religious group's delegation.
   Union representative Diane Davoine said women were "humiliated" and asked to leave
@@ -17,6 +17,10 @@ title: Eiffel Tower shut by staff strike over religious visit incident
 obsidience:
   approved_at: '2026-09-07T23:16:52'
   provenance: proposed by Alexandria (task Tasks/ingest)
+  archived_at: '2026-09-08T07:17:04Z'
+  archive_reason: Newer Top 10 edition (captured 07:05) replaces current edition (captured
+    06:05). Four stories are new, four are dropped, six are retained. All summaries
+    verified accurate against their direct sources.
 ---
 
 The Eiffel Tower closed Monday after staff went on strike following the removal of female workers during a visit by a Hindu religious group's delegation. Union representative Diane Davoine said women were "humiliated" and asked to leave their posts so men could be placed there. Operator SETE said the conditions "should not have been accepted." Paris Mayor Grégoire announced an investigation, and several French politicians condemned the incident.
