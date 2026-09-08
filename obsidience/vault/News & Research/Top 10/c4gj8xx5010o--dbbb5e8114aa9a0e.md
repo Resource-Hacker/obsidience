@@ -1,28 +1,27 @@
 ---
 type: knowledge
 status: stable
-description: 'President Trump warned Bombardier it can no longer sell in the US unless
-  it moves manufacturing there, posting on Truth Social: "NO MORE SELLING BOMBARDIER
-  IN THE UNITED STATES!" The threat came amid an escalating trade war, hours before
-  Canadian retaliatory tariffs on $20 billion of US goods. Bombardier employs thousa'
+description: President Trump warned Canadian aircraft maker Bombardier it can no longer
+  sell in the US unless it manufactures there, posting on Truth Social. The threat
+  came hours before Canada was set to impose retaliatory tariffs on $20bn of US goods
+  after trade talks collapsed. Bombardier employs 3,500 American workers across 10
 generated:
   by: obsidience/harness/knowledge/news.py
-  at: '2026-09-08T05:13:45.138Z'
+  at: '2026-09-08T06:16:44.884Z'
 resource: https://www.bbc.co.uk/news/articles/c4gj8xx5010o?at_campaign=rss&at_medium=RSS
 sources:
 - resource: source://215f171e-b536-4a86-b02b-5face1e8b613
-- resource: source://d9f5df6d-5a56-4965-8aad-e5619e1d283a
-stale_after: '2026-09-09T07:05:20.264Z'
-title: Trump threatens to stop sale of Canadian Bombardier jets in US
+- resource: source://409050e4-93f1-47c0-8c6e-07bf132f4fd9
+stale_after: '2026-09-09T08:05:59.320Z'
+title: Trump threatens to block Bombardier jet sales in US
 obsidience:
-  approved_at: '2026-09-07T22:13:52'
+  approved_at: '2026-09-07T23:16:51'
   provenance: proposed by Alexandria (task Tasks/ingest)
 ---
 
-President Trump warned Bombardier it can no longer sell in the US unless it moves manufacturing there, posting on Truth Social: "NO MORE SELLING BOMBARDIER IN THE UNITED STATES!" The threat came amid an escalating trade war, hours before Canadian retaliatory tariffs on $20 billion of US goods. Bombardier employs thousands of American workers and operates sites across 9 US states and DC. Quebec's premier called the company a flagship of her province's economy.
+President Trump warned Canadian aircraft maker Bombardier it can no longer sell in the US unless it manufactures there, posting on Truth Social. The threat came hours before Canada was set to impose retaliatory tariffs on $20bn of US goods after trade talks collapsed. Bombardier employs 3,500 American workers across 10 US states and DC. Quebec's premier called the threat provocative, saying her province "will not allow anyone to dictate where our companies must produce."
 
-Reported: 2026-09-07
-URL: https://www.bbc.co.uk/news/articles/c4gj8xx5010o
-Source: source://215f171e-b536-4a86-b02b-5face1e8b613
+Report date: 2026-09-08
+Source: https://www.bbc.co.uk/news/articles/c4gj8xx5010o | source://215f171e-b536-4a86-b02b-5face1e8b613
 
-Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://d9f5df6d-5a56-4965-8aad-e5619e1d283a.
+Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://409050e4-93f1-47c0-8c6e-07bf132f4fd9.
