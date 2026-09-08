@@ -4,7 +4,7 @@ status: stable
 description: President Donald Trump has warned Canadian aircraft company Bombardier
   that it cannot sell in the US unless it moves manufacturing to America. The threat
   comes amid an escalating trade war between the two neighbors. Bombardier already
-  operates a factory in Kansas employing 3,500 American workers.
+  operates a factory in Kansas and employs 3,500 American workers.
 generated:
   by: obsidience/harness/knowledge/news.py
   at: '2026-09-08T00:41:14.864Z'
@@ -15,11 +15,11 @@ sources:
 stale_after: '2026-09-09T02:21:46.523Z'
 title: Trump threatens to stop sale of Canadian Bombardier jets in US
 obsidience:
-  approved_at: '2026-09-07T17:41:25'
-  provenance: proposed by Alexandria (task Tasks/ingest)
+  approved_at: '2026-09-07T17:46:51'
+  provenance: proposed by Codex owner-authorized correction (task )
 ---
 
-President Donald Trump has warned Canadian aircraft company Bombardier that it cannot sell in the US unless it moves manufacturing to America. The threat comes amid an escalating trade war between the two neighbors. Bombardier already operates a factory in Kansas employing 3,500 American workers.
+President Donald Trump has warned Canadian aircraft company Bombardier that it cannot sell in the US unless it moves manufacturing to America. The threat comes amid an escalating trade war between the two neighbors. Bombardier already operates a factory in Kansas and employs 3,500 American workers.
 
 Report date: 2026-09-07
 URL: https://www.bbc.co.uk/news/articles/c4gj8xx5010o?at_campaign=rss&at_medium=RSS
