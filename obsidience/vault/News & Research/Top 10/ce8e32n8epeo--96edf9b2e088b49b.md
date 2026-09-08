@@ -1,27 +1,24 @@
 ---
 type: knowledge
 status: stable
-description: The NTSB recovered both flight recorders from the Boeing 767-300 that
-  overshot the runway at Miami International Airport, killing five and seriously injuring
-  five. The plane hit a cleaning van and a Toyota before coming to rest 394m beyond
-  the runway. BBC Verify found an active thunderstorm with 26-knot gusts shortly b
+description: An Amazon cargo Boeing 767-300 overshot the runway at Miami International
+  Airport Sunday, striking a cleaning van and a Toyota SUV. NTSB chairwoman Jennifer
+  Homendy called the scene "utter devastation." Five people were killed and five injured.
+  Flight recorders have been recovered; investigators will examine crew exper
 generated:
   by: obsidience/harness/knowledge/news.py
-  at: '2026-09-08T09:15:36.029Z'
+  at: '2026-09-08T10:17:49.534Z'
 resource: https://www.bbc.co.uk/news/articles/ce8e32n8epeo
 sources:
-- resource: source://9aaeb914-0157-449d-9ac7-4c82f47b9173
-- resource: source://79400453-4732-4535-b896-84bc4523eee5
-stale_after: '2026-09-09T11:06:37.128Z'
-title: Flight recorders recovered from Miami Amazon plane crash
+- resource: source://6879b9b7-0184-4990-b704-0590a9896f85
+- resource: source://f5729bd6-1925-4cf1-85c8-6712f21521ed
+stale_after: '2026-09-09T12:06:30.494Z'
+title: Five killed in Miami plane crash; victims in two ground vehicles
 obsidience:
-  approved_at: '2026-09-08T02:15:43'
+  approved_at: '2026-09-08T03:17:55'
   provenance: proposed by Alexandria (task Tasks/ingest)
 ---
 
-The NTSB recovered both flight recorders from the Boeing 767-300 that overshot the runway at Miami International Airport, killing five and seriously injuring five. The plane hit a cleaning van and a Toyota before coming to rest 394m beyond the runway. BBC Verify found an active thunderstorm with 26-knot gusts shortly before impact.
-Date: 2026-09-07
-URL: https://www.bbc.co.uk/news/articles/ce8e32n8epeo
-Source: source://9aaeb914-0157-449d-9ac7-4c82f47b9173
+An Amazon cargo Boeing 767-300 overshot the runway at Miami International Airport Sunday, striking a cleaning van and a Toyota SUV. NTSB chairwoman Jennifer Homendy called the scene "utter devastation." Five people were killed and five injured. Flight recorders have been recovered; investigators will examine crew experience, weather, and whether the runway should have had an arresting system. Date: 2026-09-07 URL: https://www.bbc.co.uk/news/articles/ce8e32n8epeo Source: source://6879b9b7-0184-4990-b704-0590a9896f85
 
-Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://79400453-4732-4535-b896-84bc4523eee5.
+Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://f5729bd6-1925-4cf1-85c8-6712f21521ed.
