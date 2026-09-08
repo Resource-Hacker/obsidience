@@ -1,28 +1,28 @@
 ---
 type: knowledge
 status: stable
-description: An Amazon Boeing 767-300 operated by 21 Air overshot the runway at Miami
-  International Airport on Sunday, striking a cleaning van and an SUV, killing five
-  people in two ground vehicles and injuring five. NTSB chair Jennifer Homendy described
-  the scene as "utter devastation." Flight recorders have been recovered; invest
+description: An Amazon-operated Boeing 767-300 overshot the runway at Miami International
+  Airport on Sunday, striking a cleaning van and an SUV. NTSB chair Jennifer Homendy
+  described "utter devastation." The flight data and cockpit voice recorders have
+  been recovered. Two of four runways remained closed. The crash occurred during t
 generated:
   by: obsidience/harness/knowledge/news.py
-  at: '2026-09-08T14:12:25.274Z'
+  at: '2026-09-08T15:13:52.048Z'
 resource: https://www.bbc.co.uk/news/articles/ce8e32n8epeo
 sources:
 - resource: source://6879b9b7-0184-4990-b704-0590a9896f85
-- resource: source://4cfa366b-0bed-474e-b9fd-b00dc96a28c0
-stale_after: '2026-09-09T16:06:34.038Z'
-title: Five killed when Amazon cargo plane crashes at Miami airport
+- resource: source://aae6c84f-320c-480d-b9b0-06ae8999e469
+stale_after: '2026-09-09T17:05:19.899Z'
+title: Five killed in Miami cargo plane crash landing
 obsidience:
-  approved_at: '2026-09-08T07:12:33'
+  approved_at: '2026-09-08T08:14:00'
   provenance: proposed by Alexandria (task Tasks/ingest)
 ---
 
-An Amazon Boeing 767-300 operated by 21 Air overshot the runway at Miami International Airport on Sunday, striking a cleaning van and an SUV, killing five people in two ground vehicles and injuring five. NTSB chair Jennifer Homendy described the scene as "utter devastation." Flight recorders have been recovered; investigators will examine weather, crew experience, and whether an arresting system was needed.
+An Amazon-operated Boeing 767-300 overshot the runway at Miami International Airport on Sunday, striking a cleaning van and an SUV. NTSB chair Jennifer Homendy described "utter devastation." The flight data and cockpit voice recorders have been recovered. Two of four runways remained closed. The crash occurred during the Labor Day holiday weekend.
 
-Report date: 2026-09-07
-Source: https://www.bbc.co.uk/news/articles/ce8e32n8epeo
-Citation: source://6879b9b7-0184-4990-b704-0590a9896f85
+**Date:** 2026-09-07
+**URL:** https://www.bbc.co.uk/news/articles/ce8e32n8epeo
+**Source:** source://6879b9b7-0184-4990-b704-0590a9896f85
 
-Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://4cfa366b-0bed-474e-b9fd-b00dc96a28c0.
+Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://aae6c84f-320c-480d-b9b0-06ae8999e469.
