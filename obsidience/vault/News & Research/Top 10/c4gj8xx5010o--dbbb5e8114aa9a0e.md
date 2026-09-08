@@ -1,29 +1,28 @@
 ---
 type: knowledge
 status: stable
-description: 'President Trump warned Bombardier it can "no longer sell" in the US
-  unless it moves manufacturing there, posting the threat hours before Canada was
-  scheduled to impose retaliatory tariffs on $20 bn of US goods. The Montreal-based
-  company employs thousands of American workers and contributed C$7.4 bn to Canada''s
-  GDP in '
+description: Trump posted on Truth Social that Bombardier can no longer sell aircraft
+  in the US unless it moves manufacturing there, hours before Canada imposed retaliatory
+  tariffs on $20bn of US goods. Bombardier employs thousands of American workers and
+  contributes C$7.4bn to Canada's GDP. Quebec's premier called the company "a f
 generated:
   by: obsidience/harness/knowledge/news.py
-  at: '2026-09-08T01:18:58.955Z'
+  at: '2026-09-08T02:12:59.046Z'
 resource: https://www.bbc.co.uk/news/articles/c4gj8xx5010o?at_campaign=rss&at_medium=RSS
 sources:
 - resource: source://215f171e-b536-4a86-b02b-5face1e8b613
-- resource: source://3c003a27-5092-4885-8afe-9b467ba1c58c
-stale_after: '2026-09-09T03:06:46.161Z'
-title: Trump threatens to stop sale of Canadian Bombardier jets in US
+- resource: source://51fae0f3-f788-4248-b2b8-d3b92cc3d13b
+stale_after: '2026-09-09T04:06:05.534Z'
+title: Trump threatens to stop sale of Canadian Bombardier jets in the US
 obsidience:
-  approved_at: '2026-09-07T18:23:48'
-  provenance: proposed by Codex owner-authorized correction (task )
+  approved_at: '2026-09-07T19:13:05'
+  provenance: proposed by Alexandria (task Tasks/ingest)
 ---
 
-President Trump warned Bombardier it can "no longer sell" in the US unless it moves manufacturing there, posting the threat hours before Canada was scheduled to impose retaliatory tariffs on $20 bn of US goods. The Montreal-based company employs thousands of American workers and contributed C$7.4 bn to Canada's GDP in 2024. Trade talks between the two countries collapsed late last month.
+Trump posted on Truth Social that Bombardier can no longer sell aircraft in the US unless it moves manufacturing there, hours before Canada imposed retaliatory tariffs on $20bn of US goods. Bombardier employs thousands of American workers and contributes C$7.4bn to Canada's GDP. Quebec's premier called the company "a flagship of our economy" and pledged support.
 
-Date: 2026-09-07
+Report date: 2026-09-07
 URL: https://www.bbc.co.uk/news/articles/c4gj8xx5010o
 Source: source://215f171e-b536-4a86-b02b-5face1e8b613
 
-Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://3c003a27-5092-4885-8afe-9b467ba1c58c.
+Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://51fae0f3-f788-4248-b2b8-d3b92cc3d13b.
