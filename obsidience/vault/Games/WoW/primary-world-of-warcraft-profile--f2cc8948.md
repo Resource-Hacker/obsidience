@@ -1,17 +1,17 @@
 ---
-approved_at: '2026-08-26T23:21:19'
-kind: knowledge
-provenance: proposed by Alexandria (task Tasks/link)
+type: knowledge
 title: Primary World of Warcraft profile
+obsidience:
+  approved_at: '2026-09-08T10:52:35'
+  provenance: proposed by Alexandria (task Tasks/link)
 ---
 
-The user primary World of Warcraft Retail character and profile is Squancher on BurningLegion.
+The owner's primary World of Warcraft Retail character and profile is Squancher
+on BurningLegion.
 
 ## Relationships
 
-- `related_to` [[ADMECH Workstation/Software/Games/World of Warcraft/world-of-warcraft-launch-policy--3e5e73cc|World of Warcraft launch policy]] — This primary character profile is the account context and configured movement/input target for the established WoW launch policy.
-- `related_to` [[ADMECH Workstation/Software/Games/World of Warcraft/world-of-warcraft-launch-stack--e6b9594b|World of Warcraft launch stack]] — The launch stack documents the concrete Retail launcher chain behind the launch policy for which this profile is the configured target.
-- `related_to` [[ADMECH Workstation/Software/Games/World of Warcraft/wow-relaunch-after-exit-self-heals--9270e321|WoW relaunch after exit self-heals]] — The relaunch self-heal governs repeated launches of this configured primary profile under the established WoW launch policy.
-- `related_to` [[Agents/Executive/Observations/game-interaction-authority-and-interests--463cc7c8|Game interaction authority and interests]] — The primary character defines the in-game context for Executive's authorized observation and interaction.
-- `related_to` [[Agents/Executive/Observations/plain-language-game-assistance--c7b2f41f|Plain-language game assistance preference]] — Plain-language requests to finish remaining World of Warcraft talents apply to this primary Squancher profile once the required observation and verification controls are satisfied.
-- `related_to` [[ADMECH Workstation/Hardware/Displays/Samsung Odyssey OLED G9/samsung-display-vrr-and-edid-configuration--96ccfd7b|Samsung Display VRR and EDID Configuration]] — The Samsung display configuration's required KWin direct-scanout setting supports the mouselook suite used on this primary character.
+- `related_to` [World of Warcraft launch policy](/ADMECH%20Workstation/Software/Games/World%20of%20Warcraft/world-of-warcraft-launch-policy--3e5e73cc.md) — This primary character profile is the account context and configured movement/input target for the established WoW launch policy.
+- `related_to` [Squancher talent-placement policy](/Games/WoW/squancher-talent-completion-policy--ca86ac4e.md) — The bounded talent policy applies to this exact character and realm.
+- `related_to` [Game interaction preferences](/Agents/Executive/Observations/Preferences/games.md) — The primary character supplies account context for the owner's plain-language game requests and standing interaction authority.
+- `related_to` [Gaming performance and visual-quality priorities](/ADMECH%20Workstation/Software/Games/gaming-performance-and-visual-quality-priorities--595700d3.md) — This primary profile is the World of Warcraft account context where those performance and visual-quality priorities apply, especially to graphics and operating-system regressions.
