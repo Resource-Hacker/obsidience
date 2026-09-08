@@ -1,6 +1,6 @@
 ---
 type: knowledge
-status: stable
+status: deprecated
 description: Five Indonesian airports reopened past midnight Tuesday after Anak Krakatau's
   eruption forced two days of closures. Nearly 3,000 flights were disrupted and more
   than 340,000 passengers were stranded. Volcanic ash reached 6,000m on Java's side
@@ -17,6 +17,12 @@ title: Indonesia airports reopen after volcano eruption strands 340,000
 obsidience:
   approved_at: '2026-09-07T21:17:11'
   provenance: proposed by Alexandria (task Tasks/ingest)
+  archived_at: '2026-09-08T05:13:54Z'
+  archive_reason: 'New Top 10 edition from inbox source://d9f5df6d-5a56-4965-8aad-e5619e1d283a
+    (captured 2026-09-08T05:05:20.264Z) supersedes previous edition (inbox source://562bccd2,
+    captured 2026-09-08T04:07:15.558Z). Corrections: story 2 source says troops ''fighting
+    Ukrainians in Russia'' not ''fighting in Ukraine''; story 3 source lists 9 US
+    states plus DC not 11 states plus DC.'
 ---
 
 Five Indonesian airports reopened past midnight Tuesday after Anak Krakatau's eruption forced two days of closures. Nearly 3,000 flights were disrupted and more than 340,000 passengers were stranded. Volcanic ash reached 6,000m on Java's side and 15,000m on Sumatra's. The Geological Agency warned the probability of further eruptions remains high. No tsunami warning was issued.
