@@ -1,29 +1,27 @@
 ---
 type: knowledge
 status: stable
-description: The NTSB recovered flight recorders from the Amazon cargo plane that
-  overshot the runway at Miami International Airport Sunday, killing five and injuring
-  five. The Boeing 767 hit a cleaning van and a Toyota after overrunning the runway.
-  The investigation is in its fact-finding stage. Two runways remain closed during
-  th
+description: The NTSB recovered both flight recorders from the Boeing 767-300 that
+  overshot the runway at Miami International Airport, killing five and seriously injuring
+  five. The plane hit a cleaning van and a Toyota before coming to rest 394m beyond
+  the runway. BBC Verify found an active thunderstorm with 26-knot gusts shortly b
 generated:
   by: obsidience/harness/knowledge/news.py
-  at: '2026-09-08T08:18:18.705Z'
+  at: '2026-09-08T09:15:36.029Z'
 resource: https://www.bbc.co.uk/news/articles/ce8e32n8epeo
 sources:
 - resource: source://9aaeb914-0157-449d-9ac7-4c82f47b9173
-- resource: source://fd3de0c9-4cb8-44d4-8a3b-e3f91e8945d0
-stale_after: '2026-09-09T10:06:59.363Z'
-title: Flight recorders recovered from Miami Amazon cargo plane crash
+- resource: source://79400453-4732-4535-b896-84bc4523eee5
+stale_after: '2026-09-09T11:06:37.128Z'
+title: Flight recorders recovered from Miami Amazon plane crash
 obsidience:
-  approved_at: '2026-09-08T01:18:26'
+  approved_at: '2026-09-08T02:15:43'
   provenance: proposed by Alexandria (task Tasks/ingest)
 ---
 
-The NTSB recovered flight recorders from the Amazon cargo plane that overshot the runway at Miami International Airport Sunday, killing five and injuring five. The Boeing 767 hit a cleaning van and a Toyota after overrunning the runway. The investigation is in its fact-finding stage. Two runways remain closed during the Labor Day weekend.
+The NTSB recovered both flight recorders from the Boeing 767-300 that overshot the runway at Miami International Airport, killing five and seriously injuring five. The plane hit a cleaning van and a Toyota before coming to rest 394m beyond the runway. BBC Verify found an active thunderstorm with 26-knot gusts shortly before impact.
+Date: 2026-09-07
+URL: https://www.bbc.co.uk/news/articles/ce8e32n8epeo
+Source: source://9aaeb914-0157-449d-9ac7-4c82f47b9173
 
-**Date:** 2026-09-07
-**URL:** https://www.bbc.co.uk/news/articles/ce8e32n8epeo
-**Source:** source://9aaeb914-0157-449d-9ac7-4c82f47b9173
-
-Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://fd3de0c9-4cb8-44d4-8a3b-e3f91e8945d0.
+Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://79400453-4732-4535-b896-84bc4523eee5.

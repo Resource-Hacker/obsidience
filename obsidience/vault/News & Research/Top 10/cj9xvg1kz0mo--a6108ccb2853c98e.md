@@ -1,28 +1,27 @@
 ---
 type: knowledge
 status: stable
-description: Russia and North Korea opened their first road bridge across the Tumen
-  river, enabling cargo and passenger movement. Ukrainian investigators say it primarily
-  establishes a covert military logistics corridor supporting Russia's war. The bridge
-  took 495 days to complete. Up to 300 vehicles and 2,323 people can cross dail
+description: 'The first road bridge linking Russia and North Korea has opened across
+  the Tumen river, allowing up to 300 vehicles and 2,323 people daily. Ukraine''s
+  Truth Hounds say it is "primarily" a covert military logistics corridor. An estimated
+  11,000 North Korean troops are fighting in Ukraine, and South Korean spies estimate '
 generated:
   by: obsidience/harness/knowledge/news.py
-  at: '2026-09-08T08:18:18.705Z'
+  at: '2026-09-08T09:15:36.029Z'
 resource: https://www.bbc.co.uk/news/articles/cj9xvg1kz0mo
 sources:
-- resource: source://7ac2e3ae-5651-4d22-a3e0-b8b37cd20a06
-- resource: source://fd3de0c9-4cb8-44d4-8a3b-e3f91e8945d0
-stale_after: '2026-09-09T10:06:59.363Z'
-title: Russia and North Korea open first road bridge
+- resource: source://46bad865-de0c-4d16-9491-81b043256303
+- resource: source://79400453-4732-4535-b896-84bc4523eee5
+stale_after: '2026-09-09T11:06:37.128Z'
+title: North Korea and Russia open first road bridge
 obsidience:
-  approved_at: '2026-09-08T01:18:25'
+  approved_at: '2026-09-08T02:15:42'
   provenance: proposed by Alexandria (task Tasks/ingest)
 ---
 
-Russia and North Korea opened their first road bridge across the Tumen river, enabling cargo and passenger movement. Ukrainian investigators say it primarily establishes a covert military logistics corridor supporting Russia's war. The bridge took 495 days to complete. Up to 300 vehicles and 2,323 people can cross daily. Around 11,000 North Korean troops are estimated fighting in Russia.
+The first road bridge linking Russia and North Korea has opened across the Tumen river, allowing up to 300 vehicles and 2,323 people daily. Ukraine's Truth Hounds say it is "primarily" a covert military logistics corridor. An estimated 11,000 North Korean troops are fighting in Ukraine, and South Korean spies estimate $7-14bn in weapons already transferred.
+Date: 2026-09-08
+URL: https://www.bbc.co.uk/news/articles/cj9xvg1kz0mo
+Source: source://46bad865-de0c-4d16-9491-81b043256303
 
-**Date:** 2026-09-08
-**URL:** https://www.bbc.co.uk/news/articles/cj9xvg1kz0mo
-**Source:** source://7ac2e3ae-5651-4d22-a3e0-b8b37cd20a06
-
-Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://fd3de0c9-4cb8-44d4-8a3b-e3f91e8945d0.
+Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://79400453-4732-4535-b896-84bc4523eee5.

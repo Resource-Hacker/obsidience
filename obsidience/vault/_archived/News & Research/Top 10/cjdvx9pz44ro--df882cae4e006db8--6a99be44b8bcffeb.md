@@ -1,6 +1,6 @@
 ---
 type: knowledge
-status: stable
+status: deprecated
 description: BBC Verify analysis shows Kyiv is suffering more daily air raid alerts
   than any period since 2022, averaging 10 per day since late August. Russia's new
   tactic of daytime strikes disrupts schools, businesses, and transport. Russia launched
@@ -18,6 +18,11 @@ title: Kyiv air raid alerts at record high as Russia strikes round the clock
 obsidience:
   approved_at: '2026-09-08T01:18:26'
   provenance: proposed by Alexandria (task Tasks/ingest)
+  archived_at: '2026-09-08T09:15:44Z'
+  archive_reason: Newer Top 10 edition (captured 2026-09-08T09:06:37.128Z) replaces
+    prior edition (captured 2026-09-08T08:06:59.363Z). All ten handoff summaries verified
+    accurate against direct sources. Mladic story now sourced from DW; Kyiv air raid
+    alerts removed; Nepal flood survivors added.
 ---
 
 BBC Verify analysis shows Kyiv is suffering more daily air raid alerts than any period since 2022, averaging 10 per day since late August. Russia's new tactic of daytime strikes disrupts schools, businesses, and transport. Russia launched 2,800 fast jet-powered drones in August. Zelensky convened an emergency meeting to develop new interceptors. Only about 60 percent are being shot down.
