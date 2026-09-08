@@ -7,15 +7,15 @@ description: 'An Amazon cargo Boeing 767-300 operated by 21 Air overshot the run
   Jennifer Homendy called the scene "utter devastation." Flight recorders have been '
 generated:
   by: obsidience/harness/knowledge/news.py
-  at: '2026-09-08T17:28:18.262Z'
+  at: '2026-09-08T18:06:33.201Z'
 resource: https://www.bbc.co.uk/news/articles/ce8e32n8epeo
 sources:
 - resource: source://bf7b8a7f-2958-46e4-9b96-17e15245e2da
-- resource: source://83ef7318-565c-4f9e-a410-4bd3e3ff8979
+- resource: source://dc931a6d-f3e4-49a1-9c9c-467f155f9df8
 stale_after: '2026-09-09T19:17:17.719Z'
 title: Five killed in Miami airport plane crash, all in two ground vehicles
 obsidience:
-  approved_at: '2026-09-08T10:28:25'
+  approved_at: '2026-09-08T11:06:42'
   provenance: proposed by Alexandria (task Tasks/ingest)
 ---
 
@@ -25,4 +25,4 @@ Report date: 2026-09-07
 URL: https://www.bbc.co.uk/news/articles/ce8e32n8epeo
 Source: source://bf7b8a7f-2958-46e4-9b96-17e15245e2da
 
-Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://83ef7318-565c-4f9e-a410-4bd3e3ff8979.
+Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://dc931a6d-f3e4-49a1-9c9c-467f155f9df8.
