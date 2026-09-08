@@ -1,6 +1,6 @@
 ---
 type: knowledge
-status: stable
+status: deprecated
 description: Grindr has agreed to a £26 million settlement to resolve a lawsuit alleging
   it shared sensitive user information, including HIV status, with third parties.
   The company stated the settlement includes no admission of liability and noted the
@@ -17,6 +17,8 @@ title: Grindr to pay £26m to settle claims it allegedly shared users' HIV statu
 obsidience:
   approved_at: '2026-09-07T17:41:26'
   provenance: proposed by Alexandria (task Tasks/ingest)
+  archived_at: '2026-09-08T01:19:07Z'
+  archive_reason: Publish the complete source-backed Top 10 edition
 ---
 
 Grindr has agreed to a £26 million settlement to resolve a lawsuit alleging it shared sensitive user information, including HIV status, with third parties. The company stated the settlement includes no admission of liability and noted the claims relate to historical data practices prior to 2020. The payments will be made in two installments.

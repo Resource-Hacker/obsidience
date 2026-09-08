@@ -1,29 +1,28 @@
 ---
 type: knowledge
 status: stable
-description: Nepal observed a national day of mourning following a devastating flash
-  flood believed to have been triggered by a glacial collapse. The disaster killed
-  at least 1,287 people and left over 5,000 missing. Rescue operations continue in
-  the Himalayan valley, with authorities focusing on search efforts in tunnels and
-  remot
+description: Nepal marked the last day of its 13-day Hindu mourning period for victims
+  of a glacial flash flood that killed at least 1,287 people. More than 5,000 remain
+  missing. Rescue teams continue searching ground, air, and tunnel sites at hydropower
+  stations. A 64-year-old woman was pulled alive from her buried house more than
 generated:
   by: obsidience/harness/knowledge/news.py
-  at: '2026-09-08T00:41:14.864Z'
+  at: '2026-09-08T01:18:58.955Z'
 resource: https://www.bbc.co.uk/news/articles/c2kw1qek7gdo?at_campaign=rss&at_medium=RSS
 sources:
-- resource: source://16882046-b837-467a-8c7d-0c5a4bc07b67
-- resource: source://03c0cfca-405e-40c8-9953-5772530c63da
-stale_after: '2026-09-09T02:21:46.523Z'
-title: Nepal holds national day of mourning for victims of flash flood disaster
+- resource: source://52e7fc88-0cfb-4a16-acbb-9d3b60c2b6a3
+- resource: source://3c003a27-5092-4885-8afe-9b467ba1c58c
+stale_after: '2026-09-09T03:06:46.161Z'
+title: Nepal observes national day of mourning for flash flood victims
 obsidience:
-  approved_at: '2026-09-07T17:41:26'
+  approved_at: '2026-09-07T18:19:06'
   provenance: proposed by Alexandria (task Tasks/ingest)
 ---
 
-Nepal observed a national day of mourning following a devastating flash flood believed to have been triggered by a glacial collapse. The disaster killed at least 1,287 people and left over 5,000 missing. Rescue operations continue in the Himalayan valley, with authorities focusing on search efforts in tunnels and remote areas.
+Nepal marked the last day of its 13-day Hindu mourning period for victims of a glacial flash flood that killed at least 1,287 people. More than 5,000 remain missing. Rescue teams continue searching ground, air, and tunnel sites at hydropower stations. A 64-year-old woman was pulled alive from her buried house more than 10 days after the disaster.
 
-Report date: 2026-09-07
-URL: https://www.bbc.co.uk/news/articles/c2kw1qek7gdo?at_campaign=rss&at_medium=RSS
-Source: source://16882046-b837-467a-8c7d-0c5a4bc07b67
+Date: 2026-09-07
+URL: https://www.bbc.co.uk/news/articles/c2kw1qek7gdo
+Source: source://52e7fc88-0cfb-4a16-acbb-9d3b60c2b6a3
 
-Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://03c0cfca-405e-40c8-9953-5772530c63da.
+Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://3c003a27-5092-4885-8afe-9b467ba1c58c.

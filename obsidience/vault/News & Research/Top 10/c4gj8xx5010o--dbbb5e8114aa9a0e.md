@@ -1,28 +1,28 @@
 ---
 type: knowledge
 status: stable
-description: President Donald Trump has warned Canadian aircraft company Bombardier
-  that it cannot sell in the US unless it moves manufacturing to America. The threat
-  comes amid an escalating trade war between the two neighbors. Bombardier already
-  operates a factory in Kansas and employs 3,500 American workers.
+description: President Trump warned Bombardier it can "no longer sell" in the US unless
+  it moves manufacturing there, posting the threat hours before Canada imposed retaliatory
+  tariffs on $20 bn of US goods. The Montreal-based company employs thousands of American
+  workers and contributed C$7.4 bn to Canada's GDP in 2024. Trade talk
 generated:
   by: obsidience/harness/knowledge/news.py
-  at: '2026-09-08T00:41:14.864Z'
+  at: '2026-09-08T01:18:58.955Z'
 resource: https://www.bbc.co.uk/news/articles/c4gj8xx5010o?at_campaign=rss&at_medium=RSS
 sources:
-- resource: source://733820fc-d05a-41c6-8ced-004dd12e2f40
-- resource: source://03c0cfca-405e-40c8-9953-5772530c63da
-stale_after: '2026-09-09T02:21:46.523Z'
+- resource: source://215f171e-b536-4a86-b02b-5face1e8b613
+- resource: source://3c003a27-5092-4885-8afe-9b467ba1c58c
+stale_after: '2026-09-09T03:06:46.161Z'
 title: Trump threatens to stop sale of Canadian Bombardier jets in US
 obsidience:
-  approved_at: '2026-09-07T17:46:51'
-  provenance: proposed by Codex owner-authorized correction (task )
+  approved_at: '2026-09-07T18:19:05'
+  provenance: proposed by Alexandria (task Tasks/ingest)
 ---
 
-President Donald Trump has warned Canadian aircraft company Bombardier that it cannot sell in the US unless it moves manufacturing to America. The threat comes amid an escalating trade war between the two neighbors. Bombardier already operates a factory in Kansas and employs 3,500 American workers.
+President Trump warned Bombardier it can "no longer sell" in the US unless it moves manufacturing there, posting the threat hours before Canada imposed retaliatory tariffs on $20 bn of US goods. The Montreal-based company employs thousands of American workers and contributed C$7.4 bn to Canada's GDP in 2024. Trade talks between the two countries collapsed late last month.
 
-Report date: 2026-09-07
-URL: https://www.bbc.co.uk/news/articles/c4gj8xx5010o?at_campaign=rss&at_medium=RSS
-Source: source://733820fc-d05a-41c6-8ced-004dd12e2f40
+Date: 2026-09-07
+URL: https://www.bbc.co.uk/news/articles/c4gj8xx5010o
+Source: source://215f171e-b536-4a86-b02b-5face1e8b613
 
-Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://03c0cfca-405e-40c8-9953-5772530c63da.
+Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://3c003a27-5092-4885-8afe-9b467ba1c58c.

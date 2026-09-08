@@ -1,28 +1,28 @@
 ---
 type: knowledge
 status: stable
-description: Israeli air strikes in southern Lebanon killed at least 12 people in
-  Kfar Roummane, according to Lebanon's health ministry. Eleven, including two children
-  and four women, died in a residential building, and a paramedic was killed in a
-  separate strike on a vehicle. President Joseph Aoun warned that the escalation jeopar
+description: Israeli air strikes destroyed a residential building in Kfar Roummane,
+  killing at least 12 people including two children and four women, the Lebanese health
+  ministry said. A second strike killed a paramedic. At least 27 people have been
+  killed in the south over three days. President Aoun warned the escalation is jeopar
 generated:
   by: obsidience/harness/knowledge/news.py
-  at: '2026-09-08T00:41:14.864Z'
+  at: '2026-09-08T01:18:58.955Z'
 resource: https://www.bbc.co.uk/news/articles/c5yl96vz0edo?at_campaign=rss&at_medium=RSS
 sources:
-- resource: source://73b40094-00e8-4660-b481-c969d863453c
-- resource: source://03c0cfca-405e-40c8-9953-5772530c63da
-stale_after: '2026-09-09T02:21:46.523Z'
+- resource: source://d9b11a2a-5890-48e7-841d-cd3becbb2617
+- resource: source://3c003a27-5092-4885-8afe-9b467ba1c58c
+stale_after: '2026-09-09T03:06:46.161Z'
 title: Israeli strikes in southern Lebanese village kill 12
 obsidience:
-  approved_at: '2026-09-07T17:46:51'
-  provenance: proposed by Codex owner-authorized correction (task )
+  approved_at: '2026-09-07T18:19:05'
+  provenance: proposed by Alexandria (task Tasks/ingest)
 ---
 
-Israeli air strikes in southern Lebanon killed at least 12 people in Kfar Roummane, according to Lebanon's health ministry. Eleven, including two children and four women, died in a residential building, and a paramedic was killed in a separate strike on a vehicle. President Joseph Aoun warned that the escalation jeopardizes a US-brokered ceasefire. The IDF stated the strikes targeted Hezbollah infrastructure and terrorists in retaliation for drone attacks.
+Israeli air strikes destroyed a residential building in Kfar Roummane, killing at least 12 people including two children and four women, the Lebanese health ministry said. A second strike killed a paramedic. At least 27 people have been killed in the south over three days. President Aoun warned the escalation is jeopardising the US-brokered ceasefire with Hezbollah.
 
-Report date: 2026-09-07
-URL: https://www.bbc.co.uk/news/articles/c5yl96vz0edo?at_campaign=rss&at_medium=RSS
-Source: source://73b40094-00e8-4660-b481-c969d863453c
+Date: 2026-09-07
+URL: https://www.bbc.co.uk/news/articles/c5yl96vz0edo
+Source: source://d9b11a2a-5890-48e7-841d-cd3becbb2617
 
-Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://03c0cfca-405e-40c8-9953-5772530c63da.
+Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://3c003a27-5092-4885-8afe-9b467ba1c58c.
