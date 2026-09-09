@@ -5,7 +5,7 @@ obsidience:
   curation_task: '[[Tasks/ingest]]'
   research_task: '[[Tasks/research/news]]'
   auto_curate: true
-  approved_at: '2026-09-09T12:58:51'
+  approved_at: '2026-09-09T13:15:46'
   provenance: proposed by Alexandria (task Tasks/improve)
 ---
 
@@ -18,6 +18,13 @@ attribution, uncertainty, and immutable Source evidence.
 - [Coverage](/News%20%26%20Research/Coverage.md) states the publisher discovery scope, recency window, and evidence rules.
 - [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md) condenses the current edition and links its ten individual summarized story Articles.
 - [Police launch criminal investigation into Reform UK donations](/News%20%26%20Research/item--daf978ee85d4107bfdf85298.md) is a retained source-backed story Article at the branch root.
+- [Miliband rejects chief rabbi's claim British Jews in greater danger after sanctions move](/News%20%26%20Research/item--03a0391514f979b430d54ff5.md)
+- [National security can't come at expense of social security, Burnham says](/News%20%26%20Research/item--503c3f9f9e729b92fee324c0.md)
+- [Hundreds mourn police officer killed in wrong-way A66 crash](/News%20%26%20Research/item--5c30a0c17c63824c9440c3a3.md)
+- [Uganda pulling out of Prince Harry's Invictus Games, says military chief](/News%20%26%20Research/item--5df9062f5294ca787a2bc09a.md)
+- [RNLI volunteer targeted online and branded 'traitor' after Portsmouth protests](/News%20%26%20Research/item--7719d40ec3db90a320bdc478.md)
+- [Europe's royalty pay last respects to King Harald V in Norway](/News%20%26%20Research/item--a848cfb88ff64aed55527f5c.md)
+- [Mother demands answers, weeks after black woman found hanging from Mississippi tree](/News%20%26%20Research/item--e0f4cdfd51f7553ef900fcab.md)
 
 [Darwin](/Agents/Darwin/Darwin.md) selects ten distinct world stories, reads
 their direct sources, and delivers one complete briefing to the physical
