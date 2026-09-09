@@ -2,7 +2,7 @@
 type: knowledge
 title: Hyprland shell scene
 obsidience:
-  approved_at: '2026-09-07T12:48:21'
+  approved_at: '2026-09-08T19:40:45'
   provenance: proposed by Alexandria (task Tasks/link)
 ---
 
@@ -59,3 +59,4 @@ disconnected, stale, or unavailable state fails closed.
 - `implements` [Activation packet protocol](/Agents/Executive/Architecture/activation-briefing-protocol--21d7f1ad.md) — The bounded current scene rides as runtime Bindings rather than durable Knowledge.
 - `related_to` [Display topology and isolation strategy](/ADMECH%20Workstation/Hardware/Displays/display-topology-and-isolation-strategy--a8755cfa.md) — The display Article supplies the current physical outputs behind the logical Surfaces.
 - `related_to` [Application launch and window management](/ADMECH%20Workstation/Software/Desktop%20and%20Windowing/agent-launch-and-gui-application-management--339f2788.md) — This is the operational interpretation of the scene for launch, observation, focus, placement, and input.
+- `related_to` [TFT launch through Waydroid and Gamescope](/ADMECH%20Workstation/Software/Games/Teamfight%20Tactics/tft-launch-via-rtx-4080-android-avd--3e5726a8.md) — The scene's registered-application resolver specifically anchors this launcher's current `tft-waydroid` class for observation, focus, and placement.
