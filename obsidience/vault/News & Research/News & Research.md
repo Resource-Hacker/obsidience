@@ -5,7 +5,7 @@ obsidience:
   curation_task: '[[Tasks/ingest]]'
   research_task: '[[Tasks/research/news]]'
   auto_curate: true
-  approved_at: '2026-09-05T06:54:59'
+  approved_at: '2026-09-09T12:58:51'
   provenance: proposed by Alexandria (task Tasks/improve)
 ---
 
@@ -17,6 +17,7 @@ attribution, uncertainty, and immutable Source evidence.
 
 - [Coverage](/News%20%26%20Research/Coverage.md) states the publisher discovery scope, recency window, and evidence rules.
 - [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md) condenses the current edition and links its ten individual summarized story Articles.
+- [Police launch criminal investigation into Reform UK donations](/News%20%26%20Research/item--daf978ee85d4107bfdf85298.md) is a retained source-backed story Article at the branch root.
 
 [Darwin](/Agents/Darwin/Darwin.md) selects ten distinct world stories, reads
 their direct sources, and delivers one complete briefing to the physical
