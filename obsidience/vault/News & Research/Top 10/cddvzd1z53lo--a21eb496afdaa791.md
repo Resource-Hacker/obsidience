@@ -7,15 +7,15 @@ description: Hungarian Foreign Minister Anita Orbán ordered 10 Russian diplomat
   Péter Magyar's Tisza party, elected in April, has pivoted toward pragmatic relatio
 generated:
   by: obsidience/harness/knowledge/news.py
-  at: '2026-09-09T05:09:28.321Z'
+  at: '2026-09-09T06:10:11.590Z'
 resource: https://www.bbc.co.uk/news/articles/cddvzd1z53lo
 sources:
 - resource: source://303392d4-8675-46ea-8cde-3fa43bcc3c47
-- resource: source://29d87c8b-d564-4e19-b39e-a9f6fe1958f6
+- resource: source://b409ce84-82da-4bf3-9e2a-aacad3aa7c18
 stale_after: '2026-09-09T19:17:17.719Z'
 title: Hungary expels 10 Russian diplomats as relations with Kremlin worsen
 obsidience:
-  approved_at: '2026-09-08T22:09:36'
+  approved_at: '2026-09-08T23:10:21'
   provenance: proposed by Alexandria (task Tasks/ingest)
 ---
 
@@ -25,4 +25,4 @@ Report date: 2026-09-08
 URL: https://www.bbc.co.uk/news/articles/cddvzd1z53lo
 Source: source://303392d4-8675-46ea-8cde-3fa43bcc3c47
 
-Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://29d87c8b-d564-4e19-b39e-a9f6fe1958f6.
+Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://b409ce84-82da-4bf3-9e2a-aacad3aa7c18.
