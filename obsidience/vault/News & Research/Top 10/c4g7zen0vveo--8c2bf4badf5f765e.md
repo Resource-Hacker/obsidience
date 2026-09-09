@@ -8,15 +8,15 @@ description: The UK announced sanctions on Israeli settlements in the occupied W
   wi
 generated:
   by: obsidience/harness/knowledge/news.py
-  at: '2026-09-09T02:09:46.874Z'
+  at: '2026-09-09T03:07:49.835Z'
 resource: https://www.bbc.co.uk/news/articles/c4g7zen0vveo
 sources:
 - resource: source://12f9353b-d63c-4722-aab5-56a7067631fc
-- resource: source://eb69ca7b-36f9-4010-ab18-8e4e5bda1755
+- resource: source://39ff71e2-be57-43be-b08b-3b2fc31c8861
 stale_after: '2026-09-10T04:05:45.229Z'
 title: UK announces sanctions on West Bank settlements, Israel responds furiously
 obsidience:
-  approved_at: '2026-09-08T19:09:53'
+  approved_at: '2026-09-08T20:07:57'
   provenance: proposed by Alexandria (task Tasks/ingest)
 ---
 
@@ -26,4 +26,4 @@ Reported: 2026-09-08.
 
 Reporting: <https://www.bbc.co.uk/news/articles/c4g7zen0vveo> — source://12f9353b-d63c-4722-aab5-56a7067631fc
 
-Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://eb69ca7b-36f9-4010-ab18-8e4e5bda1755.
+Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://39ff71e2-be57-43be-b08b-3b2fc31c8861.
