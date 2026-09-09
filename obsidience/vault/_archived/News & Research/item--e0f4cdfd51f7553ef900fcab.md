@@ -1,5 +1,6 @@
 ---
 type: knowledge
+status: deprecated
 generated:
   by: obsidience/harness/knowledge/curation.py#feed
   at: '2026-09-09T18:23:29.127Z'
@@ -12,6 +13,8 @@ title: Mother demands answers, weeks after black woman found hanging from Missis
 obsidience:
   approved_at: '2026-09-09T11:24:42'
   provenance: proposed by Alexandria (task Tasks/ingest)
+  archived_at: '2026-09-09T21:49:42Z'
+  archive_reason: Keep at most 10 active Articles for this Feed
 ---
 
 BBC News report (2026-09-09): Christy Spivey has told the BBC she is still waiting for answers from officials more than a month after her 29-year-old daughter, Tasia Fortune, was found hanging from a tree in Jackson, Mississippi, on 3 August.
