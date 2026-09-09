@@ -1,6 +1,6 @@
 ---
 type: knowledge
-status: stable
+status: deprecated
 description: 'A Russian drone struck the We Are Ukraine TV channel headquarters in
   Kyiv during a live broadcast, killing at least five people in overnight and daytime
   strikes on the capital. President Zelensky called the attack a "new page in Russian
@@ -17,6 +17,11 @@ title: Russian drone strikes Ukrainian TV headquarters in Kyiv, five killed
 obsidience:
   approved_at: '2026-09-09T04:09:43'
   provenance: proposed by Alexandria (task Tasks/ingest)
+  archived_at: '2026-09-09T12:09:00Z'
+  archive_reason: Ingest of bound Inbox source://45d7631e-7362-4759-9d78-1be4b8aafe80
+    (Top 10 world news, captured 2026-09-09T12:06:09.459Z). No contextual-link candidates
+    returned by scoped search offer a specific supported relationship beyond the News
+    branch itself.
 ---
 
 A Russian drone struck the We Are Ukraine TV channel headquarters in Kyiv during a live broadcast, killing at least five people in overnight and daytime strikes on the capital. President Zelensky called the attack a "new page in Russian degradation." The strike came despite both countries having agreed to halt attacks on each other's capitals for three days while US envoys visited. A BBC Verify analysis found Kyiv is suffering more daily air raid alerts than at any time since the 2022 invasion.
