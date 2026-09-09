@@ -2,7 +2,7 @@
 type: knowledge
 title: Activation packet protocol
 obsidience:
-  approved_at: '2026-09-06T08:28:26'
+  approved_at: '2026-09-08T20:24:15'
   provenance: proposed by Alexandria (task Tasks/link)
 ---
 
@@ -69,3 +69,4 @@ terminal result.
 - `implements` [LLM-wiki knowledge pattern](/Agents/Executive/Architecture/llm-wiki-knowledge-pattern--dab5ff0a.md) — Bounded hybrid retrieval supplies the relevant Knowledge lane.
 - `depends_on` [Task activation](/Agents/Executive/Architecture/task-activation--b30a4642.md) — Exact Task edges establish the packet's executable authority.
 - `implements` [Local-first architecture](/Agents/Executive/Architecture/local-first-architecture--7d8e77cc.md) — The packet's bounded context, exact paired Tool/Skill edges, and pre-inference sizing operationalize the local-first model and authority contracts.
+- `depends_on` [Executive model selection](/Agents/Executive/Architecture/current-executive-model--3745813a.md) — The pre-inference token gate uses the Task-selected model and reasoning effort defined by that selection policy.
