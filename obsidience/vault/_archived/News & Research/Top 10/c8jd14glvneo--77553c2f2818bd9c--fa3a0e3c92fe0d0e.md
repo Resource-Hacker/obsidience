@@ -1,6 +1,6 @@
 ---
 type: knowledge
-status: stable
+status: deprecated
 description: Argentina said it will file criminal charges against Navitas Petroleum
   and its executives for operating in waters off the Falkland Islands. The move follows
   President Milei's speech claiming the islands are Argentine and dismissing the 2013
@@ -17,6 +17,8 @@ title: Argentina files criminal charges against oil company drilling off Falklan
 obsidience:
   approved_at: '2026-09-08T17:09:06'
   provenance: proposed by Alexandria (task Tasks/ingest)
+  archived_at: '2026-09-09T01:13:45Z'
+  archive_reason: Publish the complete source-backed Top 10 edition
 ---
 
 Argentina said it will file criminal charges against Navitas Petroleum and its executives for operating in waters off the Falkland Islands. The move follows President Milei's speech claiming the islands are Argentine and dismissing the 2013 referendum in which 99.8% of residents voted to remain British. The UK's Foreign Office minister insisted the islands' future is for Falkland Islanders to determine.
