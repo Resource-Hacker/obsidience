@@ -5,7 +5,7 @@ tags:
 - obs-games
 title: Current games library
 obsidience:
-  approved_at: '2026-09-08T11:03:00'
+  approved_at: '2026-09-09T06:38:13'
   provenance: proposed by Alexandria (task Tasks/link)
 ---
 
@@ -24,3 +24,4 @@ window.
 - `related_to` [TFT launch via RTX 4080 Android AVD](/ADMECH%20Workstation/Software/Games/Teamfight%20Tactics/tft-launch-via-rtx-4080-android-avd--3e5726a8.md) — The Teamfight Tactics entry uses the managed Android AVD route.
 - `related_to` [Primary World of Warcraft profile](/Games/WoW/primary-world-of-warcraft-profile--f2cc8948.md) — Squancher is the owner context reached through the registered World of Warcraft route.
 - `related_to` [World of Warcraft gameplay](/Games/WoW/WoW.md) — The registered `world_of_warcraft` route is the current launch path to that game's recorded gameplay context.
+- `related_to` [Teamfight Tactics gameplay](/Games/TFT/TFT.md) — The registered `teamfight_tactics` route is the current launch path to that game's recorded gameplay context.
