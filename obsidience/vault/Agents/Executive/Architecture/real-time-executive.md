@@ -2,7 +2,7 @@
 type: knowledge
 title: Real-time Executive
 obsidience:
-  approved_at: '2026-09-07T16:28:05'
+  approved_at: '2026-09-09T06:28:33'
   provenance: proposed by Alexandria (task Tasks/link)
 ---
 
@@ -54,6 +54,7 @@ normally while the connection stays ready for the next request.
 
 - `implements` [Activation packet protocol](/Agents/Executive/Architecture/activation-briefing-protocol--21d7f1ad.md) — Every final transcript uses the same packet and graph-activity path as other Tasks.
 - `implements` [Task activation](/Agents/Executive/Architecture/task-activation--b30a4642.md) — Spoken and typed requests select the same accepted work Tasks and complete through one executor.
+- `implements` [Golden ontology](/Agents/Executive/Architecture/action-ontology.md) — The speech connection stays a connection, not a Task, and each final transcript selects an exact work Task, per the ontology's rule that a UI verb becomes a Task only when it names an independently queueable outcome.
 - `depends_on` [Executive model selection](/Agents/Executive/Architecture/current-executive-model--3745813a.md) — Each selected work Task supplies its model and reasoning effort.
 - `related_to` [Hyprland shell scene](/Agents/Executive/Architecture/hyprland-shell-scene.md) — Current focused and unfocused panes enter only as bounded runtime bindings.
 - `related_to` [Research requests](/Agents/Executive/Architecture/research-requests--7bf0113c.md) — Delegation from an interactive Realtime execution follows the Research delegation path to Darwin.
