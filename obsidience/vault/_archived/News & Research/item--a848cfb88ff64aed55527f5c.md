@@ -1,5 +1,6 @@
 ---
 type: knowledge
+status: deprecated
 generated:
   by: obsidience/harness/knowledge/curation.py#feed
   at: '2026-09-09T18:13:58.991Z'
@@ -11,6 +12,8 @@ title: Europe's royalty pay last respects to King Harald V in Norway
 obsidience:
   approved_at: '2026-09-09T11:14:48'
   provenance: proposed by Alexandria (task Tasks/ingest)
+  archived_at: '2026-09-09T21:39:36Z'
+  archive_reason: Keep at most 10 active Articles for this Feed
 ---
 
 Tens of thousands of people lined the streets to pay their respects after 13 days of national mourning.
