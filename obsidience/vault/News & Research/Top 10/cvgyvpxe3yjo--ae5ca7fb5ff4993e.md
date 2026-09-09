@@ -7,15 +7,15 @@ description: Two people died when Russian drones hit the Starokozache border cro
   a child in Novorossiysk. Moldova confirmed 17 drones struck its territory in Au
 generated:
   by: obsidience/harness/knowledge/news.py
-  at: '2026-09-09T17:08:55.018Z'
+  at: '2026-09-09T18:08:28.874Z'
 resource: https://www.bbc.co.uk/news/articles/cvgyvpxe3yjo
 sources:
 - resource: source://42d5d6c7-53bf-4dfd-b934-a21bfc4d30ef
-- resource: source://03b4b987-768c-455d-b2ef-1fa421dc23ce
+- resource: source://629eca71-88d5-4902-8fb6-37e8b4d770f0
 stale_after: '2026-09-10T19:05:26.036Z'
 title: Russia and Ukraine exchange strikes as two killed at Moldova border
 obsidience:
-  approved_at: '2026-09-09T10:09:03'
+  approved_at: '2026-09-09T11:08:38'
   provenance: proposed by Alexandria (task Tasks/ingest)
 ---
 
@@ -25,4 +25,4 @@ Reported: 2026-09-09.
 
 Reporting: <https://www.bbc.co.uk/news/articles/cvgyvpxe3yjo> — source://42d5d6c7-53bf-4dfd-b934-a21bfc4d30ef
 
-Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://03b4b987-768c-455d-b2ef-1fa421dc23ce.
+Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://629eca71-88d5-4902-8fb6-37e8b4d770f0.
