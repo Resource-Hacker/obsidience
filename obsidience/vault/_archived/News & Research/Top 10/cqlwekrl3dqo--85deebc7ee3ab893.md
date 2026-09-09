@@ -1,6 +1,6 @@
 ---
 type: knowledge
-status: stable
+status: deprecated
 description: 'Colombian President Abelardo de la Espriella signed a decree lifting
   a decade-long suspension on permits to carry legal firearms in public. The restriction,
   introduced by President Santos in December 2015 as a temporary measure, had been
@@ -17,6 +17,9 @@ title: Colombia's new president loosens gun control rules
 obsidience:
   approved_at: '2026-09-09T08:09:41'
   provenance: proposed by Alexandria (task Tasks/ingest)
+  archived_at: '2026-09-09T16:09:21Z'
+  archive_reason: Ingesting 2026-09-09 Top 10 world news edition from Darwin's research
+    handoff.
 ---
 
 Colombian President Abelardo de la Espriella signed a decree lifting a decade-long suspension on permits to carry legal firearms in public. The restriction, introduced by President Santos in December 2015 as a temporary measure, had been extended yearly by subsequent presidents. De la Espriella said the decree affects nearly 700,000 permit holders. Critics called it a grave error, while the president insisted tight ownership controls would remain.
