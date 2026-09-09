@@ -1,6 +1,6 @@
 ---
 type: knowledge
-status: stable
+status: deprecated
 description: Hungarian Foreign Minister Anita Orbán ordered 10 Russian diplomats to
   leave Budapest for taking part in "unacceptable" activities, marking a sharp break
   from the pro-Kremlin stance of the previous Viktor Orbán government. Prime Minister
@@ -17,6 +17,8 @@ title: Hungary expels 10 Russian diplomats as relations with Kremlin worsen
 obsidience:
   approved_at: '2026-09-09T01:09:39'
   provenance: proposed by Alexandria (task Tasks/ingest)
+  archived_at: '2026-09-09T09:10:35Z'
+  archive_reason: Publish the complete source-backed Top 10 edition
 ---
 
 Hungarian Foreign Minister Anita Orbán ordered 10 Russian diplomats to leave Budapest for taking part in "unacceptable" activities, marking a sharp break from the pro-Kremlin stance of the previous Viktor Orbán government. Prime Minister Péter Magyar's Tisza party, elected in April, has pivoted toward pragmatic relations with Moscow and called on Russia to end the war in Ukraine. Russia's ambassador called the move "an unprecedented and ungrounded escalation."

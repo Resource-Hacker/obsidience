@@ -1,28 +1,28 @@
 ---
 type: knowledge
 status: stable
-description: US forces struck five Iranian tankers in the Gulf of Oman and near Kharg
-  Island, sinking one, in response to Tehran targeting a US warship. Iran launched
-  missiles at a US base in Jordan, most shot down, and claimed attacks on US vessels
-  and tankers in the Strait of Hormuz. Brent crude rose to $99.35 a barrel.
+description: Brent crude reached $100.19 after the US struck five Iranian tankers
+  in the Gulf of Oman and near Kharg Island. Iran retaliated with missiles at a US
+  base in Jordan and attacks on vessels in the Strait of Hormuz. The price is the
+  highest since late July, when the US-Iran ceasefire collapsed.
 generated:
   by: obsidience/harness/knowledge/news.py
-  at: '2026-09-09T08:09:30.210Z'
+  at: '2026-09-09T09:10:22.858Z'
 resource: https://www.bbc.co.uk/news/articles/cyvznqypz0yo
 sources:
-- resource: source://d7ca1699-4229-4147-b42b-085d40832516
-- resource: source://d4fa6e84-5c1a-4a73-9352-d661e26e1916
-stale_after: '2026-09-10T09:05:23.250Z'
-title: US strikes Iranian oil tankers as Tehran targets American base in Jordan
+- resource: source://6f85602c-e277-41de-b0de-07d1266d42a1
+- resource: source://b70e538e-5c27-4231-ae81-6b87e20d9661
+stale_after: '2026-09-10T11:05:48.270Z'
+title: Oil hits $100 a barrel after US strikes on Iranian tankers
 obsidience:
-  approved_at: '2026-09-09T01:09:37'
+  approved_at: '2026-09-09T02:10:32'
   provenance: proposed by Alexandria (task Tasks/ingest)
 ---
 
-US forces struck five Iranian tankers in the Gulf of Oman and near Kharg Island, sinking one, in response to Tehran targeting a US warship. Iran launched missiles at a US base in Jordan, most shot down, and claimed attacks on US vessels and tankers in the Strait of Hormuz. Brent crude rose to $99.35 a barrel.
+Brent crude reached $100.19 after the US struck five Iranian tankers in the Gulf of Oman and near Kharg Island. Iran retaliated with missiles at a US base in Jordan and attacks on vessels in the Strait of Hormuz. The price is the highest since late July, when the US-Iran ceasefire collapsed.
 
 Reported: 2026-09-09.
 
-Reporting: <https://www.bbc.co.uk/news/articles/cyvznqypz0yo> — source://d7ca1699-4229-4147-b42b-085d40832516
+Reporting: <https://www.bbc.co.uk/news/articles/cyvznqypz0yo> — source://6f85602c-e277-41de-b0de-07d1266d42a1
 
-Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://d4fa6e84-5c1a-4a73-9352-d661e26e1916.
+Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://b70e538e-5c27-4231-ae81-6b87e20d9661.
