@@ -1,6 +1,6 @@
 ---
 type: knowledge
-status: stable
+status: deprecated
 description: The UK announced sanctions on Israeli settlements in the occupied West
   Bank, with Foreign Secretary Ed Miliband accusing settlers of carrying out ethnic
   cleansing of Palestinians. Israel responded by closing the UK consulate in East
@@ -18,6 +18,8 @@ title: UK announces sanctions on West Bank settlements, Israel responds furiousl
 obsidience:
   approved_at: '2026-09-08T23:10:19'
   provenance: proposed by Alexandria (task Tasks/ingest)
+  archived_at: '2026-09-09T07:08:25Z'
+  archive_reason: Publish the complete source-backed Top 10 edition
 ---
 
 The UK announced sanctions on Israeli settlements in the occupied West Bank, with Foreign Secretary Ed Miliband accusing settlers of carrying out ethnic cleansing of Palestinians. Israel responded by closing the UK consulate in East Jerusalem and banning 11 UK MPs. The measures, launched alongside France and Canada, will ban settlement goods and target companies providing services for settlement expansion over the next six to nine months.
