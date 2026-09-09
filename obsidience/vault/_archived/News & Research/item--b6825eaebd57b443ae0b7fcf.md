@@ -1,5 +1,6 @@
 ---
 type: knowledge
+status: deprecated
 generated:
   by: obsidience/harness/knowledge/curation.py#feed
   at: '2026-09-09T18:42:10.588Z'
@@ -12,6 +13,8 @@ title: UK air traffic control failure avoidable, Transport Secretary says
 obsidience:
   approved_at: '2026-09-09T14:36:18'
   provenance: proposed by Alexandria (task Tasks/ingest)
+  archived_at: '2026-09-09T23:53:25Z'
+  archive_reason: Keep at most 10 active Articles for this Feed
 ---
 
 The UK's air traffic control system suffered a technical failure on Tuesday, causing more than 2,000 flight cancellations and widespread disruption. Transport Secretary Heidi Alexander said the incident was avoidable, telling the Commons she had ordered an independent investigation by the Civil Aviation Authority to conclude within six months. Nats (a public–private partnership, 49% government-owned) must investigate and report back within one week.
