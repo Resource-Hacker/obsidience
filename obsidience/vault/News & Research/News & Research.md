@@ -3,8 +3,8 @@ type: knowledge
 title: News & Research
 obsidience:
   auto_curate: true
-  approved_at: '2026-09-09T14:48:37'
-  provenance: proposed by Codex (owner-requested maintenance) (task codex:owner-maintenance)
+  approved_at: '2026-09-09T15:07:12'
+  provenance: proposed by Alexandria (task Tasks/improve)
 ---
 
 The Executive's current-events and research collection. Provider items arrive through configured Connections and Feeds, retaining attribution, dates, uncertainty and immutable Source evidence.
@@ -19,6 +19,20 @@ The Executive's current-events and research collection. Provider items arrive th
 Each Feed controls its collection interval, amount, destination, optional distillation instructions and maximum active Articles. The destination's inherited Auto-curate choice controls automatic publication. Feed retention counts only attested publications from that Feed across its destinations and retains eligible excess Articles through native OKF archival. It cannot retire unrelated articles or ignore protected references or owner moves. Disabled permission or a retention conflict holds the incoming publication for the existing Review owner.
 
 The retired Top 10 edition and its stories are archived with their complete content and original Source evidence. Earlier Feed publications keep their captured destinations and remain eligible for normal Feed retention across destinations. New Feed publications do not inherit a fixed edition size or a blanket 26-hour expiry. Source and Article history are retained; Auto-curate never asserts factual truth or grants executable authority.
+
+## Current child coverage
+
+As of this index-coverage revision, the accepted `News & Research` folder also includes the following volatile Feed articles in addition to `Coverage` and `Top Stories`:
+
+- [Miliband rejects chief rabbi's claim British Jews in greater danger after sanctions move](/News%20%26%20Research/item--03a0391514f979b430d54ff5.md)
+- [BBC drops Drag Race UK after eight series](/News%20%26%20Research/item--0ac103bb5f058e2dd6ecca8c.md)
+- [Iran referred to UN Security Council for nuclear non-compliance](/News%20%26%20Research/item--5263c82a17b9873e53716bbe.md)
+- [Google picks Finland for its largest single investment in Europe](/News%20%26%20Research/item--aa6aa22b389261eb05535b6b.md)
+- [UK air traffic control failure avoidable, Transport Secretary says](/News%20%26%20Research/item--b6825eaebd57b443ae0b7fcf.md)
+- [Police launch criminal investigation into Reform UK donations](/News%20%26%20Research/item--daf978ee85d4107bfdf85298.md)
+- [Apple unveils first foldable iPhone under new CEO Ternus, at $2,000 starting price](/News%20%26%20Research/item--dbfb547e80fb7f50c4f4f2d8.md)
+
+This list evidences current child coverage only. The native child hierarchy remains the authoritative navigation structure, and ordinary Feed retention may archive or relocate these articles without requiring another manual index update.
 
 ## Related knowledge
 
