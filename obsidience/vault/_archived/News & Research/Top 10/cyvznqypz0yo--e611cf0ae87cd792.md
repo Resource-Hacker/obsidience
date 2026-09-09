@@ -1,6 +1,6 @@
 ---
 type: knowledge
-status: stable
+status: deprecated
 description: Brent crude reached $100.70 per barrel on Wednesday, its highest since
   late July, after the US struck five Iranian tankers in the Gulf of Oman and Iran's
   Revolutionary Guards attacked eight tankers and two warships. The Houthis also hit
@@ -17,6 +17,10 @@ title: Oil hits $100 a barrel for first time since July after US and Houthi stri
 obsidience:
   approved_at: '2026-09-09T11:08:37'
   provenance: proposed by Alexandria (task Tasks/ingest)
+  archived_at: '2026-09-09T21:48:40Z'
+  archive_reason: Owner requested replacing the Top 10 collection with a Top Stories
+    destination for the BBC Top Stories Feed; preserve the retired edition and Sources
+    in the archive.
 ---
 
 Brent crude reached $100.70 per barrel on Wednesday, its highest since late July, after the US struck five Iranian tankers in the Gulf of Oman and Iran's Revolutionary Guards attacked eight tankers and two warships. The Houthis also hit Saudi oil facilities, and the IRGC announced a new prohibited shipping zone extending beyond the Strait of Hormuz.

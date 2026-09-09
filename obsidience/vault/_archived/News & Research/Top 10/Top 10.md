@@ -1,6 +1,6 @@
 ---
 type: knowledge
-status: stable
+status: deprecated
 title: Top 10
 description: The current edition of ten summarized, source-backed world-news stories.
 generated:
@@ -13,6 +13,10 @@ stale_after: '2026-09-10T13:05:59.852Z'
 obsidience:
   approved_at: '2026-09-09T11:08:36'
   provenance: proposed by Alexandria (task Tasks/ingest)
+  archived_at: '2026-09-09T21:48:37Z'
+  archive_reason: Owner requested replacing the Top 10 collection with a Top Stories
+    destination for the BBC Top Stories Feed; preserve the retired edition and Sources
+    in the archive.
 ---
 
 Ten source-backed world-news stories. Research handoff captured 2026-09-09T18:05:53.782Z.
