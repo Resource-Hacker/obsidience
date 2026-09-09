@@ -1,6 +1,6 @@
 ---
 type: knowledge
-status: stable
+status: deprecated
 description: US-based Tech Transparency Project found 332 paid ads with AI-generated
   child sexual abuse imagery on Meta platforms over ten months, including 84 in India,
   78 published after the Indian government ordered removal of such content. Meta said
@@ -17,6 +17,8 @@ title: Meta continues to run ads promoting child sexual abuse material in India
 obsidience:
   approved_at: '2026-09-09T02:10:34'
   provenance: proposed by Alexandria (task Tasks/ingest)
+  archived_at: '2026-09-09T10:14:07Z'
+  archive_reason: Publish the complete source-backed Top 10 edition
 ---
 
 US-based Tech Transparency Project found 332 paid ads with AI-generated child sexual abuse imagery on Meta platforms over ten months, including 84 in India, 78 published after the Indian government ordered removal of such content. Meta said total ad spend was under $5,000.
