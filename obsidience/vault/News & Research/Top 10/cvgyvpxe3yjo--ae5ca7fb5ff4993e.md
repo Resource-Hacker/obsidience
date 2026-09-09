@@ -1,28 +1,28 @@
 ---
 type: knowledge
 status: stable
-description: Russian drones struck the Starokozache border crossing between Ukraine
-  and Moldova, killing two people, while a Ukrainian drone attack on Novorossiysk
-  killed four including a child and injured 29. Both sides have stepped up long-range
-  strikes despite diplomatic efforts. Moldova reported 17 drone strikes on its territor
+description: Two people died when Russian drones hit the Starokozache border crossing
+  between Ukraine and Moldova. A drone also struck a residential building in Kyiv,
+  killing one woman and injuring 14, while Ukrainian drones killed four people including
+  a child in Novorossiysk. Moldova confirmed 17 drones struck its territory in Au
 generated:
   by: obsidience/harness/knowledge/news.py
-  at: '2026-09-09T16:09:10.068Z'
+  at: '2026-09-09T17:08:55.018Z'
 resource: https://www.bbc.co.uk/news/articles/cvgyvpxe3yjo
 sources:
-- resource: source://62938f4e-987a-486f-8b14-9562225674a8
-- resource: source://4b979460-873e-4109-a605-32bed6ecc2fa
-stale_after: '2026-09-10T14:06:09.459Z'
+- resource: source://42d5d6c7-53bf-4dfd-b934-a21bfc4d30ef
+- resource: source://03b4b987-768c-455d-b2ef-1fa421dc23ce
+stale_after: '2026-09-10T19:05:26.036Z'
 title: Russia and Ukraine exchange strikes as two killed at Moldova border
 obsidience:
-  approved_at: '2026-09-09T09:09:18'
+  approved_at: '2026-09-09T10:09:03'
   provenance: proposed by Alexandria (task Tasks/ingest)
 ---
 
-Russian drones struck the Starokozache border crossing between Ukraine and Moldova, killing two people, while a Ukrainian drone attack on Novorossiysk killed four including a child and injured 29. Both sides have stepped up long-range strikes despite diplomatic efforts. Moldova reported 17 drone strikes on its territory in August alone, more than during all of last year.
+Two people died when Russian drones hit the Starokozache border crossing between Ukraine and Moldova. A drone also struck a residential building in Kyiv, killing one woman and injuring 14, while Ukrainian drones killed four people including a child in Novorossiysk. Moldova confirmed 17 drones struck its territory in August alone.
 
 Reported: 2026-09-09.
 
-Reporting: <https://www.bbc.co.uk/news/articles/cvgyvpxe3yjo> — source://62938f4e-987a-486f-8b14-9562225674a8
+Reporting: <https://www.bbc.co.uk/news/articles/cvgyvpxe3yjo> — source://42d5d6c7-53bf-4dfd-b934-a21bfc4d30ef
 
-Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://4b979460-873e-4109-a605-32bed6ecc2fa.
+Edition: [Top 10](/News%20%26%20Research/Top%2010/Top%2010.md). Inbox: source://03b4b987-768c-455d-b2ef-1fa421dc23ce.
