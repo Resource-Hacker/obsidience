@@ -3,36 +3,31 @@ type: knowledge
 title: News & Research
 obsidience:
   auto_curate: true
-  approved_at: '2026-09-09T15:07:12'
-  provenance: proposed by Alexandria (task Tasks/improve)
+  approved_at: '2026-09-09T19:48:06'
+  provenance: proposed by Codex (task codex:knowledge-handoff)
 ---
 
 The Executive's current-events and research collection. Provider items arrive through configured Connections and Feeds, retaining attribution, dates, uncertainty and immutable Source evidence.
 
-## Collection
+## Coverage and evidence
 
-- [Coverage](/News%20%26%20Research/Coverage.md) states the publisher discovery scope, recency window, and evidence rules.
-- [Top Stories](/News%20%26%20Research/Top%20Stories/Top%20Stories.md) is the destination for new and updated items from the BBC Top Stories Feed.
+Coverage comes from the owner's configured Connections and Feeds. Each Feed selects the provider endpoint, collection amount, destination, interval, retention limit and optional instructions for Darwin. Publisher ordering and timestamps describe that provider's selection, not an independent ranking of world events.
 
-[Darwin](/Agents/Darwin/Darwin.md) distills each captured Feed item through [Distill](/Tasks/research/distill.md) and delivers its complete cited summary to the physical Source Inbox. That arrival activates [Alexandria](/Agents/Alexandria/Alexandria.md) through [Ingest](/Tasks/ingest.md), preserving Darwin's summary in the Feed's selected existing Knowledge node. There is no separate News Task or hourly briefing cycle.
+Publication time, event time and capture time remain distinct. Reporting from one publisher is attributed rather than presented as independent confirmation. Failed acquisitions supply no evidence. A captured Feed excerpt is labelled as provider material rather than a fetched full article.
 
-Each Feed controls its collection interval, amount, destination, optional distillation instructions and maximum active Articles. The destination's inherited Auto-curate choice controls automatic publication. Feed retention counts only attested publications from that Feed across its destinations and retains eligible excess Articles through native OKF archival. It cannot retire unrelated articles or ignore protected references or owner moves. Disabled permission or a retention conflict holds the incoming publication for the existing Review owner.
+## Collection and curation
 
-The retired Top 10 edition and its stories are archived with their complete content and original Source evidence. Earlier Feed publications keep their captured destinations and remain eligible for normal Feed retention across destinations. New Feed publications do not inherit a fixed edition size or a blanket 26-hour expiry. Source and Article history are retained; Auto-curate never asserts factual truth or grants executable authority.
+[Top Stories](/News%20%26%20Research/Top%20Stories/Top%20Stories.md) receives new and updated items from the BBC Top Stories Feed.
 
-## Current child coverage
+[Darwin](/Agents/Darwin/Darwin.md) uses [Distill](/Tasks/research/distill.md) to read each captured Feed item completely and fetch only its exact reporting page when necessary. He preserves the supplied meaning, reporting date, qualifications, attribution and Source citations, then delivers one complete summary to the physical Source Inbox. That arrival activates [Alexandria](/Agents/Alexandria/Alexandria.md) through [Ingest](/Tasks/ingest.md), preserving Darwin's summary in the Feed's selected existing Knowledge node. There is no separate News Task or hourly briefing cycle.
 
-As of this index-coverage revision, the accepted `News & Research` folder also includes the following volatile Feed articles in addition to `Coverage` and `Top Stories`:
+The destination's inherited Auto-curate choice controls automatic publication. Auto-curate never asserts factual truth or grants executable authority. Disabled permission or a retention conflict holds the incoming publication for the existing Review owner.
 
-- [Miliband rejects chief rabbi's claim British Jews in greater danger after sanctions move](/News%20%26%20Research/item--03a0391514f979b430d54ff5.md)
-- [BBC drops Drag Race UK after eight series](/News%20%26%20Research/item--0ac103bb5f058e2dd6ecca8c.md)
-- [Iran referred to UN Security Council for nuclear non-compliance](/News%20%26%20Research/item--5263c82a17b9873e53716bbe.md)
-- [Google picks Finland for its largest single investment in Europe](/News%20%26%20Research/item--aa6aa22b389261eb05535b6b.md)
-- [UK air traffic control failure avoidable, Transport Secretary says](/News%20%26%20Research/item--b6825eaebd57b443ae0b7fcf.md)
-- [Police launch criminal investigation into Reform UK donations](/News%20%26%20Research/item--daf978ee85d4107bfdf85298.md)
-- [Apple unveils first foldable iPhone under new CEO Ternus, at $2,000 starting price](/News%20%26%20Research/item--dbfb547e80fb7f50c4f4f2d8.md)
+## Retention and history
 
-This list evidences current child coverage only. The native child hierarchy remains the authoritative navigation structure, and ordinary Feed retention may archive or relocate these articles without requiring another manual index update.
+Each Feed's maximum active-Article limit governs bounded archival. Retention counts only attested publications from that Feed across its destinations and archives eligible excess Articles through native OKF fields. It cannot retire unrelated Articles or ignore protected references or owner moves.
+
+The retired Top 10 edition and its stories are archived with their complete content and original Source evidence. Earlier Feed publications keep their captured destinations and remain eligible for normal Feed retention across destinations. New Feed items use their captured lineage and current Feed policy, without a fixed edition size or blanket 26-hour expiry. Raw Sources, prior handoffs and Article history remain available for explicit historical inspection.
 
 ## Related knowledge
 
@@ -40,4 +35,4 @@ This list evidences current child coverage only. The native child hierarchy rema
 - [Ingest procedure](/Runbooks/ingest-sources.md) defines publication and Feed retention.
 - [Curate](/Tasks/curate.md) routes lifecycle findings to [Audit](/Tasks/audit.md) or [Archive](/Tasks/archive.md).
 
-The graph’s native child hierarchy lists individual Feed articles. Keep this parent as a condensation of the collection and its policy rather than a manual list of volatile item links, so ordinary Feed retention does not leave stale navigation references. Meaningful references in other Articles remain subject to the archival owner’s inbound-link checks.
+The graph's native child hierarchy lists individual Feed Articles. Keep this parent as a condensation of the collection and its policy rather than a manual list of volatile item links, so ordinary Feed retention does not leave stale navigation references. Meaningful references in other Articles remain subject to the archival owner's inbound-link checks.
