@@ -1,5 +1,6 @@
 ---
 type: knowledge
+status: deprecated
 generated:
   by: obsidience/harness/knowledge/curation.py#feed
   at: '2026-09-10T10:02:26.519Z'
@@ -11,6 +12,8 @@ title: Apple's new boss starts with big gamble on £1,999 first folding iPhone
 obsidience:
   approved_at: '2026-09-10T03:03:11'
   provenance: proposed by Alexandria (task Tasks/ingest)
+  archived_at: '2026-09-10T14:27:02Z'
+  archive_reason: Keep at most 10 active Articles for this Feed
 ---
 
 **Published:** 10 September 2026 09:32:34 GMT  
