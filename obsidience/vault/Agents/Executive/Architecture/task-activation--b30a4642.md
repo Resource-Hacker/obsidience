@@ -2,8 +2,8 @@
 type: knowledge
 title: Task activation
 obsidience:
-  approved_at: '2026-09-07T13:50:54'
-  provenance: proposed by Alexandria (task Tasks/link)
+  approved_at: '2026-09-09T17:06:42'
+  provenance: proposed by Codex (task codex:knowledge-handoff)
 ---
 
 Obsidience has one reusable Task Article and several ways to activate it: manual
@@ -41,7 +41,7 @@ nor a draft Runbook grants the catalog or permits execution.
 
 Task categories stay shallow. Executive groups Query and Computer Use, shared
 by typed and spoken requests. Wiki exposes Ingest, Curate, Merge, Link, Improve,
-Archive, Audit, and Check. Research exposes Question, Learn, News, and Model.
+Archive, Audit, Check, and Repair. Research exposes Question, Learn, Distill, and Model.
 Generate exposes Tool, Skill, Task, and Runbook. Executive is a Knowledge
 grouping rather than an executable coordinator Task. The [Observation lifecycle](/Agents/Executive/Architecture/observations.md)
 is a Knowledge hierarchy whose only executable transitions are Compact beneath
