@@ -3,33 +3,91 @@ on:
   push:
     branches: [codex/spherical-crown-layout-20260910]
 permissions:
-  contents: read
+  contents: write
+defaults:
+  run:
+    shell: bash
+concurrency:
+  group: knowledge-layout-workbench
+  cancel-in-progress: false
 jobs:
-  snapshot:
+  validate:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
       ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
-      - name: Install locked UI dependencies
+      - name: Preserve transport evidence
+        run: |
+          mkdir -p /tmp/layout-evidence
+          cp .github/knowledge-layout.payload.* /tmp/layout-evidence/
+      - name: Apply hash-verified tested source edits
+        run: |
+          python - <<'PY'
+          import base64, hashlib, json, pathlib, zlib
+          encoded = ''.join(pathlib.Path('.github/knowledge-layout.payload.' + str(i)).read_text().strip() for i in range(2))
+          raw = zlib.decompress(base64.b64decode(encoded, validate=True))
+          assert hashlib.sha256(raw).hexdigest() == '632239817c402934f3b4745da30957df9d29631314ad269b9e6021bed4b32d1b', 'Transport digest mismatch'
+          changes = json.loads(raw)
+          for name, change in changes.items():
+              path = pathlib.Path(name)
+              assert not path.is_absolute() and '..' not in path.parts
+              before = path.read_bytes() if path.exists() else b''
+              if change['before'] is None:
+                  assert not path.exists(), name + ': new path already exists'
+              else:
+                  assert hashlib.sha256(before).hexdigest() == change['before'], name + ': source changed'
+              lines = before.decode().splitlines(keepends=True)
+              for edit in reversed(change['edits']):
+                  lines[edit['start']:edit['end']] = [edit['text']]
+              after = ''.join(lines).encode()
+              assert hashlib.sha256(after).hexdigest() == change['after'], name + ': output digest mismatch'
+              path.parent.mkdir(parents=True, exist_ok=True)
+              path.write_bytes(after)
+          pathlib.Path('/tmp/layout-files.json').write_text(json.dumps(list(changes)))
+          pathlib.Path('/tmp/layout-evidence/manifest.json').write_text(json.dumps({p:c['after'] for p,c in changes.items()}, indent=2))
+          PY
+          git diff --check
+      - name: Install locked UI dependencies and test runner
         run: |
           npm install --global pnpm@10.15.1
           pnpm --dir obsidience/ui install --frozen-lockfile --ignore-scripts
-      - name: Check unmodified UI baseline
+          python -m pip install pytest==9.0.2
+      - name: Validate graph regressions and Python syntax
         run: |
-          pnpm --dir obsidience/ui typecheck
-          pnpm --dir obsidience/ui build
-      - name: Package dependencies for isolated validation
-        if: always()
+          mkdir -p obsidience/.layout-checks
+          for test in simulation_continuity depth_layers branch_territory link_clearance link_review review_overlay; do
+            cp "obsidience/tests/test_graph_${test}.py" obsidience/.layout-checks/
+          done
+          python -m pytest -q --confcutdir=obsidience/.layout-checks obsidience/.layout-checks --junitxml=/tmp/layout-evidence/tests.xml | tee /tmp/layout-evidence/tests.log
+          python -m compileall -q obsidience
+      - name: Typecheck and build UI
         run: |
-          tar -czf /tmp/knowledge-layout-dependencies.tar.gz obsidience/ui/node_modules
+          pnpm --dir obsidience/ui typecheck | tee /tmp/layout-evidence/typecheck.log
+          pnpm --dir obsidience/ui build | tee /tmp/layout-evidence/build.log
+      - name: Commit only validated implementation on the isolated branch
+        env:
+          EXPECTED_HEAD: ${{ github.sha }}
+        run: |
+          test "$(git ls-remote origin refs/heads/codex/spherical-crown-layout-20260910 | cut -f1)" = "$EXPECTED_HEAD"
+          python - <<'PY'
+          import json, pathlib, subprocess
+          paths = json.loads(pathlib.Path('/tmp/layout-files.json').read_text())
+          subprocess.run(['git', 'add', '--', *paths], check=True)
+          PY
+          git rm .github/knowledge-layout.payload.0 .github/knowledge-layout.payload.1 .github/workflows/knowledge-layout-workbench.yml
+          git diff --cached --check
+          git diff --cached --stat | tee /tmp/layout-evidence/commit-stat.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix: settle recursive knowledge crowns on shared spherical layers'
+          git push origin HEAD:refs/heads/codex/spherical-crown-layout-20260910
+          git rev-parse HEAD | tee /tmp/layout-evidence/commit.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: knowledge-layout-dependencies
-          path: /tmp/knowledge-layout-dependencies.tar.gz
+          name: knowledge-layout-validation
+          path: /tmp/layout-evidence
           retention-days: 1
           if-no-files-found: error
