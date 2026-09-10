@@ -2,8 +2,8 @@
 type: knowledge
 title: TFT next-best-play policy
 obsidience:
-  approved_at: '2026-09-06T01:05:04'
-  provenance: proposed by Codex (task codex:knowledge-handoff)
+  approved_at: '2026-09-09T19:44:41'
+  provenance: proposed by Alexandria (task Tasks/link)
 ---
 
 When the owner asks Executive to play, buy, pick, or choose the next best TFT
@@ -27,3 +27,4 @@ One request never authorizes a second purchase, reroll, sale, item equip, reposi
 
 - `depends_on` [TFT managed Waydroid launch](/ADMECH%20Workstation/Software/Games/Teamfight%20Tactics/tft-launch-via-rtx-4080-android-avd--3e5726a8.md) — A live TFT decision requires the established managed Waydroid/Gamescope launch route.
 - `related_to` [Game interaction authority and interests](/Agents/Executive/Observations/Preferences/games.md) — The policy applies the owner’s standing game-interaction authority to one bounded TFT choice.
+- `related_to` [Current games library](/Games/Game%20Observations/current-games-library--6770993b.md) — The policy's one-click decision surface is the TFT application reached through the `teamfight_tactics` route registered in the current games library.
