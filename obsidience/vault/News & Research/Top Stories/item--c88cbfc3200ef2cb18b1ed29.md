@@ -2,29 +2,28 @@
 type: knowledge
 generated:
   by: obsidience/harness/knowledge/curation.py#feed
-  at: '2026-09-10T04:24:47.355Z'
+  at: '2026-09-10T05:53:10.673Z'
 resource: https://www.bbc.co.uk/news/articles/cg7kjlzlev1o
 sources:
-- resource: source://5dfb337f-3c7d-4cb8-a933-ced4325bd482
-- resource: source://eac934cc-55e0-4214-8718-a688092925c1
-title: Four takeaways from Trump's speech at first Republican midterms convention
+- resource: source://b38437cd-c473-4faa-89f2-ce4877f1cde3
+- resource: source://31196a5f-7369-45f4-a3bf-cd972816929b
+title: Trump pledges $5,000 to every American - Republican midterms convention
 obsidience:
-  approved_at: '2026-09-09T21:25:35'
+  approved_at: '2026-09-09T22:53:54'
   provenance: proposed by Alexandria (task Tasks/ingest)
 ---
 
-**Source:** [BBC News](https://www.bbc.co.uk/news/articles/cg7kjlzlev1o)
-**Published:** 10 September 2026
-**Feed item:** source://eac934cc-55e0-4214-8718-a688092925c1
+## Finding
+
+From BBC, published 10 September 2026.
 
 ## Summary
 
-A BBC analysis of Trump's speech at the first Republican midterms convention.
+At the Republican midterms convention, Donald Trump pledged $5,000 to every American. He also addressed many subjects he has returned to repeatedly, with a few surprises.
 
-> *"He covered many of the subjects he has returned to time and again - with a few surprises thrown in."
+## Provenance
 
-The full article contains four identified takeaways from the speech, but only the introductory summary was included in the captured RSS entry. The complete article may contain additional detail not visible in this source.
-
----
-
-*Note: This is a distillation of a single RSS feed item. The full article is available at the reporting URL above.*
+- **Source:** BBC News
+- **Published:** 10 September 2026, 04:07:44 UTC
+- **Reporting URL:** https://www.bbc.co.uk/news/articles/cg7kjlzlev1o
+- **Activating Source:** `source://31196a5f-7369-45f4-a3bf-cd972816929b`
