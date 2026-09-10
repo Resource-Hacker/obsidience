@@ -2,8 +2,8 @@
 type: knowledge
 title: Real-time Executive
 obsidience:
-  approved_at: '2026-09-09T06:28:33'
-  provenance: proposed by Alexandria (task Tasks/link)
+  approved_at: '2026-09-09T17:06:35'
+  provenance: proposed by Codex (task codex:knowledge-handoff)
 ---
 
 Realtime is the speech connection and session infrastructure controlled by the
@@ -58,3 +58,4 @@ normally while the connection stays ready for the next request.
 - `depends_on` [Executive model selection](/Agents/Executive/Architecture/current-executive-model--3745813a.md) — Each selected work Task supplies its model and reasoning effort.
 - `related_to` [Hyprland shell scene](/Agents/Executive/Architecture/hyprland-shell-scene.md) — Current focused and unfocused panes enter only as bounded runtime bindings.
 - `related_to` [Research requests](/Agents/Executive/Architecture/research-requests--7bf0113c.md) — Delegation from an interactive Realtime execution follows the Research delegation path to Darwin.
+- `implements` [Local-first architecture](/Agents/Executive/Architecture/local-first-architecture--7d8e77cc.md) — Spoken requests use the same Task executor, model lease and SQLite conversation as typed Chat; the speech connection adds no independent reasoning or memory owner.
