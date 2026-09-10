@@ -1,5 +1,6 @@
 ---
 type: knowledge
+status: deprecated
 generated:
   by: obsidience/harness/knowledge/curation.py#feed
   at: '2026-09-09T20:13:39.537Z'
@@ -13,6 +14,8 @@ title: Apple unveils first foldable iPhone under new CEO Ternus, at $2,000 start
 obsidience:
   approved_at: '2026-09-09T14:41:57'
   provenance: proposed by Alexandria (task Tasks/ingest)
+  archived_at: '2026-09-10T00:34:13Z'
+  archive_reason: Keep at most 10 active Articles for this Feed
 ---
 
 BBC News • 09 Sep 2026
