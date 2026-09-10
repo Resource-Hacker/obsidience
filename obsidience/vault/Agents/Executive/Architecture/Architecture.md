@@ -3,7 +3,7 @@ type: knowledge
 title: Architecture
 obsidience:
   provenance: proposed by Alexandria (task Tasks/link)
-  approved_at: '2026-09-10T14:44:28'
+  approved_at: '2026-09-10T15:39:24'
 ---
 
 Architecture is the stable operating map for the Executive. Read the narrowest
@@ -19,7 +19,7 @@ surfaces.
 - [Executive model selection](/Agents/Executive/Architecture/current-executive-model--3745813a.md) defines per-Task model and reasoning authority.
 - [Hyprland shell scene](/Agents/Executive/Architecture/hyprland-shell-scene.md) defines the current desktop observation, targeting, and effect boundary.
 - [Real-time Executive](/Agents/Executive/Architecture/real-time-executive.md) explains the speech connection and its delivery to the same work Tasks as typed Chat.
-- [Observation lifecycle](/Agents/Executive/Architecture/observations.md) defines Immediate, Temporary, and durable retention and promotion, and governs the live [Observations](/Agents/Executive/Observations/Observations.md) branch that holds the Immediate and Temporary levels.
+- [Observation lifecycle](/Agents/Executive/Architecture/observations.md) defines Immediate, Temporary, and durable retention and promotion, and governs the live [Observations](/Agents/Executive/Observations/Observations.md) branch, whose live Immediate level is [Immediate Observations](/Agents/Executive/Observations/Immediate%20Observations/Immediate%20Observations.md) and which also holds the Temporary level.
 - [Research requests](/Agents/Executive/Architecture/research-requests--7bf0113c.md) defines the Executive-to-Darwin evidence handoff, executed by [Darwin](/Agents/Darwin/Darwin.md) by preserving cited evidence in Source and handing one bounded finding to Alexandria.
 
 Together these Articles answer what an object is, where truth lives, how work is
