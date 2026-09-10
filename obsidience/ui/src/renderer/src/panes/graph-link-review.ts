@@ -4,7 +4,7 @@ import {
   type Knowledge3dRelationEffect,
   type Knowledge3dRenderNode,
   type Knowledge3dRenderEdge,
-} from "../components/themes/obsidience/knowledge-3d-satellites";
+} from "../components/themes/obsidience/knowledge-3d-cloud";
 import { knowledgeAmbientEdgeStroke, knowledgeNodeRadius, paletteForBranch } from "../components/themes/obsidience/knowledge-paint";
 import { withoutTaxonomyLinks } from "./graph-links";
 

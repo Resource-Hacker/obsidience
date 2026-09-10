@@ -62,7 +62,7 @@ import {
 import { projectedAutoCuratedRefs } from "./graph-curation";
 import { articleDisplayAliases, graphArticleIds, projectedArticleLinks, visibleArticleLinks, withoutTaxonomyLinks } from "./graph-links";
 import { ActionTracePopup } from "./action-trace-popup";
-import { KNOWLEDGE_LINK_APPROVAL_DURATION_MS } from "@/components/themes/obsidience/knowledge-3d-satellites";
+import { KNOWLEDGE_LINK_APPROVAL_DURATION_MS } from "@/components/themes/obsidience/knowledge-3d-cloud";
 import { previewLinkReviewCloud, projectLinkReviewEffects, recordLinkApproval, type LinkApproval } from "./graph-link-review";
 
 const ROOT_ID = "@vault";

@@ -7,7 +7,7 @@
 // alpha arrives prepared from the backdrop's shared styling helpers.
 //
 // Consolidation (owner 2026-08-04): the MAIN executive ball is built by the
-// SAME createKnowledge3dSatellite cloud implementation as every satellite
+// SAME createKnowledge3dCloud cloud implementation as every satellite
 // (main: true — raw node ids, no orbit transform, no ballScale shrink).
 // This module owns what is genuinely scene-global: the shader sources, the
 // camera/orbit/pointer surface, the sweep timeline clock, role nameplates,
@@ -48,17 +48,17 @@ import {
 import {
   createKnowledge3dOrbitRing,
   createKnowledge3dDeliveryComet,
-  createKnowledge3dSatellite,
+  createKnowledge3dCloud,
   KNOWLEDGE_LINK_APPROVAL_DURATION_MS,
-  satellitePhysicsSignature,
+  knowledge3dCloudPhysicsSignature,
   type Knowledge3dOrbitRing,
   type Knowledge3dRenderEdge,
   type Knowledge3dRenderNode,
   type Knowledge3dRelationEffect,
-  type Knowledge3dSatelliteCloud,
-  type Knowledge3dSatelliteDeps,
-  type Knowledge3dSatelliteInput,
-} from "./knowledge-3d-satellites";
+  type Knowledge3dCloud,
+  type Knowledge3dCloudDeps,
+  type Knowledge3dCloudInput,
+} from "./knowledge-3d-cloud";
 
 // The render-model types live with the one cloud implementation; re-export
 // so the backdrop's import surface is unchanged.
@@ -102,7 +102,7 @@ export interface Knowledge3dSceneProps {
    *  smaller cloud orbiting the main graph with its OWN tuning record
    *  (owner 2026-08-03). Node ids arrive raw; the scene namespaces them
    *  as agent:<id>/<nodeId> in projections and pointer events. */
-  satellites?: ReadonlyArray<Knowledge3dSatelliteInput>;
+  satellites?: ReadonlyArray<Knowledge3dCloudInput>;
   /** Pending Review links and confirmed approval flashes, separate from graph edges. */
   relationEffects?: readonly Knowledge3dRelationEffect[];
   /** Developer test sweep on ONE satellite (owner 2026-08-03: Test
@@ -931,10 +931,10 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
       );
     }
 
-    // The MAIN executive cloud: built by the same createKnowledge3dSatellite
+    // The MAIN executive cloud: built by the same createKnowledge3dCloud
     // implementation as every satellite, flagged main: true (owner
     // 2026-08-04 consolidation — one graph code path for all agents).
-    let mainCloud: Knowledge3dSatelliteCloud | null = null;
+    let mainCloud: Knowledge3dCloud | null = null;
     let builtNodes: Knowledge3dRenderNode[] | null = null;
     let builtEdges: Knowledge3dRenderEdge[] | null = null;
     let builtWidth = 0;
@@ -965,7 +965,7 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
     const sharedParticleTime = { value: 0 };
     // The scene module owns the canonical shader strings; every cloud —
     // main and satellites — receives the same deps object.
-    const cloudDeps: Knowledge3dSatelliteDeps = {
+    const cloudDeps: Knowledge3dCloudDeps = {
       pointVertexShader: POINT_VERTEX_SHADER,
       pointFragmentShader: POINT_FRAGMENT_SHADER,
       pointDepthFragmentShader: POINT_DEPTH_FRAGMENT_SHADER,
@@ -982,8 +982,8 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
     // Satellite clouds keyed by agent id; rebuilt per entry only when that
     // entry's inputs change, so one agent's tuning drag never replays
     // another ball's fall (owner 2026-08-03).
-    const satelliteClouds = new Map<string, Knowledge3dSatelliteCloud>();
-    let builtSatellites: ReadonlyArray<Knowledge3dSatelliteInput> | undefined;
+    const satelliteClouds = new Map<string, Knowledge3dCloud>();
+    let builtSatellites: ReadonlyArray<Knowledge3dCloudInput> | undefined;
     // Role nameplates (owner 2026-08-03): a WoW-style glyph sprite floats
     // over every ball — THREE.Sprite always faces the camera (fixed
     // orientation) and sits on the spin axis, so orbit/spin never skew it.
@@ -1030,7 +1030,7 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
          *  the finished flow ITSELF refetches the assignee — the spec
          *  must re-apply to the NEW object or the lit path and launch
          *  pulse die mid-flash. */
-        cloud: Knowledge3dSatelliteCloud;
+        cloud: Knowledge3dCloud;
       }
     >();
     // Frame-gate memory: in-flight sweeps/comets earn 60 fps, a HELD Task
@@ -1069,7 +1069,7 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
       builtEdges = edges;
       builtWidth = width;
       builtHeight = height;
-      builtPhysicsSignature = satellitePhysicsSignature(current.tuning);
+      builtPhysicsSignature = knowledge3dCloudPhysicsSignature(current.tuning);
       // Carry the cooling state as well as positions. A repaint must not
       // reheat an unchanged layout; the shared cloud compares force inputs.
       const carried = mainCloud?.captureSimulation();
@@ -1078,7 +1078,7 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
         mainCloud = null;
       }
       if (!nodes.length || !width || !height) return;
-      mainCloud = createKnowledge3dSatellite(
+      mainCloud = createKnowledge3dCloud(
         {
           agentId: "main",
           nodes,
@@ -1124,7 +1124,7 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
           existing &&
           existing.builtNodes === input.nodes &&
           existing.builtEdges === input.edges &&
-          existing.builtSignature === satellitePhysicsSignature(input.tuning)
+          existing.builtSignature === knowledge3dCloudPhysicsSignature(input.tuning)
         ) {
           continue;
         }
@@ -1136,7 +1136,7 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
           satelliteClouds.delete(input.agentId);
           continue;
         }
-        const cloud = createKnowledge3dSatellite(
+        const cloud = createKnowledge3dCloud(
           input,
           cloudDeps,
           height,
@@ -1375,7 +1375,7 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
         current.edges !== builtEdges ||
         width !== builtWidth ||
         height !== builtHeight ||
-        satellitePhysicsSignature(current.tuning) !== builtPhysicsSignature
+        knowledge3dCloudPhysicsSignature(current.tuning) !== builtPhysicsSignature
       ) {
         buildMain();
       }

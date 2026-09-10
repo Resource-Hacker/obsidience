@@ -1604,6 +1604,13 @@ Source integrity, and the run ledger. The native shell UI is a thin projection.
   changes update appearance without disturbing node positions. The main graph
   and satellites use the same physical-input comparison; a changed cloud does
   not reheat unchanged neighbours.
+  One shared cloud implementation, `knowledge-3d-cloud.ts`, renders Executive
+  and satellite graphs through the same `knowledge-3d.ts` layout. Orbit and
+  display scale do not change local physics. Brain-level angular relaxation
+  outlives edge-spring cooling, uses simultaneous sibling updates and bounded
+  substeps, and escapes coplanar saddles in a geometry-derived frame. Angular
+  coverage is tested independently of shell and collision validity; fewer than
+  four root branches do not require a full-rank three-dimensional distribution.
   Semantic depth also determines a shared spherical layer in each 3D cloud:
   every direct Brain branch occupies the first layer, and each deeper declared
   level follows in order. The first layer retains the original close spacing

@@ -21,7 +21,7 @@ const ts = nativeRequire('typescript');
 const THREE = nativeRequire('three');
 const options = JSON.parse(fs.readFileSync(0, 'utf8'));
 const component = path.join(ui, 'src/renderer/src/components/themes/obsidience');
-const cloudFile = path.join(component, 'knowledge-3d-satellites.ts');
+const cloudFile = path.join(component, 'knowledge-3d-cloud.ts');
 const cache = new Map();
 function load(filename) {
   if (cache.has(filename)) return cache.get(filename).exports;
@@ -47,7 +47,7 @@ function load(filename) {
   return mod.exports;
 }
 const physics = load(path.join(component, 'knowledge-3d.ts'));
-const {createKnowledge3dSatellite} = load(cloudFile);
+const {createKnowledge3dCloud} = load(cloudFile);
 const deps = {
   pointVertexShader:'point', pointFragmentShader:'point', pointDepthFragmentShader:'depth',
   beamVertexShader:'beam', taxonomyFragmentShader:'taxonomy', crossFragmentShader:'cross',
@@ -78,7 +78,7 @@ function fixture(agentId='main') {
 }
 const clone = input => JSON.parse(JSON.stringify(input));
 const build = (input, previous, height=1200, pixelRatio=1) =>
-  createKnowledge3dSatellite(input,deps,height,pixelRatio,previous);
+  createKnowledge3dCloud(input,deps,height,pixelRatio,previous);
 const dispose = cloud => cloud.dispose(new THREE.Scene());
 function settle(cloud) {
   let ticks = 0;
