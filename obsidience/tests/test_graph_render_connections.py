@@ -65,8 +65,8 @@ function load(filename) {
 }
 global.window = {innerWidth:1920,innerHeight:1200};
 load(path.join(ui,'src/renderer/src/panes/graph-backdrop.tsx')).GraphBackdrop();
-const {createKnowledge3dSatellite} = load(path.join(ui,
-  'src/renderer/src/components/themes/obsidience/knowledge-3d-satellites.ts'));
+const {createKnowledge3dCloud} = load(path.join(ui,
+  'src/renderer/src/components/themes/obsidience/knowledge-3d-cloud.ts'));
 const {KNOWLEDGE_CROSS_SEGMENTS} = load(path.join(ui,
   'src/renderer/src/components/themes/obsidience/knowledge-3d-links.ts'));
 const deps = {
@@ -81,7 +81,7 @@ const inputs = [{agentId:'main', main:true, nodes:sceneProps.nodes, edges:sceneP
   tuning:sceneProps.tuning, hub:sceneProps.hub}, ...sceneProps.satellites];
 const output = {};
 for (const input of inputs) {
-  const cloud = createKnowledge3dSatellite(input,deps,1200,1);
+  const cloud = createKnowledge3dCloud(input,deps,1200,1);
   const mesh = cloud.group.children.find(child => child.material?.fragmentShader === 'cross');
   const starts = mesh.geometry.getAttribute('aStart');
   const ends = mesh.geometry.getAttribute('aEnd');

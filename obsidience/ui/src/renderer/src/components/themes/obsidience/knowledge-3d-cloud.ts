@@ -1,7 +1,7 @@
 // THE ONE knowledge-ball cloud implementation (owner 2026-08-04: "we
 // should just have the code for the main one and add the orbit stuff and
 // satellite stuff … and just flag it off for the main one"). The main
-// executive ball and every satellite build through createKnowledge3dSatellite
+// executive ball and every satellite build through createKnowledge3dCloud
 // with their own tuning records; the ONLY differences are flags:
 //   - satellites orbit/spin (updateOrbit) and render SMALLER via a pure
 //     group render transform (ballScale × graphScale) — physics run at
@@ -103,7 +103,7 @@ export interface Knowledge3dRenderEdge {
   taxonomy: boolean;
 }
 
-export interface Knowledge3dSatelliteInput {
+export interface Knowledge3dCloudInput {
   agentId: string;
   nodes: Knowledge3dRenderNode[];
   edges: Knowledge3dRenderEdge[];
@@ -119,7 +119,7 @@ export interface Knowledge3dSatelliteInput {
 
 /** Shader sources + helpers handed over by the scene (its module owns the
  *  canonical strings; passing them keeps the dependency one-directional). */
-export interface Knowledge3dSatelliteDeps {
+export interface Knowledge3dCloudDeps {
   pointVertexShader: string;
   pointFragmentShader: string;
   pointDepthFragmentShader: string;
@@ -143,7 +143,7 @@ export interface Knowledge3dSatelliteDeps {
 }
 
 /** Physics/geometry signature: a change rebuilds ONLY this cloud. */
-export function satellitePhysicsSignature(tuning: Knowledge3dTuning): string {
+export function knowledge3dCloudPhysicsSignature(tuning: Knowledge3dTuning): string {
   return [
     tuning.chargeStrength,
     tuning.velocityDecay,
@@ -168,7 +168,7 @@ export interface Knowledge3dSimulationState {
   layout?: SphericalState;
 }
 
-export interface Knowledge3dSatelliteCloud {
+export interface Knowledge3dCloud {
   agentId: string;
   group: THREE.Group;
   builtNodes: Knowledge3dRenderNode[];
@@ -210,13 +210,13 @@ export interface Knowledge3dSatelliteCloud {
   dispose(scene: THREE.Scene): void;
 }
 
-export function createKnowledge3dSatellite(
-  input: Knowledge3dSatelliteInput,
-  deps: Knowledge3dSatelliteDeps,
+export function createKnowledge3dCloud(
+  input: Knowledge3dCloudInput,
+  deps: Knowledge3dCloudDeps,
   viewportHeightPx: number,
   pixelRatio: number,
   previous?: Knowledge3dSimulationState,
-): Knowledge3dSatelliteCloud {
+): Knowledge3dCloud {
   const { agentId, nodes, edges } = input;
   const isMain = input.main === true;
   // Physics run at FULL scale for every cloud; satellites shrink only
@@ -1143,7 +1143,7 @@ export function createKnowledge3dSatellite(
     group,
     builtNodes: nodes,
     builtEdges: edges,
-    builtSignature: satellitePhysicsSignature(input.tuning),
+    builtSignature: knowledge3dCloudPhysicsSignature(input.tuning),
     isHot() {
       return knowledge3dSimulationNeedsTick(simulation);
     },

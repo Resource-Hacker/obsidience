@@ -10,7 +10,7 @@ from test_graph_simulation_continuity import SIMULATION_PROBE
 
 
 PROBE = SIMULATION_PROBE.split("if (options.legacy_source) {", 1)[0] + r"""
-const spherical=load(path.join(component,'knowledge-spherical.ts'));
+const spherical=physics;
 const xyz=n=>[n.x,n.y,n.z];
 const norm=a=>Math.hypot(...a);
 const dot=(a,b)=>a.reduce((sum,x,i)=>sum+x*b[i],0);
@@ -167,6 +167,46 @@ check('impossible_capacity_is_not_reported_as_settled',()=>{
   assert(Math.max(...radii)-Math.min(...radii)<1e-7);
   return {ticks,status:state.status};
 });
+
+function frameError(nodes) {
+  const u=nodes.filter(n=>n.depth===1).map(unit),m=Array.from({length:3},()=>[0,0,0]);
+  for(const v of u)for(let a=0;a<3;a++)for(let b=0;b<3;b++)m[a][b]+=v[a]*v[b]/u.length;
+  return m.reduce((sum,row,a)=>sum+row.reduce((s,x,b)=>s+(x-(a===b?1/3:0))**2,0),0);
+}
+for(const seed of ['planar','rotated','coincident'])check(seed+'_scaffold_occupies_sphere',()=>{
+  const nodes=[kernelNode('root',null,0,0,0,0)];
+  const q=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,2,3).normalize(),0.73);
+  for(let i=0;i<6;i++){
+    let p=[20*Math.cos(i*Math.PI/3),20*Math.sin(i*Math.PI/3),0];
+    if(seed==='rotated')p=new THREE.Vector3(...p).applyQuaternion(q).toArray();
+    if(seed==='coincident')p=[20,0,0];
+    nodes.push(kernelNode('peer-'+i,'root',1,...p));
+  }
+  const simulation=physics.createKnowledgeForceSimulation(nodes,nodes.slice(1).map(n=>
+    ({source:'root',target:n.id,taxonomy:true})));
+  // Recovery must work even when the D3 annealing schedule has already ended.
+  if(seed==='rotated')simulation.alpha(0);
+  let ticks=0;
+  while(physics.knowledge3dSimulationNeedsTick(simulation)){
+    assert(++ticks<1000);simulation.tick();
+  }
+  const state=physics.captureKnowledge3dLayout(simulation);simulation.stop();
+  assert.equal(state.status,'settled',JSON.stringify(state.residuals));
+  assert(frameError(nodes)<0.002,'settled scaffold is planar or anisotropic: '+frameError(nodes));
+  assert(norm(nodes.slice(1).map(unit).reduce((s,v)=>s.map((x,i)=>x+v[i]/6),[0,0,0]))<0.02);
+  return {ticks,frame_error:frameError(nodes)};
+});
+check('executive_and_satellite_have_identical_local_geometry',()=>{
+  const a=build(hardwareFixture('main')),b=build(hardwareFixture('Alexandria'));
+  try {
+    settle(a);settle(b);verifyCloud(a);verifyCloud(b);
+    assert.deepEqual(coordinates(a.captureSimNodes()),coordinates(b.captureSimNodes()));
+    a.applyTuning(hardwareFixture('main').tuning,1);
+    b.applyTuning(hardwareFixture('Alexandria').tuning,1);
+    assert.notEqual(a.group.scale.x,b.group.scale.x,'only presentation scale should differ');
+  }finally{dispose(a);dispose(b);}
+});
+
 process.stdout.write(JSON.stringify(results));
 """
 
@@ -182,6 +222,9 @@ def territory_results():
 
 
 @pytest.mark.parametrize("case", [
+    "planar_scaffold_occupies_sphere", "rotated_scaffold_occupies_sphere",
+    "coincident_scaffold_occupies_sphere",
+    "executive_and_satellite_have_identical_local_geometry",
     "exact_angular_clearance", "contacts_stay_on_shells",
     "coupled_registration_and_2d_isolation", "rotation_and_permutation",
     "main_hardware_crown", "Alexandria_hardware_crown",
