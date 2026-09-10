@@ -1301,19 +1301,28 @@ Tool bindings, generic hierarchy edges, and framework-specific vocabulary.
   never enlarge the Brain-to-first-layer gap or unchanged inner layers.
   Layer radii reserve node-size
   clearance and surface packing space and expand collectively with density;
-  a busy branch cannot drift onto a deeper layer. The final constraint uses
-  d3's own damped integration, preserving angular motion and existing cooling.
-  Only topology, glyph sizes and spacing determine these radii, never activity
+  a busy branch cannot drift onto a deeper layer. The final coupled constraint
+  uses d3's own damped integration to resolve avoidance, outward edges and
+  recursive crown boundaries through bounded great-circle corrections. Do not
+  restore competing Cartesian 3D corrections followed by radial projection.
+  Only topology, glyph sizes and spacing determine nominal radii, never activity
   or paint. Private 3D depth follows exact parent ancestry, including Articles;
-  the 2D renderer's common terminal Article tier is never physical depth.
-  The separate 2D layout is unchanged.
-  The shared 3D solver derives each descendant's root branch from exact
-  `parentId` ancestry. A bounded tangential force keeps descendants inside
-  moving angular territories defined by the current branch directions, with
-  their core radius as spacing. Branch roots stay free; only Brain is pinned.
-  Do not substitute fixed sectors, camera-dependent layout or weaker links for
-  this hierarchy rule. Individual node collisions alone do not prevent whole
-  branches from interleaving. Ordinary front/back projection overlap remains
+  the 2D renderer's terminal Article paint tier is never physical depth.
+  The separate 2D layout and semantic spring strengths remain unchanged.
+  Crown membership follows exact parentId ancestry at every fork. Current sibling
+  directions define moving boundaries, with bounded capacity bias from descendant
+  avoidance footprints. Reserve full avoidance radii, not only visible cores.
+  Coarse crown rotations and fine contact solving share the existing scene tick;
+  only Brain is pinned. Do not substitute fixed sectors or camera-dependent layout.
+  Direct-fan capacity and persistent violations expand whole affected layers
+  with outward clearance propagation, never unchanged inner layers. Carry
+  expanded radii and solver progress with positions, velocities and alpha across
+  physics-identical rebuilds. Paint and approval cannot restart solving.
+  Alpha is a cooling schedule, not convergence evidence. Finish only after eight
+  cold, geometrically valid, low-motion ticks. Keep the twelve-pass, eight-
+  expansion-per-layer and 880-tick bounds; expose unresolved needs-capacity or
+  stalled diagnostics and a one-shot warning rather than freezing as settled
+  or adding an unbounded independent loop. Front/back projection overlap remains
   possible as the 3D view rotates.
   Valid pending Link additions from `graph.link_proposals` preview the eventual
   visual spring, degree-based radius and actual link gradient only at the Scene

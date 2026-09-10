@@ -5,14 +5,21 @@
 // 3d-force-graph): the model is a LIVE physics simulation — d3-force-3d
 // (the exact engine behind that reference) with link springs on the
 // taxonomy tree, weak springs on attested cross-links, many-body charge
-// repulsion, collision on each node's avoidance radius, a shared shell for each
-// depth and moving branch territories that keep the hierarchy radiating from the
-// pinned Brain as a ball. Nodes seed OUTSIDE their neighborhoods on
-// deterministic branch-cone directions and visibly spread/wobble into place
-// as the simulation cools; the scene ticks it per frame until alpha drops
-// below the floor, then the settled ball only rotates. Rendering stays
+// repulsion and one coupled spherical solver for avoidance, outward edges,
+// shared depth shells and recursive moving crown territories radiating from the
+// pinned Brain as a ball. Seeds are normalized onto their shared layers
+// before the first frame and visibly spread/wobble angularly into place
+// as the simulation cools; the scene ticks until cooling AND geometric
+// convergence (or an explicit bounded failure), then the ball only rotates. Rendering stays
 // 2D-parity (the sprite shader replicating the flat canvas painter) with
 // the depth glow attenuated, and the ambient 2D/3D toggle remains.
+
+import {
+  createSphericalConstraint,
+  type SphericalConstraint,
+  type SphericalState,
+} from "./knowledge-spherical";
+export type { SphericalState, SphericalResiduals, SphericalStatus } from "./knowledge-spherical";
 
 import {
   forceCollide,
@@ -533,8 +540,7 @@ export interface KnowledgeForceNode extends ForceSimulationNode {
   id: string;
   depth?: number;
   role?: KnowledgeHierarchyRole | string;
-  /** Placement parent — the leaf half-dome constraint projects each
-   *  article onto its parent's outward hemisphere (owner 2026-08-04). */
+  /** Exact placement parent; defines private 3D depth and the outward cap. */
   parentId?: string | null;
   /** World-unit disc radius (avoidance derives from it). */
   radius: number;
@@ -588,6 +594,17 @@ export function knowledge3dDepthRadii(
     layers.set(depth, layer);
   }
   const radii = new Map<number, number>([[0, 0]]);
+  const byId = new Map(nodes.map(node => [node.id, node]));
+  const fans = new Map<number, Map<string, number>>();
+  for (const node of nodes) {
+    const parent = node.parentId ? byId.get(node.parentId) : undefined;
+    if (!parent || isBallRoot(parent)) continue;
+    const depth = node.depth ?? 3;
+    if ((parent.depth ?? 3) + 1 !== depth) continue;
+    const groups = fans.get(depth) ?? new Map<string, number>();
+    groups.set(parent.id, (groups.get(parent.id) ?? 0) + knowledge3dAvoidanceRadius(node) ** 2);
+    fans.set(depth, groups);
+  }
   const step = knowledge3dLinkRest(tuning);
   const firstRadius = Math.max(
     step * 1.4,
@@ -602,6 +619,12 @@ export function knowledge3dDepthRadii(
       firstRadius + step * Math.cbrt(depth - 1),
       previousRadius + previousSize + layer.largest,
       Math.sqrt(layer.area / 2),
+      // The outward cap has area 2*pi*(R^2 - parentR*R).
+      // Reserve half of it for the direct fan's avoidance footprints.
+      ...[...(fans.get(depth) ?? [])].map(([id, area]) => {
+        const parentRadius = radii.get(byId.get(id)!.depth ?? 3) ?? 0;
+        return (parentRadius + Math.sqrt(parentRadius ** 2 + 4 * area)) / 2;
+      }),
     );
     radii.set(depth, radius);
     previousRadius = radius;
@@ -610,55 +633,36 @@ export function knowledge3dDepthRadii(
   return radii;
 }
 
-/** Final 3D constraint in d3's existing force pipeline. Predict d3's damped
- *  integration and project that next point onto its hierarchy shell. Springs,
- *  collisions and branch territories retain their angular motion, but cannot
- *  push a node into another layer, even after cooling. No coordinate pins or
- *  second layout/tick owner are introduced. */
-export function forceKnowledgeDepthLayers(
-  nodes: readonly KnowledgeForceNode[],
-  tuning: Knowledge3dTuning = DEFAULT_KNOWLEDGE_3D_TUNING,
-): (alpha: number) => void {
-  const radii = knowledge3dDepthRadii(nodes, tuning);
-  const damping = 1 - tuning.velocityDecay;
-  const project = (initial: boolean): void => {
-    for (const node of nodes) {
-      if (isBallRoot(node)) continue;
-      const radius = radii.get(node.depth ?? 3)!;
-      const x = node.x ?? 0, y = node.y ?? 0, z = node.z ?? 0;
-      let nx = x + (initial ? 0 : (node.vx ?? 0) * damping);
-      let ny = y + (initial ? 0 : (node.vy ?? 0) * damping);
-      let nz = z + (initial ? 0 : (node.vz ?? 0) * damping);
-      let length = Math.hypot(nx, ny, nz);
-      // Paint/review rebuilds carry an already valid simulation verbatim,
-      // including its velocity. Only new or physically changed seeds project.
-      if (initial && Math.abs(length - radius) < 1e-7) continue;
-      if (length < 1e-9) {
-        nx = x; ny = y; nz = z;
-        length = Math.hypot(nx, ny, nz);
-        if (length < 1e-9) {
-          const azimuth = hash01(node.id, 73) * Math.PI * 2;
-          ny = hash01(node.id, 79) * 2 - 1;
-          const span = Math.sqrt(1 - ny * ny);
-          nx = span * Math.cos(azimuth); nz = span * Math.sin(azimuth);
-          length = 1;
-        }
-      }
-      nx *= radius / length; ny *= radius / length; nz *= radius / length;
-      if (initial) {
-        node.x = nx; node.y = ny; node.z = nz;
-      } else if (damping > 1e-9) {
-        node.vx = (nx - x) / damping;
-        node.vy = (ny - y) / damping;
-        node.vz = (nz - z) / damping;
-      } else {
-        node.x = nx; node.y = ny; node.z = nz;
-        node.vx = node.vy = node.vz = 0;
-      }
-    }
-  };
-  project(true);
-  return () => project(false);
+const sphericalConstraints = new WeakMap<ForceSimulation<KnowledgeForceNode>, SphericalConstraint>();
+
+/** One canonical physical signature for refresh and solver continuity. */
+export function knowledge3dPhysicsSignature(
+  nodes: readonly KnowledgeForceNode[], links: readonly KnowledgeForceLink[],
+  tuning: Knowledge3dTuning,
+): string {
+  return JSON.stringify([
+    tuning.chargeStrength, tuning.velocityDecay, tuning.linkDistance,
+    [...nodes].sort((a, b) => a.id.localeCompare(b.id)).map(node => [
+      node.id, node.depth, node.role, node.parentId, node.radius,
+    ]),
+    [...links].sort((a, b) => a.source.localeCompare(b.source)
+      || a.target.localeCompare(b.target) || Number(a.taxonomy) - Number(b.taxonomy))
+      .map(link => [link.source, link.target, link.taxonomy]),
+  ]);
+}
+
+export function captureKnowledge3dLayout(
+  simulation: ForceSimulation<KnowledgeForceNode>,
+): SphericalState | undefined {
+  return sphericalConstraints.get(simulation)?.capture();
+}
+
+/** Alpha is a cooling schedule, not evidence that the geometry is valid. */
+export function knowledge3dSimulationNeedsTick(
+  simulation: ForceSimulation<KnowledgeForceNode>,
+): boolean {
+  return simulation.alpha() > KNOWLEDGE_3D_ALPHA_MIN
+    || (sphericalConstraints.get(simulation)?.needsTick() ?? false);
 }
 
 /** Build the live simulation: springs, charge, collision, radial hierarchy
@@ -670,6 +674,7 @@ export function createKnowledgeForceSimulation(
   links: readonly KnowledgeForceLink[],
   tuning: Knowledge3dTuning = DEFAULT_KNOWLEDGE_3D_TUNING,
   dimensions: 2 | 3 = 3,
+  previousLayout?: SphericalState,
 ): ForceSimulation<KnowledgeForceNode> {
   if (dimensions === 3) {
     // The 2D projection gives Articles a common terminal paint tier. That
@@ -711,7 +716,7 @@ export function createKnowledgeForceSimulation(
     target: KnowledgeForceNode;
     taxonomy: boolean;
   };
-  return forceSimulation(nodes, dimensions)
+  const simulation = forceSimulation(nodes, dimensions)
     .stop()
     .alphaMin(KNOWLEDGE_3D_ALPHA_MIN)
     .alphaDecay(KNOWLEDGE_3D_ALPHA_DECAY)
@@ -742,7 +747,7 @@ export function createKnowledgeForceSimulation(
     )
     .force(
       "collide",
-      forceCollide()
+      dimensions === 3 ? null : forceCollide()
         .radius((node: KnowledgeForceNode) =>
           knowledge3dAvoidanceRadius(node),
         )
@@ -758,122 +763,34 @@ export function createKnowledgeForceSimulation(
     )
     .force(
       "outwardHemisphere",
-      forceKnowledgeLeafHemisphere(nodes, dimensions),
-    )
-    .force(
-      "branchTerritory",
-      dimensions === 3 ? forceKnowledgeBranchTerritory(nodes) : null,
-    )
-    .force(
-      "depthLayers",
-      dimensions === 3 ? forceKnowledgeDepthLayers(nodes, tuning) : null,
+      dimensions === 3 ? null : forceKnowledgeLeafHemisphere(nodes, dimensions),
     );
-}
-
-/** Keep each subtree in its root branch's moving angular territory.
- * Individual collisions cannot prevent separate subtrees interleaving.
- * These boundaries follow the CURRENT branch directions, never seeded
- * sectors or camera coordinates. Only descendants receive a tangential
- * restoring velocity; branch roots and the radial hierarchy remain free.
- * Like collision, this soft correction is independent of alpha so cooling
- * does not freeze an almost-correct descendant on the wrong side. */
-export function forceKnowledgeBranchTerritory(
-  nodes: readonly KnowledgeForceNode[],
-): (alpha: number) => void {
-  const root = nodes.find(isBallRoot);
-  const byId = new Map(nodes.map((node) => [node.id, node]));
-  const branches = nodes
-    .filter((node) => root && node.parentId === root.id && node !== root)
-    .sort((a, b) => a.id.localeCompare(b.id));
-  const branchIds = new Set(branches.map((node) => node.id));
-  const members: { node: KnowledgeForceNode; branch: KnowledgeForceNode }[] = [];
-  for (const node of nodes) {
-    let ancestor: KnowledgeForceNode | undefined = node;
-    const seen = new Set<string>();
-    while (ancestor && !branchIds.has(ancestor.id) && !seen.has(ancestor.id)) {
-      seen.add(ancestor.id);
-      ancestor = ancestor.parentId ? byId.get(ancestor.parentId) : undefined;
-    }
-    if (ancestor && ancestor !== node && branchIds.has(ancestor.id)) {
-      members.push({ node, branch: ancestor });
-    }
+  if (dimensions === 3) {
+    const constraint = createSphericalConstraint(nodes, {
+      radii: knowledge3dDepthRadii(nodes, tuning),
+      avoidance: knowledge3dAvoidanceRadius,
+      velocityDecay: tuning.velocityDecay,
+      alphaMin: KNOWLEDGE_3D_ALPHA_MIN,
+      signature: knowledge3dPhysicsSignature(nodes, links, tuning),
+      previous: previousLayout,
+    });
+    // Last in d3's force order: solve contacts, outwardness and recursive
+    // crown boundaries together against the SAME predicted integration.
+    simulation.force("depthLayers", constraint);
+    sphericalConstraints.set(simulation, constraint);
   }
-  return () => {
-    const directions = new Map<string, readonly [number, number, number]>();
-    for (const branch of branches) {
-      const x = branch.x ?? 0, y = branch.y ?? 0, z = branch.z ?? 0;
-      const length = Math.hypot(x, y, z);
-      if (length > 1e-6) directions.set(branch.id, [x / length, y / length, z / length]);
-    }
-    for (const { node, branch } of members) {
-      const own = directions.get(branch.id);
-      const radius = Math.hypot(node.x ?? 0, node.y ?? 0, node.z ?? 0);
-      if (!own || radius < 1e-6) continue;
-      const ux = (node.x ?? 0) / radius;
-      const uy = (node.y ?? 0) / radius;
-      const uz = (node.z ?? 0) / radius;
-      let deficit = 0, nx = 0, ny = 0, nz = 0, signed = 0;
-      for (const [id, other] of directions) {
-        if (id === branch.id) continue;
-        let x = own[0] - other[0], y = own[1] - other[1], z = own[2] - other[2];
-        const length = Math.hypot(x, y, z);
-        // Coincident directions have no boundary; ordinary root forces
-        // separate them before this constraint can act.
-        if (length < 1e-6) continue;
-        x /= length; y /= length; z /= length;
-        const side = ux * x + uy * y + uz * z;
-        // Reserve the visible core radius inside the angular bisector.
-        // This is spacing, not a new radius or a fixed depth target.
-        const missing = node.radius / radius - side;
-        if (missing > deficit) {
-          deficit = missing; nx = x; ny = y; nz = z; signed = side;
-        }
-      }
-      if (deficit <= 0) continue;
-      let tx = nx - signed * ux, ty = ny - signed * uy, tz = nz - signed * uz;
-      let length = Math.hypot(tx, ty, tz);
-      if (length < 1e-6) {
-        // At the exact opposite pole the gradient vanishes. Prefer the
-        // owner's tangent; only the rotationally symmetric case needs a
-        // deterministic perpendicular to begin moving.
-        const towardOwn = own[0] * ux + own[1] * uy + own[2] * uz;
-        tx = own[0] - towardOwn * ux;
-        ty = own[1] - towardOwn * uy;
-        tz = own[2] - towardOwn * uz;
-        length = Math.hypot(tx, ty, tz);
-        if (length < 1e-6) {
-          const axis = Math.abs(ux) <= Math.abs(uy) && Math.abs(ux) <= Math.abs(uz)
-            ? [1, 0, 0] : Math.abs(uy) <= Math.abs(uz) ? [0, 1, 0] : [0, 0, 1];
-          const along = axis[0] * ux + axis[1] * uy + axis[2] * uz;
-          tx = axis[0] - along * ux; ty = axis[1] - along * uy; tz = axis[2] - along * uz;
-          length = Math.hypot(tx, ty, tz);
-        }
-      }
-      // Correct only the strongest violation. More siblings must not
-      // multiply the force. Cap large turns to preserve elastic settling.
-      const step = Math.min(0.25, deficit / length) * radius * 0.5;
-      node.vx = (node.vx ?? 0) + tx / length * step;
-      node.vy = (node.vy ?? 0) + ty / length * step;
-      node.vz = (node.vz ?? 0) + tz / length * step;
-    }
-  };
+  return simulation;
 }
 
-/** Article half-dome constraint (owner 2026-08-04): every LEAF stays on
- *  the OUTWARD side of its parent subject — the hemisphere facing away
- *  from the ball's center. A hard per-tick projection, not a spring:
- *  whenever a leaf's offset from its parent gains an inward component
- *  (toward the center along the parent's out-from-center ray), that
- *  component clamps to zero and the matching velocity is killed, so the
- *  crown of articles can never migrate between its subject and the core.
- *  Runs after the integrator like forceKnowledgeRadialOrder's 2D cousin. */
+/** Legacy Cartesian outward boundary retained for the separate 2D layout.
+ * Its elastic shallow correction and hard backstop are unchanged. The 3D
+ * factory uses the coupled spherical solver instead. */
 export function forceKnowledgeLeafHemisphere(
   nodes: readonly KnowledgeForceNode[],
   dimensions: 2 | 3 = 3,
 ): (alpha: number) => void {
   const byId = new Map(nodes.map((node) => [node.id, node]));
-  // Every child with a non-root parent, including subjects. In 3D the
-  // final depth constraint keeps this correction on the child's own shell.
+  // Every child with a non-root parent, including subjects.
   const leaves = nodes.filter(
     (node) =>
       !isBallRoot(node) &&
@@ -1026,6 +943,20 @@ export function knowledge3dBallTargets(
   const targets = new Float32Array(nodes.length * 3);
   const directions = new Float32Array(nodes.length * 3);
   const indexById = new Map(nodes.map((node, index) => [node.id, index]));
+  const physicalNodes: KnowledgeForceNode[] = nodes.map(node => ({ ...node }));
+  const physicalById = new Map(physicalNodes.map(node => [node.id, node]));
+  for (const node of physicalNodes) {
+    if (isBallRoot(node)) { node.depth = 0; continue; }
+    let at: KnowledgeForceNode | undefined = node;
+    let depth = 0;
+    const seen = new Set<string>();
+    while (at && !isBallRoot(at) && !seen.has(at.id)) {
+      seen.add(at.id); depth++;
+      at = at.parentId ? physicalById.get(at.parentId) : undefined;
+    }
+    if (at && isBallRoot(at)) node.depth = depth;
+  }
+  const seedRadii = knowledge3dDepthRadii(physicalNodes, tuning);
   // Depth-1 branch law (owner 2026-08-04, second round: a fixed axis
   // table stranded the seventh peer on a lone diagonal beside four
   // coplanar axes): the first branch anchors straight UP, the second
@@ -1044,10 +975,8 @@ export function knowledge3dBallTargets(
     }
   }
   const peerDirections = knowledge3dBranchDirections(peerSlot.size);
-  // Leaf siblings fan deterministically: per-parent ordered lists give
-  // each article its dome slot (owner 2026-08-04: first at the equator —
-  // 90° from the parent's outward ray — then filling the outward half
-  // dome pole-ward, uniform by area).
+  // Leaf siblings fan deterministically across the parent's outward cap
+  // on their common Brain-centered shell, with equal-area angular slots.
   const leafSlot = new Map<string, { index: number; count: number }>();
   {
     const leavesByParent = new Map<string, string[]>();
@@ -1069,7 +998,7 @@ export function knowledge3dBallTargets(
   // guarantees a child sees its parent's direction.
   const order = nodes
     .map((_, index) => index)
-    .sort((a, b) => (nodes[a].depth ?? 99) - (nodes[b].depth ?? 99));
+    .sort((a, b) => (physicalNodes[a].depth ?? 99) - (physicalNodes[b].depth ?? 99));
   for (const index of order) {
     const node = nodes[index];
     if (isBallRoot(node)) continue; // Brain pinned at the ball's center.
@@ -1104,51 +1033,16 @@ export function knowledge3dBallTargets(
       const vz = px * uy - py * ux;
       const slot = leafSlot.get(node.id);
       if (slot && parentIndex !== undefined) {
-        // Article half-dome (owner 2026-08-04): the offset FROM THE
-        // PARENT, not a center-shell direction — polar angle measured
-        // from the parent's out-from-center ray. acos over the uniform
-        // slot fraction starts the FIRST article at the dome's equator
-        // (90° off the ray) and walks later ones toward the outward pole
-        // with equal-area spacing; azimuths advance by the golden angle
-        // from a per-parent phase. The leaf rests one link length off
-        // its subject, exactly like the spring wants.
-        // fraction = index/count puts the FIRST article at exactly the
-        // equator (acos 0 = 90°) for ANY fan size — the +0.5 slot
-        // centering betrayed small fans: a one-article subject seeded at
-        // 60° and read as "not the 90° treatment" (owner 2026-08-04,
-        // satellite report). Later slots climb pole-ward.
-        const fraction = slot.index / slot.count;
-        const beta = Math.acos(fraction);
-        const gamma =
-          hash01(node.parentId ?? node.id, 41) * Math.PI * 2 +
-          slot.index * 2.399963229728653;
-        const sinBeta = Math.sin(beta);
-        const domeX =
-          px * Math.cos(beta) +
-          (ux * Math.cos(gamma) + vx * Math.sin(gamma)) * sinBeta;
-        const domeY =
-          py * Math.cos(beta) +
-          (uy * Math.cos(gamma) + vy * Math.sin(gamma)) * sinBeta;
-        const domeZ =
-          pz * Math.cos(beta) +
-          (uz * Math.cos(gamma) + vz * Math.sin(gamma)) * sinBeta;
-        const ring = knowledge3dLinkDistance(
-          node.depth,
-          nodes[parentIndex].radius,
-          node.radius,
-          tuning,
-        );
-        const tx = targets[parentIndex * 3] + domeX * ring;
-        const ty = targets[parentIndex * 3 + 1] + domeY * ring;
-        const tz = targets[parentIndex * 3 + 2] + domeZ * ring;
-        const tLength = Math.hypot(tx, ty, tz) || 1;
-        directions[index * 3] = tx / tLength;
-        directions[index * 3 + 1] = ty / tLength;
-        directions[index * 3 + 2] = tz / tLength;
-        targets[index * 3] = tx;
-        targets[index * 3 + 1] = ty;
-        targets[index * 3 + 2] = tz;
-        continue;
+        const radius = seedRadii.get(physicalNodes[index].depth ?? 3)!;
+        const parentRadius = seedRadii.get(physicalNodes[parentIndex].depth ?? 3)!;
+        const minimumCosine = Math.min(1, parentRadius / radius);
+        const cosine = minimumCosine + (1 - minimumCosine) * (slot.index + 0.5) / slot.count;
+        const gamma = hash01(node.parentId ?? node.id, 41) * Math.PI * 2
+          + slot.index * 2.399963229728653;
+        const sine = Math.sqrt(Math.max(0, 1 - cosine * cosine));
+        dx = px * cosine + (ux * Math.cos(gamma) + vx * Math.sin(gamma)) * sine;
+        dy = py * cosine + (uy * Math.cos(gamma) + vy * Math.sin(gamma)) * sine;
+        dz = pz * cosine + (uz * Math.cos(gamma) + vz * Math.sin(gamma)) * sine;
       } else {
         // Cones narrow with depth so subject subtrees stay coherent bundles.
         const depth = node.depth ?? 3;
@@ -1165,9 +1059,7 @@ export function knowledge3dBallTargets(
     directions[index * 3] = dx / length;
     directions[index * 3 + 1] = dy / length;
     directions[index * 3 + 2] = dz / length;
-    const shell =
-      knowledge3dShellRadius(node.depth ?? 3, tuning) *
-      (1 + (hash01(node.id, 37) - 0.5) * 0.08);
+    const shell = seedRadii.get(physicalNodes[index].depth ?? 3)!;
     targets[index * 3] = directions[index * 3] * shell;
     targets[index * 3 + 1] = directions[index * 3 + 1] * shell;
     targets[index * 3 + 2] = directions[index * 3 + 2] * shell;
@@ -1175,9 +1067,8 @@ export function knowledge3dBallTargets(
   return targets;
 }
 
-/** Seed every node OUTSIDE its packed spot (radially, from the ball's
- *  center) so the model visibly falls inward — gravity pulling toward the
- *  middle until the avoidance radii stop it. */
+/** Legacy radial seed expansion. The live 3D constructor immediately
+ * restores common shell radii before rendering; settling is angular. */
 export function seedKnowledge3dPositions(targets: Float32Array): Float32Array {
   const positions = new Float32Array(targets.length);
   for (let index = 0; index < targets.length; index += 1) {

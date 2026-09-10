@@ -18,7 +18,10 @@
 // record from the Graph Tuning pane.
 import * as THREE from "three";
 import {
-  KNOWLEDGE_3D_ALPHA_MIN,
+  captureKnowledge3dLayout,
+  knowledge3dSimulationNeedsTick,
+  knowledge3dPhysicsSignature,
+  type SphericalState,
   KNOWLEDGE_3D_HOVER_ARTICLE_LEVEL,
   KNOWLEDGE_3D_REHEAT_ALPHA,
   KNOWLEDGE_3D_WORLD_SPAN,
@@ -162,24 +165,7 @@ export interface Knowledge3dSimulationState {
   signature: string;
   alpha: number;
   tuning: Knowledge3dTuning;
-}
-
-/** Only inputs consumed by the forces can restart a settled layout. Paint,
- * labels, array identity/order and particle geometry are not physics. */
-function simulationSignature(
-  nodes: readonly KnowledgeForceNode[],
-  links: readonly KnowledgeForceLink[],
-  tuning: Knowledge3dTuning,
-): string {
-  return JSON.stringify([
-    tuning.chargeStrength, tuning.velocityDecay, tuning.linkDistance,
-    [...nodes].sort((a, b) => a.id.localeCompare(b.id)).map((node) => [
-      node.id, node.depth, node.role, node.parentId, node.radius,
-    ]),
-    [...links].sort((a, b) => a.source.localeCompare(b.source)
-      || a.target.localeCompare(b.target) || Number(a.taxonomy) - Number(b.taxonomy))
-      .map((link) => [link.source, link.target, link.taxonomy]),
-  ]);
+  layout?: SphericalState;
 }
 
 export interface Knowledge3dSatelliteCloud {
@@ -192,6 +178,7 @@ export interface Knowledge3dSatelliteCloud {
   tickIfHot(): boolean;
   captureSimNodes(): ReadonlyMap<string, KnowledgeForceNode>;
   captureSimulation(): Knowledge3dSimulationState;
+  layoutDiagnostics(): SphericalState | undefined;
   applyTuning(tuning: Knowledge3dTuning, pixelRatio: number): void;
   applyRelationEffects(effects: readonly Knowledge3dRelationEffect[], now: number): void;
   updateOrbit(tuning: Knowledge3dTuning, timeSeconds: number): void;
@@ -301,7 +288,8 @@ export function createKnowledge3dSatellite(
   // d3 iterates nodes and links in input order. Keep its private order stable
   // when a proposed spring becomes accepted; render buffers retain their order.
   const simulation: ForceSimulation<KnowledgeForceNode> =
-    createKnowledgeForceSimulation([...simNodes].sort((a, b) => a.id.localeCompare(b.id)), links, tuning);
+    createKnowledgeForceSimulation([...simNodes].sort((a, b) => a.id.localeCompare(b.id)),
+      links, tuning, 3, previous?.layout);
   // A proposed spring can change degree-sized glyphs and their layer spacing.
   // Keep the last painted state until the first ordinary simulation tick.
   // Fresh nodes or changed ancestry/spacing still require initial projection;
@@ -319,7 +307,7 @@ export function createKnowledge3dSatellite(
       node.vx = carried.vx; node.vy = carried.vy; node.vz = carried.vz;
     }
   }
-  const signature = simulationSignature(simNodes, links, tuning);
+  const signature = knowledge3dPhysicsSignature(simNodes, links, tuning);
   if (previous && previous.nodes.size > 0) {
     simulation.alpha(
       signature === previous.signature
@@ -1157,14 +1145,24 @@ export function createKnowledge3dSatellite(
     builtEdges: edges,
     builtSignature: satellitePhysicsSignature(input.tuning),
     isHot() {
-      return simulation.alpha() > KNOWLEDGE_3D_ALPHA_MIN;
+      return knowledge3dSimulationNeedsTick(simulation);
     },
     tickIfHot() {
-      if (simulation.alpha() <= KNOWLEDGE_3D_ALPHA_MIN) return false;
+      if (!knowledge3dSimulationNeedsTick(simulation)) return false;
       simulation.tick();
       copySimPositions();
       positionAttribute.needsUpdate = true;
       syncAllPositions();
+      if (!knowledge3dSimulationNeedsTick(simulation)) {
+        const layout = captureKnowledge3dLayout(simulation);
+        if (layout && layout.status !== "settled") {
+          // One terminal warning, not an endless idle solve or false success.
+          console.warn("Knowledge layout did not converge", {
+            agentId, status: layout.status, ticks: layout.ticks,
+            residuals: layout.residuals,
+          });
+        }
+      }
       return true;
     },
     captureSimNodes() {
@@ -1176,7 +1174,11 @@ export function createKnowledge3dSatellite(
         signature,
         alpha: simulation.alpha(),
         tuning,
+        layout: captureKnowledge3dLayout(simulation),
       };
+    },
+    layoutDiagnostics() {
+      return captureKnowledge3dLayout(simulation);
     },
     applyRelationEffects,
     applyTuning(live: Knowledge3dTuning, ratio: number) {
