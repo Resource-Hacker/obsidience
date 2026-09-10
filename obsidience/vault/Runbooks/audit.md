@@ -15,7 +15,14 @@ obsidience:
   - '[[Skills/harness.status]]'
   - '[[Skills/task.inspect]]'
   - '[[Skills/review.inspect]]'
+  - '[[Skills/harness.evaluate]]'
+  approved_at: '2026-09-09T17:57:05'
+  provenance: proposed by Codex (task codex:implementation)
 ---
+
+For an activation with `refinement_case` and `proposal`, follow [Using harness.evaluate](/Skills/harness.evaluate.md) and call `harness.evaluate` once with the exact bound filename. Do not edit the candidate, inspect its grading criteria or perform other maintenance in this branch. Report the actual verdict, paired counts and Source report path, including incomplete evidence or regressions. Finish `completed` after a real report, even for a negative verdict; finish `failed` only if no report can be obtained. This supports ordinary Review and never approves the proposal. Do not call `vault.propose` in this branch.
+
+For other Audit activations, use the existing procedure below.
 
 1. Use the exact candidate refs when this activation provides them. Otherwise
    call `harness.status` once and inspect one reported failed or blocked Task
