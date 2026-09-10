@@ -1,0 +1,93 @@
+diff --git a/src/config/lua/layout/LuaLayoutProvider.cpp b/src/config/lua/layout/LuaLayoutProvider.cpp
+--- a/src/config/lua/layout/LuaLayoutProvider.cpp
++++ b/src/config/lua/layout/LuaLayoutProvider.cpp
+@@ -25,6 +25,21 @@ static std::string normalizeLuaLayoutName(std::string name) {
+     return name;
+ }
+ 
++static const char* luaResizeCornerName(Layout::eRectCorner corner) {
++    switch (corner) {
++        case Layout::CORNER_TOP: return "top";
++        case Layout::CORNER_BOTTOM: return "bottom";
++        case Layout::CORNER_LEFT: return "left";
++        case Layout::CORNER_RIGHT: return "right";
++        case Layout::CORNER_TOPLEFT: return "top-left";
++        case Layout::CORNER_TOPRIGHT: return "top-right";
++        case Layout::CORNER_BOTTOMRIGHT: return "bottom-right";
++        case Layout::CORNER_BOTTOMLEFT: return "bottom-left";
++        case Layout::CORNER_NONE:
++        default: return "none";
++    }
++}
++
+ CLuaTiledAlgorithm::CLuaTiledAlgorithm(SP<SLuaLayoutProvider> provider) : m_provider(std::move(provider)) {
+     ;
+ }
+@@ -44,6 +59,49 @@ void CLuaTiledAlgorithm::removeTarget(SP<Layout::ITarget> target) {
+ }
+ 
+ void CLuaTiledAlgorithm::resizeTarget(const Vector2D& Δ, SP<Layout::ITarget> target, Layout::eRectCorner corner) {
++    if (!m_provider || !m_provider->active || !m_provider->state || !m_provider->manager) {
++        recalculate();
++        return;
++    }
++
++    auto targets  = liveTargets();
++    auto targetIt = std::ranges::find(targets, target);
++    auto parent   = m_parent.lock();
++    auto space    = parent ? parent->space() : nullptr;
++    if (targetIt == targets.end() || !space) {
++        recalculate();
++        return;
++    }
++
++    lua_State* L   = m_provider->state;
++    const int  top = lua_gettop(L);
++
++    lua_rawgeti(L, LUA_REGISTRYINDEX, m_provider->tableRef);
++    lua_getfield(L, -1, "resize");
++    lua_remove(L, -2);
++
++    if (!lua_isfunction(L, -1)) {
++        lua_settop(L, top);
++        recalculate();
++        return;
++    }
++
++    pushLayoutContext(L, targets, space->workArea());
++    pushLayoutTarget(L, target, sc<size_t>(targetIt - targets.begin()) + 1);
++    lua_pushnumber(L, Δ.x);
++    lua_pushnumber(L, Δ.y);
++    lua_pushstring(L, luaResizeCornerName(corner));
++
++    const int status = m_provider->manager->guardedPCall(5, 0, 0, CConfigManager::LUA_TIMEOUT_LAYOUT_CALLBACK_MS, "lua layout resize callback");
++    if (status != LUA_OK) {
++        std::string err = lua_tostring(L, -1) ? lua_tostring(L, -1) : "unknown lua error";
++        lua_settop(L, top);
++        reportError(err);
++        recalculate();
++        return;
++    }
++
++    lua_settop(L, top);
+     recalculate();
+ }
+ 
+diff --git a/meta/generateLuaStubs.py b/meta/generateLuaStubs.py
+--- a/meta/generateLuaStubs.py
++++ b/meta/generateLuaStubs.py
+@@ -650,6 +650,14 @@ def generate_stubs(
+             [
+                 ("recalculate", "fun(ctx: HL.LayoutContext): nil", False),
+                 ("layout_msg", "fun(ctx: HL.LayoutContext, msg: string): boolean|string|nil", True),
++                (
++                    "resize",
++                    "fun(ctx: HL.LayoutContext, target: HL.LayoutTarget, "
++                    "dx: number, dy: number, corner: "
++                    "'none'|'top'|'bottom'|'left'|'right'|'top-left'|"
++                    "'top-right'|'bottom-right'|'bottom-left'): nil",
++                    True,
++                ),
+             ],
+         )
+     )

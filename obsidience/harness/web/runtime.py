@@ -15,11 +15,15 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 from datetime import UTC, datetime
 from html.parser import HTMLParser
-from urllib.parse import urljoin, urlsplit, urlunsplit
+from urllib.parse import quote, urljoin, urlsplit, urlunsplit
 
 import httpx
+from markdownify import MarkdownConverter
+from lxml import html as lxml_html
+from trafilatura import extract as extract_article
 
 from ..config import PROJECT_ROOT
 
@@ -98,6 +102,132 @@ class _ReadableHTML(HTMLParser):
         return f"# {title}\n\n{body}" if title and not body.startswith(f"# {title}") else body
 
 
+class _ResearchMarkdown(MarkdownConverter):
+    """Preserve document structure without fetching linked resources.
+
+    The OKF reference fetcher demonstrates Markdownify for research extraction;
+    Obsidience keeps acquisition and immutable Source capture in this runtime.
+    """
+
+    def __init__(self, page_url: str) -> None:
+        super().__init__(heading_style="ATX", bullets="-", autolinks=False)
+        self.page_url = page_url
+
+    def process_tag(self, node, parent_tags=None):
+        if node.name in _SKIP_TAGS or node.name == "head":
+            return ""
+        return super().process_tag(node, parent_tags=parent_tags)
+
+    def convert_soup(self, soup):
+        title = re.sub(r"\s+", " ", soup.title.get_text(" ", strip=True)).strip() if soup.title else ""
+        body = super().convert_soup(soup).strip()
+        if title and not body.startswith(f"# {title}"):
+            body = f"# {title}\n\n{body}"
+        return body
+
+    def convert_a(self, el, text, parent_tags):
+        href = _outgoing_url(el.get("href"), self.page_url)
+        if href is None:
+            return text
+        el["href"] = href
+        return super().convert_a(el, text, parent_tags)
+
+    def convert_img(self, el, text, parent_tags):
+        # Keep readable alt text without loading or publishing image resources.
+        return self.escape(str(el.get("alt") or ""), parent_tags)
+
+
+def _outgoing_url(value: object, page_url: str) -> str | None:
+    """Retain only usable discovery links; never fetch them implicitly."""
+    href = str(value or "").strip()
+    if not href or href.startswith("#") or any(ord(char) < 32 for char in href):
+        return None
+    try:
+        absolute = urljoin(page_url, href)
+        parsed = urlsplit(absolute)
+        if (
+            len(absolute) > 2_000
+            or parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+        ):
+            return None
+        parsed.port
+    except ValueError:
+        return None
+    return quote(absolute, safe=":/?#[]@!$&'*+,;=%~")
+
+
+def _article_markdown(text: str, page_url: str) -> str | None:
+    """Use Trafilatura's pure extractor for marked articles, not generic docs.
+
+    HTTP acquisition and Source capture stay outside the extractor. Sparse or
+    unmarked documents retain the existing structure-preserving Markdown path.
+    """
+    try:
+        tree = lxml_html.fromstring(text, parser=lxml_html.HTMLParser(no_network=True))
+    except (ValueError, lxml_html.etree.ParserError):
+        return None
+    marked = tree.tag == "article" or bool(tree.xpath(
+        './/article | .//meta[@property="og:type" and @content="article"]'
+        ' | .//*[@itemtype="https://schema.org/NewsArticle"]'
+        ' | .//*[@itemtype="https://schema.org/Article"]'
+    )) or any(
+        re.search(r'"@type"\s*:\s*"(?:NewsArticle|Article|BlogPosting)"', node.text or "")
+        for node in tree.xpath('.//script[@type="application/ld+json"]')
+    )
+    if not marked:
+        return None
+    for anchor in list(tree.iter("a")):
+        href = _outgoing_url(anchor.get("href"), page_url)
+        if href is None:
+            anchor.drop_tag()
+        else:
+            anchor.set("href", href)
+    extracted = extract_article(
+        tree, url=page_url, output_format="markdown", include_comments=False,
+        include_links=True, include_formatting=True, with_metadata=True,
+        favor_precision=True,
+    )
+    if not extracted:
+        return None
+    # Metadata alone does not establish a useful article extraction. Short
+    # or unusual documents fall back without discarding the captured evidence.
+    body = extracted.split("\n---\n", 1)[-1]
+    return extracted.strip() if len(body.strip()) >= 200 else None
+
+
+def _check_cancelled(cancel_event: threading.Event | None) -> None:
+    if cancel_event is not None and cancel_event.is_set():
+        raise WebError("web fetch cancelled before Source capture")
+
+
+def validate_fetch_url(value: object) -> str:
+    """Validate one input's syntax before any batch request can start."""
+    raw = _bounded_text(value, "url", 2_000)
+    try:
+        parsed = urlsplit(raw)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise WebError("url must be an absolute HTTP or HTTPS URL")
+        if parsed.username is not None or parsed.password is not None:
+            raise WebError("url credentials are not allowed")
+        parsed.port
+    except ValueError as exc:
+        if isinstance(exc, WebError):
+            raise
+        raise WebError("url is malformed or its port is invalid") from exc
+    if any(ord(char) < 32 for char in raw):
+        raise WebError("url contains control characters")
+    normalized = quote(
+        urlunsplit((parsed.scheme, parsed.netloc, parsed.path or "/", parsed.query, "")),
+        safe=":/?#[]@!$&'*+,;=%~",
+    )
+    if len(normalized) > 2_000:
+        raise WebError("encoded url exceeds its bound")
+    return normalized
+
+
 def _bounded_text(value: object, field: str, maximum: int) -> str:
     if not isinstance(value, str):
         raise WebError(f"{field} must be a string")
@@ -110,12 +240,8 @@ def _bounded_text(value: object, field: str, maximum: int) -> str:
 
 
 def _public_url(value: object, *, previous_scheme: str | None = None) -> str:
-    raw = _bounded_text(value, "url", 2_000)
+    raw = validate_fetch_url(value)
     parsed = urlsplit(raw)
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-        raise WebError("url must be an absolute HTTP or HTTPS URL")
-    if parsed.username or parsed.password:
-        raise WebError("url credentials are not allowed")
     if previous_scheme == "https" and parsed.scheme != "https":
         raise WebError("HTTPS redirects may not downgrade to HTTP")
     try:
@@ -206,10 +332,11 @@ def _decode_response(response: httpx.Response, material: bytes) -> tuple[str, st
     encoding = response.encoding or "utf-8"
     text = material.decode(encoding, errors="replace").replace("\x00", "").strip()
     if media in {"text/html", "application/xhtml+xml"}:
-        parser = _ReadableHTML()
-        parser.feed(text)
-        parser.close()
-        text = parser.markdown().strip()
+        try:
+            text = (_article_markdown(text, str(response.url))
+                    or _ResearchMarkdown(str(response.url)).convert(text).strip())
+        except RecursionError as exc:
+            raise WebError("HTML nesting exceeds the extraction limit") from exc
         media_type = "text/markdown"
     elif media in {"application/json", "application/ld+json"}:
         media_type = "application/json"
@@ -220,7 +347,11 @@ def _decode_response(response: httpx.Response, material: bytes) -> tuple[str, st
     return text[:MAX_FETCH_CHARS], media_type
 
 
-def fetch_web(url: object, *, activation_key: str | None = None) -> dict:
+def fetch_web(
+    url: object, *, activation_key: str | None = None,
+    cancel_event: threading.Event | None = None,
+) -> dict:
+    _check_cancelled(cancel_event)
     current = _public_url(url)
     with httpx.Client(
         follow_redirects=False,
@@ -232,6 +363,7 @@ def fetch_web(url: object, *, activation_key: str | None = None) -> dict:
         },
     ) as client:
         for redirect_count in range(MAX_REDIRECTS + 1):
+            _check_cancelled(cancel_event)
             with client.stream("GET", current) as response:
                 if response.status_code in {301, 302, 303, 307, 308}:
                     location = response.headers.get("location")
@@ -248,12 +380,15 @@ def fetch_web(url: object, *, activation_key: str | None = None) -> dict:
                 chunks: list[bytes] = []
                 size = 0
                 for chunk in response.iter_bytes():
+                    _check_cancelled(cancel_event)
                     size += len(chunk)
                     if size > MAX_RESPONSE_BYTES:
                         raise WebError("web response exceeds the 2 MB acquisition bound")
                     chunks.append(chunk)
+                _check_cancelled(cancel_event)
                 content, media_type = _decode_response(response, b"".join(chunks))
                 captured_at = datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+                _check_cancelled(cancel_event)
                 source = ingest_source(
                     source_type="tool",
                     source_ref=current,

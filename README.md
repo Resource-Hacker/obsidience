@@ -47,8 +47,10 @@ no compositor, shell process, pointer bridge, or clipboard bridge per display.
 greetd launches that Hyprland session directly. KWin, Plasma Shell, Plasma
 Login Manager, KScreenLocker, and SDDM are removed from the live installation;
 their Git archive and backup are rollback evidence only. The current session is
-an unlocked development build. Secure locking, a native Polkit UI, HDR,
-fullscreen VRR, and WoW remain explicit acceptance gates.
+secured by the Quickshell Wayland session lock on every output; the selected
+Surface presents the existing live graph while PAM remains the sole unlock
+authority. A native Polkit UI, fullscreen HDR application behavior, fullscreen
+VRR, and WoW remain explicit acceptance gates.
 
 Graph Settings → Display selects the one Surface that owns the whole live
 knowledge graph. The setting is global for this development slice; individual
@@ -61,7 +63,7 @@ the live workspace always matches the working tree.
 
 ### Real-time command mode
 
-The top-bar volume control starts and stops the ordinary Realtime Task. A fixed
+The top-bar microphone control starts and stops the Realtime speech connection. A fixed
 Pipecat and NVIDIA NeMo speech runtime uses Nemotron Speech Streaming EN 0.6B
 on the RTX 4080 SUPER, listens through the Hardware-selected microphone and
 speaks through Pocket TTS on CPU. Pipecat's upstream `LocalAudioTransport`
@@ -70,8 +72,10 @@ audio client, audio WebSocket, or custom capture/playback loop. The OBSBOT camer
 is awake exactly while Realtime is ready, with its SDK auto-sleep timer disabled,
 so its microphone follows the camera's real hardware state. Hardware
 offers the Star Trek Computer, HAL, and Ultron Pocket voices. Each final transcript
-runs through the model and reasoning effort selected on the Realtime Task;
-speech transport never becomes another Agent, planner, or Tool owner.
+runs through the same Executive conversation and Query or Computer Use Task as
+typed Chat. Model and reasoning effort belong to that selected Task. The shared
+Thinking Packet, executor, and task.complete result drive the graph and public
+response; speech transport never becomes another Agent, planner, or Tool owner.
 
 The adjacent Play/Pause control is disabled until speech is ready. It toggles
 the existing Realtime mode without changing the selected Task model.
@@ -84,7 +88,7 @@ The supervisor API is `GET /api/realtime`, `POST /api/realtime/start`,
 ## Object model
 
 - Every graph node is an Article.
-- Knowledge is the default Article kind, including domains and parent indexes.
+- Knowledge is the default Article type, including domains and parent indexes.
 - Tasks state outcomes; Runbooks state process.
 - Every leaf Tool has one exact Capability entrypoint and one paired Skill; each
   Skill teaches only that Tool.
@@ -97,6 +101,13 @@ The supervisor API is `GET /api/realtime`, `POST /api/realtime/start`,
 The shared Library contains Tasks and Tool+Skill pairs. Runbooks are synthesized
 for individual Agents. The Tasks pane contains only active activation rules and
 executions, not the complete Task repository.
+
+The actual wiki files use [Open Knowledge Format v0.2](https://github.com/GoogleCloudPlatform/open-knowledge-format/blob/ad30107c31c06aec8a7d5636e0d1058118604e6f/SPEC.md)
+with the small Obsidience profile. Required `type` identifies the Article;
+application fields live under `obsidience`, and body links are normal Markdown.
+Task runtime state stays in the existing SQLite ledger. A parent's Article is
+`Folder/Folder.md`; it is already an index because it has children. There is no
+export copy, second graph, or upstream reference-agent runtime.
 
 ## Agent fleet
 
@@ -177,14 +188,26 @@ state, and z-order. The live Hyprland session uses the RTX 4080 as its primary
 renderer for Samsung `HDMI-A-1` at `5120x1440@240`, scale 1, 10-bit, with
 fullscreen-only VRR. The AMD iGPU supplies USB-C `DP-8` and logical DP-4
 `HDMI-A-2`; one compositor owns all three outputs and native pointer, clipboard,
-focus, and window movement. Samsung gaming, HDR, and secure lock behavior remain
-physical acceptance gates.
+focus, and window movement. Secure locking is owned by the same Quickshell host:
+the selected Surface shows the canonical graph, native QML and PAM own unlock,
+and `hypridle` provides the five-minute lock and ten-minute all-display DPMS
+policy. Samsung gaming and fullscreen HDR behavior remain physical acceptance
+gates.
 
 The same Quickshell registry, pane placement, graph, Reader, terminal, launcher,
 and theme serve every Surface; there is no second UI or temporary runtime
 namespace. Pointer dragging remains Surface-local, and multi-Surface keyboard
 transfer is one atomic
 placement revision owned by the primary shell.
+
+The Shell projects one live semantic scene into every activation packet. It
+includes focused and unfocused native applications and module panes plus each
+Surface's awake state, without exposing compositor identifiers or geometry to
+the model. `computer.observe` captures one exact toplevel directly through the
+pinned Wayshot Capability and gives that image only to the next call of the
+Task-selected vision model. `window.activate` and `window.place` are separate
+explicit Tools, so seeing, raising, and moving a window never become one hidden
+operation. Sleeping Surfaces fail immediately and are not woken automatically.
 
 Obsidience is an ordinary directory backed by `/home`; `/var/lib/ai` is the
 Models storage location. `/home` and `/var/lib/ai` are separate Btrfs subvolume

@@ -1,8 +1,9 @@
 ---
-binding: capability:vault.validate
-kind: tool
-source: obsidience/harness/capabilities/vault/validate.py
+type: tool
 title: vault.validate
+obsidience:
+  binding: capability:vault.validate
+  source: obsidience/harness/capabilities/vault/validate.py
 ---
 
 Deterministic graph validator: checks every load-bearing frontmatter edge in

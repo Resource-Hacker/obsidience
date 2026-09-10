@@ -1,14 +1,15 @@
 ---
-for_agent: '[[Agents/Alexandria/Alexandria]]'
-kind: runbook
-owner_maintained: true
-skills:
-- '[[Skills/searching-the-vault]]'
-- '[[Skills/reading-the-vault]]'
-- '[[Skills/validating-the-vault]]'
-- '[[Skills/proposing-changes]]'
-task: '[[Tasks/link]]'
+type: runbook
 title: Link procedure
+obsidience:
+  for_agent: '[[Agents/Alexandria/Alexandria]]'
+  owner_maintained: true
+  skills:
+  - '[[Skills/vault.search]]'
+  - '[[Skills/vault.read]]'
+  - '[[Skills/vault.validate]]'
+  - '[[Skills/vault.propose]]'
+  task: '[[Tasks/link]]'
 ---
 
 1. Read both exact `candidate_refs` Articles and their current accepted
@@ -28,5 +29,11 @@ title: Link procedure
    `vault.propose`. The harness classifies these as Link review objects from
    this accepted Task and displays the exact relationship delta; never attempt
    to set or describe a review class in Tool arguments.
+   Use exact accepted Article refs and no metadata changes. Each proposed
+   connection stays a suggestion; its body line and endpoint revision are
+   captured by the harness, not self-certified by the model. An edited endpoint
+   produces a visible review warning, including after a reciprocal Link is
+   approved. If Review blocks a stale proposal, reject it and reread both Articles
+   before a fresh proposal can be staged.
 6. Finish with `review`, naming each staged Article and the relationship added,
    or `completed` with the exact reason no useful link was warranted.

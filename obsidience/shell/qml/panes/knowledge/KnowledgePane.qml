@@ -20,6 +20,7 @@ Rectangle {
     property var expandedGroups: ({"executive": true})
     property var expandedPaths: ({})
     property string selectedRef: ""
+    property string selectedGraphId: ""
     property string query: ""
     property bool loading: false
     property string errorMessage: ""
@@ -75,22 +76,44 @@ Rectangle {
         }
     }
 
-    function projectionRoots(refs, namespace) {
+    function projectionRoots(refs, namespace, allowedRefs) {
         const byId = graphMap()
+        if (Array.isArray(allowedRefs)) {
+            const allowed = new Set(allowedRefs)
+            for (const ref of Object.keys(byId)) {
+                if (!allowed.has(ref)) delete byId[ref]
+            }
+        }
+        const aliases = {}
+        for (const node of Object.values(byId)) {
+            if (node.article_ref) aliases[node.article_ref] = node.id
+        }
         const requested = {}
         for (const rawRef of refs) {
-            const ref = cleanRef(rawRef)
+            const canonical = cleanRef(rawRef)
+            const ref = aliases[canonical] || canonical
             if (byId[ref]) requested[ref] = true
         }
         const parent = {}
-        for (const node of graphNodes) {
+        for (const node of Object.values(byId)) {
             for (const rawChild of Array.isArray(node.children) ? node.children : []) {
                 parent[cleanRef(rawChild)] = node.id
             }
         }
+        for (const ref of Object.keys(requested)) {
+            let cursor = parent[ref]
+            const seen = {}
+            while (cursor && !seen[cursor]) {
+                seen[cursor] = true
+                requested[cursor] = true
+                cursor = parent[cursor]
+            }
+        }
         const roots = Object.keys(requested).filter(function(ref) {
             let cursor = parent[ref]
-            while (cursor) {
+            const seen = {}
+            while (cursor && !seen[cursor]) {
+                seen[cursor] = true
                 if (requested[cursor]) return false
                 cursor = parent[cursor]
             }
@@ -136,8 +159,9 @@ Rectangle {
                 parent = folder
                 siblings = folder.children
             }
-            if (["index", "readme"].includes(String(basename).toLowerCase())
-                    && parent) {
+            if (parent && file.kind === "knowledge"
+                    && String(basename).toLowerCase()
+                        === currentPath.split("/").pop().toLowerCase()) {
                 parent.ref = file.ref
                 parent.kind = file.kind
                 parent.name = file.title
@@ -234,38 +258,84 @@ Rectangle {
             const spec = subjectTree(group)
             const identity = byId[group.root_ref]
             if (group.id === "library") {
-                const capabilities = subjectByTitle(spec.subjects, "Tools + Skills")
-                const tasks = subjectByTitle(spec.subjects, "Tasks")
+                // Match the Library graph: a Tool represents its paired Skill,
+                // and Task taxonomy indexes retain the declared hierarchy.
+                const capabilities = spec.subjects["@library/Tools"]
+                const tasks = spec.subjects["@library/Tasks"]
+                const members = group.article_refs || []
+                const libraryNodes = graphNodes.filter(node => members.includes(node.id))
                 if (capabilities) {
                     capabilities.children = projectionRoots(
-                        graphNodes.filter(node => node.kind === "tool"
-                            || node.kind === "skill").map(node => node.id),
-                        "library:capabilities"
+                        libraryNodes.filter(node => node.kind === "tool").map(node => node.id),
+                        "library:capabilities", members
                     )
                 }
                 if (tasks) {
                     tasks.children = projectionRoots(
-                        graphNodes.filter(node => node.kind === "task")
-                            .map(node => node.id), "library:tasks"
+                        libraryNodes.filter(node => node.kind === "task"
+                            || (Array.isArray(node.tags) && node.tags.includes("task-taxonomy")))
+                            .map(node => node.id), "library:tasks", members
                     )
                 }
-            } else if (identity && identity.checkouts) {
+                result.push({
+                    "id": group.id, "label": group.title,
+                    "subtitle": group.subtitle, "role": group.role,
+                    "rootRef": group.root_ref, "tree": spec.roots,
+                    "count": countRefs(spec.roots)
+                })
+                // Raw files belong to Source, not a duplicate Library tree.
+                continue
+            } else if (identity && identity.dependencies) {
                 for (const field of ["tools", "skills", "runbooks", "tasks"]) {
-                    const subject = subjectByTitle(
-                        spec.subjects,
-                        field.slice(0, 1).toUpperCase() + field.slice(1)
-                    )
+                    const subjectId = group.id === "executive"
+                        ? "@branch/" + field.slice(0, 1).toUpperCase() + field.slice(1)
+                        : "@sat/" + group.root_ref.split("/")[1] + "/" + field
+                    const subject = spec.subjects[subjectId]
                     if (subject) {
                         subject.children = projectionRoots(
-                            Array.isArray(identity.checkouts[field])
-                                ? identity.checkouts[field] : [],
-                            group.id + ":" + field
+                            Array.isArray(identity.dependencies[field])
+                                ? identity.dependencies[field] : [],
+                            group.id + ":" + field,
+                            group.article_refs || []
                         )
                     }
                 }
             }
 
-            const physical = groupFiles(group.id)
+            const members = new Set(group.article_refs || [])
+            const physical = groupFiles(group.id).filter(file =>
+                file.kind === "knowledge" && members.has(file.ref))
+            if (group.id === "executive") {
+                // Navigation owns folder identity, title and parentage. Attach
+                // each physical leaf once; its declared Article is the folder.
+                for (const declared of group.subjects || []) {
+                    if (!declared.path) continue
+                    const subject = spec.subjects[declared.id]
+                    subject.ref = declared.article_ref || declared.id
+                    for (const file of physical) {
+                        if (file.kind !== "knowledge"
+                                || file.path.slice(0, file.path.lastIndexOf("/")) !== declared.path
+                                || file.ref === declared.article_ref) continue
+                        subject.children.push({
+                            "key": "file:" + file.ref, "name": file.title,
+                            "path": file.path, "folder": false, "ref": file.ref,
+                            "kind": file.kind, "children": []
+                        })
+                    }
+                }
+                const subagents = spec.subjects["@agent/Subagents"]
+                if (subagents) subagents.children = projectionRoots(
+                    graphNodes.filter(node => node.kind === "agent" && node.id !== group.root_ref)
+                        .map(node => node.id), "executive:subagents"
+                )
+                result.push({
+                    "id": group.id, "label": group.title,
+                    "subtitle": group.subtitle, "role": group.role,
+                    "rootRef": group.root_ref, "tree": spec.roots,
+                    "count": countRefs(spec.roots)
+                })
+                continue
+            }
             let prefix = ""
             if (group.id === "guardian") prefix = "Agents/Heimdall"
             if (group.id === "curator") prefix = "Agents/Alexandria"
@@ -382,6 +452,7 @@ Rectangle {
     function revealSelection() {
         if (!selectedRef) return
         for (const group of groups) {
+            if (selectedGraphId && graphIdForGroup(group) !== selectedGraphId) continue
             const path = findPath(group.tree, selectedRef)
             if (!path) continue
             expandedGroups = setExpanded(expandedGroups, group.id, true)
@@ -459,11 +530,17 @@ Rectangle {
         shellSocket.sendTextMessage(JSON.stringify(command))
     }
 
-    function presentArticle(ref) {
+    function graphIdForGroup(group) {
+        return group.id === "executive" ? "main"
+            : group.id === "library" ? "library" : group.rootRef.split("/")[1]
+    }
+
+    function presentArticle(ref, group) {
         if (!ref) return
         sendShellCommand({"schema": "obsidience.shell.command.v1",
             "type": "pane.present", "pane_id": "reader",
-            "selection": {"kind": "article", "ref": ref}})
+            "selection": {"kind": "article", "ref": ref,
+                "graph_id": graphIdForGroup(group)}})
     }
 
     function applyShellEvent(message) {
@@ -475,6 +552,7 @@ Rectangle {
                 && event.pane.pane_id === "reader" && event.selection
                 && event.selection.kind === "article") {
             selectedRef = String(event.selection.ref || "")
+            selectedGraphId = String(event.selection.graph_id || "")
             revealSelection()
             rebuildRows()
         } else if (event.type === "pane.dock.state" && event.layout) {
@@ -692,7 +770,7 @@ Rectangle {
                         anchors.fill: parent
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: root.presentArticle(row.modelData.group.rootRef)
+                        onClicked: root.presentArticle(row.modelData.group.rootRef, row.modelData.group)
                     }
                 }
                 MouseArea {
@@ -722,6 +800,7 @@ Rectangle {
                 visible: row.modelData.type === "node"
                 anchors.fill: parent
                 color: row.modelData.node && row.modelData.node.ref === root.selectedRef
+                    && (!root.selectedGraphId || root.graphIdForGroup(row.modelData.group) === root.selectedGraphId)
                     ? "#1a67e8f9"
                     : nodeMouse.containsMouse ? "#0c67e8f9" : "transparent"
 
@@ -765,6 +844,7 @@ Rectangle {
                     anchors.verticalCenter: parent.verticalCenter
                     text: row.modelData.node ? row.modelData.node.name : ""
                     color: row.modelData.node && row.modelData.node.ref === root.selectedRef
+                        && (!root.selectedGraphId || root.graphIdForGroup(row.modelData.group) === root.selectedGraphId)
                         ? "#ecfeff" : "#a6cffafe"
                     elide: Text.ElideRight
                     font.family: "JetBrains Mono"
@@ -792,7 +872,7 @@ Rectangle {
                         ? Qt.PointingHandCursor : Qt.ArrowCursor
                     onClicked: {
                         if (row.modelData.node && row.modelData.node.ref) {
-                            root.presentArticle(row.modelData.node.ref)
+                            root.presentArticle(row.modelData.node.ref, row.modelData.group)
                         }
                     }
                 }

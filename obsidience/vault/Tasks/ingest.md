@@ -1,20 +1,16 @@
 ---
-assignee: '[[Agents/Alexandria/Alexandria]]'
-auto_done: true
-kind: task
-last_run: 3d2ca6506351
-model: obsidience-qwen38-27b-q8
-reasoning_effort: xhigh
-runbook: '[[Runbooks/ingest-sources]]'
-status: completed
-status_updated: '2026-08-21T11:00:13'
+type: task
 title: Ingest
-triggers:
-- source.inbox
+obsidience:
+  assignee: '[[Agents/Alexandria/Alexandria]]'
+  auto_done: true
+  model: obsidience-qwen38-27b-q8
+  reasoning_effort: low
+  runbook: '[[Runbooks/ingest-sources]]'
+  triggers:
+  - source.inbox
 ---
 
-Transform one immutable research handoff from the physical Source Inbox into
-coherent, retrievable wiki Knowledge. Alexandria reads the exact handoff and
-its cited raw Sources, reconciles them with the current graph, and stages only
-the Article creates or updates that the evidence justifies. Nothing to change
-is a valid result.
+Transform one immutable Source Inbox handoff into coherent, retrievable Knowledge. Darwin owns the research findings and summaries. Alexandria preserves their meaning and provenance, reconciles placement and duplicates, and adds useful contextual relationships without a routine raw-Source reread or separate factual verification pass.
+
+Success requires actual publication, an actual pending Review, or an attested no-change outcome for the bound handoff. Feed publication includes its required retention decision through the same Review owner. Model prose alone cannot discharge an unpublished commitment.

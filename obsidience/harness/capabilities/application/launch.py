@@ -6,31 +6,28 @@ import json
 import subprocess
 
 from obsidience.harness.computer.applications import APPLICATIONS
+from obsidience.harness.host.scene import (
+    SCENE,
+    SceneTargetAmbiguous,
+    SceneTargetNotFound,
+    SceneUnavailable,
+    _semantic_title,
+)
 
 
-def _visible_application_window(spec: dict) -> dict | None:
-    """Return one current compositor witness, or no witness if observation is unavailable."""
-    command = "/var/lib/ai/opt/computer-use-linux-0.4.2/computer-use-linux"
+def _visible_application_window(application: str) -> dict | None:
+    """Return one exact bounded Shell witness, never the first ambiguous match."""
     try:
-        result = subprocess.run(
-            [command, "windows"], capture_output=True, text=True, timeout=8, check=False,
-        )
-        payload = json.loads(result.stdout) if result.returncode == 0 else {}
-    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+        target = SCENE.resolve_semantic("application", application)
+    except (SceneUnavailable, SceneTargetNotFound, SceneTargetAmbiguous):
         return None
-    needles = tuple(str(value).casefold() for value in spec["window_needles"])
-    for window in payload.get("windows", []):
-        haystack = " ".join(
-            str(window.get(field, "")) for field in ("title", "app_id", "wm_class")
-        ).casefold()
-        if any(needle in haystack for needle in needles):
-            return {
-                "title": str(window.get("title", ""))[:240],
-                "app_id": str(window.get("app_id", ""))[:120],
-                "pid": window.get("pid"),
-                "window_id": window.get("window_id"),
-            }
-    return None
+    return {
+        "title": _semantic_title(target.window.title),
+        "app_id": target.window.app_id,
+        "surface": target.surface_id,
+        "focused": target.active,
+        "visible": target.surface_awake and target.window.visible_on_workspace and not target.window.minimized,
+    }
 
 
 def _unit_is_active(unit: str | None) -> bool:
@@ -56,7 +53,7 @@ def _launch_application(args: dict) -> dict:
             "application must be one of: " + ", ".join(sorted(APPLICATIONS))
         )
 
-    witness = _visible_application_window(spec)
+    witness = _visible_application_window(application)
     if witness:
         return {
             "application": application,
@@ -99,7 +96,7 @@ def _launch_application(args: dict) -> dict:
             "assistant_status": f"I could not start {spec['label']}: {detail}",
         }
 
-    witness = _visible_application_window(spec)
+    witness = _visible_application_window(application)
     ready = witness is not None
     return {
         "application": application,

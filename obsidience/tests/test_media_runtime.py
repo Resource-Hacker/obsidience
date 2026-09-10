@@ -85,23 +85,20 @@ def test_fixed_speech_runtime_preserves_canonical_voice_ids(
 
 def test_saved_audio_name_resolves_to_current_pipewire_node(monkeypatch) -> None:
     selected = "alsa_input.usb-test.analog-stereo"
+    command = ("/usr/bin/pactl", "-f", "json", "list", "sources")
     monkeypatch.setattr(
         media_runtime,
         "_run_json",
-        lambda command: [
+        lambda actual: [
             {
-                "id": 67,
-                "type": "PipeWire:Interface:Node",
-                "info": {
-                    "props": {
-                        "node.name": selected,
-                        "media.class": "Audio/Source",
-                        "object.serial": 72,
-                    }
+                "name": selected,
+                "properties": {
+                    "media.class": "Audio/Source",
+                    "object.serial": "72",
                 },
             }
         ]
-        if command == ("/usr/bin/pw-dump",)
+        if actual == command
         else None,
     )
 
@@ -280,8 +277,9 @@ def test_prepare_obsbot_enables_then_attests_exact_audio_packet_count(monkeypatc
     assert calls[2][calls[2].index("--target") + 1] == "2396"
 
 
-def test_prepare_microphone_fails_before_model_load_when_audio_clock_is_stalled(
-    monkeypatch,
+@pytest.mark.parametrize("sample_count", [0, 1, media_runtime.MICROPHONE_PROBE_SAMPLES - 1])
+def test_prepare_microphone_rejects_missing_or_incomplete_audio_packets(
+    monkeypatch, sample_count,
 ) -> None:
     monkeypatch.setattr(media_runtime, "set_realtime_camera_active", lambda *_args: None)
     monkeypatch.setattr(media_runtime, "resolve_audio_target", lambda *_args: "72")
@@ -289,7 +287,7 @@ def test_prepare_microphone_fails_before_model_load_when_audio_clock_is_stalled(
         media_runtime.subprocess,
         "run",
         lambda *_args, **_kwargs: media_runtime.subprocess.CompletedProcess(
-            (), 0, stdout=b"", stderr=b""
+            (), 0, stdout=bytes(sample_count * 2), stderr=b""
         ),
     )
 
@@ -297,7 +295,7 @@ def test_prepare_microphone_fails_before_model_load_when_audio_clock_is_stalled(
         media_runtime.prepare_microphone("some-other-microphone")
 
 
-def test_prepare_microphone_rejects_clocked_digital_silence(monkeypatch) -> None:
+def test_prepare_microphone_accepts_complete_clocked_digital_silence(monkeypatch) -> None:
     monkeypatch.setattr(media_runtime, "set_realtime_camera_active", lambda *_args: None)
     monkeypatch.setattr(media_runtime, "resolve_audio_target", lambda *_args: "72")
     monkeypatch.setattr(
@@ -311,5 +309,16 @@ def test_prepare_microphone_rejects_clocked_digital_silence(monkeypatch) -> None
         ),
     )
 
-    with pytest.raises(RuntimeError, match="digital silence"):
+    assert media_runtime.prepare_microphone("some-other-microphone") == "72"
+
+
+def test_prepare_microphone_rejects_a_stalled_audio_clock(monkeypatch) -> None:
+    monkeypatch.setattr(media_runtime, "set_realtime_camera_active", lambda *_args: None)
+    monkeypatch.setattr(media_runtime, "resolve_audio_target", lambda *_args: "72")
+
+    def stalled(command, **_kwargs):
+        raise media_runtime.subprocess.TimeoutExpired(command, 3)
+
+    monkeypatch.setattr(media_runtime.subprocess, "run", stalled)
+    with pytest.raises(RuntimeError, match="did not produce audio packets"):
         media_runtime.prepare_microphone("some-other-microphone")

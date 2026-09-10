@@ -86,10 +86,6 @@ const OFF_REALTIME: RealtimeState = {
     tts_device: "CPU",
     voice: "starfleet",
   },
-  model: null,
-  task_ref: "Tasks/executive/realtime",
-  task_run_id: null,
-  task_status: "draft",
   scheduler_paused: false,
   recent_log: [],
 };

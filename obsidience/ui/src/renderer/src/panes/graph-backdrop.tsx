@@ -45,9 +45,12 @@ import {
   onKnowledgeActivity,
   openReader,
   type GraphNavigation,
+  type GraphLink,
   type GraphNavigationGroup,
   type GraphNode,
   type KnowledgeActivity,
+  type GraphLinkProposals,
+  type LinkReviewChange,
 } from "@/lib/api";
 import {
   MAIN_GRAPH_ID,
@@ -56,12 +59,18 @@ import {
   onGraphTuning,
   selectGraph,
 } from "@/lib/graph-tuning";
+import { projectedAutoCuratedRefs } from "./graph-curation";
+import { articleDisplayAliases, graphArticleIds, projectedArticleLinks, visibleArticleLinks, withoutTaxonomyLinks } from "./graph-links";
+import { ActionTracePopup } from "./action-trace-popup";
+import { KNOWLEDGE_LINK_APPROVAL_DURATION_MS } from "@/components/themes/obsidience/knowledge-3d-satellites";
+import { previewLinkReviewCloud, projectLinkReviewEffects, recordLinkApproval, type LinkApproval } from "./graph-link-review";
 
 const ROOT_ID = "@vault";
 const FOCUS_LINGER_MS = 6_000;
 
 interface ActivityWireEntry {
-  phase?: KnowledgeActivity["phase"];
+  phase?: KnowledgeActivity["phase"] | "review_changed";
+  review?: LinkReviewChange;
   refs?: string[];
   query?: string;
   graph_id?: string;
@@ -75,7 +84,7 @@ interface ActivityWireMessage extends ActivityWireEntry {
 }
 
 function activityFromWire(entry: ActivityWireEntry): KnowledgeActivity | null {
-  if (!entry.phase) return null;
+  if (!entry.phase || entry.phase === "review_changed") return null;
   return {
     phase: entry.phase,
     refs: Array.isArray(entry.refs) ? entry.refs : [],
@@ -112,11 +121,10 @@ function latestActivityTransaction(entries: ActivityWireEntry[]): KnowledgeActiv
     else if (entry.phase === "speaking") speaking = entry;
     else if (entry.phase === "query_completed" || entry.phase === "cleared") terminal = entry;
   }
-  // A start-only snapshot needs no replay: the server subscribes before it
-  // snapshots, so its canonical path will arrive as the next live frame.
-  if (path === null) return [];
   if (terminal?.phase === "cleared") return [];
   if (terminal?.at !== undefined && Date.now() - terminal.at >= FOCUS_LINGER_MS) return [];
+  // A reconnect may land between start and packet compilation. Preserve that
+  // start so the popup includes the Task trace emitted before its graph path.
   return [started, path, speaking, terminal].filter(
     (entry): entry is KnowledgeActivity => entry !== null,
   );
@@ -134,56 +142,29 @@ interface GraphCloud {
 
 interface VaultGraphSnapshot {
   nodes: GraphNode[];
-  links: Array<{ source: string; target: string }>;
+  links: GraphLink[];
   auto_curated: string[];
+  auto_curate_resolved: boolean;
   navigation: GraphNavigation;
 }
 
-/** The API has no ephemeral graph fields. Canonicalize only the unordered
- * top-level collections; authored child arrays stay ordered and therefore
- * remain meaningful hierarchy changes. */
+/** Retain live status for node paint as well as durable graph changes.
+ * Canonicalize unordered top-level collections; authored child arrays stay
+ * ordered. The scene preserves cooling across paint-only refreshes. */
 function graphSnapshotFingerprint(snapshot: VaultGraphSnapshot): string {
   return JSON.stringify({
     nodes: [...snapshot.nodes].sort((left, right) => left.id.localeCompare(right.id)),
     links: [...snapshot.links].sort((left, right) =>
       left.source.localeCompare(right.source) || left.target.localeCompare(right.target)),
     auto_curated: [...snapshot.auto_curated].sort(),
+    auto_curate_resolved: snapshot.auto_curate_resolved,
     navigation: snapshot.navigation,
   });
 }
 
-function cascadedAutoCurated(
-  seeds: ReadonlySet<string>,
-  nodes: ReadonlyArray<{ id: string; parentId?: string | null }>,
-): Set<string> {
-  const result = new Set([...seeds].filter((id) => nodes.some((node) => node.id === id)));
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const node of nodes) {
-      if (node.parentId && result.has(node.parentId) && !result.has(node.id)) {
-        result.add(node.id);
-        changed = true;
-      }
-    }
-  }
-  return result;
-}
-
-/** Cross-link tendrils are relationships between leaf articles only. Index
- * notes still supply readable hierarchy hubs, but their navigational links
- * must never be painted as article-to-article evidence. */
-function isArticleEndpoint(node: GraphNode, hierarchyContainers: ReadonlySet<string>): boolean {
-  const basename = node.id.split("/").pop()?.toLowerCase();
-  const hasChildren = (node.children?.length ?? 0) > 0;
-  const tags = node.tags ?? [];
-  return node.kind !== "agent"
-    && node.id.toLowerCase() !== "home"
-    && basename !== "index"
-    && basename !== "readme"
-    && !tags.includes("index-hub")
-    && !hierarchyContainers.has(node.id)
-    && !hasChildren;
+/** Parent and index Articles retain semantic links; Brain peers are navigation only. */
+function isArticleEndpoint(node: GraphNode): boolean {
+  return node.kind !== "agent";
 }
 
 function buildThinkingRoute(cloud: GraphCloud, refs: readonly string[]): ThinkingRoute | null {
@@ -246,6 +227,7 @@ interface ActiveThinking {
   graphId?: string;
   query?: string;
   retrievalMs?: number;
+  startedAt: number;
 }
 
 interface SatelliteThinkingTest {
@@ -290,12 +272,15 @@ export function GraphBackdrop({
   hub?: KnowledgeLayoutAnchor;
 } = {}) {
   const [graph, setGraph] = useState<VaultGraphSnapshot>({
-    nodes: [], links: [], auto_curated: [], navigation: { groups: [] },
+    nodes: [], links: [], auto_curated: [], auto_curate_resolved: false,
+    navigation: { groups: [] },
   });
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [nodeMenu, setNodeMenu] = useState<NodeMenuState | null>(null);
   const [activity, setActivity] = useState<ActiveThinking | null>(null);
+  const [traceInspectionSince, setTraceInspectionSince] = useState<number | null>(null);
+  const [traceDismissedSince, setTraceDismissedSince] = useState<number | null>(null);
   const [sceneKey, setSceneKey] = useState(0);
   const [viewport, setViewport] = useState({ width: window.innerWidth, height: window.innerHeight });
   const titles = useRef(new Map<string, string>());
@@ -307,6 +292,27 @@ export function GraphBackdrop({
   const [satelliteTest, setSatelliteTest] = useState<SatelliteThinkingTest | null>(null);
   const [tuning, setTuning] = useState<Knowledge3dTuning>(() => loadGraphTuning(MAIN_GRAPH_ID));
   const [satelliteTunings, setSatelliteTunings] = useState<Record<string, Knowledge3dTuning>>({});
+  const [linkProposals, setLinkProposals] = useState<GraphLinkProposals>({ entries: [], truncated: false });
+  const [linkApprovals, setLinkApprovals] = useState<LinkApproval[]>([]);
+  const proposalStarts = useRef(new Map<string, number>());
+
+  // One expiry deadline for finite approval paint; the scene owns every frame.
+  useEffect(() => {
+    if (!linkApprovals.length) return;
+    const deadline = Math.min(...linkApprovals.map((item) => item.startedAt + KNOWLEDGE_LINK_APPROVAL_DURATION_MS));
+    const timer = window.setTimeout(() => setLinkApprovals((current) => current.filter(
+      (item) => performance.now() - item.startedAt < KNOWLEDGE_LINK_APPROVAL_DURATION_MS,
+    )), Math.max(1, deadline - performance.now()));
+    return () => window.clearTimeout(timer);
+  }, [linkApprovals]);
+
+  // Reading the trace can outlive the graph's activity linger. This retains only
+  // the popup's bounded presentation, never the animation or Task execution.
+  useEffect(() => {
+    if (visible && !lockMode) return;
+    setTraceInspectionSince(null);
+    setTraceDismissedSince(null);
+  }, [visible, lockMode]);
 
   useEffect(() => {
     if (!lockMode) return;
@@ -330,6 +336,21 @@ export function GraphBackdrop({
     let stopped = false;
     let socket: WebSocket | null = null;
     let retry: number | null = null;
+    const reviewChanged = (entry: ActivityWireEntry) => {
+      if (entry.phase !== "review_changed" || !entry.review) return;
+      const review = entry.review;
+      const wallNow = Date.now();
+      const frameNow = performance.now();
+      setLinkApprovals((current) => recordLinkApproval(current, review, wallNow, frameNow));
+      // Approval retains its preview spring until the fresh accepted snapshot
+      // replaces it. Removing it here would briefly tear out and re-add the link.
+      if (review.state === "rejected") {
+        setLinkProposals((current) => ({ ...current,
+          entries: current.entries.filter((link) => link.proposal_id !== review.proposal_id),
+        }));
+      }
+      window.dispatchEvent(new Event("obsidience:graph-refresh"));
+    };
     const connect = () => {
       if (stopped) return;
       socket = new WebSocket(`${WS_BASE}/ws/activity`);
@@ -337,9 +358,11 @@ export function GraphBackdrop({
         try {
           const message = JSON.parse(event.data as string) as ActivityWireMessage;
           if (message.type === "activity") {
+            reviewChanged(message);
             const activity = activityFromWire(message);
             if (activity) announceKnowledgeActivity(activity);
           } else if (message.type === "snapshot" && Array.isArray(message.entries)) {
+            message.entries.forEach(reviewChanged);
             latestActivityTransaction(message.entries).forEach(announceKnowledgeActivity);
           }
         } catch { /* malformed activity frames are ignored */ }
@@ -368,15 +391,18 @@ export function GraphBackdrop({
       setActivity({
         refs: [], phase: "thinking", key: activityKey.current, query: next.query,
         retrievalMs: next.retrievalMs, graphId: next.graphId,
+        startedAt: next.at ?? Date.now(),
       });
       return;
     }
     if (next.phase === "path") {
       activityKey.current += 1;
-      setActivity({
+      setActivity((current) => ({
         refs: next.refs, phase: "thinking", key: activityKey.current, query: next.query,
         retrievalMs: next.retrievalMs, graphId: next.graphId,
-      });
+        startedAt: current?.query === next.query && current?.graphId === next.graphId
+          ? current.startedAt : next.at ?? Date.now(),
+      }));
       return;
     }
     if (next.phase === "speaking") {
@@ -387,6 +413,7 @@ export function GraphBackdrop({
         query: next.query ?? current?.query,
         retrievalMs: next.retrievalMs ?? current?.retrievalMs,
         graphId: next.graphId ?? current?.graphId,
+        startedAt: current?.startedAt ?? next.at ?? Date.now(),
       }));
       return;
     }
@@ -418,22 +445,41 @@ export function GraphBackdrop({
 
   useEffect(() => {
     let live = true;
-    const pull = () => api.graph().then((next) => {
-      if (!live) return;
-      const snapshot: VaultGraphSnapshot = {
-        nodes: next.nodes,
-        links: next.links,
-        auto_curated: next.auto_curated ?? [],
-        navigation: next.navigation,
-      };
-      const fingerprint = graphSnapshotFingerprint(snapshot);
-      // Preserve array/object identity across no-op polls. The Obsidience scene
-      // keys cloud reuse on those identities; replacing an unchanged snapshot
-      // reheats every force simulation and visibly pops the entire graph.
-      if (fingerprint === graphFingerprint.current) return;
-      graphFingerprint.current = fingerprint;
-      setGraph(snapshot);
-    }).catch(() => undefined);
+    let requested = 0;
+    let pulling = false;
+    const pull = async () => {
+      requested += 1;
+      if (pulling) return;
+      pulling = true;
+      let request: number;
+      do {
+        request = requested;
+        try {
+          const next = await api.graph();
+          // A review event invalidates any response started before that event.
+          if (!live || request !== requested) continue;
+          const proposals = next.link_proposals ?? { entries: [], truncated: false };
+          const now = performance.now();
+          proposalStarts.current = new Map(proposals.entries.map((link) => [
+            link.proposal_id, proposalStarts.current.get(link.proposal_id) ?? now,
+          ]));
+          setLinkProposals((current) => JSON.stringify(current) === JSON.stringify(proposals) ? current : proposals);
+          const snapshot: VaultGraphSnapshot = {
+            nodes: next.nodes,
+            links: next.links,
+            auto_curated: next.auto_curated ?? [],
+            auto_curate_resolved: next.auto_curate_resolved === true,
+            navigation: next.navigation,
+          };
+          const fingerprint = graphSnapshotFingerprint(snapshot);
+          // Accepted knowledge stays separate from the Scene-only spring preview.
+          if (fingerprint === graphFingerprint.current) continue;
+          graphFingerprint.current = fingerprint;
+          setGraph(snapshot);
+        } catch { /* retain the last accepted graph until a successful refresh */ }
+      } while (live && request !== requested);
+      pulling = false;
+    };
     pull();
     const t = setInterval(pull, 15_000);
     window.addEventListener("obsidience:graph-refresh", pull);
@@ -444,10 +490,21 @@ export function GraphBackdrop({
     };
   }, []);
 
+  const displayAliases = useMemo(() => articleDisplayAliases([
+    ...graph.nodes,
+    ...graph.navigation.groups.flatMap((group) => group.subjects),
+  ]), [graph.nodes, graph.navigation]);
   const model = useMemo(() => {
     const all = graph.nodes;
-    const autoCuratedSeeds = new Set(graph.auto_curated);
+    const linkPairs = projectedArticleLinks(graph.links, displayAliases);
     const executiveGroup = graph.navigation.groups.find((group) => group.id === "executive");
+    const autoCurated = projectedAutoCuratedRefs(
+      graph.auto_curate_resolved ? graph.auto_curated : [], all,
+      [
+        ...graph.navigation.groups.flatMap((group) => group.subjects),
+        ...(executiveGroup ? [{ id: ROOT_ID, article_ref: executiveGroup.root_ref }] : []),
+      ],
+    );
     const executiveSubjects = executiveGroup?.subjects ?? [];
     const executiveName = executiveGroup?.title
       ?? all.find((node) => node.id === "Agents/Executive/Executive")?.title
@@ -460,16 +517,10 @@ export function GraphBackdrop({
       group.root_ref.split("/")[1], group,
     ]));
     const agentNames = [...agentGroupByName.keys()];
-    const assigneeOf = (n: GraphNode): string | null => {
-      const m = /Agents\/([^\]|/]+)/.exec(n.assignee ?? "");
-      return m ? m[1] : null;
-    };
     const subRef = (raw: string, pool: Set<string>): string | null => {
       const clean = raw.trim().replace(/^\[\[/, "").replace(/\]\]$/, "").split("|")[0].split("#")[0];
-      if (pool.has(clean)) return clean;
-      const base = clean.split("/").pop()!.toLowerCase();
-      for (const id of pool) if (id.split("/").pop()!.toLowerCase() === base) return id;
-      return null;
+      const displayed = displayAliases.get(clean) ?? clean;
+      return pool.has(displayed) ? displayed : null;
     };
     const primitiveKinds = new Set(["tool", "skill", "runbook", "task"]);
     const primitiveKindOf = (node: GraphNode): string | null =>
@@ -496,62 +547,26 @@ export function GraphBackdrop({
       }
       return parentOf;
     };
-    const allIds = new Set(all.map((node) => node.id));
-    const checkoutIdsOf = (identity?: GraphNode): Set<string> => new Set(
-      Object.values(identity?.checkouts ?? {}).flatMap((values) => values ?? [])
-        .map((raw) => subRef(raw, allIds)).filter((ref): ref is string => Boolean(ref)),
-    );
     const libraryKinds = new Set(["tool", "task"]);
     const primitiveFolderByKind: Record<string, string> = {
       tool: "Tools", skill: "Skills", runbook: "Runbooks", task: "Tasks",
     };
     const primitiveNotes = all.filter((n) => Boolean(primitiveKindOf(n))
       && !(n.kind === "skill" && !n.synthetic));
-    const libraryNotes = primitiveNotes.filter((node) =>
-      libraryKinds.has(primitiveKindOf(node) ?? ""));
-    const hierarchyClosure = (roots: Set<string>): Set<string> => {
-      const pool = new Set(primitiveNotes.map((node) => node.id));
-      const byId = new Map(primitiveNotes.map((node) => [node.id, node]));
-      const closure = new Set([...roots].filter((ref) => pool.has(ref)));
-      const queue = [...closure];
-      while (queue.length) {
-        const parent = byId.get(queue.shift() as string);
-        if (!parent) continue;
-        for (const raw of childRefsOf(parent)) {
-          const child = subRef(raw, pool);
-          if (!child || closure.has(child) ||
-              primitiveKindOf(byId.get(child) as GraphNode) !== primitiveKindOf(parent)) continue;
-          closure.add(child);
-          queue.push(child);
-        }
-      }
-      const parentOf = hierarchyParents(primitiveNotes);
-      for (const ref of [...closure]) {
-        let cursor = ref;
-        while (parentOf.has(cursor)) {
-          cursor = parentOf.get(cursor) as string;
-          if (closure.has(cursor)) break;
-          closure.add(cursor);
-        }
-      }
-      return closure;
-    };
     // Shared Tool+Skill pairs and Tasks belong to the curated Library satellite.
     // Runbooks are synthesized per agent; all four primitive kinds project on
     // an agent only when that identity carries them.
-    const executiveCheckouts = hierarchyClosure(
-      checkoutIdsOf(all.find((node) => node.id === "Agents/Executive/Executive")),
-    );
-    const executivePrimitives = primitiveNotes.filter((node) => executiveCheckouts.has(node.id));
+    const executiveMembers = graphArticleIds(executiveGroup, displayAliases);
+    const executivePrimitives = primitiveNotes.filter((node) => executiveMembers.has(node.id));
     const executiveParents = hierarchyParents(executivePrimitives);
     const executiveContainers = new Set(executiveParents.values());
     const agentIdentities = all.filter((node) => node.kind === "agent"
       && node.id.startsWith("Agents/") && node.id !== "Agents/Executive/Executive");
+    // Other Brains remain navigation shortcuts, never membership expansion or
+    // cross-link evidence (isArticleEndpoint excludes Agent nodes).
     const notes = [
-      ...all.filter((n) => (!n.id.startsWith("Agents/") || n.id.startsWith("Agents/Executive/"))
-        && !n.id.startsWith("Sources/")
-        && n.id !== "Library" && !n.id.startsWith("Library/") && !n.id.startsWith("@library/")
-        && !primitiveKindOf(n) && n.id !== "Agents/Executive/Executive"),
+      ...all.filter((node) => executiveMembers.has(node.id) && !primitiveKindOf(node)
+        && !node.navigation_ref && node.id !== "Agents/Executive/Executive"),
       ...agentIdentities,
       ...executivePrimitives,
     ];
@@ -562,21 +577,22 @@ export function GraphBackdrop({
       .map((n) => branchOf(n.id)).filter(Boolean))] as string[];
     const branches = folders
       .filter((folder) => folder !== "Library" && folder !== "@library"
-        && !primitiveFolders.includes(folder))
+        && !primitiveFolders.includes(folder)
+        && !executiveSubjects.some((subject) => subject.id === `@branch/${folder}`))
       .sort();
     const folderPaths = [...new Set(notes.flatMap((node) => {
       if (agentIdentities.includes(node) || primitiveKindOf(node)) return [];
       const parts = node.id.split("/").slice(0, -1);
       if (parts.length < 2 || parts[0] === "Agents") return [];
       return parts.slice(1).map((_part, index) => parts.slice(0, index + 2).join("/"));
-    }))].sort();
+    }))].filter((path) => !executiveSubjects.some((subject) => subject.id === `@branch/${path}`)).sort();
 
     const degree = new Map<string, number>();
-    const executiveArticleIds = new Set(notes
-      .filter((node) => isArticleEndpoint(node, executiveContainers))
-      .map((node) => node.id));
-    const crossLinks = graph.links.filter((link) =>
-      executiveArticleIds.has(link.source) && executiveArticleIds.has(link.target));
+    const executiveArticleIds = new Set(all.filter(isArticleEndpoint)
+      .map((node) => displayAliases.get(node.id) ?? node.id)
+      .filter((ref) => executiveMembers.has(ref)));
+    const crossLinks = visibleArticleLinks(linkPairs, executiveArticleIds, "Agents/Executive/Executive",
+      new Set(executiveGroup?.article_refs ?? []));
     for (const l of crossLinks) {
       degree.set(l.source, (degree.get(l.source) ?? 0) + 1);
       degree.set(l.target, (degree.get(l.target) ?? 0) + 1);
@@ -588,6 +604,7 @@ export function GraphBackdrop({
       const primitiveKind = primitiveKindOf(node);
       if (primitiveKind) return `@branch/${primitiveFolderByKind[primitiveKind]}`;
       if (node.kind === "agent") return "@agent/Subagents";
+      if (node.parent_id) return node.parent_id;
       if (node.id.startsWith("Agents/Executive/Architecture/")) return "@agent/Architecture";
       if (node.id.startsWith("Agents/Executive/Subagents/")) return "@agent/Subagents";
       if (node.id.startsWith("Agents/Executive/Observations/Temporary Observations/")) {
@@ -641,11 +658,10 @@ export function GraphBackdrop({
         };
       }),
     ];
-    const mainAutoCurated = cascadedAutoCurated(autoCuratedSeeds, layoutNodes);
     const taxonomyEdges = layoutNodes
       .filter((n) => n.parentId)
       .map((n, i) => ({ id: `t${i}`, source: n.parentId as string, target: n.id, type: "related_to" as never }));
-    const crossEdges = crossLinks.filter((link) => executiveParents.get(link.target) !== link.source).map((l, i) => ({
+    const crossEdges = withoutTaxonomyLinks(crossLinks, layoutNodes).map((l, i) => ({
       id: `x${i}`, source: l.source, target: l.target, type: "related_to" as never,
     }));
 
@@ -693,13 +709,13 @@ export function GraphBackdrop({
         subject,
         core: nodeCoreColor(palette, role, noteMeta?.status),
         dark: palette.dark,
-        ring: subject ? palette.ring : "rgba(0,0,0,0)",
+        ring: subject || autoCurated.has(p.id) ? palette.ring : "rgba(0,0,0,0)",
         glow: subject ? palette.glow : "rgba(0,0,0,0)",
         ringScale: knowledgeSubjectRingScale(p.depth),
         ringWidth: knowledgeSubjectRingWidth(role, p.depth),
         glowScale: subject ? knowledgeSubjectGlowScale(role, p.depth) : 1,
         alpha: knowledgeNodeBaseAlpha(role, p.depth, "hot"),
-        autoCurated: mainAutoCurated.has(p.id),
+        autoCurated: autoCurated.has(p.id),
       };
     });
     const renderEdges: Knowledge3dRenderEdge[] = [
@@ -715,38 +731,39 @@ export function GraphBackdrop({
         colorEnd: paletteOf(e.target).core,
       })),
     ];
+    const reviewScopes = new Map<string, {
+      articleIds: Set<string>; agentRef?: string; scopeRefs: Set<string>; links: GraphLink[];
+      edgeColorEnd: (id: string) => string;
+    }>([["main", { articleIds: executiveArticleIds, agentRef: "Agents/Executive/Executive",
+      scopeRefs: new Set(executiveGroup?.article_refs ?? []), links: crossLinks,
+      edgeColorEnd: (id) => paletteOf(id).core }]]);
     // ---- satellites: one ball per agent, seeded by its own mini hierarchy ----
-    const linkPairs = graph.links;
     const agentSatellites = agentNames.map((name) => {
       const navigationGroup = agentGroupByName.get(name) as GraphNavigationGroup;
       const identityRef = navigationGroup.root_ref;
       const satelliteSubjects = navigationGroup.subjects;
+      const subjectArticleRefs = new Set(satelliteSubjects.flatMap((subject) =>
+        subject.article_ref ? [subject.article_ref] : []));
       const satelliteSubjectByKey = new Map(satelliteSubjects.map((subject) => [
         subject.id.slice(subject.id.lastIndexOf("/") + 1), subject,
       ]));
       const satelliteSubjectId = (key: string): string =>
         satelliteSubjectByKey.get(key)?.id ?? identityRef;
-      const assigned = new Set(all.filter((node) => node.kind === "task" && assigneeOf(node) === name)
-        .map((node) => node.id));
-      const checkedOut = hierarchyClosure(new Set([
-        ...checkoutIdsOf(all.find((node) => node.id === identityRef)),
-        ...assigned,
-      ]));
-      const localMembers = all.filter((n) =>
-        (n.id.startsWith(`Agents/${name}/`) && n.id !== identityRef) ||
-        checkedOut.has(n.id) ||
-        (name === "Darwin" && n.id.startsWith("Sources/")
-          && !["readme", "index"].includes(n.id.split("/").pop()?.toLowerCase() ?? "")));
+      const satelliteMembers = graphArticleIds(navigationGroup, displayAliases);
+      const localMembers = all.filter((node) => satelliteMembers.has(node.id)
+        && !subjectArticleRefs.has(node.id) && node.id !== identityRef
+        && !(node.kind === "skill" && !node.synthetic));
       const otherAgentMembers = [
         ...all.filter((node) => node.kind === "agent" && node.id !== identityRef),
       ];
+      // These Brain shortcuts preserve Other Agents navigation, not its scope.
       const members = [...localMembers, ...otherAgentMembers.filter((node) => !localMembers.includes(node))];
       const primitiveMembers = members.filter((member) => Boolean(primitiveKindOf(member)));
       const primitiveParents = hierarchyParents(primitiveMembers);
       const primitiveContainers = new Set(primitiveParents.values());
-      const satelliteArticleIds = new Set(members
-        .filter((node) => isArticleEndpoint(node, primitiveContainers))
-        .map((node) => node.id));
+      const satelliteArticleIds = new Set(all.filter(isArticleEndpoint)
+        .map((node) => displayAliases.get(node.id) ?? node.id)
+        .filter((ref) => satelliteMembers.has(ref)));
       const satelliteParentOf = (node: GraphNode): string => {
         const primitiveParent = primitiveParents.get(node.id);
         if (primitiveParent) return primitiveParent;
@@ -785,7 +802,6 @@ export function GraphBackdrop({
           order: i,
         })),
       ];
-      const satelliteAutoCurated = cascadedAutoCurated(autoCuratedSeeds, satLayoutNodes);
       const satLayout = layoutKnowledgeGraph({
         nodes: satLayoutNodes,
         edges: satLayoutNodes.filter((n) => n.parentId)
@@ -806,21 +822,24 @@ export function GraphBackdrop({
           subject,
           core: nodeCoreColor(pal, subject ? role : undefined, noteMeta?.status),
           dark: pal.dark,
-          ring: subject ? pal.ring : "rgba(0,0,0,0)",
+          ring: subject || autoCurated.has(ln.id) ? pal.ring : "rgba(0,0,0,0)",
           glow: subject ? pal.glow : "rgba(0,0,0,0)",
           ringScale: knowledgeSubjectRingScale(pp?.depth),
           ringWidth: knowledgeSubjectRingWidth(subject ? role : undefined, pp?.depth),
           glowScale: subject ? knowledgeSubjectGlowScale(role, pp?.depth) : 1,
           alpha: knowledgeNodeBaseAlpha(subject ? role : undefined, pp?.depth, "hot"),
-          autoCurated: satelliteAutoCurated.has(ln.id),
+          autoCurated: autoCurated.has(ln.id),
         };
       });
+      const satelliteLinks = visibleArticleLinks(linkPairs, satelliteArticleIds, identityRef,
+        new Set(navigationGroup.article_refs ?? []));
+      reviewScopes.set(name, { articleIds: satelliteArticleIds, agentRef: identityRef,
+        scopeRefs: new Set(navigationGroup.article_refs ?? []), links: satelliteLinks,
+        edgeColorEnd: () => pal.core });
       const satEdges: Knowledge3dRenderEdge[] = [
         ...satLayoutNodes.filter((n) => n.parentId)
           .map((n) => ({ source: n.parentId as string, target: n.id, taxonomy: true, color: pal.core })),
-        ...linkPairs.filter((link) =>
-          satelliteArticleIds.has(link.source) && satelliteArticleIds.has(link.target))
-          .filter((l) => primitiveParents.get(l.target) !== l.source)
+        ...withoutTaxonomyLinks(satelliteLinks, satLayoutNodes)
           .map((l) => ({ source: l.source, target: l.target, taxonomy: false,
                          color: knowledgeAmbientEdgeStroke(false, false, pal), colorEnd: pal.core })),
       ];
@@ -842,6 +861,9 @@ export function GraphBackdrop({
     // one-to-one Tool+Skill pairs beside Tasks; synthesized Runbooks remain on
     // their owning agents.
     const libraryGroup = graph.navigation.groups.find((group) => group.id === "library");
+    const libraryMembers = graphArticleIds(libraryGroup, displayAliases);
+    const libraryNotes = primitiveNotes.filter((node) => libraryMembers.has(node.id)
+      && libraryKinds.has(primitiveKindOf(node) ?? ""));
     const libraryRoot = libraryGroup?.root_ref ?? "@library";
     const libraryTitle = libraryGroup?.title ?? "Library";
     const librarySubjects = libraryGroup?.subjects ?? [];
@@ -851,9 +873,7 @@ export function GraphBackdrop({
     ]);
     const libraryParents = hierarchyParents(libraryNotes);
     const libraryContainers = new Set(libraryParents.values());
-    const libraryArticleIds = new Set(libraryNotes
-      .filter((node) => isArticleEndpoint(node, libraryContainers))
-      .map((node) => node.id));
+    const libraryArticleIds = new Set(libraryNotes.filter(isArticleEndpoint).map((node) => node.id));
     const libraryLayoutNodes = [
       { id: libraryRoot, degree: libraryNotes.length, kind: "concept" as never, label: libraryTitle, role: "root" as never, parentId: null as string | null, order: 0 },
       ...librarySubjects.map((subject, index) => ({
@@ -877,7 +897,6 @@ export function GraphBackdrop({
         order: index,
       })),
     ];
-    const libraryAutoCurated = cascadedAutoCurated(autoCuratedSeeds, libraryLayoutNodes);
     const libraryLayout = layoutKnowledgeGraph({
       nodes: libraryLayoutNodes,
       edges: libraryLayoutNodes.filter((node) => node.parentId).map((node, index) => ({
@@ -899,22 +918,23 @@ export function GraphBackdrop({
         subject,
         core: nodeCoreColor(libraryPalette, subject ? role : undefined, noteMeta?.status),
         dark: libraryPalette.dark,
-        ring: subject ? libraryPalette.ring : "rgba(0,0,0,0)",
+        ring: subject || autoCurated.has(node.id) ? libraryPalette.ring : "rgba(0,0,0,0)",
         glow: subject ? libraryPalette.glow : "rgba(0,0,0,0)",
         ringScale: knowledgeSubjectRingScale(point?.depth),
         ringWidth: knowledgeSubjectRingWidth(subject ? role : undefined, point?.depth),
         glowScale: subject ? knowledgeSubjectGlowScale(role, point?.depth) : 1,
         alpha: knowledgeNodeBaseAlpha(subject ? role : undefined, point?.depth, "hot"),
-        autoCurated: libraryAutoCurated.has(node.id),
+        autoCurated: autoCurated.has(node.id),
       };
     });
+    const libraryLinks = visibleArticleLinks(linkPairs, libraryArticleIds);
+    reviewScopes.set("library", { articleIds: libraryArticleIds, scopeRefs: libraryArticleIds,
+      links: libraryLinks, edgeColorEnd: () => libraryPalette.core });
     const libraryRenderEdges: Knowledge3dRenderEdge[] = [
       ...libraryLayoutNodes.filter((node) => node.parentId).map((node) => ({
         source: node.parentId as string, target: node.id, taxonomy: true, color: libraryPalette.core,
       })),
-      ...linkPairs.filter((link) =>
-        libraryArticleIds.has(link.source) && libraryArticleIds.has(link.target))
-        .filter((link) => libraryParents.get(link.target) !== link.source).map((link) => ({
+      ...withoutTaxonomyLinks(libraryLinks, libraryLayoutNodes).map((link) => ({
         source: link.source, target: link.target, taxonomy: false,
         color: knowledgeAmbientEdgeStroke(false, false, libraryPalette), colorEnd: libraryPalette.core,
       })),
@@ -962,8 +982,28 @@ export function GraphBackdrop({
         });
       }
     }
-    return { nodes: renderNodes, edges: renderEdges, satellites, labelMetadata };
-  }, [graph, hub, satelliteTunings, viewport, tuning]);
+    return { nodes: renderNodes, edges: renderEdges, satellites, labelMetadata, reviewScopes, articleLinks: linkPairs };
+  }, [graph, displayAliases, hub, satelliteTunings, viewport, tuning]);
+
+  // Only the Scene receives the visual spring preview. Thinking paths, Reader
+  // selection and accepted graph state continue to use the accepted model.
+  const presentation = useMemo(() => {
+    const links = [...model.articleLinks, ...projectedArticleLinks(linkProposals.entries, displayAliases)];
+    const project = <T extends GraphCloud>(cloud: T, graphId: string): T => {
+      const scope = model.reviewScopes.get(graphId);
+      if (!scope) return cloud;
+      const union = visibleArticleLinks(links, scope.articleIds, scope.agentRef, scope.scopeRefs);
+      return previewLinkReviewCloud(cloud, scope.links, union, graphId === MAIN_GRAPH_ID, scope.edgeColorEnd);
+    };
+    const main = project(model, MAIN_GRAPH_ID);
+    const satellites = model.satellites.map((cloud) => project(cloud, cloud.agentId));
+    const labelMetadata = new Map(model.labelMetadata);
+    for (const node of main.nodes) {
+      const label = labelMetadata.get(node.id);
+      if (label) labelMetadata.set(node.id, { ...label, radius: node.radius });
+    }
+    return { nodes: main.nodes, edges: main.edges, satellites, labelMetadata };
+  }, [model, linkProposals, displayAliases]);
 
   useEffect(() => onGraphThinkingTest((graphId) => {
     testTimers.current.forEach((timer) => window.clearTimeout(timer));
@@ -999,7 +1039,7 @@ export function GraphBackdrop({
     // Obsidience starts the thinking state immediately, admits the real path at
     // 750 ms, flips to speaking at 3.2 s, and then gives the resolved path its
     // six-second readable linger after the 5.8 s synthetic turn ends.
-    setActivity({ refs: [], phase: "thinking", key, graphId, query: "Thinking test" });
+    setActivity({ refs: [], phase: "thinking", key, graphId, query: "Thinking test", startedAt: Date.now() });
     testTimers.current.push(window.setTimeout(() => {
       setActivity((current) => current?.key === key
         ? { ...current, refs: [target.id], phase: "thinking" }
@@ -1014,10 +1054,13 @@ export function GraphBackdrop({
     }, 11_800));
   }), [model]);
 
+  const renderedActivityRefs = useMemo(() => {
+    return (activity?.refs ?? []).map((ref) => displayAliases.get(ref) ?? ref);
+  }, [activity?.refs, displayAliases]);
   const mainRoute = useMemo(() => {
     if (!activity || (activity.graphId && activity.graphId !== MAIN_GRAPH_ID)) return null;
-    return buildThinkingRoute(model, activity.refs);
-  }, [activity, model]);
+    return buildThinkingRoute(model, renderedActivityRefs);
+  }, [activity, model, renderedActivityRefs]);
   const effectiveSweepSpeed = useMemo(() => {
     if (
       tuning.automaticSweepSpeed < 0.5
@@ -1092,7 +1135,7 @@ export function GraphBackdrop({
     if (!activity?.graphId || activity.graphId === MAIN_GRAPH_ID) return [];
     const satellite = model.satellites.find((entry) => entry.agentId === activity.graphId);
     if (!satellite) return [];
-    const route = buildThinkingRoute(satellite, activity.refs);
+    const route = buildThinkingRoute(satellite, renderedActivityRefs);
     const automaticSpeed = (
       route
       && satellite.tuning.automaticSweepSpeed >= 0.5
@@ -1109,7 +1152,7 @@ export function GraphBackdrop({
       hold: true,
       speed: automaticSpeed,
     }] : [];
-  }, [activity, model.satellites, satelliteTest]);
+  }, [activity, model.satellites, satelliteTest, renderedActivityRefs]);
 
   const selected = selectedId ? parseKnowledgeAgentNodeId(selectedId) : null;
   const cameraFocus = selected ? {
@@ -1121,7 +1164,8 @@ export function GraphBackdrop({
     setSelectedId(id);
     setNodeMenu(null);
     selectGraph(parsed.agentId ?? MAIN_GRAPH_ID);
-    if (read) openReader(parsed.nodeId);
+    if (read) openReader(graph.nodes.find((node) => node.id === parsed.nodeId)?.article_ref ?? parsed.nodeId,
+      parsed.agentId ?? MAIN_GRAPH_ID);
   };
   const clearSelection = () => {
     setSelectedId(null);
@@ -1141,7 +1185,7 @@ export function GraphBackdrop({
     add(hoveredId);
     add(selectedId);
     if (activity) {
-      for (const ref of activity.refs) {
+      for (const ref of renderedActivityRefs) {
         if (!activity.graphId || activity.graphId === MAIN_GRAPH_ID) add(ref);
         if (activity.graphId && activity.graphId !== MAIN_GRAPH_ID) add(knowledgeAgentNodeId(activity.graphId, ref));
       }
@@ -1151,14 +1195,22 @@ export function GraphBackdrop({
       }
     }
     return lockMode ? [] : ordered;
-  }, [activity, gatedMainNodeIds, hoveredId, lockMode, satelliteRoutes, selectedId]);
+  }, [activity, gatedMainNodeIds, hoveredId, lockMode, renderedActivityRefs, satelliteRoutes, selectedId]);
+
+  const relationEffects = useMemo(() => projectLinkReviewEffects(
+    linkProposals.entries, linkApprovals, graph.links, displayAliases,
+    [{ agentId: "main", nodes: presentation.nodes, edges: presentation.edges }, ...presentation.satellites], performance.now(),
+    proposalStarts.current,
+  ), [linkProposals, linkApprovals, graph.links, displayAliases, presentation]);
+  const pendingLinkCount = new Set(relationEffects.filter((effect) => effect.phase === "pending").map((effect) => effect.id)).size;
+  const approvedLinkCount = new Set(relationEffects.filter((effect) => effect.phase === "approved").map((effect) => effect.id)).size;
 
   return (
     <div className="absolute inset-0">
       <Knowledge3dScene
           key={sceneKey}
-          nodes={model.nodes}
-          edges={model.edges}
+          nodes={presentation.nodes}
+          edges={presentation.edges}
           hub={hub}
           focusNodeIds={mainRoute?.nodeIds ?? new Set<string>()}
           pathSpec={mainRoute?.pathSpec ?? null}
@@ -1171,9 +1223,10 @@ export function GraphBackdrop({
           hoveredNodeId={highlightedId}
           labelIds={labelIds}
           activeLabelNodeIds={lockMode ? new Set<string>() : gatedMainNodeIds}
-          labelMetadata={model.labelMetadata}
+          labelMetadata={presentation.labelMetadata}
           tuning={effectiveTuning}
-          satellites={model.satellites}
+          satellites={presentation.satellites}
+          relationEffects={relationEffects}
           satelliteSweeps={satelliteRoutes}
           cameraFocus={lockMode ? null : cameraFocus}
           onBackgroundClick={lockMode ? undefined : clearSelection}
@@ -1184,12 +1237,23 @@ export function GraphBackdrop({
             else setNodeMenu({ id, x: at.x, y: at.y });
           }}
           onContextLost={() => setSceneKey((k) => k + 1)}
-        />
-      {!lockMode && activity?.refs.length ? (
-        <div className="pointer-events-none absolute left-5 top-16 max-w-[34rem] rounded border border-violet-300/20 bg-[#030a10]/75 px-3 py-1.5 font-mono text-[9px] uppercase tracking-[0.16em] text-violet-200/75 backdrop-blur">
-          {activity.phase === "thinking" ? "consulting" : "resolved"} · {activity.refs.length} graph article{activity.refs.length === 1 ? "" : "s"}
-          {activity.query ? <span className="ml-2 normal-case tracking-normal text-cyan-100/55">{activity.query}</span> : null}
+      />
+      {!lockMode && visible && (pendingLinkCount > 0 || approvedLinkCount > 0 || linkProposals.truncated) ? (
+        <div role="status" aria-live="polite" data-testid="link-review-status"
+          className="pointer-events-none absolute bottom-5 left-5 z-20 rounded-md border border-slate-500/25 bg-[#030a10]/85 px-3 py-2 font-mono text-[11px] shadow-lg">
+          {pendingLinkCount > 0 ? <p className="text-amber-300"><span aria-hidden="true">┄ </span>{pendingLinkCount} {pendingLinkCount === 1 ? "link" : "links"} awaiting review · glowing preview</p> : null}
+          {approvedLinkCount > 0 ? <p className="text-cyan-200"><span aria-hidden="true">✦ </span>{approvedLinkCount} {approvedLinkCount === 1 ? "link approved" : "links approved"}</p> : null}
+          {linkProposals.truncated ? <p className="mt-1 text-slate-400">Review links incomplete · see Reviews</p> : null}
         </div>
+      ) : null}
+      {!lockMode && visible && (traceInspectionSince !== null || (activity && activity.startedAt !== traceDismissedSince)) ? (
+        <ActionTracePopup since={traceInspectionSince ?? activity!.startedAt}
+          keptOpen={traceInspectionSince !== null}
+          onKeepOpen={(keep) => setTraceInspectionSince(keep ? (traceInspectionSince ?? activity?.startedAt ?? null) : null)}
+          onClose={() => {
+            setTraceInspectionSince(null);
+            setTraceDismissedSince(activity?.startedAt ?? null);
+          }} />
       ) : null}
       {!lockMode && nodeMenu ? (
         <NodeActionMenu

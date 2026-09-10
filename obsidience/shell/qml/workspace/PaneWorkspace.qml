@@ -6,6 +6,7 @@ import "../api"
 import "../panes/applications"
 import "../panes/camera"
 import "../panes/chat"
+import "../panes/feeds"
 import "../panes/displays"
 import "../panes/hardware"
 import "../panes/knowledge"
@@ -22,23 +23,21 @@ Scope {
     id: root
 
     required property ShellApi shellApi
-    required property string surfaceId
     required property var targetScreens
-    required property bool locked
-    property bool authoritative: false
-    property bool launcherOpen: false
+    property bool monitoringAllowed: true
+    property var launcherOpenBySurface: ({})
 
     property PaneDockLayout dockLayout: PaneDockLayout {
-        authoritative: root.authoritative
+        authoritative: true
     }
 
     property PanePlacement displaysPlacement: PanePlacement {
         paneId: "displays"
-        authoritative: root.authoritative
+        authoritative: true
     }
     property PanePlacement chatPlacement: PanePlacement {
         paneId: "chat"
-        authoritative: root.authoritative
+        authoritative: true
         defaultSurfaceId: "usb-c"
         defaultX: 20
         defaultY: 58
@@ -49,7 +48,7 @@ Scope {
     }
     property PanePlacement libraryPlacement: PanePlacement {
         paneId: "library"
-        authoritative: root.authoritative
+        authoritative: true
         defaultSurfaceId: "usb-c"
         defaultX: 640
         defaultY: 58
@@ -60,7 +59,7 @@ Scope {
     }
     property PanePlacement tasksPlacement: PanePlacement {
         paneId: "tasks"
-        authoritative: root.authoritative
+        authoritative: true
         defaultSurfaceId: "usb-c"
         defaultX: 1280
         defaultY: 58
@@ -71,7 +70,7 @@ Scope {
     }
     property PanePlacement reviewsPlacement: PanePlacement {
         paneId: "reviews"
-        authoritative: root.authoritative
+        authoritative: true
         defaultSurfaceId: "usb-c"
         defaultX: 640
         defaultY: 598
@@ -82,7 +81,7 @@ Scope {
     }
     property PanePlacement readerPlacement: PanePlacement {
         paneId: "reader"
-        authoritative: root.authoritative
+        authoritative: true
         defaultX: 3400
         defaultY: 90
         defaultWidth: 1600
@@ -92,7 +91,7 @@ Scope {
     }
     property PanePlacement knowledgePlacement: PanePlacement {
         paneId: "knowledge"
-        authoritative: root.authoritative
+        authoritative: true
         defaultSurfaceId: "usb-c"
         defaultX: 24
         defaultY: 100
@@ -103,7 +102,7 @@ Scope {
     }
     property PanePlacement sourcePlacement: PanePlacement {
         paneId: "source"
-        authoritative: root.authoritative
+        authoritative: true
         defaultSurfaceId: "usb-c"
         defaultX: 560
         defaultY: 100
@@ -114,7 +113,7 @@ Scope {
     }
     property PanePlacement statusPlacement: PanePlacement {
         paneId: "status"
-        authoritative: root.authoritative
+        authoritative: true
         defaultSurfaceId: "usb-c"
         defaultX: 160
         defaultY: 100
@@ -125,7 +124,7 @@ Scope {
     }
     property PanePlacement hardwarePlacement: PanePlacement {
         paneId: "hardware"
-        authoritative: root.authoritative
+        authoritative: true
         defaultSurfaceId: "usb-c"
         defaultX: 180
         defaultY: 100
@@ -136,7 +135,7 @@ Scope {
     }
     property PanePlacement cameraPlacement: PanePlacement {
         paneId: "camera"
-        authoritative: root.authoritative
+        authoritative: true
         defaultSurfaceId: "usb-c"
         defaultX: 260
         defaultY: 120
@@ -147,7 +146,7 @@ Scope {
     }
     property PanePlacement settingsPlacement: PanePlacement {
         paneId: "settings"
-        authoritative: root.authoritative
+        authoritative: true
         defaultSurfaceId: "usb-c"
         defaultX: 1080
         defaultY: 80
@@ -156,9 +155,20 @@ Scope {
         defaultOpen: false
         defaultZOrder: 36
     }
+    property PanePlacement feedsPlacement: PanePlacement {
+        paneId: "feeds"
+        authoritative: true
+        defaultSurfaceId: "usb-c"
+        defaultX: 240
+        defaultY: 100
+        defaultWidth: 1040
+        defaultHeight: 760
+        defaultOpen: false
+        defaultZOrder: 38
+    }
     property PanePlacement applicationsPlacement: PanePlacement {
         paneId: "applications"
-        authoritative: root.authoritative
+        authoritative: true
         defaultSurfaceId: "usb-c"
         defaultX: 420
         defaultY: 100
@@ -169,7 +179,7 @@ Scope {
     }
     property PanePlacement terminalPlacement: PanePlacement {
         paneId: "terminal"
-        authoritative: root.authoritative
+        authoritative: true
         defaultX: 100
         defaultY: 430
         defaultWidth: 1900
@@ -189,19 +199,35 @@ Scope {
     property Component knowledgeComponent: Component {
         KnowledgePane {
             dockLayout: root.dockLayout
-            surfaceId: root.surfaceId
+            surfaceId: root.dockLayout.isDocked("knowledge")
+                ? root.readerPlacement.surfaceId
+                : root.knowledgePlacement.surfaceId
         }
     }
     property Component sourceComponent: Component {
         SourcePane {
             dockLayout: root.dockLayout
-            surfaceId: root.surfaceId
+            surfaceId: root.dockLayout.isDocked("source")
+                ? root.readerPlacement.surfaceId
+                : root.sourcePlacement.surfaceId
         }
     }
     property Component statusComponent: Component { StatusPane {} }
-    property Component hardwareComponent: Component { HardwarePane {} }
+    property Component hardwareComponent: Component {
+        HardwarePane {
+            shellTheme: root.shellApi.theme
+            monitoringAllowed: root.monitoringAllowed
+        }
+    }
     property Component cameraComponent: Component { CameraPane {} }
     property Component settingsComponent: Component { SettingsPane {} }
+    property Component feedsComponent: Component {
+        FeedsPane {
+            dockLayout: root.dockLayout
+            surfaceId: root.dockLayout.isDocked("feeds")
+                ? root.readerPlacement.surfaceId : root.feedsPlacement.surfaceId
+        }
+    }
     property Component applicationsComponent: Component { ApplicationsPane {} }
     property Component terminalComponent: Component { TerminalPane {} }
 
@@ -267,14 +293,42 @@ Scope {
         )
     }
 
-    property PaneDragSession dragSession: PaneDragSession {
-        surfaceId: root.surfaceId
-        onPlacementAccepted: record => {
-            const placement = root.placementFor(record.pane_id)
-            if (placement) {
-                placement.applyRecord(record)
+    function surfaceForScreen(screen) {
+        if (!screen) {
+            return ""
+        }
+        if (screen.name === shellApi.primaryOutputName) {
+            return "samsung"
+        }
+        if (screen.name === shellApi.usbOutputName) {
+            return "usb-c"
+        }
+        if (screen.name === shellApi.dp4OutputName) {
+            return "dp-4"
+        }
+        return ""
+    }
+
+    function screenForSurface(surfaceId) {
+        for (const screen of targetScreens) {
+            if (surfaceForScreen(screen) === surfaceId) {
+                return screen
             }
         }
+        return null
+    }
+
+    function launcherOpenFor(surfaceId) {
+        return launcherOpenBySurface[surfaceId] === true
+    }
+
+    function toggleLauncher(surfaceId) {
+        if (!surfaceId) {
+            return
+        }
+        const next = Object.assign({}, launcherOpenBySurface)
+        next[surfaceId] = next[surfaceId] !== true
+        launcherOpenBySurface = next
     }
 
     // The registry is Surface state, not screen-discovery state. Outputs may
@@ -313,6 +367,9 @@ Scope {
         {"label": "Settings", "title": "Settings", "icon": "settings", "accent": "#fb923c",
             "placement": settingsPlacement,
             "component": settingsComponent, "minWidth": 680, "minHeight": 440},
+        {"label": "Feeds", "title": "Feeds", "icon": "feeds", "accent": "#7dd3fc",
+            "placement": feedsPlacement,
+            "component": feedsComponent, "minWidth": 340, "minHeight": 320},
         {"label": "Applications", "title": "Applications", "icon": "applications", "accent": "#2dd4bf",
             "placement": applicationsPlacement,
             "component": applicationsComponent, "minWidth": 620, "minHeight": 420},
@@ -325,18 +382,16 @@ Scope {
     ]
 
     Variants {
-        model: root.targetScreens
+        model: root.paneDefinitions
 
-        PaneCanvas {
+        PaneWindow {
             required property var modelData
 
-            surfaceScreen: modelData
-            surfaceId: root.surfaceId
             shellApi: root.shellApi
-            dragSession: root.dragSession
+            paneWorkspace: root
             dockLayout: root.dockLayout
+            paneDefinition: modelData
             panes: root.paneDefinitions
-            locked: root.locked
         }
     }
 
@@ -347,13 +402,16 @@ Scope {
             required property var modelData
 
             surfaceScreen: modelData
-            surfaceId: root.surfaceId
+            surfaceId: root.surfaceForScreen(modelData)
             shellApi: root.shellApi
             dockLayout: root.dockLayout
             panes: root.paneDefinitions
-            locked: root.locked
-            launcherOpen: root.launcherOpen
-            onLauncherRequested: root.launcherOpen = !root.launcherOpen
+            launcherOpen: root.launcherOpenFor(
+                root.surfaceForScreen(modelData)
+            )
+            onLauncherRequested: root.toggleLauncher(
+                root.surfaceForScreen(modelData)
+            )
             onPresentRequested: (placement, targetSurfaceId, x, y) =>
                 root.presentPaneOn(placement, targetSurfaceId, x, y)
         }

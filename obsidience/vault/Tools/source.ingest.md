@@ -1,18 +1,21 @@
 ---
-binding: capability:source.ingest
-kind: tool
-source: obsidience/harness/capabilities/source/ingest.py
+type: tool
 title: source.ingest
+obsidience:
+  binding: capability:source.ingest
+  source: obsidience/harness/capabilities/source/ingest.py
 ---
 
 Capture one bounded source payload in the immutable raw-evidence ledger.
 
 Arguments:
 
-- `source_ref`: the direct URL, document identifier, or acquisition reference.
-- `content`: the exact text, Markdown, or JSON being preserved.
-- `source_type`: `tool`, `document`, `user`, `import`, or `recovery`.
-- `media_type`: `text/plain`, `text/markdown`, or `application/json`.
+- `content`: 1-500,000 characters of exact text, Markdown, or JSON;
+- `source_ref`: optional acquisition reference, at most 2,000 characters;
+- `source_type`: `user`, `tool`, `document`, `import`, `recovery`, or
+  `research`; defaults to `tool`;
+- `media_type`: `text/plain`, `text/markdown`, or `application/json`; defaults
+  to `text/markdown`;
 - `captured_at`: an optional timezone-aware ISO-8601 timestamp.
 
 The Tool returns a stable `source://<uuid>` citation. Creating a new raw Source
@@ -21,4 +24,4 @@ existing Learn research Task. Re-capturing identical material returns the
 existing Source and emits no event. Supporting Sources captured inside that
 active Learn occurrence coalesce into it rather than recursively queueing the
 same research. The Tool never writes the physical Inbox or a Knowledge Article;
-that distinct operation is `source.handoff`.
+it only preserves raw evidence.

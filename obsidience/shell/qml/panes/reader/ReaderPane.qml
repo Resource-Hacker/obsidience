@@ -8,13 +8,22 @@ Item {
     id: root
 
     property string articleRef: ""
+    property string graphId: ""
     property string sourceKey: ""
+    property string feedItemId: ""
+    property var previewItem: ({})
+    property bool followShellSelection: true
+    property var feedProvenance: ({})
     property string selectionKind: "article"
     property string articleTitle: ""
     property string articleKind: ""
     property string articleBody: ""
     property var articleChildren: []
+    property var articleTitles: ({})
+    property var articleGraph: ({nodes: [], links: []})
     property var articleMeta: ({})
+    property bool articleReadOnly: false
+    property string articleManagedBy: ""
     property string documentPath: ""
     property string sourceStorage: ""
     property string sourceMediaType: ""
@@ -25,26 +34,37 @@ Item {
     property string noticeMessage: ""
     property bool loading: false
     property int requestGeneration: 0
+    property int citationRequestGeneration: 0
     property bool editing: false
     property bool saving: false
+    property bool autoCurateSupported: false
+    property bool autoCurateEnabled: false
+    property bool curationBusy: false
     property string draftTitle: ""
     property string draftBody: ""
 
-    readonly property bool sourceMode: selectionKind === "source"
+    readonly property bool previewMode: selectionKind === "feed_preview"
+    readonly property bool sourceMode: selectionKind === "source" || previewMode
+    readonly property bool feedItemMode: selectionKind === "source" && feedItemId.length > 0
     readonly property bool indexArticle: !sourceMode && articleChildren.length > 0
+    readonly property var articleLinks: articleConnections(false)
+    readonly property var articleBacklinks: articleConnections(true)
     readonly property bool pythonSource: sourceMode
         && (sourceMediaType.indexOf("python") >= 0
             || articleTitle.toLowerCase().endsWith(".py"))
     readonly property bool codeSource: sourceMode && sourceReadable
         && (sourceStorage === "code" || pythonSource)
-    readonly property string sourceClass: sourceStorage === "knowledge"
+    readonly property string sourceClass: previewMode ? "Publisher preview · not collected"
+        : feedItemMode ? "Captured provider content"
+        : sourceStorage === "knowledge"
         ? "Knowledge Article file"
         : sourceStorage === "code"
             ? articleChildren.length ? "Article-linked application code" : "Application code"
-            : sourceStorage === "system" ? "System descriptor · read only"
+            : sourceStorage === "system" ? "System evidence · read only"
                 : "Immutable raw source"
 
     function applyShellEvent(text) {
+        if (!followShellSelection) return
         if (typeof text !== "string" || text.length > 65536) return
         let event
         try { event = JSON.parse(text) } catch (error) { return }
@@ -54,15 +74,42 @@ Item {
                 || event.pane.pane_id !== "reader" || !selection) return
         if (selection.kind === "article" && typeof selection.ref === "string"
                 && selection.ref.trim()) {
+            const selectedGraph = typeof selection.graph_id === "string" ? selection.graph_id : ""
+            if (selectionKind === "article" && articleRef === selection.ref.trim()
+                    && graphId === selectedGraph) return
+            requestGeneration += 1
+            graphId = selectedGraph
             selectionKind = "article"
+            feedItemId = ""
+            previewItem = ({})
             sourceKey = ""
             articleRef = selection.ref.trim()
         } else if (selection.kind === "source" && typeof selection.key === "string"
                 && selection.key.trim()) {
+            const selectedFeedItem = typeof selection.feed_item_id === "string" ? selection.feed_item_id : ""
+            if (selectionKind === "source" && sourceKey === selection.key.trim()
+                    && feedItemId === selectedFeedItem) return
+            requestGeneration += 1
+            graphId = ""
             selectionKind = "source"
             articleRef = ""
+            feedItemId = selectedFeedItem
+            previewItem = ({})
             sourceKey = selection.key.trim()
-        }
+        } else if (selection.kind === "feed_preview" && selection.item
+                && typeof selection.item.title === "string"
+                && typeof selection.item.summary === "string") {
+            const fields = ["title", "summary", "reporting_url", "published", "feed_title", "feed_url"]
+            if (previewMode && fields.every(field => previewItem[field] === selection.item[field])) return
+            requestGeneration += 1
+            graphId = ""
+            selectionKind = "feed_preview"
+            articleRef = ""
+            sourceKey = ""
+            feedItemId = ""
+            previewItem = selection.item
+        } else return
+        Qt.callLater(root.loadDocument)
     }
 
     function presentArticle(ref) {
@@ -72,7 +119,7 @@ Item {
             "schema": "obsidience.shell.command.v1",
             "type": "pane.present",
             "pane_id": "reader",
-            "selection": {"kind": "article", "ref": ref.trim()}
+            "selection": {"kind": "article", "ref": ref.trim(), "graph_id": graphId}
         }))
     }
 
@@ -89,28 +136,109 @@ Item {
         articleKind = ""
         articleBody = ""
         articleChildren = []
+        articleGraph = {nodes: [], links: []}
         articleMeta = {}
+        articleReadOnly = false
+        articleManagedBy = ""
+        autoCurateSupported = false
+        autoCurateEnabled = false
+        curationBusy = false
         documentPath = ""
         sourceStorage = ""
         sourceMediaType = ""
         sourceSize = 0
         sourceReadable = true
         sourceTruncated = false
+        feedProvenance = ({})
         errorMessage = ""
         noticeMessage = ""
         editing = false
+        saving = false
+    }
+
+    function articleLabel(ref) {
+        const clean = String(ref).trim().replace(/^\[\[/, "").replace(/\]\]$/, "")
+            .split("|")[0].split("#")[0]
+        return articleTitles[clean] || clean
+    }
+
+    function articleConnections(incoming) {
+        if (sourceMode) return []
+        const nodes = new Map(articleGraph.nodes.map(node => [node.id, node]))
+        const selected = nodes.get(articleRef)
+        const ref = (selected && selected.article_ref) || documentPath || articleRef
+        const groups = (articleGraph.navigation || {}).groups || []
+        const group = groups.find(item => graphId === (item.id === "executive" ? "main"
+            : item.id === "library" ? "library" : item.root_ref.split("/")[1]))
+        if (graphId && !group) return []
+        const members = group ? new Set(group.article_refs || []) : null
+        const links = articleGraph.links.filter(link => (incoming ? link.target : link.source) === ref
+            && (!members || (members.has(link.source) && members.has(link.target)
+                && (!link.for_agent || group.id === "library" || link.for_agent === group.root_ref)
+                && (group.id === "library" || !link.derived
+                    || (link.via || []).every(path => members.has(path))))))
+        const refs = new Set(links.map(link => incoming ? link.source : link.target))
+        return [...refs].filter(target => target !== ref && nodes.has(target))
+            .map(target => ({ref: target, title: nodes.get(target).title,
+                kind: nodes.get(target).kind,
+                detail: [...new Set(links.filter(link => link.derived
+                    && (incoming ? link.source : link.target) === target)
+                    .map(link => ((link.via || []).length
+                        ? "via " + link.via.map(path => articleLabel(path)).join(" → ")
+                        : "Applicable procedure")
+                        + (link.for_agent ? " · " + articleLabel(link.for_agent) : "")))].join("; ")}))
+            .sort((left, right) => left.title.localeCompare(right.title)
+                || left.ref.localeCompare(right.ref))
+    }
+
+    function loadArticleTitles(generation) {
+        const request = new XMLHttpRequest()
+        request.open("GET", "http://127.0.0.1:8765/api/graph")
+        request.onreadystatechange = function() {
+            if (request.readyState !== XMLHttpRequest.DONE
+                    || generation !== root.requestGeneration
+                    || request.status < 200 || request.status >= 300) return
+            try {
+                const graph = JSON.parse(request.responseText)
+                const titles = {}
+                for (const node of graph.nodes || []) titles[node.id] = node.title
+                for (const group of graph.navigation.groups || []) {
+                    titles[group.root_ref] = group.title
+                    for (const subject of group.subjects || []) {
+                        titles[subject.id] = subject.title
+                        if (subject.article_ref) titles[subject.article_ref] = subject.title
+                    }
+                }
+                root.articleTitles = titles
+                root.articleGraph = {nodes: graph.nodes || [], links: graph.links || [],
+                    navigation: graph.navigation || {groups: []}}
+            } catch (error) {}
+        }
+        request.send()
     }
 
     function loadDocument() {
-        const ref = sourceMode ? sourceKey.trim() : articleRef.trim()
+        const ref = feedItemMode ? feedItemId : sourceMode ? sourceKey.trim() : articleRef.trim()
         requestGeneration += 1
         const generation = requestGeneration
         resetDocument()
+        if (previewMode) {
+            loading = false
+            articleTitle = previewItem.title || "Untitled item"
+            articleBody = previewItem.summary || "The publisher did not include a text summary in this feed."
+            articleKind = "feed_preview"
+            sourceMediaType = "text/plain"
+            feedProvenance = previewItem
+            return
+        }
         if (!ref) { loading = false; return }
+        const expectedSourceKey = sourceKey
         loading = true
+        if (!feedItemMode) loadArticleTitles(generation)
         const request = new XMLHttpRequest()
         request.open("GET", "http://127.0.0.1:8765/"
-            + (sourceMode ? "api/source-files/" : "api/articles/") + encodeURI(ref))
+            + (feedItemMode ? "api/feeds/items/" : sourceMode ? "api/source-files/" : "api/articles/")
+            + (feedItemMode ? encodeURIComponent(ref) : encodeURI(ref)))
         request.onreadystatechange = function() {
             if (request.readyState !== XMLHttpRequest.DONE
                     || generation !== root.requestGeneration) return
@@ -121,7 +249,17 @@ Item {
             }
             try {
                 const document = JSON.parse(request.responseText)
-                if (root.sourceMode) {
+                if (root.feedItemMode) {
+                    if (document.source_id !== ref || typeof document.content_text !== "string"
+                            || document.source_path !== expectedSourceKey) throw new Error("Invalid feed item")
+                    root.articleTitle = typeof document.title === "string" ? document.title : ref
+                    root.articleKind = "source"
+                    root.articleBody = document.content_text
+                    root.documentPath = document.source_path
+                    root.sourceStorage = "raw"
+                    root.sourceMediaType = "text/plain"
+                    root.feedProvenance = document
+                } else if (root.sourceMode) {
                     root.articleTitle = typeof document.name === "string" ? document.name : ref
                     root.articleKind = typeof document.storage === "string"
                         ? document.storage : "source"
@@ -145,7 +283,12 @@ Item {
                         ? document.children.filter(value => typeof value === "string") : []
                     root.articleMeta = document.meta && typeof document.meta === "object"
                         ? document.meta : {}
-                    root.documentPath = ref
+                    root.articleManagedBy = typeof document.managed_by === "string"
+                        ? document.managed_by : ""
+                    root.articleReadOnly = document.read_only === true || root.articleManagedBy === "system"
+                    root.autoCurateSupported = !root.articleReadOnly && document.auto_curate_supported === true
+                    root.autoCurateEnabled = document.auto_curate === true
+                    root.documentPath = typeof document.ref === "string" ? document.ref : ref
                     root.draftTitle = root.articleTitle
                     root.draftBody = root.articleBody
                 }
@@ -157,10 +300,35 @@ Item {
     }
 
     function startEdit() {
+        if (sourceMode || articleReadOnly || loading || saving || !articleRef) return
         draftTitle = articleTitle
         draftBody = articleBody
         noticeMessage = ""
         editing = true
+    }
+
+    function setAutoCurate(enabled) {
+        if (sourceMode || articleReadOnly || !autoCurateSupported || curationBusy || loading || editing || !articleRef) return
+        const ref = articleRef
+        const generation = requestGeneration
+        curationBusy = true
+        errorMessage = ""
+        noticeMessage = ""
+        const request = new XMLHttpRequest()
+        request.open("PUT", "http://127.0.0.1:8765/api/articles/" + encodeURI(ref) + "/auto-curate")
+        request.setRequestHeader("content-type", "application/json")
+        request.onreadystatechange = function() {
+            if (request.readyState !== XMLHttpRequest.DONE
+                    || generation !== root.requestGeneration || root.articleRef !== ref || root.sourceMode) return
+            root.curationBusy = false
+            if (request.status < 200 || request.status >= 300) {
+                root.errorMessage = request.responseText || "Auto-curation permission could not be saved."
+                return
+            }
+            root.loadDocument()
+            root.noticeMessage = "Auto-curation permission saved. Task triggers are unchanged."
+        }
+        request.send(JSON.stringify({"enabled": enabled}))
     }
 
     function cancelEdit() {
@@ -171,26 +339,32 @@ Item {
     }
 
     function saveArticle() {
-        if (sourceMode || saving || !articleRef || !draftTitle.trim()) return
+        if (sourceMode || articleReadOnly || saving || !articleRef || !draftTitle.trim()) return
+        const ref = articleRef
+        const generation = requestGeneration
+        const title = draftTitle.trim()
+        const body = draftBody
         saving = true
         noticeMessage = ""
         errorMessage = ""
         const request = new XMLHttpRequest()
-        request.open("PATCH", "http://127.0.0.1:8765/api/articles/" + encodeURI(articleRef))
+        request.open("PATCH", "http://127.0.0.1:8765/api/articles/" + encodeURI(ref))
         request.setRequestHeader("content-type", "application/json")
         request.onreadystatechange = function() {
-            if (request.readyState !== XMLHttpRequest.DONE) return
+            if (request.readyState !== XMLHttpRequest.DONE
+                    || generation !== root.requestGeneration
+                    || root.selectionKind !== "article" || root.articleRef !== ref) return
             root.saving = false
             if (request.status < 200 || request.status >= 300) {
                 root.errorMessage = request.responseText || "Article could not be saved."
                 return
             }
-            root.articleTitle = root.draftTitle.trim()
-            root.articleBody = root.draftBody
+            root.articleTitle = title
+            root.articleBody = body
             root.editing = false
             root.noticeMessage = "Article saved."
         }
-        request.send(JSON.stringify({"title": draftTitle.trim(), "body": draftBody}))
+        request.send(JSON.stringify({"title": title, "body": body}))
     }
 
     function wikiMarkdown(content) {
@@ -202,6 +376,72 @@ Item {
                 return "[" + label + "](obsidience-ref:" + encodeURIComponent(ref) + ")"
             }
         )
+    }
+
+    function openArticleLink(link) {
+        const value = String(link)
+        if (value.startsWith("obsidience-ref:")) {
+            presentArticle(decodeURIComponent(value.slice("obsidience-ref:".length)))
+            return
+        }
+        if (value.startsWith("source://")) {
+            openSourceCitation(value)
+            return
+        }
+        // Qt parses Markdown. This only resolves its document URL within our vault.
+        if (/^[a-z][a-z0-9+.-]*:/i.test(value) || value.startsWith("//")) return
+        const path = decodeURIComponent(value.split("#")[0])
+        if (!path.toLowerCase().endsWith(".md")) return
+        const parts = path.startsWith("/") ? [] : articleRef.split("/").slice(0, -1)
+        for (const part of path.split("/")) {
+            if (!part || part === ".") continue
+            if (part === "..") { if (!parts.length) return; parts.pop() }
+            else parts.push(part)
+        }
+        presentArticle(parts.join("/").slice(0, -3))
+    }
+
+    function openSourceCitation(citation) {
+        if (!/^source:\/\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(citation)
+                || selectionKind !== "article" || shellSocket.status !== WebSocket.Open) return
+        const id = citation.slice("source://".length).toLowerCase()
+        const generation = requestGeneration
+        const citationGeneration = ++citationRequestGeneration
+        const ref = articleRef
+        const graph = graphId
+        const request = new XMLHttpRequest()
+        request.open("GET", "http://127.0.0.1:8765/api/sources/" + id)
+        request.onreadystatechange = function() {
+            if (request.readyState !== XMLHttpRequest.DONE || !root
+                    || generation !== root.requestGeneration
+                    || citationGeneration !== root.citationRequestGeneration
+                    || root.selectionKind !== "article" || root.articleRef !== ref || root.graphId !== graph) return
+            if (request.status < 200 || request.status >= 300) {
+                root.errorMessage = "The cited Source could not be opened."
+                return
+            }
+            try {
+                const source = JSON.parse(request.responseText)
+                const path = source.source_path
+                if (source.id !== id || source.citation !== "source://" + id || source.immutable !== true
+                        || typeof path !== "string" || path.length > 4096
+                        || !(path.startsWith("obsidience/evidence/")
+                            || path.startsWith("obsidience/state/system/snapshots/"))
+                        || /[\\?#\u0000]/.test(path)
+                        || path.split("/").some(part => !part || part === "." || part === "..")) {
+                    throw new Error("Invalid Source identity")
+                }
+                if (shellSocket.status !== WebSocket.Open) throw new Error("Reader unavailable")
+                root.errorMessage = ""
+                shellSocket.sendTextMessage(JSON.stringify({
+                    "schema": "obsidience.shell.command.v1", "type": "pane.present", "pane_id": "reader",
+                    "selection": {"kind": "source", "key": path}
+                }))
+            } catch (error) {
+                root.errorMessage = "The cited Source identity could not be verified."
+            }
+        }
+        request.send()
     }
 
     function escapeHtml(value) {
@@ -247,18 +487,19 @@ Item {
         return rows.join("\n")
     }
 
-    onArticleRefChanged: { if (selectionKind === "article") loadDocument() }
-    onSourceKeyChanged: { if (selectionKind === "source") loadDocument() }
+    onArticleRefChanged: { if (selectionKind === "article") Qt.callLater(root.loadDocument) }
+    onSourceKeyChanged: { if (selectionKind === "source") Qt.callLater(root.loadDocument) }
+    onFeedItemIdChanged: { if (sourceMode) Qt.callLater(root.loadDocument) }
     Component.onCompleted: loadDocument()
 
     WebSocket {
         id: shellSocket
         url: "ws://127.0.0.1:8768"
         requestedSubprotocols: ["obsidience.shell.v1"]
-        active: true
+        active: root.followShellSelection
         onTextMessageReceived: message => root.applyShellEvent(message)
         onStatusChanged: status => {
-            if (status === WebSocket.Closed || status === WebSocket.Error) {
+            if (root.followShellSelection && (status === WebSocket.Closed || status === WebSocket.Error)) {
                 reconnectTimer.restart()
             }
         }
@@ -268,7 +509,7 @@ Item {
         id: reconnectTimer
         interval: 500
         repeat: false
-        onTriggered: { shellSocket.active = false; shellSocket.active = true }
+        onTriggered: { if (root.followShellSelection) { shellSocket.active = false; shellSocket.active = true } }
     }
 
     Flickable {
@@ -293,7 +534,8 @@ Item {
             Text {
                 width: parent.width
                 visible: !root.articleTitle && !root.loading && !root.errorMessage
-                text: "Select an article in Knowledge or click a graph node to read it here."
+                text: !root.followShellSelection && root.sourceMode ? "Select a captured item to read it here."
+                    : "Select an article in Knowledge, a file in Source, or an item in Feeds to read it here."
                 color: "#59cffafe"
                 wrapMode: Text.Wrap
                 font.family: "JetBrains Mono"
@@ -327,9 +569,11 @@ Item {
                     spacing: 5
 
                     Text {
-                        visible: root.sourceMode || root.indexArticle
+                        visible: root.sourceMode || root.articleReadOnly || root.indexArticle
                         width: parent.width
-                        text: root.sourceMode ? root.sourceClass : "Knowledge index"
+                        text: root.sourceMode ? root.sourceClass
+                            : root.articleManagedBy === "system" ? "Generated from System evidence · read only"
+                            : root.articleReadOnly ? "Read only" : "Knowledge index"
                         color: root.sourceMode ? "#80c4b5fd" : "#7367e8f9"
                         font.family: "JetBrains Mono"
                         font.pixelSize: 8
@@ -355,6 +599,7 @@ Item {
                         visible: !root.editing
                         width: parent.width
                         text: root.articleTitle
+                        textFormat: Text.PlainText
                         color: root.sourceMode ? "#f5f3ff" : "#ecfeff"
                         wrapMode: Text.WrapAtWordBoundaryOrAnywhere
                         font.family: "JetBrains Mono"
@@ -367,7 +612,12 @@ Item {
                     Text {
                         visible: root.sourceMode
                         width: parent.width
-                        text: root.documentPath
+                        text: root.previewMode ? [root.feedProvenance.feed_title, root.feedProvenance.published,
+                            root.feedProvenance.reporting_url].filter(value => !!value).join(" · ")
+                            : root.feedItemMode ? [root.feedProvenance.feed_name, root.feedProvenance.published,
+                            root.feedProvenance.reporting_url].filter(value => !!value).join(" · ")
+                            + "\n" + root.documentPath : root.documentPath
+                        textFormat: Text.PlainText
                         color: "#59ede9fe"
                         wrapMode: Text.WrapAnywhere
                         font.family: "JetBrains Mono"
@@ -381,8 +631,42 @@ Item {
                     anchors.top: parent.top
                     spacing: 6
 
+                    CheckBox {
+                        id: autoCurateControl
+                        visible: !root.sourceMode && !root.articleReadOnly && root.autoCurateSupported && !root.editing
+                        enabled: !root.loading && !root.curationBusy
+                        height: 23
+                        checked: root.autoCurateEnabled
+                        nextCheckState: function() { return checkState }
+                        onClicked: root.setAutoCurate(!root.autoCurateEnabled)
+                        spacing: 5
+                        leftPadding: 0
+                        rightPadding: 0
+                        indicator: Rectangle {
+                            y: (autoCurateControl.height - height) / 2
+                            width: 14; height: 14; radius: 2
+                            color: autoCurateControl.checked ? "#67e8f9" : "#061019"
+                            border.width: 1
+                            border.color: autoCurateControl.checked ? "#67e8f9" : "#6667e8f9"
+                            Text {
+                                anchors.centerIn: parent
+                                visible: autoCurateControl.checked
+                                text: "✓"; color: "#031017"; font.pixelSize: 10; font.bold: true
+                            }
+                        }
+                        contentItem: Text {
+                            leftPadding: 19
+                            text: root.curationBusy ? "SAVING…" : "AUTO-CURATE"
+                            color: "#b3a5f3fc"; font.family: "JetBrains Mono"
+                            font.pixelSize: 8; font.letterSpacing: 0.72
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        ToolTip.visible: hovered
+                        ToolTip.text: "Allow supported automatic maintenance here. Child settings may override it; Task triggers stay unchanged."
+                    }
+
                     Repeater {
-                        model: root.sourceMode ? [
+                        model: root.sourceMode && !root.feedItemMode && !root.previewMode ? [
                             root.sourceMediaType || "file",
                             root.readableBytes(root.sourceSize)
                         ] : []
@@ -409,7 +693,7 @@ Item {
                     }
 
                     Rectangle {
-                        visible: !root.sourceMode && !root.editing
+                        visible: !root.sourceMode && !root.articleReadOnly && !root.editing
                         width: 54
                         height: 23
                         radius: 4
@@ -470,7 +754,7 @@ Item {
                         Text {
                             id: sourceArticleText
                             anchors.centerIn: parent
-                            text: sourceArticleButton.modelData.split("/").pop()
+                            text: root.articleLabel(sourceArticleButton.modelData)
                             color: "#a6cffafe"
                             elide: Text.ElideRight
                             font.family: "JetBrains Mono"
@@ -544,7 +828,7 @@ Item {
             }
 
             Rectangle {
-                visible: !root.editing && !root.sourceMode && root.articleTitle !== ""
+                visible: !root.editing && (!root.sourceMode || root.feedItemMode || root.previewMode) && root.articleTitle !== ""
                 width: parent.width
                 height: articleText.implicitHeight + (root.indexArticle ? 30 : 0)
                 radius: root.indexArticle ? 7 : 0
@@ -562,12 +846,13 @@ Item {
                 }
                 Text {
                     id: articleText
+                    objectName: "reader-prose"
                     anchors.left: parent.left
                     anchors.right: parent.right
                     anchors.top: parent.top
                     anchors.margins: root.indexArticle ? 15 : 0
-                    textFormat: Text.MarkdownText
-                    text: root.wikiMarkdown(root.articleBody)
+                    textFormat: root.feedItemMode || root.previewMode ? Text.PlainText : Text.MarkdownText
+                    text: root.feedItemMode || root.previewMode ? root.articleBody : root.wikiMarkdown(root.articleBody)
                     color: "#d1ecfeff"
                     linkColor: "#a5f3fc"
                     wrapMode: Text.Wrap
@@ -575,19 +860,12 @@ Item {
                     font.pixelSize: 13
                     lineHeightMode: Text.FixedHeight
                     lineHeight: 24
-                    onLinkActivated: link => {
-                        const value = String(link)
-                        if (value.startsWith("obsidience-ref:")) {
-                            root.presentArticle(decodeURIComponent(
-                                value.slice("obsidience-ref:".length)
-                            ))
-                        }
-                    }
+                    onLinkActivated: link => root.openArticleLink(link)
                 }
             }
 
             Rectangle {
-                visible: root.sourceMode && root.articleTitle !== ""
+                visible: root.sourceMode && !root.feedItemMode && !root.previewMode && root.articleTitle !== ""
                 width: parent.width
                 height: !root.sourceReadable ? 84
                     : Math.max(90, Math.min(900, sourceText.implicitHeight + 28))
@@ -712,7 +990,7 @@ Item {
                             anchors.verticalCenter: parent.verticalCenter
                             anchors.leftMargin: 10
                             anchors.rightMargin: 10
-                            text: childButton.modelData.split("/").pop()
+                            text: root.articleLabel(childButton.modelData)
                             color: "#b3cffafe"
                             elide: Text.ElideRight
                             font.family: "JetBrains Mono"
@@ -724,6 +1002,76 @@ Item {
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
                             onClicked: root.presentArticle(childButton.modelData)
+                        }
+                    }
+                }
+            }
+
+            Repeater {
+                model: root.editing || root.sourceMode ? [] : [
+                    {title: "LINKS TO", articles: root.articleLinks},
+                    {title: "LINKED FROM", articles: root.articleBacklinks}
+                ]
+                delegate: Column {
+                    id: connectionSection
+                    required property var modelData
+                    visible: modelData.articles.length > 0
+                    width: documentColumn.width
+                    spacing: 7
+                    Text {
+                        text: connectionSection.modelData.title
+                        color: "#7367e8f9"
+                        font.family: "JetBrains Mono"
+                        font.pixelSize: 8
+                        font.letterSpacing: 1.28
+                    }
+                    Repeater {
+                        model: connectionSection.modelData.articles
+                        delegate: Rectangle {
+                            id: connectionButton
+                            required property var modelData
+                            width: documentColumn.width
+                            height: modelData.detail ? 44 : 28
+                            radius: 4
+                            color: connectionMouse.containsMouse ? "#1267e8f9" : "#08071119"
+                            border.width: 1
+                            border.color: connectionMouse.containsMouse ? "#6667e8f9" : "#2667e8f9"
+                            Text {
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                height: 28
+                                anchors.leftMargin: 10
+                                anchors.rightMargin: 10
+                                verticalAlignment: Text.AlignVCenter
+                                text: connectionButton.modelData.title + " · " + connectionButton.modelData.kind
+                                color: "#b3cffafe"
+                                elide: Text.ElideRight
+                                font.family: "JetBrains Mono"
+                                font.pixelSize: 9
+                            }
+                            Text {
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.bottom: parent.bottom
+                                anchors.leftMargin: 10
+                                anchors.rightMargin: 10
+                                height: 18
+                                text: connectionButton.modelData.detail
+                                visible: text.length > 0
+                                color: "#7367e8f9"
+                                elide: Text.ElideRight
+                                font.family: "JetBrains Mono"
+                                font.pixelSize: 8
+                            }
+                            ToolTip.visible: connectionMouse.containsMouse && modelData.detail.length > 0
+                            ToolTip.text: modelData.detail
+                            MouseArea {
+                                id: connectionMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.presentArticle(connectionButton.modelData.ref)
+                            }
                         }
                     }
                 }

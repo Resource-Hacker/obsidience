@@ -33,9 +33,7 @@ Item {
 
     function definitionFor(paneId) {
         for (const definition of paneDefinitions) {
-            if (definition.placement.paneId === paneId) {
-                return definition
-            }
+            if (definition.placement.paneId === paneId) return definition
         }
         return null
     }
@@ -51,141 +49,107 @@ Item {
         })
     }
 
-    Row {
-        anchors.fill: parent
-        layoutDirection: root.side === "left"
-            ? Qt.LeftToRight : Qt.RightToLeft
+    Repeater {
+        // Slots keep their physical half even when a sibling is empty or
+        // collapsed. A hidden module still owns its chosen slot.
+        model: [0, 1]
 
-        Rectangle {
-            id: collapsedRail
+        delegate: Item {
+            id: moduleSlot
 
-            visible: root.collapsedModules.length > 0
-            width: visible ? 28 : 0
-            height: parent.height
-            color: root.side === "left" ? "#bf020a12" : "#c708050f"
+            required property int modelData
+            readonly property var slot: {
+                const currentRevision = root.stateRevision
+                return root.dockLayout.slotState(root.hostPaneId, root.side, modelData)
+            }
+            readonly property var definition: slot ? root.definitionFor(slot.pane_id) : null
+            readonly property color tint: definition ? definition.accent : "#64748b"
+            x: 0
+            y: modelData * root.height / 2
+            width: root.width
+            height: root.height / 2
+            clip: true
 
             Rectangle {
-                anchors.top: parent.top
-                anchors.bottom: parent.bottom
-                anchors.right: root.side === "left" ? parent.right : undefined
-                anchors.left: root.side === "right" ? parent.left : undefined
-                width: 1
-                color: root.side === "left" ? "#1f67e8f9" : "#1fc4b5fd"
-            }
-
-            Column {
-                anchors.top: parent.top
-                anchors.horizontalCenter: parent.horizontalCenter
-                anchors.topMargin: 8
-                spacing: 4
-
-                Repeater {
-                    model: root.collapsedModules
-
-                    delegate: Rectangle {
-                        id: railButton
-
-                        required property var modelData
-                        readonly property color tint: modelData.pane_id === "knowledge"
-                            ? "#67e8f9" : "#c4b5fd"
-                        width: 20
-                        height: 20
-                        radius: 4
-                        color: railMouse.containsMouse
-                            ? Qt.rgba(tint.r, tint.g, tint.b, 0.10)
-                            : "transparent"
-                        border.width: 1
-                        border.color: Qt.rgba(
-                            tint.r, tint.g, tint.b,
-                            railMouse.containsMouse ? 0.40 : 0.15
-                        )
-
-                        Text {
-                            anchors.centerIn: parent
-                            text: railButton.modelData.pane_id === "knowledge"
-                                ? "▤" : "◫"
-                            color: Qt.rgba(
-                                railButton.tint.r,
-                                railButton.tint.g,
-                                railButton.tint.b,
-                                railMouse.containsMouse ? 0.95 : 0.48
-                            )
-                            font.family: "JetBrains Mono"
-                            font.pixelSize: 10
-                        }
-
-                        MouseArea {
-                            id: railMouse
-
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: root.expand(railButton.modelData.pane_id)
-
-                            ToolTip.visible: containsMouse
-                            ToolTip.delay: 400
-                            ToolTip.text: "Open " + railButton.modelData.pane_id
-                        }
-                    }
-                }
-            }
-        }
-
-        Item {
-            id: activeArea
-
-            visible: root.activeModules.length > 0
-            width: visible ? root.width - collapsedRail.width : 0
-            height: parent.height
-
-            Rectangle {
-                anchors.top: parent.top
-                anchors.bottom: parent.bottom
-                anchors.right: root.side === "left" ? parent.right : undefined
-                anchors.left: root.side === "right" ? parent.left : undefined
-                width: 1
-                color: root.side === "left" ? "#1f67e8f9" : "#1fc4b5fd"
-                z: 2
-            }
-
-            Column {
                 anchors.fill: parent
+                color: root.side === "left" ? "#bf020a12" : "#c708050f"
+            }
 
-                Repeater {
-                    model: root.activeModules
+            Rectangle {
+                visible: moduleSlot.modelData === 1
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                height: 1
+                color: "#2467e8f9"
+                z: 3
+            }
 
-                    delegate: Item {
-                        id: moduleSlot
+            Text {
+                visible: !moduleSlot.slot && root.width > 28
+                anchors.centerIn: parent
+                text: "Empty dock"
+                color: "#526174"
+                font.family: "JetBrains Mono"
+                font.pixelSize: 10
+            }
 
-                        required property int index
-                        required property var modelData
-                        readonly property var definition: root.definitionFor(
-                            modelData.pane_id
-                        )
-                        width: activeArea.width
-                        height: activeArea.height / Math.max(
-                            1, root.activeModules.length
-                        )
+            Loader {
+                anchors.fill: parent
+                active: !!moduleSlot.definition && !moduleSlot.slot.collapsed
+                sourceComponent: active ? moduleSlot.definition.component : null
+            }
 
-                        Rectangle {
-                            visible: moduleSlot.index > 0
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            anchors.top: parent.top
-                            height: 1
-                            color: "#1a67e8f9"
-                            z: 3
-                        }
+            Rectangle {
+                visible: !!moduleSlot.slot && moduleSlot.slot.collapsed
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                height: 28
+                color: expandMouse.containsMouse ? "#203448" : "#111e2c"
 
-                        Loader {
-                            anchors.fill: parent
-                            active: moduleSlot.definition !== null
-                            sourceComponent: moduleSlot.definition
-                                ? moduleSlot.definition.component : null
-                        }
-                    }
+                Text {
+                    anchors.left: parent.left
+                    anchors.leftMargin: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: root.side === "left" ? "›" : "‹"
+                    color: moduleSlot.tint
+                    font.pixelSize: 15
+                }
+                Text {
+                    visible: root.width > 28
+                    anchors.left: parent.left
+                    anchors.leftMargin: 28
+                    anchors.right: parent.right
+                    anchors.rightMargin: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: moduleSlot.definition ? moduleSlot.definition.title : ""
+                    textFormat: Text.PlainText
+                    color: moduleSlot.tint
+                    elide: Text.ElideRight
+                    font.pixelSize: 11
+                }
+                MouseArea {
+                    id: expandMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.expand(moduleSlot.slot.pane_id)
+                    ToolTip.visible: containsMouse
+                    ToolTip.delay: 400
+                    ToolTip.text: "Expand " + (moduleSlot.definition ? moduleSlot.definition.title : "pane")
                 }
             }
         }
+    }
+
+    Rectangle {
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        anchors.right: root.side === "left" ? parent.right : undefined
+        anchors.left: root.side === "right" ? parent.left : undefined
+        width: 1
+        color: root.side === "left" ? "#1f67e8f9" : "#1fc4b5fd"
+        z: 2
     }
 }

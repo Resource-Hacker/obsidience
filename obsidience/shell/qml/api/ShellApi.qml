@@ -7,4 +7,5 @@ QtObject {
     readonly property string dp4OutputName: "HDMI-A-2"
     readonly property ShellTheme theme: ShellTheme {}
     readonly property SurfaceLayout surfaceLayout: SurfaceLayout {}
+    readonly property RealtimeState realtime: RealtimeState {}
 }

@@ -1,0 +1,59 @@
+diff --git a/src/desktop/state/ViewHitTester.cpp b/src/desktop/state/ViewHitTester.cpp
+index 1b7ecdc..67e3664 100644
+--- a/src/desktop/state/ViewHitTester.cpp
++++ b/src/desktop/state/ViewHitTester.cpp
+@@ -154,7 +154,7 @@ PHLWINDOW CViewHitTester::windowAt(const Vector2D& pos, uint16_t properties, PHL
+             return found;
+ 
+         // for windows, we need to check their extensions too, first.
+-        for (auto const& w : WINDOWS) {
++        for (auto const& w : WINDOWS | std::views::reverse) {
+             if (ONLY_PRIORITY && !w->priorityFocus())
+                 continue;
+ 
+@@ -171,15 +171,18 @@ PHLWINDOW CViewHitTester::windowAt(const Vector2D& pos, uint16_t properties, PHL
+             }
+         }
+ 
+-        for (auto const& w : WINDOWS) {
++        const auto tiledMainAt = [&](PHLWINDOW w) -> PHLWINDOW {
++            if (!w)
++                return nullptr;
++
+             if (ONLY_PRIORITY && !w->priorityFocus())
+-                continue;
++                return nullptr;
+ 
+             if (special != w->onSpecialWorkspace())
+-                continue;
++                return nullptr;
+ 
+             if (!w->m_workspace)
+-                continue;
++                return nullptr;
+ 
+             if (!w->m_isFloating && w->m_isMapped && w->workspaceID() == WSPID && w->acceptsInput() && !w->m_X11ShouldntFocus && !w->m_ruleApplicator->noFocus().valueOrDefault() &&
+                 w != ignoreWindow && !isShadowedByModal(w)) {
+@@ -235,6 +238,22 @@ PHLWINDOW CViewHitTester::windowAt(const Vector2D& pos, uint16_t properties, PHL
+                 if (box.containsPoint(pos))
+                     return w;
+             }
++
++            return nullptr;
++        };
++
++        // Tiled windows may overlap in a custom layout. The renderer presents
++        // the focused tiled window above its peers, so it must win the same
++        // point before the remaining stack is tested from top to bottom.
++        if (const auto found = tiledMainAt(LASTFOCUSED); found)
++            return found;
++
++        for (auto const& w : WINDOWS | std::views::reverse) {
++            if (w == LASTFOCUSED)
++                continue;
++
++            if (const auto found = tiledMainAt(w); found)
++                return found;
+         }
+ 
+         return nullptr;

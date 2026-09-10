@@ -16,7 +16,7 @@ from obsidience.harness.knowledge.tasks import (
     TASK_TAXONOMY_BY_PATH,
     task_triggers,
 )
-from obsidience.harness.knowledge.vault import resolver
+from obsidience.harness.knowledge.vault import resolver, write_note
 
 
 class FakeSourceIndex:
@@ -77,6 +77,7 @@ def _route(calls: list[tuple[str, dict]]):
         params: dict,
         *,
         expected_task: str | None = None,
+        source_event: tuple[str, str] | None = None,
     ) -> list[dict]:
         calls.append((event, params))
         target = {
@@ -84,6 +85,8 @@ def _route(calls: list[tuple[str, dict]]):
             "source.inbox": "Tasks/ingest",
         }[event]
         assert expected_task == target
+        assert source_event == (params["source_id"], params["activation_key"])
+        source_index.INDEX.mark_source_event_dispatched(params["source_id"], 1.0)
         return [{"task": target, "state": "started"}]
 
     return enqueue
@@ -124,6 +127,92 @@ def test_raw_source_emits_learn_once(monkeypatch, tmp_path) -> None:
     assert duplicate["id"] == result["id"]
     assert duplicate["source_event"] is None
     assert len(calls) == 1
+
+
+def test_controller_bound_observation_archive_emits_without_learn(
+    monkeypatch, tmp_path,
+) -> None:
+    _runtime(monkeypatch, tmp_path)
+    conversation_id = "conversation-" + "a" * 32
+    promotion_key = "b" * 20
+    write_note(
+        "Agents/Executive/Observations/Temporary Observations/archive.md",
+        {
+            "title": "Temporary archive input",
+            "kind": "knowledge",
+            "observation_scope": "temporary",
+            "temporary": True,
+            "compaction": True,
+            "compaction_committed": True,
+            "source_conversation_id": conversation_id,
+            "promotion_pending": promotion_key,
+        },
+        "Controller-bound metadata, not this body, establishes the archive class.",
+    )
+    learn = SimpleNamespace(
+        kind="task",
+        ref="Tasks/research/learn",
+        meta={"triggers": ["source.added"]},
+    )
+    monkeypatch.setattr(scheduler, "iter_notes", lambda: [learn])
+    monkeypatch.setattr(
+        scheduler,
+        "enqueue_event",
+        lambda *_args, **_kwargs: pytest.fail("observation archive activated Learn"),
+    )
+
+    result = source.ingest_source(
+        source_type="document",
+        source_ref=(
+            "obsidience://observations/temporary/"
+            f"{conversation_id}/{promotion_key}"
+        ),
+        media_type="text/markdown",
+        captured_at="2026-09-04T20:00:00Z",
+        content="The raw content does not classify itself.",
+    )
+
+    assert result["created"] is True
+    assert result["source_event"]["name"] == "source.added"
+    assert result["source_event"]["params"]["source_class"] == (
+        source.OBSERVATION_ARCHIVE_SOURCE_CLASS
+    )
+    assert result["source_event"]["occurrences"] == []
+
+
+@pytest.mark.parametrize(
+    ("source_ref", "content"),
+    [
+        (
+            "obsidience://observations/temporary/"
+            f"conversation-{'c' * 32}/{'d' * 20}",
+            "An unbound reserved-looking URI is still ordinary evidence.",
+        ),
+        (
+            "ordinary-source.md",
+            "# Temporary Observation Bundle\n\nRaw text cannot assign a Source class.",
+        ),
+    ],
+)
+def test_untrusted_source_identity_cannot_assign_observation_archive_class(
+    monkeypatch, tmp_path, source_ref: str, content: str,
+) -> None:
+    _runtime(monkeypatch, tmp_path)
+    calls: list[tuple[str, dict]] = []
+    monkeypatch.setattr(scheduler, "enqueue_named_event", _route(calls))
+
+    result = source.ingest_source(
+        source_type="document",
+        source_ref=source_ref,
+        media_type="text/markdown",
+        captured_at="2026-09-04T20:00:00Z",
+        content=content,
+    )
+
+    assert "source_class" not in result["source_event"]["params"]
+    assert result["source_event"]["occurrences"] == [
+        {"task": "Tasks/research/learn", "state": "started"}
+    ]
 
 
 def test_research_handoff_uses_distinct_inbox_lane_and_ingest(monkeypatch, tmp_path) -> None:
@@ -331,6 +420,8 @@ def test_source_event_columns_migrate_from_legacy_ledger(monkeypatch, tmp_path) 
 
 
 def test_one_task_subscribes_to_multiple_events(monkeypatch) -> None:
+    from obsidience.harness.execution import assignments
+    monkeypatch.setattr(assignments, "ensure_task_runbook", lambda *_args: {"status": "ready"})
     task = SimpleNamespace(
         kind="task",
         ref="Tasks/research/learn",
@@ -373,13 +464,64 @@ def test_reserved_event_validates_subscriber_before_mutation(monkeypatch) -> Non
     with pytest.raises(ValueError, match="must resolve exactly"):
         scheduler.enqueue_named_event(
             "source.added",
-            {},
+            {"source_class": source.OBSERVATION_ARCHIVE_SOURCE_CLASS},
             expected_task="Tasks/research/learn",
         )
     assert mutations == []
 
 
-def test_restart_retries_active_event_without_losing_fifo(monkeypatch) -> None:
+def test_observation_archive_filter_is_exact_and_learn_only(monkeypatch) -> None:
+    from obsidience.harness.execution import assignments
+    monkeypatch.setattr(assignments, "ensure_task_runbook", lambda *_args: {"status": "ready"})
+    learn = SimpleNamespace(
+        kind="task",
+        ref="Tasks/research/learn",
+        meta={"triggers": ["source.added"]},
+    )
+    calls: list[tuple[str, dict]] = []
+    monkeypatch.setattr(scheduler, "iter_notes", lambda: [learn])
+    monkeypatch.setattr(
+        scheduler,
+        "enqueue_event",
+        lambda task, params: calls.append((task.ref, params)) or {"state": "started"},
+    )
+
+    assert scheduler.enqueue_named_event(
+        "source.added",
+        {"source_class": source.OBSERVATION_ARCHIVE_SOURCE_CLASS},
+        expected_task="Tasks/research/learn",
+    ) == []
+    assert calls == []
+
+    ordinary = scheduler.enqueue_named_event(
+        "source.added",
+        {"source_class": "observation-archive"},
+        expected_task="Tasks/research/learn",
+    )
+    assert ordinary == [{"task": learn.ref, "state": "started"}]
+    assert calls == [(learn.ref, {"event": "source.added", "source_class": "observation-archive"})]
+
+
+def test_observation_archive_and_promotion_completion_contracts_are_explicit() -> None:
+    learn = resolver().resolve("Runbooks/research/learn")
+    promote = resolver().resolve("Runbooks/observations/promote")
+    promote_body = " ".join(promote.body.split()) if promote is not None else ""
+
+    assert learn is not None
+    assert "`source_class: observation_archive`" in learn.body
+    assert "legacy queued observation archive" in learn.body
+    assert promote is not None
+    assert "Finish `review` when this execution staged" in promote_body
+    assert (
+        "Finish `completed` for explicitly published changes or an honest no-change/archival-only"
+        in promote_body
+    )
+
+
+def test_restart_retries_active_event_without_losing_fifo(monkeypatch, tmp_path) -> None:
+    # This synthetic no-effect run owns an empty Review scope. The workstation
+    # or copied integration Vault may contain unrelated real Ingest proposals.
+    monkeypatch.setattr(config.CONFIG, "vault_dir", tmp_path / "vault")
     active = {"event": "source.inbox", "activation_key": "source.inbox:active"}
     waiting = {"event": "source.inbox", "activation_key": "source.inbox:waiting"}
     task = SimpleNamespace(
@@ -390,6 +532,7 @@ def test_restart_retries_active_event_without_losing_fifo(monkeypatch) -> None:
         mtime=1.0,
         meta={
             "status": "running",
+            "last_run": "covered-restart",
             "triggers": ["source.inbox"],
             "params": active,
             "event_queue": [waiting],
@@ -411,6 +554,7 @@ def test_restart_retries_active_event_without_losing_fifo(monkeypatch) -> None:
     monkeypatch.setattr(scheduler, "update_status", update)
     monkeypatch.setattr(scheduler, "mutate_note_metadata", mutate)
     monkeypatch.setattr(scheduler.INDEX, "record_run", lambda **values: recorded.append(values))
+    scheduler.INDEX.begin_tool_run(run_id="covered-restart", task_ref=task.ref, params=active, started=1.)
 
     assert scheduler.reconcile_interrupted_runs() == ["Tasks/ingest"]
     assert task.meta["status"] == "pending"
@@ -419,7 +563,7 @@ def test_restart_retries_active_event_without_losing_fifo(monkeypatch) -> None:
     assert recorded[0]["status"] == "failed"
 
 
-def test_restart_recovers_exact_failed_interruption_and_dedupes_candidate_pair(
+def test_restart_recovers_covered_failed_interruption_and_dedupes_candidate_pair(
     monkeypatch,
 ) -> None:
     active = {
@@ -448,6 +592,7 @@ def test_restart_recovers_exact_failed_interruption_and_dedupes_candidate_pair(
         mtime=1.0,
         meta={
             "status": "failed",
+            "last_run": "covered-failed-restart",
             "blocked_reason": "interrupted by harness restart; outcome is unknown",
             "triggers": ["task.create"],
             "params": active,
@@ -463,6 +608,7 @@ def test_restart_recovers_exact_failed_interruption_and_dedupes_candidate_pair(
     monkeypatch.setattr(scheduler, "iter_notes", lambda: [task])
     monkeypatch.setattr(scheduler, "mutate_note_metadata", mutate)
     monkeypatch.setattr(scheduler.INDEX, "record_run", lambda **values: recorded.append(values))
+    scheduler.INDEX.begin_tool_run(run_id="covered-failed-restart", task_ref=task.ref, params=active, started=1.)
 
     assert scheduler.reconcile_interrupted_runs() == ["Tasks/link"]
     assert task.meta["status"] == "pending"
@@ -614,9 +760,15 @@ def test_new_event_waits_behind_unresolved_active_occurrence(
 def test_reserved_source_triggers_match_existing_tasks() -> None:
     learn = resolver().resolve("Tasks/research/learn")
     ingest = resolver().resolve("Tasks/ingest")
-    assert learn is not None and task_triggers(learn.meta) == ("source.added",)
+    assert learn is not None and task_triggers(learn.meta) == (
+        "source.added",
+        "task.create",
+    )
     assert ingest is not None and task_triggers(ingest.meta) == ("source.inbox",)
-    assert TASK_TAXONOMY_BY_PATH["research/learn"].triggers == ("source.added",)
+    assert TASK_TAXONOMY_BY_PATH["research/learn"].triggers == (
+        "source.added",
+        "task.create",
+    )
     assert TASK_TAXONOMY_BY_PATH["wiki/ingest"].triggers == ("source.inbox",)
 
 
@@ -637,13 +789,21 @@ def test_source_handoff_capability_is_darwin_research_only(monkeypatch) -> None:
     assert called is False
 
 
-def test_task_completion_with_proposals_requires_review() -> None:
+def test_task_completion_with_proposals_requires_review(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(config.CONFIG, "vault_dir", tmp_path / "vault")
+    staged = config.CONFIG.vault_dir / "_staging/pending.md"
+    staged.parent.mkdir(parents=True)
+    staged.write_text("pending")
     task = SimpleNamespace(ref="Tasks/ingest", kind="task", meta={"auto_done": True})
     result = task_complete_capability.execute(
         {"status": "completed", "summary": "staged the article"},
         {
             "task_note": task,
-            "staged_proposals": [{"target": "Articles/example", "action": "create"}],
+            "staged_proposals": [{
+                "staged": "_staging/pending.md",
+                "target": "Articles/example",
+                "action": "create",
+            }],
         },
     )
 

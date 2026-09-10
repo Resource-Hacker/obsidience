@@ -42,7 +42,7 @@ def test_new_tool_and_skill_are_approved_as_one_pair(monkeypatch, tmp_path) -> N
     write_note(
         "_staging/skill.md",
         _proposal(
-            "Skills/launching-an-application.md",
+            "Skills/application.launch.md",
             "Launch an application",
             "skill",
             tool=f"[[Tools/{tool_name}]]",
@@ -53,9 +53,9 @@ def test_new_tool_and_skill_are_approved_as_one_pair(monkeypatch, tmp_path) -> N
     result = review.approve("tool.md")
 
     assert result["approved"] == f"Tools/{tool_name}.md"
-    assert result["paired_skill"] == "Skills/launching-an-application.md"
+    assert result["paired_skill"] == "Skills/application.launch.md"
     assert (tmp_path / f"Tools/{tool_name}.md").is_file()
-    assert (tmp_path / "Skills/launching-an-application.md").is_file()
+    assert (tmp_path / "Skills/application.launch.md").is_file()
     assert not list((tmp_path / "_staging").glob("*.md"))
 
 

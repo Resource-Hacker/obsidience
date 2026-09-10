@@ -32,8 +32,16 @@ def namespace_title(segment: str) -> str:
     return segment[:1].upper() + segment[1:]
 
 
+def callable_namespace(name: str) -> str:
+    """Library grouping, independent of the callable's exact stable identity."""
+    namespace = name.rsplit(".", 1)[0]
+    # Observation operations are direct peers; Temporary describes their
+    # target data, not another level of executable work or guidance.
+    return "observations" if namespace == "observations.temporary" else namespace
+
+
 def build_skill_mirror(notes: list[Note]) -> tuple[SkillMirrorNode, ...]:
-    """Project one Skill leaf per dotted callable Tool, under matching paths."""
+    """Project one Skill leaf per callable Tool under its Library group."""
     tools = [note for note in notes if note.kind == "tool"]
     skills = [note for note in notes if note.kind == "skill"]
     resolver = Resolver(notes)
@@ -47,9 +55,10 @@ def build_skill_mirror(notes: list[Note]) -> tuple[SkillMirrorNode, ...]:
         for note in tools
         if note.ref not in explicit_children and "." in note.ref.rsplit("/", 1)[-1]
     }
+    parents = {name: callable_namespace(name).replace(".", "/") for name in eligible}
     namespaces = sorted({
-        "/".join(name.split(".")[:depth])
-        for name in eligible for depth in range(1, len(name.split(".")))
+        "/".join(parent.split("/")[:depth])
+        for parent in parents.values() for depth in range(1, len(parent.split("/")) + 1)
     })
     namespace_set = set(namespaces)
 
@@ -69,8 +78,7 @@ def build_skill_mirror(notes: list[Note]) -> tuple[SkillMirrorNode, ...]:
         )
         child_leaves = sorted(
             "/".join(name.split(".")) for name in eligible
-            if name.split(".")[:depth] == namespace.split("/")
-            and len(name.split(".")) == depth + 1
+            if parents[name] == namespace
         )
         nodes.append(SkillMirrorNode(
             path=namespace,

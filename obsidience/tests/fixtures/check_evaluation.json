@@ -1,0 +1,142 @@
+{
+  "schema_version": 1,
+  "task": "Tasks/check",
+  "runbook": "Runbooks/check",
+  "problem": "A recorded Check obtained and accurately reported a degraded snapshot, but its Task completion was failed. A successful inspection of degraded health must complete while preserving the degraded finding. Invalid or unavailable inspection must fail. Historical failures alone cannot determine current health. Improve the general procedure only if the frozen cases reveal a remaining weakness; do not embed case IDs, counts, or expected answer text in the Runbook.",
+  "suite": {
+    "schemaVersion": 1,
+    "repetitions": 1,
+    "cases": [
+      {
+        "id": "degraded-inspection",
+        "split": "train",
+        "objective": "Inspect harness health and report the observed finding accurately.",
+        "max_steps": 3,
+        "responses": [
+          {
+            "tool": "harness.status",
+            "args": {},
+            "result": {
+              "status": "degraded",
+              "task_issue_count": 1,
+              "task_issues": [
+                {
+                  "task": "Tasks/ingest",
+                  "status": "failed",
+                  "queued": 2
+                }
+              ],
+              "source_issues": 0,
+              "recent_failures": 3,
+              "history": {
+                "groups": [],
+                "tools": []
+              }
+            }
+          }
+        ],
+        "expected": {
+          "status": "completed",
+          "required_tools": [
+            "harness.status"
+          ],
+          "max_tool_calls": 1,
+          "summary_contains": [
+            "degraded"
+          ]
+        }
+      },
+      {
+        "id": "unavailable-inspection",
+        "split": "train",
+        "objective": "Inspect harness health and report the observed finding accurately.",
+        "max_steps": 3,
+        "responses": [
+          {
+            "tool": "harness.status",
+            "args": {},
+            "result": {
+              "error": "status inspection unavailable"
+            }
+          }
+        ],
+        "expected": {
+          "status": "failed",
+          "required_tools": [
+            "harness.status"
+          ],
+          "max_tool_calls": 1,
+          "summary_contains": [
+            "unavailable"
+          ]
+        }
+      },
+      {
+        "id": "healthy-with-history",
+        "split": "holdout",
+        "objective": "Inspect harness health and report the observed finding accurately.",
+        "max_steps": 3,
+        "responses": [
+          {
+            "tool": "harness.status",
+            "args": {},
+            "result": {
+              "status": "healthy",
+              "task_issue_count": 0,
+              "task_issues": [],
+              "source_issues": 0,
+              "recent_failures": 9,
+              "history": {
+                "groups": [],
+                "tools": []
+              }
+            }
+          }
+        ],
+        "expected": {
+          "status": "completed",
+          "required_tools": [
+            "harness.status"
+          ],
+          "max_tool_calls": 1,
+          "summary_contains": [
+            "healthy"
+          ]
+        }
+      },
+      {
+        "id": "different-degraded-finding",
+        "split": "holdout",
+        "objective": "Inspect harness health and report the observed finding accurately.",
+        "max_steps": 3,
+        "responses": [
+          {
+            "tool": "harness.status",
+            "args": {},
+            "result": {
+              "status": "degraded",
+              "task_issue_count": 0,
+              "task_issues": [],
+              "source_issues": 2,
+              "recent_failures": 0,
+              "history": {
+                "groups": [],
+                "tools": []
+              }
+            }
+          }
+        ],
+        "expected": {
+          "status": "completed",
+          "required_tools": [
+            "harness.status"
+          ],
+          "max_tool_calls": 1,
+          "summary_contains": [
+            "degraded"
+          ]
+        }
+      }
+    ]
+  }
+}

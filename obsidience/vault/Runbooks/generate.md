@@ -1,16 +1,17 @@
 ---
-approved_at: '2026-08-21T04:02:05'
-kind: runbook
-owner_maintained: true
-for_agent: '[[Agents/Darwin/Darwin]]'
-provenance: proposed by Codex (task research generation kit)
-subrunbooks:
-- '[[Runbooks/create-a-tool]]'
-- '[[Runbooks/create-a-skill]]'
-- '[[Runbooks/create-a-task]]'
-- '[[Runbooks/create-a-runbook]]'
-task: '[[@library/Tasks/generate]]'
+type: runbook
 title: Generate procedure
+obsidience:
+  approved_at: '2026-08-21T04:02:05'
+  owner_maintained: true
+  for_agent: '[[Agents/Darwin/Darwin]]'
+  provenance: proposed by Codex (task research generation kit)
+  subrunbooks:
+  - '[[Runbooks/create-a-tool]]'
+  - '[[Runbooks/create-a-skill]]'
+  - '[[Runbooks/create-a-task]]'
+  - '[[Runbooks/create-a-runbook]]'
+  task: '[[@library/Tasks/generate]]'
 ---
 
 Quality procedures for synthesizing graph-native objects.

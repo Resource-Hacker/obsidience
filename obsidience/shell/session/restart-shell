@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+shell_path=/home/wissenschafter/Projects/obsidience/obsidience/shell/qml
+
+if "$script_dir/session-lock" status; then
+    state="$(/usr/bin/qs ipc --path "$shell_path" --any-display \
+        call lock status 2>/dev/null || true)"
+    if [[ "$state" == "secure" || "$state" == "locking" ]]; then
+        printf '%s\n' 'Refusing to restart Obsidience while its session lock is active.' >&2
+        exit 1
+    fi
+fi
+
+/usr/bin/systemctl --user restart obsidience-shell-session.target
+/usr/bin/systemctl --user is-active --quiet \
+    obsidience-shell-session.target \
+    obsidience-shell-host.service \
+    obsidience-shell-knowledge.service \
+    obsidience-shell-window-adapter.service

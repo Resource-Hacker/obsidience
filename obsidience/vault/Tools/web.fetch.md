@@ -1,20 +1,37 @@
 ---
-binding: capability:web.fetch
-kind: tool
-source: obsidience/harness/capabilities/web/fetch.py
+type: tool
 title: web.fetch
+obsidience:
+  binding: capability:web.fetch
+  source: obsidience/harness/capabilities/web/fetch.py
 ---
 
-Fetch one public HTTP or HTTPS page through the bounded research acquisition
-path. Private, loopback, link-local, credential-bearing, oversized, binary,
-and unsafe redirect targets fail closed.
+Fetch one public HTTP(S) page or a batch of one to ten independent pages.
+Pass exactly `{"url": "<direct public URL>"}` or `{"urls": ["<URL>", ...]}`.
+All argument shapes and URL syntax are checked before any request; batch URLs
+must be unique after fragment removal. Each acquisition independently rejects
+private addresses, credentials, unsafe redirects, oversized or unsupported data.
 
-Argument: `url` is one direct public source URL.
+The same HTTPX acquisition path bounds each encoded URL to 2,000 characters,
+redirects to five, each response to 2 MB and extraction to 240,000 characters.
+Marked article HTML uses Trafilatura 2.2.0 to return article text, byline and date
+when present; sparse or unmarked documents retain structured Markdown extraction.
+Safe outgoing links are preserved as discovery references and never fetched
+implicitly. The complete bounded extraction is captured by the Source authority.
 
-The Tool extracts readable text and atomically passes that exact output to
-`source.ingest` before returning it. Success includes the readable material,
-final URL, content hash, and stable `source://<uuid>` citation. A genuinely new
-capture therefore emits the same ordinary `source.added` event; a duplicate
-fetch does not. When the fetch occurs inside the active source-triggered Learn
-Task, the new raw Source joins that activation instead of recursively queueing
-another copy of the same research commitment.
+One URL returns the final URL, content hash, stable `source://` citation and an
+exact preview of up to 6,000 characters. A batch runs at most four joined workers
+and returns JSON `{"results": [{"url": "<requested URL>", "ok": true,
+"result": "<ordinary single-URL result>"}, ...]}` in input order. Each failure has
+`ok: false` with a bounded explanation, while successful Sources remain usable.
+The entire encoded batch response is at most 60,000 characters; previews may be
+shorter to accommodate metadata and JSON escaping. Every success states exact
+returned/total character counts and the next `source.read` offset when needed.
+Facts visible in the returned range may be cited; an unread tail is optional
+unless a needed detail is absent and must never be represented as inspected.
+
+A new immutable capture emits one `source.added` event; duplicate captures reuse
+the existing identity. Research-owned captures join the same activation without
+recursively queueing research. STOP uses the existing capability cancellation
+event to stop queued work and prevent later Source commits; workers are joined
+before the Tool returns. HTTP reads retain their bounded network timeout.

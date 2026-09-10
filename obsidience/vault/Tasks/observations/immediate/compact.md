@@ -1,23 +1,25 @@
 ---
-assignee: '[[Agents/Executive/Executive]]'
-context_threshold: 80
-kind: task
-model: obsidience-gemma
-params:
-  curation_mode: compaction
-  target_path: Agents/Executive/Observations/Temporary Observations
-reasoning_effort: low
-runbook: '[[Runbooks/observations/compact]]'
-taxonomy_path: observations/immediate/compact
+type: task
 title: Compact
-triggers:
-- observations.immediate.threshold
+obsidience:
+  assignee: '[[Agents/Executive/Executive]]'
+  context_threshold: 80
+  model: obsidience-gemma
+  reasoning_effort: low
+  runbook: '[[Runbooks/observations/compact]]'
+  taxonomy_path: observations/compact
+  triggers:
+  - observations.immediate.threshold
 ---
 
-Condense the completed prefix of [[Agents/Executive/Observations/immediate-observations|Immediate Observations]]
+Condense the completed prefix of [Current conversation](/Agents/Executive/Observations/Immediate%20Observations/current-conversation.md)
 into one cumulative Temporary Observation summary. Preserve the owner's current
-goals, decisions, constraints, unresolved questions, and the minimum facts
-needed to continue naturally.
+goal, constraints and corrections, verified state, outstanding work, and the
+minimum facts needed to continue naturally. Do not preserve hidden reasoning.
+
+During an ongoing conversation, leave the latest two completed pairs exact. At
+a real conversation boundary, compact the complete remaining tail before
+promotion.
 
 The default event trigger is 80 percent of the selected model's usable input
 context. The owner may change that threshold or issue this Task immediately

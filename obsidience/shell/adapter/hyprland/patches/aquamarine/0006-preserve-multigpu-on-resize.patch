@@ -1,0 +1,16 @@
+diff --git a/src/allocator/Swapchain.cpp b/src/allocator/Swapchain.cpp
+index 2b1bd5d..edc4aff 100644
+--- a/src/allocator/Swapchain.cpp
++++ b/src/allocator/Swapchain.cpp
+@@ -104,8 +104,9 @@ bool Aquamarine::CSwapchain::resize(size_t newSize) {
+         }
+     } else {
+         while (buffers.size() < newSize) {
+-            auto buf =
+-                allocator->acquire(SAllocatorBufferParams{.size = options.size, .format = options.format, .scanout = options.scanout, .cursor = options.cursor}, self.lock());
++            auto buf = allocator->acquire(
++                SAllocatorBufferParams{.size = options.size, .format = options.format, .scanout = options.scanout, .cursor = options.cursor, .multigpu = options.multigpu},
++                self.lock());
+             if (!buf) {
+                 allocator->getBackend()->log(AQ_LOG_ERROR, "Swapchain: Failed acquiring a buffer");
+                 return false;

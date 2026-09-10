@@ -1,7 +1,7 @@
 """Observation lifecycles and completed-turn events for graph-native Obsidience.
 
-The Executive conversation projects into one transient ``Immediate Observations``
-Knowledge Article. Compact turns its completed prefix into a cumulative Temporary
+The Executive conversation projects into ``Current conversation`` beneath the
+``Immediate Observations`` index Article. Compact turns its prefix into a cumulative Temporary
 Observation Article while SQLite retains the exact public turns. Other completed
 work may still emit ``turn.complete`` for owner-enabled observation Tasks.
 """
@@ -13,13 +13,14 @@ import hashlib
 import json
 import re
 import threading
-import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from ..config import CONFIG
+from ..knowledge.links import metadata_ref
 from ..knowledge.tasks import task_triggers
-from ..knowledge.vault import Note, load_note, resolver, slugify, write_note
+from ..knowledge.auto_curate import enabled as auto_curate_enabled
+from ..knowledge.vault import Note, Resolver, load_note, resolver, slugify, write_note
 
 TURN_COMPLETE_EVENT = "turn.complete"
 TEMPORARY_MAX_ENTRIES = 10
@@ -27,7 +28,7 @@ TEMPORARY_MAX_ENTRY_CHARS = 2_000
 TEMPORARY_MAX_TOTAL_CHARS = 20_000
 TEMPORARY_TTL_SECONDS = 24 * 60 * 60
 IMMEDIATE_OBSERVATIONS_PATH = Path(
-    "Agents/Executive/Observations/immediate-observations.md"
+    "Agents/Executive/Observations/Immediate Observations/current-conversation.md"
 )
 IMMEDIATE_OBSERVATIONS_REF = str(IMMEDIATE_OBSERVATIONS_PATH.with_suffix(""))
 IMMEDIATE_COMPACT_TASK_REF = "Tasks/observations/immediate/compact"
@@ -68,6 +69,28 @@ def _redact(value: object, limit: int) -> str:
     return text
 
 
+_COMPACTION_SECTIONS = ("Goal", "Constraints and corrections", "Verified state", "Outstanding")
+_COMPACTION_HEADING = re.compile(
+    r"^(?:\#{1,6}[ \t]+)?(Goal|Constraints and corrections|Verified state|Outstanding)"
+    r"(?:[ \t]*:[ \t]*|[ \t]*(?=\n|$))", re.MULTILINE,
+)
+
+
+def _valid_compaction_text(text: str) -> bool:
+    """Enforce the Compact Runbook's complete section contract, not its truth."""
+    if not text or len(text) > TEMPORARY_MAX_ENTRY_CHARS or _redact(text, TEMPORARY_MAX_ENTRY_CHARS) != text:
+        return False
+    headings = list(_COMPACTION_HEADING.finditer(text))
+    if tuple(match.group(1) for match in headings) != _COMPACTION_SECTIONS:
+        return False
+    if text[:headings[0].start()].strip():
+        return False
+    return all(
+        text[match.end():headings[index + 1].start() if index + 1 < len(headings) else len(text)].strip()
+        for index, match in enumerate(headings)
+    )
+
+
 def _temporary_dir(value: object) -> Path:
     raw = str(value or "").strip().replace("\\", "/").strip("/")
     path = Path(raw)
@@ -98,9 +121,20 @@ def _temporary_notes(target_path: str | Path) -> list:
     )
 
 
-def _prune_temporary(target_path: str | Path) -> tuple[int, list]:
+def _prune_temporary(
+    target_path: str | Path,
+    *,
+    active_conversation_id: str | None = None,
+) -> tuple[int, list]:
+    target = _temporary_dir(target_path)
+    if active_conversation_id is None and target == EXECUTIVE_TEMPORARY_PATH:
+        immediate = load_note(IMMEDIATE_OBSERVATIONS_PATH)
+        if immediate and immediate.meta.get("immediate") is True:
+            active_conversation_id = str(
+                immediate.meta.get("conversation_id") or ""
+            ).strip() or None
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=TEMPORARY_TTL_SECONDS)
-    notes = _temporary_notes(target_path)
+    notes = _temporary_notes(target)
     # A closed session's exact inputs cannot disappear while its ordinary
     # promotion Task waits for the executor. Pending inputs temporarily sit
     # outside the live-cache limits; the normal limits apply again as soon as
@@ -111,11 +145,32 @@ def _prune_temporary(target_path: str | Path) -> tuple[int, list]:
         and not str(note.meta.get("source_archive", ""))
     ]
     pending_refs = {note.ref for note in retained}
-    normal_count = 0
-    total_chars = 0
+    active_summary = max(
+        (
+            note for note in notes
+            if active_conversation_id
+            and note.meta.get("compaction") is True
+            and note.meta.get("compaction_committed") is True
+            and _valid_compaction_text(note.body.strip())
+            and str(note.meta.get("source_conversation_id", ""))
+            == active_conversation_id
+        ),
+        key=lambda note: int(note.meta.get("through_sequence") or 0),
+        default=None,
+    )
+    if active_summary is not None and active_summary not in retained:
+        retained.append(active_summary)
+    protected_refs = {note.ref for note in retained}
+    active_counts = active_summary is not None and active_summary.ref not in pending_refs
+    normal_count = int(active_counts)
+    total_chars = (
+        len(re.sub(r"\s+", " ", active_summary.body).strip())
+        if active_counts
+        else 0
+    )
     removed = 0
     for note in notes:
-        if note.ref in pending_refs:
+        if note.ref in protected_refs:
             continue
         try:
             observed = datetime.fromisoformat(str(note.meta.get("observed_at", "")))
@@ -145,6 +200,8 @@ def append_temporary_observation(args: dict, runtime: dict) -> dict:
     if mode not in {"temporary", "compaction"}:
         raise ValueError("this auto-curation Task does not target Temporary Observations")
     target = _temporary_dir(runtime.get("target_path"))
+    if not auto_curate_enabled(str(target)):
+        raise ValueError("Auto-curate is disabled for this Temporary Observations branch")
     if mode == "compaction" and (
         str(runtime.get("origin_task_ref", "")) != IMMEDIATE_COMPACT_TASK_REF
         or target != EXECUTIVE_TEMPORARY_PATH
@@ -153,7 +210,13 @@ def append_temporary_observation(args: dict, runtime: dict) -> dict:
     turn_id = slugify(str(runtime.get("turn_id") or ""))[:96]
     if not turn_id:
         raise ValueError("temporary observation requires an exact completed-turn identity")
-    text = re.sub(r"\s+", " ", str(args.get("text") or "")).strip()
+    text = str(args.get("text") or "")
+    if mode == "compaction":
+        text = "\n".join(
+            line.rstrip() for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+        ).strip()
+    else:
+        text = re.sub(r"\s+", " ", text).strip()
     maximum = TEMPORARY_MAX_ENTRY_CHARS if mode == "compaction" else 200
     if not text or len(text) > maximum:
         raise ValueError(
@@ -161,6 +224,12 @@ def append_temporary_observation(args: dict, runtime: dict) -> dict:
         )
     if _redact(text, maximum) != text:
         raise ValueError("temporary observation text failed the safety policy")
+    if mode == "compaction" and not _valid_compaction_text(text):
+        raise ValueError(
+            "context compaction requires four nonempty sections in order: "
+            "Goal, Constraints and corrections, Verified state, Outstanding; "
+            "the complete cumulative summary may use up to 2,000 characters"
+        )
 
     related = []
     res = resolver()
@@ -168,30 +237,41 @@ def append_temporary_observation(args: dict, runtime: dict) -> dict:
     if not isinstance(raw_related, list) or len(raw_related) > 3:
         raise ValueError("related_refs must contain at most three exact article refs")
     for raw in raw_related:
-        note = res.resolve(str(raw))
+        note = res.by_ref.get(metadata_ref(str(raw)).lower())
         if note is None:
             raise ValueError(f"related_ref does not resolve exactly: {raw}")
         if note.ref not in related:
             related.append(note.ref)
 
     now = datetime.now(timezone.utc)
+    conversation_id = str(runtime.get("conversation_id") or "").strip()
+    active_conversation_id = str(
+        runtime.get("active_conversation_id") or ""
+    ).strip() or None
     with _WRITE_LOCK:
         for note in _temporary_notes(target):
             if str(note.meta.get("source_turn_id", "")) != turn_id:
                 continue
-            if re.sub(r"\s+", " ", note.body).strip() != text:
+            existing_text = (
+                note.body.strip()
+                if mode == "compaction"
+                else re.sub(r"\s+", " ", note.body).strip()
+            )
+            if existing_text != text:
                 raise ValueError("completed turn already has a different temporary observation")
-            _removed, retained = _prune_temporary(target)
+            _removed, retained = _prune_temporary(
+                target,
+                active_conversation_id=active_conversation_id,
+            )
             return {"status": "existing", "ref": note.ref, "retained": len(retained)}
 
         rel = target / f"{now.strftime('%Y%m%d-%H%M%S')}-{turn_id}.md"
         through_sequence = int(runtime.get("through_sequence") or 0)
-        conversation_id = str(runtime.get("conversation_id") or "").strip()
         if mode == "compaction" and (not conversation_id or through_sequence < 1):
             raise ValueError("context compaction requires conversation and sequence identity")
         note_meta = {
             "title": (
-                f"Temporary context {now.strftime('%Y-%m-%d %H:%M:%S UTC')}"
+                f"Conversation summary · {now.strftime('%Y-%m-%d %H:%M:%S UTC')}"
                 if mode == "compaction"
                 else f"Temporary observation {now.strftime('%Y-%m-%d %H:%M:%S UTC')}"
             ),
@@ -213,7 +293,10 @@ def append_temporary_observation(args: dict, runtime: dict) -> dict:
         if through_sequence:
             note_meta["through_sequence"] = through_sequence
         write_note(str(rel), note_meta, text)
-        removed, retained = _prune_temporary(target)
+        removed, retained = _prune_temporary(
+            target,
+            active_conversation_id=active_conversation_id,
+        )
     retained_refs = {note.ref for note in retained}
     entry_ref = str(rel.with_suffix(""))
     if entry_ref not in retained_refs:
@@ -221,18 +304,50 @@ def append_temporary_observation(args: dict, runtime: dict) -> dict:
     return {"status": "appended", "ref": entry_ref, "retained": len(retained), "removed": removed}
 
 
-def latest_context_compaction(conversation_id: str) -> Note | None:
+def latest_context_compaction(
+    conversation_id: str,
+    *,
+    active: bool = False,
+) -> Note | None:
     """Return the newest cumulative Temporary Observation for one conversation."""
     with _WRITE_LOCK:
-        _removed, retained = _prune_temporary(EXECUTIVE_TEMPORARY_PATH)
+        _removed, retained = _prune_temporary(
+            EXECUTIVE_TEMPORARY_PATH,
+            active_conversation_id=conversation_id if active else None,
+        )
     rows = [
         note for note in retained
         if note.meta.get("compaction") is True
         and note.meta.get("compaction_committed") is True
+        and _valid_compaction_text(note.body.strip())
         and str(note.meta.get("source_conversation_id", "")) == conversation_id
         and int(note.meta.get("through_sequence") or 0) > 0
     ]
     return max(rows, key=lambda note: int(note.meta.get("through_sequence") or 0), default=None)
+
+
+def promoted_context_sequence(conversation_id: str, *, active: bool = False) -> int:
+    """Return the greatest conversation sequence already queued for promotion."""
+    with _WRITE_LOCK:
+        _removed, retained = _prune_temporary(
+            EXECUTIVE_TEMPORARY_PATH,
+            active_conversation_id=conversation_id if active else None,
+        )
+    return max(
+        (
+            int(note.meta.get("through_sequence") or 0)
+            for note in retained
+            if note.meta.get("compaction") is True
+            and note.meta.get("compaction_committed") is True
+            and _valid_compaction_text(note.body.strip())
+            and str(note.meta.get("source_conversation_id", "")) == conversation_id
+            and (
+                str(note.meta.get("promotion_pending", ""))
+                or str(note.meta.get("promotion_key", ""))
+            )
+        ),
+        default=0,
+    )
 
 
 def _committed_context_compactions(conversation_id: str) -> list[Note]:
@@ -244,8 +359,10 @@ def _committed_context_compactions(conversation_id: str) -> list[Note]:
             note for note in retained
             if note.meta.get("compaction") is True
             and note.meta.get("compaction_committed") is True
+            and _valid_compaction_text(note.body.strip())
             and str(note.meta.get("source_conversation_id", "")) == conversation_id
             and int(note.meta.get("through_sequence") or 0) > 0
+            and not str(note.meta.get("promotion_pending", ""))
             and not str(note.meta.get("promotion_key", ""))
         ),
         key=lambda note: int(note.meta.get("through_sequence") or 0),
@@ -315,10 +432,15 @@ def queue_temporary_promotion(conversation_id: str, *, session_boundary: str) ->
     }
 
 
-def archive_temporary_observations(args: dict, runtime: dict) -> dict:
-    """Preserve exact event-bound Temporary Article snapshots in Source."""
-    if args:
-        raise ValueError("temporary archive takes no model-authored arguments")
+def resolve_temporary_promotion_inputs(
+    runtime: dict, accepted_resolver: Resolver | None = None,
+) -> list[Note]:
+    """Validate committed promotion inputs without inference, archival or mutation.
+
+    Existing queued inputs may predate Compact's current completeness guard.
+    Execution checks them before model acquisition; archival checks fresh inputs
+    again at its effect boundary through this same owner.
+    """
     if (
         str(runtime.get("origin_task_ref", "")) != TEMPORARY_PROMOTION_TASK_REF
         or str(runtime.get("event", "")) != TEMPORARY_PROMOTION_EVENT
@@ -342,8 +464,9 @@ def archive_temporary_observations(args: dict, runtime: dict) -> dict:
 
     notes: list[Note] = []
     seen: set[str] = set()
+    res = accepted_resolver if accepted_resolver is not None else resolver()
     for raw_ref in raw_refs:
-        note = resolver().resolve(str(raw_ref))
+        note = res.resolve(str(raw_ref))
         if (
             note is None
             or note.ref in seen
@@ -353,6 +476,7 @@ def archive_temporary_observations(args: dict, runtime: dict) -> dict:
             or note.meta.get("temporary") is not True
             or note.meta.get("compaction") is not True
             or note.meta.get("compaction_committed") is not True
+            or not _valid_compaction_text(note.body.strip())
             or str(note.meta.get("source_conversation_id", "")) != conversation_id
             or str(note.meta.get("promotion_pending", promotion_key)) != promotion_key
             or str(note.meta.get("promotion_key", promotion_key)) != promotion_key
@@ -363,6 +487,17 @@ def archive_temporary_observations(args: dict, runtime: dict) -> dict:
     notes.sort(key=lambda note: int(note.meta.get("through_sequence") or 0))
     if max(int(note.meta.get("through_sequence") or 0) for note in notes) != through_sequence:
         raise ValueError("temporary archive sequence does not match its exact inputs")
+    return notes
+
+
+def archive_temporary_observations(args: dict, runtime: dict) -> dict:
+    """Preserve exact event-bound Temporary Article snapshots in Source."""
+    if args:
+        raise ValueError("temporary archive takes no model-authored arguments")
+    notes = resolve_temporary_promotion_inputs(runtime)
+    conversation_id = str(runtime["conversation_id"]).strip()
+    promotion_key = str(runtime["promotion_key"]).strip()
+    through_sequence = int(runtime["through_sequence"])
 
     from ..knowledge.source import get_source, ingest_source
 
@@ -463,6 +598,8 @@ def commit_context_compaction(
         ), None)
         if match is None:
             raise RuntimeError("Compact completed without its pending Temporary Observation")
+        if not _valid_compaction_text(match.body.strip()):
+            raise RuntimeError("Compact completed without a complete four-section Temporary Observation")
         if match.meta.get("compaction_committed") is not True:
             meta = dict(match.meta)
             meta["compaction_committed"] = True
@@ -500,12 +637,31 @@ def project_immediate_observations(
     materialize: bool = True,
 ) -> dict:
     """Materialize the active context window as one transient Observation Article."""
-    compacted = latest_context_compaction(conversation_id)
+    compacted = latest_context_compaction(
+        conversation_id,
+        active=(conversation_id == getattr(conversation, "conversation_id", None)),
+    )
     through_sequence = int(compacted.meta.get("through_sequence") or 0) if compacted else 0
     pairs = conversation.complete_pairs(
         conversation_id=conversation_id,
         before_sequence=before_sequence,
         after_sequence=through_sequence,
+    )
+    # A failed or interrupted execution has no successful assistant reply, but
+    # its final owner request still supplies the referent for the next correction.
+    # Keep that request without admitting any partial assistant output as fact.
+    turns = conversation.index.conversation_turns(conversation_id)
+    users = [turn for turn in turns
+             if turn["role"] == "user" and turn["state"] == "final"
+             and int(turn["sequence"]) > through_sequence
+             and (before_sequence is None or int(turn["sequence"]) < before_sequence)]
+    replies = {user["id"]: assistant for user, assistant in pairs}
+    from .evidence import historical_public_replies, historical_steered_turns
+    public_limits = historical_public_replies(
+        conversation, conversation_id=conversation_id, before_sequence=before_sequence,
+    )
+    applied_clarifications = historical_steered_turns(
+        conversation, conversation_id=conversation_id, before_sequence=before_sequence,
     )
     sections: list[str] = [
         "This transient Article is the Executive model's active conversation context. "
@@ -518,21 +674,28 @@ def project_immediate_observations(
             f"From [[{compacted.ref}|{compacted.title}]] through conversation sequence "
             f"{through_sequence}:\n\n{compacted.body.strip()}"
         )
-    if pairs:
+    if users:
         dialogue = "\n\n".join(
-            f"User: {user['text']}\nExecutive: {assistant['text']}"
-            for user, assistant in pairs
+            f"User: {user['text']}\n" + (
+                f"Executive: {replies[user['id']]['text']}" if user["id"] in replies
+                else "[Owner clarification applied within the same completed Task; see its Executive reply.]" if user["id"] in applied_clarifications
+                else (f"Executive [Task {public_limits[user['id']]['status']}]: "
+                      f"{public_limits[user['id']]['text']}") if user["id"] in public_limits
+                else "[No successful Executive reply recorded; this request remains unresolved.]"
+            )
+            for user in sorted(users, key=lambda turn: int(turn["sequence"]))
         )
-        sections.append("## Exact completed dialogue after compaction\n\n" + dialogue)
+        sections.append("## Exact dialogue after compaction\n\n" + dialogue)
     elif not compacted:
         sections.append("No completed conversation pair exists yet.")
     latest_sequence = max(
-        (int(assistant["sequence"]) for _user, assistant in pairs),
+        (max(int(user["sequence"]), int(replies.get(user["id"], {}).get("sequence", 0)))
+         for user in users),
         default=through_sequence,
     )
     body = "\n\n".join(sections)
     meta = {
-        "title": "Immediate Observations",
+        "title": "Current conversation",
         "kind": "knowledge",
         "observation_scope": "immediate",
         "retrieval": False,
@@ -543,8 +706,10 @@ def project_immediate_observations(
         "compacted_through": through_sequence,
         "latest_sequence": latest_sequence,
     }
-    if materialize:
+    if materialize and auto_curate_enabled(str(IMMEDIATE_OBSERVATIONS_PATH)):
         current = load_note(IMMEDIATE_OBSERVATIONS_PATH)
+        if current and isinstance(current.meta.get("auto_curate"), bool):
+            meta["auto_curate"] = current.meta["auto_curate"]
         needs_index_sync = current is None or current.meta.get("retrieval") is not False
         if not current or current.meta != meta or current.body.strip() != body.strip():
             write_note(str(IMMEDIATE_OBSERVATIONS_PATH), meta, body)
@@ -578,14 +743,13 @@ def _event_tasks(agent_ref: str) -> list:
 
 
 def read_temporary_observations(agent_ref: str) -> str:
-    """Read only enabled, agent-matched temporary nodes before a turn."""
-    entries = []
+    """Read the Agent's permitted cache, independently of Task scheduling."""
+    target = str(Path(agent_ref).parent / "Observations/Temporary Observations")
+    if not auto_curate_enabled(target):
+        return ""
     with _WRITE_LOCK:
-        for task in _event_tasks(agent_ref):
-            if str(task.meta.get("curation_mode", "")) != "temporary":
-                continue
-            _removed, retained = _prune_temporary(task.meta.get("target_path", ""))
-            entries.extend(reversed(retained))
+        _removed, retained = _prune_temporary(target)
+        entries = list(reversed(retained))
     if not entries:
         return ""
     lines = [f"- {re.sub(r'\s+', ' ', note.body).strip()}" for note in entries]

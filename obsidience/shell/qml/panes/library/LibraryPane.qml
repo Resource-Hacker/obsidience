@@ -11,15 +11,15 @@ Rectangle {
     property var nodes: []
     property var tasks: []
     property var navigationAgents: []
-    property var checkouts: ({})
-    property var busyCheckouts: ({})
+    property var assignments: ({})
+    property var busyAssignments: ({})
     property var expanded: ({})
     property var initializedShelves: ({})
     property var rows: []
     property string shelf: "task"
     property string query: ""
-    property string checkoutError: ""
-    property string checkoutNotice: ""
+    property string assignmentError: ""
+    property string assignmentNotice: ""
     property int reviewCount: 0
     property int acceptedCount: 0
     property int taskCount: 0
@@ -33,8 +33,23 @@ Rectangle {
             .replace(/^\[\[/, "").replace(/\]\]$/, "").split("|")[0]
     }
 
-    function checkoutKey(ref, agent) {
+    function assignmentKey(ref, agent) {
         return ref + "\u0000" + agent
+    }
+
+    function canAssign(node) {
+        return node && node.kind === "task" && node.synthetic !== true
+    }
+
+    function assignmentHint(ref, agent) {
+        const assignment = assignments[assignmentKey(ref, agent)]
+        if (assignment && assignment.inherited && !assignment.direct) {
+            return "Assigned by this Task's triggers or active ownership. Edit the Task in Reader."
+        }
+        return assignment && assignment.direct
+            ? "Remove the manual Task assignment"
+                + (assignment.inherited ? "; triggered or active ownership remains." : ".")
+            : "Assign this Task; its Runbook, Skills and Tools follow automatically."
     }
 
     function requestError(request, fallback) {
@@ -78,11 +93,13 @@ Rectangle {
             if (!ok || !payload || !Array.isArray(payload.nodes)) {
                 return
             }
-            nodes = payload.nodes.filter(node => node
-                && (node.kind === "tool" || node.kind === "task"
-                    || (Array.isArray(node.tags) && node.tags.includes("task-taxonomy"))))
             const groups = payload.navigation && Array.isArray(payload.navigation.groups)
                 ? payload.navigation.groups : []
+            const library = groups.find(group => group.id === "library")
+            const members = new Set(library ? library.article_refs || [] : [])
+            nodes = payload.nodes.filter(node => node && members.has(node.id)
+                && (node.kind === "tool" || node.kind === "task"
+                    || (Array.isArray(node.tags) && node.tags.includes("task-taxonomy"))))
             navigationAgents = groups.filter(group => group && group.role !== "library")
             updateCounts()
             rebuildRows()
@@ -98,17 +115,19 @@ Rectangle {
                 reviewCount = payload.length
             }
         })
-        requestJson("GET", "/api/library/checkouts", null, function(ok, payload) {
+        requestJson("GET", "/api/library/assignments", null, function(ok, payload) {
             if (!ok || !payload || !Array.isArray(payload.assignments)) {
                 return
             }
             const selected = {}
             for (const assignment of payload.assignments) {
-                if (assignment && assignment.ref && assignment.agent) {
-                    selected[checkoutKey(assignment.ref, assignment.agent)] = true
+                if (assignment && assignment.kind === "task"
+                        && assignment.ref && assignment.agent
+                        && (assignment.direct || assignment.inherited)) {
+                    selected[assignmentKey(assignment.ref, assignment.agent)] = assignment
                 }
             }
-            checkouts = selected
+            assignments = selected
         })
     }
 
@@ -130,20 +149,15 @@ Rectangle {
             return leftOrder - rightOrder || String(left.title).localeCompare(String(right.title))
         })
         const byRef = {}
-        const byName = {}
         for (const node of shelfNodes) {
             byRef[node.id] = node
-            const leaf = String(node.id).split("/").pop().toLowerCase()
-            if (!byName[leaf]) {
-                byName[leaf] = node
-            }
         }
         const children = {}
         const childRefs = {}
         const parentOf = {}
         function resolve(raw) {
             const ref = root.cleanLink(raw)
-            return byRef[ref] || byName[(ref.split("/").pop() || "").toLowerCase()]
+            return byRef[ref]
         }
         for (const node of shelfNodes) {
             const childRows = []
@@ -270,59 +284,47 @@ Rectangle {
         rebuildRows()
     }
 
-    function toggleCheckout(ref, agent) {
-        const key = checkoutKey(ref, agent)
-        if (busyCheckouts[key]) {
+    function toggleAssignment(ref, agent) {
+        const key = assignmentKey(ref, agent)
+        const assignment = assignments[key]
+        if (!canAssign(nodes.find(node => node.id === ref)) || busyAssignments[key]
+                || (assignment && assignment.inherited && !assignment.direct)) {
             return
         }
-        const checkedOut = !checkouts[key]
-        checkoutError = ""
-        checkoutNotice = ""
-        const nextBusy = Object.assign({}, busyCheckouts)
+        const assigned = !(assignment && assignment.direct)
+        assignmentError = ""
+        assignmentNotice = ""
+        const nextBusy = Object.assign({}, busyAssignments)
         nextBusy[key] = true
-        busyCheckouts = nextBusy
-        const optimistic = Object.assign({}, checkouts)
-        if (checkedOut) {
-            optimistic[key] = true
-        } else {
-            delete optimistic[key]
-        }
-        checkouts = optimistic
-
-        requestJson("PUT", "/api/library/checkouts/" + encodeURI(ref), {
+        busyAssignments = nextBusy
+        requestJson("PUT", "/api/library/assignments/" + encodeURI(ref), {
             "agent": agent,
-            "checked_out": checkedOut
+            "assigned": assigned
         }, function(ok, payload, error) {
-            const finishedBusy = Object.assign({}, busyCheckouts)
+            const finishedBusy = Object.assign({}, busyAssignments)
             delete finishedBusy[key]
-            busyCheckouts = finishedBusy
+            busyAssignments = finishedBusy
             if (!ok) {
-                const rollback = Object.assign({}, checkouts)
-                if (checkedOut) {
-                    delete rollback[key]
-                } else {
-                    rollback[key] = true
-                }
-                checkouts = rollback
-                checkoutError = error.slice(0, 180)
+                assignmentError = error.slice(0, 180)
                 return
             }
+            const nextAssignments = Object.assign({}, assignments)
+            if (payload.direct || payload.inherited) nextAssignments[key] = payload
+            else delete nextAssignments[key]
+            assignments = nextAssignments
             const group = navigationAgents.find(candidate => candidate.role === agent)
             const label = group ? group.title : agent
-            if (payload.activation_error) {
-                checkoutError = "Checkout saved for " + label + ", but " + payload.activation_error
-            } else if (!payload.checkout_changed) {
-                checkoutNotice = label + " already had this item checked out."
-            } else if (!checkedOut) {
-                checkoutNotice = "Returned from " + label + "."
-            } else if (payload.activation_state === "queued") {
-                checkoutNotice = "Checked out to " + label
-                    + ". Runbook generation is queued at position "
-                    + String(payload.queue_position) + "."
-            } else if (payload.activation_state === "started") {
-                checkoutNotice = "Checked out to " + label + ". Runbook generation started."
+            if (payload.activation_state === "queued") {
+                assignmentNotice = "Task assigned to " + label + ". Runbook generation is queued for review."
+            } else if (payload.activation_error) {
+                assignmentError = "Task assignment saved for " + label + ", but " + payload.activation_error
+            } else if (!payload.assignment_changed) {
+                assignmentNotice = "Task assignment is already current for " + label + "."
+            } else if (!assigned) {
+                assignmentNotice = "Manual Task assignment removed from " + label
+                    + (payload.inherited ? "; triggered or active ownership remains." : ".")
             } else {
-                checkoutNotice = "Checked out to " + label + "."
+                assignmentNotice = "Task assigned to " + label + ". Dependencies follow automatically."
             }
             refresh()
         })
@@ -346,7 +348,7 @@ Rectangle {
             "schema": "obsidience.shell.command.v1",
             "type": "pane.present",
             "pane_id": "reader",
-            "selection": {"kind": "article", "ref": ref}
+            "selection": {"kind": "article", "ref": ref, "graph_id": "library"}
         }))
     }
 
@@ -508,7 +510,7 @@ Rectangle {
     }
 
     Rectangle {
-        id: checkoutLegend
+        id: assignmentLegend
 
         anchors.left: parent.left
         anchors.right: parent.right
@@ -525,7 +527,7 @@ Rectangle {
             anchors.left: parent.left
             anchors.leftMargin: 8
             anchors.verticalCenter: parent.verticalCenter
-            text: "CHECKOUT"
+            text: "ASSIGNMENT"
             color: "#405eead4"
             font.family: "JetBrains Mono"
             font.pixelSize: 8
@@ -579,18 +581,18 @@ Rectangle {
 
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.top: checkoutLegend.bottom
+        anchors.top: assignmentLegend.bottom
         anchors.topMargin: 4
-        height: (root.checkoutError || root.checkoutNotice) ? 28 : 0
+        height: (root.assignmentError || root.assignmentNotice) ? 28 : 0
         visible: height > 0
-        color: root.checkoutError ? "#30190a12" : "#165eead4"
+        color: root.assignmentError ? "#30190a12" : "#165eead4"
 
         Text {
             anchors.fill: parent
             anchors.leftMargin: 12
             anchors.rightMargin: 12
-            text: root.checkoutError || root.checkoutNotice
-            color: root.checkoutError ? "#fda4af" : "#a7f3d0"
+            text: root.assignmentError || root.assignmentNotice
+            color: root.assignmentError ? "#fda4af" : "#a7f3d0"
             elide: Text.ElideRight
             verticalAlignment: Text.AlignVCenter
             font.family: "JetBrains Mono"
@@ -740,44 +742,46 @@ Rectangle {
                 }
 
                 Repeater {
-                    model: (libraryRow.modelData.node.kind === "task"
-                        || libraryRow.modelData.node.kind === "tool")
-                        ? root.navigationAgents : []
+                    model: root.canAssign(libraryRow.modelData.node) ? root.navigationAgents : []
 
                     delegate: Rectangle {
-                        id: checkoutButton
+                        id: assignmentButton
 
                         required property var modelData
-                        readonly property string key: root.checkoutKey(
+                        readonly property string key: root.assignmentKey(
                             libraryRow.modelData.node.id,
                             modelData.role
                         )
-                        readonly property bool selected: Boolean(root.checkouts[key])
-                        readonly property bool busy: Boolean(root.busyCheckouts[key])
+                        readonly property bool selected: Boolean(root.assignments[key])
+                        readonly property bool busy: Boolean(root.busyAssignments[key])
+                        readonly property bool inheritedOnly: selected
+                            && root.assignments[key].inherited && !root.assignments[key].direct
                         width: 24
                         height: 24
                         radius: 5
                         color: selected ? Qt.alpha(root.roleColor(modelData.role, false), 0.15)
-                            : (checkoutMouse.containsMouse ? "#11071119" : "#80020a0c")
+                            : (assignmentMouse.containsMouse ? "#11071119" : "#80020a0c")
                         border.width: 1
                         border.color: root.roleColor(modelData.role, !selected)
                         opacity: busy ? 0.35 : (selected ? 1.0 : 0.58)
+                        ToolTip.visible: assignmentMouse.containsMouse
+                        ToolTip.text: root.assignmentHint(libraryRow.modelData.node.id, modelData.role)
 
                         RoleIcon {
                             anchors.fill: parent
                             anchors.margins: 2
-                            role: String(checkoutButton.modelData.role || "executive")
+                            role: String(assignmentButton.modelData.role || "executive")
                         }
 
                         MouseArea {
-                            id: checkoutMouse
+                            id: assignmentMouse
                             anchors.fill: parent
                             hoverEnabled: true
-                            enabled: !checkoutButton.busy
-                            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-                            onClicked: root.toggleCheckout(
+                            cursorShape: !assignmentButton.busy && !assignmentButton.inheritedOnly
+                                ? Qt.PointingHandCursor : Qt.ArrowCursor
+                            onClicked: root.toggleAssignment(
                                 libraryRow.modelData.node.id,
-                                checkoutButton.modelData.role
+                                assignmentButton.modelData.role
                             )
                         }
                     }

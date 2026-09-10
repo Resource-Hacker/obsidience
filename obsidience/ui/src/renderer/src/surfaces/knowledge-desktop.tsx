@@ -20,8 +20,8 @@ export function KnowledgeDesktopSurface() {
   const [visible, setVisible] = useState(true);
   const [selectedSurfaceId, setSelectedSurfaceId] = useState("samsung");
 
-  useEffect(() => onOpenReader((ref) => {
-    presentShellReader(ref);
+  useEffect(() => onOpenReader((ref, graphId) => {
+    presentShellReader(ref, graphId);
   }), []);
   useEffect(() => onShellKnowledgeVisibility(surfaceId, setVisible), [surfaceId]);
   useEffect(() => onShellGraphDisplay(setSelectedSurfaceId), []);
@@ -48,8 +48,8 @@ export function KnowledgeDesktopSurface() {
           OBSIDIENCE
         </span>
       ) : null}
-      {showGraph ? (
-        <GraphBackdrop visible lockMode={lockMode} hub={CENTERED_HUB} />
+      {selectedSurfaceId === surfaceId ? (
+        <GraphBackdrop visible={showGraph} lockMode={lockMode} hub={CENTERED_HUB} />
       ) : null}
     </main>
   );

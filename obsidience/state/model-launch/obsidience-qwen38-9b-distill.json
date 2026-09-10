@@ -9,5 +9,6 @@
   ],
   "max_num_seqs": 1,
   "max_output_tokens": 8192,
-  "model_id": "obsidience-qwen38-9b-distill"
+  "model_id": "obsidience-qwen38-9b-distill",
+  "projector_path": null
 }

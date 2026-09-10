@@ -6,7 +6,6 @@ import "../../components/identity"
 Item {
     id: content
 
-    required property string surfaceId
     required property bool locked
 
     Identity {

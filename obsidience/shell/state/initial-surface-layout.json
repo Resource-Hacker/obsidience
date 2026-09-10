@@ -3,6 +3,11 @@
   "revision": 0,
   "graph_surface_id": "samsung",
   "pane_grid_size": 10,
+  "tile_resize_limit_percent": 25,
+  "oled_mode_enabled": false,
+  "oled_shift_distance_px": 32,
+  "oled_travel_duration_seconds": 3600,
+  "oled_glow_rotation_hours": 3,
   "workspace_tiling": {
     "samsung": { "columns": 8, "rows": 2 },
     "usb-c": { "columns": 3, "rows": 2 },

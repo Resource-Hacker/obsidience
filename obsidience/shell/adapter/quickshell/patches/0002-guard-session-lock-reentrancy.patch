@@ -1,0 +1,154 @@
+diff --git a/src/wayland/session_lock.cpp b/src/wayland/session_lock.cpp
+index 1ae8d2e..21ed395 100644
+--- a/src/wayland/session_lock.cpp
++++ b/src/wayland/session_lock.cpp
+@@ -113,70 +113,84 @@ void WlSessionLock::updateSurfaces(bool show, WlSessionLock* old) {
+ }
+ 
+ void WlSessionLock::realizeLockTarget(WlSessionLock* old) {
+-	if (this->lockTarget) {
+-		if (!SessionLockManager::lockAvailable()) {
+-			qCritical() << "Cannot start session lock: The current compositor does not support the "
+-			               "ext-session-lock-v1 protocol.";
+-			this->unlock();
+-			return;
+-		}
++	if (this->realizing || !this->manager) {
++		this->awaitingRealization = true;
++		return;
++	}
+ 
+-		if (this->mSurfaceComponent == nullptr) {
+-			qWarning() << "WlSessionLock.surface is null. Aborting lock.";
+-			this->unlock();
+-			return;
+-		}
++	this->realizing = true;
++
++	[&, this]() {
++		if (this->lockTarget) {
++			if (!SessionLockManager::lockAvailable()) {
++				qCritical() << "Cannot start session lock: The current compositor does not support the "
++				               "ext-session-lock-v1 protocol.";
++				this->unlock();
++				return;
++			}
+ 
+-		// preload initial surfaces to make the chance of the compositor displaying a blank
+-		// frame before the lock surfaces are shown as low as possible.
+-		this->updateSurfaces(false);
++			if (this->mSurfaceComponent == nullptr) {
++				qWarning() << "WlSessionLock.surface is null. Aborting lock.";
++				this->unlock();
++				return;
++			}
+ 
+-		if (!this->manager->lock()) this->lockTarget = false;
++			// preload initial surfaces to make the chance of the compositor displaying a blank
++			// frame before the lock surfaces are shown as low as possible.
++			this->updateSurfaces(false);
+ 
+-		this->updateSurfaces(true, old);
+-	} else {
+-		this->unlock(); // emits lockStateChanged
++			auto wasLocked = this->isLocked();
++			if (!this->manager->lock()) {
++				qWarning() << "Failed to acquire session lock.";
++				this->unlock();
++				return;
++			}
++
++			this->updateSurfaces(true, old);
++			if (!wasLocked) emit this->lockStateChanged();
++		} else {
++			this->unlock(); // emits lockStateChanged
++		}
++	}();
++
++	this->realizing = false;
++
++	if (this->awaitingRealization) {
++		this->awaitingRealization = false;
++		this->realizeLockTarget();
+ 	}
+ }
+ 
+ void WlSessionLock::unlock() {
+-	if (this->isLocked()) {
+-		this->lockTarget = false;
+-		this->manager->unlock();
++	this->lockTarget = false;
+ 
+-		for (auto* surface: this->surfaces) {
+-			surface->deleteLater();
+-		}
++	for (auto* surface: this->surfaces) {
++		surface->deleteLater();
++	}
+ 
+-		this->surfaces.clear();
++	this->surfaces.clear();
+ 
+-		emit this->lockStateChanged();
+-	}
++	if (this->manager) this->manager->unlock();
++	if (this->isLocked()) emit this->lockStateChanged();
+ }
+ 
+ void WlSessionLock::onScreensChanged() {
+-	if (this->manager != nullptr && this->manager->isLocked()) {
++	// Theoretically screens shouldnt be invalidated while realizing, instead in later event loop cycles.
++	if (this->isLocked() && !this->realizing) {
+ 		this->updateSurfaces(true);
+ 	}
+ }
+ 
+-bool WlSessionLock::isLocked() const {
+-	return this->manager == nullptr ? this->lockTarget : this->manager->isLocked();
+-}
++bool WlSessionLock::isLocked() const { return this->manager && this->manager->isLocked(); }
+ 
+ bool WlSessionLock::isSecure() const {
+ 	return this->manager != nullptr && SessionLockManager::isSecure();
+ }
+ 
+ void WlSessionLock::setLocked(bool locked) {
+-	if (this->isLocked() == locked) return;
++	if (this->lockTarget == locked) return;
+ 	this->lockTarget = locked;
+ 
+-	if (this->manager == nullptr) {
+-		emit this->lockStateChanged();
+-		return;
+-	}
+-
+ 	this->realizeLockTarget();
+ }
+ 
+diff --git a/src/wayland/session_lock.hpp b/src/wayland/session_lock.hpp
+index 9a34eaf..587875f 100644
+--- a/src/wayland/session_lock.hpp
++++ b/src/wayland/session_lock.hpp
+@@ -101,6 +101,8 @@ private:
+ 	QQmlComponent* mSurfaceComponent = nullptr;
+ 	QMap<QScreen*, WlSessionLockSurface*> surfaces;
+ 	bool lockTarget = false;
++	bool realizing = false;
++	bool awaitingRealization = false;
+ 
+ 	friend class WlSessionLockSurface;
+ };
+diff --git a/src/wayland/session_lock/session_lock.cpp b/src/wayland/session_lock/session_lock.cpp
+index c32dd90..7800a54 100644
+--- a/src/wayland/session_lock/session_lock.cpp
++++ b/src/wayland/session_lock/session_lock.cpp
+@@ -25,7 +25,8 @@ QSWaylandSessionLockManager* manager() {
+ bool SessionLockManager::lockAvailable() { return manager()->isActive(); }
+ 
+ bool SessionLockManager::lock() {
+-	if (this->isLocked() || SessionLockManager::sessionLocked()) return false;
++	if (this->isLocked()) return true;
++	if (SessionLockManager::sessionLocked()) return false;
+ 	this->mLock = manager()->acquireLock();
+ 	this->mLock->setParent(this);
+ 

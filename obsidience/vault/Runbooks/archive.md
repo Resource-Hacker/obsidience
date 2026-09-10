@@ -40,6 +40,13 @@ obsidience:
    the exact observed grounds in `evidence`. Missing evidence and unresolved
    inbound references are not clean completion.
 
-The bounded Top 10 rotation uses this same Review archival owner inside one
-complete edition change, under its explicit owner policy. It is not general
-permission for Auto-curate to archive arbitrary Knowledge or delete Source.
+Explicit Feed active-Article retention uses this same Review archival owner. Darwin's Feed handoff triggers Alexandria's Ingest
+to retire the oldest excess Articles from that exact Feed while publishing its
+incoming Article atomically. A Feed policy save can also reconcile the count,
+including quiet feeds, in bounded groups. The Feed compiler attests membership,
+current policy, exact bases, all affected Article permissions and surviving
+inbound references. Full content, Sources and history remain below `_archived/`;
+retention records retirement from the active collection without declaring an
+old report false. This is not general permission to archive arbitrary Knowledge,
+reclassify elapsed `stale_after`, or delete Source. No additional model Archive
+execution is required for this deterministic policy application.

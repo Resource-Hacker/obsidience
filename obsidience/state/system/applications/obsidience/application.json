@@ -21,5 +21,22 @@
     "software_management": "PackageKit (alpm)"
   },
   "live_data_endpoint": "/api/system",
-  "read_only": true
+  "read_only": true,
+  "storage_locations": [
+    {
+      "id": "models",
+      "label": "AI Models",
+      "path": "/var/lib/ai",
+      "models_path": "/var/lib/ai/models",
+      "allocation": "shared_filesystem",
+      "quota_bytes": null
+    },
+    {
+      "id": "obsidience",
+      "label": "Obsidience",
+      "path": "/home/wissenschafter/Projects/obsidience/obsidience",
+      "allocation": "shared_filesystem",
+      "quota_bytes": null
+    }
+  ]
 }

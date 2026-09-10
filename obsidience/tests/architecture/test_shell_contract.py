@@ -21,10 +21,19 @@ def test_shell_manifest_names_one_real_module() -> None:
         "package": "obsidience.shell",
         "entrypoints": [
             "obsidience/shell/qml/shell.qml",
+            "obsidience/shell/qml/lock/LockController.qml",
+            "obsidience/shell/lock/pam.d/obsidience",
+            "obsidience/shell/adapter/quickshell/build-runtime",
+            "obsidience/shell/adapter/quickshell/patches/0001-satisfy-qtwebengine-host-contract.patch",
+            "obsidience/shell/adapter/quickshell/patches/0002-guard-session-lock-reentrancy.patch",
+            "obsidience/shell/adapter/quickshell/patches/0003-notify-session-unlock.patch",
             "obsidience/shell/adapter/hyprland/hyprland.lua",
             "obsidience/shell/adapter/hyprland/layout.lua",
+            "obsidience/shell/idle/hypridle.conf",
             "obsidience/shell/session/greetd.toml",
             "obsidience/shell/session/obsidience-shell-login",
+            "obsidience/shell/session/restart-shell",
+            "obsidience/shell/session/session-lock",
             "obsidience/shell/surfaces/knowledge/host.py",
             "obsidience/shell/adapter/windows/host.py",
             "obsidience/shell/theme/apply.py",
@@ -49,18 +58,14 @@ def test_one_quickshell_host_owns_all_three_logical_surfaces() -> None:
     assert 'dp4OutputName: "HDMI-A-2"' in shell_api
     assert "property ShellApi shellApi: ShellApi {}" in shell
     assert shell.count("Quickshell.screens.filter") == 3
-    assert shell.count("PaneWorkspace {") == 3
+    assert shell.count("PaneWorkspace {") == 1
     assert shell.count("Stage {") == 3
     assert shell.count("Variants {") == 3
-    assert "targetScreens: root.samsungScreens" in shell
-    assert "targetScreens: root.usbScreens" in shell
-    assert "targetScreens: root.dp4Screens" in shell
+    assert "targetScreens: root.workspaceScreens" in shell
     assert 'surfaceId: "samsung"' in shell
     assert 'surfaceId: "usb-c"' in shell
     assert 'surfaceId: "dp-4"' in shell
-    assert shell.count("shellApi: root.shellApi") == 6
-    assert "authoritative: true" in shell
-    assert shell.count("authoritative: true") == 1
+    assert shell.count("shellApi: root.shellApi") == 5
     assert 'import "surfaces/stage"' in shell
     assert "WlrLayer.Bottom" in stage
     assert "aboveWindows: false" in stage
@@ -73,7 +78,10 @@ def test_one_quickshell_host_owns_all_three_logical_surfaces() -> None:
     assert "font.letterSpacing: 5.2" in identity
     assert "blurMax: 12" in identity
     assert "shadowEnabled: true" in identity
-    assert shell.startswith("//@ pragma NativeTextRendering\n")
+    assert shell.startswith(
+        "//@ pragma AppId io.obsidience.shell\n"
+        "//@ pragma NativeTextRendering\n"
+    )
     assert not (SHELL_ROOT / "qml" / "panels" / "top" / "TopPanel.qml").exists()
     assert not (
         SHELL_ROOT / "qml" / "surfaces" / "background" / "Background.qml"
@@ -139,7 +147,7 @@ def test_knowledge_graph_is_shell_owned_threejs_stage_content() -> None:
         SHELL_ROOT / "qml" / "api" / "ShellCommandServer.qml"
     ).read_text()
     placement = (SHELL_ROOT / "qml" / "workspace" / "PanePlacement.qml").read_text()
-    pane = (SHELL_ROOT / "qml" / "workspace" / "PaneItem.qml").read_text()
+    pane = (SHELL_ROOT / "qml" / "workspace" / "PaneWindow.qml").read_text()
     reader = (SHELL_ROOT / "qml" / "panes" / "reader" / "ReaderPane.qml").read_text()
     workspace = (
         SHELL_ROOT / "qml" / "workspace" / "PaneWorkspace.qml"
@@ -149,7 +157,7 @@ def test_knowledge_graph_is_shell_owned_threejs_stage_content() -> None:
     assert "KnowledgeDesktop" not in stage
     assert not (SHELL_ROOT / "qml" / "surfaces" / "stage" / "X11Stage.qml").exists()
     assert not (SHELL_ROOT / "qml" / "surface.qml").exists()
-    assert shell.count("PaneWorkspace {") == 3
+    assert shell.count("PaneWorkspace {") == 1
     assert shell.count("Stage {") == 3
     assert "KnowledgeDesktop" not in pane
     assert 'gi.require_version("GtkLayerShell", "0.1")' in desktop
@@ -158,7 +166,8 @@ def test_knowledge_graph_is_shell_owned_threejs_stage_content() -> None:
     assert "WebKit2.WebView()" in desktop
     assert 'GtkLayerShell.set_namespace(window, "obsidience-knowledge-desktop")' in desktop
     assert "GtkLayerShell.Layer.BACKGROUND" in desktop
-    assert "GtkLayerShell.KeyboardMode.NONE" in desktop
+    assert "GtkLayerShell.KeyboardMode.ON_DEMAND" in desktop
+    assert "window.set_accept_focus(True)" in desktop
     assert "GtkLayerShell.set_exclusive_zone(window, 0)" in desktop
     assert "display.get_n_monitors() != 1" not in desktop
     assert 'display.connect("monitor-added"' in desktop
@@ -177,12 +186,14 @@ def test_knowledge_graph_is_shell_owned_threejs_stage_content() -> None:
     assert "set_enable_webgl(True)" in desktop
     assert "HardwareAccelerationPolicy.ALWAYS" in desktop
     assert 'WEBKIT_DMABUF_RENDERER_FORCE_SHM", "1"' in desktop
+    assert "was_unavailable" not in desktop
+    assert "self.webview is not None and previous_surface_id != surface_id" in desktop
     assert "?surface=reader" not in desktop
     assert "?surface=knowledge" in desktop
     assert "Electron" not in desktop
     assert 'app.mount(' in api
     assert '"/shell/knowledge"' in api
-    assert "StaticFiles(" in api
+    assert "class ShellKnowledgeFiles(StaticFiles):" in api
     assert '"ui" / "out" / "renderer"' in api
     assert "/usr/bin/python3" in service
     assert "surfaces/knowledge/host.py" in service
@@ -220,7 +231,7 @@ def test_knowledge_graph_is_shell_owned_threejs_stage_content() -> None:
     assert 'const SHELL_SUBPROTOCOL = "obsidience.shell.v1"' in shell_client
     assert 'type: "pane.present"' in shell_client
     assert 'pane_id: "reader"' in shell_client
-    assert 'selection: { kind: "article", ref }' in shell_client
+    assert 'selection: { kind: "article", ref, graph_id: graphId }' in shell_client
     assert "ShellCommandServer {" in shell
     fullscreen_state = (
         SHELL_ROOT / "qml" / "api" / "FullscreenState.qml"
@@ -229,7 +240,8 @@ def test_knowledge_graph_is_shell_owned_threejs_stage_content() -> None:
         SHELL_ROOT / "adapter" / "windows" / "hyprland.py"
     ).read_text()
     assert "property FullscreenState fullscreenState: FullscreenState {}" in shell
-    assert "knowledgeVisible: !lockState.active && !fullscreenState.active" in shell
+    assert "knowledgeVisible: !lockController.active" in shell
+    assert "&& !fullscreenState.active" in shell
     assert "knowledgeVisible: root.knowledgeVisible" in shell
     assert '"/obsidience-shell-fullscreen.state"' in fullscreen_state
     assert "preload: true" in fullscreen_state
@@ -260,7 +272,13 @@ def test_knowledge_graph_is_shell_owned_threejs_stage_content() -> None:
     assert 'message.type !== "surface.state"' in shell_client
     assert "selectedSurfaceId === surfaceId && (lockMode || visible)" in renderer_surface
     assert 'const CENTERED_HUB = { x: 0.5, y: 0.5 } as const' in renderer_surface
-    assert '<GraphBackdrop visible lockMode={lockMode} hub={CENTERED_HUB} />' in renderer_surface
+    assert "{selectedSurfaceId === surfaceId ? (" in renderer_surface
+    assert (
+        "<GraphBackdrop visible={showGraph} lockMode={lockMode} "
+        "hub={CENTERED_HUB} />"
+        in renderer_surface
+    )
+    assert "{showGraph ? (\n        <GraphBackdrop" not in renderer_surface
     assert 'surfaceId !== "samsung" || lockMode' in renderer_surface
     assert "OBSIDIENCE" in renderer_surface
     assert 'query.get("lock") === "1"' in renderer_surface
@@ -334,7 +352,7 @@ def test_knowledge_graph_is_shell_owned_threejs_stage_content() -> None:
     assert "<svg" not in graph_backdrop
     assert "labelIds={labelIds}" in graph_backdrop
     assert "activeLabelNodeIds={lockMode ? new Set<string>() : gatedMainNodeIds}" in graph_backdrop
-    assert "labelMetadata={model.labelMetadata}" in graph_backdrop
+    assert "labelMetadata={presentation.labelMetadata}" in graph_backdrop
     assert "obsidience-knowledge-map-drift" not in graph_styles
     assert "obsidience-knowledge-tag-active-lock" not in graph_styles
     assert "obsidience-knowledge-tag-scan" not in graph_styles
@@ -365,11 +383,7 @@ def test_one_shell_host_shares_displays_pane_and_surface_layout() -> None:
     layout = (SHELL_ROOT / "qml" / "api" / "SurfaceLayout.qml").read_text()
     tiler = (SHELL_ROOT / "qml" / "api" / "WorkspaceTiler.qml").read_text()
     placement = (SHELL_ROOT / "qml" / "workspace" / "PanePlacement.qml").read_text()
-    pane = (SHELL_ROOT / "qml" / "workspace" / "PaneItem.qml").read_text()
-    canvas = (SHELL_ROOT / "qml" / "workspace" / "PaneCanvas.qml").read_text()
-    drag_session = (
-        SHELL_ROOT / "qml" / "workspace" / "PaneDragSession.qml"
-    ).read_text()
+    pane = (SHELL_ROOT / "qml" / "workspace" / "PaneWindow.qml").read_text()
     command_server = (
         SHELL_ROOT / "qml" / "api" / "ShellCommandServer.qml"
     ).read_text()
@@ -384,33 +398,34 @@ def test_one_shell_host_shares_displays_pane_and_surface_layout() -> None:
     displays = (
         SHELL_ROOT / "qml" / "panes" / "displays" / "DisplaysPane.qml"
     ).read_text()
+    compositor = (
+        SHELL_ROOT / "adapter" / "hyprland" / "hyprland.lua"
+    ).read_text()
     initial_placement = json.loads(
-        (SHELL_ROOT / "state" / "initial-pane-placement.json").read_text()
+        (SHELL_ROOT / "state" / "placements" / "displays-placement.json")
+        .read_text()
     )
     initial_reader_placement = json.loads(
-        (SHELL_ROOT / "state" / "initial-reader-placement.json").read_text()
+        (SHELL_ROOT / "state" / "placements" / "reader-placement.json")
+        .read_text()
     )
     initial_terminal_placement = json.loads(
-        (SHELL_ROOT / "state" / "initial-terminal-placement.json").read_text()
+        (SHELL_ROOT / "state" / "placements" / "terminal-placement.json")
+        .read_text()
     )
     initial_layout = json.loads(
         (SHELL_ROOT / "state" / "initial-surface-layout.json").read_text()
     )
 
-    assert shell.count("PaneWorkspace {") == 3
+    assert shell.count("PaneWorkspace {") == 1
     assert shell.count("Stage {") == 3
     assert shell.count("Variants {") == 3
-    assert "PaneWindow" not in workspace
-    assert workspace.count("PaneCanvas {") == 1
+    assert workspace.count("PaneWindow {") == 1
+    assert "PaneCanvas" not in workspace
     assert 'readonly property var paneDefinitions' in workspace
-    assert workspace.count('"label":') == 14
-    assert 'surfaceId: "samsung"' in shell
-    assert 'surfaceId: "usb-c"' in shell
-    assert 'surfaceId: "dp-4"' in shell
-    assert "targetScreens: root.samsungScreens" in shell
-    assert "targetScreens: root.usbScreens" in shell
-    assert "targetScreens: root.dp4Screens" in shell
-    assert shell.count("shellApi: root.shellApi") == 6
+    assert workspace.count('"label":') == 15
+    assert "targetScreens: root.workspaceScreens" in shell
+    assert shell.count("shellApi: root.shellApi") == 5
     assert "SurfaceLayout surfaceLayout: SurfaceLayout {}" in shell_api
     assert "ShellTheme theme: ShellTheme {}" in shell_api
     assert "readonly property int paneTopInset: 0" in layout
@@ -445,54 +460,55 @@ def test_one_shell_host_shares_displays_pane_and_surface_layout() -> None:
     )[0]
     assert "snapPaneValue(value)" in clamp_x
     assert "snapPaneValue(value)" in clamp_y
-    assert "FocusScope {" in pane
+    assert "FloatingWindow {" in pane
     assert "PaneFrame {" in pane
     assert "required property var paneDefinition" in pane
     assert 'root.placement.paneId === "reader"' in pane
     assert "? dockHostComponent : root.paneDefinition.component" in pane
     assert "DisplaysPane" not in pane
     assert "ReaderPane" not in pane
-    assert "PanelWindow {" in canvas
-    assert "left: true" in canvas
-    assert "right: true" in canvas
-    assert "top: true" in canvas
-    assert "bottom: true" in canvas
-    assert "mask: Region { id: inputMask }" in canvas
-    assert "focusable: hasLocalPane" in canvas
-    assert "readonly property bool compositorActive: contentItem.window" in canvas
-    assert "? contentItem.window.active : false" in canvas
-    assert "aboveWindows: compositorActive" in canvas
-    assert "onCompositorActiveChanged:" in canvas
-    assert 'if (compositorActive && activePaneId !== "")' in canvas
-    assert "notifyPaneActivated(activePaneId)" in canvas
-    assert 'if (!compositorActive && activePaneId !== "")' in canvas
-    assert "function deactivatePane(paneId)" in canvas
-    assert "function notifyPaneActivated(paneId)" in canvas
-    activate = canvas.split("function activatePane", 1)[1].split(
-        "function notifyPaneActivated", 1
-    )[0]
-    assert "if (compositorActive)" in activate
-    assert "notifyPaneActivated(paneId)" in activate
-    assert 'if (activePaneId !== paneId)' in canvas
-    assert 'activePaneId = ""' in canvas
-    deactivate = canvas.split("function deactivatePane", 1)[1].split(
-        "Item {", 1
-    )[0]
-    assert "dragSession.deactivatePane(placement)" in deactivate
-    assert "Repeater {" in canvas
-    assert "PaneItem {" in canvas
-    assert "inputMask.regions.push(region)" in canvas
-    assert "width: paneVisible ? renderWidth : 0" in pane
-    assert "height: paneVisible ? renderHeight : 0" in pane
-    assert pane.count("shellApi.surfaceLayout.clampPaneSize(") >= 4
-    assert "resizeStartWidth = renderWidth" in pane
-    assert "resizeStartHeight = renderHeight" in pane
-    assert "dragSession.previewLocal" in pane
-    assert "dragSession.finish" in pane
-    assert "placement.previewResize" in pane
-    assert "placement.commitResize" in pane
-    assert "DisplaysPane" not in canvas
+    assert 'title: "obsidience-pane:" + placement.paneId' in pane
+    assert "screen: activeScreen" in pane
+    assert "placement.open && !moduleDocked" in pane
+    assert "onMoveRequested: root.startSystemMove()" in pane
+    assert "onResizeRequested: edges => root.startSystemResize(edges)" in pane
+    assert "readonly property var defaultTileRect:" in pane
+    assert "readonly property int defaultGuideTolerance: 5" in pane
+    assert "readonly property bool tiled: defaultTileRect !== null" in pane
+    assert "readonly property bool tiledResizeEnabled:" in pane
+    assert "surfaceLayout.tileResizeLimitPercent > 0" in pane
+    assert "readonly property bool resizeControlsEnabled: !tiled" in pane
+    assert 'return "right"' in pane
+    assert 'return "bottom"' in pane
+    assert "readonly property bool defaultSizeFeedbackEnabled:" in pane
+    assert '!shellApi.surfaceLayout.oledModeEnabled' in pane
+    assert "defaultWidthReached: root.defaultWidthReached" in pane
+    assert "defaultHeightReached: root.defaultHeightReached" in pane
+    assert "verticalDefaultGuideEdge: root.verticalDefaultGuideEdge" in pane
+    assert "horizontalDefaultGuideEdge: root.horizontalDefaultGuideEdge" in pane
+    assert "onClosed: placement.dismiss()" not in pane
+    assert "placement.hydrated" in pane
+    assert "placement.dismiss()" in pane
     assert "default property alias contentData: content.data" in frame
+    assert "property bool resizeFeedbackActive: false" in frame
+    assert "property int resizeFeedbackEdges: 0" in frame
+    assert "readonly property bool widthResizeFeedback:" in frame
+    assert "readonly property bool heightResizeFeedback:" in frame
+    assert "id: verticalDefaultGuide" in frame
+    assert "id: horizontalDefaultGuide" in frame
+    assert "id: widthResizeHandle" in frame
+    assert "id: heightResizeHandle" in frame
+    assert 'visible: root.verticalDefaultGuideEdge !== ""' in frame
+    assert 'visible: root.horizontalDefaultGuideEdge !== ""' in frame
+    assert "onPressed: root.beginResize(root.verticalResizeEdge)" in frame
+    assert "onPressed: root.beginResize(root.horizontalResizeEdge)" in frame
+    assert "root.verticalResizeEdge | root.horizontalResizeEdge" in frame
+    assert "? Qt.SizeFDiagCursor : Qt.SizeBDiagCursor" in frame
+    assert "&& root.widthResizeFeedback" in frame
+    assert "&& root.heightResizeFeedback" in frame
+    assert "resizeFeedbackActive = true" in frame
+    assert "width: 30" in frame
+    assert "resizeFeedbackTimer.restart()" in frame
     launcher_anchors = launcher.split("anchors {", 1)[1].split("}", 1)[0]
     assert "bottom: true" in launcher_anchors
     assert "top: true" not in launcher_anchors
@@ -511,100 +527,150 @@ def test_one_shell_host_shares_displays_pane_and_surface_layout() -> None:
     assert "dragOffsetY" in displays
     assert "commitSurfaceAt" in displays
     assert 'text: "DRAG SURFACES TO DEFINE TOUCHING EDGES"' in displays
-    assert "currentSurface.logical_width" in pane
-    assert "currentSurface.logical_height" in pane
-    assert pane.count("shellApi.surfaceLayout.clampPaneX(") >= 2
-    assert pane.count("shellApi.surfaceLayout.clampPaneY(") >= 2
-    assert "placement.paneId, placement, renderX, renderY" in pane
-    assert "placement.transfer" not in pane
-    assert "placement.previewMove" not in pane
-    assert "placement.commitMove" not in pane
-    assert "dragSession.prepare" not in pane
-    assert "transferAtEdge" not in pane
-    assert "crossedEdges" not in pane
-    assert "surfaceLayout.route" not in pane
-    assert "dragSession.previewLocal" in pane
-    assert "dragSession.finish" in pane
-    assert "dragCancelled" not in pane
-    assert "dragCancelled" not in frame
-    assert "root.dragFinished(titleBar.moved)" in frame.split("onCanceled:", 1)[1]
-    assert "required property PaneDragSession dragSession" in pane
-    assert '"/run/user/1000/dp4-edge-bridge.cmd"' not in pane
-    assert "PaneDragSession" in workspace
-    assert "dragSession: root.dragSession" in workspace
-    assert 'property string activePaneId: ""' in canvas
-    assert "function activatePane(paneId)" in canvas
-    assert "dragSession.activatePane(placement)" in canvas
-    assert "Shortcut {" not in canvas
-    assert "activeInCanvas: root.activePaneId === placement.paneId" in canvas
-    assert "z: activeInCanvas ? 1000000 : placement.zOrder" in pane
-    assert "signal activated(string paneId)" in pane
-    assert "signal deactivated(string paneId)" in pane
-    assert "deactivated(placement.paneId)" in pane
-    assert "dragSession.deactivatePane(placement)" not in pane
-    assert "onDeactivated: paneId => root.deactivatePane(paneId)" in canvas
-    assert "forceActiveFocus(Qt.MouseFocusReason)" in pane
-    assert "PointHandler {" in pane
-    assert "acceptedButtons: Qt.LeftButton" in pane
-    assert "onActiveChanged: if (active)" in pane
-    assert "MouseArea {" not in pane
+    assert "function surfaceForScreen(screen)" in workspace
+    assert "function screenForSurface(surfaceId)" in workspace
+    assert "function launcherOpenFor(surfaceId)" in workspace
+    assert "function toggleLauncher(surfaceId)" in workspace
+    assert "surfaceId: root.surfaceForScreen(modelData)" in workspace
+    assert "screenForSurface(" in pane
+    assert "startSystemMove()" in pane
+    assert "startSystemResize(edges)" in pane
+    assert "property var activeScreen: null" in pane
+    assert "property bool screenTransitionPending: true" in pane
+    assert "property int screenTransitionGeneration: 0" in pane
+    assert "visible: paneVisible && activeScreen !== null" in pane
+    assert "function selectSurfaceScreen()" in pane
+    assert "const generation = screenTransitionGeneration" in pane
+    assert "const target = surfaceScreen" in pane
+    assert "target === null || screen === target" in pane
+    assert "screenTransitionPending = true" in pane
+    assert "generation !== screenTransitionGeneration" in pane
+    assert "generation === screenTransitionGeneration" in pane
+    assert "activeScreen = target" in pane
+    assert "Component.onCompleted: selectSurfaceScreen()" in pane
+    assert "onSurfaceScreenChanged: selectSurfaceScreen()" in pane
+    assert "signal moveRequested()" in frame
+    assert "signal resizeRequested(int edges)" in frame
+    assert not (SHELL_ROOT / "qml" / "workspace" / "PaneCanvas.qml").exists()
+    assert not (SHELL_ROOT / "qml" / "workspace" / "PaneItem.qml").exists()
+    assert not (SHELL_ROOT / "qml" / "workspace" / "PaneDragSession.qml").exists()
     assert "function presentPaneOn(" in workspace
     assert "onPresentRequested:" in workspace
     assert "function placementFor(paneId)" in workspace
     assert "function definitionFor(paneId)" in workspace
-    assert shell.count("authoritative: true") == 1
-    assert 'url: "ws://127.0.0.1:8768"' in drag_session
-    assert "Math.round(startX) : placement.x" in drag_session
-    assert "Math.round(startY) : placement.y" in drag_session
-    assert drag_session.index("Math.round(startX)") < drag_session.index("token = next")
-    assert drag_session.index("Math.round(startY)") < drag_session.index("token = next")
-    assert '"type": "pane.drag.commit"' in drag_session
-    assert '"type": "pane.activate"' in drag_session
-    assert '"type": "pane.move"' not in drag_session
-    assert '"type": "pane.subscribe"' in drag_session
-    assert '"type": "pane.drag.prepare"' not in drag_session
-    assert '"type": "pane.drag.ready"' not in drag_session
+    assert "authoritative: true" in workspace
+    assert "authoritative: true" not in shell
     assert '"drag-start"' not in command_server
     assert '"drag-route"' not in command_server
     assert '"drag-cancel"' not in command_server
     assert "obsidience-pane-drag" not in command_server
-    drag_commit = command_server.split("function commitLocalDrag", 1)[1].split(
-        "function activatePane", 1
-    )[0]
-    assert "surfaceLayout.nearestTiledPaneRect(" in drag_commit
-    assert "placement.commitGeometry(" in drag_commit
-    assert "placement.commitDrag(" not in drag_commit
     assert "paneWorkspace.placementFor(paneId)" in command_server
-    assert "function broadcastToPaneClients(message)" in command_server
-    assert "function activePlacement(surfaceId)" in command_server
-    assert "function movePane(socket, placement, direction)" in command_server
-    assert 'command.type === "pane.move_active"' in command_server
-    assert "surfaceLayout.moveRoute(" in command_server
-    assert command_server.count("surfaceLayout.clampPaneX(") >= 4
-    assert command_server.count("surfaceLayout.clampPaneY(") >= 4
-    assert "y = surfaceLayout.paneTopInset" in command_server
+    assert "function observeModuleWindows()" in command_server
+    observe_modules = command_server.split(
+        "function observeModuleWindows()", 1
+    )[1].split("function windowResult", 1)[0]
+    assert observe_modules.index(
+        "if (sessionLocked || moduleRestorePending)"
+    ) < observe_modules.index(
+        "placement.observeNative("
+    )
+    lock_change = command_server.split(
+        "onSessionLockedChanged:", 1
+    )[1].split("property Connections graphDisplayConnections", 1)[0]
+    assert "moduleWindowBindings = ({})" in lock_change
+    assert "moduleRestorePending = null" in lock_change
+    assert "observeModuleWindows()" in lock_change
+    assert "function moduleCandidateMatchesIntent(" in command_server
+    assert "property var moduleWindowBindings: ({})" in command_server
+    assert "property var moduleRestorePending: null" in command_server
+    assert "function requestModuleRestore(" in command_server
+    assert '"window.layout.restore.request" : "window.place.request"' in command_server
+    assert "request.destination_surface_id = bounds.surface_id" in command_server
+    assert "request.workspace_tiling = surfaceLayout.workspaceTilingState()" in command_server
+    assert "function finishModuleRestore(token, success)" in command_server
+    assert "function settlePendingModuleRestore()" in command_server
+    assert "placement.sameTileBounds(" in command_server
+    assert 'command.type === "window.layout.restore.result"' in command_server
+    restore_request = command_server.split(
+        "&& requestModuleRestore(", 1
+    )[1].split("if (binding &&", 1)[0]
+    assert "return" in restore_request
+    assert '"restore_failed": success !== true' in command_server
+    failed_restore = command_server.split(
+        'command.type === "window.layout.restore.result"', 1
+    )[1].split('command.type === "window.close.result"', 1)[0]
+    assert "finishModuleRestore(" in failed_restore
+    assert '"result_received": true' in failed_restore
+    assert "settlePendingModuleRestore()" in failed_restore
+    assert "observeModuleWindows()" in failed_restore
+    place_result = command_server.split(
+        'command.type === "window.place.result"', 1
+    )[1].split('command.type === "window.layout.restore.result"', 1)[0]
+    assert '"result_received": true' in place_result
+    assert "settlePendingModuleRestore()" in place_result
+    assert "finishModuleRestore(command.token, false)" in place_result
+    state_publish = command_server.split(
+        'command.type === "window.state.publish"', 1
+    )[1].split('command.type === "window.activation.result"', 1)[0]
+    assert state_publish.index("settlePendingModuleRestore()") < state_publish.index(
+        "observeModuleWindows()"
+    )
+    assert 'window.window_kind !== "module"' in command_server
+    assert "placement.observeNative(" in command_server
+    binding_policy = command_server.split(
+        "function moduleCandidateMatchesIntent(", 1
+    )[1].split("function observeModuleWindows()", 1)[0]
+    # A unique remapped address may be moved to its saved Surface before settling.
+    assert "!binding || binding.window_id !== window.window_id" in binding_policy
+    assert "return true" in binding_policy
+    # An unchanged exact address adopts a native Surface move unless a new
+    # shell-selected Surface is still pending.
+    assert "placement.surfaceId === binding.surface_id" in binding_policy
+    assert "|| state.surface_id === placement.surfaceId" in binding_policy
+    assert "duplicates[paneId]" in command_server
+    assert 'appId !== "io.obsidience.shell"' in command_server
+    assert "window.module.place.request" not in command_server
+    assert "window.module.place.result" not in command_server
+    assert "modulePlacementRequests" not in command_server
+    assert "delete moduleWindowBindings" not in command_server
+    subscribe_window_block = command_server.split(
+        'command.type === "window.adapter.subscribe"', 1
+    )[1].split('command.type === "window.state.publish"', 1)[0]
+    assert "moduleWindowBindings = ({})" not in subscribe_window_block
+    for workspace_id, monitor in (
+        ("1", "HDMI-A-1"),
+        ("2", "HDMI-A-2"),
+        ("3", "DP-8"),
+    ):
+        rule = compositor.split(
+            f'workspace = "{workspace_id}"', 1
+        )[1].split("})", 1)[0]
+        assert f'monitor = "{monitor}"' in rule
+        assert "persistent = true" in rule
+        assert "default = true" in rule
+    assert "function broadcastToPaneClients(message)" not in command_server
+    assert "function activePlacement(surfaceId)" not in command_server
+    assert "function movePane(socket, placement, direction)" not in command_server
+    assert 'command.type === "pane.move_active"' not in command_server
+    assert 'command.type === "pane.tile_active"' not in command_server
+    assert 'command.type === "pane.tile_move_active"' not in command_server
+    assert 'command.type === "pane.deactivate"' not in command_server
+    assert 'command.type === "window.layout_active"' in command_server
+    assert '"type": "window.layout.request"' in command_server
+    assert 'command.type === "window.close_active"' in command_server
+    assert '"type": "window.close.request"' in command_server
+    assert 'current.window_kind === "module"' in command_server
+    assert "StandardPaths.GenericStateLocation" in placement
+    assert "StandardPaths.RuntimeLocation" not in placement
     assert "shellApi.surfaceLayout.clampPaneX(" in launcher
     assert "shellApi.surfaceLayout.clampPaneY(" in launcher
-    assert "placement.commitGeometry(" in command_server
-    assert '"type": "pane.moved"' in command_server
-    assert "function tilePane(socket, placement, direction, translate)" in command_server
-    assert "surfaceLayout.tiledHandoffRect(" in command_server
-    assert 'direction === "top"' in command_server
-    assert "surfaceLayout.tilingFor(surface.id).rows === 1" in command_server
     assert "function tiledHandoffRect(" in layout
     assert "workspaceTiler.entryBounds(" in layout
-    assert 'command.type === "pane.tile_active"' in command_server
-    assert 'command.type === "pane.tile_move_active"' in command_server
-    assert '"type": "pane.tiled"' in command_server
-    assert 'event.type === "pane.tiled"' in drag_session
-    assert "function deactivatePane(placement)" in drag_session
-    assert 'command.type === "pane.deactivate"' in command_server
-    assert "return paneWorkspace.topPlacement(surfaceId)" not in command_server
     assert "function commitDrag(" not in placement
     assert "function commitGeometry(" in placement
+    assert "function observeNative(" in placement
     assert '"tile_bounds": tileBounds' in placement
     assert "record.tile_home" not in placement
-    assert "tiled ? placement.width" in pane
     assert "!authoritative || revision !== expectedRevision" in placement
     assert "function transfer(" not in placement
     assert "samsungUsbStart" not in pane
@@ -624,10 +690,11 @@ def test_one_shell_host_shares_displays_pane_and_surface_layout() -> None:
     assert 'paneId: "source"' in workspace
     assert 'paneId: "status"' in workspace
     assert 'paneId: "hardware"' in workspace
+    assert 'com.tmog.taskmanager' not in workspace
     assert 'paneId: "camera"' in workspace
     assert 'paneId: "settings"' in workspace
     assert 'paneId: "tuning"' not in workspace
-    assert 'stateFileName: paneId === "displays"' in placement
+    assert 'stateFileName: paneId + "-placement.json"' in placement
     assert "function present()" in placement
     assert "function dismiss()" in placement
     assert 'record.surface_id !== "dp-4"' in placement
@@ -652,28 +719,16 @@ def test_one_shell_host_shares_displays_pane_and_surface_layout() -> None:
     assert "atomicWrites: true" in layout
     assert "watchChanges: true" in layout
     assert "required property ShellTheme theme" in frame
-    assert "required property bool active" in frame
     assert "theme: root.shellApi.theme" in pane
-    assert "active: root.activeInCanvas" in pane
-    assert "active: root.activeInCanvas && root.activeFocus" not in pane
     assert "import Quickshell.Widgets" in frame
     assert "ClippingRectangle {" in frame
     assert "contentUnderBorder: true" in frame
     assert "color: root.theme.surface" in frame
     assert "border.width: 0" in frame
     assert "RectangularShadow {" not in frame
-    assert "anchors.margins: -3" in frame
-    assert "visible: root.active" in frame
-    assert "radius: root.theme.cornerRadius + 3" in frame
-    assert "border.width: 3" in frame
-    assert "border.pixelAligned: false" in frame
-    assert "20 / 255" in frame
-    assert "root.theme.shadow.r" in frame
-    assert "border.width: root.theme.borderWidth" in frame
-    assert "border.pixelAligned: true" in frame
-    assert "border.color: root.active" in frame
-    assert "root.theme.strongAccent.r" in frame
-    assert ") : root.theme.inactiveBorder" in frame
+    assert "anchors.margins: -3" not in frame
+    assert "required property bool active" not in frame
+    assert "root.theme.inactiveBorder" not in frame
     assert "Qt5Compat.GraphicalEffects" not in frame
     assert "layer.effect: MultiEffect" not in frame
     assert "height: root.theme.titleHeight" in frame
@@ -682,7 +737,10 @@ def test_one_shell_host_shares_displays_pane_and_surface_layout() -> None:
     assert 'readonly property string schema: "obsidience.shell-theme.v1"' in theme
     assert "watchChanges: true" in theme
     assert "onFileChanged: paletteFile.reload()" in theme
-    assert shell.startswith("//@ pragma NativeTextRendering\n")
+    assert shell.startswith(
+        "//@ pragma AppId io.obsidience.shell\n"
+        "//@ pragma NativeTextRendering\n"
+    )
     assert not (SHELL_ROOT / "qml" / "surface.qml").exists()
     assert not (
         SHELL_ROOT / "systemd" / "obsidience-shell-surface-usbc.service"
@@ -808,7 +866,10 @@ def test_pane_registry_is_the_single_source_for_titles_and_icons() -> None:
     definitions = workspace.split(
         "readonly property var paneDefinitions", 1
     )[1].split("Variants {", 1)[0]
-    assert definitions.count('"icon":') == 14
+    assert definitions.count('"icon":') == 15
+    assert '"label": "Hardware"' in definitions
+    assert '"label": "Feeds"' in definitions
+    assert '"label": "Connections"' not in definitions
     assert '"label": "Chat"' in definitions
     assert '"label": "Applications"' in definitions
     assert '"title": "Chat"' in definitions
@@ -860,6 +921,11 @@ def test_window_state_and_activation_use_one_bounded_shell_transport() -> None:
     assert 'self._command("eval", f"hl.dispatch({expression})")' in hyprland
     assert 'command.type === "window.layout_active"' in server
     assert '"type": "window.layout.request"' in server
+    assert 'command.type === "window.place"' in server
+    assert '"type": "window.place.request"' in server
+    assert 'result_type = "window.place.result"' in transport
+    assert "self.store.exact_window(" in host
+    assert "follow = false" in hyprland
     assert '"window.close.request"' in transport
     assert 'result_type = "window.close.result"' in transport
     assert "self.store.exact_active_window(" in host
@@ -972,6 +1038,13 @@ def test_settings_sections_share_one_pane_without_a_second_store() -> None:
     assert 'text: "PANE GRID"' in workspace_settings
     assert '"id": "tiling", "label": "Workspace tiling"' in workspace_settings
     assert 'text: "WORKSPACE TILING"' in workspace_settings
+    assert "id: sectionRail" in workspace_settings
+    assert "width: 144" in workspace_settings
+    assert "height: 28" in workspace_settings
+    assert "anchors.left: sectionRail.right" in workspace_settings
+    assert '"#2667e8f9"' in workspace_settings
+    assert '"#1467e8f9"' in workspace_settings
+    assert 'width: modelData.id === "tiling" ? 156 : 112' not in workspace_settings
     assert "property int paneGridSize: 10" in workspace_settings
     assert "property int minimumPaneGridSize: 1" in workspace_settings
     assert "property int maximumPaneGridSize: 100" in workspace_settings
@@ -1003,7 +1076,6 @@ def test_settings_sections_share_one_pane_without_a_second_store() -> None:
     )[0]
     assert "savePending = true" in save_body
     assert "savedTuning =" not in save_body
-
     for command in (
         "graph.state.request",
         "graph.tuning.preview",
@@ -1041,17 +1113,184 @@ def test_settings_sections_share_one_pane_without_a_second_store() -> None:
     assert '"minWidth": 680, "minHeight": 440' in workspace
 
 
-def test_development_lock_projection_starts_unlocked_without_owning_authentication() -> None:
-    shell = (SHELL_ROOT / "qml" / "shell.qml").read_text()
-    lock_state = (SHELL_ROOT / "qml" / "api" / "LockState.qml").read_text()
-    initial = (SHELL_ROOT / "state" / "initial-unlocked-state").read_text()
+def test_workspace_tile_behavior_uses_the_surface_layout_authority() -> None:
+    layout = (SHELL_ROOT / "qml" / "api" / "SurfaceLayout.qml").read_text()
+    command_server = (
+        SHELL_ROOT / "qml" / "api" / "ShellCommandServer.qml"
+    ).read_text()
+    workspace_settings = (
+        SHELL_ROOT
+        / "qml"
+        / "panes"
+        / "settings"
+        / "workspace"
+        / "WorkspaceSettings.qml"
+    ).read_text()
+    initial = json.loads(
+        (SHELL_ROOT / "state" / "initial-surface-layout.json").read_text()
+    )
 
-    assert "property LockState lockState: LockState {}" in shell
-    assert "!lockState.active && !fullscreenState.active" in shell
-    assert shell.count("locked: root.lockState.active") == 6
-    assert "property bool active: true" in lock_state
-    assert 'active = stateFile.text().trim() !== "0"' in lock_state
-    assert initial == "0\n"
+    assert initial["schema"] == "obsidience.surface-layout.v1"
+    assert initial["tile_resize_limit_percent"] == 25
+    assert initial["oled_mode_enabled"] is False
+    assert initial["oled_shift_distance_px"] == 32
+    assert initial["oled_travel_duration_seconds"] == 3600
+    assert initial["oled_glow_rotation_hours"] == 3
+
+    assert "readonly property int minimumTileResizeLimitPercent: 0" in layout
+    assert "readonly property int maximumTileResizeLimitPercent: 25" in layout
+    assert "readonly property int minimumOledShiftDistancePx: 1" in layout
+    assert "readonly property int maximumOledShiftDistancePx: 50" in layout
+    assert "readonly property int minimumOledTravelDurationSeconds: 60" in layout
+    assert "readonly property int maximumOledTravelDurationSeconds: 86400" in layout
+    assert "readonly property int minimumOledGlowRotationHours: 1" in layout
+    assert "readonly property int maximumOledGlowRotationHours: 24" in layout
+    assert "property int tileResizeLimitPercent: 25" in layout
+    assert "property bool oledModeEnabled: false" in layout
+    assert "property int oledShiftDistancePx: 32" in layout
+    assert "property int oledTravelDurationSeconds: 3600" in layout
+    assert "property int oledGlowRotationHours: 3" in layout
+    assert "function normalizeTileResizeLimitPercent(value)" in layout
+    assert "function normalizeOledShiftDistancePx(value)" in layout
+    assert "function normalizeOledTravelDurationSeconds(value)" in layout
+    assert "function normalizeOledGlowRotationHours(value)" in layout
+    assert 'typeof record.oled_mode_enabled === "boolean"' in layout
+    assert '"tile_resize_limit_percent": tileResizeLimitPercent' in layout
+    assert '"oled_mode_enabled": oledModeEnabled' in layout
+    assert '"oled_shift_distance_px": oledShiftDistancePx' in layout
+    assert '"oled_travel_duration_seconds": oledTravelDurationSeconds' in layout
+    assert '"oled_glow_rotation_hours": oledGlowRotationHours' in layout
+    assert "function commitTileResizeLimitPercent(value)" in layout
+
+    oled_commit = layout.split("function commitOledSettings(", 1)[1].split(
+        "function commitWorkspaceTiling", 1
+    )[0]
+    assert 'typeof enabled !== "boolean"' in oled_commit
+    assert "shiftDistancePx < minimumOledShiftDistancePx" in oled_commit
+    assert "shiftDistancePx > maximumOledShiftDistancePx" in oled_commit
+    assert "travelDurationSeconds < minimumOledTravelDurationSeconds" in oled_commit
+    assert "travelDurationSeconds > maximumOledTravelDurationSeconds" in oled_commit
+    assert "glowRotationHours < minimumOledGlowRotationHours" in oled_commit
+    assert "glowRotationHours > maximumOledGlowRotationHours" in oled_commit
+    assert oled_commit.count("revision += 1") == 1
+    assert oled_commit.count("writeState()") == 1
+
+    assert (
+        '"tile_resize_limit_percent": surfaceLayout.tileResizeLimitPercent'
+        in command_server
+    )
+    assert '"oled_mode_enabled": surfaceLayout.oledModeEnabled' in command_server
+    assert (
+        '"oled_shift_distance_px": surfaceLayout.oledShiftDistancePx'
+        in command_server
+    )
+    assert (
+        '"oled_travel_duration_seconds": '
+        "surfaceLayout.oledTravelDurationSeconds"
+        in command_server
+    )
+    assert (
+        '"oled_glow_rotation_hours": surfaceLayout.oledGlowRotationHours'
+        in command_server
+    )
+    assert 'command.type === "workspace.tile.limit.set"' in command_server
+    assert "surfaceLayout.commitTileResizeLimitPercent(" in command_server
+    assert 'command.type === "workspace.oled.set"' in command_server
+    assert "surfaceLayout.commitOledSettings(" in command_server
+
+    assert '{"id": "behavior", "label": "Tile behavior"}' in workspace_settings
+    assert 'text: "TILE BEHAVIOR"' in workspace_settings
+    assert 'text: "EXPAND / CONTRACT LIMIT"' in workspace_settings
+    assert 'text: "OLED MODE"' in workspace_settings
+    assert 'text: "MAXIMUM DRIFT"' in workspace_settings
+    assert 'text: "BORDER GLOW ROTATION"' in workspace_settings
+    assert (
+        "Per-seam drift can change a pane by up to twice its value"
+        in workspace_settings
+    )
+    assert "Travel is nominal active time" in workspace_settings
+    assert "motion starts at center" in workspace_settings
+    assert "chrome stays consistent on every Surface" in workspace_settings
+    assert 'send("workspace.tile.limit.set", {' in workspace_settings
+    assert 'send("workspace.oled.set", {' in workspace_settings
+    assert 'typeof message.oled_mode_enabled !== "boolean"' in workspace_settings
+    assert "root.minimumTileResizeLimitPercent" in workspace_settings
+    assert "root.maximumTileResizeLimitPercent" in workspace_settings
+    assert "root.minimumOledShiftDistancePx" in workspace_settings
+    assert "root.maximumOledShiftDistancePx" in workspace_settings
+    assert "root.minimumOledTravelDurationSeconds" in workspace_settings
+    assert "root.maximumOledTravelDurationSeconds" in workspace_settings
+    assert "root.minimumOledGlowRotationHours" in workspace_settings
+    assert "root.maximumOledGlowRotationHours" in workspace_settings
+    assert "FileView" not in workspace_settings
+
+
+def test_shell_owns_one_secure_graph_lock_with_pam_authentication() -> None:
+    shell = (SHELL_ROOT / "qml" / "shell.qml").read_text()
+    controller = (SHELL_ROOT / "qml" / "lock" / "LockController.qml").read_text()
+    surface = (SHELL_ROOT / "qml" / "lock" / "LockSurface.qml").read_text()
+    workspace = (SHELL_ROOT / "qml" / "workspace" / "PaneWorkspace.qml").read_text()
+    pane_window = (SHELL_ROOT / "qml" / "workspace" / "PaneWindow.qml").read_text()
+    pane_launcher = (SHELL_ROOT / "qml" / "workspace" / "PaneLauncher.qml").read_text()
+    renderer_surface = (
+        PROJECT_ROOT
+        / "obsidience"
+        / "ui"
+        / "src"
+        / "renderer"
+        / "src"
+        / "surfaces"
+        / "knowledge-desktop.tsx"
+    ).read_text()
+    pam = (SHELL_ROOT / "lock" / "pam.d" / "obsidience").read_text()
+
+    assert 'import "lock"' in shell
+    assert "property LockController lockController: LockController {" in shell
+    assert "shellApi: root.shellApi" in shell
+    assert "!lockController.active" in shell
+    assert shell.count("locked: root.lockController.active") == 3
+    assert "required property bool locked" not in workspace
+    assert "required property bool locked" not in pane_window
+    assert "required property bool locked" not in pane_launcher
+    assert "&& !locked" not in pane_window
+    assert "active: root.paneVisible" in pane_window
+    assert "visible: true" in pane_launcher
+    assert "{selectedSurfaceId === surfaceId ? (" in renderer_surface
+    assert "<GraphBackdrop visible={showGraph}" in renderer_surface
+    assert not (SHELL_ROOT / "qml" / "api" / "LockState.qml").exists()
+    assert not (SHELL_ROOT / "state" / "initial-unlocked-state").exists()
+
+    assert "import Quickshell.Services.Pam" in controller
+    assert "import Quickshell.Wayland" in controller
+    assert "readonly property bool active: sessionLock.locked" in controller
+    assert "readonly property bool secure: sessionLock.secure" in controller
+    assert "sessionLock.locked = true" in controller
+    assert "authenticating = pam.start()" in controller
+    assert "PamContext {" in controller
+    assert 'configDirectory: "/etc/pam.d"' in controller
+    assert 'config: "obsidience"' in controller
+    assert "result === PamResult.Success && sessionLock.secure" in controller
+    assert "sessionLock.locked = false" in controller
+    assert "WlSessionLock {" in controller
+    assert "WlSessionLockSurface {" in controller
+    assert "LockSurface {" in controller
+    assert "graphSurfaceId: root.shellApi.surfaceLayout.graphSurfaceId" in controller
+    assert 'target: "lock"' in controller
+    assert "return root.requestLock()" in controller
+
+    assert "import QtWebEngine" in surface
+    assert "surfaceId === graphSurfaceId" in surface
+    assert '"?surface=knowledge&surface_id="' in surface
+    assert '"&lock=1"' in surface
+    assert "WebEngineView {" in surface
+    assert "active: root.showsGraph" in surface
+    assert "visible: !root.showsGraph" in surface
+    assert "enabled: false" in surface
+    assert "echoMode: TextInput.Password" in surface
+    assert "onAccepted: root.controller.tryUnlock()" in surface
+    assert "onClicked: root.controller.tryUnlock()" in surface
+    assert pam == "auth include system-auth\n"
+
     assert not (SHELL_ROOT / "input" / "dbus_bridge.py").exists()
     assert not (SHELL_ROOT / "lock" / "wallpaper" / "metadata.json").exists()
     assert not (
@@ -1063,59 +1302,44 @@ def test_pane_shortcut_move_is_atomic_and_has_one_owner_per_display_path() -> No
     command_server = (
         SHELL_ROOT / "qml" / "api" / "ShellCommandServer.qml"
     ).read_text()
-    drag_session = (
-        SHELL_ROOT / "qml" / "workspace" / "PaneDragSession.qml"
-    ).read_text()
-    canvas = (
-        SHELL_ROOT / "qml" / "workspace" / "PaneCanvas.qml"
+    pane_window = (
+        SHELL_ROOT / "qml" / "workspace" / "PaneWindow.qml"
     ).read_text()
     compositor = (
         SHELL_ROOT / "adapter" / "hyprland" / "hyprland.lua"
     ).read_text()
     move_client = (SHELL_ROOT / "input" / "move_pane.py").read_text()
-    move = command_server.split("function movePane", 1)[1].split(
-        "function handlePaneCommand", 1
-    )[0]
-
-    assert "Shortcut {" not in canvas
-    assert "dragSession.activatePane(placement)" in canvas
-    assert '"type": "pane.activate"' in drag_session
-    assert '"surface_id": placement.surfaceId' in drag_session
-    assert '"expected_revision": placement.revision' in drag_session
-    assert 'command.type === "pane.move_active"' in command_server
-    assert "activePaneBySurface" in command_server
-    assert "paneWorkspace.topPlacement(surfaceId)" not in command_server
-    assert "placement.open !== true" in move
-    assert "surfaceLayout.moveRoute(" in move
-    assert "placement.commitGeometry(" in move
-    assert '"pane.move_active"' in move_client
-    assert '"pane.tile_active"' in move_client
-    assert '"pane.tile_move_active"' in move_client
-    assert '"pane.dismiss_active"' in move_client
+    assert "FloatingWindow {" in pane_window
+    assert "startSystemMove()" in pane_window
+    assert "startSystemResize(edges)" in pane_window
+    assert not (SHELL_ROOT / "qml" / "workspace" / "PaneCanvas.qml").exists()
+    assert not (SHELL_ROOT / "qml" / "workspace" / "PaneDragSession.qml").exists()
+    assert 'command.type === "pane.move_active"' not in command_server
+    assert "activePaneBySurface" not in command_server
+    assert "function movePane(" not in command_server
+    assert '"pane.move_active"' not in move_client
+    assert '"pane.tile_active"' not in move_client
+    assert '"pane.tile_move_active"' not in move_client
+    assert '"pane.dismiss_active"' not in move_client
     assert '"source_surface_id": surface_id' in move_client
     assert '"window.layout_active"' in move_client
     assert '"window.close_active"' in move_client
-    assert 'command.type === "pane.dismiss_active"' in command_server
+    assert 'command.type === "pane.dismiss_active"' not in command_server
     assert 'command.type === "window.close_active"' in command_server
     assert '"type": "window.close.request"' in command_server
-    assert 'event.get("reason") == "no_active_pane"' in move_client
+    assert 'event.get("reason") == "no_active_pane"' not in move_client
     assert 'subprotocols=[SUBPROTOCOL]' in move_client
-    assert 'command.type === "focus.cycle"' in command_server
-    assert '"type": "pane.focus.request"' in command_server
-    assert "function focusCandidates(surfaceId)" in command_server
-    assert "!dockLayout.isDocked(placement.paneId)" in command_server
-    assert '"type": "window.activation.request"' in command_server
-    assert "signal focusRequested(string paneId, int expectedRevision)" in drag_session
-    assert 'event.type === "pane.focus.request"' in drag_session
-    assert "function focusPane(paneId, expectedRevision)" in canvas
-    assert "pane.forceActiveFocus(Qt.ShortcutFocusReason)" in canvas
-    assert "contentItem.window.requestActivate()" in canvas
-    assert '"type": "focus.cycle"' in move_client
-    assert 'event.get("type") == "focus.cycle.result"' in move_client
+    assert 'command.type === "focus.cycle"' not in command_server
+    assert '"type": "pane.focus.request"' not in command_server
+    assert "function focusCandidates(surfaceId)" not in command_server
+    assert 'title: "obsidience-pane:" + placement.paneId' in pane_window
+    assert '"type": "focus.cycle"' not in move_client
+    assert 'event.get("type") == "focus.cycle.result"' not in move_client
     assert compositor.count('hl.bind("ALT + TAB"') == 1
     assert compositor.count('hl.bind("ALT + SHIFT + TAB"') == 1
-    assert "move_pane.py focused focus next" in compositor
-    assert "move_pane.py focused focus previous" in compositor
+    assert 'hl.bind("ALT + TAB", hl.dsp.window.cycle_next())' in compositor
+    assert "hl.dsp.window.cycle_next({ next = false })" in compositor
+    assert "move_pane.py focused focus" not in compositor
     assert compositor.count('hl.bind("SUPER + SHIFT +') == 5
     assert compositor.count('hl.bind("SUPER + LEFT"') == 1
     assert compositor.count('hl.bind("SUPER + RIGHT"') == 1
@@ -1134,7 +1358,7 @@ def test_pane_shortcut_move_is_atomic_and_has_one_owner_per_display_path() -> No
     assert 'surface_argument == "focused"' in move_client
     assert not (SHELL_ROOT / "input" / "router.py").exists()
     assert not (SHELL_ROOT / "input" / "dbus_bridge.py").exists()
-    assert "router" not in move.lower()
+    assert "router" not in move_client.lower()
     assert "drag-start" not in command_server
     assert "drag-route" not in command_server
     assert "obsidience-pane-drag" not in command_server
@@ -1144,7 +1368,7 @@ def test_reader_explorers_share_one_native_dock_layout() -> None:
     workspace = (
         SHELL_ROOT / "qml" / "workspace" / "PaneWorkspace.qml"
     ).read_text()
-    pane = (SHELL_ROOT / "qml" / "workspace" / "PaneItem.qml").read_text()
+    pane = (SHELL_ROOT / "qml" / "workspace" / "PaneWindow.qml").read_text()
     layout = (
         SHELL_ROOT / "qml" / "workspace" / "PaneDockLayout.qml"
     ).read_text()
@@ -1178,6 +1402,12 @@ def test_reader_explorers_share_one_native_dock_layout() -> None:
     assert '"/obsidience-shell/pane-dock-layout.json"' in layout
     assert "atomicWrites: true" in layout and "watchChanges: true" in layout
     assert "property PaneDockLayout dockLayout" in workspace
+    assert 'root.dockLayout.isDocked("knowledge")' in workspace
+    assert 'root.dockLayout.isDocked("source")' in workspace
+    assert 'root.dockLayout.isDocked("feeds")' in workspace
+    assert "root.readerPlacement.surfaceId" in workspace
+    assert "root.knowledgePlacement.surfaceId" in workspace
+    assert "root.sourcePlacement.surfaceId" in workspace
     assert 'root.placement.paneId === "reader"' in pane
     assert "PaneDockHost {" in pane
     assert host.count("PaneDockStack {") == 2
@@ -1187,8 +1417,10 @@ def test_reader_explorers_share_one_native_dock_layout() -> None:
     assert '"Dock right · bottom"' in host
     assert "availableWidth * 0.30" in stack
     assert "Math.min(380, Math.max(240" in stack
-    assert "root.width - collapsedRail.width" in stack
-    assert "activeArea.height / Math.max" in stack
+    assert "model: [0, 1]" in stack
+    assert "y: modelData * root.height / 2" in stack
+    assert "height: root.height / 2" in stack
+    assert "dockLayout.slotState" in stack
     assert 'baseCommand("pane.dock")' in header
     assert 'baseCommand("pane.float")' in header
     assert 'baseCommand("pane.collapse")' in header
@@ -1200,10 +1432,45 @@ def test_reader_explorers_share_one_native_dock_layout() -> None:
     assert "Electron" not in host + stack + header + reader + knowledge + source
     assert 'color: "#bf020a12"' in knowledge
     assert 'color: "#c708050f"' in source
-    assert 'textFormat: Text.MarkdownText' in reader
+    assert 'textFormat: root.feedItemMode || root.previewMode ? Text.PlainText : Text.MarkdownText' in reader
     assert 'root.sourceMode ? 1100 : root.indexArticle ? 920 : 720' in reader
     assert '"SYSTEM"' in source
     assert 'title: "Knowledge"' in knowledge
+
+
+def test_knowledge_explorer_absorbs_native_folder_articles_once() -> None:
+    knowledge = (
+        SHELL_ROOT / "qml" / "panes" / "knowledge" / "KnowledgePane.qml"
+    ).read_text()
+    assert 'if (parent && file.kind === "knowledge"' in knowledge
+    assert '=== currentPath.split("/").pop().toLowerCase()' in knowledge
+    assert 'parent.ref = file.ref' in knowledge
+    assert 'subject.ref = declared.article_ref || declared.id' in knowledge
+    assert '|| file.ref === declared.article_ref) continue' in knowledge
+    assert '["index", "readme"].includes' not in knowledge
+    assert '(index|readme)' not in knowledge
+    panes = PROJECT_ROOT / "obsidience" / "ui" / "src" / "renderer" / "src" / "panes"
+    reader = (panes / "reader-pane.tsx").read_text()
+    graph = (panes / "graph-backdrop.tsx").read_text()
+    assert 'basename.toLowerCase() === parent.path.split("/").pop()?.toLowerCase()' in reader
+    assert '&& file.ref !== declared.article_ref' in reader
+    assert '!subjectArticleRefs.has(candidate.id)' in reader
+    assert 'row.article_ref ? [row.article_ref] : []' in reader
+    assert '!subjectArticleRefs.has(node.id)' in graph
+    assert 'subject.article_ref ? [subject.article_ref] : []' in graph
+
+
+def test_reader_child_labels_use_canonical_graph_titles() -> None:
+    reader = (SHELL_ROOT / "qml" / "panes" / "reader" / "ReaderPane.qml").read_text()
+    assert 'request.open("GET", "http://127.0.0.1:8765/api/graph")' in reader
+    assert "loadArticleTitles(generation)" in reader
+    assert "generation !== root.requestGeneration" in reader
+    assert "titles[node.id] = node.title" in reader
+    assert "titles[subject.id] = subject.title" in reader
+    assert "titles[subject.article_ref] = subject.title" in reader
+    assert "root.articleLabel(childButton.modelData)" in reader
+    assert "root.articleLabel(sourceArticleButton.modelData)" in reader
+    assert 'modelData.split("/").pop()' not in reader
 
 
 def test_login_entry_installs_as_a_greeter_readable_file() -> None:
@@ -1229,10 +1496,55 @@ def test_live_shell_runtime_dependencies_are_pinned_without_kde_shell_entries() 
     assert packages["WebKitGTK"] == "webkit2gtk-4.1 2.52.6-1"
     assert packages["PyGObject"] == "python-gobject 3.56.3-1"
     assert packages["QMLTermWidget"] == "qmltermwidget 2.0.0.git1-1.1"
+    assert packages["Qt WebEngine"] == "qt6-webengine 6.11.2-1"
     assert packages["Qt WebSockets"] == "qt6-websockets 6.11.1-1.1"
     assert "KScreenLocker" not in packages
-    assert "Qt WebEngine" not in packages
     assert "KWin MCP" not in packages
+
+
+def test_quickshell_runtime_pins_webengine_and_session_lock_fixes() -> None:
+    manifest = json.loads((SHELL_ROOT / "REUSE_MANIFEST.json").read_text())
+    upstreams = {item["name"]: item for item in manifest["upstreams"]}
+    quickshell = upstreams["Quickshell"]
+    assert quickshell["commit"] == "1a4716cde794a59928d9d9fc15f2afc7a95de360"
+    assert quickshell["patches"] == [
+        "adapter/quickshell/patches/0001-satisfy-qtwebengine-host-contract.patch",
+        "adapter/quickshell/patches/0002-guard-session-lock-reentrancy.patch",
+        "adapter/quickshell/patches/0003-notify-session-unlock.patch",
+    ]
+    webengine_patch = (SHELL_ROOT / quickshell["patches"][0]).read_text()
+    assert webengine_patch.count("diff --git") == 2
+    assert sum(line.startswith("@@ ") for line in webengine_patch.splitlines()) == 2
+    assert "-\tauto qArgC = 0;" in webengine_patch
+    assert "+\tauto qArgC = 1;" in webengine_patch
+    assert "+\tQCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);" in webengine_patch
+    lock_patch = (SHELL_ROOT / quickshell["patches"][1]).read_text()
+    assert lock_patch.count("diff --git") == 3
+    assert "if (this->realizing || !this->manager)" in lock_patch
+    assert "if (this->isLocked() && !this->realizing)" in lock_patch
+    unlock_patch = (SHELL_ROOT / quickshell["patches"][2]).read_text()
+    assert unlock_patch.count("diff --git") == 1
+    assert "const auto wasLocked = this->isLocked();" in unlock_patch
+    assert "if (wasLocked) emit this->lockStateChanged();" in unlock_patch
+    assert quickshell["upstream_backports"] == [
+        {
+            "commit": "afb2c27cd6d600d221d9379a332ee1b321a68487",
+            "subject": "wayland/lock: guard against reentrancy during surface creation",
+        }
+    ]
+    assert quickshell["runtime"] == {
+        "path": "/home/wissenschafter/.local/opt/obsidience-quickshell/"
+        "quickshell-0.3.1-webengine-lock-5f4d2585/quickshell",
+        "sha256": "5f4d25850c0112fbc7fd718bbdc859e85db888120aecd010a051f5b51b50de05",
+    }
+    recipe = (SHELL_ROOT / "adapter/quickshell/build-runtime").read_text()
+    assert 'lock_patch_file="$script_dir/patches/0002-guard-session-lock-reentrancy.patch"' in recipe
+    assert 'git -C "$source_dir" apply --check "$lock_patch_file"' in recipe
+    assert 'git -C "$source_dir" apply "$lock_patch_file"' in recipe
+    assert 'unlock_patch_file="$script_dir/patches/0003-notify-session-unlock.patch"' in recipe
+    assert 'git -C "$source_dir" apply "$unlock_patch_file"' in recipe
+    assert "readonly source_date_epoch=1787279335" in recipe
+    assert 'git ls-files -z | xargs -0 touch -d "@$SOURCE_DATE_EPOCH" --' in recipe
 
 
 def test_workspace_tiler_reuses_only_attested_omarchy_geometry() -> None:
@@ -1332,12 +1644,16 @@ def test_native_terminal_is_one_tmux_view_inside_the_generic_pane() -> None:
     assert "kill-session" not in attach
     assert "codex exec" not in attach.lower()
     assert "codex resume" not in attach.lower()
-    assert shell.count("PaneWorkspace {") == 3
+    assert shell.count("PaneWorkspace {") == 1
     assert not (SHELL_ROOT / "qml" / "surface.qml").exists()
     assert "property Component terminalComponent: Component { TerminalPane {} }" in workspace
     assert '"label": "Terminal"' in workspace
     assert '"component": terminalComponent' in workspace
-    assert "initial-terminal-placement.json" in host
+    assert "state/placements/." in host
+    assert ".local/state/obsidience-shell/placements" in host
+    assert len(list((SHELL_ROOT / "state" / "placements").glob(
+        "*-placement.json"
+    ))) == 15
     assert not (
         PROJECT_ROOT / "obsidience" / "ui" / "src" / "main" / "terminal"
         / "local-terminal.ts"

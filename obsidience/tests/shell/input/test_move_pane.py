@@ -32,58 +32,78 @@ class FakeSocket:
 
 
 @pytest.mark.parametrize(
-    ("action", "command_type", "event_type"),
+    "action",
     [
-        ("surface", "pane.move_active", "pane.moved"),
-        ("resize", "pane.tile_active", "pane.tiled"),
-        ("tile", "pane.tile_move_active", "pane.tiled"),
+        "surface",
+        "resize",
+        "tile",
     ],
 )
-def test_active_pane_actions_share_one_typed_client(
+def test_layout_actions_go_directly_to_the_active_native_window(
     monkeypatch: pytest.MonkeyPatch,
     action: str,
-    command_type: str,
-    event_type: str,
 ) -> None:
-    socket = FakeSocket(event_type)
+    socket = FakeSocket(
+        [
+            {
+                "schema": "obsidience.shell.event.v1",
+                "type": "window.layout.result",
+                "token": "native-token",
+                "success": True,
+            }
+        ]
+    )
     monkeypatch.setattr(move_pane, "connect", lambda *_args, **_kwargs: socket)
+    monkeypatch.setattr(move_pane.secrets, "token_hex", lambda _size: "native-token")
 
-    assert move_pane.apply_active_pane_action("samsung", action, "right") is True
+    assert move_pane.apply_active_window_action("samsung", action, "right") is True
     assert socket.sent == [
         {
             "schema": "obsidience.shell.command.v1",
-            "type": command_type,
+            "type": "window.layout_active",
+            "token": "native-token",
             "source_surface_id": "samsung",
+            "action": action,
             "direction": "right",
         }
     ]
 
 
-def test_close_uses_the_active_qml_pane_first(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    socket = FakeSocket("pane.dismissed")
-    monkeypatch.setattr(move_pane, "connect", lambda *_args, **_kwargs: socket)
-
-    assert move_pane.apply_active_pane_action("samsung", "close") is True
-    assert socket.sent == [
-        {
-            "schema": "obsidience.shell.command.v1",
-            "type": "pane.dismiss_active",
-            "source_surface_id": "samsung",
-        }
-    ]
-
-
-def test_close_falls_through_to_the_exact_native_window(
+def test_close_goes_directly_to_the_active_native_window(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     socket = FakeSocket(
         [
             {
                 "schema": "obsidience.shell.event.v1",
-                "type": "pane.dismiss.failed",
-                "reason": "no_active_pane",
+                "type": "window.close.result",
+                "token": "native-token",
+                "success": True,
+            }
+        ]
+    )
+    monkeypatch.setattr(move_pane, "connect", lambda *_args, **_kwargs: socket)
+    monkeypatch.setattr(move_pane.secrets, "token_hex", lambda _size: "native-token")
+
+    assert move_pane.apply_active_window_action("samsung", "close") is True
+    assert socket.sent == [
+        {
+            "schema": "obsidience.shell.command.v1",
+            "type": "window.close_active",
+            "token": "native-token",
+            "source_surface_id": "samsung",
+        }
+    ]
+
+
+def test_unrelated_events_do_not_create_a_second_command(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    socket = FakeSocket(
+        [
+            {
+                "schema": "obsidience.shell.event.v1",
+                "type": "pane.dismissed",
             },
             {
                 "schema": "obsidience.shell.event.v1",
@@ -96,13 +116,8 @@ def test_close_falls_through_to_the_exact_native_window(
     monkeypatch.setattr(move_pane, "connect", lambda *_args, **_kwargs: socket)
     monkeypatch.setattr(move_pane.secrets, "token_hex", lambda _size: "native-token")
 
-    assert move_pane.apply_active_pane_action("usb-c", "close") is True
+    assert move_pane.apply_active_window_action("usb-c", "close") is True
     assert socket.sent == [
-        {
-            "schema": "obsidience.shell.command.v1",
-            "type": "pane.dismiss_active",
-            "source_surface_id": "usb-c",
-        },
         {
             "schema": "obsidience.shell.command.v1",
             "type": "window.close_active",
@@ -119,7 +134,7 @@ def test_legacy_two_argument_entrypoint_remains_surface_transfer(
     monkeypatch.setattr(move_pane, "focused_surface", lambda: "usb-c")
     monkeypatch.setattr(
         move_pane,
-        "apply_active_pane_action",
+        "apply_active_window_action",
         lambda surface, action, direction: (
             not called.append((surface, action, direction))
         ),
@@ -136,7 +151,7 @@ def test_close_entrypoint_needs_no_direction(
     monkeypatch.setattr(move_pane, "focused_surface", lambda: "samsung")
     monkeypatch.setattr(
         move_pane,
-        "apply_active_pane_action",
+        "apply_active_window_action",
         lambda surface, action, direction: (
             not called.append((surface, action, direction))
         ),
@@ -146,63 +161,7 @@ def test_close_entrypoint_needs_no_direction(
     assert called == [("samsung", "close", "")]
 
 
-@pytest.mark.parametrize("direction", ["next", "previous"])
-def test_focus_cycle_uses_one_surface_scoped_command(
-    monkeypatch: pytest.MonkeyPatch, direction: str
-) -> None:
-    socket = FakeSocket(
-        [
-            {
-                "schema": "obsidience.shell.event.v1",
-                "type": "focus.cycle.result",
-                "token": "focus-token",
-                "success": True,
-            }
-        ]
-    )
-    monkeypatch.setattr(move_pane, "connect", lambda *_args, **_kwargs: socket)
-    monkeypatch.setattr(move_pane.secrets, "token_hex", lambda _size: "focus-token")
-
-    assert move_pane.cycle_focus("dp-4", direction) is True
-    assert socket.sent == [
-        {
-            "schema": "obsidience.shell.command.v1",
-            "type": "focus.cycle",
-            "token": "focus-token",
-            "source_surface_id": "dp-4",
-            "direction": direction,
-        }
-    ]
-
-
-def test_focus_entrypoint_uses_the_combined_cycle(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    called: list[tuple[str, str]] = []
-    monkeypatch.setattr(move_pane, "focused_surface", lambda: "usb-c")
-    monkeypatch.setattr(
-        move_pane,
-        "cycle_focus",
-        lambda surface, direction: not called.append((surface, direction)),
-    )
-
-    assert move_pane.main(["focused", "focus", "next"]) == 0
-    assert called == [("usb-c", "next")]
-
-
-def test_invalid_focus_cycle_fails_without_connecting(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        move_pane,
-        "connect",
-        lambda *_args, **_kwargs: pytest.fail("invalid focus opened a socket"),
-    )
-
-    assert move_pane.cycle_focus("samsung", "left") is False
-
-
-def test_invalid_active_pane_action_fails_without_connecting(
+def test_invalid_active_window_action_fails_without_connecting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -211,38 +170,28 @@ def test_invalid_active_pane_action_fails_without_connecting(
         lambda *_args, **_kwargs: pytest.fail("invalid action opened a socket"),
     )
 
-    assert move_pane.apply_active_pane_action("samsung", "unknown", "right") is False
+    assert move_pane.apply_active_window_action("samsung", "unknown", "right") is False
 
 
-def test_native_layout_runs_only_when_no_qml_pane_is_active(
+def test_native_failure_is_terminal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     socket = FakeSocket(
         [
             {
                 "schema": "obsidience.shell.event.v1",
-                "type": "pane.tile.failed",
-                "reason": "no_active_pane",
-            },
-            {
-                "schema": "obsidience.shell.event.v1",
                 "type": "window.layout.result",
                 "token": "native-token",
-                "success": True,
+                "success": False,
+                "reason": "boundary",
             },
         ]
     )
     monkeypatch.setattr(move_pane, "connect", lambda *_args, **_kwargs: socket)
     monkeypatch.setattr(move_pane.secrets, "token_hex", lambda _size: "native-token")
 
-    assert move_pane.apply_active_pane_action("usb-c", "tile", "left") is True
+    assert move_pane.apply_active_window_action("usb-c", "tile", "left") is False
     assert socket.sent == [
-        {
-            "schema": "obsidience.shell.command.v1",
-            "type": "pane.tile_move_active",
-            "source_surface_id": "usb-c",
-            "direction": "left",
-        },
         {
             "schema": "obsidience.shell.command.v1",
             "type": "window.layout_active",
@@ -252,22 +201,3 @@ def test_native_layout_runs_only_when_no_qml_pane_is_active(
             "direction": "left",
         },
     ]
-
-
-@pytest.mark.parametrize("reason", ["boundary", "stale_commit", "invalid_geometry"])
-def test_qml_failure_never_moves_a_native_window(
-    monkeypatch: pytest.MonkeyPatch, reason: str
-) -> None:
-    socket = FakeSocket(
-        [
-            {
-                "schema": "obsidience.shell.event.v1",
-                "type": "pane.tile.failed",
-                "reason": reason,
-            }
-        ]
-    )
-    monkeypatch.setattr(move_pane, "connect", lambda *_args, **_kwargs: socket)
-
-    assert move_pane.apply_active_pane_action("samsung", "resize", "right") is False
-    assert len(socket.sent) == 1

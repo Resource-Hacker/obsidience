@@ -1,20 +1,21 @@
 ---
-for_agent: '[[Agents/Alexandria/Alexandria]]'
-kind: runbook
-owner_maintained: true
-skills:
-- '[[Skills/searching-the-vault]]'
-- '[[Skills/reading-the-vault]]'
-- '[[Skills/validating-the-vault]]'
-- '[[Skills/proposing-changes]]'
-task: '[[Tasks/merge]]'
+type: runbook
 title: Merge procedure
+obsidience:
+  for_agent: '[[Agents/Alexandria/Alexandria]]'
+  owner_maintained: true
+  skills:
+  - '[[Skills/vault.search]]'
+  - '[[Skills/vault.read]]'
+  - '[[Skills/vault.validate]]'
+  - '[[Skills/vault.propose]]'
+  task: '[[Tasks/merge]]'
 ---
 
 1. Read every exact `candidate_refs` Article supplied by Curate. Confirm that
    they describe the same subject and are redundant. Similarity is only a lead;
    Article-kind differences alone neither prove nor disprove duplication. One
-   named Agent is a decisive special case: its canonical `kind: agent` Brain
+   named Agent is a decisive special case: its canonical `type: agent` Brain
    Article and any parallel Knowledge "role charter" describe one subject and
    are architectural duplicates, not complementary Articles.
 2. Choose one canonical retained Article. Prefer the accountable Agent Article
@@ -50,3 +51,11 @@ title: Merge procedure
    redirect updates are accepted. Finish with `review`, naming the retained and redundant
    refs and every staged update, or `completed` with the exact reason the
    candidate was not safe to merge.
+
+Do not merge different agents' Knowledge folder condensations based on shared
+index titles or boilerplate. Their accepted Agent ownership and folder roles
+distinguish their scopes. This does not exempt an ordinary shadow role charter
+from consolidation into its actual canonical Agent Article. Stale unused
+maintenance leads are settled against exact creator and revision evidence
+before model admission; changing a queued lead never authorizes executing
+its old proposal or discarding an uncertain prior Tool effect.

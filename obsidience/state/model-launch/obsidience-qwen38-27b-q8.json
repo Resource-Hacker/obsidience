@@ -11,5 +11,6 @@
   ],
   "max_num_seqs": 1,
   "max_output_tokens": 10240,
-  "model_id": "obsidience-qwen38-27b-q8"
+  "model_id": "obsidience-qwen38-27b-q8",
+  "projector_path": null
 }

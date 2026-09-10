@@ -14,6 +14,7 @@ Rectangle {
     property string actionError: ""
     property string decidingFile: ""
     property bool loading: true
+    property int refreshGeneration: 0
 
     color: "#b302080e"
     clip: true
@@ -59,8 +60,12 @@ Rectangle {
     }
 
     function refresh() {
+        if (decidingFile) {
+            return
+        }
+        const generation = ++refreshGeneration
         requestJson("GET", "/api/reviews", (ok, payload, error) => {
-            if (!root) {
+            if (!root || generation !== root.refreshGeneration) {
                 return
             }
             root.loading = false
@@ -78,23 +83,38 @@ Rectangle {
     }
 
     function decide(proposal, approve) {
-        if (!proposal || decidingFile) {
+        if (!proposal || decidingFile || loading) {
+            return
+        }
+        const file = proposal.file
+        const current = proposals.find(row => row.file === file)
+        if (!current || (approve && !current.approvable)) {
             return
         }
         actionError = ""
-        decidingFile = proposal.file
+        decidingFile = file
+        // A poll already in flight belongs to the queue before this decision.
+        ++refreshGeneration
         const action = approve ? "approve" : "reject?reason="
             + encodeURIComponent("rejected from review pane")
-        requestJson("POST", "/api/reviews/" + encodeURIComponent(proposal.file)
+        requestJson("POST", "/api/reviews/" + encodeURIComponent(file)
             + "/" + action, (ok, payload, error) => {
             if (!root) {
                 return
             }
-            root.decidingFile = ""
-            if (!ok) {
+            if (ok) {
+                // Retire the acknowledged card before another click is possible.
+                root.proposals = root.proposals.filter(row => row.file !== file)
+                if (root.expandedFile === file) {
+                    root.expandedFile = ""
+                }
+            } else {
                 root.actionError = error
-                return
             }
+            root.loading = true
+            root.decidingFile = ""
+            // A lost response can follow a committed decision. Read the queue;
+            // never retry an approval or rejection automatically.
             root.refresh()
         })
     }
@@ -150,7 +170,7 @@ Rectangle {
             width: 28
             height: 28
             text: "↻"
-            enabled: !root.loading
+            enabled: !root.loading && !root.decidingFile
             idleBorderOpacity: 0
             hoverBorderOpacity: 0
             idleTextOpacity: 0.60
@@ -391,7 +411,7 @@ Rectangle {
                                     textLetterSpacing: 0
                                     contentHorizontalPadding: 0
                                     disabledOpacity: 0.30
-                                    enabled: !root.decidingFile && card.modelData.approvable
+                                    enabled: !root.loading && !root.decidingFile && card.modelData.approvable
                                     onClicked: root.decide(card.modelData, true)
                                 }
 
@@ -410,7 +430,7 @@ Rectangle {
                                     textLetterSpacing: 0
                                     contentHorizontalPadding: 0
                                     disabledOpacity: 0.30
-                                    enabled: !root.decidingFile
+                                    enabled: !root.loading && !root.decidingFile
                                     onClicked: root.decide(card.modelData, false)
                                 }
                             }
@@ -468,6 +488,17 @@ Rectangle {
                                     font.letterSpacing: 1.2
                                 }
 
+                                Text {
+                                    width: parent.width
+                                    visible: text !== ""
+                                    text: String(card.modelData.evidence_warning || "")
+                                    textFormat: Text.PlainText
+                                    color: "#fcd34d"
+                                    wrapMode: Text.Wrap
+                                    font.family: "JetBrains Mono"
+                                    font.pixelSize: 9
+                                }
+
                                 Repeater {
                                     model: card.modelData.link_changes
                                         && Array.isArray(card.modelData.link_changes.added)
@@ -493,6 +524,24 @@ Rectangle {
                                         text: "− " + root.cleanLeaf(modelData)
                                         color: "#fda4af"
                                         elide: Text.ElideRight
+                                        font.family: "JetBrains Mono"
+                                        font.pixelSize: 9
+                                    }
+                                }
+
+                                Repeater {
+                                    model: card.expanded && Array.isArray(card.modelData.link_evidence)
+                                        ? card.modelData.link_evidence : []
+                                    delegate: Text {
+                                        required property var modelData
+                                        width: linkColumn.width
+                                        text: (modelData.derivation === "proposed_wikilink"
+                                            ? "Proposed link" : "Removed accepted link")
+                                            + " · body line " + modelData.body_line
+                                            + "\n" + modelData.excerpt
+                                        textFormat: Text.PlainText
+                                        color: "#bbbfd5d9"
+                                        wrapMode: Text.Wrap
                                         font.family: "JetBrains Mono"
                                         font.pixelSize: 9
                                     }

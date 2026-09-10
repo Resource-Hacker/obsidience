@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+shell_path=/home/wissenschafter/Projects/obsidience/obsidience/shell/qml
+ipc=(/usr/bin/qs ipc --path "$shell_path" --any-display call lock)
+
+compositor_locked() {
+    local monitors state
+    monitors="$(/usr/bin/hyprctl -i 0 -j monitors 2>/dev/null)" || return 2
+    state="$(/usr/bin/jq -r '
+        def blockers: .solitaryBlockedBy // [];
+        def readable: blockers | index("WORKSPACE") | not;
+        if any(.[]; blockers | index("LOCK")) then 0
+        elif any(.[]; readable) then 1
+        else 2 end
+    ' <<<"$monitors" 2>/dev/null)" || return 2
+    [[ "$state" == "0" ]] && return 0
+    [[ "$state" == "1" ]] && return 1
+    return 2
+}
+
+case "${1:-status}" in
+    status)
+        compositor_locked
+        ;;
+    recover)
+        if compositor_locked; then
+            :
+        else
+            status=$?
+            [[ "$status" == "1" || "$status" == "2" ]] && exit 0
+        fi
+
+        deadline=$((SECONDS + 30))
+        while (( SECONDS < deadline )); do
+            state="$("${ipc[@]}" status 2>/dev/null || true)"
+            case "$state" in
+                secure) exit 0 ;;
+                unlocked) "${ipc[@]}" lock >/dev/null 2>&1 || true ;;
+            esac
+            sleep 0.1
+        done
+
+        printf '%s\n' 'Obsidience could not restore the compositor session lock.' >&2
+        exit 1
+        ;;
+    *)
+        printf 'usage: %s {status|recover}\n' "$0" >&2
+        exit 2
+        ;;
+esac

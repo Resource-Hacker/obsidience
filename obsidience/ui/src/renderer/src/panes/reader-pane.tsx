@@ -35,6 +35,7 @@ import {
   type KnowledgeRole,
 } from "@/components/themes/obsidience/knowledge-role-icons";
 import {
+  API_BASE,
   api,
   onOpenSourceFile,
   onOpenReader,
@@ -53,9 +54,6 @@ import {
   type SourceDoc,
   type SourceFile,
   type SourceIssue,
-  type StorageFilesystem,
-  type StorageLocation,
-  type StorageState,
   type TaskRow,
   type VaultFile,
   type WikiAction,
@@ -335,7 +333,8 @@ function buildFileTree(files: VaultFile[], group: ExplorerGroupId, stripPrefix =
       parent = ensureFolder(siblings, part, base ? `${base}/${prefix}` : prefix);
       siblings = parent.children;
     }
-    if (["index", "readme"].includes(basename.toLowerCase()) && parent) {
+    if (parent && file.kind === "knowledge"
+      && basename.toLowerCase() === parent.path.split("/").pop()?.toLowerCase()) {
       parent.ref = file.ref;
       parent.kind = file.kind;
       parent.name = file.title;
@@ -390,11 +389,13 @@ function graphProjectionNode(
 
 function graphProjectionRoots(refs: string[], nodes: GraphNode[], namespace: string): ExplorerNode[] {
   const byId = new Map(nodes.map((node) => [node.id, node]));
+  const aliases = new Map(nodes.flatMap((node) => node.article_ref ? [[node.article_ref, node.id]] : []));
+  const hierarchyKind = (node?: GraphNode) => node?.tags?.includes("task-taxonomy") ? "task" : node?.kind;
   const parentByChild = new Map<string, string>();
   for (const node of nodes) {
     for (const child of node.children ?? []) parentByChild.set(cleanLink(child), node.id);
   }
-  const roots = new Set(refs.map(cleanLink).filter((ref) => byId.has(ref)));
+  const roots = new Set(refs.map(cleanLink).map((ref) => aliases.get(ref) ?? ref).filter((ref) => byId.has(ref)));
   const allowed = new Set(roots);
   const queue = [...roots];
   while (queue.length) {
@@ -402,7 +403,7 @@ function graphProjectionRoots(refs: string[], nodes: GraphNode[], namespace: str
     const node = byId.get(ref);
     for (const child of node?.children ?? []) {
       const childRef = cleanLink(child);
-      if (!allowed.has(childRef) && byId.get(childRef)?.kind === node?.kind) {
+      if (byId.has(childRef) && !allowed.has(childRef) && hierarchyKind(byId.get(childRef)) === hierarchyKind(node)) {
         allowed.add(childRef);
         queue.push(childRef);
       }
@@ -411,7 +412,9 @@ function graphProjectionRoots(refs: string[], nodes: GraphNode[], namespace: str
   for (const ref of [...allowed]) {
     let cursor = ref;
     let parent = parentByChild.get(cursor);
-    while (parent && byId.get(parent)?.kind === byId.get(ref)?.kind) {
+    const seen = new Set<string>();
+    while (parent && !seen.has(parent) && hierarchyKind(byId.get(parent)) === hierarchyKind(byId.get(ref))) {
+      seen.add(parent);
       allowed.add(parent);
       cursor = parent;
       parent = parentByChild.get(cursor);
@@ -419,7 +422,9 @@ function graphProjectionRoots(refs: string[], nodes: GraphNode[], namespace: str
   }
   const projectedRoots = [...allowed].filter((ref) => {
     let parent = parentByChild.get(ref);
-    while (parent) {
+    const seen = new Set<string>();
+    while (parent && !seen.has(parent)) {
+      seen.add(parent);
       if (allowed.has(parent)) return false;
       parent = parentByChild.get(parent);
     }
@@ -434,11 +439,11 @@ function subjectExplorerNodes(group: GraphNavigationGroup, namespace: string): M
   const subjects = new Map(group.subjects.map((subject) => [subject.id, {
     key: `${namespace}:${subject.id}`,
     name: subject.title,
-    path: subject.id,
+    path: subject.path ?? subject.id,
     folder: true,
-    ref: subject.id,
+    ref: subject.article_ref ?? subject.id,
     kind: "knowledge",
-    virtual: true,
+    virtual: !subject.article_ref,
     children: [],
   } satisfies ExplorerNode]));
   for (const subject of group.subjects) {
@@ -448,6 +453,8 @@ function subjectExplorerNodes(group: GraphNavigationGroup, namespace: string): M
 }
 
 function libraryProjection(nodes: GraphNode[], group: GraphNavigationGroup): ExplorerNode[] {
+  const allowed = new Set(group.article_refs ?? []);
+  nodes = nodes.filter((node) => allowed.has(node.id));
   return group.subjects.filter((subject) => !subject.parent_id).map((subject) => {
     const kind = subject.id === "@library/Tasks" ? "task" : "tool";
     const members = [...nodes.filter((node) => node.kind === kind ||
@@ -473,29 +480,27 @@ function libraryProjection(nodes: GraphNode[], group: GraphNavigationGroup): Exp
 }
 
 function agentProjection(group: GraphNavigationGroup, nodes: GraphNode[], files: VaultFile[]): ExplorerNode[] {
+  const otherAgents = nodes.filter((node) => node.kind === "agent" && node.id !== group.root_ref);
+  const allowed = new Set(group.article_refs ?? []);
+  nodes = nodes.filter((node) => allowed.has(node.id));
   const identityRef = group.root_ref;
   const agentName = identityRef.split("/")[1] ?? group.title;
   const identity = nodes.find((node) => node.id === identityRef);
   const subjects = subjectExplorerNodes(group, `agent-subject:${agentName}`);
   const subject = (key: string) => subjects.get(`@sat/${agentName}/${key}`);
 
-  const checkoutFields = ["tools", "skills", "runbooks", "tasks"] as const;
-  for (const field of checkoutFields) {
-    const refs = [...(identity?.checkouts?.[field] ?? [])];
-    if (field === "tasks") {
-      refs.push(...nodes.filter((node) => node.kind === "task" &&
-        String(node.assignee ?? "").includes(agentName)).map((node) => node.id));
-    }
+  const dependencyFields = ["tools", "skills", "runbooks", "tasks"] as const;
+  for (const field of dependencyFields) {
+    const refs = identity?.dependencies?.[field] ?? [];
     subject(field)?.children.push(...graphProjectionRoots(refs, nodes, `${agentName}:${field}`));
   }
 
   const sourceRefs = new Set(identity?.source_scope_refs ?? []);
   subject("knowledge")?.children.push(...buildFileTree(
-    files.filter((file) => sourceRefs.has(file.ref)),
+    files.filter((file) => file.kind === "knowledge" && allowed.has(file.ref) && sourceRefs.has(file.ref)),
     group.id as ExplorerGroupId,
   ));
 
-  const otherAgents = nodes.filter((node) => node.kind === "agent" && node.id !== identityRef);
   subject("other-agents")?.children.push(...otherAgents.map((node) => ({
     key: `agent-peer:${agentName}:${node.id}`,
     name: node.title,
@@ -508,7 +513,9 @@ function agentProjection(group: GraphNavigationGroup, nodes: GraphNode[], files:
   })));
 
   const localPrefix = `Agents/${agentName}/`;
-  for (const node of nodes.filter((candidate) => candidate.id.startsWith(localPrefix) && candidate.id !== identityRef)) {
+  const subjectArticleRefs = new Set(group.subjects.flatMap((row) => row.article_ref ? [row.article_ref] : []));
+  for (const node of nodes.filter((candidate) => candidate.id.startsWith(localPrefix)
+    && candidate.kind === "knowledge" && candidate.id !== identityRef && !subjectArticleRefs.has(candidate.id))) {
     const localPath = node.id.slice(localPrefix.length);
     const segment = localPath.split("/", 1)[0]
       .toLowerCase().replaceAll("_", "-").replaceAll(" ", "-");
@@ -537,68 +544,52 @@ function agentProjection(group: GraphNavigationGroup, nodes: GraphNode[], files:
 }
 
 function executiveProjection(files: VaultFile[], nodes: GraphNode[], group: GraphNavigationGroup): ExplorerNode[] {
+  const peers = nodes.filter((node) => node.kind === "agent" && node.id !== group.root_ref);
+  const allowed = new Set(group.article_refs ?? []);
+  nodes = nodes.filter((node) => allowed.has(node.id));
+  files = files.filter((file) => allowed.has(file.ref));
   const identity = nodes.find((node) => node.id === group.root_ref);
   const subjects = subjectExplorerNodes(group, "executive-subject");
   const subject = (ref: string) => subjects.get(ref);
 
-  const checkoutFields = ["tools", "skills", "runbooks", "tasks"] as const;
-  for (const field of checkoutFields) {
-    const refs = [...(identity?.checkouts?.[field] ?? [])];
-    if (field === "tasks") {
-      refs.push(...nodes.filter((node) => node.kind === "task" &&
-        String(node.assignee ?? "").includes("Agents/Executive/Executive")).map((node) => node.id));
-    }
+  const dependencyFields = ["tools", "skills", "runbooks", "tasks"] as const;
+  for (const field of dependencyFields) {
+    const refs = identity?.dependencies?.[field] ?? [];
     subject(`@branch/${field[0].toUpperCase()}${field.slice(1)}`)?.children.push(
       ...graphProjectionRoots(refs, nodes, `executive:${field}`),
     );
   }
 
-  subject("@agent/Architecture")?.children.push(...buildFileTree(
-    files.filter((file) => file.path.startsWith("Agents/Executive/Architecture/")),
-    "executive",
-    "Agents/Executive/Architecture",
-  ));
-  subject("@agent/Subagents")?.children.push(...buildFileTree(
-    files.filter((file) => file.path.startsWith("Agents/Executive/Subagents/")),
-    "executive",
-    "Agents/Executive/Subagents",
-  ));
-  const byId = new Map(nodes.map((node) => [node.id, node]));
-  subject("@agent/Subagents")?.children.push(...nodes
+  for (const declared of group.subjects) {
+    if (!declared.path) continue;
+    const parent = subject(declared.id);
+    if (!parent) continue;
+    parent.children.push(...files.filter((file) => {
+      const separator = file.path.lastIndexOf("/");
+      return file.kind === "knowledge"
+        && file.path.slice(0, separator) === declared.path
+        && file.ref !== declared.article_ref;
+    }).map((file) => ({
+      key: `file:${file.ref}`,
+      name: file.title,
+      path: file.path,
+      folder: false,
+      ref: file.ref,
+      kind: file.kind,
+      children: [],
+    })));
+  }
+
+  const byId = new Map(peers.map((node) => [node.id, node]));
+  subject("@agent/Subagents")?.children.push(...peers
     .filter((node) => node.kind === "agent" && node.id.startsWith("Agents/")
       && node.id !== "Agents/Executive/Executive")
     .map((node) => graphProjectionNode(node.id, byId, "executive:subagents"))
     .filter((node): node is ExplorerNode => Boolean(node)));
 
-  const temporaryPrefix = "Agents/Executive/Observations/Temporary Observations/";
-  subject("@agent/Observations")?.children.push(...buildFileTree(
-    files.filter((file) =>
-      file.path.startsWith("Agents/Executive/Observations/") && !file.path.startsWith(temporaryPrefix)),
-    "executive",
-    "Agents/Executive/Observations",
-  ));
-  subject("@agent/Temporary Observations")?.children.push(...buildFileTree(
-    files.filter((file) => file.path.startsWith(temporaryPrefix)),
-    "executive",
-    "Agents/Executive/Observations/Temporary Observations",
-  ));
-
-  const handledAgentPrefixes = [
-    "Agents/Executive/Architecture/",
-    "Agents/Executive/Subagents/",
-    "Agents/Executive/Observations/",
-  ];
-  const worldKnowledge = buildFileTree(files.filter((file) =>
-    fileGroup(file.path) === "executive" &&
-    !file.path.startsWith("Agents/Executive/") &&
-    !handledAgentPrefixes.some((prefix) => file.path.startsWith(prefix)) &&
-    !file.path.startsWith("Runbooks/")), "executive");
-
-  return [
-    ...group.subjects.filter((row) => !row.parent_id)
-      .map((row) => subjects.get(row.id) as ExplorerNode),
-    ...worldKnowledge,
-  ];
+  return group.subjects.filter((row) => !row.parent_id)
+    .map((row) => subjects.get(row.id) as ExplorerNode)
+    .filter(Boolean);
 }
 
 function treeRefCount(nodes: ExplorerNode[]): number {
@@ -1048,97 +1039,42 @@ interface SourceTreeNode {
   backingPath?: string;
   subtitle?: string;
   order?: number;
-  storage?: {
-    filesystem?: StorageFilesystem;
-    location?: StorageLocation;
-  };
   children: SourceTreeNode[];
 }
 
 const SOURCE_VIEW = {
   system: "@view/system",
-  hardware: "@view/system/hardware",
-  compute: "@view/system/hardware/compute",
-  drives: "@view/system/hardware/drives",
-  volume: "@view/system/hardware/drives/system-volume",
-  obsidience: "@view/system/hardware/drives/system-volume/obsidience",
-  modelsDrive: "@view/system/hardware/drives/system-volume/models",
-  devices: "@view/system/hardware/devices",
-  applications: "@view/system/applications",
-  network: "@view/network",
+  knowledge: "@view/knowledge",
+  evidence: "@view/evidence",
+  project: "@view/project",
 } as const;
 
 const SYSTEM_SOURCE_PREFIX = "obsidience/state/system";
+const KNOWLEDGE_SOURCE_PREFIX = "obsidience/vault";
+const EVIDENCE_SOURCE_PREFIX = "obsidience/evidence";
 
 interface SourceRoute {
-  parent: "system" | "obsidience" | "compute" | "devices" | "applications" | "network" | "modelsDrive";
+  parent: keyof typeof SOURCE_VIEW;
   relativePath: string;
   physicalBase: string;
   virtualAncestors: string[];
 }
 
 function sourceRoute(file: SourceFile): SourceRoute {
-  const compute = `${SYSTEM_SOURCE_PREFIX}/hardware/compute/`;
-  const devices = `${SYSTEM_SOURCE_PREFIX}/hardware/devices/`;
-  const applications = `${SYSTEM_SOURCE_PREFIX}/applications/`;
-  const network = `${SYSTEM_SOURCE_PREFIX}/network/`;
-  const volume = `${SYSTEM_SOURCE_PREFIX}/hardware/drives/system-volume/`;
-  const modelSources = "obsidience/evidence/models/";
-  if (file.path.startsWith(compute)) return {
-    parent: "compute",
-    relativePath: file.path.slice(compute.length),
-    physicalBase: compute.slice(0, -1),
-    virtualAncestors: [SOURCE_VIEW.system, SOURCE_VIEW.hardware, SOURCE_VIEW.compute],
-  };
-  if (file.path.startsWith(devices)) return {
-    parent: "devices",
-    relativePath: file.path.slice(devices.length),
-    physicalBase: devices.slice(0, -1),
-    virtualAncestors: [SOURCE_VIEW.system, SOURCE_VIEW.hardware, SOURCE_VIEW.devices],
-  };
-  if (file.path.startsWith(applications)) return {
-    parent: "applications",
-    relativePath: file.path.slice(applications.length),
-    physicalBase: applications.slice(0, -1),
-    virtualAncestors: [SOURCE_VIEW.system, SOURCE_VIEW.applications],
-  };
-  if (file.path.startsWith(network)) return {
-    parent: "network",
-    relativePath: file.path.slice(network.length),
-    physicalBase: network.slice(0, -1),
-    virtualAncestors: [SOURCE_VIEW.network],
-  };
-  if (file.path === `${volume}obsidience.json`) return {
-    parent: "obsidience",
-    relativePath: file.name,
-    physicalBase: volume.slice(0, -1),
-    virtualAncestors: [SOURCE_VIEW.system, SOURCE_VIEW.hardware, SOURCE_VIEW.drives, SOURCE_VIEW.volume, SOURCE_VIEW.obsidience],
-  };
-  if (file.path === `${volume}ai-models.json`) return {
-    parent: "modelsDrive",
-    relativePath: file.name,
-    physicalBase: volume.slice(0, -1),
-    virtualAncestors: [SOURCE_VIEW.system, SOURCE_VIEW.hardware, SOURCE_VIEW.drives, SOURCE_VIEW.volume, SOURCE_VIEW.modelsDrive],
-  };
-  if (file.path.startsWith(modelSources)) return {
-    parent: "modelsDrive",
-    relativePath: file.path.slice(modelSources.length),
-    physicalBase: modelSources.slice(0, -1),
-    virtualAncestors: [SOURCE_VIEW.system, SOURCE_VIEW.hardware, SOURCE_VIEW.drives, SOURCE_VIEW.volume, SOURCE_VIEW.modelsDrive],
-  };
-  if (file.path === `${SYSTEM_SOURCE_PREFIX}/system.json`) return {
-    parent: "system",
-    relativePath: file.name,
-    physicalBase: SYSTEM_SOURCE_PREFIX,
-    virtualAncestors: [SOURCE_VIEW.system],
-  };
-  const productPrefix = "obsidience/";
-  return {
-    parent: "obsidience",
-    relativePath: file.path.startsWith(productPrefix) ? file.path.slice(productPrefix.length) : file.path,
-    physicalBase: file.path.startsWith(productPrefix) ? "obsidience" : "",
-    virtualAncestors: [SOURCE_VIEW.system, SOURCE_VIEW.hardware, SOURCE_VIEW.drives, SOURCE_VIEW.volume, SOURCE_VIEW.obsidience],
-  };
+  const route = (parent: keyof typeof SOURCE_VIEW, base: string): SourceRoute => ({
+    parent, relativePath: base ? file.path.slice(base.length + 1) : file.path,
+    physicalBase: base, virtualAncestors: [SOURCE_VIEW[parent]],
+  });
+  if (file.path === `${SYSTEM_SOURCE_PREFIX}/system.json`
+      || file.path.startsWith(`${SYSTEM_SOURCE_PREFIX}/hardware/`)
+      || file.path.startsWith(`${SYSTEM_SOURCE_PREFIX}/applications/`)) {
+    return route("system", SYSTEM_SOURCE_PREFIX);
+  }
+  if (file.path.startsWith(`${KNOWLEDGE_SOURCE_PREFIX}/`)) return route("knowledge", KNOWLEDGE_SOURCE_PREFIX);
+  if (file.path.startsWith(`${EVIDENCE_SOURCE_PREFIX}/`)) return route("evidence", EVIDENCE_SOURCE_PREFIX);
+  // A remaining legacy capture retains its real old path, outside System.
+  if (file.path.startsWith(`${SYSTEM_SOURCE_PREFIX}/snapshots/`)) return route("evidence", SYSTEM_SOURCE_PREFIX);
+  return route("project", "");
 }
 
 function sourcePresentationAncestors(file: SourceFile): string[] {
@@ -1153,141 +1089,28 @@ function sourcePresentationAncestors(file: SourceFile): string[] {
   return [...route.virtualAncestors, ...physical];
 }
 
-function sourceFolderName(path: string, name: string): string {
-  return path.startsWith(`${SYSTEM_SOURCE_PREFIX}/`)
-    ? name.replace(/[-_]+/g, " ").toUpperCase()
-    : name;
-}
-
-function buildSourceTree(files: SourceFile[], storage: StorageState | null): SourceTreeNode[] {
-  const hasTree = (path: string) => files.some((file) =>
-    file.path === path || file.path.startsWith(`${path}/`));
-  const filesystemFor = (location?: StorageLocation) =>
-    storage?.filesystems.find((filesystem) => filesystem.id === location?.filesystem_id);
-  const obsidienceLocation = storage?.locations.find((location) => location.id === "obsidience");
-  const modelsLocation = storage?.locations.find((location) => location.id === "models");
-  const sharedFilesystem = storage?.filesystems.length === 1 ? storage.filesystems[0] : undefined;
-
-  const obsidience: SourceTreeNode = {
-    key: SOURCE_VIEW.obsidience,
-    name: "OBSIDIENCE",
-    folder: true,
-    virtual: true,
-    backingPath: "obsidience",
-    subtitle: obsidienceLocation?.available
-      ? `${obsidienceLocation.path} · shared filesystem · no quota`
-      : "Storage unavailable",
-    order: 0,
-    storage: { location: obsidienceLocation, filesystem: filesystemFor(obsidienceLocation) },
-    children: [],
-  };
-  const modelsDrive: SourceTreeNode = {
-    key: SOURCE_VIEW.modelsDrive,
-    name: modelsLocation?.label ?? "AI Models",
-    folder: true,
-    virtual: true,
-    backingPath: "obsidience/evidence/models",
-    subtitle: modelsLocation?.available
-      ? `${modelsLocation.path} · shared filesystem · no quota`
-      : "Storage unavailable",
-    order: 1,
-    storage: { location: modelsLocation, filesystem: filesystemFor(modelsLocation) },
-    children: [],
-  };
-  const volume: SourceTreeNode = {
-    key: SOURCE_VIEW.volume,
-    name: "SYSTEM VOLUME",
-    folder: true,
-    virtual: true,
-    backingPath: `${SYSTEM_SOURCE_PREFIX}/hardware/drives/system-volume`,
-    subtitle: sharedFilesystem ? "BTRFS · one shared physical capacity pool" : "Physical storage volume",
-    order: 0,
-    storage: { filesystem: sharedFilesystem },
-    children: [obsidience, modelsDrive].filter((node) =>
-      Boolean(node.backingPath && hasTree(node.backingPath))),
-  };
-  const compute: SourceTreeNode = {
-    key: SOURCE_VIEW.compute,
-    name: "COMPUTE",
-    folder: true,
-    virtual: true,
-    backingPath: `${SYSTEM_SOURCE_PREFIX}/hardware/compute`,
-    subtitle: "Processors and accelerators",
-    order: 0,
-    children: [],
-  };
-  const drives: SourceTreeNode = {
-    key: SOURCE_VIEW.drives,
-    name: "DRIVES",
-    folder: true,
-    virtual: true,
-    backingPath: `${SYSTEM_SOURCE_PREFIX}/hardware/drives`,
-    subtitle: "Volumes and their actual files",
-    order: 1,
-    children: [volume],
-  };
-  const devices: SourceTreeNode = {
-    key: SOURCE_VIEW.devices,
-    name: "DEVICES",
-    folder: true,
-    virtual: true,
-    backingPath: `${SYSTEM_SOURCE_PREFIX}/hardware/devices`,
-    subtitle: "Input and output",
-    order: 2,
-    children: [],
-  };
-  const hardware: SourceTreeNode = {
-    key: SOURCE_VIEW.hardware,
-    name: "HARDWARE",
-    folder: true,
-    virtual: true,
-    backingPath: `${SYSTEM_SOURCE_PREFIX}/hardware`,
-    subtitle: "Physical computer",
-    order: 0,
-    children: [compute, drives, devices].filter((node) =>
-      Boolean(node.backingPath && hasTree(node.backingPath))),
-  };
-  const applications: SourceTreeNode = {
-    key: SOURCE_VIEW.applications,
-    name: "APPLICATIONS",
-    folder: true,
-    virtual: true,
-    backingPath: `${SYSTEM_SOURCE_PREFIX}/applications`,
-    subtitle: "Obsidience shell and integrated applications",
-    order: 1,
-    children: [],
-  };
-  const system: SourceTreeNode = {
-    key: SOURCE_VIEW.system,
-    name: "SYSTEM",
-    folder: true,
-    virtual: true,
-    backingPath: SYSTEM_SOURCE_PREFIX,
-    subtitle: "This PC",
-    order: 0,
-    children: [hardware, applications].filter((node) =>
-      Boolean(node.backingPath && hasTree(node.backingPath))),
-  };
-  const network: SourceTreeNode = {
-    key: SOURCE_VIEW.network,
-    name: "NETWORK",
-    folder: true,
-    virtual: true,
-    backingPath: `${SYSTEM_SOURCE_PREFIX}/network`,
-    subtitle: "Connections and remote systems",
-    order: 1,
-    children: [],
-  };
-  const parents = {
-    system,
-    obsidience,
-    compute,
-    devices,
-    applications,
-    network,
-    modelsDrive,
-  };
-
+function buildSourceTree(files: SourceFile[]): SourceTreeNode[] {
+  const folder = (key: string, name: string, backingPath: string, subtitle = "",
+    virtual = false, order?: number): SourceTreeNode => ({
+    key, name, backingPath, subtitle, virtual, order, folder: true, children: [],
+  });
+  const system = folder(SOURCE_VIEW.system, "SYSTEM", SYSTEM_SOURCE_PREFIX,
+    "Hardware and Applications · read only", true, 0);
+  const knowledge = folder(SOURCE_VIEW.knowledge, "KNOWLEDGE MARKDOWN", KNOWLEDGE_SOURCE_PREFIX,
+    "Actual graph Articles · obsidience/vault", true, 1);
+  const evidence = folder(SOURCE_VIEW.evidence, "EVIDENCE", EVIDENCE_SOURCE_PREFIX,
+    "Captured references and agent handoffs · obsidience/evidence", true, 2);
+  evidence.children = [
+    ["raw", "Immutable captured references"],
+    ["inbox", "Darwin’s cited handoffs to Alexandria"],
+    ["system", "Immutable System evidence versions"],
+    ["incoming", "Manual text imports · capture and queue Darwin Learn; originals remain"],
+  ].map(([name, subtitle], order) => folder(
+    `${EVIDENCE_SOURCE_PREFIX}/${name}`, name, `${EVIDENCE_SOURCE_PREFIX}/${name}`, subtitle, false, order,
+  ));
+  const project = folder(SOURCE_VIEW.project, "PROJECT FILES", "",
+    "Application code and project documents · exact paths", true, 3);
+  const parents = { system, knowledge, evidence, project };
   for (const file of files) {
     const route = sourceRoute(file);
     const parts = route.relativePath.split("/").filter(Boolean);
@@ -1296,32 +1119,22 @@ function buildSourceTree(files: SourceFile[], storage: StorageState | null): Sou
     let prefix = route.physicalBase;
     for (const part of parts) {
       prefix = prefix ? `${prefix}/${part}` : part;
-      let folder = children.find((node) => node.folder && node.key === prefix);
-      if (!folder) {
-        folder = {
-          key: prefix,
-          name: sourceFolderName(prefix, part),
-          folder: true,
-          backingPath: prefix,
-          children: [],
-        };
-        children.push(folder);
+      let child = children.find((node) => node.folder && node.key === prefix);
+      if (!child) {
+        const breadcrumb = file.system_breadcrumbs?.find((item) => item.path === prefix);
+        child = folder(prefix, breadcrumb?.title ?? part, prefix);
+        children.push(child);
       }
-      children = folder.children;
+      children = child.children;
     }
-    children.push({ key: file.key, name: filename, folder: false, file, children: [] });
+    children.push({ key: file.key, name: file.system_label || filename, folder: false, file, children: [] });
   }
   const sort = (nodes: SourceTreeNode[]) => {
-    nodes.sort((left, right) => {
-      if (left.order !== undefined || right.order !== undefined) {
-        return (left.order ?? Number.MAX_SAFE_INTEGER) - (right.order ?? Number.MAX_SAFE_INTEGER);
-      }
-      return Number(right.folder) - Number(left.folder) || left.name.localeCompare(right.name);
-    });
+    nodes.sort((left, right) => (left.order ?? 999) - (right.order ?? 999)
+      || Number(right.folder) - Number(left.folder) || left.name.localeCompare(right.name));
     nodes.forEach((node) => sort(node.children));
   };
-  const roots = [system, network].filter((node) =>
-    Boolean(node.backingPath && hasTree(node.backingPath)));
+  const roots = [system, knowledge, evidence, project];
   sort(roots);
   return roots;
 }
@@ -1333,14 +1146,6 @@ function filterSourceTree(nodes: SourceTreeNode[], needle: string): SourceTreeNo
     const matches = `${node.name} ${node.key} ${node.subtitle ?? ""} ${node.file?.articles.join(" ") ?? ""}`
       .toLowerCase().includes(needle);
     return matches || children.length ? [{ ...node, children }] : [];
-  });
-}
-
-function pruneEmptySourceTree(nodes: SourceTreeNode[]): SourceTreeNode[] {
-  return nodes.flatMap((node) => {
-    if (!node.folder) return [node];
-    const children = pruneEmptySourceTree(node.children);
-    return children.length ? [{ ...node, children }] : [];
   });
 }
 
@@ -1363,16 +1168,16 @@ function readableBytes(bytes: number): string {
 function SourceFolderGlyph({ node, open }: { node: SourceTreeNode; open: boolean }) {
   const className = node.virtual ? "text-violet-200/75" : "text-violet-300/50";
   if (node.key === SOURCE_VIEW.system) return <Computer size={12} className="text-cyan-200/80" />;
-  if (node.key === SOURCE_VIEW.obsidience) return <Package size={11} className={className} />;
-  if (node.key === SOURCE_VIEW.hardware) return <Server size={11} className="text-emerald-300/70" />;
-  if (node.key === SOURCE_VIEW.compute) return <Cpu size={11} className="text-emerald-300/70" />;
-  if (node.key === SOURCE_VIEW.drives || node.key === SOURCE_VIEW.volume || node.storage?.location) return <HardDrive size={11} className="text-sky-300/70" />;
-  if (node.key === SOURCE_VIEW.devices) return <Usb size={11} className="text-amber-300/70" />;
-  if (node.key === SOURCE_VIEW.applications) return <AppWindow size={11} className="text-fuchsia-300/70" />;
-  if (node.key === SOURCE_VIEW.network) return <Network size={11} className="text-blue-300/70" />;
-  return open
-    ? <FolderOpen size={10} className={className} />
-    : <Folder size={10} className={className} />;
+  if (node.key === SOURCE_VIEW.knowledge) return <FileText size={11} className={className} />;
+  if (node.key === SOURCE_VIEW.evidence) return <Database size={11} className={className} />;
+  if (node.key === SOURCE_VIEW.project) return <Package size={11} className={className} />;
+  if (node.key === `${SYSTEM_SOURCE_PREFIX}/hardware`) return <Server size={11} className="text-emerald-300/70" />;
+  if (node.key === `${SYSTEM_SOURCE_PREFIX}/hardware/compute`) return <Cpu size={11} className="text-emerald-300/70" />;
+  if (node.key === `${SYSTEM_SOURCE_PREFIX}/hardware/drives`) return <HardDrive size={11} className="text-sky-300/70" />;
+  if (node.key === `${SYSTEM_SOURCE_PREFIX}/hardware/devices`) return <Usb size={11} className="text-amber-300/70" />;
+  if (node.key === `${SYSTEM_SOURCE_PREFIX}/applications`) return <AppWindow size={11} className="text-fuchsia-300/70" />;
+  if (node.key === `${SYSTEM_SOURCE_PREFIX}/hardware/network`) return <Network size={11} className="text-blue-300/70" />;
+  return open ? <FolderOpen size={10} className={className} /> : <Folder size={10} className={className} />;
 }
 
 type PythonTokenKind =
@@ -1573,24 +1378,20 @@ function SourceExplorer({
   const [issues, setIssues] = useState<SourceIssue[]>([]);
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [showAll, setShowAll] = useState(false);
-  const [storage, setStorage] = useState<StorageState | null>(null);
+  const [showAll, setShowAll] = useState(true);
   const [checkouts, setCheckouts] = useState<Set<string>>(new Set());
   const [busyCheckouts, setBusyCheckouts] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set([
-    SOURCE_VIEW.system, SOURCE_VIEW.hardware, SOURCE_VIEW.drives,
-    SOURCE_VIEW.volume, SOURCE_VIEW.obsidience, SOURCE_VIEW.applications,
+    SOURCE_VIEW.system, SOURCE_VIEW.knowledge,
   ]));
 
   const refresh = useCallback(() => {
     Promise.all([
       api.sourceFiles(),
       api.sourceCheckouts(),
-      api.hardware().then((snapshot) => snapshot.storage).catch(() => null),
-    ]).then(([result, checkoutSnapshot, storageSnapshot]) => {
+    ]).then(([result, checkoutSnapshot]) => {
       setFiles(result.files);
       setIssues(result.issues);
-      setStorage(storageSnapshot);
       setCheckouts(new Set(checkoutSnapshot.assignments.map((assignment) =>
         sourceCheckoutKey(assignment.tree, assignment.agent))));
       setError(null);
@@ -1615,14 +1416,11 @@ function SourceExplorer({
     return () => window.clearInterval(retry);
   }, [error, refresh]);
 
-  useEffect(() => {
-    setShowAll(false);
-  }, [selectedRef]);
-
   const scopedFiles = useMemo(() => (
     selectedRef && !showAll
       ? files.filter((file) =>
-        file.key === selectedKey || sourceMatchesArticle(file, selectedRef))
+        file.path.startsWith(`${EVIDENCE_SOURCE_PREFIX}/`)
+        || file.key === selectedKey || sourceMatchesArticle(file, selectedRef))
       : files
   ), [files, selectedKey, selectedRef, showAll]);
 
@@ -1633,12 +1431,9 @@ function SourceExplorer({
   }, [scopedFiles, selectedRef, showAll]);
 
   const tree = useMemo(() => {
-    if (!scopedFiles.length) return [];
     const needle = query.trim().toLowerCase();
-    const projected = buildSourceTree(scopedFiles, storage);
-    const visible = selectedRef && !showAll ? pruneEmptySourceTree(projected) : projected;
-    return filterSourceTree(visible, needle);
-  }, [scopedFiles, query, selectedRef, showAll, storage]);
+    return filterSourceTree(buildSourceTree(scopedFiles), needle);
+  }, [scopedFiles, query]);
 
   const toggle = (key: string) => setExpanded((current) => {
     const next = new Set(current);
@@ -1672,13 +1467,11 @@ function SourceExplorer({
     const open = expanded.has(node.key) || Boolean(query.trim());
     if (node.folder) {
       const checkoutPath = node.backingPath;
-      const filesystem = node.storage?.filesystem;
-      const showCapacity = node.key === SOURCE_VIEW.volume && filesystem;
       return (
         <div key={node.key}>
           <div className={`group/source-row flex w-full items-center rounded hover:bg-violet-300/[0.055] ${node.virtual ? "bg-white/[0.012]" : ""}`}>
           <button type="button" onClick={() => toggle(node.key)}
-            title={checkoutPath ?? node.subtitle ?? node.name}
+            title={[node.subtitle, checkoutPath].filter(Boolean).join("\n") || node.name}
             className={`flex min-w-0 flex-1 items-center gap-1 pr-1 text-left font-mono text-violet-100/60 hover:text-violet-50 ${node.virtual ? "py-1.5 text-[9px]" : "py-1 text-[9px]"}`}
             style={{ paddingLeft: 4 + depth * 12 }}>
             {open ? <ChevronDown size={9} /> : <ChevronRight size={9} />}
@@ -1712,23 +1505,6 @@ function SourceExplorer({
             </span>
           ) : null}
           </div>
-          {showCapacity ? (
-            <div className="mb-1.5 mt-0.5 rounded border border-sky-300/10 bg-sky-300/[0.025] px-2 py-1.5"
-              style={{ marginLeft: 18 + depth * 12 }}>
-              <div className="mb-1 flex items-center justify-between gap-2 font-mono text-[7px] text-sky-100/45">
-                <span>{filesystem.filesystem?.toUpperCase() ?? "Filesystem"} · shared by Obsidience and AI Models</span>
-                <span>{filesystem.used_percent?.toFixed(1) ?? "—"}%</span>
-              </div>
-              <div className="h-1 overflow-hidden rounded-full bg-sky-100/10">
-                <div className="h-full rounded-full bg-gradient-to-r from-cyan-400/55 to-violet-400/65"
-                  style={{ width: `${Math.min(100, Math.max(0, filesystem.used_percent ?? 0))}%` }} />
-              </div>
-              <div className="mt-1 flex justify-between font-mono text-[7px] text-sky-100/30">
-                <span>{readableBytes(filesystem.used_bytes)} used</span>
-                <span>{readableBytes(filesystem.available_bytes)} free · {readableBytes(filesystem.total_bytes)} total</span>
-              </div>
-            </div>
-          ) : null}
           {open ? renderNodes(node.children, depth + 1) : null}
         </div>
       );
@@ -1822,7 +1598,7 @@ function SourceDocument({
                 : source.storage === "code"
                   ? source.articles.length ? "Article-linked application code" : "Application code"
                   : source.storage === "system"
-                    ? "System descriptor · read only"
+                    ? "System evidence · read only"
                     : "Immutable raw source"}
             </p>
             <h1 className="font-mono text-[18px] font-semibold leading-snug tracking-[0.025em] text-violet-50">
@@ -2057,7 +1833,7 @@ function AutoCurateControl({
 }) {
   return (
     <label className="flex cursor-pointer items-center gap-1.5 font-mono text-[8px] uppercase tracking-[0.12em] text-cyan-200/65"
-      title="Create an ordinary Task that runs after this agent completes a turn, matching Obsidience's memory trigger">
+      title="Allow supported automatic maintenance in this Knowledge scope. Child settings may override it; Task triggers stay unchanged.">
       <input type="checkbox" checked={enabled} disabled={busy}
         onChange={(event) => onChange(event.target.checked)}
         className="h-3 w-3 accent-cyan-400" />
@@ -2075,7 +1851,10 @@ function splitIndexBody(body: string): { summary: string; sections: string } {
   };
 }
 
-function IndexArticleContent({ note }: { note: NoteDoc }) {
+function IndexArticleContent({ note, onSourceNavigate }: {
+  note: NoteDoc;
+  onSourceNavigate: (citation: string) => void;
+}) {
   const { summary, sections } = splitIndexBody(note.body);
   return (
     <div className="space-y-5">
@@ -2083,14 +1862,14 @@ function IndexArticleContent({ note }: { note: NoteDoc }) {
         <div className="absolute inset-y-0 left-0 w-px bg-cyan-200/65 shadow-[0_0_14px_rgba(103,232,249,0.65)]" />
         <p className="mb-2 font-mono text-[8px] uppercase tracking-[0.22em] text-cyan-300/50">Summary</p>
         {summary ? (
-          <ArticleMarkdown content={summary} variant="reader" onNavigate={openReader} />
+          <ArticleMarkdown content={summary} variant="reader" onNavigate={openReader} onSourceNavigate={onSourceNavigate} />
         ) : (
           <p className="font-mono text-[13px] leading-6 text-cyan-100/45">No summary has been written for this index yet.</p>
         )}
       </section>
       {sections ? (
         <section className="rounded-lg border border-cyan-300/10 bg-[#03101a]/48 px-4 py-1 shadow-[0_12px_36px_rgba(0,0,0,0.16)]">
-          <ArticleMarkdown content={sections} variant="index" onNavigate={openReader} />
+          <ArticleMarkdown content={sections} variant="index" onNavigate={openReader} onSourceNavigate={onSourceNavigate} />
         </section>
       ) : null}
     </div>
@@ -2119,6 +1898,7 @@ export function ReaderPaneBody({ docking }: { docking: ReaderDockingProps }) {
   const [draft, setDraft] = useState<TaskDraft | null>(null);
   const [articleDraft, setArticleDraft] = useState<ArticleDraft | null>(null);
   const [editing, setEditing] = useState(false);
+  const articleReadOnly = note?.read_only === true || note?.managed_by === "system";
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [launching, setLaunching] = useState(false);
@@ -2127,6 +1907,31 @@ export function ReaderPaneBody({ docking }: { docking: ReaderDockingProps }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const sourceRequest = useRef(0);
+  const citationRequest = useRef(0);
+
+  async function openSourceCitation(citation: string) {
+    if (!/^source:\/\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(citation)) return;
+    const id = citation.slice("source://".length).toLowerCase();
+    const generation = sourceRequest.current;
+    const citationGeneration = ++citationRequest.current;
+    try {
+      const response = await fetch(`${API_BASE}/api/sources/${id}`, { cache: "no-store" });
+      if (!response.ok) throw new Error("The cited Source could not be opened.");
+      const source = await response.json();
+      if (sourceRequest.current !== generation || citationRequest.current !== citationGeneration) return;
+      const path = source.source_path;
+      if (source.id !== id || source.citation !== `source://${id}` || source.immutable !== true
+          || typeof path !== "string" || path.length > 4096
+          || !(path.startsWith("obsidience/evidence/") || path.startsWith("obsidience/state/system/snapshots/"))
+          || /[\\?#\u0000]/.test(path) || path.split("/").some((part: string) => !part || part === "." || part === "..")) {
+        throw new Error("The cited Source identity could not be verified.");
+      }
+      setError(null);
+      openSourceFile(path);
+    } catch (cause) {
+      if (sourceRequest.current === generation && citationRequest.current === citationGeneration) setError(String(cause));
+    }
+  }
 
   const load = useCallback(async (ref: string) => {
     sourceRequest.current += 1;
@@ -2183,6 +1988,7 @@ export function ReaderPaneBody({ docking }: { docking: ReaderDockingProps }) {
         .sort((left, right) => left.title.localeCompare(right.title));
       const nextArticleNode = graph.nodes.find((node) => node.id === nextNote.ref) ?? null;
       const nextTask = tasks.find((row) => row.ref === nextNote.ref) ?? null;
+      setSelectedRef(nextNote.ref);
       setNote(nextNote);
       setArticleNode(nextArticleNode);
       setTask(nextTask);
@@ -2334,7 +2140,7 @@ export function ReaderPaneBody({ docking }: { docking: ReaderDockingProps }) {
   }
 
   async function saveArticle() {
-    if (!note || !articleDraft?.title.trim()) return;
+    if (!note || articleReadOnly || !articleDraft?.title.trim()) return;
     setSaving(true);
     setError(null);
     try {
@@ -2350,7 +2156,7 @@ export function ReaderPaneBody({ docking }: { docking: ReaderDockingProps }) {
   }
 
   async function toggleAutoCurate(enabled: boolean) {
-    if (!note) return;
+    if (!note || articleReadOnly) return;
     const target = selectedRef ?? note.ref;
     setCurationBusy(true);
     setError(null);
@@ -2359,11 +2165,10 @@ export function ReaderPaneBody({ docking }: { docking: ReaderDockingProps }) {
       setNote((current) => current ? {
         ...current,
         auto_curate: result.enabled,
-        auto_curate_task: result.task,
       } : current);
       setNotice(enabled
-        ? `Auto-curation enabled. ${result.task ?? "The event Task"} now runs after completed turns.`
-        : "Auto-curation disabled; its event Task is paused.");
+        ? "Auto-curation enabled for this Knowledge scope. Existing Tasks keep their triggers and validation."
+        : "Auto-curation disabled for this Knowledge scope. Child settings may override this permission.");
       window.dispatchEvent(new Event("obsidience:knowledge-changed"));
       window.dispatchEvent(new Event("obsidience:graph-refresh"));
     } catch (cause) {
@@ -2409,7 +2214,7 @@ export function ReaderPaneBody({ docking }: { docking: ReaderDockingProps }) {
   }
 
   async function runWikiAction(ref: string) {
-    if (!note || wikiLaunching) return;
+    if (!note || articleReadOnly || wikiLaunching) return;
     const action = wikiActions.find((candidate) => candidate.ref === ref);
     if (!action) return;
     setWikiLaunching(true);
@@ -2665,8 +2470,6 @@ export function ReaderPaneBody({ docking }: { docking: ReaderDockingProps }) {
             </h1>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
-            <AutoCurateControl enabled={Boolean(note.auto_curate)} busy={curationBusy}
-              onChange={(enabled) => void toggleAutoCurate(enabled)} />
             <button type="button" onClick={() => editing ? cancelEdit() : setEditing(true)} disabled={running}
               className="flex items-center gap-1 rounded border border-cyan-300/25 px-2 py-1 font-mono text-[8px] uppercase tracking-[0.12em] text-cyan-200/70 hover:border-cyan-300/50 hover:text-cyan-50 disabled:opacity-35">
               {editing ? <X size={9} /> : <Pencil size={9} />} {editing ? "Cancel" : "Edit"}
@@ -2837,8 +2640,10 @@ export function ReaderPaneBody({ docking }: { docking: ReaderDockingProps }) {
         <div className={`mx-auto w-full pb-8 ${indexArticle ? "max-w-[920px]" : "max-w-[78ch]"}`}>
           <div className="mb-5 flex flex-wrap items-start justify-between gap-3 border-b border-cyan-300/10 pb-4">
             <div className="min-w-[220px] flex-1">
-              {indexArticle && !editing ? (
-                <p className="mb-1.5 font-mono text-[8px] uppercase tracking-[0.24em] text-cyan-300/45">Knowledge index</p>
+              {(indexArticle || articleReadOnly) && !editing ? (
+                <p className="mb-1.5 font-mono text-[8px] uppercase tracking-[0.24em] text-cyan-300/45">
+                  {note.managed_by === "system" ? "Generated from System evidence · read only" : articleReadOnly ? "Read only" : "Knowledge index"}
+                </p>
               ) : null}
               {editing ? (
                 <input value={articleDraft?.title ?? ""}
@@ -2867,19 +2672,23 @@ export function ReaderPaneBody({ docking }: { docking: ReaderDockingProps }) {
               ) : null}
             </div>
             <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-              <AutoCurateControl enabled={Boolean(note.auto_curate)} busy={curationBusy}
-                onChange={(enabled) => void toggleAutoCurate(enabled)} />
-              {!editing ? (
+              {!articleReadOnly && note.auto_curate_supported ? (
+                <AutoCurateControl enabled={Boolean(note.auto_curate)} busy={curationBusy}
+                  onChange={(enabled) => void toggleAutoCurate(enabled)} />
+              ) : null}
+              {!articleReadOnly && !editing ? (
                 <ReaderWikiActionControls
                   actions={wikiActions}
                   busy={wikiLaunching}
                   onAction={(ref) => void runWikiAction(ref)}
                 />
               ) : null}
+              {!articleReadOnly ? (
               <button type="button" onClick={() => editing ? cancelEdit() : setEditing(true)}
                 className="flex shrink-0 items-center gap-1 rounded border border-cyan-300/25 px-2 py-1 font-mono text-[8px] uppercase tracking-[0.12em] text-cyan-200/70 hover:border-cyan-300/50 hover:text-cyan-50">
                 {editing ? <X size={9} /> : <Pencil size={9} />} {editing ? "Cancel" : "Edit"}
               </button>
+              ) : null}
             </div>
           </div>
           {editing ? (
@@ -2900,9 +2709,10 @@ export function ReaderPaneBody({ docking }: { docking: ReaderDockingProps }) {
               </div>
             </div>
           ) : indexArticle ? (
-            <IndexArticleContent note={note} />
+            <IndexArticleContent note={note} onSourceNavigate={(citation) => void openSourceCitation(citation)} />
           ) : (
-            <ArticleMarkdown content={note.body} variant="reader" onNavigate={openReader} />
+            <ArticleMarkdown content={note.body} variant="reader" onNavigate={openReader}
+              onSourceNavigate={(citation) => void openSourceCitation(citation)} />
           )}
           {error ? <p className="mt-3 font-mono text-[9px] text-rose-300">{error}</p> : null}
           {notice ? <p className="mt-3 font-mono text-[9px] text-emerald-300/75">{notice}</p> : null}

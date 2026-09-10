@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from datetime import date, datetime, timezone
+from pathlib import PurePosixPath
 
 _CURATION_TITLE_NOISE = frozenset({
     "agent", "article", "brain", "charter", "curator", "guardian", "identity",
@@ -30,16 +32,85 @@ def _candidate_identity(item: dict) -> tuple[str, ...]:
     if isinstance(refs, list):
         stable_refs = tuple(sorted({str(ref).strip() for ref in refs if str(ref).strip()}))
         if stable_refs:
-            return ("refs", *stable_refs)
+            return ("refs", *stable_refs, str(item.get("candidate_revision", "")))
     candidate_key = str(item.get("candidate_key", ""))
     return ("key", candidate_key) if candidate_key else ()
 
 
-def _maintenance_candidates() -> dict:
-    from obsidience.harness.knowledge.vault import iter_notes, resolver
+def _completed_candidates() -> set[tuple[str, str, str]]:
+    from obsidience.harness.knowledge.index import INDEX
 
-    notes = [note for note in iter_notes() if note.kind in {"agent", "knowledge"}]
-    res = resolver()
+    return INDEX.maintenance_no_change_keys()
+
+
+def candidate_revision(notes: list) -> str:
+    """Fingerprint the exact accepted input, including semantic frontmatter."""
+    value = [(note.ref, note.title, note.meta, note.body)
+             for note in sorted(notes, key=lambda note: note.ref)]
+    return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def agent_structural_hub(note, res) -> bool:
+    """Recognize a folder Article beneath an actual accepted Agent Article."""
+    from obsidience.harness.knowledge.vault import folder_article_path, is_folder_article
+
+    if note is None or note.kind != "knowledge" or not is_folder_article(note):
+        return False
+    for parent in PurePosixPath(note.ref).parents:
+        if str(parent) == ".":
+            continue
+        owner = res.resolve(folder_article_path(str(parent)))
+        if owner is not None and owner.kind == "agent":
+            return True
+    return False
+
+
+def candidate_invalidation(task_ref: str, params: dict, res) -> dict | None:
+    """Read current accepted inputs; never reinterpret or refresh a commitment."""
+    from obsidience.harness.knowledge.system import is_system_article
+    refs = params.get("candidate_refs")
+    expected = params.get("candidate_revision")
+    if (not isinstance(refs, list) or not refs
+            or any(not isinstance(ref, str) or not ref for ref in refs)
+            or not isinstance(expected, str) or not re.fullmatch(r"[a-f0-9]{64}", expected)):
+        return None
+    notes = [res.resolve(ref) for ref in refs]
+    if any(note is None or note.kind not in {"agent", "knowledge"}
+           or note.runtime_observation or is_system_article(note.ref) for note in notes):
+        reason, current = "inputs_unavailable", None
+    elif task_ref == "Tasks/improve" and params.get("candidate_kind") == "index_coverage":
+        # Native hierarchy already enumerates children. Retire old commitments
+        # through the same receipt-bound invalidation path, even at equal bytes.
+        reason, current = "native_hierarchy_coverage", candidate_revision(notes)
+    elif (task_ref == "Tasks/merge" and params.get("candidate_kind") == "possible_duplicate"
+          and any(agent_structural_hub(note, res) for note in notes)):
+        reason, current = "agent_structural_hub", candidate_revision(notes)
+    else:
+        current = candidate_revision(notes)
+        if current == expected:
+            return None
+        reason = "revision_changed"
+    return {"disposition": "invalidated", "reason": reason, "candidate_refs": list(refs),
+            "candidate_key": params.get("candidate_key"), "expected_revision": expected,
+            "current_revision": current}
+
+
+def _maintenance_candidates() -> dict:
+    from obsidience.harness.knowledge.vault import Resolver, folder_article_path, is_folder_article, iter_notes
+    from obsidience.harness.knowledge.system import is_system_article
+
+    snapshot = iter_notes()
+    res = Resolver(snapshot)
+    notes = [
+        note
+        for note in snapshot
+        if note.kind in {"agent", "knowledge"} and not note.runtime_observation and not is_system_article(note.ref)
+    ]
+    title_words = {
+        note.ref: _curation_words(note.title, title=True)
+        for note in notes
+    }
+    body_words = {note.ref: _curation_words(note.body) for note in notes}
     neighbors = {
         note.ref: {
             target.ref
@@ -48,15 +119,88 @@ def _maintenance_candidates() -> dict:
         }
         for note in notes
     }
+    semantic_refs = set(neighbors)
+    adjacency = {ref: set() for ref in semantic_refs}
+    for ref, targets in neighbors.items():
+        for target_ref in targets & semantic_refs:
+            adjacency[ref].add(target_ref)
+            adjacency[target_ref].add(ref)
+
+    component_by_ref: dict[str, int] = {}
+    component_sizes: list[int] = []
+    unseen = set(semantic_refs)
+    while unseen:
+        pending = [min(unseen)]
+        component_id = len(component_sizes)
+        size = 0
+        while pending:
+            ref = pending.pop()
+            if ref not in unseen:
+                continue
+            unseen.remove(ref)
+            component_by_ref[ref] = component_id
+            size += 1
+            pending.extend(adjacency[ref] & unseen)
+        component_sizes.append(size)
+
     rows: list[dict] = []
+
+    def add_lead(kind: str, task: str, selected: list, score: float, **evidence) -> None:
+        refs = sorted(note.ref for note in selected)
+        rows.append({
+            "candidate_key": hashlib.sha256(json.dumps([kind, refs]).encode()).hexdigest()[:20],
+            "kind": kind, "recommended_task": task, "refs": refs,
+            "titles": [note.title for note in selected], "score": score,
+            "signals": evidence,
+        })
+
+    folders: dict[str, list] = {}
+    now = datetime.now(timezone.utc)
+    for note in notes:
+        if note.kind != "knowledge":
+            continue
+        missing = sorted({raw for raw in note.links if res.resolve(raw) is None})
+        if missing:
+            add_lead("broken_reference", "Improve", [note], 1.0, missing_refs=missing[:8])
+        parent = str(PurePosixPath(note.ref).parent)
+        if parent != "." and not is_folder_article(note):
+            folders.setdefault(parent, []).append(note)
+        if not is_folder_article(note) and not note.children and note.meta.get("article_status") == "deprecated":
+            add_lead("deprecated", "Archive", [note], 0.97,
+                     archive_ref=note.ref, article_status="deprecated")
+        stale_after = note.meta.get("stale_after")
+        if isinstance(stale_after, str):
+            try:
+                stale = datetime.fromisoformat(stale_after.replace("Z", "+00:00"))
+            except ValueError:
+                stale = None
+            if stale is not None and stale.utcoffset() is not None and stale <= now:
+                add_lead("stale_after", "Audit", [note], 0.96, stale_after=stale_after)
+        review_due = note.meta.get("review_due")
+        if review_due:
+            try:
+                due = date.fromisoformat(str(review_due)[:10])
+            except ValueError:
+                due = None
+            if due is not None and due <= date.today():
+                add_lead("review_due", "Audit", [note], 0.96, review_due=due.isoformat())
+        successor = res.resolve(str(note.meta.get("superseded_by", "")))
+        if successor and successor.ref != note.ref and successor.kind == "knowledge" and not successor.runtime_observation:
+            add_lead("superseded", "Archive", [note, successor], 0.95,
+                     archive_ref=note.ref, successor_ref=successor.ref)
+    for folder, children in folders.items():
+        index_ref = folder_article_path(folder).removesuffix(".md")
+        index_note = res.resolve(index_ref)
+        if not index_note and len(children) >= 2:
+            add_lead("missing_index", "Improve", children[:8], 0.92, index_ref=index_ref)
     for index, left in enumerate(notes):
-        left_title = _curation_words(left.title, title=True)
-        left_body = _curation_words(left.body)
+        left_title = title_words[left.ref]
+        left_body = body_words[left.ref]
         if not left_title or len(left_body) < 20:
             continue
         for right in notes[index + 1:]:
-            right_title = _curation_words(right.title, title=True)
-            right_body = _curation_words(right.body)
+            right_title = title_words[right.ref]
+            right_body = body_words[right.ref]
             if not right_title or len(right_body) < 20:
                 continue
             common = left_body & right_body
@@ -70,7 +214,9 @@ def _maintenance_candidates() -> dict:
                 f"{note.ref}\n{note.title}\n{note.body}" for note in (left, right)
             )
             duplicate_signal = (same_subject and containment >= 0.34) or strong_body_match
-            if duplicate_signal:
+            if duplicate_signal and not (
+                agent_structural_hub(left, res) or agent_structural_hub(right, res)
+            ):
                 candidate_key = hashlib.sha256(source.encode()).hexdigest()[:20]
                 inbound: dict[str, list[str]] = {}
                 for candidate_ref in refs:
@@ -140,6 +286,7 @@ def _maintenance_candidates() -> dict:
                 + (0.07 if shared_neighbors else 0.0),
             )
             candidate_key = hashlib.sha256(f"missing_link\n{source}".encode()).hexdigest()[:20]
+            semantic_shared_neighbors = adjacency[left.ref] & adjacency[right.ref]
             rows.append({
                 "candidate_key": candidate_key,
                 "kind": "missing_link",
@@ -157,12 +304,26 @@ def _maintenance_candidates() -> dict:
                     "shared_neighbors": len(shared_neighbors),
                     "same_parent": same_parent,
                 },
+                "connectivity": {
+                    "isolated_endpoint_refs": [
+                        ref for ref in refs if not adjacency[ref]
+                    ],
+                    "separate_components": (
+                        component_by_ref[left.ref] != component_by_ref[right.ref]
+                    ),
+                    "shared_neighbor_refs": sorted(semantic_shared_neighbors)[:4],
+                },
             })
+    for row in rows:
+        row["candidate_revision"] = candidate_revision([res.resolve(ref) for ref in row["refs"]])
     rows.sort(key=lambda row: (-row["score"], row["refs"]))
     claimed_by_task: dict[str, set[str]] = {}
     for recommendation, task_ref in {
         "Merge": "Tasks/merge",
         "Link": "Tasks/link",
+        "Improve": "Tasks/improve",
+        "Archive": "Tasks/archive",
+        "Audit": "Tasks/audit",
     }.items():
         destination = res.resolve(task_ref)
         if not destination:
@@ -176,22 +337,35 @@ def _maintenance_candidates() -> dict:
             for item in occurrences
             if isinstance(item, dict) and (identity := _candidate_identity(item))
         }
+    completed = _completed_candidates()
     unclaimed = [
         row
         for row in rows
         if _candidate_identity(row)
         not in claimed_by_task.get(row["recommended_task"], set())
+        and (*_candidate_identity(row)[:-1], "")
+        not in claimed_by_task.get(row["recommended_task"], set())
     ]
+    eligible = [row for row in unclaimed if (
+        "Tasks/" + row["recommended_task"].lower(), row["candidate_key"], row["candidate_revision"]
+    ) not in completed]
     return {
         "checked_articles": len(notes),
         "candidate_count": len(rows),
         "claimed_count": len(rows) - len(unclaimed),
-        "unclaimed_count": len(unclaimed),
-        "candidates": unclaimed[:8],
+        "unchanged_no_change_count": len(unclaimed) - len(eligible),
+        "unclaimed_count": len(eligible),
+        "candidates": eligible[:8],
+        "connectivity": {
+            "component_count": len(component_sizes),
+            "isolated_article_count": sum(not targets for targets in adjacency.values()),
+            "largest_component_size": max(component_sizes, default=0),
+        },
         "rule": (
             "Candidates are evidence leads. Curate may activate only the exact accepted "
-            "Task named by its Runbook. Merge confirms and consolidates identity; Link confirms a "
-            "specific useful relationship. Neither signal authorizes a change by itself."
+            "Task named by its Runbook. Connectivity is descriptive; disconnectedness alone "
+            "never creates or authorizes a Link. Merge confirms and consolidates identity; "
+            "Link confirms a specific useful relationship. No signal authorizes a change by itself."
         ),
     }
 

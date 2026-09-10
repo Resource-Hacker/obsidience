@@ -1,0 +1,42 @@
+From f66fb773b406e3a63970cce001c8b45e17fa075a Mon Sep 17 00:00:00 2001
+From: Tom Englund <tomenglund26@gmail.com>
+Date: Mon, 3 Aug 2026 18:19:13 +0200
+Subject: [PATCH] drm: make pendingPageflip id std::optional
+
+change pendingPageflip id to std::optional.
+---
+ include/aquamarine/backend/DRM.hpp | 2 +-
+ src/backend/drm/DRM.cpp            | 4 ++--
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/include/aquamarine/backend/DRM.hpp b/include/aquamarine/backend/DRM.hpp
+index d347bfd4..f3fd3208 100644
+--- a/include/aquamarine/backend/DRM.hpp
++++ b/include/aquamarine/backend/DRM.hpp
+@@ -163,7 +163,7 @@ namespace Aquamarine {
+         int32_t                refresh = 0; // unused
+ 
+         struct {
+-            uintptr_t                                      id = 0; // 0 when nothing is in flight
++            std::optional<uintptr_t>                       id; // nullopt when nothing is in flight
+             Hyprutils::Memory::CWeakPointer<SDRMConnector> connector;
+             bool                                           async = false; // PAGE_FLIP_ASYNC
+         } pendingFlip;
+diff --git a/src/backend/drm/DRM.cpp b/src/backend/drm/DRM.cpp
+index 15c17bb2..2ee44309 100644
+--- a/src/backend/drm/DRM.cpp
++++ b/src/backend/drm/DRM.cpp
+@@ -1178,11 +1178,11 @@ uintptr_t Aquamarine::SDRMCRTC::armPageFlip(CWeakPointer<SDRMConnector> connecto
+     pendingFlip.connector = connector;
+     pendingFlip.async     = async;
+ 
+-    return pendingFlip.id;
++    return pendingFlip.id.value();
+ }
+ 
+ void Aquamarine::SDRMCRTC::disarmPageFlip() {
+-    pendingFlip.id = 0;
++    pendingFlip.id.reset();
+     pendingFlip.connector.reset();
+     pendingFlip.async = false;
+ }

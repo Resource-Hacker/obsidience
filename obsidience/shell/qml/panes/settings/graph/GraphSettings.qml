@@ -67,7 +67,8 @@ Item {
         const xhr = new XMLHttpRequest()
         xhr.open("GET", apiBase + "/api/graph")
         xhr.onreadystatechange = function() {
-            if (xhr.readyState !== XMLHttpRequest.DONE) return
+            // The Settings Loader may destroy this page before its request finishes.
+            if (!root || xhr.readyState !== XMLHttpRequest.DONE) return
             if (xhr.status < 200 || xhr.status >= 300) {
                 root.errorMessage = root.responseError(xhr, "Graph inventory failed")
                 return

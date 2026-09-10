@@ -18,7 +18,6 @@ PanelWindow {
     required property var surfaceScreen
     required property var panes
     required property bool launcherOpen
-    required property bool locked
 
     signal presentRequested(var placement, string surfaceId, real x, real y)
     signal launcherRequested()
@@ -29,14 +28,13 @@ PanelWindow {
     property string realtimePhase: "off"
     property string realtimeAction: ""
     property string realtimeError: ""
-    property real microphoneLevel: 0
+    property bool captureActive: false
     property bool userSpeaking: false
     property string liveTranscriptText: ""
     property bool liveTranscriptFinal: false
-    readonly property bool realtimeBusy: realtimeAction !== ""
-    readonly property int microphoneLevelPercent: Math.round(
-        Math.max(0, Math.min(1, microphoneLevel)) * 100
-    )
+    readonly property bool realtimeBusy: realtimeAction !== "" || !shellApi.realtime.connected
+    readonly property bool inputCapturing: realtimeEnabled && (captureActive || userSpeaking)
+    readonly property bool recognitionVisible: inputCapturing || recognitionLinger.running
     property var runningApplications: []
     property string activeWindowId: ""
     property int windowRevision: 0
@@ -50,7 +48,7 @@ PanelWindow {
     readonly property var currentSurface: shellApi.surfaceLayout.surface(surfaceId)
 
     screen: surfaceScreen
-    visible: !locked
+    visible: true
     implicitWidth: Math.min(
         surfaceScreen ? Math.max(1, surfaceScreen.width - 40)
                       : shelfMaximumWidth,
@@ -72,7 +70,7 @@ PanelWindow {
     }
 
     function scheduleShelfHide() {
-        if (!launcherOpen && !shelfHover.hovered) {
+        if (!launcherOpen && !shelfHover.hovered && !recognitionVisible) {
             shelfHideTimer.restart()
         }
     }
@@ -84,6 +82,19 @@ PanelWindow {
         } else {
             scheduleShelfHide()
         }
+    }
+
+    onRecognitionVisibleChanged: {
+        if (recognitionVisible) {
+            shelfHideTimer.stop()
+            shelfOpen = true
+        } else {
+            scheduleShelfHide()
+        }
+    }
+
+    onRealtimeEnabledChanged: {
+        if (!realtimeEnabled) recognitionLinger.stop()
     }
 
     ApplicationLauncher {
@@ -216,17 +227,14 @@ PanelWindow {
             ? payload.phase : (realtimeEnabled ? "running" : "off")
         realtimeError = typeof payload.last_error === "string"
             ? payload.last_error : ""
-        const rawLevel = payload.microphone_level !== undefined
-            ? payload.microphone_level : payload.input_level
-        const level = Number(rawLevel)
-        microphoneLevel = isFinite(level)
-            ? Math.max(0, Math.min(1, level)) : 0
+        captureActive = payload.capture_active === true
         userSpeaking = payload.user_speaking === true
         const transcript = payload.live_transcript
         liveTranscriptText = transcript
                 && typeof transcript.text === "string"
             ? transcript.text : ""
-        liveTranscriptFinal = transcript && transcript.final === true
+        liveTranscriptFinal = !!transcript && transcript.final === true
+        if (realtimePhase === "disconnected") recognitionLinger.stop()
     }
 
     function realtimeRequest(method, path, action, body) {
@@ -248,7 +256,9 @@ PanelWindow {
                 return
             }
             try {
-                root.applyRealtime(JSON.parse(xhr.responseText))
+                // The shared stream owns live state; HTTP only acknowledges
+                // this explicit control request and cannot overwrite newer events.
+                JSON.parse(xhr.responseText)
             } catch (error) {
                 root.realtimeError = "Realtime returned invalid state."
             }
@@ -286,7 +296,13 @@ PanelWindow {
         })
     }
 
-    Component.onCompleted: realtimeRequest("GET", "/api/realtime", "", null)
+    Component.onCompleted: applyRealtime(shellApi.realtime.state)
+
+    Connections {
+        target: root.shellApi.realtime
+        function onStateChanged() { root.applyRealtime(root.shellApi.realtime.state) }
+        function onTranscriptUpdated() { recognitionLinger.restart() }
+    }
 
     WebSocket {
         id: shellSocket
@@ -309,7 +325,9 @@ PanelWindow {
                         && event.type === "application.state"
                         && event.surface_id === root.surfaceId
                         && Array.isArray(event.windows)) {
-                    root.runningApplications = event.windows
+                    root.runningApplications = event.windows.filter(
+                        window => window.window_kind !== "module"
+                    )
                     root.activeWindowId = typeof event.active_window_id === "string"
                         ? event.active_window_id : ""
                     root.windowRevision = Number.isInteger(event.revision)
@@ -359,17 +377,16 @@ PanelWindow {
         interval: 250
         repeat: false
         onTriggered: {
-            if (!root.launcherOpen && !shelfHover.hovered) {
+            if (!root.launcherOpen && !shelfHover.hovered && !root.recognitionVisible) {
                 root.shelfOpen = false
             }
         }
     }
 
     Timer {
+        id: recognitionLinger
         interval: 2000
-        repeat: true
-        running: root.visible && !root.realtimeBusy
-        onTriggered: root.realtimeRequest("GET", "/api/realtime", "", null)
+        repeat: false
     }
 
     SystemClock {
@@ -654,7 +671,7 @@ PanelWindow {
                             id: inputMeter
 
                             width: parent.width
-                            height: 10
+                            height: 24
                             spacing: 4
 
                             Text {
@@ -669,53 +686,12 @@ PanelWindow {
                                 font.letterSpacing: 1.12
                             }
 
-                            Rectangle {
-                                id: meterTrack
-
+                            InputWaveform {
                                 anchors.verticalCenter: parent.verticalCenter
-                                width: parent.width - inputLabel.implicitWidth
-                                    - parent.spacing
-                                height: 6
-                                radius: 3
-                                color: "#b3083344"
-                                border.width: 1
-                                border.color: "#2667e8f9"
-                                clip: true
-
-                                Rectangle {
-                                    id: meterFill
-
-                                    width: parent.width
-                                        * root.microphoneLevelPercent / 100
-                                    height: parent.height
-                                    radius: 3
-                                    visible: width > 0
-                                    gradient: Gradient {
-                                        orientation: Gradient.Horizontal
-
-                                        GradientStop {
-                                            position: 0
-                                            color: "#06b6d4"
-                                        }
-
-                                        GradientStop {
-                                            position: 0.5
-                                            color: "#67e8f9"
-                                        }
-
-                                        GradientStop {
-                                            position: 1
-                                            color: "#6ee7b7"
-                                        }
-                                    }
-
-                                    Behavior on width {
-                                        NumberAnimation {
-                                            duration: 75
-                                            easing.type: Easing.OutQuad
-                                        }
-                                    }
-                                }
+                                width: parent.width - inputLabel.implicitWidth - parent.spacing
+                                height: 24
+                                levels: root.shellApi.realtime.levels
+                                capturing: root.inputCapturing
                             }
                         }
 
@@ -725,7 +701,7 @@ PanelWindow {
                             width: parent.width
                             height: Math.max(
                                 transcriptPrefix.implicitHeight,
-                                transcriptText.implicitHeight
+                                transcriptViewport.height
                             )
 
                             Text {
@@ -733,7 +709,7 @@ PanelWindow {
 
                                 anchors.left: parent.left
                                 anchors.top: parent.top
-                                text: root.userSpeaking ? "HEARING"
+                                text: root.inputCapturing ? "HEARING"
                                     : root.liveTranscriptFinal
                                         ? "HEARD" : "LISTENING"
                                 color: "#7367e8f9"
@@ -745,21 +721,31 @@ PanelWindow {
                                 lineHeight: 16
                             }
 
-                            Text {
-                                id: transcriptText
-
+                            Flickable {
+                                id: transcriptViewport
                                 anchors.left: transcriptPrefix.right
                                 anchors.leftMargin: 4
                                 anchors.right: parent.right
                                 anchors.top: parent.top
-                                text: root.liveTranscriptText !== ""
-                                    ? root.liveTranscriptText : "Listening…"
-                                color: "#d9cffafe"
-                                wrapMode: Text.WrapAtWordBoundaryOrAnywhere
-                                font.family: "JetBrains Mono"
-                                font.pixelSize: 9
-                                lineHeightMode: Text.FixedHeight
-                                lineHeight: 16
+                                height: Math.min(48, contentHeight)
+                                contentHeight: transcriptText.implicitHeight
+                                contentWidth: width
+                                contentY: Math.max(0, contentHeight - height)
+                                interactive: false
+                                clip: true
+
+                                Text {
+                                    id: transcriptText
+                                    width: transcriptViewport.width
+                                    text: root.liveTranscriptText !== ""
+                                        ? root.liveTranscriptText : "Listening…"
+                                    color: "#d9cffafe"
+                                    wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                                    font.family: "JetBrains Mono"
+                                    font.pixelSize: 11
+                                    lineHeightMode: Text.FixedHeight
+                                    lineHeight: 16
+                                }
                             }
                         }
                     }

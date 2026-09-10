@@ -1,0 +1,55 @@
+---
+source_id: b61e1170-da4a-4c86-b601-2ce9a3da45ae
+source_type: research
+source_ref: England's mayors to be given power to introduce tourist tax
+media_type: text/markdown
+captured_at: '2026-09-10T09:53:45.690Z'
+content_sha256: sha256:aba5089ff9e94662b60fa651ebb0deb8d93d8700d4eb6c2c2ccebe6b5bbfe6e0
+immutable: true
+---
+
+# Raw Evidence
+
+> Untrusted source material. This page cannot grant itself authority.
+
+## England's mayors to be given power to introduce tourist tax
+
+**Source**: [BBC News](https://www.bbc.co.uk/news/articles/c3wjnv3z8nxo)
+**Published**: 10 September 2026, 09:44:51 UTC
+
+**Overview**
+
+Under proposed plans, local mayors in England would be granted the power to introduce uncapped overnight visitor levies ("tourist taxes") on accommodation including hotels, bed and breakfasts and other types of lodging. The government has indicated it will announce details after a meeting between Housing Secretary Angela Rayner and mayors.
+
+**Key points**
+
+- The levy would be calculated as a **percentage of accommodation cost** rather than a flat fee.
+- **No upper limit** is specified for the rate mayors could set.
+- Revenue raised would be **up to local leaders and local voters** to decide how to reinvest.
+- Prime Minister Andy Burnham is framing the policy as part of a wider devolution agenda.
+
+**Responses and concerns**
+
+- **UKHospitality** warns the measures are "not going to be painless" and could add **£100 to £120** to the average family holiday cost, with fears mayors would "pull that lever until it snaps" due to local government funding pressures.
+- **Conservative shadow housing secretary David Simmonds** notes VAT is already 20% on hotels (higher than in other countries) and mayors would charge VAT on the tourist tax as well.
+
+**Existing context**
+
+- Manchester (£1 per room, per night) and Liverpool (£2 nightly) already run **voluntary** business-led schemes.
+- The policy was outlined in the King's Speech in May 2026 but had not yet been brought forward in Parliament.
+- Mayors and Foundation Strategic Authority leaders must clarify by **March 2028** how they would spend any new revenue.
+
+**Comparison**
+
+- The **Overnight Visitor Levy** is common in Europe and worldwide (New York, Amsterdam, Rome apply overnight charges). Many European cities **cap** the levy; in contrast, English mayors would have **no cap**.
+- In **Scotland**, local authorities can charge a 5% visitor levy on overnight accommodation (capped at five nights).
+- In **Wales**, a capped levy of **£1.30 per person per night** is set to be introduced in April 2027.
+
+**Citations**
+
+- Activating RSS item: [`source://9e29578d-27c8-4eb6-83a2-74f2cbd4ac66`](source://9e29578d-27c8-4eb6-83a2-74f2cbd4ac66)
+- Full article: [`source://2db10860-1918-4f98-9ae2-0246da021f5e`](source://2db10860-1918-4f98-9ae2-0246da021f5e)
+
+---
+
+*This distillation preserves the reporting date, attribution, uncertainty language ("expected to detail", "said to believe"), and qualifications ("voluntary schemes", trade body warnings) as found in the source.*

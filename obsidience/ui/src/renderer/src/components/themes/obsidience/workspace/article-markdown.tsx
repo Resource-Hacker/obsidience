@@ -4,10 +4,11 @@
 // palette, monospace code, GFM tables. react-markdown is pure React (no
 // dangerouslySetInnerHTML, CSP-safe); links open nowhere by default — the
 // reader is a display surface, not a browser.
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 const READER_REF_PREFIX = "#obsidience-ref=";
+const SOURCE_CITATION = /^source:\/\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function readableWikiLinks(content: string): string {
   return content.replace(/\[\[([^\]|\n]+)(?:\|([^\]\n]+))?\]\]/g, (_match, rawRef, rawLabel) => {
@@ -22,6 +23,7 @@ export function ArticleMarkdown(props: {
   content: string;
   variant?: "default" | "reader" | "index";
   onNavigate?: (ref: string) => void;
+  onSourceNavigate?: (citation: string) => void;
 }) {
   const variant = props.variant ?? "default";
   const comfortable = variant !== "default";
@@ -32,6 +34,7 @@ export function ArticleMarkdown(props: {
       : "text-xs leading-5 text-cyan-50/85"}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
+        urlTransform={(url) => SOURCE_CITATION.test(url) ? url : defaultUrlTransform(url)}
         components={{
           h1: ({ children }) => (
             <h1 className={`${comfortable
@@ -78,6 +81,14 @@ export function ArticleMarkdown(props: {
             </li>
           ) : <li className="break-words">{children}</li>,
           a: ({ children, href }) => {
+            if (href && SOURCE_CITATION.test(href) && props.onSourceNavigate) {
+              return (
+                <button type="button" onClick={() => props.onSourceNavigate?.(href)}
+                  className="mr-1 inline text-left font-semibold text-cyan-200 underline decoration-cyan-300/30 underline-offset-2 hover:text-cyan-50 hover:decoration-cyan-200/70">
+                  {children}
+                </button>
+              );
+            }
             if (href?.startsWith(READER_REF_PREFIX) && props.onNavigate) {
               const ref = decodeURIComponent(href.slice(READER_REF_PREFIX.length));
               return (

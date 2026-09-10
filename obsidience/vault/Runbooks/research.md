@@ -1,21 +1,23 @@
 ---
+type: runbook
 title: Research procedure
-kind: runbook
-owner_maintained: true
-for_agent: '[[Agents/Darwin/Darwin]]'
-skills:
-- '[[Skills/searching-the-web]]'
-- '[[Skills/fetching-web-sources]]'
-- '[[Skills/capturing-source-evidence]]'
-- '[[Skills/reading-source-evidence]]'
-- '[[Skills/handing-off-research]]'
-subrunbooks:
-- '[[Runbooks/research/question]]'
-- '[[Runbooks/research/learn]]'
-- '[[Runbooks/research/news]]'
-- '[[Runbooks/research/model]]'
+obsidience:
+  owner_maintained: true
+  for_agent: '[[Agents/Darwin/Darwin]]'
+  skills:
+  - '[[Skills/web.search]]'
+  - '[[Skills/web.fetch]]'
+  - '[[Skills/source.ingest]]'
+  - '[[Skills/source.read]]'
+  - '[[Skills/source.handoff]]'
+  subrunbooks:
+  - '[[Runbooks/research/question]]'
+  - '[[Runbooks/research/learn]]'
+  - '[[Runbooks/research/distill]]'
+  - '[[Runbooks/research/model]]'
 ---
-Procedures owned by Darwin. Question, Learn, News, and Model are the four
+
+Procedures owned by Darwin. Question, Learn, Distill, and Model are the four
 requested outcomes. Framing, discovery, collection, screening, assessment, extraction,
 analysis, and verification are steps inside these procedures rather than Task
 taxonomy. Generate is a peer family used after research establishes evidence.

@@ -14,6 +14,8 @@ Rectangle {
     property var contextUsage: null
     property int compactAt: 80
     property bool busy: false
+    property string activeTurnId: ""
+    property bool acceptingClarification: false
     property bool connected: false
     property bool resetting: false
     property string socketError: ""
@@ -91,6 +93,16 @@ Rectangle {
             busy = true
         } else if (message.type === "end") {
             busy = false
+            acceptingClarification = false
+            activeTurnId = ""
+        } else if (message.type === "active_turn" && message.conversation_id === conversationId) {
+            activeTurnId = typeof message.turn_id === "string" ? message.turn_id : ""
+            acceptingClarification = Boolean(message.accepting_clarification) && activeTurnId.length > 0
+            busy = activeTurnId.length > 0
+        } else if (message.type === "error") {
+            socketError = String(message.text || "Request failed")
+        } else if (message.type === "steering") {
+            socketError = ""
         }
     }
 
@@ -101,13 +113,18 @@ Rectangle {
 
     function sendDraft() {
         const clean = draft.trim()
-        if (!clean || !canMutate()) {
+        const clarify = busy && acceptingClarification && connected && !resetting
+            && chatSocket.status === WebSocket.Open
+        if (!clean || (!canMutate() && !clarify)) {
             return
         }
         chatSocket.sendTextMessage(JSON.stringify({
+            "type": clarify ? "steer" : "message",
+            "expected_turn_id": clarify ? activeTurnId : "",
             "text": clean,
             "source": "text"
         }))
+        socketError = ""
         draft = ""
         busy = true
     }
@@ -270,6 +287,19 @@ Rectangle {
         }
     }
 
+    Text {
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: composer.top
+        anchors.margins: 10
+        visible: root.socketError.length > 0
+        text: root.socketError
+        color: "#fcd34d"
+        font.pixelSize: 11
+        wrapMode: Text.Wrap
+        z: 2
+    }
+
     Rectangle {
         id: composer
 
@@ -377,7 +407,7 @@ Rectangle {
             anchors.topMargin: 9
             anchors.bottomMargin: 10
             text: root.draft
-            placeholderText: root.busy || root.resetting ? "…" : "Speak to the vault"
+            placeholderText: root.acceptingClarification ? "Clarify the current task" : root.busy || root.resetting ? "…" : "Speak to the vault"
             color: "#e6faff"
             placeholderTextColor: "#4d7dd3fc"
             wrapMode: TextEdit.Wrap
@@ -428,10 +458,10 @@ Rectangle {
             anchors.rightMargin: 10
             anchors.bottom: parent.bottom
             anchors.bottomMargin: 10
-            width: 50
+            width: root.acceptingClarification ? 76 : 50
             height: 54
-            enabled: root.canMutate() && root.draft.trim().length > 0
-            text: "SEND"
+            enabled: (root.canMutate() || (root.connected && root.acceptingClarification && !root.resetting)) && root.draft.trim().length > 0
+            text: root.acceptingClarification ? "CLARIFY" : "SEND"
             foreground: "#67e8f9"
             idleBorderOpacity: 0.25
             idleTextOpacity: 0.70
@@ -453,6 +483,7 @@ Rectangle {
             if (status === WebSocket.Open) {
                 root.socketError = ""
             } else if (status === WebSocket.Closed || status === WebSocket.Error) {
+                root.acceptingClarification = false
                 root.busy = false
                 root.resetting = false
                 if (status === WebSocket.Error) {

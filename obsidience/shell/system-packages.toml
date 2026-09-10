@@ -18,12 +18,12 @@ host = [
     "tmux",
 ]
 session = [
+    "aquamarine",
     "greetd",
     "greetd-agreety",
     "grim",
     "hypridle",
     "hyprland",
-    "hyprlock",
     "hyprpolkitagent",
     "kitty",
     "mako",
@@ -45,6 +45,7 @@ shell = [
     "qt6-multimedia",
     "qt6-svg",
     "qt6-wayland",
+    "qt6-webengine",
     "qt6-websockets",
     "quickshell",
     "ttf-jetbrains-mono",

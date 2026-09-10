@@ -181,11 +181,11 @@ function connect(): WebSocket {
   return socket;
 }
 
-export function presentShellReader(ref: string): void {
+export function presentShellReader(ref: string, graphId = ""): void {
   sendCommand({
     type: "pane.present",
     pane_id: "reader",
-    selection: { kind: "article", ref },
+    selection: { kind: "article", ref, graph_id: graphId },
   });
 }
 

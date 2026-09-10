@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# Build a candidate only; selecting the runtime is a separate deployment step.
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+runtime_root=${1:-/var/lib/ai/opt/obsidience-pointer}
+protocol=/usr/share/wlr-protocols/unstable/wlr-virtual-pointer-unstable-v1.xml
+protocol_sha=3ff6d540be0bc5228195bf072bde42117ea17945a5c2061add5d3cf97d6bb524
+printf '%s  %s\n' "$protocol_sha" "$protocol" | sha256sum --check --status
+work=$(mktemp -d)
+trap 'rm -rf -- "$work"' EXIT
+cp -- "$protocol" "$work/protocol.xml"
+wayland-scanner client-header "$work/protocol.xml" "$work/wlr-virtual-pointer-unstable-v1-client-protocol.h"
+wayland-scanner private-code "$work/protocol.xml" "$work/protocol.c"
+cc -std=c11 -O2 -Wall -Wextra -Werror -fstack-protector-strong \
+    -D_FORTIFY_SOURCE=2 -Wl,-z,relro,-z,now \
+    -I"$work" "$script_dir/pointer.c" "$work/protocol.c" \
+    $(pkg-config --cflags --libs wayland-client) -o "$work/obsidience-pointer"
+binary_sha=$(sha256sum "$work/obsidience-pointer")
+binary_sha=${binary_sha%% *}
+destination="$runtime_root/$binary_sha"
+mkdir -p -- "$runtime_root"
+if [[ -e "$destination" ]]; then
+    printf '%s  %s\n' "$binary_sha" "$destination/obsidience-pointer" | sha256sum --check --status
+else
+    mkdir -- "$destination"
+    install -m 0555 "$work/obsidience-pointer" "$destination/obsidience-pointer"
+    install -m 0444 "$script_dir/pointer.c" "$destination/pointer.c"
+    install -m 0444 "$work/protocol.xml" "$destination/protocol.xml"
+    install -m 0444 "$work/protocol.c" "$destination/protocol.c"
+    install -m 0444 "$work/wlr-virtual-pointer-unstable-v1-client-protocol.h" "$destination/wlr-virtual-pointer-unstable-v1-client-protocol.h"
+    chmod 0555 "$destination"
+fi
+printf '%s\n' "$destination/obsidience-pointer"

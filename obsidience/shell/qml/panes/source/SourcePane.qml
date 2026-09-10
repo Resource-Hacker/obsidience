@@ -13,6 +13,8 @@ Rectangle {
     required property string surfaceId
 
     readonly property string systemPrefix: "obsidience/state/system"
+    readonly property string evidencePrefix: "obsidience/evidence"
+    readonly property string vaultPrefix: "obsidience/vault"
     readonly property var checkoutAgents: [
         {"id": "executive", "label": "Executive", "role": "executive"},
         {"id": "guardian", "label": "Heimdall", "role": "guardian"},
@@ -22,22 +24,22 @@ Rectangle {
 
     property var files: []
     property var issues: []
-    property var storage: null
+    property var systemKnowledge: ({})
+    property bool systemRefreshBusy: false
+    property string systemError: ""
+    property int systemRequestGeneration: 0
     property var checkouts: ({})
+    property var articleRefs: ({})
     property var busyCheckouts: ({})
     property var visibleRows: []
     property var expandedPaths: ({
         "@view/system": true,
-        "@view/system/hardware": true,
-        "@view/system/hardware/drives": true,
-        "@view/system/hardware/drives/system-volume": true,
-        "@view/system/hardware/drives/system-volume/obsidience": true,
-        "@view/system/applications": true
+        "@view/knowledge": true
     })
     property string selectedRef: ""
     property string selectedKey: ""
     property string query: ""
-    property bool showAll: false
+    property bool showAll: true
     property bool loading: false
     property string errorMessage: ""
     property string bridgeError: ""
@@ -66,6 +68,7 @@ Rectangle {
     function sourceMatchesArticle(file, ref) {
         if (!file || !Array.isArray(file.articles)) return false
         if (file.articles.indexOf(ref) >= 0) return true
+        if (articleRefs[ref] && file.articles.indexOf(articleRefs[ref]) >= 0) return true
         if (!ref.startsWith("@branch/")) return false
         const branch = ref.slice("@branch/".length)
         if (branch === "ADMECH Workstation" && file.storage === "system") return true
@@ -74,59 +77,23 @@ Rectangle {
     }
 
     function route(file) {
-        const compute = systemPrefix + "/hardware/compute/"
-        const devices = systemPrefix + "/hardware/devices/"
-        const applications = systemPrefix + "/applications/"
-        const network = systemPrefix + "/network/"
-        const volume = systemPrefix + "/hardware/drives/system-volume/"
-        const models = "obsidience/evidence/models/"
-        if (file.path.startsWith(compute)) {
-            return {"parent": "compute", "relative": file.path.slice(compute.length),
-                "base": compute.slice(0, -1)}
+        if (file.path === systemPrefix + "/system.json"
+                || file.path.startsWith(systemPrefix + "/hardware/")
+                || file.path.startsWith(systemPrefix + "/applications/")) {
+            return {"parent": "system", "relative": file.path.slice(systemPrefix.length + 1), "base": systemPrefix}
         }
-        if (file.path.startsWith(devices)) {
-            return {"parent": "devices", "relative": file.path.slice(devices.length),
-                "base": devices.slice(0, -1)}
+        if (file.path.startsWith(vaultPrefix + "/")) {
+            return {"parent": "knowledge", "relative": file.path.slice(vaultPrefix.length + 1), "base": vaultPrefix}
         }
-        if (file.path.startsWith(applications)) {
-            return {"parent": "applications",
-                "relative": file.path.slice(applications.length),
-                "base": applications.slice(0, -1)}
+        if (file.path.startsWith(evidencePrefix + "/")) {
+            return {"parent": "evidence", "relative": file.path.slice(evidencePrefix.length + 1), "base": evidencePrefix}
         }
-        if (file.path.startsWith(network)) {
-            return {"parent": "network", "relative": file.path.slice(network.length),
-                "base": network.slice(0, -1)}
+        // During an evidence migration, keep any remaining exact old files
+        // outside System without claiming that their physical path changed.
+        if (file.path.startsWith(systemPrefix + "/snapshots/")) {
+            return {"parent": "evidence", "relative": file.path.slice(systemPrefix.length + 1), "base": systemPrefix}
         }
-        if (file.path === volume + "obsidience.json") {
-            return {"parent": "obsidience", "relative": file.name,
-                "base": volume.slice(0, -1)}
-        }
-        if (file.path === volume + "ai-models.json") {
-            return {"parent": "models", "relative": file.name,
-                "base": volume.slice(0, -1)}
-        }
-        if (file.path.startsWith(models)) {
-            return {"parent": "models", "relative": file.path.slice(models.length),
-                "base": models.slice(0, -1)}
-        }
-        if (file.path === systemPrefix + "/system.json") {
-            return {"parent": "system", "relative": file.name, "base": systemPrefix}
-        }
-        const productPrefix = "obsidience/"
-        return {"parent": "obsidience",
-            "relative": file.path.startsWith(productPrefix)
-                ? file.path.slice(productPrefix.length) : file.path,
-            "base": file.path.startsWith(productPrefix) ? "obsidience" : ""}
-    }
-
-    function storageLocation(id) {
-        if (!storage || !Array.isArray(storage.locations)) return null
-        return storage.locations.find(value => value.id === id) || null
-    }
-
-    function storageFilesystem(location) {
-        if (!location || !storage || !Array.isArray(storage.filesystems)) return null
-        return storage.filesystems.find(value => value.id === location.filesystem_id) || null
+        return {"parent": "project", "relative": file.path, "base": ""}
     }
 
     function folder(key, name, backingPath, subtitle, virtual, order) {
@@ -137,46 +104,25 @@ Rectangle {
     }
 
     function buildTree(scopedFiles) {
-        if (!scopedFiles.length) return []
-        const obsLocation = storageLocation("obsidience")
-        const modelLocation = storageLocation("models")
-        const sharedFilesystem = storage && Array.isArray(storage.filesystems)
-                && storage.filesystems.length === 1 ? storage.filesystems[0] : null
-        const obsidience = folder("@view/system/hardware/drives/system-volume/obsidience",
-            "OBSIDIENCE", "obsidience", obsLocation && obsLocation.available
-                ? obsLocation.path + " · shared filesystem · no quota"
-                : "Storage unavailable", true, 0)
-        const models = folder("@view/system/hardware/drives/system-volume/models",
-            modelLocation && modelLocation.label ? modelLocation.label : "AI Models",
-            "obsidience/evidence/models", modelLocation && modelLocation.available
-                ? modelLocation.path + " · shared filesystem · no quota"
-                : "Storage unavailable", true, 1)
-        const volume = folder("@view/system/hardware/drives/system-volume",
-            "SYSTEM VOLUME", systemPrefix + "/hardware/drives/system-volume",
-            sharedFilesystem ? "BTRFS · one shared physical capacity pool"
-                : "Physical storage volume", true, 0)
-        volume.filesystem = sharedFilesystem
-        volume.children = [obsidience, models]
-        const compute = folder("@view/system/hardware/compute", "COMPUTE",
-            systemPrefix + "/hardware/compute", "Processors and accelerators", true, 0)
-        const drives = folder("@view/system/hardware/drives", "DRIVES",
-            systemPrefix + "/hardware/drives", "Volumes and their actual files", true, 1)
-        drives.children = [volume]
-        const devices = folder("@view/system/hardware/devices", "DEVICES",
-            systemPrefix + "/hardware/devices", "Input and output", true, 2)
-        const hardware = folder("@view/system/hardware", "HARDWARE",
-            systemPrefix + "/hardware", "Physical computer", true, 0)
-        hardware.children = [compute, drives, devices]
-        const applications = folder("@view/system/applications", "APPLICATIONS",
-            systemPrefix + "/applications",
-            "Obsidience shell and integrated applications", true, 1)
-        const system = folder("@view/system", "SYSTEM", systemPrefix, "This PC", true, 0)
-        system.children = [hardware, applications]
-        const network = folder("@view/network", "NETWORK", systemPrefix + "/network",
-            "Connections and remote systems", true, 1)
-        const parents = {"system": system, "obsidience": obsidience,
-            "compute": compute, "devices": devices,
-            "applications": applications, "network": network, "models": models}
+        const system = folder("@view/system", "SYSTEM", systemPrefix,
+            "Hardware and Applications · read only", true, 0)
+        const knowledge = folder("@view/knowledge", "KNOWLEDGE MARKDOWN", vaultPrefix,
+            "Actual graph Articles · obsidience/vault", true, 1)
+        const evidence = folder("@view/evidence", "EVIDENCE", evidencePrefix,
+            "Captured references and agent handoffs · obsidience/evidence", true, 2)
+        evidence.children = [
+            folder(evidencePrefix + "/raw", "raw", evidencePrefix + "/raw",
+                "Immutable captured references", false, 0),
+            folder(evidencePrefix + "/inbox", "inbox", evidencePrefix + "/inbox",
+                "Darwin’s cited handoffs to Alexandria", false, 1),
+            folder(evidencePrefix + "/system", "system", evidencePrefix + "/system",
+                "Immutable System evidence versions", false, 2),
+            folder(evidencePrefix + "/incoming", "incoming", evidencePrefix + "/incoming",
+                "Manual text imports · capture and queue Darwin Learn; originals remain", false, 3)
+        ]
+        const project = folder("@view/project", "PROJECT FILES", "",
+            "Application code and project documents · exact paths", true, 3)
+        const parents = {"system": system, "knowledge": knowledge, "evidence": evidence, "project": project}
         for (const file of scopedFiles) {
             const target = route(file)
             const parts = target.relative.split("/").filter(Boolean)
@@ -187,44 +133,26 @@ Rectangle {
                 prefix = prefix ? prefix + "/" + part : part
                 let child = children.find(node => node.folder && node.key === prefix)
                 if (!child) {
-                    const systemFolder = prefix.startsWith(systemPrefix + "/")
-                    child = folder(prefix,
-                        systemFolder ? part.replace(/[-_]+/g, " ").toUpperCase() : part,
-                        prefix, "", false)
+                    const breadcrumb = Array.isArray(file.system_breadcrumbs)
+                        ? file.system_breadcrumbs.find(item => item.path === prefix) : null
+                    child = folder(prefix, breadcrumb ? breadcrumb.title : part, prefix, "", false)
                     children.push(child)
                 }
                 children = child.children
             }
-            children.push({"key": file.key, "name": filename,
+            children.push({"key": file.key, "name": file.system_label || filename,
                 "folder": false, "file": file, "children": []})
-        }
-        function prune(nodes) {
-            const result = []
-            for (const node of nodes) {
-                if (!node.folder) { result.push(node); continue }
-                node.children = prune(node.children)
-                if (node.children.length || node.key === "@view/system"
-                        || node.key === "@view/system/hardware"
-                        || node.key === "@view/system/hardware/drives"
-                        || node.key === "@view/system/hardware/drives/system-volume"
-                        || node.key === "@view/system/hardware/drives/system-volume/obsidience") {
-                    result.push(node)
-                }
-            }
-            return result
         }
         function sort(nodes) {
             nodes.sort(function(left, right) {
-                if (left.order !== undefined || right.order !== undefined) {
-                    const difference = (left.order ?? 999) - (right.order ?? 999)
-                    if (difference) return difference
-                }
+                const order = (left.order ?? 999) - (right.order ?? 999)
+                if (order) return order
                 if (left.folder !== right.folder) return left.folder ? -1 : 1
                 return left.name.localeCompare(right.name)
             })
             for (const node of nodes) sort(node.children)
         }
-        const roots = prune([system, network])
+        const roots = [system, knowledge, evidence, project]
         sort(roots)
         return roots
     }
@@ -248,7 +176,8 @@ Rectangle {
     function rebuildRows() {
         let scoped = files
         if (selectedRef && !showAll) {
-            scoped = files.filter(file => file.key === selectedKey
+            scoped = files.filter(file => file.path.startsWith(evidencePrefix + "/")
+                || file.key === selectedKey
                 || sourceMatchesArticle(file, selectedRef))
         }
         const tree = filterTree(buildTree(scoped), query.trim().toLowerCase())
@@ -257,7 +186,6 @@ Rectangle {
             return Object.assign({
                 "key": "", "name": "", "folder": false,
                 "subtitle": "", "backingPath": "", "virtual": false,
-                "filesystem": null,
                 "file": {"key": "", "storage": "", "size": 0},
                 "children": []
             }, node || {})
@@ -266,11 +194,6 @@ Rectangle {
             for (const node of nodes) {
                 rows.push({"type": node.folder ? "folder" : "file",
                     "node": rowNode(node), "depth": depth})
-                if (node.key === "@view/system/hardware/drives/system-volume"
-                        && node.filesystem && (expandedPaths[node.key] || query.trim())) {
-                    rows.push({"type": "capacity", "node": rowNode(node),
-                        "depth": depth + 1})
-                }
                 if (node.folder && (expandedPaths[node.key] || query.trim())) {
                     append(node.children || [], depth + 1)
                 }
@@ -297,29 +220,44 @@ Rectangle {
         requestGeneration += 1
         const generation = requestGeneration
         let sourcePayload = null
-        let hardwarePayload = null
         let checkoutPayload = null
+        let graphPayload = {}
+        let failed = false
+        const sourceFiles = Object.create(null)
+        const sourceIssues = Object.create(null)
+        const sourceCursors = Object.create(null)
+        let sourceScope = undefined
         function finish() {
-            if (!root || generation !== root.requestGeneration || sourcePayload === null
-                    || hardwarePayload === null || checkoutPayload === null) return
+            if (!root || failed || generation !== root.requestGeneration || sourcePayload === null
+                    || checkoutPayload === null) return
             root.files = sourcePayload.files
             root.issues = sourcePayload.issues
-            root.storage = hardwarePayload.storage || null
             const next = {}
             for (const assignment of checkoutPayload.assignments || []) {
                 next[root.checkoutKey(assignment.tree, assignment.agent)] = true
             }
             root.checkouts = next
+            const refs = {}
+            for (const group of (graphPayload.navigation || {}).groups || []) {
+                if (group.id === "executive") refs["@vault"] = group.root_ref
+                for (const subject of group.subjects || []) {
+                    if (subject.article_ref) refs[subject.id] = subject.article_ref
+                }
+            }
+            root.articleRefs = refs
             root.loading = false
             root.rebuildRows()
         }
-        function load(path, accept) {
+        function load(path, accept, optional) {
             const request = new XMLHttpRequest()
             request.open("GET", "http://127.0.0.1:8765" + path)
             request.onreadystatechange = function() {
-                if (request.readyState !== XMLHttpRequest.DONE || !root) return
+                if (request.readyState !== XMLHttpRequest.DONE || !root || failed
+                        || generation !== root.requestGeneration) return
                 if (request.status < 200 || request.status >= 300) {
+                    if (optional) { accept({}); finish(); return }
                     if (generation === root.requestGeneration) {
+                        failed = true
                         root.loading = false
                         root.errorMessage = request.responseText
                             || "Source hierarchy is unavailable."
@@ -328,7 +266,9 @@ Rectangle {
                 }
                 try { accept(JSON.parse(request.responseText)); finish() }
                 catch (error) {
+                    if (optional) { accept({}); finish(); return }
                     if (root && generation === root.requestGeneration) {
+                        failed = true
                         root.loading = false
                         root.errorMessage = "Source hierarchy response was invalid."
                     }
@@ -336,16 +276,59 @@ Rectangle {
             }
             request.send()
         }
-        load("/api/source-files", payload => {
-            if (!payload || !Array.isArray(payload.files)
-                    || !Array.isArray(payload.issues)) throw new Error("invalid source")
-            sourcePayload = payload
-        })
-        load("/api/hardware", payload => { hardwarePayload = payload || {} })
+        function loadSource(after) {
+            load("/api/source-files" + (after === null ? ""
+                : "?after=" + encodeURIComponent(after)), payload => {
+                if (!payload || !Array.isArray(payload.files)
+                        || !Array.isArray(payload.issues)) throw new Error("invalid source")
+                for (const file of payload.files) {
+                    if (!file || typeof file.key !== "string" || !file.key
+                            || typeof file.path !== "string" || !file.path) {
+                        throw new Error("invalid source file")
+                    }
+                    sourceFiles[file.key] = file
+                }
+                for (const issue of payload.issues) {
+                    if (!issue || typeof issue.path !== "string"
+                            || typeof issue.status !== "string" || typeof issue.detail !== "string") {
+                        throw new Error("invalid source issue")
+                    }
+                    sourceIssues[JSON.stringify([issue.path, issue.status, issue.detail])] = issue
+                }
+                const coverage = payload.coverage
+                // A first legacy response is a complete pre-pagination view.
+                if (coverage === undefined && after === null) {
+                    sourcePayload = {"files": Object.values(sourceFiles), "issues": Object.values(sourceIssues)}
+                    return
+                }
+                if (!coverage || coverage.consistency !== "live" || typeof coverage.complete !== "boolean"
+                        || coverage.returned !== payload.files.length || !Number.isInteger(coverage.limit)
+                        || coverage.limit < 1 || coverage.limit > 2000 || payload.files.length > coverage.limit
+                        || !(coverage.scope === null || typeof coverage.scope === "string")
+                        || (sourceScope !== undefined && coverage.scope !== sourceScope)) {
+                    throw new Error("invalid source coverage")
+                }
+                sourceScope = coverage.scope
+                if (coverage.complete) {
+                    if (coverage.next_cursor !== null) throw new Error("invalid source completion")
+                    sourcePayload = {"files": Object.values(sourceFiles), "issues": Object.values(sourceIssues)}
+                    return
+                }
+                const next = coverage.next_cursor
+                if (typeof next !== "string" || !next || sourceCursors[next]
+                        || !payload.files.length || next !== payload.files[payload.files.length - 1].key) {
+                    throw new Error("source pagination did not advance")
+                }
+                sourceCursors[next] = true
+                loadSource(next)
+            })
+        }
+        loadSource(null)
         load("/api/source-checkouts", payload => {
             checkoutPayload = payload && Array.isArray(payload.assignments)
                 ? payload : {"assignments": []}
         })
+        load("/api/graph", payload => { graphPayload = payload || {} }, true)
     }
 
     function sendShellCommand(command) {
@@ -401,7 +384,6 @@ Rectangle {
                 && event.pane.pane_id === "reader" && event.selection) {
             if (event.selection.kind === "article") {
                 selectedRef = String(event.selection.ref || "")
-                showAll = false
             } else if (event.selection.kind === "source") {
                 selectedKey = String(event.selection.key || "")
             }
@@ -411,7 +393,58 @@ Rectangle {
         }
     }
 
-    Component.onCompleted: refresh()
+    function systemKnowledgeLabel() {
+        if (systemRefreshBusy) return "System · Recording current observations…"
+        if (systemError) return systemError
+        const report = systemKnowledge || {}
+        if (report.status === "uninitialized" || !report.status) return "System · No recorded observations yet"
+        const timestamp = report.updated_at ? new Date(report.updated_at) : null
+        const recorded = timestamp && !isNaN(timestamp.getTime())
+            ? " · Checked " + timestamp.toLocaleString() : ""
+        return "System · " + Number(report.current_count || 0) + "/"
+            + (Array.isArray(report.categories) ? report.categories.length : 0) + " current"
+            + (report.status === "degraded" ? " · Some observations unavailable" : "") + recorded
+    }
+
+    function systemKnowledgeDetails() {
+        const categories = Array.isArray(systemKnowledge.categories) ? systemKnowledge.categories : []
+        const unavailable = categories.filter(item => item.status !== "current")
+            .map(item => item.title + ": " + (item.detail || item.status))
+        return systemKnowledgeLabel() + "\nImmutable evidence; refresh records newly observed versions."
+            + (unavailable.length ? "\n" + unavailable.join("\n") : "")
+    }
+
+    function loadSystemKnowledge(capture) {
+        if (systemRefreshBusy) return
+        const generation = ++systemRequestGeneration
+        if (capture) systemRefreshBusy = true
+        systemError = ""
+        const request = new XMLHttpRequest()
+        request.open(capture ? "POST" : "GET", "http://127.0.0.1:8765/api/system/"
+            + (capture ? "refresh" : "knowledge"))
+        request.onreadystatechange = function() {
+            if (request.readyState !== XMLHttpRequest.DONE || !root
+                    || generation !== root.systemRequestGeneration) return
+            root.systemRefreshBusy = false
+            if (request.status < 200 || request.status >= 300) {
+                root.systemError = capture ? "System refresh failed · previous evidence retained"
+                    : "System evidence status unavailable"
+                return
+            }
+            try {
+                const report = JSON.parse(request.responseText)
+                if (!report || ["ready", "degraded", "uninitialized"].indexOf(report.status) < 0
+                        || !Array.isArray(report.categories)) throw new Error("Invalid system status")
+                root.systemKnowledge = report
+                if (capture) root.refresh()
+            } catch (error) {
+                root.systemError = "System evidence status unavailable"
+            }
+        }
+        request.send()
+    }
+
+    Component.onCompleted: { refresh(); loadSystemKnowledge(false) }
     onQueryChanged: rebuildRows()
     onShowAllChanged: rebuildRows()
 
@@ -441,7 +474,7 @@ Rectangle {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
-        height: root.selectedRef ? 88 : 56
+        height: root.selectedRef ? 118 : 86
         color: "#c708050f"
 
         PaneModuleHeader {
@@ -486,6 +519,57 @@ Rectangle {
                 color: "#08050f"
                 border.width: 1
                 border.color: filterField.activeFocus ? "#80c4b5fd" : "#33c4b5fd"
+            }
+        }
+
+        Item {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.margins: 8
+            anchors.topMargin: 54
+            height: 24
+            Text {
+                anchors.left: parent.left
+                anchors.right: refreshSystem.left
+                anchors.rightMargin: 6
+                anchors.verticalCenter: parent.verticalCenter
+                text: root.systemKnowledgeLabel()
+                color: root.systemError || root.systemKnowledge.status === "degraded" ? "#fcd34d" : "#99c4b5fd"
+                elide: Text.ElideRight
+                font.family: "JetBrains Mono"
+                font.pixelSize: 8
+                MouseArea {
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    acceptedButtons: Qt.NoButton
+                    ToolTip.visible: containsMouse
+                    ToolTip.text: root.systemKnowledgeDetails()
+                }
+            }
+            Button {
+                id: refreshSystem
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                width: 104
+                height: 23
+                text: root.systemRefreshBusy ? "REFRESHING…" : "REFRESH SYSTEM"
+                enabled: !root.systemRefreshBusy
+                onClicked: root.loadSystemKnowledge(true)
+                contentItem: Text {
+                    text: refreshSystem.text
+                    color: "#c4b5fd"
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                    font.family: "JetBrains Mono"
+                    font.pixelSize: 8
+                }
+                background: Rectangle {
+                    radius: 3
+                    color: refreshSystem.hovered ? "#1ac4b5fd" : "#0ac4b5fd"
+                    border.width: 1
+                    border.color: "#40c4b5fd"
+                }
             }
         }
 
@@ -584,8 +668,7 @@ Rectangle {
             id: row
             required property var modelData
             width: hierarchyView.width
-            height: modelData.type === "capacity" ? 50
-                : modelData.type === "folder" && modelData.node.subtitle ? 34
+            height: modelData.type === "folder" && modelData.node.subtitle ? 34
                 : modelData.type === "issue" ? 30 : 24
 
             Rectangle {
@@ -619,7 +702,7 @@ Rectangle {
                         : row.modelData.node.key.indexOf("drives") >= 0 ? "▰"
                         : row.modelData.node.key.indexOf("devices") >= 0 ? "⌘"
                         : row.modelData.node.key.indexOf("applications") >= 0 ? "▦"
-                        : row.modelData.node.key === "@view/network" ? "⌁" : "▱"
+                        : row.modelData.node.key === root.systemPrefix + "/hardware/network" ? "⌁" : "▱"
                     color: row.modelData.node.key.indexOf("hardware") >= 0
                         ? "#b36ee7b7" : "#99c4b5fd"
                     font.family: "JetBrains Mono"
@@ -715,6 +798,10 @@ Rectangle {
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: root.toggleFolder(row.modelData.node.key)
+                    ToolTip.visible: containsMouse
+                    ToolTip.delay: 400
+                    ToolTip.text: [row.modelData.node.subtitle,
+                        row.modelData.node.backingPath].filter(Boolean).join("\n")
                 }
             }
 
@@ -770,72 +857,6 @@ Rectangle {
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: root.presentSource(row.modelData.node.file.key)
-                }
-            }
-
-            Rectangle {
-                visible: row.modelData.type === "capacity"
-                anchors.fill: parent
-                anchors.leftMargin: 18 + row.modelData.depth * 12
-                anchors.rightMargin: 4
-                anchors.topMargin: 2
-                anchors.bottomMargin: 4
-                radius: 4
-                color: "#060ea5e9"
-                border.width: 1
-                border.color: "#1a7dd3fc"
-                property var filesystem: row.modelData.node
-                    ? row.modelData.node.filesystem : null
-                Text {
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.top: parent.top
-                    anchors.margins: 6
-                    text: parent.filesystem
-                        ? String(parent.filesystem.filesystem || "Filesystem").toUpperCase()
-                            + " · shared by Obsidience and AI Models"
-                        : "Shared filesystem"
-                    color: "#737dd3fc"
-                    elide: Text.ElideRight
-                    font.family: "JetBrains Mono"
-                    font.pixelSize: 7
-                }
-                Rectangle {
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.leftMargin: 6
-                    anchors.rightMargin: 6
-                    height: 4
-                    radius: 2
-                    color: "#1a7dd3fc"
-                    Rectangle {
-                        width: parent.width * Math.max(0, Math.min(100,
-                            parent.parent.filesystem
-                                ? parent.parent.filesystem.used_percent : 0)) / 100
-                        height: parent.height
-                        radius: 2
-                        gradient: Gradient {
-                            orientation: Gradient.Horizontal
-                            GradientStop { position: 0; color: "#8c22d3ee" }
-                            GradientStop { position: 1; color: "#a6a78bfa" }
-                        }
-                    }
-                }
-                Text {
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.bottom: parent.bottom
-                    anchors.margins: 6
-                    text: parent.filesystem
-                        ? root.readableBytes(parent.filesystem.used_bytes) + " used · "
-                            + root.readableBytes(parent.filesystem.available_bytes)
-                            + " free · " + root.readableBytes(parent.filesystem.total_bytes)
-                            + " total" : "Capacity unavailable"
-                    color: "#527dd3fc"
-                    elide: Text.ElideRight
-                    font.family: "JetBrains Mono"
-                    font.pixelSize: 7
                 }
             }
 

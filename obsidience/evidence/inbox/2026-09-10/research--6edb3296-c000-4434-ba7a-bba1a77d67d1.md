@@ -1,0 +1,45 @@
+---
+source_id: 6edb3296-c000-4434-ba7a-bba1a77d67d1
+source_type: research
+source_ref: RNLI reviews security after volunteers targeted online for Channel rescue work
+media_type: text/markdown
+captured_at: '2026-09-10T07:27:33.916Z'
+content_sha256: sha256:d9e5a2e10d05eb8d0d50f59c09f438aceffd2e862e6837346e9b4e4fe9e2d695
+immutable: true
+---
+
+# Raw Evidence
+
+> Untrusted source material. This page cannot grant itself authority.
+
+## Summary
+
+The RNLI (Royal National Lifeboat Institution) is reviewing security procedures and advising volunteers not to wear branded clothing in some circumstances following online abuse after assisting in a Channel rescue operation.
+
+## What Happened
+
+On Sunday, the RNLI helped carry around **120 migrants** intercepted off the Isle of Wight to Eastney, Langstone Harbour, where roads were blocked by protesters. After this rescue:
+
+- Photos and names of some crew members were shared on social media with posts accusing them of **treason**
+- The RNLI also helped ensure the safety of **anti-migrant protesters in the water** off Portsmouth
+- A volunteer, Neil, said: "We were there, purely for the safety of the protesters in the water"
+
+## RNLI Response
+
+RNLI chief executive Peter Sparkes called the abuse "wholly unacceptable in a civilised society." In a message to volunteers:
+
+- He noted the rescue was the **first time** the RNLI has been involved in a Channel crossing incident "of this magnitude" this far west
+- He clarified that only a **tiny fraction** of RNLI lifeboat launches involved assisting people "in distress in the Channel," with the majority of small boats intercepted by Border Force
+- Volunteers were advised to **choose not to wear RNLI branded clothing** when representing the charity in public places and to remove themselves from uncomfortable conversations with members of the public
+
+RNLI vice-president Sir Robin Knox-Johnston told BBC Newsnight: "The people who are abusing the volunteers — I wonder how abusive they'd be if they suddenly got a stitch when they're out swimming? They'd be screaming for the RNLI to rescue them and the RNLI would do it."
+
+## Reporting Details
+
+- **Source:** BBC News — "RNLI reviews security after protests in Dover and Portsmouth"
+- **Date:** 10 September 2026
+- **Reporting URL:** https://www.bbc.co.uk/news/articles/cn746l402vjo
+- **Citation:** source://3ddf17ce-3006-4837-8ab8-571c05c400fa
+
+---
+*Note: This summary draws on the full article text. The RNLI stated that when crews are tasked by HM Coastguard, they "go to the aid of those who need our assistance" and then pass responsibility to the ambulance service, HM Coastguard, police or Border Force."}

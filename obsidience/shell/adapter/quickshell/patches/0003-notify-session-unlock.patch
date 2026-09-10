@@ -1,0 +1,21 @@
+diff --git a/src/wayland/session_lock.cpp b/src/wayland/session_lock.cpp
+index 21ed395..96c3330 100644
+--- a/src/wayland/session_lock.cpp
++++ b/src/wayland/session_lock.cpp
+@@ -156,6 +156,7 @@ void WlSessionLock::realizeLockTarget(WlSessionLock* old) {
+ }
+ 
+ void WlSessionLock::unlock() {
++	const auto wasLocked = this->isLocked();
+ 	this->lockTarget = false;
+ 
+ 	for (auto* surface: this->surfaces) {
+@@ -166,7 +167,7 @@ void WlSessionLock::unlock() {
+ 	this->surfaces.clear();
+ 
+ 	if (this->manager) this->manager->unlock();
+-	if (this->isLocked()) emit this->lockStateChanged();
++	if (wasLocked) emit this->lockStateChanged();
+ }
+ 
+ void WlSessionLock::onScreensChanged() {

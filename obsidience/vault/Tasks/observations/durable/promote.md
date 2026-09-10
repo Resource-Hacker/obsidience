@@ -1,16 +1,16 @@
 ---
-assignee: '[[Agents/Alexandria/Alexandria]]'
-auto_done: true
-enabled: true
-kind: task
-model: obsidience-qwen38-27b-q8
-reasoning_effort: xhigh
-runbook: '[[Runbooks/observations/promote]]'
-status: draft
-taxonomy_path: observations/durable/promote
+type: task
 title: Promote
-triggers:
-- observations.temporary.ready
+obsidience:
+  assignee: '[[Agents/Alexandria/Alexandria]]'
+  auto_done: true
+  enabled: true
+  model: obsidience-qwen38-27b-q8
+  reasoning_effort: xhigh
+  runbook: '[[Runbooks/observations/promote]]'
+  taxonomy_path: observations/promote
+  triggers:
+  - observations.temporary.ready
 ---
 
 Evaluate one completed Executive conversation's committed Temporary

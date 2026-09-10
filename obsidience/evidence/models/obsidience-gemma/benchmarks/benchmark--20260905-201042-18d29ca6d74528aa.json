@@ -1,0 +1,25 @@
+{
+  "completion_tokens": 768,
+  "contract": "obsidience.model-comparison.v1",
+  "devices": [
+    "rtx4000"
+  ],
+  "kind": "model_comparison",
+  "metrics": {
+    "latency_p50_ms": 2492.27,
+    "latency_p95_ms": 2495.16,
+    "temperature_zero_supported": true,
+    "ttft_p95_ms": 61.66
+  },
+  "model_id": "obsidience-gemma",
+  "output_budget_tokens": 256,
+  "recorded_at": "2026-09-05T20:10:42-0700",
+  "sample_count": 3,
+  "schema": "obsidience.model-benchmark.v1",
+  "summary": "TTFT 60.9 ms \u00b7 102.93 end-to-end tok/s",
+  "tested_at": "2026-09-05T20:10:42-0700",
+  "tokens_per_second": 102.93,
+  "total_seconds": 7.462,
+  "ttft_ms": 60.86,
+  "warmup_count": 1
+}

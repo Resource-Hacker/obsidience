@@ -1,0 +1,44 @@
+From: Obsidience <local@obsidience>
+Subject: [PATCH] launch: satisfy the QtWebEngine host contract
+
+QtWebEngine initializes Chromium from QCoreApplication::arguments() and
+rejects an empty argument list. Quickshell reconstructs its GUI application
+after parsing its own command line, so retain the executable name while
+continuing to hide all consumed arguments from Qt.
+
+QtWebEngine Quick also requires shared graphics contexts to be selected before
+the first application object exists. Set Qt's documented equivalent attribute
+before Quickshell creates its temporary QCoreApplication.
+
+---
+ src/launch/launch.cpp | 2 +-
+ src/launch/main.cpp   | 1 +
+ 2 files changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/launch/launch.cpp b/src/launch/launch.cpp
+index 71d9983..fa41f88 100644
+--- a/src/launch/launch.cpp
++++ b/src/launch/launch.cpp
+@@ -282,7 +282,7 @@ int launch(const LaunchArgs& args, char** argv, QCoreApplication* coreApplicatio
+ 	delete coreApplication;
+ 
+ 	QGuiApplication* app = nullptr;
+-	auto qArgC = 0;
++	auto qArgC = 1;
+ 
+ 	if (pragmas.useQApplication) {
+ 		app = new QApplication(qArgC, argv);
+diff --git a/src/launch/main.cpp b/src/launch/main.cpp
+index ab08a5e..441304d 100644
+--- a/src/launch/main.cpp
++++ b/src/launch/main.cpp
+@@ -117,6 +117,7 @@ void exitDaemon(int code) {
+ }
+ 
+ int main(int argc, char** argv) {
++	QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
+ 	QCoreApplication::setApplicationName("quickshell");
+ 
+ #if CRASH_HANDLER
+-- 
+2.51.0

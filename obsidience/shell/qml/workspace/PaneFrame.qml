@@ -9,16 +9,64 @@ Item {
 
     required property string title
     required property ShellTheme theme
-    required property bool active
+    property bool defaultWidthReached: false
+    property bool defaultHeightReached: false
+    property string verticalDefaultGuideEdge: ""
+    property string horizontalDefaultGuideEdge: ""
+    property bool defaultSizeFeedbackEnabled: true
+    property bool resizeFeedbackActive: false
+    property int resizeFeedbackEdges: 0
+    readonly property int verticalResizeEdge:
+        verticalDefaultGuideEdge === "left" ? Qt.LeftEdge : Qt.RightEdge
+    readonly property int horizontalResizeEdge:
+        horizontalDefaultGuideEdge === "top" ? Qt.TopEdge : Qt.BottomEdge
+    readonly property bool widthResizeFeedback:
+        (resizeFeedbackEdges & (Qt.LeftEdge | Qt.RightEdge)) !== 0
+    readonly property bool heightResizeFeedback:
+        (resizeFeedbackEdges & (Qt.TopEdge | Qt.BottomEdge)) !== 0
     default property alias contentData: content.data
 
-    signal dragStarted()
-    signal dragMoved(real deltaX, real deltaY, real pointerX, real pointerY)
-    signal dragFinished(bool moved)
-    signal resizeStarted()
-    signal resizeMoved(real deltaX, real deltaY)
-    signal resizeFinished(bool moved)
+    signal moveRequested()
+    signal resizeRequested(int edges)
     signal closeRequested()
+
+    function keepResizeFeedback() {
+        if (resizeFeedbackActive) {
+            resizeFeedbackTimer.restart()
+        }
+    }
+
+    function beginResize(edges) {
+        resizeFeedbackEdges = edges
+        resizeFeedbackActive = true
+        resizeFeedbackTimer.restart()
+        resizeRequested(edges)
+    }
+
+    function keepWidthResizeFeedback() {
+        if (widthResizeFeedback) {
+            resizeFeedbackActive = true
+            resizeFeedbackTimer.restart()
+        }
+    }
+
+    function keepHeightResizeFeedback() {
+        if (heightResizeFeedback) {
+            resizeFeedbackActive = true
+            resizeFeedbackTimer.restart()
+        }
+    }
+
+    onWidthChanged: keepWidthResizeFeedback()
+    onHeightChanged: keepHeightResizeFeedback()
+
+    Timer {
+        id: resizeFeedbackTimer
+
+        interval: 900
+        repeat: false
+        onTriggered: root.resizeFeedbackActive = false
+    }
 
     ClippingRectangle {
         id: frame
@@ -37,8 +85,6 @@ Item {
             anchors.top: parent.top
             height: root.theme.titleHeight
             color: "transparent"
-
-            property bool moved: false
 
             Rectangle {
                 anchors.left: parent.left
@@ -99,47 +145,14 @@ Item {
                 anchors.top: parent.top
                 anchors.bottom: parent.bottom
                 acceptedButtons: Qt.LeftButton
-                preventStealing: true
                 cursorShape: Qt.OpenHandCursor
 
-                property point pressGlobal: Qt.point(0, 0)
-
-                onPressed: mouse => {
-                    titleBar.moved = false
-                    pressGlobal = titleBar.mapToGlobal(mouse.x, mouse.y)
+                onPressed: {
                     cursorShape = Qt.ClosedHandCursor
-                    root.dragStarted()
+                    root.moveRequested()
                 }
-                onPositionChanged: mouse => {
-                    if (!dragArea.pressed) {
-                        return
-                    }
-                    const pointer = titleBar.mapToGlobal(mouse.x, mouse.y)
-                    const deltaX = pointer.x - pressGlobal.x
-                    const deltaY = pointer.y - pressGlobal.y
-                    if (Math.abs(deltaX) > 0 || Math.abs(deltaY) > 0) {
-                        titleBar.moved = true
-                    }
-                    const localPointer = dragArea.mapToItem(
-                        root,
-                        mouse.x,
-                        mouse.y
-                    )
-                    root.dragMoved(
-                        deltaX,
-                        deltaY,
-                        localPointer.x,
-                        localPointer.y
-                    )
-                }
-                onReleased: {
-                    cursorShape = Qt.OpenHandCursor
-                    root.dragFinished(titleBar.moved)
-                }
-                onCanceled: {
-                    cursorShape = Qt.OpenHandCursor
-                    root.dragFinished(titleBar.moved)
-                }
+                onReleased: cursorShape = Qt.OpenHandCursor
+                onCanceled: cursorShape = Qt.OpenHandCursor
             }
         }
 
@@ -152,30 +165,173 @@ Item {
             anchors.bottom: parent.bottom
         }
 
+        Rectangle {
+            id: verticalDefaultGuide
+
+            x: root.verticalDefaultGuideEdge === "left"
+                ? 3 : parent.width - width - 3
+            y: 3
+            width: 2
+            height: Math.max(0, parent.height - 6)
+            radius: 1
+            color: root.theme.text
+            opacity: root.defaultSizeFeedbackEnabled
+                    && root.resizeFeedbackActive
+                    && root.widthResizeFeedback
+                    && root.defaultWidthReached
+                    && root.verticalDefaultGuideEdge !== "" ? 0.9 : 0
+
+            Behavior on opacity {
+                NumberAnimation { duration: 80 }
+            }
+        }
+
+        Rectangle {
+            id: horizontalDefaultGuide
+
+            x: 3
+            y: root.horizontalDefaultGuideEdge === "top"
+                ? 3 : parent.height - height - 3
+            width: Math.max(0, parent.width - 6)
+            height: 2
+            radius: 1
+            color: root.theme.text
+            opacity: root.defaultSizeFeedbackEnabled
+                    && root.resizeFeedbackActive
+                    && root.heightResizeFeedback
+                    && root.defaultHeightReached
+                    && root.horizontalDefaultGuideEdge !== "" ? 0.9 : 0
+
+            Behavior on opacity {
+                NumberAnimation { duration: 80 }
+            }
+        }
+
+        Item {
+            id: widthResizeHandle
+
+            visible: root.verticalDefaultGuideEdge !== ""
+            x: root.verticalDefaultGuideEdge === "left"
+                ? 0 : parent.width - width
+            y: Math.round((parent.height - height) / 2)
+            width: 18
+            height: 56
+
+            Rectangle {
+                anchors.fill: parent
+                anchors.margins: 2
+                radius: 6
+                color: widthResizeMouse.containsMouse
+                    || widthResizeMouse.pressed
+                    ? root.theme.hover : "transparent"
+            }
+
+            Rectangle {
+                anchors.centerIn: parent
+                width: 2
+                height: 24
+                radius: 1
+                color: widthResizeMouse.containsMouse
+                    || widthResizeMouse.pressed
+                    ? root.theme.text : root.theme.strongAccent
+            }
+
+            MouseArea {
+                id: widthResizeMouse
+
+                anchors.fill: parent
+                acceptedButtons: Qt.LeftButton
+                hoverEnabled: true
+                cursorShape: Qt.SizeHorCursor
+                onPressed: root.beginResize(root.verticalResizeEdge)
+                onReleased: root.keepResizeFeedback()
+                onCanceled: root.keepResizeFeedback()
+            }
+        }
+
+        Item {
+            id: heightResizeHandle
+
+            visible: root.horizontalDefaultGuideEdge !== ""
+            x: Math.round((parent.width - width) / 2)
+            y: root.horizontalDefaultGuideEdge === "top"
+                ? 0 : parent.height - height
+            width: 56
+            height: 18
+
+            Rectangle {
+                anchors.fill: parent
+                anchors.margins: 2
+                radius: 6
+                color: heightResizeMouse.containsMouse
+                    || heightResizeMouse.pressed
+                    ? root.theme.hover : "transparent"
+            }
+
+            Rectangle {
+                anchors.centerIn: parent
+                width: 24
+                height: 2
+                radius: 1
+                color: heightResizeMouse.containsMouse
+                    || heightResizeMouse.pressed
+                    ? root.theme.text : root.theme.strongAccent
+            }
+
+            MouseArea {
+                id: heightResizeMouse
+
+                anchors.fill: parent
+                acceptedButtons: Qt.LeftButton
+                hoverEnabled: true
+                cursorShape: Qt.SizeVerCursor
+                onPressed: root.beginResize(root.horizontalResizeEdge)
+                onReleased: root.keepResizeFeedback()
+                onCanceled: root.keepResizeFeedback()
+            }
+        }
+
         Item {
             id: resizeHandle
 
-            anchors.right: parent.right
-            anchors.bottom: parent.bottom
-            width: 22
-            height: 22
+            visible: root.verticalDefaultGuideEdge !== ""
+                && root.horizontalDefaultGuideEdge !== ""
+            x: root.verticalDefaultGuideEdge === "left"
+                ? 0 : parent.width - width
+            y: root.horizontalDefaultGuideEdge === "top"
+                ? 0 : parent.height - height
+            width: 30
+            height: 30
 
             Rectangle {
-                anchors.right: parent.right
-                anchors.bottom: parent.bottom
-                anchors.rightMargin: 4
-                anchors.bottomMargin: 4
-                width: 8
-                height: 8
-                color: "transparent"
-                border.width: 0
+                anchors.fill: parent
+                anchors.margins: 2
+                radius: 6
+                color: resizeMouse.containsMouse || resizeMouse.pressed
+                    ? root.theme.hover : "transparent"
+            }
+
+            Item {
+                id: cornerGlyph
+
+                x: 5
+                y: 5
+                width: 15
+                height: 15
+                transform: Scale {
+                    origin.x: cornerGlyph.width / 2
+                    origin.y: cornerGlyph.height / 2
+                    xScale: root.verticalDefaultGuideEdge === "left" ? -1 : 1
+                    yScale: root.horizontalDefaultGuideEdge === "top" ? -1 : 1
+                }
 
                 Rectangle {
                     anchors.right: parent.right
                     anchors.bottom: parent.bottom
                     width: 2
                     height: parent.height
-                    color: root.theme.strongAccent
+                    color: resizeMouse.containsMouse || resizeMouse.pressed
+                        ? root.theme.text : root.theme.strongAccent
                 }
 
                 Rectangle {
@@ -183,72 +339,48 @@ Item {
                     anchors.bottom: parent.bottom
                     width: parent.width
                     height: 2
-                    color: root.theme.strongAccent
+                    color: resizeMouse.containsMouse || resizeMouse.pressed
+                        ? root.theme.text : root.theme.strongAccent
+                }
+
+                Rectangle {
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    anchors.rightMargin: 6
+                    anchors.bottomMargin: 6
+                    width: 2
+                    height: 6
+                    color: resizeMouse.containsMouse || resizeMouse.pressed
+                        ? root.theme.text : root.theme.strongAccent
+                }
+
+                Rectangle {
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    anchors.rightMargin: 6
+                    anchors.bottomMargin: 6
+                    width: 6
+                    height: 2
+                    color: resizeMouse.containsMouse || resizeMouse.pressed
+                        ? root.theme.text : root.theme.strongAccent
                 }
             }
 
             MouseArea {
+                id: resizeMouse
+
                 anchors.fill: parent
                 acceptedButtons: Qt.LeftButton
-                preventStealing: true
-                cursorShape: Qt.SizeFDiagCursor
-
-                property point pressGlobal: Qt.point(0, 0)
-                property bool moved: false
-
-                onPressed: mouse => {
-                    moved = false
-                    pressGlobal = resizeHandle.mapToGlobal(mouse.x, mouse.y)
-                    root.resizeStarted()
-                }
-                onPositionChanged: mouse => {
-                    if (!pressed) {
-                        return
-                    }
-                    const pointer = resizeHandle.mapToGlobal(mouse.x, mouse.y)
-                    const deltaX = pointer.x - pressGlobal.x
-                    const deltaY = pointer.y - pressGlobal.y
-                    if (Math.abs(deltaX) > 0 || Math.abs(deltaY) > 0) {
-                        moved = true
-                    }
-                    root.resizeMoved(deltaX, deltaY)
-                }
-                onReleased: root.resizeFinished(moved)
-                onCanceled: root.resizeFinished(moved)
+                hoverEnabled: true
+                cursorShape: (root.verticalDefaultGuideEdge === "left")
+                        === (root.horizontalDefaultGuideEdge === "top")
+                    ? Qt.SizeFDiagCursor : Qt.SizeBDiagCursor
+                onPressed: root.beginResize(
+                    root.verticalResizeEdge | root.horizontalResizeEdge
+                )
+                onReleased: root.keepResizeFeedback()
+                onCanceled: root.keepResizeFeedback()
             }
         }
-    }
-
-    Rectangle {
-        anchors.fill: frame
-        anchors.margins: -3
-        z: 1
-        visible: root.active
-        color: "transparent"
-        radius: root.theme.cornerRadius + 3
-        border.width: 3
-        border.pixelAligned: false
-        border.color: Qt.rgba(
-            root.theme.shadow.r,
-            root.theme.shadow.g,
-            root.theme.shadow.b,
-            20 / 255
-        )
-    }
-
-    Rectangle {
-        anchors.fill: frame
-        z: 2
-        color: "transparent"
-        radius: root.theme.cornerRadius
-        border.width: root.theme.borderWidth
-        border.pixelAligned: true
-        border.color: root.active
-            ? Qt.rgba(
-                root.theme.strongAccent.r,
-                root.theme.strongAccent.g,
-                root.theme.strongAccent.b,
-                1
-            ) : root.theme.inactiveBorder
     }
 }

@@ -25,6 +25,6 @@ One request never authorizes a second purchase, reroll, sale, item equip, reposi
 
 ## Relationships
 
-- `depends_on` [TFT managed Waydroid launch](/ADMECH%20Workstation/Software/Games/Teamfight%20Tactics/tft-launch-via-rtx-4080-android-avd--3e5726a8.md) — A live TFT decision requires the established managed Waydroid/Gamescope launch route.
+- `depends_on` [TFT managed Waydroid launch](/ADMECH%20Workstation/Workstation%20Observations/tft-launch-via-rtx-4080-android-avd--3e5726a8.md) — A live TFT decision requires the established managed Waydroid/Gamescope launch route.
 - `related_to` [Game interaction authority and interests](/Agents/Executive/Observations/Preferences/games.md) — The policy applies the owner’s standing game-interaction authority to one bounded TFT choice.
 - `related_to` [Current games library](/Games/Game%20Observations/current-games-library--6770993b.md) — The policy's one-click decision surface is the TFT application reached through the `teamfight_tactics` route registered in the current games library.

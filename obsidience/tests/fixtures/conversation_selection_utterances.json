@@ -1,0 +1,225 @@
+{
+  "description": "Historical wording regression corpus. Previous regex expectations are recorded for comparison, not accepted semantic results. Supply exact conversation and current scene for pronouns and ambiguous requests; evaluate the real semantic selector separately.",
+  "cases": [
+    {
+      "request": "Can you tell me what's on the edge right now",
+      "previous_selector_outcome": "observe"
+    },
+    {
+      "request": "Can you tell me what's on the edge browser",
+      "previous_selector_outcome": "observe"
+    },
+    {
+      "request": "Can you bring it to the focus foreground?",
+      "previous_selector_outcome": "focus"
+    },
+    {
+      "request": "Can you bring it to the foreground",
+      "previous_selector_outcome": "focus"
+    },
+    {
+      "request": "Alright, I ain't gonna work. Can you bring it to the foreground?",
+      "previous_selector_outcome": "focus"
+    },
+    {
+      "request": "Can you bring it to the four can you bring it to the foreground?",
+      "previous_selector_outcome": "focus"
+    },
+    {
+      "request": "Can you focus the edge when uh pane",
+      "previous_selector_outcome": "focus"
+    },
+    {
+      "request": "Can you focus the edge page?",
+      "previous_selector_outcome": "focus"
+    },
+    {
+      "request": "Can you move the edge pane to the far left of the screen?",
+      "previous_selector_outcome": "placement"
+    },
+    {
+      "request": "Can you move the edge pane to the right",
+      "previous_selector_outcome": "placement"
+    },
+    {
+      "request": "Let's see if this will hey, can you move the TFT window to the bottom monitor",
+      "previous_selector_outcome": "placement"
+    },
+    {
+      "request": "Can you move it back",
+      "previous_selector_outcome": "placement"
+    },
+    {
+      "request": "Move the cursor to the right",
+      "previous_selector_outcome": "action"
+    },
+    {
+      "request": "Can you send a message to Bob?",
+      "previous_selector_outcome": "action"
+    },
+    {
+      "request": "What is visible in the Microsoft Edge browser right now?",
+      "previous_selector_outcome": "observe"
+    },
+    {
+      "request": "Can you tell me what is visible in the Microsoft Edge browser right now?",
+      "previous_selector_outcome": "observe"
+    },
+    {
+      "request": "What's currently visible in the Edge window?",
+      "previous_selector_outcome": "observe"
+    },
+    {
+      "request": "What is showing in the Microsoft Edge browser?",
+      "previous_selector_outcome": "observe"
+    },
+    {
+      "request": "What is displayed in the Microsoft Edge window at the moment?",
+      "previous_selector_outcome": "observe"
+    },
+    {
+      "request": "What is Microsoft Edge currently showing?",
+      "previous_selector_outcome": "observe"
+    },
+    {
+      "request": "What is the Edge browser displaying right now?",
+      "previous_selector_outcome": "observe"
+    },
+    {
+      "request": "What can you see in the Microsoft Edge browser?",
+      "previous_selector_outcome": "observe"
+    },
+    {
+      "request": "What do you see in the Edge window right now?",
+      "previous_selector_outcome": "observe"
+    },
+    {
+      "request": "What's currently visible on my screen?",
+      "previous_selector_outcome": "observe"
+    },
+    {
+      "request": "What can you see on the screen right now?",
+      "previous_selector_outcome": "observe"
+    },
+    {
+      "request": "What is the focused window showing?",
+      "previous_selector_outcome": "observe"
+    },
+    {
+      "request": "How does moving a window to the foreground work?",
+      "previous_selector_outcome": "answer"
+    },
+    {
+      "request": "Explain \"Can you bring it to the foreground\"",
+      "previous_selector_outcome": "answer"
+    },
+    {
+      "request": "Do not bring Edge to the foreground",
+      "previous_selector_outcome": "answer"
+    },
+    {
+      "request": "Don't move the Edge pane",
+      "previous_selector_outcome": "answer"
+    },
+    {
+      "request": "Why did moving the window fail?",
+      "previous_selector_outcome": "answer"
+    },
+    {
+      "request": "What happened in the last few commands? Why did they fail",
+      "previous_selector_outcome": "answer"
+    },
+    {
+      "request": "What does 'bring to foreground' mean?",
+      "previous_selector_outcome": "answer"
+    },
+    {
+      "request": "If I say \"can you move Edge\", what will happen?",
+      "previous_selector_outcome": "answer"
+    },
+    {
+      "request": "I feel like",
+      "previous_selector_outcome": "answer"
+    },
+    {
+      "request": "I don't see it",
+      "previous_selector_outcome": "answer"
+    },
+    {
+      "request": "Can you move Edge? Don't do it yet.",
+      "previous_selector_outcome": "answer"
+    },
+    {
+      "request": "Can you focus Edge? Never mind.",
+      "previous_selector_outcome": "answer"
+    },
+    {
+      "request": "Can you launch Edge? Don't open it yet.",
+      "previous_selector_outcome": "answer"
+    },
+    {
+      "request": "Can you tell me what is a browser?",
+      "previous_selector_outcome": "answer"
+    },
+    {
+      "request": "What is a visible window?",
+      "previous_selector_outcome": "answer"
+    },
+    {
+      "request": "What does visible mean in a browser?",
+      "previous_selector_outcome": "answer"
+    },
+    {
+      "request": "What is visible in a browser by default?",
+      "previous_selector_outcome": "answer"
+    },
+    {
+      "request": "What is visible in a browser?",
+      "previous_selector_outcome": "answer"
+    },
+    {
+      "request": "What would be visible in the Microsoft Edge browser right now?",
+      "previous_selector_outcome": "answer"
+    },
+    {
+      "request": "What would the Microsoft Edge browser be showing?",
+      "previous_selector_outcome": "answer"
+    },
+    {
+      "request": "What is the Microsoft Edge browser showing if I open a new tab?",
+      "previous_selector_outcome": "answer"
+    },
+    {
+      "request": "If I open Edge, what is visible in the browser?",
+      "previous_selector_outcome": "answer"
+    },
+    {
+      "request": "What was visible in the Microsoft Edge browser?",
+      "previous_selector_outcome": "answer"
+    },
+    {
+      "request": "What is not visible in the Microsoft Edge browser?",
+      "previous_selector_outcome": "answer"
+    },
+    {
+      "request": "Can you tell me \"what is visible in the Microsoft Edge browser right now\"?",
+      "previous_selector_outcome": "answer"
+    },
+    {
+      "request": "Can you tell me 'what is visible in the Microsoft Edge browser right now'?",
+      "previous_selector_outcome": "answer"
+    },
+    {
+      "request": "What is visible in the Microsoft Edge browser right now? Do not inspect it.",
+      "previous_selector_outcome": "answer"
+    },
+    {
+      "request": "Microsoft Edge is working. Can you focus TFT?",
+      "previous_selector_outcome": "focus"
+    },
+    {
+      "request": "Can you focus Edge? Instead, focus TFT.",
+      "previous_selector_outcome": "focus"
+    }
+  ]
+}

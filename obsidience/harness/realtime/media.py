@@ -144,7 +144,8 @@ def resolve_audio_target(kind: str, selection: str) -> str:
     current PipeWire stack, does not link the OBSBOT capture stream by name.
     Its numeric ``object.serial`` links immediately and remains unambiguous.
     Persist the stable name in Hardware and resolve only at Realtime startup so
-    device reconnects remain safe.
+    device reconnects remain safe.  Query only the selected interface class;
+    the complete PipeWire graph can contain unrelated display-audio nodes.
     """
 
     if kind not in {"microphone", "speaker"}:
@@ -152,14 +153,14 @@ def resolve_audio_target(kind: str, selection: str) -> str:
     if not isinstance(selection, str) or not selection or "\x00" in selection:
         raise ValueError("audio selection must be a nonempty PipeWire node name")
     expected_class = "Audio/Source" if kind == "microphone" else "Audio/Sink"
-    document = _run_json(("/usr/bin/pw-dump",))
+    pactl_kind = "sources" if kind == "microphone" else "sinks"
+    document = _run_json(("/usr/bin/pactl", "-f", "json", "list", pactl_kind))
     matches: list[str] = []
     if isinstance(document, list):
         for row in document:
-            if not isinstance(row, dict) or row.get("type") != "PipeWire:Interface:Node":
+            if not isinstance(row, dict):
                 continue
-            info = row.get("info")
-            props = info.get("props") if isinstance(info, dict) else None
+            props = row.get("properties")
             if not isinstance(props, dict):
                 continue
             object_serial = props.get("object.serial")
@@ -169,7 +170,7 @@ def resolve_audio_target(kind: str, selection: str) -> str:
                 else object_serial
             )
             if (
-                props.get("node.name") == selection
+                row.get("name") == selection
                 and props.get("media.class") == expected_class
                 and isinstance(serial_text, str)
                 and serial_text.isdecimal()
@@ -410,8 +411,8 @@ def prepare_microphone(selection: str) -> str:
             "selected microphone did not produce the expected audio packets"
             + (f": {detail}" if detail else "")
         )
-    if not any(completed.stdout):
-        raise RuntimeError("selected microphone produced only digital silence")
+    # Clocked silence is valid audio, including a quiet or noise-gated room.
+    # Readiness attests delivery from the selected input, not acoustic activity.
     return target
 
 

@@ -49,10 +49,12 @@ import {
   createKnowledge3dOrbitRing,
   createKnowledge3dDeliveryComet,
   createKnowledge3dSatellite,
+  KNOWLEDGE_LINK_APPROVAL_DURATION_MS,
   satellitePhysicsSignature,
   type Knowledge3dOrbitRing,
   type Knowledge3dRenderEdge,
   type Knowledge3dRenderNode,
+  type Knowledge3dRelationEffect,
   type Knowledge3dSatelliteCloud,
   type Knowledge3dSatelliteDeps,
   type Knowledge3dSatelliteInput,
@@ -64,7 +66,9 @@ export type {
   Knowledge3dLabelMeta,
   Knowledge3dRenderEdge,
   Knowledge3dRenderNode,
+  Knowledge3dRelationEffect,
 };
+export { KNOWLEDGE_LINK_APPROVAL_DURATION_MS };
 
 export interface Knowledge3dSceneProps {
   nodes: Knowledge3dRenderNode[];
@@ -99,6 +103,8 @@ export interface Knowledge3dSceneProps {
    *  (owner 2026-08-03). Node ids arrive raw; the scene namespaces them
    *  as agent:<id>/<nodeId> in projections and pointer events. */
   satellites?: ReadonlyArray<Knowledge3dSatelliteInput>;
+  /** Pending Review links and confirmed approval flashes, separate from graph edges. */
+  relationEffects?: readonly Knowledge3dRelationEffect[];
   /** Developer test sweep on ONE satellite (owner 2026-08-03: Test
    *  thinking runs on the SELECTED graph): the scene drives that cloud's
    *  beams/nodes on the same constant-speed timeline law as the main
@@ -135,7 +141,7 @@ export interface Knowledge3dSceneProps {
   cameraFocus?: { agentId: string | null; nodeId: string } | null;
   /** A non-drag click on empty space (used to release the camera focus). */
   onBackgroundClick?: () => void;
-  onHover: (id: string | null) => void;
+  onHover?: (id: string | null) => void;
   /** Ambient node interaction: a non-drag left click reads a node, a right
    *  click opens its action menu (owner directive 2026-08-02). */
   onNodeAction?: (
@@ -296,16 +302,10 @@ void main() {
   float effAlpha = mix(vStyle.w, 1.0, boost);
   vec3 acc = vec3(0.0);
   float accA = 0.0;
-  if (vStyle.x > 0.5) {
-    // Depth glow: gradient from 0.25r (palette glow) to glowScale*r (clear).
-    float glowT = clamp((r - 0.25) / max(vGlowScale - 0.25, 1e-3), 0.0, 1.0);
-    float glowA = vGlow.a * uGlowScale * (1.0 - glowT);
-    acc = vGlow.rgb * glowA;
-    accA = glowA;
-    // Ring stroke at ringScale*r, ringWidth device pixels wide. The Brain
-    // draws NO ring — it is a bare floating ball of light.
-    float ringA = 0.0;
-    if (vStyle.x < 1.5) {
+  // One ring calculation for subjects and auto-curated Article leaves.
+  // An unmarked Brain remains a bare floating ball of light.
+  float ringA = 0.0;
+  if (vCurate > 0.5 || (vStyle.x > 0.5 && vStyle.x < 1.5)) {
       float halfW = (vStyle.z * 0.5) / vRadiusPx;
       float ringDistance = squareNode
         ? abs(roundedBoxDistance(p, vStyle.y, nodeVariant < 4.5 ? 0.18 : 0.06))
@@ -349,7 +349,13 @@ void main() {
           (1.0 - smoothstep(0.62, 0.68, cell));
         ringA *= dash;
       }
-    }
+  }
+  if (vStyle.x > 0.5) {
+    // Depth glow: gradient from 0.25r (palette glow) to glowScale*r (clear).
+    float glowT = clamp((r - 0.25) / max(vGlowScale - 0.25, 1e-3), 0.0, 1.0);
+    float glowA = vGlow.a * uGlowScale * (1.0 - glowT);
+    acc = vGlow.rgb * glowA;
+    accA = glowA;
     acc = vRing.rgb * ringA + acc * (1.0 - ringA);
     accA = ringA + accA * (1.0 - ringA);
     vec3 disc;
@@ -556,6 +562,10 @@ void main() {
       acc = orbColor * orbA;
       accA = orbA;
     }
+    if (vCurate > 0.5) {
+      acc = vRing.rgb * ringA + acc * (1.0 - ringA);
+      accA = ringA + accA * (1.0 - ringA);
+    }
   }
   if (accA <= 0.004) discard;
   vec3 color = acc / max(accA, 1e-4);
@@ -580,6 +590,10 @@ attribute float aWidth;
 attribute float aP;
 attribute float aDormant;
 attribute float aHover;
+#ifdef KNOWLEDGE_REVIEW_EFFECT
+attribute vec2 aReview;
+varying vec2 vReview;
+#endif
 uniform vec2 uViewportPx;
 uniform float uWidthPx;
 uniform float uFloorPx;
@@ -607,7 +621,14 @@ void main() {
   // completion pulse SWELLS on-path beams to nearly double width (owner
   // 2026-08-02: the whole beam pulses with bloom around it, not just the
   // center line).
-  float swell = aP >= 0.0 ? 1.0 + uGlow * 0.9 : 1.0;
+  float beamGlow = uGlow;
+#ifdef KNOWLEDGE_REVIEW_EFFECT
+  vReview = aReview;
+  beamGlow = aReview.x > 0.5
+    ? sin(clamp((aReview.y - 1.35) / 0.55, 0.0, 1.0) * 3.14159265)
+    : (aReview.y >= 0.8 ? 0.2 + 0.08 * cos((aReview.y - 0.8) * 3.14159265) : 0.0);
+#endif
+  float swell = aP >= 0.0 ? 1.0 + beamGlow * 0.9 : 1.0;
   vec2 normalPx = vec2(-direction.y, direction.x) *
     (mix(uWidthPx, uFloorPx, aWidth) * swell * 0.5 * aSide);
   vec4 clip = mix(clipA, clipB, aEnd01);
@@ -703,11 +724,15 @@ ${PATH_TIMELINE_GLSL}
 const CROSS_PATH_FRAGMENT_SHADER = `
 uniform float uOpacity;
 uniform float uDashFreq;
+#ifndef KNOWLEDGE_REVIEW_EFFECT
 uniform float uBeamP;
 uniform float uSolidP;
 uniform float uGlow;
 uniform float uFlowAge;
 uniform float uHeadSpan;
+#else
+varying vec2 vReview;
+#endif
 varying vec3 vColor;
 varying float vAcross;
 varying float vArc;
@@ -717,6 +742,19 @@ void main() {
   float t = abs(vAcross);
   float band = (1.0 - smoothstep(0.88, 1.0, t)) * 0.24;
   float core = 1.0 - smoothstep(0.14, 0.24, t);
+#ifdef KNOWLEDGE_REVIEW_EFFECT
+  bool pending = vReview.x < 0.5;
+  if (!pending && vReview.y >= ${(KNOWLEDGE_LINK_APPROVAL_DURATION_MS / 1000).toFixed(1)}) discard;
+  float uBeamP = pending && vReview.y >= 0.8 ? 2.0 : vReview.y / (pending ? 0.6 : 0.9);
+  float uSolidP = pending && vReview.y >= 0.8 ? 2.0
+    : (vReview.y - (pending ? 0.2 : 0.45)) / (pending ? 0.6 : 0.9);
+  float uGlow = pending
+    ? (vReview.y >= 0.8 ? 0.2 + 0.08 * cos((vReview.y - 0.8) * 3.14159265) : 0.0)
+    : sin(clamp((vReview.y - 1.35) / 0.55, 0.0, 1.0) * 3.14159265);
+  float uFlowAge = -1.0;
+  float uHeadSpan = 0.08;
+  if (uBeamP < vP) discard;
+#endif
   if (vP < 0.0 || uBeamP < vP) {
     // Dormant: static checkered dashes at the tuned opacity.
     if (fract(vArc * uDashFreq) > 0.55) discard;
@@ -726,17 +764,21 @@ void main() {
     return;
   }
 ${PATH_TIMELINE_GLSL}
+#ifdef KNOWLEDGE_REVIEW_EFFECT
+  if (!pending) gl_FragColor.a *= 1.0 - smoothstep(1.9,
+    ${(KNOWLEDGE_LINK_APPROVAL_DURATION_MS / 1000).toFixed(1)}, vReview.y);
+#endif
 }
 `;
 
 // Elongated silver streaks streaming along the cross-link curves: each is
-// a thin two-vertex line whose head/tail sample the bezier at t and
-// t-STREAK_SPAN in the vertex shader, so the streaming costs zero CPU
+// clipped interval on the beam's exact polyline. Segmenting the tail prevents
+// it from cutting through the layer while streaming still costs zero CPU
 // once the ball settles.
 const PARTICLE_VERTEX_SHADER = `
-attribute vec3 aP0;
-attribute vec3 aP1;
-attribute vec3 aP2;
+attribute vec3 aStart;
+attribute vec3 aEnd;
+attribute vec2 aRange;
 attribute float aPhase;
 attribute float aSpeed;
 attribute float aTip;
@@ -744,19 +786,25 @@ uniform float uTime;
 uniform float uSpeedScale;
 uniform float uStreakSpan;
 varying float vTip;
+varying float vVisible;
 void main() {
-  vTip = aTip;
   float head = fract(uTime * aSpeed * uSpeedScale + aPhase);
-  float t = max(0.0, head - (1.0 - aTip) * uStreakSpan);
-  vec3 a = mix(aP0, aP1, t);
-  vec3 b = mix(aP1, aP2, t);
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(mix(a, b, t), 1.0);
+  float tail = max(0.0, head - uStreakSpan);
+  float start = max(aRange.x, tail);
+  float end = min(aRange.y, head);
+  vVisible = end > start ? 1.0 : 0.0;
+  float t = clamp(mix(start, end, aTip), aRange.x, aRange.y);
+  vTip = clamp((t - tail) / max(0.00001, head - tail), 0.0, 1.0);
+  float local = (t - aRange.x) / (aRange.y - aRange.x);
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(mix(aStart, aEnd, local), 1.0);
 }
 `;
 
 const PARTICLE_FRAGMENT_SHADER = `
 varying float vTip;
+varying float vVisible;
 void main() {
+  if (vVisible < 0.5) discard;
   gl_FragColor = vec4(0.86, 0.93, 1.0, 0.2 + 0.65 * vTip);
 }
 `;
@@ -1022,19 +1070,9 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
       builtWidth = width;
       builtHeight = height;
       builtPhysicsSignature = satellitePhysicsSignature(current.tuning);
-      // Preserve live positions/velocities by id before tearing down, so a
-      // refreshed snapshot reheats in place instead of replaying the drop;
-      // a tuning-only rebuild also hands over the OLD tuning so carried
-      // positions prescale onto the new shells per depth — geometry
-      // sliders respond instantly instead of drifting there.
-      const carried = mainCloud?.captureSimNodes();
-      const tuningOnlyRebuild =
-        mainCloud !== null &&
-        mainCloud.builtNodes === nodes &&
-        mainCloud.builtEdges === edges;
-      const previousTuning = tuningOnlyRebuild
-        ? mainCloud?.builtTuning
-        : undefined;
+      // Carry the cooling state as well as positions. A repaint must not
+      // reheat an unchanged layout; the shared cloud compares force inputs.
+      const carried = mainCloud?.captureSimulation();
       if (mainCloud) {
         mainCloud.dispose(scene);
         mainCloud = null;
@@ -1053,7 +1091,6 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
         height,
         pixelRatio,
         carried,
-        previousTuning,
       );
       scene.add(mainCloud.group);
       // Force path/hover attribute refills: fresh geometry starts fully
@@ -1091,17 +1128,9 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
         ) {
           continue;
         }
-        // Same agent, new build inputs: carry positions/velocities over so
-        // a physics-slider drag or refreshed snapshot reheats in place
-        // instead of replaying the drop (main-ball parity). A tuning-only
-        // rebuild (same nodes/edges) also hands over the OLD tuning so the
-        // replacement pre-scales carried positions onto the new shells —
-        // geometry sliders respond instantly instead of drifting there.
-        const carried = existing?.captureSimNodes();
-        const tuningOnlyRebuild =
-          existing &&
-          existing.builtNodes === input.nodes &&
-          existing.builtEdges === input.edges;
+        // Each cloud retains its own cooling state. Updates in another
+        // graph or paint-only changes cannot disturb this cloud's layout.
+        const carried = existing?.captureSimulation();
         if (existing) existing.dispose(scene);
         if (!input.nodes.length) {
           satelliteClouds.delete(input.agentId);
@@ -1113,7 +1142,6 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
           height,
           pixelRatio,
           carried,
-          tuningOnlyRebuild ? existing.builtTuning : undefined,
         );
         satelliteClouds.set(input.agentId, cloud);
         scene.add(cloud.group);
@@ -1250,11 +1278,11 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
       const now = performance.now();
       if (now - hoverAt < 50 || orbit.dragging) return;
       hoverAt = now;
-      propsRef.current.onHover(pickNearest(event.clientX, event.clientY));
+      propsRef.current.onHover?.(pickNearest(event.clientX, event.clientY));
     }
 
     function onPointerLeave(): void {
-      propsRef.current.onHover(null);
+      propsRef.current.onHover?.(null);
     }
 
     function onWheel(event: WheelEvent): void {
@@ -1304,6 +1332,12 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
         return;
       }
       const interacting = now < orbit.interactingUntil;
+      const relationEffects = current.relationEffects ?? [];
+      const pendingLinks = relationEffects.some((effect) => effect.phase === "pending");
+      const approvalActive = relationEffects.some((effect) =>
+        effect.phase === "approved" && Number.isFinite(effect.startedAt) &&
+        effect.startedAt <= now &&
+        now - effect.startedAt < KNOWLEDGE_LINK_APPROVAL_DURATION_MS);
       let satellitesHot = false;
       for (const cloud of satelliteClouds.values()) {
         if (cloud.isHot()) {
@@ -1317,10 +1351,10 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
       const simActive = (mainCloud?.isHot() ?? false) || satellitesHot;
       const interval = knowledge3dFrameIntervalMs({
         focusActive:
-          current.focusActive || simActive || lastSweepHot ||
+          current.focusActive || simActive || lastSweepHot || approvalActive ||
           deliveryComets.size > 0 || (current.deliveries?.length ?? 0) > 0 ||
           current.cameraFocus != null,
-        interacting: interacting || lastSweepHeld,
+        interacting: interacting || lastSweepHeld || pendingLinks,
         animationProfile: current.animationProfile,
       });
       const nextDeadline = advanceKnowledge3dFrameDeadline(
@@ -1365,6 +1399,7 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
       // Tick the live physics while hot, then go dormant: the cooled ball
       // only rotates via the camera transform (zero per-node work).
       mainCloud?.tickIfHot();
+      mainCloud?.applyRelationEffects(relationEffects, now);
 
       // Satellites: live tuning (visual + orbit knobs update without a
       // rebuild), orbit advance, and their own sim ticks while hot. The
@@ -1400,6 +1435,7 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
           cloud.applyTuning(input.tuning, pixelRatio);
           cloud.updateOrbit(input.tuning, orbitSeconds);
           cloud.tickIfHot();
+          cloud.applyRelationEffects(relationEffects, now);
           // Role nameplate lifecycle (re-attaches after cloud rebuilds).
           let plate = rolePlates.get(input.agentId);
           if (platesOn && !plate) {

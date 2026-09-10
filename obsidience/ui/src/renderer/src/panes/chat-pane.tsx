@@ -1,4 +1,4 @@
-/** Executive text chat plus the visible transcript of the Realtime Task. */
+/** The Executive conversation shared by text and Realtime speech. */
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Plus, Send } from "lucide-react";

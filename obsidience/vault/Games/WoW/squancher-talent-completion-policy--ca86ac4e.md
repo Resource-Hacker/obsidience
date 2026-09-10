@@ -1,18 +1,32 @@
 ---
-approved_at: '2026-08-26T13:40:29'
-kind: knowledge
-provenance: proposed by Alexandria (task Tasks/link)
-title: Squancher talent-completion policy
+type: knowledge
+title: Squancher talent-placement policy
+obsidience:
+  approved_at: '2026-08-26T13:40:29'
+  provenance: proposed by Alexandria (task Tasks/link)
 ---
 
-For Squancher on Burning Legion, “add the remaining talents” and equivalent plain requests are affirmative talent-placement instructions. Executive reads the live addon snapshot once and the Battle.net talent projection once, rejects stale state, records the initial unspent-point count, and resolves the intended build in this order: an exact owner-named build, a reviewed saved or imported build already selected, then the reviewed current default for the exact spec and role. If no exact reviewed target exists or sources conflict, Executive researches or explains the build and places no points.
+For Squancher on BurningLegion, “add the remaining talents” and equivalent plain
+requests express the owner's desired end state. The current Executive action
+contract can commit at most one grounded click in a Task run, so it must never
+claim that a multi-point build was completed automatically.
 
-Each point is a separate evidence-gated action. Executive obtains a fresh regional visual capture, rejects max-rank talents, hovers the current element, requires exact tooltip OCR for the intended talent, commits that one element once, and verifies both the visible rank increase and remaining-point decrease before continuing from another fresh capture. Data IDs are never visual element indices, coordinates are never derived from resized pixels, and an uncertain delivery is never replayed.
+Resolve the intended build in this order: an exact owner-named build, a
+reviewed saved or imported build visibly selected in the client, then current
+research for the exact specialization and role. The present Tool set has no
+Battle.net or addon-state Tool; do not invent one or present web material as
+live character state. If the build, current point count, eligibility, or target
+is missing, stale, or conflicting, explain the gap and place no point.
 
-The loop ends when no unspent point remains or any target, tooltip, rank, eligibility, frame, geometry, counter, or delivery result becomes stale, conflicting, missing, or uncertain.
+For one authorized point, `computer.act` must uniquely ground the exact visible
+talent control and return a fresh post-observation establishing the intended
+rank or remaining-point change. A max-rank, ambiguous, unavailable, or
+uncertain target ends the attempt. Never supply a data ID as a visual element,
+derive coordinates from resized pixels, replay an uncertain click, or continue
+to a second point in the same Task run.
 
 ## Relationships
 
-- `related_to` [[Games/WoW/primary-world-of-warcraft-profile--f2cc8948|Primary World of Warcraft profile]] — The talent-completion policy applies to the owner’s primary Squancher profile.
-- `related_to` [[Agents/Executive/Observations/game-interaction-authority-and-interests--463cc7c8|Game interaction authority and interests]] — The policy applies standing game-interaction authority through exact, verified per-point actions.
-- `related_to` [[ADMECH Workstation/Software/Games/World of Warcraft/world-of-warcraft-launch-policy--3e5e73cc|World of Warcraft launch policy]] — Talent placement presumes a live, verified WoW client, and the launch policy defines how that client is dispatched and readiness is verified.
+- `related_to` [Primary World of Warcraft profile](/Games/WoW/primary-world-of-warcraft-profile--f2cc8948.md) — The talent-placement policy applies only to the owner's primary Squancher profile.
+- `depends_on` [World of Warcraft launch policy](/ADMECH%20Workstation/Workstation%20Observations/world-of-warcraft-launch-policy--3e5e73cc.md) — Talent placement requires one live, uniquely resolved World of Warcraft client.
+- `related_to` [Game interaction preferences](/Agents/Executive/Observations/Preferences/games.md) — The owner may state the desired result plainly, while the current one-click evidence boundary remains explicit.

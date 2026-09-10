@@ -1,11 +1,13 @@
 ---
+type: task
 title: Question
-kind: task
-assignee: '[[Agents/Darwin/Darwin]]'
-reasoning_effort: high
-runbook: '[[Runbooks/research/question]]'
-status: draft
-taxonomy_path: research/question
+obsidience:
+  assignee: '[[Agents/Darwin/Darwin]]'
+  reasoning_effort: high
+  runbook: '[[Runbooks/research/question]]'
+  taxonomy_path: research/question
+  triggers:
+  - task.create
 ---
 
 Answer one bounded research question from preserved direct-source evidence and

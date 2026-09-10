@@ -9,11 +9,10 @@ QtObject {
 
     readonly property string schema: "obsidience.surface-placement.v1"
     property string paneId: "displays"
-    property string stateFileName: paneId === "displays"
-        ? "pane-placement.json" : paneId + "-placement.json"
+    property string stateFileName: paneId + "-placement.json"
     readonly property string statePath: StandardPaths.writableLocation(
-        StandardPaths.RuntimeLocation
-    ) + "/obsidience-shell/" + stateFileName
+        StandardPaths.GenericStateLocation
+    ) + "/obsidience-shell/placements/" + stateFileName
 
     property string defaultSurfaceId: "samsung"
     property int defaultX: 2180
@@ -33,6 +32,7 @@ QtObject {
     property var tileBounds: null
     property int revision: 0
     property bool authoritative: false
+    property bool hydrated: false
 
     function isNumber(value) {
         return typeof value === "number" && isFinite(value)
@@ -96,14 +96,14 @@ QtObject {
 
     function reloadState() {
         const text = placementFile.text()
-        if (!text) {
-            return
+        if (text) {
+            try {
+                applyRecord(JSON.parse(text))
+            } catch (error) {
+                console.warn("Ignored invalid pane placement:", error)
+            }
         }
-        try {
-            applyRecord(JSON.parse(text))
-        } catch (error) {
-            console.warn("Ignored invalid pane placement:", error)
-        }
+        hydrated = true
     }
 
     function record() {
@@ -146,6 +146,49 @@ QtObject {
         open = true
         zOrder = isNumber(nextZOrder) ? Math.round(nextZOrder) : zOrder
         tileBounds = normalizeTileBounds(nextTileBounds)
+        revision += 1
+        writeState()
+        return true
+    }
+
+    function sameTileBounds(left, right) {
+        if (!left || !right) {
+            return !left && !right
+        }
+        return left.surface_id === right.surface_id
+            && left.columns === right.columns && left.rows === right.rows
+            && left.left === right.left && left.top === right.top
+            && left.right === right.right && left.bottom === right.bottom
+    }
+
+    // Hyprland owns live geometry. The shell mirrors its settled, grid-snapped
+    // result so every Obsidience surface reports the same placement truth.
+    function observeNative(nextSurfaceId, rect, nextTileBounds) {
+        if (!authoritative
+                || (nextSurfaceId !== "samsung" && nextSurfaceId !== "usb-c"
+                    && nextSurfaceId !== "dp-4")
+                || !rect || !isNumber(rect.x) || !isNumber(rect.y)
+                || !isNumber(rect.width) || !isNumber(rect.height)
+                || rect.width <= 0 || rect.height <= 0) {
+            return false
+        }
+        const nextX = Math.round(rect.x)
+        const nextY = Math.round(rect.y)
+        const nextWidth = Math.round(rect.width)
+        const nextHeight = Math.round(rect.height)
+        const bounds = normalizeTileBounds(nextTileBounds)
+        if (surfaceId === nextSurfaceId && x === nextX && y === nextY
+                && width === nextWidth && height === nextHeight && open
+                && sameTileBounds(tileBounds, bounds)) {
+            return false
+        }
+        surfaceId = nextSurfaceId
+        x = nextX
+        y = nextY
+        width = nextWidth
+        height = nextHeight
+        open = true
+        tileBounds = bounds
         revision += 1
         writeState()
         return true
@@ -204,4 +247,6 @@ QtObject {
         onTextChanged: root.reloadState()
         onFileChanged: placementFile.reload()
     }
+
+    Component.onCompleted: reloadState()
 }

@@ -16,6 +16,11 @@ QtObject {
     property int revision: 0
     property var modules: defaultModules()
 
+    function canDock(paneId, hostPaneId) {
+        return hostPaneId === "reader"
+            && ["knowledge", "source", "feeds"].indexOf(paneId) >= 0
+    }
+
     function defaultModules() {
         return {
             "knowledge": {
@@ -50,7 +55,7 @@ QtObject {
         }
         const paneId = cleanPaneId(value.pane_id)
         const hostPaneId = cleanPaneId(value.host_pane_id)
-        if (!paneId || !hostPaneId || paneId === hostPaneId
+        if (!canDock(paneId, hostPaneId)
                 || (value.side !== "left" && value.side !== "right")
                 || !isNumber(value.order)) {
             return null
@@ -67,7 +72,7 @@ QtObject {
     function applyRecord(record) {
         if (!record || record.schema !== schema
                 || !isNumber(record.revision) || record.revision < revision
-                || !Array.isArray(record.modules) || record.modules.length > 16) {
+                || !Array.isArray(record.modules) || record.modules.length > 3) {
             return false
         }
         const next = {}
@@ -77,6 +82,34 @@ QtObject {
                 return false
             }
             next[module.pane_id] = module
+        }
+        // Older layouts used unbounded ordering. Preserve their relative
+        // positions once, then retain two exact slots on each Reader side.
+        const occupied = {}
+        const legacySides = {}
+        const originalSlots = {}
+        for (const module of Object.values(next)) {
+            const key = module.side + module.order
+            if ((module.order !== 0 && module.order !== 1) || originalSlots[key]) {
+                legacySides[module.side] = true
+            }
+            originalSlots[key] = true
+        }
+        const sideCounts = {"left": 0, "right": 0}
+        const values = Object.values(next).sort(function(left, right) {
+            return left.side.localeCompare(right.side) || left.order - right.order
+                || left.pane_id.localeCompare(right.pane_id)
+        })
+        for (const module of values) {
+            const preferred = legacySides[module.side]
+                ? Math.min(1, sideCounts[module.side]++) : module.order
+            const choices = [[module.side, preferred], [module.side, 1 - preferred],
+                [module.side === "left" ? "right" : "left", 0],
+                [module.side === "left" ? "right" : "left", 1]]
+            const slot = choices.find(value => !occupied[value[0] + value[1]])
+            module.side = slot[0]
+            module.order = slot[1]
+            occupied[module.side + module.order] = true
         }
         modules = next
         revision = Math.round(record.revision)
@@ -131,6 +164,10 @@ QtObject {
         return result
     }
 
+    function slotState(hostPaneId, side, order) {
+        return modulesFor(hostPaneId, side).find(value => value.order === order) || null
+    }
+
     function record() {
         const values = []
         for (const paneId of Object.keys(modules).sort()) {
@@ -151,21 +188,31 @@ QtObject {
 
     function commitDock(expectedRevision, paneId, hostPaneId, side, position) {
         if (!authoritative || revision !== expectedRevision
-                || !cleanPaneId(paneId) || !cleanPaneId(hostPaneId)
-                || paneId === hostPaneId
+                || !canDock(paneId, hostPaneId)
                 || (side !== "left" && side !== "right")
                 || (position !== "top" && position !== "bottom")) {
             return false
         }
-        const peers = modulesFor(hostPaneId, side)
-            .filter(value => value.pane_id !== paneId)
-        let order = 0
-        if (peers.length > 0) {
-            order = position === "top"
-                ? peers[0].order - 1
-                : peers[peers.length - 1].order + 1
-        }
+        const order = position === "top" ? 0 : 1
+        const prior = modules[paneId]
+        const occupant = slotState(hostPaneId, side, order)
         const next = Object.assign({}, modules)
+        if (occupant && occupant.pane_id !== paneId) {
+            let replacement
+            if (prior) {
+                // Moving one docked module onto another swaps their slots;
+                // collapsed state belongs to the module and remains intact.
+                replacement = [prior.side, prior.order]
+            } else {
+                const otherSide = side === "left" ? "right" : "left"
+                replacement = [[side, 1 - order], [otherSide, 0], [otherSide, 1]]
+                    .find(value => !slotState(hostPaneId, value[0], value[1]))
+            }
+            if (!replacement) return false
+            next[occupant.pane_id] = Object.assign({}, occupant, {
+                "side": replacement[0], "order": replacement[1]
+            })
+        }
         next[paneId] = {
             "pane_id": paneId,
             "host_pane_id": hostPaneId,

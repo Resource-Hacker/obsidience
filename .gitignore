@@ -10,7 +10,10 @@ out/
 obsidience/state/media-settings.json
 obsidience/state/model-catalog.json
 obsidience/state/model-settings.json
+obsidience/state/system-knowledge.json
+obsidience/state/system/snapshots/
 obsidience/state/models/
 obsidience/vault/.obsidian/workspace*
 obsidience/vault/raw/
 obsidience/evidence/raw/
+obsidience/evidence/system/

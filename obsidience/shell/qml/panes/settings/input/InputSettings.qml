@@ -24,7 +24,7 @@ Item {
         const xhr = new XMLHttpRequest()
         xhr.open("GET", apiBase + "/api/input")
         xhr.onreadystatechange = function() {
-            if (xhr.readyState !== XMLHttpRequest.DONE) return
+            if (xhr.readyState !== XMLHttpRequest.DONE || !root) return
             if (xhr.status < 200 || xhr.status >= 300) {
                 root.errorMessage = "Input state unavailable (" + xhr.status + ")"
                 return

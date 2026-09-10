@@ -1,6 +1,38 @@
 {
   "schema_version": 1,
   "artifacts": {
+    "open_knowledge_format": {
+      "repository": "https://github.com/GoogleCloudPlatform/open-knowledge-format",
+      "revision": "ad30107c31c06aec8a7d5636e0d1058118604e6f",
+      "version": "0.2",
+      "license": "Apache-2.0",
+      "integration": "Canonical Article serialization contract. Small YAML framing and timestamp-preserving loader adapted from src/reference_agent/bundle/document.py into harness/knowledge/format.py with attribution. No reference-agent runtime, ADK, Gemini service, or second knowledge store."
+    },
+    "markdownify": {
+      "repository": "https://github.com/matthewwithanm/python-markdownify",
+      "version": "1.2.3",
+      "license": "MIT",
+      "wheel_sha256": "a189a0bedfd14009030fde5f85bb6f77c56897cb839b5c25315dd7d4e3e290ba",
+      "integration": "Installed dependency underneath the existing web.fetch Capability; preserves structured HTML as Markdown and resolves safe outgoing links, without crawling."
+    },
+    "markdown_it_py": {
+      "repository": "https://github.com/executablebooks/markdown-it-py",
+      "version": "4.0.0",
+      "license": "MIT",
+      "integration": "Installed CommonMark parser for Article link extraction, reference-style links, and review evidence locations. Code examples, images, and external URLs do not become Article edges."
+    },
+    "watchdog": {
+      "repository": "https://github.com/gorakhargosh/watchdog",
+      "version": "6.0.0",
+      "license": "Apache-2.0",
+      "integration": "Installed Python dependency; one in-process Linux inotify observer for Source incoming closed-write and atomic-move events. No upstream daemon or polling service."
+    },
+    "feedparser": {
+      "repository": "https://github.com/kurtmckee/feedparser",
+      "version": "6.0.14",
+      "license": "BSD-2-Clause",
+      "integration": "Installed Python dependency; web.feed parses preserved RSS/Atom XML into bounded research leads. Existing Source, Task and Inbox owners are unchanged."
+    },
     "nemotron_speech_streaming_en_0_6b": {
       "repository": "https://huggingface.co/nvidia/nemotron-speech-streaming-en-0.6b",
       "revision": "ebe59e5a817142986528bbbee5dba8db7b38ed50",
@@ -37,6 +69,53 @@
       "path": "/var/lib/ai/models/obsidience-realtime/pocket-tts/voices/ultron.safetensors",
       "sha256": "3f0e6334368b7e3e8e4c871853ad492ecf7806a21b074dde87a9dc0d344b768e",
       "size": 16811832
+    },
+    "wayshot": {
+      "repository": "https://github.com/waycrate/wayshot",
+      "version": "1.6.0",
+      "revision": "ac949d4198df429e7f804d9bef9451d33aa7336d",
+      "license": "GPL-3.0-or-later",
+      "library_license": "BSD-2-Clause",
+      "source_path": "/var/lib/ai/src/obsidience-wayshot",
+      "path": "/var/lib/ai/opt/obsidience-wayshot/wayshot-1.6.0-ac949d4198df/wayshot",
+      "sha256": "0ff787473cc5e5f8a06e6eec0828cc5e1d33a0fbe20da0d50feae68deb65c94c",
+      "size": 3672848,
+      "build": "cargo build --release --locked -p wayshot --no-default-features",
+      "integration": "One PNG on stdout for an exact output name or Hyprland stable toplevel identifier; no picker, portal, clipboard, notification, persistence, or service"
+    },
+    "httpx_sse": {
+      "repository": "https://github.com/florimondmanca/httpx-sse",
+      "version": "0.4.3",
+      "license": "MIT",
+      "wheel_sha256": "0ac1c9fe3c0afad2e0ebb25a934a59f4c7823b60792691f779fad2c5568830fc",
+      "integration": "Installed maintained SSE decoder for the existing HTTPX model provider. Incremental provider progress uses the existing Task request, cancellation and output limits; no automatic reconnect, generation replay, new model owner or speech transport."
+    },
+    "trafilatura": {
+      "repository": "https://github.com/adbar/trafilatura",
+      "version": "2.2.0",
+      "license": "Apache-2.0",
+      "wheel_sha256": "ac43592a6201264dfc4f9c361cbe3eb3fea96e54437010a159d5e7365360ed98",
+      "integration": "Installed pure HTML article extractor underneath the existing web.fetch Capability. Extracts article text, attribution, date and safe outgoing references from already acquired HTML; sparse or unmarked documents keep Markdownify. No upstream fetcher, crawler, CLI, agent, scheduler or Source owner is used."
+    },
+    "areev_diagnostic_patterns": {
+      "repository": "https://github.com/AreevAI/areev",
+      "revision": "124cdf9aa306c8cfa99b14800f44a6190e8c3455",
+      "license": "MIT OR Apache-2.0",
+      "integration": "Pattern reference only; no upstream source code, runtime or dependency imported. Native implementation of bounded context inclusion/omission accounting and revision-scoped historical failure diagnostics; deterministic tests of the existing intent/result crash boundaries. Existing Article ontology, tokenizer, execution ledger, Check, review and no-replay owners remain authoritative.",
+      "reference_files": [
+        "crates/areev-cal/tests/assemble_budget_visibility.rs",
+        "crates/areev-cal/src/assemble.rs",
+        "crates/areev-loop/src/analyzers/run_outcome.rs",
+        "crates/areev-loop/src/analyzers/tool_failure.rs",
+        "crates/areev-run/src/runner.rs",
+        "crates/areev-run/tests/wave4_tests.rs"
+      ]
+    },
+    "autosaddler_evaluation_patterns": {
+      "repository": "https://github.com/microsoft/AutoSaddler",
+      "revision": "30e20ce004486c58e7ee97c66182a8d0d41ec90e",
+      "license": "MIT",
+      "integration": "Design references only: exact paired case/repetition matching, immutable baseline/candidate identity, held-out regression evaluation and causal diagnosis. Locally implemented in harness/execution/evaluation.py and refinement.py over the existing executor, Task-selected provider, Source files and Review ledger. No upstream source copied and no AutoSaddler engine, provider SDK, candidate Git store or scheduler installed. Acceptance requires complete coverage, all candidate cases passing, no pass-to-fail regression and strict training improvement."
     }
   }
 }

@@ -1,7 +1,7 @@
 {
   "schema": "obsidience.system-node.v1",
   "id": "microphone",
-  "label": "Microphone input",
+  "label": "Microphones",
   "category": "device",
   "collector": "obsidience.harness.realtime.media.interface_catalog",
   "selector": "microphone",

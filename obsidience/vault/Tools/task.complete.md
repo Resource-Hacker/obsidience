@@ -8,44 +8,16 @@ obsidience:
   provenance: proposed by Codex (task codex:knowledge-handoff)
 ---
 
-End one active Task execution with one terminal result. Interactive answers
-from typed Chat or speech use this same completion; `summary` carries the
-verified public answer. Completing work does not close the speech connection.
+Record one terminal result for the active Task. Arguments: `{"status":"completed|failed|review","summary":str optional,"outcome":"changed|no_change" optional,"evidence":[str] optional,"verification":{"status":"established","observation":str} optional}`. Summary: at most 2,000 characters. Evidence: at most eight nonempty strings, each at most 500 characters. Verification has exactly the shown keys; observation is 1–1,000 characters. Unknown status or malformed evidence/verification is rejected.
 
-Arguments: `{"status": "completed|failed|review", "summary": str optional,
-"outcome": "changed|no_change" optional, "evidence": [str] optional, "verification": {"status":"established", "observation":str} optional}`.
-The summary is capped at 2,000 characters. Evidence is capped at eight nonempty
-500-character entries. Pass one exact status; an unknown status is rejected.
+Returns `accepted:true` with the recorded status/summary/outcome, or `accepted:false` with an error. Acceptance records a decision, not independent proof of semantic success. Interactive Chat/speech use summary as the public answer; completion leaves the speech connection available.
 
-The summary records the verified outcome, proposal, or exact blocker. An
-`accepted: true` result records the decision; it does not independently prove
-that the Task acceptance condition was satisfied.
+Unresolved proposals from this execution require review. Otherwise review requires an explicit Task acceptance gate; downstream Review does not change its caller's state. Generated-Runbook execution finishes review with its actual validated output proposal, or failed if none was staged. A `Merge is incomplete` archive blocker prevents review completion until the named referring-Article redirect proposals exist.
 
-For Computer Use, `completed` requires the executor's actual verified Tool
-result for the requested outcome and, when explicitly bound, the exact canonical
-application. Tile placement requires matching attested tile edges as well as
-the destination Surface. The executor rejects an explicitly contradictory
-application target before dispatch; a focused observation can resolve normally
-but its actual result must still match. A screenshot cannot prove focus or placement,
-launch dispatch cannot prove readiness, and input acknowledgement cannot prove
-an in-client postcondition. Model-authored `evidence` never substitutes for this
-controller witness. An unclear target finishes `failed` with the clarification
-question in `summary`; a blocked operation finishes `failed` with its exact
-blocker. Those deliberate public results can be spoken without persisting a
-successful assistant conversation turn.
+Evidence-bound execution with no staged, approved or reviewed proposal must explicitly complete with `outcome:no_change` and concrete evidence. No-change requires completed status and cannot accompany a pending, approved or reviewed proposal. Actual Auto-curate approval supports changed completion without pending Review. Evidence prose cannot replace controller witnesses.
 
-`review` is valid only when this exact execution staged at least one unresolved
-proposal or the Task Article has an explicit authored acceptance gate. A
-downstream Task's review state does not put the caller in review.
+Controller-bound computer outcomes require Computer Use; Query cannot complete an action. The latest verified Tool result must match the requested outcome and any canonical application binding: fresh attached `computer.observe` image, active `window.activate` focus, `window.place` destination Surface and requested tile edges, or `application.launch` ready window. Screenshots do not prove focus/placement, and launch dispatch does not prove readiness. A verified existing state may complete without claiming a new effect.
 
-An evidence-bound execution with no pending or approved change must explicitly
-finish `completed` with `outcome: no_change` and concrete evidence. A no-change
-outcome is rejected when any proposal remains pending or a change was approved.
-An owner Auto-curate approval is controller evidence for `outcome: changed` and
-does not leave the Task in a zombie Review state.
+Action requires controller `computer_scope:input|state`. Input needs the latest acknowledged click and actual fresh post-image. State also needs the same target's post-action image attached to the immediately preceding model input and `verification:{"status":"established","observation":"Visible evidence for the requested state"}`. An intervening Tool or response consumes that immediate image evidence. Verification is the model's interpretation, not independent semantic proof. Intent, errors, history or acknowledgement alone cannot establish the requested state. Unclear targets finish failed with the clarification in summary; other failures name the blocker. These deliberate failures can be spoken without persisting a successful assistant turn. Never replay uncertain input.
 
-An archive with an exact `Merge is incomplete` blocker cannot complete review.
-The Tool returns the missing referring Article refs so the active Merge can
-stage their redirects and retry completion.
-
-Controller-bound computer outcomes apply to every Task: Query cannot complete a computer action. For action, computer_scope must explicitly be input or state. Input requires the latest acknowledged click and actual fresh post-image. State additionally requires a current post-action image attached to the immediately preceding model input, plus verification: {"status":"established","observation":"visible evidence supporting the requested application state"}. The verification object has exactly status and observation, with 1-1,000 observation characters. It records the model's interpretation; it does not turn input delivery into independently verified semantic truth. An intervening Tool or response consumes that immediate image evidence. If the state is not established, complete failed with the actual limit; never manufacture evidence or relabel success. Historical receipts cannot satisfy a current outcome.
+A Source-bound Learn or Distill success requires the complete activating Source read and an attested cited handoff, or the supported explicit cited no-change outcome. Feed Ingest completion must attest the exact published item version or the actual bound pending Review, including required retention. Failed publication remains a failure; claiming success cannot bypass the Source, Feed or Review owner.

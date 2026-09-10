@@ -1,14 +1,37 @@
 ---
-binding: capability:computer.observe
-kind: tool
-source: obsidience/harness/capabilities/computer/observe.py
+type: tool
 title: computer.observe
+obsidience:
+  binding: capability:computer.observe
+  source: obsidience/harness/capabilities/computer/observe.py
 ---
 
-Observe one exact on-screen application through Obsidience's structured
-observation service. Arguments:
-`{"application": str, "query": str}`.
+Answer one visual question about an exact native application or module pane,
+including a unique unfocused target. The current Shell Scene already supplies
+window enumeration and focus; observation is not an enumeration Tool. Arguments:
+`{"target": {"kind": "focused|application|pane", "name": str optional, "surface": "samsung|usb-c|dp-4" optional}, "query": str}`.
 
-The result contains bounded visible labels and grounding state. It exposes no
-window token, image descriptor, or privileged coordinate and always reports
-`action_authorized: false`. This Tool observes; it never injects input.
+For `application`, `name` is the registered canonical application ID, such as
+`teamfight_tactics`, or exact current `app_id` (1-256 printable characters).
+Existing application-registry aliases are accepted; arbitrary window titles
+and fuzzy matches are not. For `pane`, use the exact `pane_id` (1-48 printable
+characters). Omit `name` for `focused`, which is an observation input selector
+only. Optional `surface` disambiguates the same identifier. The shared scene
+resolver requires one unique match and privately pins its current revision.
+Observation never activates, raises, moves, resizes, or injects input.
+
+The observation returns `target: {kind, name, surface}` with concrete
+`kind: application|pane`; `name` prefers the canonical application ID, falls
+back to exact `app_id`, or is the exact `pane_id`. Display `title` and `focused`
+are separate observation fields, not target arguments. The target object can
+be reused directly by an authorized window effect, which resolves it afresh;
+it carries no action lease. Bounded visible evidence and
+`action_authorized: false` expose no compositor identifier, capture token, or
+privileged coordinate. Evidence is valid only for its scene and capture
+revision. An effect Tool's own freshly verified result is sufficient for that
+effect; take another observation only for a separate visual question.
+
+Failures are typed as `scene_unavailable`, `target_missing`,
+`target_ambiguous`, `target_not_visible` for a sleeping Surface,
+`stale_scene`, `capture_unavailable`, or `observation_failed`. A failure never grants
+permission to guess, change focus, or use another mutation route.

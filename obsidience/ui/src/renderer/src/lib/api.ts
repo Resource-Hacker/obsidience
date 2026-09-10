@@ -20,27 +20,57 @@ async function json<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export interface GraphNode {
+  article_ref?: string;
   id: string;
   title: string;
   kind: string;
   status?: string | null;
   assignee?: string | null;
+  parent_id?: string;
+  navigation_ref?: string;
   children?: string[];
   synthetic?: boolean;
   order?: number;
   triggers?: string[];
   routing?: string;
-  checkouts?: Partial<Record<"tools" | "skills" | "runbooks" | "tasks", string[]>>;
+  dependencies?: Partial<Record<"tools" | "skills" | "runbooks" | "tasks", string[]>>;
   source_scopes?: string[];
   source_scope_refs?: string[];
   tags?: string[];
 }
-export interface GraphLink { source: string; target: string }
+export interface GraphLink {
+  source: string;
+  target: string;
+  derived?: boolean;
+  relation?: string;
+  via?: string[];
+  for_agent?: string;
+}
+export interface GraphLinkProposal {
+  proposal_id: string;
+  run_id: string;
+  source: string;
+  target: string;
+}
+export interface GraphLinkProposals {
+  entries: GraphLinkProposal[];
+  truncated: boolean;
+}
+export interface LinkReviewChange {
+  proposal_id: string;
+  run_id: string;
+  state: "pending" | "approved" | "rejected";
+  decided_at?: number;
+  links?: Array<{ source: string; target: string }>;
+  truncated: boolean;
+}
 export type GraphNavigationRole = "executive" | "guardian" | "curator" | "researcher" | "library";
 export interface GraphNavigationSubject {
   id: string;
   title: string;
   parent_id: string | null;
+  path?: string;
+  article_ref?: string;
 }
 export interface GraphNavigationGroup {
   id: GraphNavigationRole;
@@ -49,13 +79,16 @@ export interface GraphNavigationGroup {
   role: GraphNavigationRole;
   root_ref: string;
   subjects: GraphNavigationSubject[];
+  article_refs?: string[];
 }
 export interface GraphNavigation { groups: GraphNavigationGroup[] }
 export interface GraphSnapshot {
   nodes: GraphNode[];
   links: GraphLink[];
   auto_curated?: string[];
+  auto_curate_resolved?: boolean;
   navigation: GraphNavigation;
+  link_proposals?: GraphLinkProposals;
 }
 export interface TaskRow {
   ref: string; title: string; status: string; assignee: string; runbook: string; subtasks: number;
@@ -67,6 +100,14 @@ export interface TaskRow {
   resolved_model: string;
   triggers: string[];
   queue_depth?: number;
+  execution?: {
+    state: "running" | "review" | "needs_attention" | "waiting" | "ready" | "idle";
+    label?: string;
+    reason: string;
+    last_run: { id: string; status: string; finished: number; summary: string } | null;
+    retry_allowed: boolean;
+    retry_blocked_reason: string;
+  };
   enabled?: boolean;
   schedule?: string | null; next_run?: number | null; blocked_reason?: string | null; last_run?: string | null;
 }
@@ -76,11 +117,16 @@ export interface Proposal {
   run_id?: string; approvable: boolean; blocked_reason: string;
   review_class: "article" | "link";
   link_changes: { added: string[]; removed: string[] } | null;
+  link_evidence: { ref: string; change: "added" | "removed";
+    derivation: "proposed_wikilink" | "accepted_wikilink";
+    body_line: number; excerpt: string; endpoint_sha256: string }[];
+  evidence_warning: string;
 }
 export interface NoteDoc {
   ref: string; title: string; kind: string; meta: Record<string, string>; body: string;
   children?: string[];
-  auto_curate?: boolean; auto_curate_task?: string | null;
+  auto_curate?: boolean; auto_curate_supported?: boolean;
+  read_only?: boolean; managed_by?: string;
 }
 export interface HarnessStatus {
   notes: number; tasks: number; tasks_by_status: Record<string, number>;
@@ -238,14 +284,11 @@ export interface RealtimeState {
   audio_source: string;
   audio_sink: string;
   input_level: number;
+  capture_active?: boolean;
   user_speaking: boolean;
   live_transcript: { text: string; final: boolean } | null;
   acoustic_echo_cancellation: boolean;
   speech: SpeechRuntime;
-  model: { id: string; label: string; devices: string[] } | null;
-  task_ref: string;
-  task_run_id: string | null;
-  task_status: string;
   scheduler_paused: boolean;
   recent_log: string[];
 }
@@ -260,19 +303,85 @@ export interface KnowledgeActivity {
   /** Main Executive graph or one named satellite agent graph. */
   graphId?: string;
 }
-export type CheckoutAgent = "executive" | "guardian" | "curator" | "researcher";
-export interface CheckoutAssignment { agent: CheckoutAgent; ref: string; kind: string }
+export type AssignmentAgent = "executive" | "guardian" | "curator" | "researcher";
+export type CheckoutAgent = AssignmentAgent; // Source-tree scope remains an independent checkout.
+export interface TaskAssignment {
+  agent: AssignmentAgent; ref: string; kind: "task"; direct: boolean; inherited: boolean;
+}
+export interface TaskDependency {
+  agent: AssignmentAgent; ref: string; kind: "task" | "runbook" | "skill" | "tool";
+}
 export interface SourceCheckoutAssignment { agent: CheckoutAgent; tree: string }
 export interface VaultFile { ref: string; path: string; title: string; kind: string }
 export interface SourceFile {
   key: string; path: string; name: string; media_type: string; size: number;
   modified_at: number; storage: "blob" | "knowledge" | "code" | "system";
   read_only: boolean; articles: string[];
+  system_label?: string;
+  system_breadcrumbs?: Array<{ path: string; title: string }>;
 }
 export interface SourceDoc extends SourceFile {
   content: string | null; truncated: boolean; sha256: string | null;
 }
 export interface SourceIssue { path: string; status: string; detail: string }
+interface SourceFilesPage {
+  files: SourceFile[];
+  issues: SourceIssue[];
+  coverage?: { scope: string | null; limit: number; returned: number; consistency: "live";
+    complete: boolean; next_cursor: string | null };
+}
+
+async function sourceFiles(): Promise<{ files: SourceFile[]; issues: SourceIssue[] }> {
+  const files = new Map<string, SourceFile>();
+  const issues = new Map<string, SourceIssue>();
+  const cursors = new Set<string>();
+  let after: string | null = null;
+  let scope: string | null | undefined;
+  while (true) {
+    const page = await json<SourceFilesPage>("/api/source-files"
+      + (after === null ? "" : `?after=${encodeURIComponent(after)}`), { cache: "no-store" });
+    if (!page || !Array.isArray(page.files) || !Array.isArray(page.issues)) {
+      throw new Error("Source hierarchy response was invalid.");
+    }
+    for (const file of page.files) {
+      if (!file || typeof file.key !== "string" || !file.key
+          || typeof file.path !== "string" || !file.path) {
+        throw new Error("Source hierarchy file was invalid.");
+      }
+      files.set(file.key, file);
+    }
+    for (const issue of page.issues) {
+      if (!issue || typeof issue.path !== "string" || typeof issue.status !== "string"
+          || typeof issue.detail !== "string") {
+        throw new Error("Source hierarchy issue was invalid.");
+      }
+      issues.set(JSON.stringify([issue.path, issue.status, issue.detail]), issue);
+    }
+    const coverage = page.coverage;
+    // A legacy single response remains readable across a development restart.
+    if (coverage === undefined && after === null) break;
+    if (!coverage || coverage.consistency !== "live" || typeof coverage.complete !== "boolean"
+        || coverage.returned !== page.files.length || !Number.isInteger(coverage.limit)
+        || coverage.limit < 1 || coverage.limit > 2000 || page.files.length > coverage.limit
+        || !(coverage.scope === null || typeof coverage.scope === "string")
+        || (scope !== undefined && coverage.scope !== scope)) {
+      throw new Error("Source hierarchy page coverage was invalid.");
+    }
+    scope = coverage.scope;
+    if (coverage.complete) {
+      if (coverage.next_cursor !== null) throw new Error("Source hierarchy completion was invalid.");
+      break;
+    }
+    const next = coverage.next_cursor;
+    if (typeof next !== "string" || !next || cursors.has(next) || !page.files.length
+        || next !== page.files[page.files.length - 1].key) {
+      throw new Error("Source hierarchy pagination did not advance.");
+    }
+    cursors.add(next);
+    after = next;
+  }
+  return { files: [...files.values()], issues: [...issues.values()] };
+}
 export interface VaultMoveResult {
   source: string; destination: string; refs: Record<string, string>; article: boolean;
 }
@@ -331,13 +440,11 @@ export const api = {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ proactive }),
   }),
-  graph: () => json<GraphSnapshot>("/api/graph"),
+  // Review readback must reach the authority after its committed decision.
+  graph: () => json<GraphSnapshot>("/api/graph", { cache: "no-store" }),
   article: (ref: string) => json<NoteDoc>(`/api/articles/${encodeURI(ref)}`),
   files: () => json<VaultFile[]>("/api/files"),
-  sourceFiles: () => json<{ files: SourceFile[]; issues: SourceIssue[] }>(
-    "/api/source-files",
-    { cache: "no-store" },
-  ),
+  sourceFiles,
   sourceFile: (key: string) => json<SourceDoc>(
     `/api/source-files/${encodeURI(key)}`,
     { cache: "no-store" },
@@ -368,22 +475,22 @@ export const api = {
       body: JSON.stringify(update),
     }),
   setAutoCurate: (ref: string, enabled: boolean) =>
-    json<{ article: string; enabled: boolean; task: string | null }>(
+    json<{ article: string; enabled: boolean }>(
       `/api/articles/${encodeURI(ref)}/auto-curate`, {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ enabled }),
       }),
-  checkouts: () => json<{ assignments: CheckoutAssignment[] }>("/api/library/checkouts"),
-  setCheckout: (ref: string, agent: CheckoutAgent, checkedOut: boolean) =>
-    json<{ agent: CheckoutAgent; ref: string; kind: string; checked_out: boolean;
-      checkout_changed: boolean; paired_skills: string[]; activated_task: string | null;
-      activation_state: "started" | "queued" | null; queue_position: number | null;
-      queue_depth: number; activation_error: string | null }>(
-      `/api/library/checkouts/${encodeURI(ref)}`, {
+  assignments: () => json<{ assignments: TaskAssignment[]; dependencies: TaskDependency[] }>("/api/library/assignments"),
+  setAssignment: (ref: string, agent: AssignmentAgent, assigned: boolean) =>
+    json<{ agent: AssignmentAgent; ref: string; kind: "task"; assigned: boolean;
+      direct: boolean; inherited: boolean; assignment_changed: boolean; activated_task: string | null;
+      activation_state: "ready" | "queued" | "blocked" | null;
+      activation_error: string | null }>(
+      `/api/library/assignments/${encodeURI(ref)}`, {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agent, checked_out: checkedOut }),
+        body: JSON.stringify({ agent, assigned }),
       }),
   note: (ref: string) => json<NoteDoc>(`/api/notes/${encodeURI(ref)}`),
   tasks: () => json<TaskRow[]>("/api/tasks"),
@@ -446,18 +553,23 @@ export const api = {
 };
 
 let readerSelection: string | null = null;
+let readerGraphId = "";
 let sourceSelection: string | null = null;
 
-export function openReader(ref: string): void {
+export function openReader(ref: string, graphId = ""): void {
   readerSelection = ref;
+  readerGraphId = graphId;
   sourceSelection = null;
-  window.dispatchEvent(new CustomEvent("obsidience:open-reader", { detail: { ref } }));
+  window.dispatchEvent(new CustomEvent("obsidience:open-reader", { detail: { ref, graphId } }));
 }
 
-export function onOpenReader(handler: (ref: string) => void): () => void {
-  const fn = (e: Event) => handler((e as CustomEvent<{ ref: string }>).detail.ref);
+export function onOpenReader(handler: (ref: string, graphId: string) => void): () => void {
+  const fn = (e: Event) => {
+    const { ref, graphId = "" } = (e as CustomEvent<{ ref: string; graphId?: string }>).detail;
+    handler(ref, graphId);
+  };
   window.addEventListener("obsidience:open-reader", fn);
-  if (readerSelection) handler(readerSelection);
+  if (readerSelection) handler(readerSelection, readerGraphId);
   return () => window.removeEventListener("obsidience:open-reader", fn);
 }
 

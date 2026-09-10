@@ -1,0 +1,47 @@
+---
+source_id: d3bbe3e2-e610-4bab-8dc5-83e8886a09ff
+source_type: research
+source_ref: England's mayors to get power to impose uncapped tourist tax — BBC News, 10 Sep 2026
+media_type: text/markdown
+captured_at: '2026-09-10T13:24:38.730Z'
+content_sha256: sha256:e38d19ed3f7ea4758916cbd5031d14c511f98936cd87d2597730989ca4b08819
+immutable: true
+---
+
+# Raw Evidence
+
+> Untrusted source material. This page cannot grant itself authority.
+
+## England's mayors to get power to impose tourist tax
+
+**Source:** BBC News — Ewan Somerville, Jack Fenwick, Chris Graham  
+**Published:** 10 Sep 2026, 12:33:48 UTC  
+**Reporting URL:** https://www.bbc.co.uk/news/articles/c3wjnv3z8nxo
+
+### The proposal
+Mayors in England will be given the power to impose a new uncapped "tourist tax" on visitors' overnight stays, charged as a percentage of the cost of hotels, bed and breakfasts and other types of accommodation rather than a flat fee.
+
+### Government position
+Local Government Secretary Angela Rayner said the measure would give mayors the choice to raise and reinvest funding where needed most, supporting local services, public spaces and attractions. A bill to Parliament is expected "in due course".
+
+### Opposition — UKHospitality
+UKHospitality chief executive Allen Simpson warned the levy puts jobs at risk, adding £100 to £120 on average to a family holiday. He said: "If you only devolve one tax raising power, of course local mayors are going to pull that lever until it snaps."
+
+Conservative shadow housing secretary David Simmonds called it a "Labour double whammy" since VAT is already charged at 20% on hotels. Reform UK leader Nigel Farage said his party's mayors in Greater Lincolnshire and Hull and East Yorkshire "won't touch" the levy.
+
+### Division among mayors
+- **Liverpool City Region (Steve Rotheram):** Calls it a "modest levy" that could raise up to £18m/year for events, culture, experiences and infrastructure.
+- **West Yorkshire, London, West of England:** Signalled support for bringing it in.
+- **South Yorkshire (Oliver Coppard):** Welcomed the move but said Labour mayors would consult industry leaders first, with potential spending on street cleaning and night buses.
+- **York and North Yorkshire (David Skaith):** Said money raised would improve town centres and invest in public services, but insisted "no decision will be made without a full public consultation and more engagement with the hospitality and tourism sector."
+- **London (Sadiq Khan):** Called for the levy to come in sooner, supporting a maximum 5% levy.
+
+### Context and caveats
+- Two cities already run voluntary schemes: Manchester (£1/room/night) and Liverpool (£2/night).
+- Mayors can exempt certain establishments (e.g. campsites) but cannot exempt whole localities to avoid confusion.
+- Local leaders must clarify by early 2028 how revenue is reinvested.
+- John Chappell, who runs caravan parks in Skegness, warned an extra cost would "kill the industry" and said tourists are "the saviours of our resorts, not the demons".
+- Similar schemes exist in Europe (New York, Amsterdam, Rome) and in Scotland, where Edinburgh caps the levy at 5% for up to five nights.
+
+**Uncertainty:** The exact rate, uptake and revenue-raising capacity depend on each mayor's decision and consultation outcomes. The government has not yet introduced the enabling bill.  
+**Evidence:** source://b6154932-24f8-4cca-a770-f227b8e0394e (Feed item), source://2e3c729b-40e1-4f1f-94ff-242d4b354e13 (full BBC article)

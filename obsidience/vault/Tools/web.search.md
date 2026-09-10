@@ -1,8 +1,9 @@
 ---
-binding: capability:web.search
-kind: tool
-source: obsidience/harness/capabilities/web/search.py
+type: tool
 title: web.search
+obsidience:
+  binding: capability:web.search
+  source: obsidience/harness/capabilities/web/search.py
 ---
 
 Search the public web for direct source candidates.

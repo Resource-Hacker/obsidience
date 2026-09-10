@@ -1,17 +1,18 @@
 ---
+type: runbook
 title: Research question procedure
-kind: runbook
-owner_maintained: true
-for_agent: '[[Agents/Darwin/Darwin]]'
-task: '[[Tasks/research/question]]'
-skills:
-- '[[Skills/listing-the-vault]]'
-- '[[Skills/searching-the-vault]]'
-- '[[Skills/reading-the-vault]]'
-- '[[Skills/searching-the-web]]'
-- '[[Skills/fetching-web-sources]]'
-- '[[Skills/reading-source-evidence]]'
-- '[[Skills/handing-off-research]]'
+obsidience:
+  owner_maintained: true
+  for_agent: '[[Agents/Darwin/Darwin]]'
+  task: '[[Tasks/research/question]]'
+  skills:
+  - '[[Skills/vault.list]]'
+  - '[[Skills/vault.search]]'
+  - '[[Skills/vault.read]]'
+  - '[[Skills/web.search]]'
+  - '[[Skills/web.fetch]]'
+  - '[[Skills/source.read]]'
+  - '[[Skills/source.handoff]]'
 ---
 
 1. Frame one bounded question, success criterion, scope, and freshness need.
@@ -24,5 +25,7 @@ skills:
 5. Use `source.handoff` once to drop the complete cited synthesis into the
    physical Source Inbox. Its `source.inbox` event activates Alexandria's
    centralized Ingest Task.
-6. Complete after the handoff is attested; report failed or partial acquisition
-   honestly without staging an intermediate Review.
+6. Complete after the handoff is attested. If accepted evidence already answers
+   the question and no handoff is justified, complete with `outcome: no_change`
+   and cite the exact accepted evidence in the `evidence` list. Report failed or
+   partial acquisition honestly without staging an intermediate Review.

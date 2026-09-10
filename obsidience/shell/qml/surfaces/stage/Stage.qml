@@ -35,7 +35,6 @@ PanelWindow {
     StageContent {
         width: stage.screen ? stage.screen.width : 0
         height: stage.screen ? stage.screen.height : 0
-        surfaceId: stage.surfaceId
         locked: stage.locked
     }
 }

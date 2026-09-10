@@ -9,13 +9,12 @@ import math
 import os
 import signal
 import time
-import uuid
 from collections import deque
 from pathlib import Path
 from typing import Any, Literal
 
-from ..conversation.store import CONVERSATION
-from ..execution import activity as knowledge_activity
+from ..conversation import runtime as conversation_runtime
+from ..execution import trace
 from ..models import runtime as model_runtime
 from . import media as media_runtime
 
@@ -31,26 +30,17 @@ NEMOTRON_MODEL = Path(
 )
 MAX_EVENT_TEXT = 512
 MAX_EVENTS = 80
+MAX_WORKER_EVENT_BYTES = 16_384
 RUNTIME_LEASE_OWNER = "obsidience-realtime"
-REALTIME_TASK_REF = "Tasks/executive/realtime"
-COMPACT_TASK_REF = "Tasks/observations/immediate/compact"
-REALTIME_AGENT_REF = "Agents/Executive/Executive"
-REALTIME_RUNBOOK_REF = "Runbooks/realtime"
 REALTIME_CONFIRMATION = "Realtime active."
-REALTIME_RESPONSE_CONTRACT = (
-    "Answer the owner in one or two short spoken sentences unless detail is requested. "
-    "If unclear, ask one brief question. Never narrate Realtime, Task, Tool, transport, "
-    "or harness status unless asked."
-)
-DEFAULT_CONTEXT_THRESHOLD = 80
-MIN_CONTEXT_THRESHOLD = 50
-MAX_CONTEXT_THRESHOLD = 90
-DEFAULT_THINKING_OVERHEAD_TOKENS = 1_500
-PROMPT_SAFETY_TOKENS = 256
+
+
+_input_speech_timing = trace.input_speech_timing
 
 
 class RealtimeSessionManager:
-    def __init__(self) -> None:
+    def __init__(self, conversation=None, *, requested_state_path: Path | None = None) -> None:
+        self._requested_state_path = requested_state_path
         self._lock = asyncio.Lock()
         self._process: asyncio.subprocess.Process | None = None
         self._monitor: asyncio.Task[None] | None = None
@@ -63,7 +53,9 @@ class RealtimeSessionManager:
         self._audio_source = media_runtime.DEFAULT_MICROPHONE
         self._audio_sink = media_runtime.DEFAULT_SPEAKER
         self._input_level = 0.0
+        self._capture_active = False
         self._user_speaking = False
+        self._speech_sequence = 0
         self._live_transcript: dict[str, Any] | None = None
         self._aec_active = False
         self._tts_voice = media_runtime.DEFAULT_TTS_VOICE
@@ -72,32 +64,12 @@ class RealtimeSessionManager:
         self._subscribers: set[asyncio.Queue[dict[str, Any]]] = set()
         self._operation = 0
         self._hardware_leased = False
-        self._selected_model: model_runtime.ModelSpec | None = None
-        self._selected_devices: tuple[str, ...] = ()
-        self._task_run_id: str | None = None
-        self._task_started: float | None = None
-        self._task_objective: str | None = None
-        self._task_runbook_ref: str | None = None
-        self._task_runbook_sha256: str | None = None
-        self._task_status: str = "draft"
-        self._task_activity: dict[str, Any] | None = None
-        self._realtime_refs: list[str] = [
-            REALTIME_AGENT_REF,
-            REALTIME_TASK_REF,
-            REALTIME_RUNBOOK_REF,
-        ]
-        self._turn_task: asyncio.Task[dict[str, Any]] | None = None
-        self._generation = 0
-        self._conversation = CONVERSATION
-        self._compact_lock = asyncio.Lock()
-        self._session_finalize_lock = asyncio.Lock()
-        self._deferred_observation_sessions: list[str] = []
-        self._finalized_observation_sessions: set[str] = set()
-        self._compacting = False
-        self._thinking_overhead_tokens = DEFAULT_THINKING_OVERHEAD_TOKENS
+        self._playback_timing_binding: tuple | None = None
+        self._playback_timing_stages: set[str] = set()
+        self.conversation = conversation or conversation_runtime.RUNTIME
 
     def scheduler_paused(self) -> bool:
-        return self._task_run_id is not None and self._phase not in {"off", "error"}
+        return self._phase not in {"off", "error"}
 
     def snapshot(self) -> dict[str, Any]:
         process = self._process
@@ -116,6 +88,7 @@ class RealtimeSessionManager:
             "audio_source": self._audio_source,
             "audio_sink": self._audio_sink,
             "input_level": self._input_level,
+            "capture_active": self._capture_active,
             "user_speaking": self._user_speaking,
             "live_transcript": self._live_transcript,
             "acoustic_echo_cancellation": self._aec_active,
@@ -129,378 +102,9 @@ class RealtimeSessionManager:
                 "tts_device": "CPU",
                 "voice": self._tts_voice,
             },
-            "model": (
-                None
-                if self._selected_model is None
-                else {
-                    "id": self._selected_model.id,
-                    "label": self._selected_model.label,
-                    "devices": list(self._selected_devices),
-                }
-            ),
-            "task_ref": REALTIME_TASK_REF,
-            "task_run_id": self._task_run_id,
-            "task_status": self._task_status,
             "scheduler_paused": self.scheduler_paused(),
             "recent_log": list(self._recent_log),
         }
-
-    def _context_model(self, task_ref: str | None = None) -> model_runtime.ModelSpec:
-        if task_ref is None and self._selected_model is not None:
-            return self._selected_model
-        from ..knowledge.vault import resolver
-
-        task = resolver().resolve(task_ref or REALTIME_TASK_REF)
-        if task is None:
-            return model_runtime.configured_spec(model_runtime.EXECUTIVE_MODEL)
-        assignee = str(task.meta.get("assignee", "")).strip("[]")
-        return model_runtime.resolve_model(
-            task.meta.get("model"), assignee or REALTIME_AGENT_REF,
-        )
-
-    def _context_threshold(self) -> int:
-        from ..knowledge.vault import resolver
-
-        task = resolver().resolve(COMPACT_TASK_REF)
-        try:
-            value = int(task.meta.get("context_threshold", DEFAULT_CONTEXT_THRESHOLD))
-        except (AttributeError, TypeError, ValueError):
-            value = DEFAULT_CONTEXT_THRESHOLD
-        return min(MAX_CONTEXT_THRESHOLD, max(MIN_CONTEXT_THRESHOLD, value))
-
-    def context_status(
-        self,
-        *,
-        before_sequence: int | None = None,
-        conversation_id: str | None = None,
-        context_task_ref: str | None = None,
-        pending_text: str = "",
-    ) -> dict[str, Any]:
-        """Project the Immediate Observations Article and report its model occupancy."""
-        from ..conversation.observations import project_immediate_observations
-
-        exact_conversation_id = conversation_id or self._conversation.conversation_id
-        projection = project_immediate_observations(
-            self._conversation,
-            conversation_id=exact_conversation_id,
-            before_sequence=before_sequence,
-            materialize=(exact_conversation_id == self._conversation.conversation_id),
-        )
-        spec = self._context_model(context_task_ref)
-        capacity = max(
-            1,
-            spec.context_tokens - spec.max_output_tokens - PROMPT_SAFETY_TOKENS,
-        )
-        immediate_tokens = (len(str(projection["body"])) + 3) // 4
-        pending_tokens = (len(pending_text.strip()) + 3) // 4
-        used = self._thinking_overhead_tokens + immediate_tokens + pending_tokens
-        return {
-            "type": "context",
-            "conversation_id": exact_conversation_id,
-            "article_ref": projection["ref"],
-            "used_tokens": used,
-            "capacity_tokens": capacity,
-            "percent": round(min(100.0, used * 100.0 / capacity), 1),
-            "compact_at": self._context_threshold(),
-            "compacting": self._compacting,
-            "compacted_through": projection["compacted_through"],
-            "latest_sequence": projection["latest_sequence"],
-        }
-
-    def publish_context(self) -> dict[str, Any]:
-        status = self.context_status()
-        self._conversation.publish(status)
-        return status
-
-    def record_prompt_usage(self, result: dict[str, Any], *, request_text: str = "") -> None:
-        prompt = int(result.get("prompt_tokens_estimate") or 0)
-        immediate = int(result.get("conversation_tokens_estimate") or 0)
-        request = (len(request_text.strip()) + 3) // 4
-        if prompt > immediate + request:
-            self._thinking_overhead_tokens = prompt - immediate - request
-
-    async def set_context_threshold(self, percent: object) -> dict[str, Any]:
-        try:
-            value = int(percent)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("context threshold must be an integer percent") from exc
-        if not MIN_CONTEXT_THRESHOLD <= value <= MAX_CONTEXT_THRESHOLD:
-            raise ValueError(
-                f"context threshold must be {MIN_CONTEXT_THRESHOLD}-{MAX_CONTEXT_THRESHOLD}"
-            )
-        from ..knowledge.index import INDEX
-        from ..knowledge.vault import mutate_note_metadata, resolver
-
-        task = resolver().resolve(COMPACT_TASK_REF)
-        if task is None or task.kind != "task":
-            raise RuntimeError("the Compact Immediate Observations Task is missing")
-        mutate_note_metadata(task, lambda meta: meta.__setitem__("context_threshold", value))
-        await asyncio.to_thread(INDEX.sync)
-        return self.publish_context()
-
-    async def compact_conversation(
-        self,
-        *,
-        force: bool,
-        before_sequence: int | None = None,
-        conversation_id: str | None = None,
-        context_task_ref: str | None = None,
-        pending_text: str = "",
-    ) -> dict[str, Any]:
-        """Issue the one graph Task that compacts Immediate into Temporary."""
-        exact_conversation_id = conversation_id or self._conversation.conversation_id
-        current = asyncio.current_task()
-        if force and self._turn_task and self._turn_task is not current and not self._turn_task.done():
-            raise RuntimeError("wait for the active Executive turn before compacting")
-        async with self._compact_lock:
-            status = self.context_status(
-                before_sequence=before_sequence,
-                conversation_id=exact_conversation_id,
-                context_task_ref=context_task_ref,
-                pending_text=pending_text,
-            )
-            if (
-                not force
-                and int(status["used_tokens"]) * 100
-                < int(status["compact_at"]) * int(status["capacity_tokens"])
-            ):
-                return {"status": "not_needed", "context": status}
-            if int(status["latest_sequence"]) <= int(status["compacted_through"]):
-                return {"status": "nothing_to_compact", "context": status}
-
-            from ..conversation.observations import (
-                EXECUTIVE_TEMPORARY_PATH,
-                commit_context_compaction,
-                discard_pending_context_compaction,
-                project_immediate_observations,
-            )
-            from ..execution.executor import run_task
-            from ..knowledge.index import INDEX
-            from ..knowledge.vault import resolver
-
-            task = resolver().resolve(COMPACT_TASK_REF)
-            if task is None or task.kind != "task":
-                raise RuntimeError("the Compact Immediate Observations Task is missing")
-            projection = project_immediate_observations(
-                self._conversation,
-                conversation_id=exact_conversation_id,
-                before_sequence=before_sequence,
-                materialize=(exact_conversation_id == self._conversation.conversation_id),
-            )
-            through_sequence = int(projection["latest_sequence"])
-            turn_id = (
-                f"compact-{exact_conversation_id.removeprefix('conversation-')[:16]}"
-                f"-{through_sequence}"
-            )
-            self._compacting = True
-            if exact_conversation_id == self._conversation.conversation_id:
-                self._conversation.publish(status | {"compacting": True})
-            try:
-                result = await run_task(
-                    task,
-                    runtime_params={
-                        "event": "observations.immediate.manual" if force
-                        else "observations.immediate.threshold",
-                        "source": "executive:context",
-                        "turn_id": turn_id,
-                        "target_path": str(EXECUTIVE_TEMPORARY_PATH),
-                        "curation_mode": "compaction",
-                        "conversation_id": exact_conversation_id,
-                        "through_sequence": str(through_sequence),
-                    },
-                    emit_turn_event=False,
-                    keep_task_open=True,
-                    conversation_context=str(projection["body"]),
-                )
-                if result.get("status") != "completed":
-                    removed = discard_pending_context_compaction(
-                        conversation_id=exact_conversation_id,
-                        through_sequence=through_sequence,
-                        turn_id=turn_id,
-                    )
-                    if removed:
-                        await asyncio.to_thread(INDEX.sync)
-                    return result
-                compacted = commit_context_compaction(
-                    conversation_id=exact_conversation_id,
-                    through_sequence=through_sequence,
-                    turn_id=turn_id,
-                )
-                project_immediate_observations(
-                    self._conversation,
-                    conversation_id=exact_conversation_id,
-                    before_sequence=before_sequence,
-                    materialize=(exact_conversation_id == self._conversation.conversation_id),
-                )
-                await asyncio.to_thread(INDEX.sync)
-                return {**result, "temporary_ref": compacted.ref}
-            except BaseException:
-                removed = discard_pending_context_compaction(
-                    conversation_id=exact_conversation_id,
-                    through_sequence=through_sequence,
-                    turn_id=turn_id,
-                )
-                if removed:
-                    await asyncio.to_thread(INDEX.sync)
-                raise
-            finally:
-                self._compacting = False
-                self.publish_context()
-
-    async def prepare_immediate_observations(
-        self,
-        user_turn: dict[str, Any],
-        *,
-        context_task_ref: str | None = None,
-    ) -> str:
-        exact_conversation_id = str(user_turn["conversation_id"])
-        await self.compact_conversation(
-            force=False,
-            before_sequence=int(user_turn["sequence"]),
-            conversation_id=exact_conversation_id,
-            context_task_ref=context_task_ref,
-            pending_text=str(user_turn.get("text") or ""),
-        )
-        from ..conversation.observations import project_immediate_observations
-
-        return str(project_immediate_observations(
-            self._conversation,
-            conversation_id=exact_conversation_id,
-            before_sequence=int(user_turn["sequence"]),
-            materialize=(exact_conversation_id == self._conversation.conversation_id),
-        )["body"])
-
-    def _begin_task(self) -> None:
-        """Open the one runtime Task and resolve its one selected model."""
-
-        from ..execution.executor import build_activation_binding, resolve_spine
-        from ..execution.ledger import runbook_tree_hash
-        from ..knowledge.vault import resolver, update_status
-
-        task = resolver().resolve(REALTIME_TASK_REF)
-        if task is None or task.kind != "task":
-            raise RuntimeError("the Realtime Task Article is missing")
-        spine = resolve_spine(task, resolver())
-        if "error" in spine or "subtasks" in spine:
-            raise RuntimeError(str(spine.get("error") or "Realtime must be one leaf Task"))
-        assignee_ref = str(task.meta.get("assignee", "")).strip("[]")
-        self._selected_model = model_runtime.resolve_model(
-            task.meta.get("model"),
-            assignee_ref or REALTIME_AGENT_REF,
-        )
-        self._task_run_id = f"realtime-{uuid.uuid4().hex[:12]}"
-        self._task_started = time.time()
-        self._task_objective = build_activation_binding(
-            task,
-            spine["runbooks"],
-            {"event": "realtime.start"},
-        ).objective
-        self._task_runbook_ref = spine["runbook"].ref
-        self._task_runbook_sha256 = runbook_tree_hash(spine["runbooks"])
-        self._task_status = "running"
-        update_status(task, "running", {"last_run": self._task_run_id})
-
-    def _finish_task(self, status: str, summary: str) -> None:
-        """Close the runtime Task exactly once from its owner-controlled lifecycle."""
-
-        if self._task_run_id is None or self._task_started is None:
-            return
-        from ..knowledge.index import INDEX
-        from ..knowledge.vault import resolver, update_status
-
-        task = resolver().resolve(REALTIME_TASK_REF)
-        run_id = self._task_run_id
-        started = self._task_started
-        if task is not None:
-            update_status(task, status, {"summary": summary, "last_run": run_id})
-        INDEX.record_run(
-            id=run_id,
-            task_ref=REALTIME_TASK_REF,
-            objective=self._task_objective or (task.title if task is not None else "Realtime"),
-            agent="JARVIS",
-            started=started,
-            finished=time.time(),
-            status=status,
-            summary=summary,
-            trace="[]",
-            runbook_ref=self._task_runbook_ref or "",
-            runbook_sha256=self._task_runbook_sha256 or "",
-            reasoning_effort="none",
-            model=(
-                self._selected_model.id
-                if self._selected_model is not None
-                else model_runtime.EXECUTIVE_MODEL
-            ),
-        )
-        INDEX.sync()
-        self._task_status = status
-        self._task_run_id = None
-        self._task_started = None
-        self._task_objective = None
-        self._task_runbook_ref = None
-        self._task_runbook_sha256 = None
-        self._selected_model = None
-        self._selected_devices = ()
-        self._complete_task_activity()
-
-    async def _activate_task_activity(self) -> None:
-        """Compile and display the long-running Realtime Task like any other Task."""
-
-        from ..execution.executor import build_activation_binding, compile_activation, resolve_spine
-        from ..knowledge.vault import resolver
-
-        res = resolver()
-        task = res.resolve(REALTIME_TASK_REF)
-        if task is None or task.kind != "task":
-            raise RuntimeError("the Realtime Task Article is missing")
-        spine = resolve_spine(task, res)
-        if "error" in spine or "subtasks" in spine:
-            raise RuntimeError(str(spine.get("error") or "Realtime must be one leaf Task"))
-        self._task_objective = build_activation_binding(
-            task,
-            spine["runbooks"],
-            {"event": "realtime.start"},
-        ).objective
-        query = self._task_objective
-        graph_id = "main"
-        knowledge_activity.emit(
-            "query_started", [task.ref], query=query, graph_id=graph_id,
-        )
-        try:
-            activation = await compile_activation(
-                task,
-                spine=spine,
-                params={"event": "realtime.start"},
-            )
-        except BaseException:
-            knowledge_activity.emit(
-                "query_completed", [task.ref], query=query, graph_id=graph_id,
-            )
-            raise
-        self._task_objective = str(activation["objective"])
-        query = self._task_objective
-        self._task_activity = {
-            "refs": list(activation["refs"]),
-            "query": query,
-            "graph_id": graph_id,
-            "retrieval_ms": float(activation["retrieval_ms"]),
-        }
-        self._realtime_refs = list(activation["refs"])
-
-    def _complete_task_activity(self) -> None:
-        """End startup illumination; idle Realtime is not unresolved graph work."""
-
-        activity = self._task_activity
-        if activity is None:
-            return
-        knowledge_activity.emit(
-            "query_completed",
-            activity["refs"],
-            query=activity["query"],
-            graph_id=activity["graph_id"],
-            retrieval_ms=activity["retrieval_ms"],
-        )
-        self._task_activity = None
 
     async def _publish(self, kind: str, **payload: Any) -> None:
         event = {
@@ -529,6 +133,28 @@ class RealtimeSessionManager:
     def unsubscribe(self, queue: asyncio.Queue[dict[str, Any]]) -> None:
         self._subscribers.discard(queue)
 
+    def _trace_speech_boundary(self, event_type: str) -> None:
+        """Correlate speech edges without copying words or acoustic data."""
+        transcript = self._live_transcript
+        boundary = event_type.removeprefix("speech_")
+        metadata = {
+            "event": f"speech.{boundary}",
+            "conversation_id": str(self.conversation._conversation.conversation_id)[:96],
+            "generation": int(getattr(self.conversation, "_generation", 0)),
+            "speech_sequence": self._speech_sequence,
+            "user_speaking": self._user_speaking,
+            # This describes the latest observed transcript, not an acoustic
+            # confidence or proof that a VAD onset was intentional speech.
+            "latest_transcript_state": (
+                "final" if transcript and transcript.get("final") is True
+                else "partial" if transcript else "none"
+            ),
+        }
+        trace.emit(
+            "speech", f"Speech {boundary.replace('_', ' ')}",
+            [json.dumps(metadata, sort_keys=True)],
+        )
+
     def _command(self) -> tuple[str, ...]:
         return (
             str(REALTIME_PYTHON),
@@ -548,252 +174,64 @@ class RealtimeSessionManager:
         process = self._process
         if process is None or process.returncode is not None or process.stdin is None:
             return
+        if payload.get("type") in {"speak", "cancel", "stop"}:
+            self._playback_timing_binding = (
+                tuple(payload.get(key) for key in ("generation", "speech_sequence", "turn_id", "run_id"))
+                if payload.get("type") == "speak" else None
+            )
+            self._playback_timing_stages.clear()
         process.stdin.write((json.dumps(payload) + "\n").encode())
         await process.stdin.drain()
 
-    async def _cancel_turn(self, *, stop_playback: bool = True) -> None:
-        self._generation += 1
-        task, self._turn_task = self._turn_task, None
-        if task and task is not asyncio.current_task():
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
-        if stop_playback:
-            await self._send_worker({"type": "cancel", "generation": self._generation})
-
-    async def _run_voice_turn(
-        self,
-        text: str,
-        generation: int,
-        user_turn: dict[str, Any] | None = None,
-        *,
-        source: Literal["text", "realtime"] = "realtime",
-        speak: bool = True,
-    ) -> dict[str, Any]:
-        from ..execution.executor import run_task
-        from ..knowledge.vault import resolver
-
-        task = resolver().resolve(REALTIME_TASK_REF)
-        if task is None or task.kind != "task":
-            raise RuntimeError("the Realtime Task Article is missing")
-        try:
-            conversation_context = (
-                await self.prepare_immediate_observations(
-                    user_turn,
-                    context_task_ref=task.ref,
-                )
-                if user_turn is not None
-                else ""
-            )
-            result = await run_task(
-                task,
-                runtime_params={
-                    "event": "realtime.utterance" if source == "realtime" else "chat.request",
-                    "request": text,
-                    "source": "voice" if source == "realtime" else "text",
-                    "response_contract": REALTIME_RESPONSE_CONTRACT,
-                },
-                emit_turn_event=False,
-                keep_task_open=True,
-                realtime_projection=True,
-                conversation_context=conversation_context,
-            )
-            self.record_prompt_usage(result, request_text=text)
-            if generation != self._generation or self._phase not in {"command", "proactive"}:
-                return {"status": "interrupted"}
-            reply = str(result.get("reply", "")).strip()
-            if result.get("status") != "completed":
-                detail = str(result.get("summary", "")).strip()
-                self._last_error = f"Realtime turn failed: {detail or 'no public reply'}"[:MAX_EVENT_TEXT]
-                await self._publish("runtime", line=self._last_error)
-                return result
-            if reply:
-                self._last_error = None
-                if speak:
-                    await self._send_worker({
-                        "type": "speak",
-                        "generation": generation,
-                        "text": reply,
-                    })
-                if generation != self._generation or self._phase not in {"command", "proactive"}:
-                    return {"status": "interrupted"}
-                assistant_turn = None
-                if user_turn is not None:
-                    assistant_turn = await self._conversation.append(
-                        role="assistant",
-                        source=source,
-                        text=reply,
-                        run_id=str(result.get("run_id") or "") or None,
-                        conversation_id=str(user_turn["conversation_id"]),
-                        reply_to=str(user_turn["id"]),
-                    )
-                    self.publish_context()
-                await self._publish(
-                    "reply",
-                    text=reply,
-                    transcript=text,
-                    run_id=result.get("run_id"),
-                    turn_id=None if assistant_turn is None else assistant_turn["id"],
-                )
-            return result
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            message = f"Realtime turn failed: {type(exc).__name__}: {exc}"[:MAX_EVENT_TEXT]
-            self._last_error = message
-            await self._publish("runtime", line=message)
-            return {"status": "failed", "summary": message}
-        finally:
-            if self._turn_task is asyncio.current_task():
-                self._turn_task = None
-
-    async def _start_turn(
-        self,
-        text: str,
-        *,
-        source: Literal["text", "realtime"],
-        speak: bool,
-        wait: bool,
-    ) -> dict[str, Any]:
-        clean = " ".join(text.split())[:4_000]
-        if not clean:
-            return {"status": "ignored"}
-        async with self._lock:
-            if self._phase not in {"command", "proactive"}:
-                raise RuntimeError("real-time mode is not ready")
-            await self._cancel_turn(stop_playback=source == "text")
-            user_turn = await self._conversation.append(
-                role="user",
-                source=source,
-                text=clean,
-            )
-            generation = self._generation
-            turn_task = asyncio.create_task(
-                self._run_voice_turn(
-                    clean,
-                    generation,
-                    user_turn,
-                    source=source,
-                    speak=speak,
-                ),
-                name=f"obsidience-realtime-turn-{generation}",
-            )
-            self._turn_task = turn_task
-        if not wait:
-            return user_turn
-        try:
-            return await turn_task
-        except asyncio.CancelledError:
-            current = asyncio.current_task()
-            if turn_task.cancelled() and current is not None and current.cancelling() == 0:
-                return {"status": "interrupted"}
-            raise
-
-    async def _accept_transcript(self, text: str) -> None:
-        await self._start_turn(
-            text,
-            source="realtime",
-            speak=True,
-            wait=False,
-        )
-
-    async def submit_text(self, text: str) -> dict[str, Any]:
-        """Run typed input through the active Realtime Task without speaking its reply."""
-
-        return await self._start_turn(
-            text,
-            source="text",
-            speak=False,
-            wait=True,
-        )
-
-    def defer_observation_session(self, conversation_id: str) -> None:
-        """Remember one rotated Realtime session without delaying startup."""
-
-        exact = str(conversation_id).strip()
-        if (
-            exact
-            and exact not in self._finalized_observation_sessions
-            and exact not in self._deferred_observation_sessions
-        ):
-            self._deferred_observation_sessions.append(exact)
-
-    async def finalize_observation_session(
-        self,
-        conversation_id: str,
-        *,
-        session_boundary: str,
-    ) -> dict[str, Any]:
-        """Compact one closed session and issue its ordinary promotion event once."""
-
-        exact = str(conversation_id).strip()
-        if not exact:
-            raise ValueError("observation finalization requires a conversation identity")
-        async with self._session_finalize_lock:
-            if exact in self._finalized_observation_sessions:
-                return {"status": "already_finalized", "conversation_id": exact}
-            compacted = await self.compact_conversation(
-                force=True,
-                conversation_id=exact,
-            )
-            if compacted.get("status") not in {
-                "completed", "nothing_to_compact", "not_needed",
-            }:
-                raise RuntimeError(
-                    "final Immediate Observations compaction did not complete: "
-                    f"{compacted.get('status', 'unknown')}"
-                )
-            from ..conversation.observations import queue_temporary_promotion
-
-            promotion = queue_temporary_promotion(
-                exact,
-                session_boundary=session_boundary,
-            )
-            if promotion.get("state") == "not_configured":
-                raise RuntimeError("the Alexandria promotion Task is not configured")
-            self._finalized_observation_sessions.add(exact)
-            return {
-                "status": "finalized",
-                "conversation_id": exact,
-                "compaction": compacted,
-                "promotion": promotion,
-            }
-
-    async def _finalize_realtime_observations(
-        self,
-        conversation_id: str,
-        *,
-        session_boundary: str,
-    ) -> list[dict[str, Any]]:
-        session_ids = list(self._deferred_observation_sessions)
-        if conversation_id and conversation_id not in session_ids:
-            session_ids.append(conversation_id)
-        results = []
-        for session_id in session_ids:
-            try:
-                result = await self.finalize_observation_session(
-                    session_id,
-                    session_boundary=session_boundary,
-                )
-            except Exception as exc:  # noqa: BLE001 - retain the exact session for retry
-                self.defer_observation_session(session_id)
-                self._last_error = (
-                    f"Observation promotion deferred: {type(exc).__name__}: {exc}"
-                )[:MAX_EVENT_TEXT]
-                results.append({
-                    "status": "deferred",
-                    "conversation_id": session_id,
-                    "error": self._last_error,
-                })
-            else:
-                self._deferred_observation_sessions = [
-                    item for item in self._deferred_observation_sessions
-                    if item != session_id
-                ]
-                results.append(result)
-        return results
+    def _record_playback_timing(self, event: dict[str, Any]) -> None:
+        stage = event.get("stage")
+        if (not isinstance(stage, str)
+                or stage not in {"speech_received", "aec_ready", "first_pcm", "first_output_write"}
+                or stage in self._playback_timing_stages
+                or self._playback_timing_binding is None
+                or tuple(event.get(key) for key in ("generation", "speech_sequence", "turn_id", "run_id"))
+                != self._playback_timing_binding
+                or type(event.get("generation")) is not int
+                or type(event.get("speech_sequence")) is not int
+                or event["generation"] != self.conversation._generation):
+            return
+        instant = event.get("monotonic_ns")
+        duration = event.get("duration_ms")
+        if (type(instant) is not int or not 0 < instant <= time.monotonic_ns()
+                or (duration is not None and (type(duration) not in {int, float}
+                    or not 0 <= duration <= 86_400_000))):
+            return
+        self._playback_timing_stages.add(stage)
+        trace.latency(stage, monotonic_ns=instant, duration_ms=duration, **{
+            key: event[key] for key in ("generation", "speech_sequence", "turn_id", "run_id")
+        })
 
     async def start(self) -> dict[str, Any]:
+        from ..execution.scheduler import foreground_admission
+
+        async with foreground_admission("realtime.start"):
+            return await self._start_admitted()
+
+    async def restore(self) -> dict[str, Any]:
+        """Restore same-login speech intent before autonomous admission opens."""
+        path = self._requested_state_path
+        if path is None:
+            return self.snapshot()
+        try:
+            requested = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, ValueError):
+            return self.snapshot()
+        if requested != {"enabled": True} or requested.get("enabled") is not True:
+            return self.snapshot()
+        try:
+            return await self.start()
+        except (OSError, RuntimeError, ValueError) as exc:
+            self._phase = "error"
+            self._last_error = f"{type(exc).__name__}: {exc}"[:MAX_EVENT_TEXT]
+            await self._publish("state", reason="restore_failed")
+            return self.snapshot()
+
+    async def _start_admitted(self) -> dict[str, Any]:
         async with self._lock:
             if self._process is not None:
                 return self.snapshot()
@@ -809,7 +247,9 @@ class RealtimeSessionManager:
             self._started_ns = time.monotonic_ns()
             self._last_error = None
             self._input_level = 0.0
+            self._capture_active = False
             self._user_speaking = False
+            self._speech_sequence = 0
             self._live_transcript = None
             self._aec_active = False
             self._recent_log.clear()
@@ -827,17 +267,8 @@ class RealtimeSessionManager:
                     self._audio_sink,
                 )
                 self._aec_active = True
-                self._begin_task()
-                await self._activate_task_activity()
-                assert self._selected_model is not None
                 await model_runtime.reserve_devices(
                     RUNTIME_LEASE_OWNER, (model_runtime.RTX_4080_DEVICE,),
-                )
-                hardware = model_runtime.RUNTIME.settings()["hardware"]
-                self._selected_devices = tuple(
-                    device
-                    for device in model_runtime.GPU_DEVICES
-                    if hardware.get(device) == self._selected_model.id
                 )
                 self._hardware_leased = True
                 RUNTIME_ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -879,11 +310,19 @@ class RealtimeSessionManager:
                     stderr=asyncio.subprocess.STDOUT,
                     start_new_session=True,
                 )
-                outgoing_conversation = self._conversation.conversation_id
-                await self._conversation.new_conversation()
-                self.defer_observation_session(outgoing_conversation)
-                self.publish_context()
+                self.conversation.speech = self
+                if self._requested_state_path is not None:
+                    media_runtime._atomic_json(self._requested_state_path, {"enabled": True})
+                # Reconnecting speech preserves the one selected conversation.
+                # Only the explicit Conversation control creates a new identity.
             except BaseException as exc:
+                process, self._process = self._process, None
+                if process is not None and process.returncode is None:
+                    with contextlib.suppress(ProcessLookupError):
+                        os.killpg(process.pid, signal.SIGKILL)
+                    await process.wait()
+                if self.conversation.speech is self:
+                    self.conversation.speech = None
                 if self._aec_active:
                     await asyncio.to_thread(media_runtime.stop_realtime_aec)
                     self._aec_active = False
@@ -896,7 +335,6 @@ class RealtimeSessionManager:
                 if self._hardware_leased:
                     await model_runtime.release_devices(RUNTIME_LEASE_OWNER)
                     self._hardware_leased = False
-                self._finish_task("failed", f"Realtime failed to start: {exc}")
                 raise
             self._monitor = asyncio.create_task(
                 self._monitor_process(self._process, operation),
@@ -919,14 +357,30 @@ class RealtimeSessionManager:
             await self._publish("state", reason="mode_applied")
             return self.snapshot()
 
-    async def stop(self) -> dict[str, Any]:
-        conversation_id = self._conversation.conversation_id
+    async def stop(self, *, preserve_requested: bool = False) -> dict[str, Any]:
         finalize_observations = False
+        intent_error = None
+
+        def stopped_snapshot():
+            if intent_error is not None:
+                raise RuntimeError("Realtime stopped, but its restart intent could not be cleared") from intent_error
+            return self.snapshot()
+
         async with self._lock:
+            if not preserve_requested and self._requested_state_path is not None:
+                try:
+                    self._requested_state_path.unlink(missing_ok=True)
+                except OSError as exc:
+                    intent_error = exc
+            conversation_id = self.conversation._conversation.conversation_id
             process = self._process
+            operation = self._operation
             if process is None or process.returncode is not None:
+                if self.conversation.speech is self:
+                    await self.conversation.cancel()
                 finalize_observations = bool(
-                    self._task_run_id or self._deferred_observation_sessions
+                    self._phase not in {"off", "error"}
+                    or self.conversation._ledger().deferred_observation_finalizations()
                 )
                 await asyncio.to_thread(media_runtime.stop_realtime_aec)
                 self._aec_active = False
@@ -936,6 +390,7 @@ class RealtimeSessionManager:
                 self._phase = "off"
                 self._transport_ready = False
                 self._input_level = 0.0
+                self._capture_active = False
                 self._user_speaking = False
                 self._live_transcript = None
                 self._requested_proactive = False
@@ -944,25 +399,26 @@ class RealtimeSessionManager:
                 self._hardware_leased = False
                 if release_hardware:
                     await model_runtime.release_devices(RUNTIME_LEASE_OWNER)
-                self._finish_task("completed", "Realtime was disabled by the owner.")
+                if self.conversation.speech is self:
+                    self.conversation.speech = None
                 result = self.snapshot()
             else:
                 result = None
-            if result is None:
+            if result is None and self._phase != "stopping":
                 self._phase = "stopping"
                 self._requested_proactive = False
-                await self._cancel_turn()
+                await self.conversation.cancel()
                 await self._send_worker({"type": "stop"})
                 await self._publish("state", reason="stop_requested")
                 with contextlib.suppress(ProcessLookupError):
                     os.killpg(process.pid, signal.SIGINT)
         if result is not None:
             if finalize_observations:
-                await self._finalize_realtime_observations(
-                    conversation_id,
+                await self.conversation.finalize_pending(
+                    "",
                     session_boundary="realtime.stopped",
                 )
-            return self.snapshot()
+            return stopped_snapshot()
         try:
             await asyncio.wait_for(process.wait(), timeout=60)
         except TimeoutError:
@@ -975,32 +431,34 @@ class RealtimeSessionManager:
                     os.killpg(process.pid, signal.SIGKILL)
                 await process.wait()
         async with self._lock:
-            if self._process is process:
-                self._process = None
-                self._phase = "off"
-                self._transport_ready = False
-                self._input_level = 0.0
-                self._user_speaking = False
-                self._live_transcript = None
-                self._started_ns = None
-                self._vision_source = None
-                await self._publish("state", reason="stopped")
-            release_hardware = self._hardware_leased
-            self._hardware_leased = False
+            if self._process is not process or self._operation != operation:
+                return stopped_snapshot()
             if self._aec_active:
                 await asyncio.to_thread(media_runtime.stop_realtime_aec)
                 self._aec_active = False
-        if release_hardware:
-            await model_runtime.release_devices(RUNTIME_LEASE_OWNER)
-        await asyncio.to_thread(
-            media_runtime.set_realtime_camera_active, self._audio_source, False,
-        )
-        self._finish_task("completed", "Realtime was disabled by the owner.")
-        await self._finalize_realtime_observations(
-            conversation_id,
+            if self._hardware_leased:
+                await model_runtime.release_devices(RUNTIME_LEASE_OWNER)
+                self._hardware_leased = False
+            await asyncio.to_thread(
+                media_runtime.set_realtime_camera_active, self._audio_source, False,
+            )
+            if self.conversation.speech is self:
+                self.conversation.speech = None
+            self._process = None
+            self._phase = "off"
+            self._transport_ready = False
+            self._input_level = 0.0
+            self._capture_active = False
+            self._user_speaking = False
+            self._live_transcript = None
+            self._started_ns = None
+            self._vision_source = None
+            await self._publish("state", reason="stopped")
+        await self.conversation.finalize_pending(
+            "",
             session_boundary="realtime.stopped",
         )
-        return self.snapshot()
+        return stopped_snapshot()
 
     async def _monitor_process(
         self,
@@ -1013,7 +471,17 @@ class RealtimeSessionManager:
                 raw = await process.stdout.readline()
                 if not raw:
                     break
-                line = raw.decode("utf-8", errors="replace").strip()[:MAX_EVENT_TEXT]
+                if operation != self._operation or self._process is not process:
+                    return
+                # Keep draining a stopping worker, but admit no late state or
+                # work. Stop owns cleanup until it releases this exact process.
+                if self._phase in {"stopping", "off", "error"}:
+                    continue
+                if len(raw) > MAX_WORKER_EVENT_BYTES:
+                    continue
+                # Parse the complete bounded record before trimming display text.
+                # Trimming JSON would drop valid final transcripts with timings.
+                line = raw.decode("utf-8", errors="replace").strip()
                 if not line:
                     continue
                 try:
@@ -1025,6 +493,20 @@ class RealtimeSessionManager:
                     if isinstance(worker_event, dict)
                     else ""
                 )
+                if event_type == "speech_timing":
+                    self._record_playback_timing(worker_event)
+                    continue
+                if event_type == "input_capture":
+                    active = worker_event.get("active")
+                    if isinstance(active, bool) and active != self._capture_active:
+                        # This provisional VAD hint is presentation only. NeMo's
+                        # recognized speech owns interruption and final admission.
+                        self._capture_active = active
+                        if (active and self._live_transcript
+                                and self._live_transcript.get("final") is True):
+                            self._live_transcript = None
+                        await self._publish("runtime", reason="capture_active")
+                    continue
                 if event_type == "input_level":
                     level = worker_event.get("level")
                     if isinstance(level, (int, float)) and not isinstance(level, bool):
@@ -1033,7 +515,13 @@ class RealtimeSessionManager:
                             self._input_level = max(0.0, min(1.0, numeric_level))
                             await self._publish("runtime", reason="input_level")
                     continue
+                sequence = worker_event.get("speech_sequence") if isinstance(worker_event, dict) else None
+                exact_sequence = type(sequence) is int and 0 < sequence < 2**31
+                if exact_sequence and event_type in {"speech_detected", "speech_ended", "interruption"}:
+                    self._speech_sequence = sequence
                 if event_type == "speech_detected":
+                    if not exact_sequence and not self._user_speaking:
+                        self._speech_sequence += 1
                     self._user_speaking = True
                     if self._live_transcript and self._live_transcript.get("final") is True:
                         self._live_transcript = None
@@ -1048,6 +536,8 @@ class RealtimeSessionManager:
                             "text": transcript_text,
                             "final": event_type == "transcript_final",
                         }
+                if event_type in {"speech_detected", "speech_ended"}:
+                    self._trace_speech_boundary(event_type)
                 display_line = line
                 if event_type == "transport_ready":
                     display_line = "[pipecat-local-audio-ready]"
@@ -1076,15 +566,33 @@ class RealtimeSessionManager:
                     self._transport_ready = True
                     await self._publish("state", reason="transport_ready")
                 elif event_type == "runtime_ready":
+                    if self._phase != "starting":
+                        continue
                     self._phase = "command"
-                    self._complete_task_activity()
                     await self._publish("state", reason="runtime_ready")
                 elif event_type == "transcript_final":
-                    await self._accept_transcript(transcript_text)
+                    async with self._lock:
+                        if (operation != self._operation or self._process is not process
+                                or self._phase not in {"command", "proactive"}):
+                            continue
+                        timing = _input_speech_timing(worker_event.get("speech_timing"))
+                        if timing is not None:
+                            self._speech_sequence = timing["speech_sequence"]
+                        self._trace_speech_boundary(event_type)
+                        await self.conversation.submit(
+                            transcript_text, source="realtime", wait=False,
+                            **({"speech_timing": timing} if timing is not None else {}),
+                        )
                     await self._publish("runtime", line=display_line)
                 elif event_type == "interruption":
                     async with self._lock:
-                        await self._cancel_turn(stop_playback=False)
+                        if (operation != self._operation or self._process is not process
+                                or self._phase not in {"command", "proactive"}):
+                            continue
+                        self._trace_speech_boundary(event_type)
+                        await self.conversation.cancel(
+                            reason="speech.interruption", stop_playback=False,
+                        )
                     await self._publish("runtime", line=display_line)
                 elif event_type == "fatal":
                     self._last_error = display_line[:MAX_EVENT_TEXT]
@@ -1096,64 +604,61 @@ class RealtimeSessionManager:
                 }:
                     await self._publish("runtime", line=display_line)
             returncode = await process.wait()
-            conversation_id = self._conversation.conversation_id
             async with self._lock:
                 if operation != self._operation or self._process is not process:
                     return
-                stopping = self._phase == "stopping"
-                if not stopping:
-                    await self._cancel_turn()
+                if self._phase == "stopping":
+                    return
+                conversation_id = self.conversation._conversation.conversation_id
+                self._phase = "stopping"
+                await self.conversation.cancel()
+                if self._aec_active:
+                    await asyncio.to_thread(media_runtime.stop_realtime_aec)
+                    self._aec_active = False
+                if self._hardware_leased:
+                    await model_runtime.release_devices(RUNTIME_LEASE_OWNER)
+                    self._hardware_leased = False
+                with contextlib.suppress(Exception):
+                    await asyncio.to_thread(
+                        media_runtime.set_realtime_camera_active, self._audio_source, False,
+                    )
+                if self.conversation.speech is self:
+                    self.conversation.speech = None
                 self._process = None
                 self._started_ns = None
                 self._requested_proactive = False
                 self._transport_ready = False
                 self._input_level = 0.0
+                self._capture_active = False
                 self._user_speaking = False
                 self._live_transcript = None
                 self._vision_source = None
-                if stopping or returncode in {0, -signal.SIGINT}:
+                if returncode in {0, -signal.SIGINT}:
                     self._phase = "off"
                 else:
                     self._phase = "error"
                     self._transport_ready = False
                     self._last_error = self._last_error or f"live runtime exited {returncode}"
-                self._finish_task(
-                    "completed" if stopping or returncode in {0, -signal.SIGINT} else "failed",
-                    "Realtime was disabled by the owner."
-                    if stopping or returncode in {0, -signal.SIGINT}
-                    else f"Realtime runtime exited {returncode}.",
-                )
                 await self._publish("state", reason="process_exited", returncode=returncode)
-                if self._aec_active:
-                    await asyncio.to_thread(media_runtime.stop_realtime_aec)
-                    self._aec_active = False
-            if self._hardware_leased:
-                self._hardware_leased = False
-                await model_runtime.release_devices(RUNTIME_LEASE_OWNER)
-            if not stopping:
-                with contextlib.suppress(Exception):
-                    await asyncio.to_thread(
-                        media_runtime.set_realtime_camera_active, self._audio_source, False,
-                    )
-                await self._finalize_realtime_observations(
-                    conversation_id,
-                    session_boundary="realtime.runtime_exited",
-                )
+            await self.conversation.finalize_pending(
+                "",
+                session_boundary="realtime.runtime_exited",
+            )
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             async with self._lock:
                 if operation == self._operation and self._process is process:
+                    if self._phase == "stopping":
+                        return
                     self._phase = "error"
                     self._last_error = f"{type(exc).__name__}: {exc}"[:MAX_EVENT_TEXT]
                     await self._publish("state", reason="monitor_failed")
-            if self._hardware_leased:
-                self._hardware_leased = False
-                with contextlib.suppress(Exception):
-                    await model_runtime.release_devices(RUNTIME_LEASE_OWNER)
+                    # A failed monitor cannot release a live worker's GPU or
+                    # another operation's lease. Stop retains exact ownership.
 
     async def shutdown(self) -> None:
-        await self.stop()
+        await self.stop(preserve_requested=True)
         monitor = self._monitor
         if monitor is not None and monitor is not asyncio.current_task():
             with contextlib.suppress(asyncio.CancelledError):
@@ -1161,4 +666,4 @@ class RealtimeSessionManager:
         self._monitor = None
 
 
-RUNTIME = RealtimeSessionManager()
+RUNTIME = RealtimeSessionManager(requested_state_path=RUNTIME_ROOT / "requested.json")

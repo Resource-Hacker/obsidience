@@ -1,7 +1,7 @@
 {
   "schema": "obsidience.system-node.v1",
   "id": "camera",
-  "label": "Preferred camera",
+  "label": "Cameras",
   "category": "device",
   "collector": "obsidience.harness.realtime.media.interface_catalog",
   "selector": "camera",

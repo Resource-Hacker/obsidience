@@ -16,10 +16,14 @@ bounded structural maintenance leads.
 - Forward the exact candidate identity, revision, kind and signals when the
   active Runbook authorizes a peer Task. Never recompute or guess these fields.
   `unchanged_no_change_count` reports previously inspected unchanged leads,
-  not new repairs. Broken references and index gaps route to Improve; explicit
+  not new repairs. Broken references and missing folder Articles route to Improve; explicit
   elapsed native `stale_after` and review dates route to Audit; native
   `status: deprecated` and explicit supersession route to Archive. Each
   destination independently verifies its lead.
+- `missing_index` means the folder Article is absent. Existing folder Articles
+  and native hierarchy already represent child coverage. Do not turn missing
+  Markdown child lists into repair work or synthesize per-child tables of
+  contents; parent prose remains a useful condensation.
 - For a missing-link lead, read `connectivity.isolated_endpoint_refs` as exact
   zero-neighbor endpoints, `connectivity.separate_components` as no existing
   semantic path between the endpoints, and `connectivity.shared_neighbor_refs`
@@ -33,3 +37,12 @@ bounded structural maintenance leads.
 - Stop on malformed JSON, missing candidate identity fields, duplicate refs, or
   an unavailable snapshot. Repeating the same call without a vault change is
   not new evidence.
+
+Duplicate-by-similarity nomination excludes Knowledge folder Articles owned
+by an actual accepted Agent. Ordinary leaf duplicates and the canonical Agent
+versus ordinary shadow-role case remain eligible. This structural guard does
+not suppress factual audits, improvements, or meaningful-link inspection.
+Maintenance occurrence identity includes the inspected revision: unchanged
+work remains deduplicated, while changed accepted inputs may be nominated again.
+An evidenced settlement of an obsolete unused occurrence is not a semantic
+no-change finding about the revised Articles.

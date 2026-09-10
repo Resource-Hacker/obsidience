@@ -1,14 +1,17 @@
 ---
-assignee: '[[Agents/Executive/Executive]]'
-kind: task
-last_run: def109e90ad5
-reasoning_effort: high
-runbook: '[[Runbooks/answer-the-user]]'
-status: completed
-status_updated: '2026-08-27T15:17:13'
-summary: Observation lifecycle live.
+type: task
 title: Query
+obsidience:
+  assignee: '[[Agents/Executive/Executive]]'
+  model: obsidience-gemma
+  reasoning_effort: none
+  runbook: '[[Runbooks/answer-the-user]]'
+  taxonomy_path: executive/query
 ---
 
-Answer the owner's current question from the graph and its activation packet.
-Query is interactive work, not a scheduled maintenance Task.
+Answer the owner's current question from the graph, current evidence, and its
+activation packet. Typed Chat and speech activate this same reusable outcome.
+
+Completion means the owner receives a grounded answer, an evidenced finding
+from a delegated research Task, or the exact unresolved blocker. Query is
+interactive work and carries no speech-session or scheduled-maintenance lifecycle.

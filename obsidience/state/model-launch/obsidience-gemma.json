@@ -1,5 +1,5 @@
 {
-  "context_tokens": 16384,
+  "context_tokens": 65536,
   "devices": [
     "rtx4000"
   ],
@@ -9,5 +9,6 @@
   ],
   "max_num_seqs": 1,
   "max_output_tokens": 3584,
-  "model_id": "obsidience-gemma"
+  "model_id": "obsidience-gemma",
+  "projector_path": "/var/lib/ai/models/jarvis-fixed/gemma-4-26b-a4b-it-qat-7b92b5b2/mmproj-F16.gguf"
 }

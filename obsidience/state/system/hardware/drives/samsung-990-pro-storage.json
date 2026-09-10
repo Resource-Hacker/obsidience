@@ -1,0 +1,11 @@
+{
+  "schema": "obsidience.system-node.v1",
+  "id": "samsung-990-pro-storage",
+  "label": "Samsung 990 PRO \u2014 Storage (2 TB)",
+  "category": "storage",
+  "collector": "obsidience.harness.host.system_evidence._storage",
+  "selector": "S7KHNU0X757355N",
+  "model": "Samsung SSD 990 PRO 2TB",
+  "wwn": "eui.0025384741a25c94",
+  "read_only": true
+}

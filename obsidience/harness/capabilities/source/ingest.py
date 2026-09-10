@@ -4,16 +4,10 @@ from __future__ import annotations
 
 
 def execute(args: dict, context: dict) -> str:
-    from obsidience.harness.knowledge.source import SourceError, ingest_source
+    from obsidience.harness.knowledge.source import SourceError, ingest_source, research_activation_key
 
     args = args or {}
-    params = context.get("params") if isinstance(context.get("params"), dict) else {}
-    activation_key = (
-        str(params.get("activation_key"))
-        if context.get("event") == "source.added"
-        and str(params.get("activation_key", "")).startswith("source.added:")
-        else None
-    )
+    activation_key = research_activation_key(context)
     try:
         result = ingest_source(
             source_type=str(args.get("source_type", "tool")),

@@ -7,9 +7,11 @@ import hashlib
 import json
 import re
 import threading
+from pathlib import Path
 import time
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
+from dataclasses import replace
 
 import httpx
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -18,12 +20,17 @@ from fastapi.staticfiles import StaticFiles
 from croniter import croniter
 
 from ...conversation.store import CONVERSATION
+from ...conversation import runtime as conversation_runtime
 from ...execution import activity as knowledge_activity
 from ...execution import scheduler, trace
+from ...execution.assignments import ensure_task_runbook
+from ...execution.ledger import current_task_issue
+from ...knowledge.dependencies import agent_dependencies, dependency_resolver
 from ...execution.executor import compile_activation, run_task, task_descendants
-from ...host import inventory
-from ...knowledge import retrieval, review, source
+from ...host import inventory, monitor, scene as shell_scene
+from ...knowledge import retrieval, review, source, system as system_knowledge
 from ...knowledge.index import INDEX
+from ...knowledge.links import metadata_ref
 from ...knowledge.tasks import (
     CANONICAL_TASK_BY_PATH,
     TASK_TAXONOMY_BY_PATH,
@@ -36,12 +43,15 @@ from ...knowledge.tasks import (
 )
 from ...knowledge.skills import (
     build_skill_mirror,
+    callable_namespace,
     descendant_count as skill_mirror_descendant_count,
     namespace_title,
     node_id as skill_mirror_node_id,
 )
 from ...knowledge.vault import (
     Note,
+    folder_article_path,
+    is_folder_article,
     iter_notes,
     load_note,
     move_vault_item,
@@ -57,12 +67,11 @@ from ...realtime import media as media_runtime
 from ...realtime import runtime as realtime
 from obsidience.shell.applications import packagekit as application_packages
 from obsidience.shell.adapter.hyprland import input as input_adapter
+from . import connections as connections_api
 
 
-# Each principal owns typed links to the capabilities it currently carries.
-# The shared Library exposes paired Tool+Skill capabilities and Tasks;
-# synthesized Runbooks use the same identity field but are attached by the
-# validated runbook-generation path.
+# Tasks are the only authored capability assignments. The dependency graph
+# supplies the effective Runbooks, Skills and Tools; Source scopes stay separate.
 CHECKOUT_AGENTS = {
     "executive": "Agents/Executive/Executive",
     "guardian": "Agents/Heimdall/Heimdall",
@@ -136,8 +145,7 @@ def _link_values(value) -> list[str]:
 
 
 def _link_ref(value: str) -> str:
-    return (value.strip().removeprefix("[[").removesuffix("]]")
-            .split("|", 1)[0].split("#", 1)[0].strip())
+    return metadata_ref(value)
 
 
 def _task_taxonomy_path(note: Note) -> str:
@@ -160,7 +168,66 @@ def _note_doc(note):
 
 def _folder_index(folder: str):
     """Resolve the authored hub a graph subject absorbs, if one exists."""
-    return load_note(f"{folder}/index.md") or load_note(f"{folder}/README.md")
+    return load_note(folder_article_path(folder))
+
+
+def _executive_folder_ref(folder: str) -> str:
+    """Keep existing subject identities while deriving descendants from disk."""
+    roots = {
+        "Agents/Executive/Architecture": "@agent/Architecture",
+        "Agents/Executive/Subagents": "@agent/Subagents",
+        "Agents/Executive/Observations": "@agent/Observations",
+        "Agents/Executive/Observations/Temporary Observations": "@agent/Temporary Observations",
+    }
+    return roots.get(folder, f"@branch/{folder}")
+
+
+def _executive_folder_paths(notes: list[Note] | None = None) -> list[str]:
+    folders = {f"Agents/Executive/{key}" for key in ("Architecture", "Subagents", "Observations")}
+    for note in iter_notes() if notes is None else notes:
+        parts = Path(note.path).parts[:-1]
+        if note.kind != "knowledge" or not parts:
+            continue
+        if parts[0] == "Agents":
+            if parts[:2] != ("Agents", "Executive"):
+                continue
+            start = 3
+        elif parts[0] in EXECUTIVE_SYSTEM_ROOTS:
+            continue
+        else:
+            start = 1
+        folders.update("/".join(parts[:depth]) for depth in range(start, len(parts) + 1))
+    return sorted(folders)
+
+
+def _folder_article(folder: str, ref: str, notes: list[Note] | None = None) -> dict:
+    """One real folder hub and its direct children, never duplicate descendants."""
+    notes = iter_notes() if notes is None else notes
+    by_path = {note.path: note for note in notes}
+    def hub_at(path: str):
+        return by_path.get(folder_article_path(path))
+
+    prefix = folder + "/"
+    descendants = [note for note in notes if note.ref.startswith(prefix)]
+    children = [note for note in descendants if str(Path(note.path).parent) == folder
+                and not is_folder_article(note)]
+    child_folders = sorted({note.ref[len(prefix):].split("/", 1)[0]
+                            for note in descendants if "/" in note.ref[len(prefix):]})
+    subnodes = []
+    for child in child_folders:
+        path = f"{folder}/{child}"
+        hub = hub_at(path)
+        subnodes.append((hub.ref if hub else _executive_folder_ref(path), hub.title if hub else child))
+    hub = hub_at(folder)
+    if hub:
+        return {**_note_doc(hub), "children": [
+            *(child_ref for child_ref, _label in subnodes),
+            *(note.ref for note in children),
+        ]}
+    doc = _virtual_subject(ref, folder.rsplit("/", 1)[-1],
+                           _branch_index_summary(folder.rsplit("/", 1)[-1], child_folders,
+                                                 len(descendants)), subnodes, children)
+    return doc
 
 
 def _reader_override_path(ref: str) -> str:
@@ -183,7 +250,7 @@ def _reader_overrides() -> dict[str, Note]:
 
 
 def _apply_reader_override(doc: dict, overrides: dict[str, Note] | None = None) -> dict:
-    override = (overrides or _reader_overrides()).get(str(doc.get("ref", "")))
+    override = (_reader_overrides() if overrides is None else overrides).get(str(doc.get("ref", "")))
     if not override:
         return doc
     return {
@@ -207,49 +274,36 @@ def _is_enabled(value: object) -> bool:
     return value is not False
 
 
-def _auto_curate_tasks() -> list[Note]:
-    return [
-        note for note in iter_notes()
-        if note.kind == "task" and note.meta.get("auto_curate_target")
-    ]
-
-
 def _auto_curate_state(request_ref: str, doc: dict) -> tuple[bool, str | None]:
-    task = next(
-        (note for note in _auto_curate_tasks()
-         if str(note.meta.get("auto_curate_target", "")) == request_ref),
-        None,
-    )
-    enabled = bool(task and _is_enabled(task.meta.get("enabled", True)))
-    if not enabled:
-        target = load_note(str(doc.get("ref", "")) + ".md")
-        if target:
-            enabled = "auto-curate" in _tags(target.meta.get("tags"))
-        elif request_ref.startswith("@"):
-            override = _reader_overrides().get(request_ref)
-            enabled = bool(override and "auto-curate" in _tags(override.meta.get("tags")))
-    return enabled, task.ref if task else None
+    from ...knowledge.auto_curate import policy_for, selection
+
+    if not _auto_curate_supported(request_ref, doc):
+        return False, None
+    policy = policy_for(_auto_curate_target_path(request_ref, doc))
+    return selection(policy) is True, None
 
 
 def _article_with_curation(request_ref: str, doc: dict) -> dict:
     enabled, task_ref = _auto_curate_state(request_ref, doc)
-    return {**doc, "auto_curate": enabled, "auto_curate_task": task_ref}
+    system_managed = system_knowledge.is_system_article(str(doc.get("ref", request_ref)))
+    return {**doc, "auto_curate": enabled, "auto_curate_task": task_ref,
+            "auto_curate_supported": _auto_curate_supported(request_ref, doc),
+            **({"read_only": True, "managed_by": "system"} if system_managed else {})}
 
 
-def _auto_curate_agent_ref(ref: str, doc: dict) -> str:
-    if ref.startswith("@sat/"):
-        name = ref.split("/", 3)[2]
-        return f"Agents/{name}/{name}"
-    target_ref = str(doc.get("ref", ref))
-    if target_ref.startswith("Agents/"):
-        name = target_ref.split("/", 2)[1]
-        return f"Agents/{name}/{name}"
-    if ref.startswith("@library") or target_ref.split("/", 1)[0] in {"Tools", "Skills", "Tasks"}:
-        return CHECKOUT_AGENTS["curator"]
-    return CHECKOUT_AGENTS["executive"]
+def _auto_curate_supported(ref: str, doc: dict) -> bool:
+    if system_knowledge.is_system_article(str(doc.get("ref", ref))):
+        return False
+    if doc.get("kind") not in {"knowledge", "agent", "index"} or ref.startswith("@library"):
+        return False
+    if ref.startswith("@sat/") and ref.split("/")[-1] in {"tools", "skills", "tasks", "runbooks", "other-agents"}:
+        return False
+    return not _auto_curate_target_path(ref, doc).split("/", 1)[0] in {"Tools", "Skills", "Tasks", "Runbooks"}
 
 
 def _auto_curate_target_path(ref: str, doc: dict) -> str:
+    if ref == "@vault":
+        return "Agents/Executive/Executive.md"
     if ref == "@agent/Temporary Observations":
         return "Agents/Executive/Observations/Temporary Observations"
     if ref == "@agent/Observations":
@@ -273,55 +327,23 @@ def _auto_curate_target_path(ref: str, doc: dict) -> str:
         return ref.removeprefix("@library/").replace("Tools + Skills", "Tools")
     target_ref = str(doc.get("ref", ref))
     note = load_note(target_ref + ".md")
+    if note and is_folder_article(note):
+        return str(Path(note.path).parent)
     return note.path if note else target_ref
 
 
-def _auto_curate_runbook(agent_ref: str) -> Note:
-    res = resolver()
-    identity = res.resolve(agent_ref)
-    if not identity:
-        raise HTTPException(500, f"auto-curation identity missing: {agent_ref}")
-    for raw in _link_values(identity.meta.get("runbooks")):
-        runbook = res.resolve(raw)
-        if runbook and runbook.kind == "runbook" and runbook.meta.get("purpose") == "auto-curate":
-            return runbook
-    raise HTTPException(409, f"{identity.title} has no checked-out auto-curation Runbook")
-
-
 def _set_auto_curate_tag(ref: str, doc: dict, enabled: bool) -> None:
-    target_ref = str(doc.get("ref", ""))
-    note = load_note(target_ref + ".md") if target_ref and not target_ref.startswith("@") else None
-    if note:
-        meta = dict(note.meta)
-        tags = [tag for tag in _tags(meta.get("tags")) if tag != "auto-curate"]
-        if enabled:
-            tags.append("auto-curate")
-        if tags:
-            meta["tags"] = tags
-        else:
-            meta.pop("tags", None)
-        write_note(note.path, meta, note.body)
-        return
-
-    override = _reader_overrides().get(ref)
-    meta = dict(override.meta) if override else {
-        "title": str(doc.get("title", ref)),
-        "kind": str(doc.get("kind", "index")),
-        "reader_ref": ref,
-        "owner_maintained": True,
-    }
+    target = _auto_curate_target_path(ref, doc)
+    path = target if target.endswith(".md") else folder_article_path(target)
+    note = load_note(path)
+    meta = dict(note.meta) if note else {"title": doc["title"], "kind": "knowledge"}
     tags = [tag for tag in _tags(meta.get("tags")) if tag != "auto-curate"]
-    if enabled:
-        tags.append("auto-curate")
     if tags:
         meta["tags"] = tags
     else:
         meta.pop("tags", None)
-    write_note(
-        _reader_override_path(ref),
-        meta,
-        override.body if override else str(doc.get("body", "")),
-    )
+    meta["auto_curate"] = enabled
+    write_note(path, meta, note.body if note else str(doc.get("body", "")))
 
 
 def _tool_namespace_catalog():
@@ -330,7 +352,7 @@ def _tool_namespace_catalog():
     explicit_children = {
         child.ref
         for parent in tools for raw in parent.children
-        if (child := res.resolve(raw)) and child.kind == "tool"
+        if (child := res.resolve(_link_ref(raw))) and child.kind == "tool"
     }
     eligible = {
         note.ref.rsplit("/", 1)[-1]: note
@@ -338,8 +360,9 @@ def _tool_namespace_catalog():
         if note.ref not in explicit_children and "." in note.ref.rsplit("/", 1)[-1]
     }
     namespaces = {
-        ".".join(name.split(".")[:depth])
-        for name in eligible for depth in range(1, len(name.split(".")))
+        ".".join(parent.split(".")[:depth])
+        for name in eligible for parent in [callable_namespace(name)]
+        for depth in range(1, len(parent.split(".")) + 1)
     }
     return eligible, namespaces
 
@@ -360,8 +383,7 @@ def _tool_namespace_article(ref: str, namespace: str | None = None) -> dict:
     )
     child_tools = sorted(
         (name, note) for name, note in eligible.items()
-        if name.split(".")[:len(prefix_parts)] == prefix_parts
-        and len(name.split(".")) == len(prefix_parts) + 1
+        if callable_namespace(name) == namespace
     )
     lines = [
         f"- [[@library/Tools/{child}|{namespace_title(child.rsplit('.', 1)[-1])}]] · tool index"
@@ -446,83 +468,6 @@ def _skill_mirror_catalog():
     return notes, nodes, {node.path: node for node in nodes}
 
 
-def _paired_skill_checkouts(tool_refs: set[str]) -> set[str]:
-    """Return the Skill mirror leaf paired to every selected callable Tool."""
-    _notes, nodes, _by_path = _skill_mirror_catalog()
-    return {
-        skill_mirror_node_id(node.path)
-        for node in nodes if node.tool_ref in tool_refs
-    }
-
-
-def _canonical_skills_for_tools(tool_refs: set[str]) -> list[str]:
-    """Resolve the one canonical Skill article paired to each Tool."""
-    res = resolver()
-    by_tool: dict[str, str] = {}
-    for skill in (note for note in iter_notes() if note.kind == "skill"):
-        target = res.resolve(str(skill.meta.get("tool", "")))
-        if target and target.ref in tool_refs:
-            by_tool[target.ref] = skill.ref
-    return [by_tool[ref] for ref in sorted(tool_refs) if ref in by_tool]
-
-
-def _activate_task_checkout_event(agent: str, identity, task_ref: str, identity_meta: dict) -> dict:
-    """Queue the ordinary graph Task that handles Task-checkout events."""
-    res = resolver()
-    subscribers = [note for note in iter_notes()
-                   if note.kind == "task" and "task.checkout" in task_triggers(note.meta)]
-    if len(subscribers) != 1:
-        raise HTTPException(
-            500,
-            f"task.checkout must resolve to exactly one graph Task; found {len(subscribers)}",
-        )
-    generation = subscribers[0]
-    target = res.resolve(task_ref)
-    if target and target.kind == "task":
-        task_title = target.title
-        task_path = target.ref.removeprefix("Tasks/")
-        task_article = target.body.strip()[:8_000]
-        task_hierarchy = [target.ref, *(child.ref for child in task_descendants(target, res)[0])]
-    elif task_ref.startswith("@library/Tasks/"):
-        task_path = task_ref.removeprefix("@library/Tasks/")
-        article = _task_taxonomy_article(task_ref, task_path)
-        task_title = str(article["title"])
-        task_article = str(article["body"])[:8_000]
-        task_hierarchy = [
-            path for path in TASK_TAXONOMY_BY_PATH
-            if path == task_path or path.startswith(task_path + "/")
-        ]
-    else:
-        task_path = task_ref.rsplit("/", 1)[-1]
-        task_title = task_path
-        task_article = ""
-        task_hierarchy = [task_path]
-
-    selected_tools = {
-        tool.ref
-        for raw in _link_values(identity_meta.get("tools"))
-        if (tool := res.resolve(raw)) and tool.kind == "tool"
-    }
-    canonical_skills = _canonical_skills_for_tools(selected_tools)
-    output_segments = [slugify(segment) for segment in task_path.split("/") if segment]
-    output_runbook = f"Runbooks/Generated/{agent}/{'/'.join(output_segments)}.md"
-    params = {
-        "checkout_event_id": f"checkout-{time.time_ns():x}",
-        "queued_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-        "target_task": task_ref,
-        "target_task_title": task_title,
-        "target_task_article": task_article,
-        "target_task_hierarchy": task_hierarchy,
-        "target_agent": identity.ref,
-        "target_agent_name": identity.title,
-        "tools": sorted(selected_tools),
-        "skills": canonical_skills,
-        "output_runbook": output_runbook,
-    }
-    queued = scheduler.enqueue_event(generation, params)
-    return {"task": generation.ref, **queued}
-
-
 def _skill_mirror_article(ref: str, path: str | None = None) -> dict:
     notes, nodes, by_path = _skill_mirror_catalog()
     by_ref = {note.ref: note for note in notes}
@@ -592,7 +537,7 @@ def _primitive_closure(roots, catalog) -> list:
     while queue:
         parent = queue.pop(0)
         for raw in parent.children:
-            target = str(raw).strip().strip("[]").split("|", 1)[0].split("#", 1)[0]
+            target = _link_ref(str(raw))
             child = by_ref.get(target.lower()) or by_leaf.get(target.rsplit("/", 1)[-1].lower())
             if not child or child.kind != parent.kind or child.ref in closure:
                 continue
@@ -610,8 +555,7 @@ def _virtual_index(ref: str, title: str, summary: str, children, *, kind: str = 
     parent_of: dict[str, str] = {}
 
     def resolve_child(raw):
-        target = str(raw).strip().strip("[]").split("|", 1)[0].split("#", 1)[0]
-        target = target[:-3] if target.lower().endswith(".md") else target
+        target = _link_ref(str(raw))
         return by_ref.get(target.lower()) or by_leaf.get(target.rsplit("/", 1)[-1].lower())
 
     for parent in ordered:
@@ -721,26 +665,38 @@ def _branch_index_summary(title: str, child_folders=(), article_count: int = 0) 
 
 def _navigation_subject(ref: str, parent_ref: str | None, overrides: dict[str, Note]) -> dict:
     """One generated subject whose title is identical everywhere it renders."""
-    article = _apply_reader_override(_base_article(ref), overrides)
+    # Navigation needs labels, not complete Reader bodies or checkout closure.
+    # Reuse _base_article's subject vocabulary without reparsing every Article
+    # for each label on every graph refresh.
+    if ref.startswith("@sat/"):
+        _, agent, key = ref.split("/", 2)
+        subject = SATELLITE_AGENT_SUBJECTS.get(key) or SATELLITE_ROLE_SUBJECTS.get(agent, {}).get(key)
+        title = subject[0] if subject else key.capitalize()
+    else:
+        title = ref.rsplit("/", 1)[-1]
+        if ref == "@library/Tools":
+            title = "Tools + Skills"
+    folder = _auto_curate_target_path(ref, {"ref": ref}) if ref.startswith("@sat/") else None
+    authored = _folder_index(folder) if folder else None
+    article = _apply_reader_override({"ref": ref, "title": authored.title if authored else title}, overrides)
     return {
         "id": ref,
         "title": str(article["title"]),
         "parent_id": parent_ref,
+        **({"path": folder, "article_ref": authored.ref} if authored else {}),
     }
 
 
 def _navigation_manifest(overrides: dict[str, Note]) -> dict:
     """Canonical naming and subject topology for every graph/UI projection."""
+    notes = iter_notes()
+    by_ref = {note.ref: note for note in notes}
     groups = []
     executive_subjects = [
-        ("@agent/Architecture", None),
         ("@branch/Tools", None),
         ("@branch/Skills", None),
         ("@branch/Runbooks", None),
         ("@branch/Tasks", None),
-        ("@agent/Subagents", None),
-        ("@agent/Observations", None),
-        ("@agent/Temporary Observations", "@agent/Observations"),
     ]
     satellite_base = [
         ("tools", None),
@@ -755,7 +711,7 @@ def _navigation_manifest(overrides: dict[str, Note]) -> dict:
     ]
 
     for group_id, identity_ref in CHECKOUT_AGENTS.items():
-        identity = resolver().resolve(identity_ref)
+        identity = by_ref.get(identity_ref)
         if not identity:
             continue
         role = str(identity.meta.get("role") or group_id).strip().lower()
@@ -764,6 +720,16 @@ def _navigation_manifest(overrides: dict[str, Note]) -> dict:
                 _navigation_subject(ref, parent_ref, overrides)
                 for ref, parent_ref in executive_subjects
             ]
+            folders = _executive_folder_paths(notes)
+            for folder in folders:
+                parent = str(Path(folder).parent)
+                subject_ref = _executive_folder_ref(folder)
+                article = _apply_reader_override(_folder_article(folder, subject_ref, notes), overrides)
+                subjects.append({
+                    "id": subject_ref, "title": article["title"],
+                    "parent_id": _executive_folder_ref(parent) if parent in folders else None,
+                    "path": folder, "article_ref": article["ref"],
+                })
         else:
             agent_name = identity_ref.split("/")[1]
             role_subjects = SATELLITE_ROLE_SUBJECTS.get(agent_name, {})
@@ -793,10 +759,10 @@ def _navigation_manifest(overrides: dict[str, Note]) -> dict:
             "subjects": subjects,
         })
 
-    library = _apply_reader_override(_base_article("@library"), overrides)
+    library = _apply_reader_override({"ref": "@library", "title": "Library"}, overrides)
     library_subjects = [
         _navigation_subject(ref, None, overrides)
-        for ref in library.get("children", [])
+        for ref in ("@library/Tools", "@library/Tasks")
     ]
     groups.append({
         "id": "library",
@@ -811,32 +777,74 @@ def _navigation_manifest(overrides: dict[str, Note]) -> dict:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    scheduler.reconcile_interrupted_runs()
-    source.list_sources()  # attest/restore registered raw evidence before serving it
-    INDEX.sync()
-    await asyncio.to_thread(retrieval.prewarm_fast_context)
-    model_events = await model_runtime.initialize()
-    task = asyncio.create_task(scheduler.loop())
-    for params in model_events:
-        scheduler.enqueue_named_event("model.added", params)
-    try:
-        yield
-    finally:
+    from ...models import llm
+    from ...knowledge.intake import SourceIntake
+
+    async def stop_scheduler(task):
         task.cancel()
         try:
             await task
         except asyncio.CancelledError:
             pass
         await scheduler.shutdown()
-        await realtime.RUNTIME.shutdown()
-        await model_runtime.shutdown()
+
+    async with AsyncExitStack() as resources:
+        trace.start(INDEX)
+        resources.callback(trace.stop)
+        await llm.start_provider_client()
+        resources.push_async_callback(llm.close_provider_client)
+        review.recover_groups()
+        scheduler.reconcile_interrupted_runs()
+        source.list_sources()  # attest raw evidence before serving it
+        # System facts are a deterministic projection of recorded evidence.
+        # Publish before retrieval warming; this creates no model work or Task.
+        await asyncio.to_thread(system_knowledge.refresh_system_knowledge, sync=False)
+        INDEX.sync()
+        await asyncio.to_thread(retrieval.prewarm_fast_context)
+        resources.push_async_callback(model_runtime.shutdown)
+        model_events = await model_runtime.initialize()
+        resources.push_async_callback(shell_scene.SCENE.stop)
+        shell_scene.SCENE.start()
+        intake = SourceIntake()
+        resources.push_async_callback(asyncio.to_thread, intake.stop)
+        await asyncio.to_thread(intake.start)
+        app.state.shell_scene = shell_scene.SCENE
+        connections, credentials = connections_api.create_manager()
+        app.state.connections = connections
+        app.state.connection_credentials = credentials
+        resources.push_async_callback(realtime.RUNTIME.shutdown)
+        await realtime.RUNTIME.restore()
+        resources.push_async_callback(conversation_runtime.RUNTIME.cancel)
+        task = asyncio.create_task(scheduler.loop())
+        resources.push_async_callback(stop_scheduler, task)
+        # Collection is owned by this Harness lifetime. Stop it before the
+        # scheduler so every completed capture retains its durable admission.
+        resources.push_async_callback(connections.stop)
+        await connections.start()
+        for params in model_events:
+            scheduler.enqueue_named_event("model.added", params)
+        yield
+
 
 
 app = FastAPI(title="Obsidience", lifespan=lifespan)
+app.include_router(connections_api.router)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+
+class ShellKnowledgeFiles(StaticFiles):
+    """Revalidate the mutable entry page while retaining hashed asset caching."""
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        if path in {".", "", "index.html"} or response.headers.get("content-type", "").startswith("text/html"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 app.mount(
     "/shell/knowledge",
-    StaticFiles(
+    ShellKnowledgeFiles(
         directory=CONFIG.project_root / "obsidience" / "ui" / "out" / "renderer",
         html=True,
         check_dir=False,
@@ -863,6 +871,7 @@ def status():
         "proposals_pending": len(review.list_proposals()),
         "sources": len(source_status["files"]),
         "source_issues": len(source_status["issues"]),
+        "source_coverage": source_status.get("coverage", {}),
         "speech": media_runtime.speech_runtime(),
         "llm": {
             "base_url": active_specs[0].base_url if len(active_specs) == 1 else None,
@@ -897,10 +906,28 @@ def hardware():
     }
 
 
+@app.get("/api/hardware/monitor")
+def hardware_monitor():
+    """Bounded read-only measurements shared by visible Hardware panes."""
+    return monitor.snapshot()
+
+
 @app.get("/api/system")
 def system():
     """Actual host, application, and network inventory behind Source."""
     return inventory.system_snapshot()
+
+
+@app.get("/api/system/knowledge")
+def system_knowledge_status():
+    """Read the last System publication without collecting or changing files."""
+    return system_knowledge.system_knowledge_status()
+
+
+@app.post("/api/system/refresh")
+def refresh_system_knowledge():
+    """Owner refresh of immutable System evidence and its workstation Articles."""
+    return system_knowledge.refresh_system_knowledge()
 
 
 @app.get("/api/input")
@@ -1014,7 +1041,7 @@ def update_hardware_camera(payload: dict):
 
 @app.get("/api/realtime")
 def realtime_status():
-    """Return the Task-selected live-session state."""
+    """Return speech transport state, independent of the selected work Task."""
 
     return realtime.RUNTIME.snapshot()
 
@@ -1040,16 +1067,38 @@ async def realtime_stop():
     return await realtime.RUNTIME.stop()
 
 
+async def _serve_websocket_events(ws: WebSocket, send_events):
+    """Join both halves of a presentation stream on disconnect or cancellation."""
+    async def receive_disconnect():
+        while True:
+            if (await ws.receive())["type"] == "websocket.disconnect":
+                return
+
+    tasks = [asyncio.create_task(send_events()), asyncio.create_task(receive_disconnect())]
+    try:
+        done, _pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        for task in done:
+            await task
+    except (WebSocketDisconnect, asyncio.CancelledError):
+        return
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
 @app.websocket("/ws/realtime")
 async def realtime_ws(ws: WebSocket):
-    queue = realtime.RUNTIME.subscribe()
     await ws.accept()
-    try:
+    queue = realtime.RUNTIME.subscribe()
+
+    async def send_events():
         await ws.send_json({"type": "state", "state": realtime.RUNTIME.snapshot()})
         while True:
             await ws.send_json(await queue.get())
-    except (WebSocketDisconnect, asyncio.CancelledError):
-        return
+
+    try:
+        await _serve_websocket_events(ws, send_events)
     finally:
         realtime.RUNTIME.unsubscribe(queue)
 
@@ -1086,31 +1135,133 @@ def _count_by(tasks):
     return out
 
 
+def _graph_article_membership(nodes: list[dict], groups: list[dict]) -> dict[str, list[str]]:
+    """One read-only Agent/Library selection for Reader and graph presentation."""
+    by_id = {node["id"]: node for node in nodes}
+    aliases = {node["article_ref"]: node["id"] for node in nodes if node.get("article_ref")}
+
+    def resolve(raw: str) -> str:
+        ref = raw if raw in by_id else _link_ref(raw)
+        return aliases.get(ref, ref)
+
+    def primitive_kind(node: dict) -> str | None:
+        if "task-taxonomy" in node.get("tags", []):
+            return "task"
+        return node["kind"] if node["kind"] in CHECKOUT_FIELDS else None
+
+    primitives = {ref: node for ref, node in by_id.items()
+                  if primitive_kind(node) and ref not in aliases}
+    children = {ref: [child for raw in node.get("children", [])
+                      if (child := resolve(raw)) in primitives and child != ref
+                      and primitive_kind(primitives[child]) == primitive_kind(node)]
+                for ref, node in primitives.items()}
+    parent_of = {}
+    for parent, refs in children.items():
+        for child in refs:
+            cursor = parent
+            while cursor in parent_of and cursor != child:
+                cursor = parent_of[cursor]
+            if child not in parent_of and cursor != child:
+                parent_of[child] = parent
+
+    def closure(roots: set[str]) -> set[str]:
+        selected = roots & primitives.keys()
+        # Dependencies already contain the execution closure. Only add display
+        # ancestors here; descending from inherited guidance would select siblings.
+        for ref in list(selected):
+            while ref in parent_of:
+                ref = parent_of[ref]
+                if ref in selected:
+                    break
+                selected.add(ref)
+        return selected
+
+    memberships = {}
+    shared_prefixes = ("Tools/", "Skills/", "Tasks/",
+                       "@library/Tools/", "@library/Skills/", "@library/Tasks/")
+    for group in groups:
+        root = group["root_ref"]
+        if group["id"] == "library":
+            selected = {ref for ref, node in primitives.items()
+                        if primitive_kind(node) in {"tool", "skill", "task"}
+                        and ref.startswith(shared_prefixes)
+                        and node.get("article_ref", ref).startswith(shared_prefixes)}
+        else:
+            identity = by_id.get(root, {})
+            local = root.rsplit("/", 1)[0] + "/"
+            roots = {resolve(raw) for field in CHECKOUT_FIELDS.values()
+                     for raw in identity.get("dependencies", {}).get(field, [])}
+            selected = closure(roots)
+            paths = [subject["path"].rstrip("/") + "/" for subject in group["subjects"]
+                     if subject.get("path")]
+            scoped = {resolve(ref) for ref in identity.get("source_scope_refs", [])}
+            for ref, node in by_id.items():
+                if node["kind"] != "knowledge" or primitive_kind(node):
+                    continue
+                if ref.startswith("Agents/") and not ref.startswith(local):
+                    continue
+                if (ref.startswith(local) or ref in scoped or any(ref.startswith(path) for path in paths)
+                        or root == CHECKOUT_AGENTS["researcher"] and ref.startswith("Sources/")
+                        or group["id"] == "executive" and not ref.startswith(
+                            ("Agents/", "Sources/", "Library/", "@library/"))
+                        and ref not in {"Sources", "Library", "@library"}):
+                    selected.add(ref)
+            # A local cloud never acquires another Agent's private Articles.
+            selected = {ref for ref in selected
+                        if all(not candidate.startswith("Agents/") or candidate.startswith(local)
+                               for candidate in (ref, by_id[ref].get("article_ref", ref)))}
+        selected.add(root)
+        selected.update(subject["id"] for subject in group["subjects"])
+        selected.update(by_id[ref]["article_ref"] for ref in list(selected)
+                        if ref in by_id and by_id[ref].get("article_ref"))
+        memberships[group["id"]] = sorted(selected)
+    return memberships
+
+
 @app.get("/api/graph")
 def graph():
+    # The indexed graph and its filesystem navigation describe one accepted
+    # publication, including a complete multi-Article news edition.
+    from ...knowledge.vault import _NOTE_WRITE_LOCK
+
+    with _NOTE_WRITE_LOCK:
+        return _graph_snapshot()
+
+
+def _graph_snapshot():
     doc = INDEX.graph()
     overrides = _reader_overrides()
+    navigation = _navigation_manifest(overrides)
+    subjects = next((group["subjects"] for group in navigation["groups"]
+                     if group["id"] == "executive"), [])
+    folders = {subject["path"]: subject for subject in subjects if subject.get("path")}
     for node in doc["nodes"]:
         override = overrides.get(node["id"])
         if override:
             node["title"] = override.title
-    auto_curated = {
-        node["id"] for node in doc["nodes"]
-        if "auto-curate" in _tags(node.get("tags"))
-    }
-    auto_curated.update(
-        ref for ref, override in overrides.items()
-        if "auto-curate" in _tags(override.meta.get("tags"))
-    )
-    auto_curated.update(
-        str(task.meta.get("auto_curate_target"))
-        for task in _auto_curate_tasks()
-        if _is_enabled(task.meta.get("enabled", True))
-    )
+        subject = folders.get(str(Path(node["id"]).parent))
+        if subject and node["kind"] == "knowledge":
+            node["parent_id"] = subject["id"]
+            if node["id"] == subject["article_ref"]:
+                node["navigation_ref"] = subject["id"]
+    from ...knowledge.auto_curate import enabled
+    notes_by_ref = {note.ref: note for note in iter_notes()}
+    auto_curated = {ref for ref, note in notes_by_ref.items()
+                    if note.kind in {"knowledge", "agent"} and enabled(ref, notes_by_ref)}
+    membership = _graph_article_membership(doc["nodes"], navigation["groups"])
+    for group in navigation["groups"]:
+        group["article_refs"] = membership[group["id"]]
+        for subject in group["subjects"]:
+            ref = subject["id"]
+            target = subject.get("path") or _auto_curate_target_path(ref, {"ref": ref})
+            if _auto_curate_supported(ref, {"ref": ref, "kind": "knowledge"}) and enabled(target, notes_by_ref):
+                auto_curated.add(ref)
     return {
         **doc,
         "auto_curated": sorted(auto_curated),
-        "navigation": _navigation_manifest(overrides),
+        "auto_curate_resolved": True,
+        "navigation": navigation,
+        "link_proposals": review.link_proposals(list(notes_by_ref.values())),
     }
 
 
@@ -1120,6 +1271,8 @@ def _base_article(ref: str):
     # leaf-title fallback turn @library/.../generate into Runbooks/generate.
     note = None if ref.startswith("@") else load_note(ref + ".md") or resolver().resolve(ref)
     if note:
+        if note.kind == "knowledge" and is_folder_article(note):
+            return _folder_article(str(Path(note.path).parent), ref)
         return _note_doc(note)
 
     # Match the main graph's visible knowledge pool. Raw sources are excluded
@@ -1131,22 +1284,16 @@ def _base_article(ref: str):
     if ref == "@vault":
         identity = load_note("Agents/Executive/Executive.md")
         if identity:
-            knowledge_branches = sorted({
-                item.ref.split("/", 1)[0]
-                for item in notes
-                if "/" in item.ref and item.ref.split("/", 1)[0] not in EXECUTIVE_SYSTEM_ROOTS
-            })
+            folders = _executive_folder_paths()
             doc = _note_doc(identity)
             doc["ref"] = ref
             doc["children"] = [
-                "@agent/Architecture",
                 "@branch/Tools",
                 "@branch/Skills",
                 "@branch/Runbooks",
                 "@branch/Tasks",
-                "@agent/Subagents",
-                "@agent/Observations",
-                *(f"@branch/{branch}" for branch in knowledge_branches),
+                *(_executive_folder_ref(folder) for folder in folders
+                  if str(Path(folder).parent) not in folders),
             ]
             return doc
         return _virtual_index(ref, "Obsidience", "The root Agent Brain Article.", notes, kind="agent")
@@ -1200,35 +1347,15 @@ def _base_article(ref: str):
         )
     if ref.startswith("@branch/"):
         folder = ref.removeprefix("@branch/").strip("/")
-        authored = _folder_index(folder)
-        if authored:
-            return _note_doc(authored)
         kind = folder.rstrip("s").lower()
+        if kind not in CHECKOUT_FIELDS:
+            return _folder_article(folder, ref)
         if kind in CHECKOUT_FIELDS:
             res = resolver()
             identity = res.resolve(CHECKOUT_AGENTS["executive"])
-            raw_checkouts = _link_values(identity.meta.get(CHECKOUT_FIELDS[kind])) if identity else []
-            roots = [target for raw in raw_checkouts
-                     if (target := res.resolve(raw)) and target.kind == kind]
-            children = _primitive_closure(roots, [item for item in notes if item.kind == kind])
-        else:
-            prefix = f"{folder}/"
-            descendants = [item for item in notes if item.ref.startswith(prefix)]
-            children = [item for item in descendants
-                        if item.ref.rsplit("/", 1)[0] == folder]
-            child_folders = sorted({
-                item.ref.removeprefix(prefix).split("/", 1)[0]
-                for item in descendants
-                if "/" in item.ref.removeprefix(prefix)
-            })
-            if child_folders:
-                title = folder.rsplit("/", 1)[-1]
-                subnodes = [(f"@branch/{folder}/{child}", child) for child in child_folders]
-                return _virtual_subject(
-                    ref, title,
-                    _branch_index_summary(title, child_folders, len(descendants)),
-                    subnodes, descendants,
-                )
+            refs = agent_dependencies(identity, res)[CHECKOUT_FIELDS[kind]] if identity else []
+            children = [target for raw in refs
+                        if (target := res.resolve(raw)) and target.kind == kind]
         return _virtual_index(ref, folder.rsplit("/", 1)[-1],
                               _branch_index_summary(
                                   folder.rsplit("/", 1)[-1], article_count=len(children)
@@ -1238,22 +1365,14 @@ def _base_article(ref: str):
         summary = EXECUTIVE_AGENT_SUBJECTS.get(key)
         if not summary:
             raise HTTPException(404, f"executive agent node not found: {ref}")
-        if key == "Architecture":
-            children = [item for item in notes if item.ref.startswith("Agents/Executive/Architecture/")]
-        elif key == "Subagents":
-            children = [item for item in notes if item.ref.startswith("Agents/Executive/Subagents/")]
-            children.extend(item for item in iter_notes() if item.kind == "agent")
-        elif key == "Observations":
-            children = [item for item in notes
-                        if item.ref.startswith("Agents/Executive/Observations/")
-                        and "/Temporary Observations/" not in item.ref]
-        elif key == "Temporary Observations":
-            children = [item for item in notes
-                        if item.ref.startswith(
-                            "Agents/Executive/Observations/Temporary Observations/"
-                        )]
-        else:
-            children = []
+        if key != "Subagents":
+            folder = "Agents/Executive/Observations/Temporary Observations" if key == "Temporary Observations" else f"Agents/Executive/{key}"
+            return _folder_article(folder, ref)
+        children = [item for item in iter_notes() if item.kind == "agent"
+                    and item.ref != CHECKOUT_AGENTS["executive"]]
+        authored = _folder_index("Agents/Executive/Subagents")
+        if authored:
+            return {**_note_doc(authored), "children": [item.ref for item in children]}
         return _virtual_subject(ref, key, summary, children=children)
     if ref.startswith("@sat/"):
         parts = ref.split("/")
@@ -1272,6 +1391,9 @@ def _base_article(ref: str):
             if not subject:
                 raise HTTPException(404, f"agent node not found: {ref}")
             title, summary = subject
+            target_folder = _auto_curate_target_path(ref, {"ref": ref})
+            if _folder_index(target_folder):
+                return _folder_article(target_folder, ref)
             child_keys = list(SATELLITE_ROLE_CHILDREN.get(agent_name, {}).get(folder_key, []))
             if folder_key == "observations":
                 child_keys.insert(0, "temporary-observations")
@@ -1288,7 +1410,7 @@ def _base_article(ref: str):
                     children.append(executive)
             elif folder_key == "observations":
                 children = [item for item in iter_notes()
-                            if item.ref.startswith(f"Agents/{agent_name}/")
+                            if item.ref.startswith(f"Agents/{agent_name}/Observations/")
                             and "/Observations/Temporary Observations/" not in item.ref
                             and item.ref != identity.ref]
             elif folder_key == "temporary-observations":
@@ -1299,20 +1421,17 @@ def _base_article(ref: str):
             elif agent_name == "Darwin" and folder_key == "sources":
                 children = [item for item in iter_notes()
                             if item.ref.startswith("Sources/")
-                            and item.ref.rsplit("/", 1)[-1].lower() not in {"readme", "index"}]
+                            and not is_folder_article(item)]
             else:
                 children = []
             return _virtual_subject(ref, title, summary, subnodes, children)
         res = resolver()
-        children = [target for raw in _link_values(identity.meta.get(CHECKOUT_FIELDS[kind]))
+        refs = agent_dependencies(identity, res)[CHECKOUT_FIELDS[kind]]
+        children = [target for raw in refs
                     if (target := res.resolve(raw)) and target.kind == kind]
-        if kind == "task":
-            children.extend(item for item in notes if item.kind == "task" and
-                            f"Agents/{agent_name}" in str(item.meta.get("assignee", "")))
-        children = _primitive_closure(children, [item for item in notes if item.kind == kind])
         return _virtual_index(
             ref, folder,
-            f"{agent_name}'s active and checked-out {folder.lower()}.",
+            f"{agent_name}'s {folder.lower()} supplied by assigned Tasks.",
             children,
         )
     raise HTTPException(404, f"article not found: {ref}")
@@ -1325,82 +1444,21 @@ def get_article(ref: str):
 
 @app.put("/api/articles/{ref:path}/auto-curate")
 def set_article_auto_curate(ref: str, payload: dict):
-    """Owner toggle: mark a node and provision its ordinary turn event Task."""
+    """Owner permission, inherited by children; Task triggers stay independent."""
     enabled = payload.get("enabled")
     if not isinstance(enabled, bool):
         raise HTTPException(400, "enabled must be boolean")
     doc = _apply_reader_override(_base_article(ref))
-    existing = next(
-        (note for note in _auto_curate_tasks()
-         if str(note.meta.get("auto_curate_target", "")) == ref),
-        None,
-    )
-    if existing and str(existing.meta.get("status", "")) == "running":
-        raise HTTPException(409, "auto-curation cannot change while its Task is running")
-
-    task_ref = existing.ref if existing else None
-    if enabled:
-        agent_ref = _auto_curate_agent_ref(ref, doc)
-        runbook = _auto_curate_runbook(agent_ref)
-        target_path = _auto_curate_target_path(ref, doc)
-        temporary = target_path.endswith("Observations/Temporary Observations")
-        digest = hashlib.sha256(ref.encode()).hexdigest()[:12]
-        folder = "temporary" if temporary else "durable"
-        task_path = (
-            existing.path if existing else
-            f"Tasks/observations/{folder}/{slugify(str(doc['title'])) or 'node'}-{digest}.md"
-        )
-        meta = dict(existing.meta) if existing else {}
-        meta.update({
-            "title": f"Maintain {doc['title']}",
-            "kind": "task",
-            # An event Task waits as a definition until a real turn.complete
-            # occurrence binds its parameters and moves it to pending.
-            "status": "draft",
-            "triggers": ["turn.complete"],
-            "enabled": True,
-            "assignee": f"[[{agent_ref}]]",
-            "runbook": f"[[{runbook.ref}]]",
-            "reasoning_effort": "low",
-            "auto_done": True,
-            "auto_curate_target": ref,
-            "target_path": target_path,
-            "curation_mode": "temporary" if temporary else "reviewed",
-            "taxonomy_path": (
-                "observations/temporary/maintain"
-                if temporary else "observations/durable/maintain"
-            ),
-        })
-        if temporary:
-            meta["transient"] = True
-        else:
-            meta.pop("transient", None)
-        meta.pop("event", None)
-        for runtime_field in (
-            "blocked_reason", "event_queue", "last_run", "params", "summary",
-            "triggered_at", "status_updated",
-        ):
-            meta.pop(runtime_field, None)
-        body = (
-            f"Maintain [[{ref}|{doc['title']}]] after each completed turn by its assigned agent. "
-            "The trigger is Obsidience's completed-turn memory boundary; this is not a schedule."
-        )
-        write_note(task_path, meta, body)
-        task_ref = task_path[:-3]
-    elif existing:
-        meta = dict(existing.meta)
-        meta["enabled"] = False
-        meta["status"] = "draft"
-        write_note(existing.path, meta, existing.body)
-
+    if not _auto_curate_supported(ref, doc):
+        raise HTTPException(400, "Auto-curate applies to Knowledge branches, not capability definitions or checkouts")
     _set_auto_curate_tag(ref, doc, enabled)
     INDEX.sync()
-    return {"article": ref, "enabled": enabled, "task": task_ref}
+    return {"article": ref, "enabled": enabled, "task": None}
 
 
 @app.patch("/api/articles/{ref:path}")
 def update_article(ref: str, payload: dict):
-    """Direct owner edit for any Reader article, including generated nodes."""
+    """Direct owner edit for authored Articles and editable navigation nodes."""
     title = str(payload.get("title", "")).strip()
     body = str(payload.get("body", ""))
     if not title:
@@ -1412,8 +1470,14 @@ def update_article(ref: str, payload: dict):
 
     base = _base_article(ref)
     target_ref = str(base["ref"])
+    try:
+        system_knowledge.assert_system_article_writable(target_ref)
+    except ValueError as cause:
+        raise HTTPException(409, str(cause)) from cause
     note = None if target_ref.startswith("@") else load_note(target_ref + ".md")
     if note:
+        if note.runtime_observation:
+            raise HTTPException(409, "runtime Observations are maintained by Compact and Promote")
         if note.kind == "task" and str(note.meta.get("status", "draft")) == "running":
             raise HTTPException(409, "cannot edit a running task")
         meta = dict(note.meta)
@@ -1457,10 +1521,10 @@ def sources():
 
 
 @app.get("/api/source-files")
-def source_files():
+def source_files(scope: str | None = None, after: str | None = None, limit: int = 2000):
     """Exact physical wiki, code, System, and raw-source paths in one view."""
     try:
-        return source.list_source_files()
+        return source.list_source_files(scope=scope, after=after, limit=limit)
     except source.SourceError as cause:
         raise HTTPException(409, str(cause)) from cause
 
@@ -1602,7 +1666,7 @@ def wiki_actions():
         if note.children or not note.meta.get("runbook"):
             continue
         seen.add(note.ref)
-        agent = resolver().resolve(str(note.meta.get("assignee", "")))
+        agent = resolver().resolve(_link_ref(str(note.meta.get("assignee", ""))))
         rows.append({
             "ref": note.ref,
             "title": note.title,
@@ -1617,163 +1681,79 @@ def wiki_actions():
     return rows
 
 
-@app.get("/api/library/checkouts")
-def library_checkouts():
-    """Return exact shared-Library assignments for all four principals."""
-    res = resolver()
-    assignments = []
+def _assignment_row(agent: str, identity: Note, task: Note, res) -> dict:
+    selected = _link_values(identity.meta.get("tasks"))
+    remaining = [raw for raw in selected
+                 if not ((target := res.resolve(raw)) and target.ref == task.ref)]
+    direct = len(remaining) != len(selected)
+    without_direct = replace(identity, meta={**identity.meta, "tasks": remaining})
+    inherited = task.ref in agent_dependencies(without_direct, res)["tasks"]
+    return {"agent": agent, "ref": task.ref, "kind": "task",
+            "direct": direct, "inherited": inherited}
+
+
+@app.get("/api/library/assignments")
+def library_assignments():
+    """Task assignments and their read-only shared Library dependencies."""
+    res = dependency_resolver(resolver())
+    assignments, dependencies = [], []
     for agent, identity_ref in CHECKOUT_AGENTS.items():
         identity = res.resolve(identity_ref)
         if not identity:
             continue
-        for kind in LIBRARY_KINDS:
-            field = CHECKOUT_FIELDS[kind]
-            selected = set()
-            for raw in _link_values(identity.meta.get(field)):
-                raw_ref = _link_ref(raw)
-                if kind == "task" and raw_ref.startswith("@library/Tasks/"):
-                    path = raw_ref.removeprefix("@library/Tasks/")
-                    taxonomy_node = TASK_TAXONOMY_BY_PATH.get(path)
-                    if taxonomy_node and taxonomy_node.kind == "task":
-                        assignments.append({"agent": agent, "ref": raw_ref, "kind": kind})
-                    continue
-                target = res.resolve(raw)
-                if target and target.kind == kind:
-                    assignments.append({"agent": agent, "ref": target.ref, "kind": kind})
-                    selected.add(target.ref)
-            if kind == "tool":
-                _eligible, namespaces = _tool_namespace_catalog()
-                for namespace in sorted(namespaces):
-                    members = {note.ref for note in _tool_namespace_members(namespace)}
-                    if members and members <= selected:
-                        assignments.append({
-                            "agent": agent,
-                            "ref": f"@library/Tools/{namespace}",
-                            "kind": "tool",
-                        })
-            if kind == "task":
-                known = {note.ref for note in iter_notes() if note.kind == "task"}
-                for path, taxonomy_node in TASK_TAXONOMY_BY_PATH.items():
-                    if taxonomy_node.kind != "task":
-                        continue
-                    synthetic_ref = f"@library/Tasks/{path}"
-                    if task_taxonomy_node_id(path, known) != synthetic_ref:
-                        continue
-                    members = set(task_taxonomy_members(path, known))
-                    if members and members <= selected:
-                        assignments.append({
-                            "agent": agent,
-                            "ref": synthetic_ref,
-                            "kind": "task",
-                        })
-    return {"assignments": assignments}
+        effective = agent_dependencies(identity, res)
+        for kind, field in CHECKOUT_FIELDS.items():
+            for ref in effective[field]:
+                dependencies.append({"agent": agent, "ref": ref, "kind": kind})
+                if kind == "task" and (task := res.resolve(ref)) and task.kind == "task":
+                    row = _assignment_row(agent, identity, task, res)
+                    if not row["direct"] and not row["inherited"]:
+                        row["inherited"] = True  # Parent/descendant Task scope.
+                    assignments.append(row)
+    return {"assignments": assignments, "dependencies": dependencies}
 
 
-def _set_library_checkout(ref: str, payload: dict):
-    """Owner toggle for one typed Library item on one principal."""
+@app.put("/api/library/assignments/{ref:path}")
+def set_library_assignment(ref: str, payload: dict):
+    """Assign one accepted Task; its dependencies are never separate grants."""
     agent = str(payload.get("agent") or "").strip().lower()
     if agent not in CHECKOUT_AGENTS:
-        raise HTTPException(400, f"unknown checkout agent: {agent or '(empty)'}")
-    checked_out = payload.get("checked_out")
-    if not isinstance(checked_out, bool):
-        raise HTTPException(400, "checked_out must be boolean")
-
-    res = resolver()
-    namespace = ref.removeprefix("@library/Tools/") if ref.startswith("@library/Tools/") else None
-    if ref.startswith("@library/Skills/"):
-        raise HTTPException(
-            404, "Skills are checked out automatically with their paired Tool"
-        )
-    task_path = ref.removeprefix("@library/Tasks/") if ref.startswith("@library/Tasks/") else None
-    if task_path and task_path not in TASK_TAXONOMY_BY_PATH:
-        raise HTTPException(404, f"task taxonomy node not found: {task_path}")
-    if task_path and TASK_TAXONOMY_BY_PATH[task_path].kind != "task":
-        raise HTTPException(
-            400,
-            f"{TASK_TAXONOMY_BY_PATH[task_path].title} is a Knowledge Article and cannot be checked out",
-        )
-    if namespace:
-        targets = _tool_namespace_members(namespace)
-    else:
-        targets = []
-    if namespace and namespace not in _tool_namespace_catalog()[1]:
-        raise HTTPException(404, f"tool namespace not found: {namespace}")
-    target = res.resolve(ref) if not namespace and not task_path else None
-    if not namespace and not task_path and (not target or target.kind not in LIBRARY_KINDS):
-        raise HTTPException(404, f"library item not found: {ref}")
-    identity = res.resolve(CHECKOUT_AGENTS[agent])
-    if not identity:
-        raise HTTPException(500, f"checkout identity missing: {CHECKOUT_AGENTS[agent]}")
-
-    kind = "tool" if namespace else "task" if task_path else target.kind
-    field = CHECKOUT_FIELDS[kind]
-    current = _link_values(identity.meta.get(field))
-    retained = []
-    target_refs = ({ref} if task_path else {item.ref for item in targets}
-                   if namespace else {target.ref})
-    def checkout_ref(raw: str) -> str:
-        raw_ref = _link_ref(raw)
-        if raw_ref.startswith("@library/"):
-            return raw_ref
-        resolved = res.resolve(raw)
-        return resolved.ref if resolved else raw_ref
-
-    current_refs = {checkout_ref(raw) for raw in current}
-    was_checked_out = bool(target_refs) and target_refs <= current_refs
-    checkout_changed = checked_out != was_checked_out
-    for raw in current:
-        current_ref = checkout_ref(raw)
-        if current_ref not in target_refs:
-            retained.append(raw)
-    if checked_out:
-        retained.extend(f"[[{target_ref}]]" for target_ref in sorted(target_refs))
-
-    meta = dict(identity.meta)
-    if retained:
-        meta[field] = retained
-    else:
-        meta.pop(field, None)
-
-    paired_skills: list[str] = []
-    if kind == "tool":
-        selected_tools = {
-            tool.ref
-            for raw in _link_values(meta.get("tools"))
-            if (tool := res.resolve(raw)) and tool.kind == "tool"
-        }
-        paired_skills = sorted(_paired_skill_checkouts(selected_tools))
-        if paired_skills:
-            meta["skills"] = [f"[[{skill_ref}]]" for skill_ref in paired_skills]
-        else:
-            meta.pop("skills", None)
-
-    write_note(identity.path, meta, identity.body)
-    activation = None
-    activation_error = None
-    if checkout_changed and checked_out and kind == "task":
-        try:
-            activation = _activate_task_checkout_event(agent, identity, ref, meta)
-        except HTTPException as exc:
-            activation_error = str(exc.detail)
-        except Exception as exc:  # noqa: BLE001 — assignment remains a successful owner action
-            activation_error = f"runbook generation could not be queued: {exc}"
-    INDEX.sync()
-    return {"agent": agent, "ref": ref if namespace or task_path else target.ref,
-            "kind": kind, "checked_out": checked_out,
-            "checkout_changed": checkout_changed,
-            "paired_skills": paired_skills,
-            "activated_task": activation["task"] if activation else None,
-            "activation_state": activation["state"] if activation else None,
-            "queue_position": activation["position"] if activation else None,
-            "queue_depth": activation["queue_depth"] if activation else 0,
-            "activation_error": activation_error}
-
-
-@app.put("/api/library/checkouts/{ref:path}")
-def set_library_checkout(ref: str, payload: dict):
-    """Serialize checkout mutations so rapid clicks cannot lose identity edges."""
+        raise HTTPException(400, f"unknown agent: {agent or '(empty)'}")
+    assigned = payload.get("assigned")
+    if not isinstance(assigned, bool):
+        raise HTTPException(400, "assigned must be boolean")
     with _CHECKOUT_LOCK:
-        return _set_library_checkout(ref, payload)
+        res = dependency_resolver(resolver())
+        task = res.resolve(ref)
+        if not task or task.kind != "task":
+            raise HTTPException(400, "Only an accepted Task Article can be assigned")
+        identity = res.resolve(CHECKOUT_AGENTS[agent])
+        if not identity:
+            raise HTTPException(500, f"Agent Article missing: {CHECKOUT_AGENTS[agent]}")
+        before = _assignment_row(agent, identity, task, res)
+        retained = [raw for raw in _link_values(identity.meta.get("tasks"))
+                    if not ((target := res.resolve(raw)) and target.ref == task.ref)]
+        if assigned:
+            retained.append(f"[[{task.ref}]]")
+        meta = dict(identity.meta)
+        if retained:
+            meta["tasks"] = retained
+        else:
+            meta.pop("tasks", None)
+        changed = before["direct"] != assigned
+        if changed:
+            write_note(identity.path, meta, identity.body)
+        activation = ensure_task_runbook(task, res, agent_ref=identity.ref) if assigned else {}
+        if changed:
+            INDEX.sync()
+        row = _assignment_row(agent, replace(identity, meta=meta), task, res)
+        return {
+            **row, "assigned": assigned or row["inherited"],
+            "assignment_changed": changed,
+            "activated_task": activation.get("generator_task"),
+            "activation_state": activation.get("status"),
+            "activation_error": activation.get("error"),
+        }
 
 
 @app.get("/api/notes/{ref:path}")
@@ -1836,9 +1816,47 @@ async def completed_turn(payload: dict):
     }
 
 
+def task_execution_state(note: Note, accepted_resolver: Resolver) -> dict:
+    """Present current admission separately from the immutable last attempt."""
+    status = str(note.meta.get("status", "draft"))
+    issue = current_task_issue(note)
+    previous = INDEX.run(str(note.meta.get("last_run") or ""))
+    if previous and previous.get("task_ref") != note.ref:
+        previous = None
+    last_run = ({key: previous.get(key) for key in ("id", "status", "finished", "summary")}
+                if previous else None)
+    result = {"state": "idle", "reason": "", "last_run": last_run,
+              "retry_allowed": False, "retry_blocked_reason": ""}
+    if status == "cancelled":
+        result["reason"] = str(note.meta.get("summary") or "Cancelled by the owner.")
+    elif status in {"running", "review"}:
+        result.update(state=status, reason=str(note.meta.get("blocked_reason") or ""))
+    elif issue:
+        if issue["kind"] == "unresolved_occurrence":
+            blocked = scheduler.retry_blocked_reason(note, previous)
+        elif issue["kind"] == "scheduled_draft":
+            blocked = "Resolve the scheduled Task's draft state before running it."
+        else:
+            blocked = "Resolve the Task configuration before running it."
+        result.update(state="needs_attention", reason=issue["reason"],
+                      retry_allowed=not blocked, retry_blocked_reason=blocked)
+    elif status == "pending":
+        if not scheduler._realtime_allows(note, accepted_resolver):
+            result.update(state="waiting", label="Paused: Realtime" if realtime.RUNTIME.scheduler_paused() else "Paused: foreground",
+                          reason="Background work is paused while Realtime or foreground input owns execution.")
+        else:
+            error = scheduler._resource_error(note)
+            if error:
+                result.update(state="waiting", label="Waiting: hardware", reason=scheduler.RESOURCE_WAIT_PREFIX + str(error))
+            else:
+                result.update(state="ready", reason="Waiting for its turn in the existing execution queue.")
+    return result
+
+
 @app.get("/api/tasks")
 def tasks():
     out = []
+    accepted_resolver = resolver()
     for n in iter_notes():
         if n.kind != "task":
             continue
@@ -1872,8 +1890,8 @@ def tasks():
                 pass
         out.append({"ref": n.ref, "title": n.title,
                     "status": n.meta.get("status", "draft"),
-                    "assignee": str(n.meta.get("assignee", "")),
-                    "runbook": str(n.meta.get("runbook", "")),
+                    "assignee": assignee_ref,
+                    "runbook": _link_ref(str(n.meta.get("runbook", ""))),
                     "subtasks": len(refs),
                     "subtask_refs": refs,
                     "excluded_subtask_refs": excluded_refs,
@@ -1890,7 +1908,8 @@ def tasks():
                     "schedule": schedule,
                     "next_run": next_run,
                     "blocked_reason": n.meta.get("blocked_reason"),
-                    "last_run": n.meta.get("last_run")})
+                    "last_run": n.meta.get("last_run"),
+                    "execution": task_execution_state(n, accepted_resolver)})
     return out
 
 
@@ -1928,8 +1947,10 @@ async def create_task(payload: dict):
         meta.pop("params", None)
     meta["status"] = "pending"
     write_note(task.path, meta, task.body)
+    readiness = ensure_task_runbook(load_note(task.path), resolver())
     INDEX.sync()
-    return {"task": task.ref, "state": state, "status": meta["status"]}
+    return {"task": task.ref, "state": state, "status": meta["status"],
+            "dependencies": readiness}
 
 
 @app.patch("/api/tasks/{ref:path}/reasoning")
@@ -1971,8 +1992,9 @@ async def set_task_assignee(ref: str, payload: dict):
     meta = dict(note.meta)
     meta["assignee"] = assignee
     write_note(note.path, meta, note.body)
+    readiness = ensure_task_runbook(load_note(note.path), resolver())
     INDEX.sync()
-    return {"task": note.ref, "assignee": assignee}
+    return {"task": note.ref, "assignee": assignee, "dependencies": readiness}
 
 
 @app.patch("/api/tasks/{ref:path}/model")
@@ -2115,17 +2137,36 @@ async def update_task(ref: str, payload: dict):
 
     body = str(payload["body"]) if "body" in payload else note.body
     write_note(note.path, meta, body)
+    readiness = ensure_task_runbook(load_note(note.path), resolver())
     INDEX.sync()
-    return {"task": note.ref, "updated": True}
+    return {"task": note.ref, "updated": True, "dependencies": readiness}
 
 
 @app.post("/api/tasks/{ref:path}/run")
 async def run_now(ref: str, payload: dict | None = None):
-    note = load_note(ref + ".md") or resolver().resolve(ref)
-    if not note or note.kind != "task":
+    note = load_note(ref + ".md") or resolver(include_system=False).resolve(ref)
+    if (not note or note.kind != "task" or note.ref.startswith(("_", "."))
+            or note.meta.get("article_status") == "deprecated"):
         raise HTTPException(404, f"task not found: {ref}")
     if str(note.meta.get("status", "draft")) == "running":
         raise HTTPException(409, "task is already running")
+    if "retry_run_id" in (payload or {}):
+        expected = (payload or {}).get("retry_run_id")
+        if not isinstance(expected, str) or not expected:
+            raise HTTPException(400, "retry_run_id must name the exact previous attempt")
+        if any(key in (payload or {}) for key in ("params", "model")):
+            raise HTTPException(400, "retry preserves the occurrence inputs and Task model")
+        try:
+            return scheduler.retry_failed_occurrence(note, expected)
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(409, str(exc)) from exc
+    if str(note.meta.get("status", "draft")) == "review":
+        raise HTTPException(409, "resolve the pending Review before running this Task")
+    stored = note.meta.get("params")
+    if str(note.meta.get("status", "")) in {"failed", "blocked"} and isinstance(stored, dict) and (
+        stored.get("activation_key") or stored.get("event")
+    ):
+        raise HTTPException(409, "retry must name the exact failed attempt; its inputs and waiting queue are retained")
     try:
         requested_effort = (payload or {}).get("reasoning_effort", note.meta.get("reasoning_effort"))
         effort = llm.normalize_reasoning_effort(requested_effort)
@@ -2148,6 +2189,15 @@ async def run_now(ref: str, payload: dict | None = None):
         if not key or len(key) > 64 or len(value) > 500:
             raise HTTPException(400, "runtime params are invalid")
         runtime_params[key] = value
+    from ...capabilities.task.complete import validate_computer_outcome
+
+    stored_params = note.meta.get("params")
+    bound_params = {**(stored_params if isinstance(stored_params, dict) else {}), **runtime_params}
+    outcome_error = validate_computer_outcome(
+        bound_params.get("computer_outcome"), bound_params.get("computer_scope"),
+    )
+    if outcome_error:
+        raise HTTPException(400, outcome_error)
     try:
         scheduler.launch(
             note,
@@ -2180,13 +2230,32 @@ def action_trace():
 @app.websocket("/ws/trace")
 async def action_trace_ws(ws: WebSocket):
     await ws.accept()
-    queue = trace.subscribe()
-    try:
-        await ws.send_json({"type": "snapshot", "entries": trace.history()})
-        while True:
-            await ws.send_json({"type": "entry", "entry": await queue.get()})
-    except (WebSocketDisconnect, asyncio.CancelledError):
+    raw_cursor = ws.query_params.get("after")
+    if raw_cursor is not None and (not raw_cursor.isascii() or not raw_cursor.isdecimal() or len(raw_cursor) > 16):
+        await ws.close(code=1008, reason="Invalid trace cursor")
         return
+    after = int(raw_cursor) if raw_cursor is not None else None
+    queue = trace.subscribe()
+
+    async def send_events():
+        frame = trace.replay(after)
+        cursor = frame["cursor"]
+        await ws.send_json(frame)
+        while True:
+            entry = await queue.get()
+            sequence = entry.get("seq")
+            if sequence is not None and sequence <= cursor:
+                continue
+            if sequence is not None and sequence != cursor + 1:
+                frame = trace.replay(cursor)
+                await ws.send_json(frame)
+                cursor = frame["cursor"]
+            else:
+                await ws.send_json({"type": "entry", "entry": entry, "cursor": sequence or cursor})
+                cursor = sequence or cursor
+
+    try:
+        await _serve_websocket_events(ws, send_events)
     finally:
         trace.unsubscribe(queue)
 
@@ -2196,19 +2265,22 @@ async def knowledge_activity_ws(ws: WebSocket):
     """Every Task activation, independent of how the Task was started."""
     await ws.accept()
     queue = knowledge_activity.subscribe()
-    try:
+
+    async def send_events():
         await ws.send_json({"type": "snapshot", "entries": knowledge_activity.history()})
         while True:
             await ws.send_json({"type": "activity", **await queue.get()})
-    except (WebSocketDisconnect, asyncio.CancelledError):
-        return
+
+    try:
+        await _serve_websocket_events(ws, send_events)
     finally:
         knowledge_activity.unsubscribe(queue)
 
 
 @app.get("/api/reviews")
 def reviews():
-    return review.list_proposals()
+    with _REVIEW_LOCK:
+        return review.list_proposals()
 
 
 @app.post("/api/reviews/{name}/approve")
@@ -2229,94 +2301,13 @@ def reject(name: str, reason: str = ""):
         raise HTTPException(404, str(exc)) from exc
 
 
-LIVE_APPLICATION_ALIASES = {
-    "tft": "teamfight_tactics",
-    "teamfight tactics": "teamfight_tactics",
-    "world of warcraft": "world_of_warcraft",
-    "wow": "world_of_warcraft",
-    "battle net": "battle_net",
-    "battlenet": "battle_net",
-    "microsoft edge": "microsoft_edge",
-    "edge": "microsoft_edge",
-}
-
-
-def _live_application_request(text: str) -> str | None:
-    """Recognize only an explicit, current launch imperative—not a discussion about launching."""
-    normalized = re.sub(r"\s+", " ", text.strip().casefold())
-    if re.search(r"\b(?:do not|don't|never)\b", normalized):
-        return None
-    match = re.fullmatch(
-        r"(?:please\s+)?(?:(?:can|could|would|will)\s+(?:you|we)\s+)?"
-        r"(?:open|launch|start|run)\s+(?:up\s+)?(?:the\s+)?(.+?)(?:\s+for me)?[.!?]*",
-        normalized,
-    )
-    if not match:
-        return None
-    requested = match.group(1).strip().replace("battle.net", "battle net")
-    return LIVE_APPLICATION_ALIASES.get(requested)
-
-
-def _live_application_mention(text: str) -> str | None:
-    normalized = re.sub(r"\s+", " ", text.strip().casefold()).replace("battle.net", "battle net")
-    for label in sorted(LIVE_APPLICATION_ALIASES, key=len, reverse=True):
-        if re.search(rf"(?<!\w){re.escape(label)}(?!\w)", normalized):
-            return LIVE_APPLICATION_ALIASES[label]
-    return None
-
-
-def _live_computer_request(text: str) -> bool:
-    """Recognize a current computer-control imperative, never a discussion about one."""
-    normalized = re.sub(r"\s+", " ", text.strip().casefold())
-    if re.search(r"\b(?:do not|don't|never)\b", normalized):
-        return False
-    prefix = (
-        r"(?:please\s+)?(?:"
-        r"(?:(?:can|could|would|will)\s+(?:you|we)\s+)|"
-        r"(?:i(?:'d| would)\s+like\s+you\s+to\s+)"
-        r")?"
-    )
-    action = (
-        r"(?:click|press|hit|tap|type|enter|scroll|drag|drop|select|choose|hover|"
-        r"focus|move|control|interact|play)\b.+"
-    )
-    menu_open = r"open\b.+\b(?:menu|dialog|panel|tab|button|control)\b.*"
-    return re.fullmatch(prefix + rf"(?:{action}|{menu_open})[.!?]*", normalized) is not None
-
-
-def _live_task_selection(
-    text: str,
-    source_name: str,
-    *,
-    realtime_active: bool = False,
-) -> tuple[Note | None, dict, str]:
-    """Select one existing Task Article for live Executive interaction."""
-
-    event = "voice.activation" if source_name == "voice" else "chat.request"
-    application = _live_application_request(text)
-    computer_use = _live_computer_request(text)
-    mentioned_application = application or (_live_application_mention(text) if computer_use else None)
-    task = resolver().resolve(
-        "Tasks/executive/realtime"
-        if realtime_active
-        else "Tasks/executive/operate" if application or computer_use else "Tasks/query"
-    )
-    runtime_params = {"request": text, "source": source_name, "event": event}
-    if application:
-        runtime_params.update({"operation": "launch", "application": application})
-    elif computer_use:
-        runtime_params["operation"] = "computer_use"
-        if mentioned_application:
-            runtime_params["application"] = mentioned_application
-    return task, runtime_params, event
-
-
 @app.websocket("/ws/chat")
 async def chat_ws(ws: WebSocket):
     """Project the one persisted Executive conversation into every Chat pane."""
     await ws.accept()
     queue = CONVERSATION.subscribe()
-    queue.put_nowait(realtime.RUNTIME.context_status())
+    queue.put_nowait(conversation_runtime.RUNTIME.context_status())
+    queue.put_nowait(conversation_runtime.RUNTIME.active_turn())
 
     async def send_events() -> None:
         while True:
@@ -2329,90 +2320,47 @@ async def chat_ws(ws: WebSocket):
                 msg = json.loads(raw)
             except json.JSONDecodeError:
                 continue
+            if not isinstance(msg, dict):
+                continue
+            if msg.get("type") == "steer":
+                try:
+                    result = await conversation_runtime.RUNTIME.steer(
+                        str(msg.get("text", "")), expected_turn_id=str(msg.get("expected_turn_id", "")),
+                    )
+                    queue.put_nowait({"type": "steering", **result})
+                except (ValueError, RuntimeError) as exc:
+                    queue.put_nowait({"type": "error", "text": str(exc)[:512]})
+                continue
             if msg.get("type") == "new_conversation":
-                outgoing_conversation = CONVERSATION.conversation_id
-                if realtime.RUNTIME.scheduler_paused():
-                    realtime.RUNTIME.defer_observation_session(outgoing_conversation)
-                else:
-                    try:
-                        await realtime.RUNTIME.finalize_observation_session(
-                            outgoing_conversation,
-                            session_boundary="chat.new_conversation",
-                        )
-                    except (ValueError, RuntimeError) as exc:
-                        queue.put_nowait({"type": "error", "text": str(exc)[:512]})
-                        continue
-                await CONVERSATION.new_conversation()
-                realtime.RUNTIME.publish_context()
+                try:
+                    await conversation_runtime.RUNTIME.new_conversation(
+                        defer=realtime.RUNTIME.scheduler_paused(),
+                    )
+                except (ValueError, RuntimeError) as exc:
+                    queue.put_nowait({"type": "error", "text": str(exc)[:512]})
                 continue
             if msg.get("type") == "set_compact_threshold":
                 try:
-                    await realtime.RUNTIME.set_context_threshold(msg.get("percent"))
+                    await conversation_runtime.RUNTIME.set_context_threshold(msg.get("percent"))
                 except (ValueError, RuntimeError) as exc:
                     queue.put_nowait({"type": "error", "text": str(exc)[:512]})
                 continue
             if msg.get("type") == "compact":
                 queue.put_nowait({"type": "start", "source": "compact"})
                 try:
-                    await realtime.RUNTIME.compact_conversation(force=True)
+                    await conversation_runtime.RUNTIME.compact_conversation(force=True)
                 except (ValueError, RuntimeError) as exc:
                     queue.put_nowait({"type": "error", "text": str(exc)[:512]})
                 finally:
                     queue.put_nowait({"type": "end"})
                 continue
-            text = " ".join(str(msg.get("text", "")).split())[:4_000]
+            text = str(msg.get("text", "")).strip()
             if not text:
                 continue
-            queue.put_nowait({"type": "start", "source": "text"})
             try:
-                realtime_state = realtime.RUNTIME.snapshot()
-                if realtime.RUNTIME.scheduler_paused():
-                    if not realtime_state["ready"]:
-                        await CONVERSATION.append(role="user", source="text", text=text)
-                        raise RuntimeError("Realtime is still starting")
-                    await realtime.RUNTIME.submit_text(text)
-                    continue
-
-                user_turn = await CONVERSATION.append(
-                    role="user",
-                    source="text",
-                    text=text,
-                )
-                task, runtime_params, event = _live_task_selection(text, "text")
-                if task is None:
-                    raise RuntimeError("the selected Executive Task Article is missing")
-                trace.emit("event", f"{task.title} activated", [task.ref, event])
-                context = await realtime.RUNTIME.prepare_immediate_observations(
-                    user_turn,
-                    context_task_ref=task.ref,
-                )
-                result = await run_task(
-                    task,
-                    runtime_params=runtime_params,
-                    emit_turn_event=False,
-                    conversation_context=context,
-                )
-                realtime.RUNTIME.record_prompt_usage(result, request_text=text)
-                summary = str(result.get("summary") or "").strip()
-                if result.get("status") != "completed" or not summary:
-                    raise RuntimeError(summary or "the Executive Task produced no public reply")
-                assistant_turn = await CONVERSATION.append(
-                    role="assistant",
-                    source="text",
-                    text=summary,
-                    run_id=str(result.get("run_id") or "") or None,
-                    conversation_id=user_turn["conversation_id"],
-                    reply_to=user_turn["id"],
-                )
-                realtime.RUNTIME.publish_context()
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:  # noqa: BLE001 - report a bounded runtime failure
-                message = f"Executive turn failed: {type(exc).__name__}: {exc}"[:512]
-                trace.emit("error", message)
-                queue.put_nowait({"type": "error", "text": message})
-            finally:
-                queue.put_nowait({"type": "end"})
+                await conversation_runtime.RUNTIME.submit(text, source="text", wait=False)
+            except (ValueError, RuntimeError) as exc:
+                queue.put_nowait({"type": "error", "text": str(exc)[:512]})
 
     sender = asyncio.create_task(send_events(), name="obsidience-chat-send")
     receiver = asyncio.create_task(receive_requests(), name="obsidience-chat-receive")

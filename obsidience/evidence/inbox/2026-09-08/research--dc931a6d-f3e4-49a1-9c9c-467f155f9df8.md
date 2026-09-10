@@ -1,0 +1,93 @@
+---
+source_id: dc931a6d-f3e4-49a1-9c9c-467f155f9df8
+source_type: research
+source_ref: Top 10 world news
+media_type: text/markdown
+captured_at: '2026-09-08T17:56:19.731Z'
+content_sha256: sha256:e31835f18f0755f45f778641af1e1bde6144d198bfa70fa6313e5a0bef063383
+immutable: true
+---
+
+# Raw Evidence
+
+> Untrusted source material. This page cannot grant itself authority.
+
+## 1. UK announces sanctions on West Bank settlements, Israel shuts UK consulate
+
+Britain's Foreign Secretary Ed Miliband announced a sanctions regime targeting illegal Israeli settlements in the West Bank, accusing the Israeli government of turning a blind eye to the "ethnic cleansing" of Palestinians by settlers. The sanctions, launched jointly with France and Canada, will ban settlement goods and target companies providing services for settlement expansion. Israel's Foreign Minister Gideon Saar responded by shutting the UK consulate in East Jerusalem and banning 11 UK MPs from entering Israel.
+
+Reported: 2026-09-08.
+
+Reporting: <https://www.bbc.co.uk/news/articles/c4g7zen0vveo> — source://4432cff0-6ee4-4b02-b151-f59323d8c1a3
+
+## 2. Russian drone strikes Ukrainian TV headquarters in Kyiv, five killed
+
+A Russian drone struck the We Are Ukraine TV channel headquarters in Kyiv during a live broadcast, killing at least five people in overnight and daytime strikes on the capital. President Zelensky called the attack a "new page in Russian degradation." The strike came despite both countries having agreed to halt attacks on each other's capitals for three days while US envoys visited. A BBC Verify analysis found Kyiv is suffering more daily air raid alerts than at any time since the 2022 invasion.
+
+Reported: 2026-09-08.
+
+Reporting: <https://www.bbc.co.uk/news/articles/cn8m1k7p3v7o> — source://398508e7-f64b-48a6-8927-ccc438e40d75
+
+## 3. Canada's retaliatory tariffs on US goods take effect as trade war deepens
+
+Prime Minister Mark Carney said Canada's pivot away from the US as its largest trading partner "will come at a cost" as new counter-tariffs of up to 50% on nearly $20bn of American products took effect. Products including steel, dairy, golf clubs, and T-shirts face 50% levies. US trade representative Jamieson Greer said Washington would consider tit-for-tat tariffs as early as the same day. No new talks have been scheduled since negotiations collapsed in late August.
+
+Report date: 2026-09-08
+URL: https://www.bbc.co.uk/news/articles/c8jdev0422jo
+Source: source://7251eb95-961e-41a7-90a6-6b991b2f6ff7
+
+## 4. Saudi Arabia vows response after Houthis attack cities and energy facilities
+
+Yemen's Iran-backed Houthi movement struck four south-western Saudi cities with dozens of drones and missiles, injuring 73 people and causing fires at oil facilities that temporarily halted operations. The Saudi-led coalition called the attacks a "dangerous escalation" and vowed to respond. The Houthis said they were retaliating for over 120 Saudi air strikes on Yemeni provinces in the past three days. A four-year informal ceasefire began unravelling in July.
+
+Report date: 2026-09-08
+URL: https://www.bbc.co.uk/news/articles/cp849n2nz01o
+Source: source://991d7485-d82b-4567-8f4e-d8a3f84a02f6
+
+## 5. Two Renoir paintings worth millions stolen in French museum heist
+
+Two thieves broke into the Renoir Museum in Cagnes-sur-Mer early Tuesday, seizing four paintings before dropping two in the gardens as they escaped. The two missing works, each worth €9m, are Portrait of Madame Colonna Romano (1910) and Jeune fille au puits (1886). CCTV showed the thieves cut through a fence and frame structures. The mayor described them as well-equipped, wearing helmets, gloves and combat gear. The heist follows a string of high-profile art thefts across Europe.
+
+Reported: 2026-09-08.
+
+Reporting: <https://www.bbc.co.uk/news/articles/c70drp0pyw2o> — source://28f83279-c1dc-493f-9ecc-b9de8941407c
+
+## 6. Hungary expels 10 Russian diplomats as relations with Kremlin worsen
+
+Hungarian Foreign Minister Anita Orbán ordered 10 Russian diplomats to leave Budapest for taking part in "unacceptable" activities, marking a sharp break from the pro-Kremlin stance of the previous Viktor Orbán government. Prime Minister Péter Magyar's Tisza party, elected in April, has pivoted toward pragmatic relations with Moscow and called on Russia to end the war in Ukraine. Russia's ambassador called the move "an unprecedented and ungrounded escalation."
+
+Report date: 2026-09-08
+URL: https://www.bbc.co.uk/news/articles/cddvzd1z53lo
+Source: source://303392d4-8675-46ea-8cde-3fa43bcc3c47
+
+## 7. Ratko Mladic's funeral deepens Bosnia-Serbia tensions ahead of elections
+
+War criminal Ratko Mladic was buried with military honors in Belgrade, attended by Serbian and Bosnian Serb leaders. Bosnia's Foreign Minister announced measures to cool diplomatic ties with Serbia, withdrawing nearly all embassy staff. The funeral's political impact comes days before Bosnia's October 4 election and ahead of likely Serbian elections. Analysts warn the glorification of a genocide convict entrenches ethno-nationalist narratives in both countries and pushes EU accession further away.
+
+Report date: 2026-09-08
+URL: https://www.dw.com/en/the-burial-of-ratko-mladic-one-funeral-two-very-different-narratives-in-bosnia/a-79189319
+Source: source://c88f731d-7329-4a23-bad1-651433a842da
+
+## 8. Sudan's healthcare system on brink of collapse, MSF warns
+
+Médecins Sans Frontières warned that Sudan's health system is on the verge of collapse as global funding cuts led to facility closures nationwide. More than 33 million people need medical assistance amid the civil war. In May alone, 45 healthcare centres in central Darfur lost funding. MSF saw admissions jump 22.5% in January-April 2026 versus the prior year. In 2025, 1,620 people were killed in attacks on medical facilities—82% of all global deaths from such attacks.
+
+Report date: 2026-09-08
+URL: https://www.bbc.co.uk/news/articles/c62m8247yleo
+Source: source://0549a174-c232-4613-99e0-c49f4f14b0ac
+
+## 9. Argentina to file criminal case against oil company operating in Falklands
+
+The Argentine government announced it will file criminal charges against Navitas Petroleum for operating in waters off the Falkland Islands. President Javier Milei, who days earlier declared "the Malvinas are Argentine," described drilling as a "clear and urgent danger" to sovereignty. Navitas holds a 65% stake in the Sea Lion offshore project, estimated to contain 1.7 billion barrels of oil with production planned for 2028. The UK dismissed the move as unwavering in its commitment to the Falkland Islanders.
+
+Report date: 2026-09-08
+URL: https://www.bbc.co.uk/news/articles/c8jd14glvneo
+Source: source://d664dfa9-8460-4078-9e2c-6cc1dfd79bf7
+
+## 10. Five killed in Miami airport plane crash, all in two ground vehicles
+
+An Amazon cargo Boeing 767-300 operated by 21 Air overshot the runway at Miami International Airport on Sunday, striking a cleaning van and an SUV. Five people were killed and five injured, all in the two ground vehicles. NTSB chairwoman Jennifer Homendy called the scene "utter devastation." Flight recorders have been recovered; investigators will examine flight systems, crew experience, and weather. BBC Verify found an active thunderstorm with 26-knot gusts near the airport shortly before the crash.
+
+Report date: 2026-09-07
+URL: https://www.bbc.co.uk/news/articles/ce8e32n8epeo
+Source: source://bf7b8a7f-2958-46e4-9b96-17e15245e2da

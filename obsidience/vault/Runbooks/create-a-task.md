@@ -1,14 +1,15 @@
 ---
-approved_at: '2026-08-21T04:02:25'
-kind: runbook
-owner_maintained: true
-provenance: proposed by Codex (task research generation kit)
-skills:
-- '[[Skills/listing-the-vault]]'
-- '[[Skills/searching-the-vault]]'
-- '[[Skills/reading-the-vault]]'
-- '[[Skills/proposing-changes]]'
+type: runbook
 title: Generate task procedure
+obsidience:
+  approved_at: '2026-08-21T04:02:25'
+  owner_maintained: true
+  provenance: proposed by Codex (task research generation kit)
+  skills:
+  - '[[Skills/vault.list]]'
+  - '[[Skills/vault.search]]'
+  - '[[Skills/vault.read]]'
+  - '[[Skills/vault.propose]]'
 ---
 
 Synthesize one quality shared Task definition.
@@ -19,12 +20,22 @@ Synthesize one quality shared Task definition.
    independently meaningful, verifiable outcome, as in the Observations
    lifecycle. Procedural stages belong in a Runbook. A container uses ordered
    `subtasks`; a leaf links one exact Runbook.
-4. Write checkable acceptance criteria, failure and review outcomes, parameter limits, and any required reasoning effort. Keep procedure in the Runbook and executable mechanics in Tools.
+4. Write a nonempty bounded list of checkable acceptance criteria plus failure
+   and review outcomes. Keep procedure in the Runbook and executable mechanics
+   in Tools.
 5. Use `vault.propose` with `action: create`, a target below `Tasks/`, the
-   complete drafted body, and typed Task metadata including the exact `runbook`
-   or `subtasks`. Finish with `review`, naming the proposed Task and its intended
-   taxonomy path. Generate → Task is the only path that authors reusable Task
+   complete drafted body, and only reusable Task-definition metadata:
+   `type: task`, one accepted `assignee`, one existing `taxonomy_path`, a
+   nonempty `acceptance` list, exactly one accepted `runbook` or a nonempty list
+   of accepted `subtasks`, plus optional ordered `triggers`, registered `model`,
+   and `reasoning_effort`. Do not author runtime `params`, `status`, `schedule`,
+   `enabled`, run IDs, results, or timestamps.
+6. Finish with `review`, naming the proposed Task and its intended taxonomy
+   placement. Generate → Task is the only path that authors reusable Task
    definitions; `task.create` activates an existing accepted Task and is not
    used here.
 
-Quality gate: one outcome, narrow placement, deterministic completion evidence, no hidden event object, and no procedure copied into the Task.
+Quality gate: one outcome, narrow placement, deterministic completion evidence,
+resolved Agent and Runbook or subtask references, valid event names and model
+when supplied, no runtime occurrence state, and no procedure copied into the
+Task.

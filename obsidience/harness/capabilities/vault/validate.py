@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from collections import Counter
 
+import yaml
+
 
 def execute(args: dict, context: dict) -> str:
     del args, context
     from obsidience.harness.capabilities.registry import REGISTRY, contract_error
+    from obsidience.harness.config import CONFIG
+    from obsidience.harness.knowledge.format import parse, validate_profile
     from obsidience.harness.knowledge.skills import (
         build_skill_mirror,
         node_id as skill_mirror_node_id,
@@ -20,9 +24,39 @@ def execute(args: dict, context: dict) -> str:
     from obsidience.harness.knowledge.vault import (
         CHILD_FIELD_BY_KIND,
         HIERARCHY_FIELDS,
+        SOURCE_DIRS,
+        SYSTEM_DIRS,
         iter_notes,
         resolver,
     )
+
+    # Validate persisted bytes, not a re-encoded runtime projection: projection
+    # would hide misplaced fields and Task state that must not live in Articles.
+    profile_errors: list[str] = []
+    profiles_checked = 0
+    for path in sorted(CONFIG.vault_dir.rglob("*.md")):
+        relative = path.relative_to(CONFIG.vault_dir)
+        if relative.parts[0] in (*SOURCE_DIRS, *SYSTEM_DIRS) or any(
+            part.startswith(".") for part in relative.parts
+        ):
+            continue
+        try:
+            raw, _ = parse(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, ValueError, yaml.YAMLError) as error:
+            profile_errors.append(f"- [[{relative.with_suffix('')}]] OKF profile: {error}")
+            continue
+        if path.name.lower() in {"index.md", "log.md"} and not ({"type", "kind"} & raw.keys()):
+            continue  # Ordinary OKF navigation/history is not an Article.
+        profiles_checked += 1
+        profile_errors.extend(
+            f"- [[{relative.with_suffix('')}]] OKF profile: {error}"
+            for error in validate_profile(raw, relative)
+        )
+    if profile_errors:
+        return (
+            f"{profiles_checked} Article profiles checked, {len(profile_errors)} invalid:\n"
+            + "\n".join(profile_errors[:30])
+        )
 
     res = resolver()
     notes = iter_notes()
@@ -126,10 +160,8 @@ def execute(args: dict, context: dict) -> str:
     for tool in leaf_tools:
         checked += 1
         leaf_titles.append(tool.title)
-        if "sources" in tool.meta:
-            broken.append(
-                f"- [[{tool.ref}]] sources: Tool Articles require one singular source"
-            )
+        # OKF sources is provenance. Only singular obsidience.source binds the
+        # executable entrypoint, which still must match the registry exactly.
         error = contract_error(
             tool.title,
             tool.meta.get("binding"),
@@ -211,11 +243,11 @@ def execute(args: dict, context: dict) -> str:
                 )
 
     reserved_source_events = {
-        "source.added": ("Tasks/research/learn", "Agents/Darwin/Darwin"),
-        "source.inbox": ("Tasks/ingest", "Agents/Alexandria/Alexandria"),
+        "source.added": ({"Tasks/research/learn", "Tasks/research/distill"}, "Agents/Darwin/Darwin"),
+        "source.inbox": ({"Tasks/ingest"}, "Agents/Alexandria/Alexandria"),
     }
     tasks = [note for note in notes if note.kind == "task"]
-    for event, (expected_task, expected_agent) in reserved_source_events.items():
+    for event, (expected_tasks, expected_agent) in reserved_source_events.items():
         checked += 1
         subscribers = [
             note for note in tasks
@@ -224,17 +256,19 @@ def execute(args: dict, context: dict) -> str:
             and str(note.meta.get("enabled", True)).strip().lower()
             not in {"0", "false", "no", "off"}
         ]
-        if [note.ref for note in subscribers] != [expected_task]:
+        if {note.ref for note in subscribers} != expected_tasks:
             broken.append(
-                f"- {event} subscribers: expected [[{expected_task}]], found "
+                f"- {event} subscribers: expected "
+                + ", ".join(f"[[{ref}]]" for ref in sorted(expected_tasks)) + ", found "
                 + (", ".join(f"[[{note.ref}]]" for note in subscribers) or "none")
             )
             continue
-        assignee = res.resolve(str(subscribers[0].meta.get("assignee", "")))
-        if not assignee or assignee.ref != expected_agent:
-            broken.append(
-                f"- [[{expected_task}]] assignee: expected [[{expected_agent}]]"
-            )
+        for subscriber in subscribers:
+            assignee = res.resolve(str(subscriber.meta.get("assignee", "")))
+            if not assignee or assignee.ref != expected_agent:
+                broken.append(
+                    f"- [[{subscriber.ref}]] assignee: expected [[{expected_agent}]]"
+                )
     if not broken:
         return f"All {checked} load-bearing edges resolve. No broken references."
     return f"{checked} edges checked, {len(broken)} broken:\n" + "\n".join(broken[:30])

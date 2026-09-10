@@ -17,10 +17,78 @@
     },
     {
       "name": "Hyprland",
-      "package": "hyprland 0.56.2-1",
+      "package": "hyprland 0.56.2-2.4",
       "repository": "https://github.com/hyprwm/Hyprland",
+      "commit": "efb50993780079460b0cbed1363e2166a2de1d9f",
       "license": "BSD-3-Clause",
-      "adaptation": "Used as the installed live Wayland compositor for Samsung, USB-C, and logical DP-4. Obsidience supplies its own minimal Lua configuration, supported custom layout provider, and shell surfaces; no Hyprland source or visual design was copied."
+      "selected_sources": [
+        {
+          "path": "src/desktop/state/ViewHitTester.cpp",
+          "sha256": "1bcc02a03db80b0519e516b41b3e0d0e70df08d6aa50b006b6a4362854524a09"
+        },
+        {
+          "path": "src/config/lua/layout/LuaLayoutProvider.cpp",
+          "sha256": "e8a0977e7cd1604d0e86b0b85681eb5b6941b2109294f5e5aae8d20cf7dbb4ba"
+        },
+        {
+          "path": "meta/generateLuaStubs.py",
+          "sha256": "da2cdb373e6ba757369495f4087216c29fdda142af852aaa79e3590d7c0a29ed"
+        }
+      ],
+      "patches": [
+        "adapter/hyprland/patches/0001-hit-test-overlapping-tiled-windows.patch",
+        "adapter/hyprland/patches/0002-forward-lua-layout-resize.patch"
+      ],
+      "adaptation": "Used as the live Wayland compositor for Samsung, USB-C, and logical DP-4. Obsidience supplies its own minimal Lua configuration, supported custom layout provider, and shell surfaces. Native CSS gaps retain compositor-owned pointer hit-testing and native inner glow renders the low-rate OLED border treatment. One downstream source patch makes tiled pointer hit-testing follow the visible front-to-back order required when custom-layout tile bounds overlap. A second forwards native tiled-resize deltas and the grabbed corner to an optional Lua layout callback while preserving the existing recalculate-only fallback. No Hyprland visual design is copied."
+    },
+    {
+      "name": "Aquamarine",
+      "package": "aquamarine 0.14.0-2.4",
+      "repository": "https://github.com/hyprwm/aquamarine",
+      "commit": "a79fb21b2e2a82dd061a6d071802bcf38bd5c383",
+      "license": "BSD-3-Clause",
+      "selected_sources": [
+        {
+          "path": "src/allocator/Swapchain.cpp",
+          "sha256": "aef19dac12f57da0de08874bd0cdfaf77f8e91e6f6f0757699a26cb90d908f71",
+          "patched_sha256": "bf11ebd3ed8ddad7166a8c07c5a38e2bcc1aad045ecaeb8b89271717363b1cfb"
+        }
+      ],
+      "patches": [
+        "adapter/hyprland/patches/aquamarine/0001-crtc-pageflip-accounting.patch",
+        "adapter/hyprland/patches/aquamarine/0002-buffer-commit-plane-rotation.patch",
+        "adapter/hyprland/patches/aquamarine/0003-release-fb-reference.patch",
+        "adapter/hyprland/patches/aquamarine/0004-mgpu-blit-safeguards.patch",
+        "adapter/hyprland/patches/aquamarine/0005-pageflip-id-optional.patch",
+        "adapter/hyprland/patches/aquamarine/0006-preserve-multigpu-on-resize.patch"
+      ],
+      "upstream_backports": [
+        {
+          "commit": "3f33dd35e09bb6b155d8576563d6053aa4b898c6",
+          "subject": "drm: move pending pageflips to the crtc"
+        },
+        {
+          "commit": "40cde956f4998e3853e32c0e3f3729fa5340c0ad",
+          "subject": "drm: only rotate plane FBs on buffer commits"
+        },
+        {
+          "commit": "9f05429c75bb4fee3501c040e457e7bd69b737c3",
+          "subject": "drm: use reference in lambda"
+        },
+        {
+          "commit": "b65c12201b66ff344689a0093148ff8a38e644cd",
+          "subject": "drm: safeguard blit from releaseMgpuResources"
+        },
+        {
+          "commit": "f66fb773b406e3a63970cce001c8b45e17fa075a",
+          "subject": "drm: make pendingPageflip id std::optional"
+        },
+        {
+          "commit": "639ee4cdc1a44a05de4e50a9067f4b8a4f210666",
+          "subject": "swapchain: preserve multigpu flag in resize() (#356)"
+        }
+      ],
+      "adaptation": "Used as Hyprland's DRM and rendering backend with the complete five-commit upstream page-flip and framebuffer-ownership series plus the upstream multi-GPU swapchain-resize fix. The backports retain Aquamarine 0.14's SONAME 13, keep state-only commits on the current AMD-local framebuffer, rotate planes only for a newly committed buffer, guard released multi-GPU swapchains, preserve the multi-GPU flag after resize, and reject stale cross-output page-flip ownership without any Obsidience watcher, retry loop, delay, or output-cycle workaround."
     },
     {
       "name": "Universal Wayland Session Manager",
@@ -33,15 +101,65 @@
       "name": "Quickshell",
       "package": "quickshell 0.3.1-1.1",
       "repository": "https://git.outfoxxed.me/quickshell/quickshell",
+      "commit": "1a4716cde794a59928d9d9fc15f2afc7a95de360",
       "license": "LGPL-3.0-only",
-      "adaptation": "Used as the installed Qt Quick and Wayland layer-shell runtime. Obsidience owns all QML, presentation, state and behavior; no upstream source or visual design was copied."
+      "selected_sources": [
+        {
+          "path": "src/launch/launch.cpp",
+          "sha256": "60812ec93022a8bcd0831a0dbb24a4ac81373d34cdf60b251764fed977ba2a93",
+          "patched_sha256": "66c96eb12ead4d1f7414c735d4ae52975f8c9ad210982b0631cf243d67e37d2d"
+        },
+        {
+          "path": "src/launch/main.cpp",
+          "sha256": "0d05ea9be6728dfd4075895c2717435183f658696c1d95be08e117a14df2901d",
+          "patched_sha256": "e05136d4e0733589c8f0fd4c9b732efaca4ae8921ef79749e3181310014d1c95"
+        },
+        {
+          "path": "src/wayland/session_lock.cpp",
+          "sha256": "fb38f903c7b25f2b64a1a1a15c9ae8e9fc7dfff78a04c70e5c01fc6488e71904",
+          "patched_sha256": "4c415d435d040a320a361ad3fb8ac7ef71ccfafa552d48bc7136bef3f01dbaf1"
+        },
+        {
+          "path": "src/wayland/session_lock.hpp",
+          "sha256": "bd32bbb44b1c401b789eacad42723ceb304e9e8cdc289c41dbe9b1f1da56436f",
+          "patched_sha256": "d6bd008f895b40c0ec49a1ddc9cf80b3fc1d7521feb5a8909714ba306d9fe5d5"
+        },
+        {
+          "path": "src/wayland/session_lock/session_lock.cpp",
+          "sha256": "4d0a09e665ce55e0086e101e99eab2bebc79f994c8fc275e38723412f2bd3c15",
+          "patched_sha256": "c820c9e4481449b798eb001fbe32b7cf8c380aac2eaeb4a581e602d2843fe6a6"
+        }
+      ],
+      "patches": [
+        "adapter/quickshell/patches/0001-satisfy-qtwebengine-host-contract.patch",
+        "adapter/quickshell/patches/0002-guard-session-lock-reentrancy.patch",
+        "adapter/quickshell/patches/0003-notify-session-unlock.patch"
+      ],
+      "upstream_backports": [
+        {
+          "commit": "afb2c27cd6d600d221d9379a332ee1b321a68487",
+          "subject": "wayland/lock: guard against reentrancy during surface creation"
+        }
+      ],
+      "runtime": {
+        "path": "/home/wissenschafter/.local/opt/obsidience-quickshell/quickshell-0.3.1-webengine-lock-5f4d2585/quickshell",
+        "sha256": "5f4d25850c0112fbc7fd718bbdc859e85db888120aecd010a051f5b51b50de05"
+      },
+      "adaptation": "Used as the Qt Quick and Wayland shell runtime. Its WlSessionLock and WlSessionLockSurface types own the secure ext-session-lock surfaces, while PamContext delegates authentication to the system PAM stack. One two-line compatibility patch supplies Qt WebEngine's documented host preconditions: a valid argv[0] for Chromium and shared graphics contexts selected before the first application object. The exact upstream afb2c27 session-lock fix serializes lock-surface realization and prevents screen changes from reentering it. A two-line follow-up preserves the pre-unlock state so the existing locked property emits its false transition after release. The fixed-path build recipe makes the selected content hash reproducible. Obsidience owns the QML presentation and lock policy; no upstream visual design was copied."
+    },
+    {
+      "name": "Qt WebEngine",
+      "package": "qt6-webengine 6.11.2-1",
+      "repository": "https://code.qt.io/cgit/qt/qtwebengine.git",
+      "license": "LGPL-3.0-only or GPL-3.0-only or commercial license, with bundled component licenses",
+      "adaptation": "Used as the installed QML WebEngineView runtime for the existing loopback-only Three.js graph renderer on the selected secure lock Surface. The web view is presentation-only and receives no credentials; password input remains native QML and authentication remains exclusively in Quickshell PamContext through the system PAM stack. No Qt WebEngine source was copied."
     },
     {
       "name": "gtk-layer-shell",
       "package": "gtk-layer-shell 0.10.1-1.1",
       "repository": "https://github.com/wmww/gtk-layer-shell",
       "license": "LGPL-3.0-or-later",
-      "adaptation": "Used as the installed GTK Wayland layer-shell binding for the Samsung knowledge background. No upstream source or visual design was copied."
+      "adaptation": "Used as the installed GTK Wayland layer-shell binding for the knowledge background on the selected Surface. Native ON_DEMAND keyboard focus admits user-selected Action Trace disclosures without reserving exclusive focus. No upstream source or visual design was copied."
     },
     {
       "name": "WebKitGTK",
@@ -90,6 +208,28 @@
       "notice": "LICENSES/Omarchy-Windows-MIT.txt"
     },
     {
+      "name": "Omarchy Quattro lock lifecycle",
+      "repository": "https://github.com/omacom/omarchy",
+      "commit": "f99d33a8ddee7b36509a71a6d20d5d23355ce8b1",
+      "license": "MIT",
+      "selected_sources": [
+        {
+          "path": "bin/omarchy-hyprland-session-locked",
+          "sha256": "e5004580e41475932f852d622b36ec07bfb0e98633c4d3c3055071a54d0eda07"
+        },
+        {
+          "path": "bin/omarchy-restart-shell",
+          "sha256": "e4c996275a15025c9aac829d34913d6bcaf8a30a17fae5ce5e260df2ddf21cd7"
+        },
+        {
+          "path": "default/hypr/looknfeel.lua",
+          "sha256": "e3873fded9f3796a1aacea88fb8d17b39937449614412aac32a36682bc1f6e8a"
+        }
+      ],
+      "adaptation": "Obsidience adopts the narrow lock-lifecycle pattern: Hyprland permits its sole shell to reclaim an ext-session-lock after that client dies, compositor LOCK state is read from monitor blockers, active-lock development restarts are refused, and service startup reclaims only a stranded lock. Obsidience retains its own service, IPC, lock UI, PAM policy, and visual design.",
+      "notice": "LICENSES/Omarchy-MIT.txt"
+    },
+    {
       "name": "Omarchy quattro theme system",
       "repository": "https://github.com/omacom/omarchy",
       "commit": "4d017913d06f715da9d960021861cf535e4f15aa",
@@ -106,6 +246,196 @@
       ],
       "adaptation": "Obsidience independently applies two bounded reference patterns: one semantic palette projects into shell and supported application-native theme tokens, and one warm shell host loads small modular UI components. Omarchy source, visual design, shell scripts, Hyprland configuration, IPC, plugin runtime, and package authority were not imported.",
       "notice": "LICENSES/Omarchy-MIT.txt"
+    },
+    {
+      "name": "Voxtype dictation waveform reference",
+      "repository": "https://github.com/peteonrails/voxtype",
+      "commit": "e32510690636d1e082f2f02a5094efda4aa95fa0",
+      "license": "MIT",
+      "reference_sources": [
+        {
+          "path": "src/osd/visual.rs",
+          "sha256": "0be58679d173644ceb6efd8613caab8c1068d16d6f36a5c74b52be593a402c0a"
+        }
+      ],
+      "adaptation": "Visual reference only: a bounded recent amplitude history displayed oldest-left/newest-right with a quiet centerline. Obsidience independently renders its existing Realtime microphone-level telemetry as native QML bars beside streaming recognized text. No Voxtype source, audio capture, recognizer, IPC, typing path, daemon, or OSD host is imported. Levels are normalized volume samples, not a raw PCM min/max envelope.",
+      "omarchy_reference": {
+        "repository": "https://github.com/basecamp/omarchy",
+        "commit": "f1b065c2923ee7255c89cf812c40c5e391f03f4b",
+        "path": "shell/plugins/bar/indicators/Dictation.qml",
+        "sha256": "581498154ecbfaa64dcc0612dbac417968b8567404c0cabb13fa092f339c7ac6",
+        "adaptation": "Confirmed the warm shell consumes existing dictation status; Obsidience uses its own existing Realtime event stream."
+      }
+    },
+    {
+      "name": "wlrctl private pointer transport",
+      "repository": "https://git.sr.ht/~brocellous/wlrctl",
+      "commit": "c6bc60820bb8786c7509e651bcae9393a738f180",
+      "license": "MIT",
+      "selected_sources": [
+        {
+          "path": "pointer.c",
+          "sha256": "7ed995ea5b4fa1fb8cdc79792e65086229f76d1237e6c00a634117cdc7f39be5"
+        },
+        {
+          "path": "main.c",
+          "sha256": "d1ae595beafc45369a447d2c53fdf8e6a0c0211c06c95182c81e79d68c15ac32"
+        },
+        {
+          "path": "LICENSE",
+          "sha256": "8a1fce8a66d959daffb43cc66093ce554d13f7d4ac9c1f26845f16c85a8619ba"
+        }
+      ],
+      "notice": "adapter/hyprland/pointer.c",
+      "adaptation": "The existing Shell adapter privately invokes one bounded native client. The upstream button/frame sequence and real Wayland sync-callback pattern are adapted to exact output-name binding, output-local absolute motion, a positioned receipt followed by one controller commit, and a final acknowledged receipt. Disconnect, malformed or missing commit, output changes, and deadlines fail nonzero without replay. The helper owns no target identity, observation, permission, Task, Tool, daemon, or semantic success authority. The existing Shell Scene and Computer Use owner retain fresh identity, geometry, visibility, lock, grounding, cancellation, and postcondition checks. Callback acknowledgement means compositor protocol processing, never application acceptance. No wlrctl CLI, window matching, keyboard, relative pointer, or generic action surface is imported."
+    },
+    {
+      "name": "wlr virtual pointer protocol",
+      "package": "wlr-protocols r112.a741f0a-1; wayland-client and wayland-scanner 1.26.0",
+      "repository": "https://gitlab.freedesktop.org/wlroots/wlr-protocols",
+      "license": "MIT",
+      "selected_sources": [
+        {
+          "path": "unstable/wlr-virtual-pointer-unstable-v1.xml",
+          "sha256": "3ff6d540be0bc5228195bf072bde42117ea17945a5c2061add5d3cf97d6bb524"
+        }
+      ],
+      "adaptation": "The build reads the exact hash-checked installed v2 protocol XML and uses installed wayland-scanner and libwayland-client. Generated headers, protocol C, XML copyright notice, adapted source and the executable remain in a content-addressed runtime candidate outside the repository. build-pointer does not select a current runtime or connect to Wayland. The optional output argument is a compositor mapping suggestion, so the parent verifies the observed real cursor position before commit."
+    },
+    {
+      "name": "Codex Harness lifecycle patterns",
+      "repository": "https://github.com/openai/codex",
+      "commit": "73a1148c9c775c2a4616ce5096291740a00ed68a",
+      "license": "Apache-2.0",
+      "reference_sources": [
+        {
+          "path": "codex-rs/core/src/client.rs",
+          "sha256": "6979098f4ad7b5ec16f19ca90d5c927d3b1e33d0f6d926c70388d0237c52af35"
+        },
+        {
+          "path": "codex-rs/core/src/tools/parallel.rs",
+          "sha256": "13beb44a875bb0043953adfc4c23d54962fe47acc6c7829436289c85e8111ace"
+        }
+      ],
+      "documentation": "https://learn.chatgpt.com/docs/app-server",
+      "adaptation": "Independent Python implementation of lifecycle-owned provider connections, call identity and terminal outcomes, cursor-based public trace recovery, and exact-active-turn steering. The existing Obsidience executor, SQLite ledger, Conversation and Model runtime remain owners. Durable pre-dispatch receipts and replay admission are Obsidience-specific. No Codex Rust code, SDK, model, agent, process server or runtime dependency is imported.",
+      "omarchy_reference": {
+        "repository": "https://github.com/omacom/omarchy",
+        "commit": "5ead870507dfb68db696b3ddb948cc3d178e8d62",
+        "path": "shell/plugins/bar/indicators/Dictation.qml",
+        "adaptation": "Read-only architectural reference: shell presentation consumes state from the existing owner. Omarchy does not supply the exact conversation-steering contract; no source or visual design is copied.",
+        "latency_review": "2026-09-09: rechecked the existing Dictation.qml Process/SplitParser state projection for response timing presentation. No source or visual design adopted; timing is supplied by the existing Obsidience speech and trace owners."
+      }
+    },
+    {
+      "name": "Connections and Feeds plumbing",
+      "packages": [
+        "feedparser 6.0.14",
+        "httpx",
+        "systemd-creds 261.2"
+      ],
+      "documentation": [
+        "https://feedparser.readthedocs.io/en/latest/http-etag/",
+        "https://www.freedesktop.org/software/systemd/man/latest/systemd-creds.html",
+        "https://feedparser.readthedocs.io/en/latest/common-rss-elements/"
+      ],
+      "licenses": {
+        "feedparser": "BSD-2-Clause",
+        "httpx": "BSD-3-Clause",
+        "systemd": "LGPL-2.1-or-later"
+      },
+      "adaptation": "Existing installed feedparser parses complete RSS/Atom items; existing HTTPX performs bounded public-origin conditional requests. Installed systemd-creds encrypts owner-scoped, write-only HTTP credentials outside Source, bound to connection identity and origin. Obsidience adds configuration, exact item/version deduplication in its existing Index, and ingestion through existing Source/Darwin Tasks. No upstream source copied, additional service, broker, scheduler, or model introduced.",
+      "omarchy_reference": {
+        "repository": "https://github.com/basecamp/omarchy",
+        "commit": "5ead870507dfb68db696b3ddb948cc3d178e8d62",
+        "path": "shell/shell.qml",
+        "adaptation": "Read-only reference for one warm shell host and independent service/presentation ownership; no code or visual design adopted."
+      },
+      "preview_adaptation": "2026-09-09: explicit read-only draft preview reuses existing HTTPX acquisition and one feedparser document/item parser shared with collection. Transient bounded plain-text projection only; no imported service, Source capture, cursor update or additional package."
+    },
+    {
+      "name": "Tide feed reader reference",
+      "repository": "https://github.com/allisonhere/tide",
+      "commit": "6678ee3946c8792d0e24fe9bf963c0f7333bd11e",
+      "license": "MIT",
+      "reference_sources": [
+        {
+          "path": "screenshot.png",
+          "sha256": "e83e7562c70e5273930227b406c6be9b5b9663f7c026b5b596be4dc34896385a"
+        }
+      ],
+      "adaptation": "Native presentation reference: standalone feed groups and captured items, Settings-owned Connections, and item selection in the shared standalone Reader. Feeds uses the same four-slot Reader dock authority as Knowledge and Source. Existing Source owns captured bytes; uncollected previews remain ephemeral presentation. No Go UI, second reader application, summarizer, model client, theme, or database imported.",
+      "notice": "LICENSES/Tide-MIT.txt",
+      "editor_reference": {
+        "sources": [
+          "https://github.com/allisonhere/tide#feed-manager-and-sources",
+          "https://freshrss.github.io/FreshRSS/en/users/05_Configuration.html#content-width"
+        ],
+        "adaptation": "Read-only design references for simple feed/source management and bounded readable content width. Native Obsidience Preview/Settings grouping and responsive selector are independently implemented; no Tide/FreshRSS code, theme, application, database or scheduler is copied.",
+        "navigation_guidance": [
+          "https://www.nngroup.com/articles/tabs-used-right/",
+          "https://www.nngroup.com/articles/duplicate-links/",
+          "https://design-system.service.gov.uk/components/tabs/",
+          "https://learn.microsoft.com/en-us/windows/apps/design/basics/navigation-basics"
+        ],
+        "navigation_adaptation": "Settings owns Connections; standalone Feeds opens items in the shared Reader and uses the existing four dock slots. Keep one editable amount beside preview, distinguish navigation from actions, avoid duplicate pane/record headings, and reuse the connection address for new feed drafts. Guidance only; no upstream implementation copied."
+      }
+    },
+    {
+      "name": "Matcha feed reader reference",
+      "repository": "https://github.com/piqoni/matcha",
+      "commit": "3c17bb77ee9c22f7e99e8a7fe8de74a0881bda7b",
+      "license": "MIT",
+      "reference_sources": [
+        {
+          "path": "processor.go",
+          "sha256": "2543e255bef4783468bc5e428db196cb921952e2541d9ac5d8580a6428a77c32"
+        },
+        {
+          "path": "migrations.go",
+          "sha256": "5d95c566b3bf93639bc631dd021bd5e4e7c07587cdca69dbd232d3778578e61d"
+        },
+        {
+          "path": "opml.go",
+          "sha256": "d04db2c2002f233ce67eb09968f84ea6c3df63b6645f3ed6802354dac18dfd69"
+        }
+      ],
+      "adaptation": "Reviewed incremental per-feed item processing, limits, seen-item accounting, and reading from stored material. Obsidience applies these patterns through its existing Source fingerprint and Index receipts, preserving content versions rather than URL-only suppression. Summarization remains Darwin and Alexandria; no Matcha executable, Go code, independent LLM, scheduler, or Markdown vault writer is adopted. OPML remains a possible future interchange extension.",
+      "notice": "LICENSES/Matcha-MIT.txt"
+    },
+    {
+      "name": "psutil",
+      "package": "psutil 7.2.2",
+      "repository": "https://github.com/giampaolo/psutil",
+      "license": "BSD-3-Clause",
+      "notice": "LICENSES/psutil-BSD-3-Clause.txt",
+      "adaptation": "Installed Python dependency for the native Hardware pane read-only monitor API. Uses maintained CPU/core, memory/swap, disk/network cumulative counters, and bounded process identity/name/CPU/RSS sampling; existing host inventory owns GPU/hwmon data. Obsidience adds one lock-protected on-demand cache, safe deltas, availability projection, and native QML presentation using its existing ShellTheme and components. No upstream source or telemetry daemon imported. Public process_iter and oneshot collection reuse the upstream process cache with pre/post identity validation; process arguments are not projected or persisted. Physical interface selection excludes internal traffic from the summary.",
+      "references": [
+        {
+          "url": "https://psutil.readthedocs.io/en/latest/",
+          "use": "Official maintained system/process telemetry APIs"
+        },
+        {
+          "url": "https://doc.qt.io/qt-6/qml-qtquick-canvas.html",
+          "use": "Existing QtQuick drawing primitive for bounded charts; repaint only on data or geometry changes"
+        },
+        {
+          "url": "https://github.com/basecamp/omarchy/blob/f4378f0de5b44d331ee943746a97872b718a6c18/bin/omarchy-restart-btop",
+          "use": "Inspected external btop integration; no source adopted because the requested native pane uses the existing Harness host API"
+        },
+        {
+          "url": "https://github.com/PlummersSoftwareLLC/tmog-feedback/blob/main/README.md",
+          "use": "Verified application source is private. Summary/Performance organization is a visual reference; no TMOG core source adopted."
+        }
+      ]
+    },
+    {
+      "name": "util-linux lsblk",
+      "package": "util-linux 2.42.2-1",
+      "repository": "https://github.com/util-linux/util-linux",
+      "license": "GPL-2.0-or-later",
+      "adaptation": "The installed unmodified lsblk executable supplies read-only physical-drive and partition inventory via bounded explicit-column JSON. Harness system_evidence projects exact serial/model/WWN identities into existing deterministic System Articles; partitions and mount points are Article details. No upstream source is copied, no drive is mounted or modified, and no second monitor or service is introduced.",
+      "documentation": "https://kernel.googlesource.com/pub/scm/utils/util-linux/util-linux/+/refs/tags/v2.41.1/misc-utils/lsblk.8.adoc"
     }
   ]
 }

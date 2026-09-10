@@ -189,7 +189,7 @@ def _physical_cpu_cores() -> int | None:
     return len(cores) or None
 
 
-def _cpu_sensor_snapshot() -> dict:
+def _cpu_sensor_snapshot(*, include_utilization: bool = True) -> dict:
     total_mib, used_mib, free_mib = _memory_snapshot()
     k10temp = _hwmon("k10temp")
     temperature = _read_int(k10temp / "temp1_input") if k10temp else None
@@ -205,7 +205,7 @@ def _cpu_sensor_snapshot() -> dict:
         "memory_free_mib": free_mib,
         "memory_used_percent": round(100 * used_mib / total_mib, 1)
         if total_mib and used_mib is not None else None,
-        "utilization_percent": _cpu_utilization(),
+        "utilization_percent": _cpu_utilization() if include_utilization else None,
         "temperature_c": round(temperature / 1000, 1)
         if temperature is not None else None,
         "clock_core_mhz": _cpu_clock_mhz(),

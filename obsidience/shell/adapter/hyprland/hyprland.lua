@@ -30,13 +30,39 @@ hl.monitor({
     vrr = 0,
 })
 
+-- Keep each Surface's native workspace bound through output sleep and wake.
+hl.workspace_rule({
+    workspace = "1",
+    monitor = "HDMI-A-1",
+    persistent = true,
+    default = true,
+})
+
+hl.workspace_rule({
+    workspace = "2",
+    monitor = "HDMI-A-2",
+    persistent = true,
+    default = true,
+})
+
+hl.workspace_rule({
+    workspace = "3",
+    monitor = "DP-8",
+    persistent = true,
+    default = true,
+})
+
 hl.config({
     general = {
         border_size = 1,
-        gaps_in = 0,
-        gaps_out = 0,
+        -- Keep raw tiled boxes contiguous so Hyprland owns every pointer pixel
+        -- in the visible 5 px gap. The asymmetric native insets total 5 px.
+        gaps_in = { top = 2, right = 3, bottom = 3, left = 2 },
+        gaps_out = 5,
         allow_tearing = false,
         resize_on_border = true,
+        extend_border_grab_area = 15,
+        hover_icon_on_border = true,
         layout = "lua:obsidience",
         col = {
             active_border = "rgba(67e8f966)",
@@ -55,11 +81,17 @@ hl.config({
             render_power = 3,
             color = "rgba(22d3ee14)",
         },
+        -- OLED mode enables and advances this native inner glow with its grid.
+        glow = {
+            enabled = false,
+            range = 5,
+            render_power = 3,
+        },
     },
     animations = { enabled = false },
     input = {
         kb_layout = "us",
-        follow_mouse = 1,
+        follow_mouse = 0,
         sensitivity = 0,
     },
     misc = {
@@ -68,6 +100,9 @@ hl.config({
         disable_splash_rendering = true,
         force_default_wallpaper = 0,
         focus_on_activate = true,
+        -- Keep Hyprland fail-secure while allowing the one shell host to
+        -- reclaim a lock whose previous client died.
+        allow_session_lock_restore = true,
     },
     ecosystem = {
         no_donation_nag = true,
@@ -79,6 +114,17 @@ hl.config({
         enabled = true,
         force_zero_scaling = true,
     },
+})
+
+-- Module panes are ordinary xdg-toplevels. Match the process-owned immutable
+-- identity, then admit them to the same native layout as applications.
+hl.window_rule({
+    name = "obsidience-module-pane",
+    match = {
+        initial_class = [[^io\.obsidience\.shell$]],
+        initial_title = [[^obsidience-pane:[a-z][a-z0-9-]{0,47}$]],
+    },
+    tile = true,
 })
 
 -- The classic M.M.O.7 is physically verified at its 6400-DPI top stage.
@@ -94,9 +140,9 @@ hl.on("hyprland.start", function()
 end)
 
 hl.bind("SUPER + RETURN", hl.dsp.exec_cmd("uwsm app -- kitty"))
-hl.bind("SUPER + Q", hl.dsp.window.close())
-hl.bind("ALT + TAB", hl.dsp.exec_cmd("/usr/bin/python /home/wissenschafter/Projects/obsidience/obsidience/shell/input/move_pane.py focused focus next"))
-hl.bind("ALT + SHIFT + TAB", hl.dsp.exec_cmd("/usr/bin/python /home/wissenschafter/Projects/obsidience/obsidience/shell/input/move_pane.py focused focus previous"))
+hl.bind("SUPER + Q", hl.dsp.exec_cmd("/usr/bin/python /home/wissenschafter/Projects/obsidience/obsidience/shell/input/move_pane.py focused close"))
+hl.bind("ALT + TAB", hl.dsp.window.cycle_next())
+hl.bind("ALT + SHIFT + TAB", hl.dsp.window.cycle_next({ next = false }))
 hl.bind("SUPER + ESCAPE", hl.dsp.exec_cmd("/usr/bin/python /home/wissenschafter/Projects/obsidience/obsidience/shell/input/move_pane.py focused close"))
 hl.bind("SUPER + SHIFT + ESCAPE", hl.dsp.exit())
 hl.bind("SUPER + LEFT", hl.dsp.exec_cmd("/usr/bin/python /home/wissenschafter/Projects/obsidience/obsidience/shell/input/move_pane.py focused resize left"))

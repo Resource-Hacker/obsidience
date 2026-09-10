@@ -79,6 +79,11 @@ MODEL_LAUNCH_DIR = PRODUCT_ROOT / "state" / "model-launch"
 MODEL_CATALOG_STATE_PATH = PRODUCT_ROOT / "state" / "model-catalog.json"
 MODEL_SOURCE_ROOT = PRODUCT_ROOT / "evidence" / "models"
 GEMMA_MODEL = PRODUCT_ROOT / "state" / "models" / "executive.gguf"
+GEMMA_PROJECTOR = Path(
+    "/var/lib/ai/models/jarvis-fixed/gemma-4-26b-a4b-it-qat-7b92b5b2/"
+    "mmproj-F16.gguf"
+)
+GEMMA_PROJECTOR_SHA256 = "d00f211a7d4f7fb19bd9b75d8e9342eccffb5920b08fd9562167560fdfcc5dd1"
 QWEN_DISTILL_MODEL = Path(
     "/var/lib/ai/models/obsidience-qwen38-9b-distill/"
     "Qwen3.8-9B-Distill-Heretic-Uncensored-Q8_0.gguf"
@@ -138,12 +143,46 @@ class ModelSpec:
     verified_path: Path | None = None
     expected_size: int | None = None
     runtime_path: Path | None = None
+    projector_path: Path | None = None
+    projector_sha256: str | None = None
+    family: str = ""
+    supports_json_schema: bool = False
+
+
+class ModelResourceUnavailable(RuntimeError):
+    """A valid model layout conflicts with a current component reservation."""
+
+    def __init__(
+        self, spec: ModelSpec, layouts: list[tuple[str, ...]],
+        reservations: dict[str, tuple[str, ...]],
+    ) -> None:
+        self.model_id = spec.id
+        self.candidate_layouts = tuple(layouts)
+        needed = {device for layout in layouts for device in layout}
+        self.reservations = {
+            owner: tuple(device for device in devices if device in needed)
+            for owner, devices in reservations.items() if needed.intersection(devices)
+        }
+        blockers = "; ".join(
+            f"{owner}: {' + '.join(DEVICE_LABELS[device] for device in devices)}"
+            for owner, devices in self.reservations.items()
+        )
+        super().__init__(f"{spec.label} needs reserved hardware ({blockers})")
+
+    def as_dict(self) -> dict:
+        return {
+            "code": "model_resources_reserved",
+            "model_id": self.model_id,
+            "candidate_layouts": [list(layout) for layout in self.candidate_layouts],
+            "reservations": {owner: list(devices) for owner, devices in self.reservations.items()},
+        }
 
 
 MODELS = {
     EXECUTIVE_MODEL: ModelSpec(
         id=EXECUTIVE_MODEL,
         label="Gemma 4 26B-A4B",
+        family="gemma4",
         base_url="http://127.0.0.1:8089/v1",
         purpose="Responsive Executive conversation and Task dispatch",
         context_tokens=16_384,
@@ -152,7 +191,7 @@ MODELS = {
         quantization="Q4_K_XL",
         hardware="One Ada GPU",
         runtime="llama.cpp b10078",
-        capabilities=("text", "reasoning", "tools"),
+        capabilities=("text", "vision", "reasoning", "tools"),
         reasoning_budgets={"none": 0, "low": 256, "medium": 768, "high": 1_536, "xhigh": 2_560},
         supported_devices=(RTX_4000_DEVICE,),
         default_allowed_devices=(RTX_4000_DEVICE,),
@@ -161,6 +200,9 @@ MODELS = {
         default_max_num_seqs=1,
         service=GEMMA_SERVICE,
         model_path=GEMMA_MODEL,
+        projector_path=GEMMA_PROJECTOR,
+        projector_sha256=GEMMA_PROJECTOR_SHA256,
+        supports_json_schema=True,
     ),
     SPECIALIST_MODEL: ModelSpec(
         id=SPECIALIST_MODEL,
@@ -184,6 +226,7 @@ MODELS = {
         model_path=QWEN_DISTILL_MODEL,
         verified_path=QWEN_DISTILL_VERIFIED,
         expected_size=QWEN_DISTILL_EXPECTED_SIZE,
+        supports_json_schema=True,
     ),
     QWEN_W4_MODEL: ModelSpec(
         id=QWEN_W4_MODEL,
@@ -207,6 +250,7 @@ MODELS = {
         model_path=QWEN_FAST_MODEL,
         verified_path=QWEN_FAST_VERIFIED,
         expected_size=QWEN_FAST_EXPECTED_SIZE,
+        supports_json_schema=True,
     ),
     QWEN_Q8_MODEL: ModelSpec(
         id=QWEN_Q8_MODEL,
@@ -230,6 +274,7 @@ MODELS = {
         model_path=QWEN_Q8_MODEL_PATH,
         verified_path=QWEN_Q8_VERIFIED,
         expected_size=QWEN_Q8_EXPECTED_SIZE,
+        supports_json_schema=True,
     ),
     HOMEUSER_MODEL: ModelSpec(
         id=HOMEUSER_MODEL,
@@ -256,6 +301,7 @@ MODELS = {
         runtime_path=Path(
             "/var/lib/ai/src/obsidience-qwen38-vllm/venv/bin/vllm"
         ),
+        supports_json_schema=True,
     ),
     MUSE_MODEL: ModelSpec(
         id=MUSE_MODEL,
@@ -281,6 +327,7 @@ MODELS = {
         verified_path=MUSE_VERIFIED,
         expected_size=MUSE_EXPECTED_SIZE,
         runtime_path=Path("/var/lib/ai/opt/llama.cpp-b21e4de/bin/llama-server"),
+        supports_json_schema=True,
     ),
 }
 
@@ -422,6 +469,7 @@ def _write_launch(spec: ModelSpec, devices: tuple[str, ...], profile: dict) -> N
         "max_output_tokens": profile["max_output_tokens"],
         "gpu_memory_utilization": profile["gpu_memory_utilization"],
         "max_num_seqs": profile["max_num_seqs"],
+        "projector_path": str(spec.projector_path) if spec.projector_path else None,
     }, indent=2, sort_keys=True) + "\n")
     temporary.replace(path)
 
@@ -499,6 +547,7 @@ def _installed(spec: ModelSpec) -> tuple[bool, int | None]:
         and (spec.expected_size is None or size == spec.expected_size)
         and (spec.verified_path is None or spec.verified_path.exists())
         and (spec.runtime_path is None or spec.runtime_path.exists())
+        and (spec.projector_path is None or spec.projector_path.is_file())
     )
     return installed, size
 
@@ -567,6 +616,17 @@ def _model_source_identity(spec: ModelSpec) -> dict:
             list(devices) for devices in _device_sets(spec, spec.supported_devices)
         ],
     }
+    if spec.projector_path:
+        identity["projector"] = {
+            "path": str(spec.projector_path),
+            "size_bytes": (
+                spec.projector_path.stat().st_size
+                if spec.projector_path.is_file()
+                else None
+            ),
+            "sha256": spec.projector_sha256,
+            "installed": spec.projector_path.is_file(),
+        }
     fingerprint_material = json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
     return {
         **identity,
@@ -812,9 +872,13 @@ async def _systemctl(action: str, *units: str, timeout: float = 45) -> None:
     )
     try:
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
-    except TimeoutError:
-        process.kill()
+    except (TimeoutError, asyncio.CancelledError) as exc:
+        if process.returncode is None:
+            with contextlib.suppress(ProcessLookupError):
+                process.kill()
         await process.communicate()
+        if isinstance(exc, asyncio.CancelledError):
+            raise
         raise RuntimeError(f"systemctl {action} timed out for {', '.join(units)}") from None
     if process.returncode:
         detail = (stderr or stdout).decode(errors="replace").strip()
@@ -903,13 +967,14 @@ class _HardwareModelRuntime:
         self.lock = asyncio.Lock()
         self.running_model: str | None = None
         self.switching = False
+        self.reconciliation_pending = False
         self.external_models: dict[str, tuple[str, ...]] = {}
         self.device_reservations: dict[str, tuple[str, ...]] = {}
 
     def _reserved_devices(self, *, excluding: str | None = None) -> set[str]:
         return {
             device
-            for owner, devices in self.device_reservations.items()
+            for owner, devices in self.device_reservations.copy().items()
             if owner != excluding
             for device in devices
         }
@@ -1002,6 +1067,7 @@ class _HardwareModelRuntime:
         return clean
 
     async def _reconcile_defaults(self, *, strict: bool = False) -> None:
+        self.reconciliation_pending = True
         settings = _read_settings()
         reserved = self._reserved_devices()
         desired = {
@@ -1044,30 +1110,51 @@ class _HardwareModelRuntime:
             ]
             if not conflicts:
                 await self._perception(True)
+        self.reconciliation_pending = False
 
-    def _pick_devices(self, spec: ModelSpec, override: object = None) -> tuple[str, ...]:
+    def _unreserved_layouts(
+        self, spec: ModelSpec, override: object = None,
+    ) -> list[tuple[str, ...]]:
+        """One reservation check for scheduler admission and locked activation."""
         profile = _read_settings()["models"][spec.id]
         allowed = tuple(device for device in profile["allowed_devices"] if device in spec.supported_devices)
-        reserved = self._reserved_devices()
+        layouts = _device_sets(spec, allowed)
         if override is not None:
-            requested = tuple(str(item) for item in (override if isinstance(override, list) else []))
-            requested = tuple(device for device in GPU_DEVICES if device in requested and device in allowed)
-            if requested not in _device_sets(spec, allowed) or set(requested) & reserved:
-                valid = [" + ".join(devices) for devices in _device_sets(spec, allowed)]
+            if (not isinstance(override, list) or not override
+                    or any(not isinstance(device, str) for device in override)
+                    or len(override) != len(set(override))
+                    or any(device not in allowed for device in override)):
+                raise ValueError("model devices must name each allowed GPU exactly once")
+            requested = tuple(device for device in GPU_DEVICES if device in override)
+            if requested not in layouts:
+                valid = [" + ".join(devices) for devices in layouts]
                 raise ValueError(
-                    f"{spec.label} supports an unreserved layout from: "
+                    f"{spec.label} supports a layout from: "
                     f"{', '.join(valid) or 'no current GPU layout'}"
                 )
-            return requested
-        current = _read_launch(spec.id)
-        if _healthy(spec, timeout=0.75) and current in _device_sets(spec, allowed):
-            return current
-        candidates = [
-            devices for devices in _device_sets(spec, allowed)
-            if not set(devices) & reserved
-        ]
+            layouts = [requested]
+        if not layouts:
+            raise ValueError(f"{spec.label} has no valid configured GPU layout")
+        # task.create can ask from its Tool thread while Realtime changes the
+        # reservation on the event loop. Use one snapshot for decision/evidence.
+        reservations = self.device_reservations.copy()
+        reserved = set(itertools.chain.from_iterable(reservations.values()))
+        candidates = [devices for devices in layouts if not set(devices) & reserved]
         if not candidates:
-            raise RuntimeError(f"{spec.label} has no unreserved GPU layout")
+            raise ModelResourceUnavailable(spec, layouts, reservations)
+        return candidates
+
+    def check_resources(self, spec: ModelSpec, devices: object = None) -> None:
+        """Validate admission without probing or changing services or hardware."""
+        self._unreserved_layouts(spec, devices)
+
+    def _pick_devices(self, spec: ModelSpec, override: object = None) -> tuple[str, ...]:
+        candidates = self._unreserved_layouts(spec, override)
+        if override is not None:
+            return candidates[0]
+        current = _read_launch(spec.id)
+        if current in candidates and _healthy(spec, timeout=0.75):
+            return current
         if spec.device_sets:
             return candidates[0]
         loaded = {
@@ -1085,8 +1172,7 @@ class _HardwareModelRuntime:
         )[1]
 
     async def _activate_task_model(self, spec: ModelSpec, devices: tuple[str, ...]) -> None:
-        if set(devices) & self._reserved_devices():
-            raise RuntimeError(f"{spec.label} overlaps reserved speech hardware")
+        self.check_resources(spec, list(devices))
         for model_id, candidate in MODELS.items():
             if model_id == spec.id:
                 continue
@@ -1134,20 +1220,35 @@ class _HardwareModelRuntime:
     @asynccontextmanager
     async def lease(self, spec: ModelSpec, devices: object = None):
         await self.lock.acquire()
-        self.switching = True
+        activation_attempted = False
+        cancelled = False
         try:
             selected = self._pick_devices(spec, devices)
+            self.switching = True
+            activation_attempted = True
+            self.reconciliation_pending = True
             await self._activate_task_model(spec, selected)
             self.running_model = spec.id
             self.switching = False
             yield configured_spec(spec.id)
+        except asyncio.CancelledError:
+            cancelled = True
+            raise
         finally:
             self.running_model = None
-            self.switching = True
-            with contextlib.suppress(Exception):
-                await self._reconcile_defaults()
-            self.switching = False
-            self.lock.release()
+            try:
+                # STOP must not begin another long model load. The next ordinary
+                # lease activates its own exact layout and restores defaults on
+                # normal exit; initialize/settings operations also reconcile.
+                if (activation_attempted and not cancelled
+                        and not asyncio.current_task().cancelling()):
+                    self.switching = True
+                    with contextlib.suppress(Exception):
+                        await self._reconcile_defaults()
+                        self.reconciliation_pending = False
+            finally:
+                self.switching = False
+                self.lock.release()
 
     async def initialize(self) -> list[dict]:
         model_events = sync_model_sources()
@@ -1157,6 +1258,7 @@ class _HardwareModelRuntime:
                 settings = _read_settings()
                 _write_settings(settings)
                 await self._reconcile_defaults()
+                self.reconciliation_pending = False
             finally:
                 self.switching = False
         return model_events
@@ -1219,61 +1321,100 @@ class _HardwareModelRuntime:
         if model_id not in MODELS:
             raise ValueError("unknown model")
         spec = MODELS[model_id]
-        settings = _read_settings()
-        profile = settings["models"][model_id]
-        previous_profile = json.loads(json.dumps(profile))
-        if "allowed_devices" in payload:
-            devices = _normalize_devices(payload["allowed_devices"], spec)
-            if not _device_sets(spec, devices):
-                raise ValueError(f"{spec.label} has no valid layout on those GPUs")
-            profile["allowed_devices"] = devices
-        for field, low, high in (
-            ("context_tokens", 2_048, spec.max_context_tokens),
-            ("max_output_tokens", 256, 32_768),
-            ("max_num_seqs", 1, 32),
-        ):
-            if field in payload:
-                value = int(payload[field])
-                if not low <= value <= high:
-                    raise ValueError(f"{field} must be between {low} and {high}")
-                profile[field] = value
-        if "gpu_memory_utilization" in payload:
-            value = float(payload["gpu_memory_utilization"])
-            if not 0.50 <= value <= 0.99:
-                raise ValueError("gpu_memory_utilization must be between 0.50 and 0.99")
-            profile["gpu_memory_utilization"] = value
-        if int(profile["max_output_tokens"]) >= int(profile["context_tokens"]):
-            raise ValueError("max output must be smaller than context")
-        for device in GPU_DEVICES:
-            if settings["hardware"].get(device) == model_id and device not in profile["allowed_devices"]:
-                settings["hardware"][device] = NONE_COMPONENT
+        cancelled_after_commit = False
         async with self.lock:
+            # Read the profile only after admission: a waiting operation must
+            # not overwrite another owner's intervening settings commit.
+            settings = _read_settings()
+            profile = settings["models"][model_id]
+            previous_profile = json.loads(json.dumps(profile))
+            if "allowed_devices" in payload:
+                devices = _normalize_devices(payload["allowed_devices"], spec)
+                if not _device_sets(spec, devices):
+                    raise ValueError(f"{spec.label} has no valid layout on those GPUs")
+                profile["allowed_devices"] = devices
+            for field, low, high in (
+                ("context_tokens", 2_048, spec.max_context_tokens),
+                ("max_output_tokens", 256, 32_768),
+                ("max_num_seqs", 1, 32),
+            ):
+                if field in payload:
+                    value = int(payload[field])
+                    if not low <= value <= high:
+                        raise ValueError(f"{field} must be between {low} and {high}")
+                    profile[field] = value
+            if "gpu_memory_utilization" in payload:
+                value = float(payload["gpu_memory_utilization"])
+                if not 0.50 <= value <= 0.99:
+                    raise ValueError("gpu_memory_utilization must be between 0.50 and 0.99")
+                profile["gpu_memory_utilization"] = value
+            if int(profile["max_output_tokens"]) >= int(profile["context_tokens"]):
+                raise ValueError("max output must be smaller than context")
+            for device in GPU_DEVICES:
+                if settings["hardware"].get(device) == model_id and device not in profile["allowed_devices"]:
+                    settings["hardware"][device] = NONE_COMPONENT
             self.switching = True
             try:
+                self.reconciliation_pending = True
                 if _healthy(spec, timeout=0.75):
                     await self._stop(spec)
                 _write_settings(settings)
-                await self._reconcile_defaults()
+                configuration_source = record_model_source(model_id, "configuration", {
+                    "before": previous_profile,
+                    "after": json.loads(json.dumps(profile)),
+                })
+                # Settings and their Source receipt are now committed. A stop
+                # during readiness must not erase that effect or claim ready.
+                try:
+                    await self._reconcile_defaults()
+                    self.reconciliation_pending = False
+                except asyncio.CancelledError:
+                    cancelled_after_commit = True
             finally:
                 self.switching = False
-        record_model_source(model_id, "configuration", {
-            "before": previous_profile,
-            "after": json.loads(json.dumps(profile)),
+            result = model_document(model_id)
+        result.update({
+            "configuration_applied": True,
+            "configuration_source": configuration_source,
+            "runtime_reconciled": not cancelled_after_commit,
         })
-        return model_document(model_id)
+        if cancelled_after_commit:
+            result.update({
+                "cancellation_requested": True,
+                "reconciliation_warning": (
+                    "Configuration was saved, but runtime reconciliation was interrupted. "
+                    "The new runtime configuration is not verified ready."
+                ),
+            })
+        return result
 
     async def benchmark(self, model_id: str, devices: object) -> dict:
         if model_id not in MODELS:
             raise ValueError("unknown model")
         spec = configured_spec(model_id)
         requested = list(devices) if isinstance(devices, list) else None
-        async with self.lease(spec, requested) as active:
-            result = await _benchmark_text_model(active)
-            result["source_path"] = record_model_source(model_id, "benchmark", result)
-            settings = _read_settings()
-            settings["benchmarks"][model_id] = result
-            _write_settings(settings)
-            return result
+        committed_result = None
+        try:
+            async with self.lease(spec, requested) as active:
+                result = await _benchmark_text_model(active)
+                result["source_path"] = record_model_source(model_id, "benchmark", result)
+                settings = _read_settings()
+                settings["benchmarks"][model_id] = result
+                _write_settings(settings)
+                committed_result = result
+        except asyncio.CancelledError:
+            if committed_result is None:
+                raise
+            return {
+                **committed_result,
+                "cancellation_requested": True,
+                "runtime_reconciled": False,
+                "reconciliation_warning": (
+                    "Benchmark measurements were saved, but default-model reconciliation "
+                    "was interrupted. Default residency is not verified restored."
+                ),
+            }
+        return committed_result
 
     def settings(self) -> dict:
         settings = _read_settings()
@@ -1292,6 +1433,7 @@ class _HardwareModelRuntime:
                 for owner, devices in self.device_reservations.items()
             },
             "switching": self.switching,
+            "reconciliation_pending": self.reconciliation_pending,
         }
 
     async def reserve_devices(self, owner: str, devices: tuple[str, ...]) -> None:
@@ -1300,7 +1442,7 @@ class _HardwareModelRuntime:
         if not owner or "\x00" in owner or len(owner) > 96:
             raise ValueError("device reservation owner must be bounded text")
         selected = tuple(device for device in GPU_DEVICES if device in devices)
-        if not selected or len(selected) != len(set(devices)):
+        if not selected or len(selected) != len(devices) or len(devices) != len(set(devices)):
             raise ValueError("device reservation must name known GPUs exactly once")
         async with self.lock:
             conflicts = self._reserved_devices(excluding=owner) & set(selected)
@@ -1335,7 +1477,8 @@ class _HardwareModelRuntime:
 
     async def shutdown(self) -> None:
         # Model services outlive the development harness. Defaults are already
-        # reconciled after every Task and on every settings change.
+        # reconciled after normal Tasks/settings changes and at next initialize.
+        # Interrupted leases deliberately leave a visible pending reconciliation.
         return
 
     async def acquire_external_lease(
@@ -1409,6 +1552,10 @@ def model_document(model_id: str) -> dict:
 
 
 RUNTIME = _HardwareModelRuntime()
+
+
+def check_resources(spec: ModelSpec, devices: object = None) -> None:
+    RUNTIME.check_resources(spec, devices)
 
 
 @asynccontextmanager

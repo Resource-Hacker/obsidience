@@ -1,36 +1,36 @@
 ---
-approved_at: '2026-08-31T07:38:14'
-kind: knowledge
-provenance: proposed by Alexandria (task Tasks/link)
+type: knowledge
 title: Research requests
+obsidience:
+  approved_at: '2026-08-31T07:38:14'
+  provenance: proposed by Alexandria (task Tasks/link)
 ---
 
-When accepted Knowledge is insufficient, Executive activates one bounded Darwin
-outcome: Question, Learn, News, or Model. An ad hoc request runs immediately; a
-recurring request adds a schedule to the same Task and remains pending while
-[[Agents/Executive/Architecture/real-time-executive|Real-time Executive]] runs,
-because that surface leaves autonomous specialist schedules and triggers
-unclaimed. Both use ordinary Task activation.
+When accepted Knowledge is insufficient, Executive delegates one bounded outcome
+to [Darwin](/Agents/Darwin/Darwin.md): [Question](/Tasks/research/question.md) for a
+specific answer, [Learn](/Tasks/research/learn.md) for a reusable knowledge gap,
+News for a current-events finding, or Model for local model characterization.
 
-The Task states the gap, target, expected artifact, and acceptance conditions.
-Its Runbook owns framing, discovery, collection, screening, assessment,
-extraction, analysis, verification, and handoff. These stages remain procedure
-unless one becomes an independently queueable outcome.
+The selected Task states one gap, target, expected artifact, and acceptance
+condition. Its Runbook owns framing, discovery, collection, screening,
+assessment, extraction, analysis, verification, and handoff; those stages are
+procedure, not automatic child Tasks. A recurring request adds a schedule to the
+same Task instead of creating a scheduling object or duplicate Task.
 
-Darwin prefers current direct or primary sources and bounded corroboration. He
-captures selected evidence in Source and drops one self-contained finding with
-exact `source://` pointers into the physical `obsidience/evidence/inbox/`. Its
-`source.inbox` event activates Alexandria's centralized Ingest Task, which
-reconciles it into maintained Knowledge. Heimdall independently verifies
-consequential evidence or contradictions.
+Darwin searches accepted Knowledge first, then acquires only the direct evidence
+needed. He preserves the selected Source and uses `source.handoff` once to write
+one self-contained cited finding into `obsidience/evidence/inbox/`. The resulting
+`source.inbox` event activates [Ingest](/Tasks/ingest.md) for
+[Alexandria](/Agents/Alexandria/Alexandria.md). Darwin does not write accepted
+Knowledge, and Alexandria does not perform the research acquisition.
 
-If research reveals a reusable capability gap, Executive follows the evidence
-with the appropriate Generate Task. A Tool is not accepted until its executable
-binding and paired Skill both exist and validate.
+If the evidence establishes a reusable capability gap, Executive may activate
+the appropriate peer Generate Task. A Tool remains unusable until its exact
+Source-backed Capability and singular paired Skill validate.
 
 ## Relationships
 
-- `uses` [[Agents/Darwin/Darwin|Darwin]] - Darwin owns research acquisition and synthesis.
-- `depends_on` [[Agents/Alexandria/Alexandria|Alexandria]] - Alexandria turns findings into maintained Knowledge.
-- `implements` [[Agents/Executive/Architecture/task-activation--b30a4642|Task activation]] - Research uses the same activation law as all work.
-- `implements` [[Agents/Executive/Architecture/llm-wiki-knowledge-pattern--dab5ff0a|LLM-wiki knowledge pattern]] - Research requests instantiate the pattern's bounded Darwin research, source handoff, and Alexandria ingestion loop.
+- `implements` [Task activation](/Agents/Executive/Architecture/task-activation--b30a4642.md) — Research outcomes are ordinary peer Tasks with exact assignees and Runbooks.
+- `implements` [LLM-wiki knowledge pattern](/Agents/Executive/Architecture/llm-wiki-knowledge-pattern--dab5ff0a.md) — Research supplies the evidence side of the Source-to-wiki loop.
+- `depends_on` [Alexandria](/Agents/Alexandria/Alexandria.md) — Only Alexandria's Ingest outcome may reconcile the finding into maintained Knowledge.
+- `related_to` [Heimdall](/Agents/Heimdall/Heimdall.md) — Consequential evidence or contradictions may require independent checking.

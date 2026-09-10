@@ -108,6 +108,9 @@ export function ReviewsPaneBody() {
                 {isLink && p.link_changes ? (
                   <span className="mt-2 block rounded border border-violet-300/15 bg-violet-300/[0.045] px-2 py-1.5 font-mono text-[9px] leading-4">
                     <span className="block uppercase tracking-[0.16em] text-violet-200/55">Relationship change</span>
+                    {p.evidence_warning ? (
+                      <span className="block text-amber-200/80">{p.evidence_warning}</span>
+                    ) : null}
                     {p.link_changes.added.map((ref) => (
                       <span key={`add-${ref}`} className="mt-0.5 block text-emerald-200/75" title={ref}>
                         + {cleanLeaf(ref)}
@@ -150,6 +153,12 @@ export function ReviewsPaneBody() {
               <section className={`border-t bg-[#01070d]/72 px-4 py-4 ${
                 isLink ? "border-violet-300/12" : "border-cyan-300/10"
               }`}>
+                {(p.link_evidence ?? []).map((e) => (
+                  <p key={`${e.change}-${e.ref}`} className="mb-3 whitespace-pre-wrap font-mono text-[10px] leading-4 text-cyan-100/65">
+                    {e.derivation === "proposed_wikilink" ? "Proposed link" : "Removed accepted link"}
+                    {` · body line ${e.body_line}\n${e.excerpt}`}
+                  </p>
+                ))}
                 <p className={`mb-3 font-mono text-[9px] uppercase tracking-[0.2em] ${
                   isLink ? "text-violet-200/50" : "text-cyan-300/45"
                 }`}>{isLink ? "Article after link" : "Proposed article"}</p>

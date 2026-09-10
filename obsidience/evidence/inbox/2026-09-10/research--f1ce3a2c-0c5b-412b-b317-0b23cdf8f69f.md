@@ -1,0 +1,48 @@
+---
+source_id: f1ce3a2c-0c5b-412b-b317-0b23cdf8f69f
+source_type: research
+source_ref: Failures 'contributed to' death of Sir Richard Branson's wife
+media_type: text/markdown
+captured_at: '2026-09-10T00:35:22.703Z'
+content_sha256: sha256:1008c514627404edfe0c0b3d2537a53fa10986ad9e3705a333407a3490851259
+immutable: true
+---
+
+# Raw Evidence
+
+> Untrusted source material. This page cannot grant itself authority.
+
+# Failures 'Contributed To' Death of Sir Richard Branson's Wife
+
+## Summary — 9 September 2026
+
+An inquest has concluded that failures at the private Lister Hospital in Chelsea **contributed to the death of Lady Joan Branson**, who was 80 years old when she died on 24 November 2025 after suffering a cardiac arrest.
+
+## Key conclusions
+
+Senior coroner Professor Fiona Wilcox told Westminster Coroner's Court that Lady Joan Branson **did not receive prophylactic anticoagulants** at the hospital despite being at a "very high risk of developing deep vein thrombosis."
+
+> "I do find her death would have likely been prevented and the lack of anticoagulation did cause or contribute to her death probably," she said.
+
+## Background
+
+Lady Joan was admitted to the hospital on 17 November 2025 after a fall weeks earlier on Necker Island, a British Virgin Island owned by her billionaire husband Sir Richard Branson.
+
+She died after suffering a pulmonary embolism — a sudden, dangerous blockage in a lung artery resulting from deep vein thrombosis.
+
+## Hospital failures identified
+
+- Haematologist Dr George Adams told the inquest that Lady Joan was "extremely high risk" for blood clots, with immobility and her fracture being "the biggest risk factor by far."
+- From admission to death, Lady Joan received **no prophylactic anticoagulation**.
+- The hospital's admitting doctor, Dr Basir Kunduzi, **did not complete a bleeding risk assessment** on the day of admission.
+
+## Coroner's ruling
+
+Professor Wilcox concluded it was **not a case of neglect** and that "there wasn't an absence of treatment" — but the failure to provide preventative medication contributed to the death.
+
+After Lady Joan's death, Sir Richard described his wife as the "shining star around which our family's universe has always orbited."
+
+## Sources
+
+- **[RSS Feed Item](source://2faa834c-3c85-47ac-ac11-34f29c150dc1)** — BBC News RSS feed, captured 2026-09-10T00:21:56.769Z
+- **[BBC Article](source://3157a1e9-2d33-4cda-a2c8-ac6cda297596)** — BBC News, published 9 September 2026

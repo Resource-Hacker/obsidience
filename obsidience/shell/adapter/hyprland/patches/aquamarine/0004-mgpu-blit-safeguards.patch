@@ -1,0 +1,70 @@
+From b65c12201b66ff344689a0093148ff8a38e644cd Mon Sep 17 00:00:00 2001
+From: Tom Englund <tomenglund26@gmail.com>
+Date: Sun, 2 Aug 2026 08:38:33 +0200
+Subject: [PATCH] drm: safeguard blit from releaseMgpuResources
+
+if we accidently commit without updating the swapchain after
+releaseMgpuResources() this will nullptr deref on a 0 lenght swapchain,
+safeguard it.
+---
+ src/backend/drm/DRM.cpp      | 16 ++++++++++++++--
+ src/backend/drm/Renderer.cpp |  5 +++++
+ 2 files changed, 19 insertions(+), 2 deletions(-)
+
+diff --git a/src/backend/drm/DRM.cpp b/src/backend/drm/DRM.cpp
+index 6be5a71..15c17bb 100644
+--- a/src/backend/drm/DRM.cpp
++++ b/src/backend/drm/DRM.cpp
+@@ -2174,12 +2174,19 @@ bool Aquamarine::CDRMOutput::commitState(bool onlyTest) {
+             OPTIONS.multigpu = false; // this is not a shared swapchain, and additionally, don't make it linear, nvidia would be mad
+             OPTIONS.cursor   = false;
+             OPTIONS.scanout  = true;
++            if (OPTIONS.length == 0) // releaseMgpuResources() cleared the swapchain and we committed without updating it.
++                OPTIONS.length = 2;
+             if (!mgpu.swapchain->reconfigure(OPTIONS)) {
+                 backend->backend->log(AQ_LOG_ERROR, "drm: Backend requires blit, but the mgpu swapchain failed reconfiguring");
+                 return false;
+             }
+ 
+-            auto                         NEWAQBUF = mgpu.swapchain->next(nullptr);
++            auto NEWAQBUF = mgpu.swapchain->next(nullptr);
++            if (!NEWAQBUF) {
++                backend->backend->log(AQ_LOG_ERROR, "drm: Backend requires blit, but the mgpu swapchain has no buffer");
++                return false;
++            }
++
+             SP<Aquamarine::CDRMRenderer> primaryRenderer;
+             if (backend->primary)
+                 primaryRenderer = backend->primary->rendererState.renderer;
+@@ -2404,7 +2411,12 @@ bool Aquamarine::CDRMOutput::setCursor(SP<IBuffer> buffer, const Vector2D& hotsp
+                 return false;
+             }
+ 
+-            auto                         NEWAQBUF = mgpu.cursorSwapchain->next(nullptr);
++            auto NEWAQBUF = mgpu.cursorSwapchain->next(nullptr);
++            if (!NEWAQBUF) {
++                backend->backend->log(AQ_LOG_ERROR, "drm: Backend requires blit, but the mgpu cursorSwapchain has no buffer");
++                return false;
++            }
++
+             SP<Aquamarine::CDRMRenderer> primaryRenderer;
+             if (backend->primary)
+                 primaryRenderer = backend->primary->rendererState.renderer;
+diff --git a/src/backend/drm/Renderer.cpp b/src/backend/drm/Renderer.cpp
+index 5e794de..66dc52a 100644
+--- a/src/backend/drm/Renderer.cpp
++++ b/src/backend/drm/Renderer.cpp
+@@ -934,6 +934,11 @@ void CDRMRenderer::clearBuffer(IBuffer* buf) {
+ }
+ 
+ CDRMRenderer::SBlitResult CDRMRenderer::blit(SP<IBuffer> from, SP<IBuffer> to, SP<CDRMRenderer> primaryRenderer, int waitFD) {
++    if (!from || !to) {
++        backend->log(AQ_LOG_ERROR, "EGL (blit): null source or destination buffer");
++        return {};
++    }
++
+     CEglContextGuard eglContext(*this);
+ 
+     if (from->dmabuf().size != to->dmabuf().size) {
+-- 
+2.55.0

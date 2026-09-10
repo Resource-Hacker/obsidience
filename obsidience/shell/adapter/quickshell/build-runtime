@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly upstream=https://git.outfoxxed.me/quickshell/quickshell
+readonly commit=1a4716cde794a59928d9d9fc15f2afc7a95de360
+readonly source_date_epoch=1787279335
+readonly launch_before=60812ec93022a8bcd0831a0dbb24a4ac81373d34cdf60b251764fed977ba2a93
+readonly launch_after=66c96eb12ead4d1f7414c735d4ae52975f8c9ad210982b0631cf243d67e37d2d
+readonly main_before=0d05ea9be6728dfd4075895c2717435183f658696c1d95be08e117a14df2901d
+readonly main_after=e05136d4e0733589c8f0fd4c9b732efaca4ae8921ef79749e3181310014d1c95
+readonly lock_cpp_before=fb38f903c7b25f2b64a1a1a15c9ae8e9fc7dfff78a04c70e5c01fc6488e71904
+readonly lock_cpp_after=a2657bb8b2f9179eaad982ee07a5694f6a7995b2b07f3fedc0e500b678609180
+readonly lock_cpp_final=4c415d435d040a320a361ad3fb8ac7ef71ccfafa552d48bc7136bef3f01dbaf1
+readonly lock_hpp_before=bd32bbb44b1c401b789eacad42723ceb304e9e8cdc289c41dbe9b1f1da56436f
+readonly lock_hpp_after=d6bd008f895b40c0ec49a1ddc9cf80b3fc1d7521feb5a8909714ba306d9fe5d5
+readonly lock_manager_before=4d0a09e665ce55e0086e101e99eab2bebc79f994c8fc275e38723412f2bd3c15
+readonly lock_manager_after=c820c9e4481449b798eb001fbe32b7cf8c380aac2eaeb4a581e602d2843fe6a6
+readonly binary_sha256=5f4d25850c0112fbc7fd718bbdc859e85db888120aecd010a051f5b51b50de05
+readonly destination=/home/wissenschafter/.local/opt/obsidience-quickshell/quickshell-0.3.1-webengine-lock-5f4d2585
+readonly work_root=/var/tmp/obsidience-quickshell-0.3.1-webengine-lock
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+webengine_patch_file="$script_dir/patches/0001-satisfy-qtwebengine-host-contract.patch"
+lock_patch_file="$script_dir/patches/0002-guard-session-lock-reentrancy.patch"
+unlock_patch_file="$script_dir/patches/0003-notify-session-unlock.patch"
+source_dir="$work_root/source"
+build_dir="$work_root/build"
+
+if [[ -e "$work_root" ]]; then
+    find "$work_root" -xdev -depth -delete
+fi
+install -d -m 0755 "$work_root"
+git clone --quiet --filter=blob:none --no-checkout "$upstream" "$source_dir"
+git -C "$source_dir" checkout --quiet --detach "$commit"
+printf '%s  %s\n' "$launch_before" "$source_dir/src/launch/launch.cpp" | sha256sum --check --status
+printf '%s  %s\n' "$main_before" "$source_dir/src/launch/main.cpp" | sha256sum --check --status
+printf '%s  %s\n' "$lock_cpp_before" "$source_dir/src/wayland/session_lock.cpp" | sha256sum --check --status
+printf '%s  %s\n' "$lock_hpp_before" "$source_dir/src/wayland/session_lock.hpp" | sha256sum --check --status
+printf '%s  %s\n' "$lock_manager_before" "$source_dir/src/wayland/session_lock/session_lock.cpp" | sha256sum --check --status
+git -C "$source_dir" apply --check "$webengine_patch_file"
+git -C "$source_dir" apply "$webengine_patch_file"
+git -C "$source_dir" apply --check "$lock_patch_file"
+git -C "$source_dir" apply "$lock_patch_file"
+printf '%s  %s\n' "$launch_after" "$source_dir/src/launch/launch.cpp" | sha256sum --check --status
+printf '%s  %s\n' "$main_after" "$source_dir/src/launch/main.cpp" | sha256sum --check --status
+printf '%s  %s\n' "$lock_cpp_after" "$source_dir/src/wayland/session_lock.cpp" | sha256sum --check --status
+printf '%s  %s\n' "$lock_hpp_after" "$source_dir/src/wayland/session_lock.hpp" | sha256sum --check --status
+printf '%s  %s\n' "$lock_manager_after" "$source_dir/src/wayland/session_lock/session_lock.cpp" | sha256sum --check --status
+git -C "$source_dir" apply --check "$unlock_patch_file"
+git -C "$source_dir" apply "$unlock_patch_file"
+printf '%s  %s\n' "$lock_cpp_final" "$source_dir/src/wayland/session_lock.cpp" | sha256sum --check --status
+export SOURCE_DATE_EPOCH="$source_date_epoch"
+(
+    cd "$source_dir"
+    git ls-files -z | xargs -0 touch -d "@$SOURCE_DATE_EPOCH" --
+)
+
+cmake -S "$source_dir" -B "$build_dir" -GNinja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DBUILD_TESTING=OFF \
+    -DCRASH_HANDLER=ON \
+    -DUSE_JEMALLOC=ON \
+    -DSERVICE_PAM=ON \
+    -DWAYLAND_SESSION_LOCK=ON \
+    -DDISTRIBUTOR='Obsidience local compatibility build'
+cmake --build "$build_dir" --parallel
+printf '%s  %s\n' "$binary_sha256" "$build_dir/src/quickshell" | sha256sum --check --status
+
+install -d -m 0755 "$destination"
+install -m 0755 "$build_dir/src/quickshell" "$destination/quickshell"
+find "$work_root" -xdev -depth -delete
+printf '%s\n' "$destination/quickshell"

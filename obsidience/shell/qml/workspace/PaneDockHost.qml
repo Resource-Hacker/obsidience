@@ -134,6 +134,13 @@ Item {
                 id: target
 
                 required property var modelData
+                readonly property var occupant: {
+                    const currentRevision = root.dockLayout.revision
+                    return root.dockLayout.slotState(
+                        root.hostDefinition.placement.paneId, modelData.side,
+                        modelData.position === "top" ? 0 : 1
+                    )
+                }
                 width: dockTargets.width * 0.28
                 height: dockTargets.height / 2 - 12
                 x: modelData.side === "left"
@@ -147,7 +154,14 @@ Item {
 
                 Text {
                     anchors.centerIn: parent
-                    text: target.modelData.label
+                    width: parent.width - 16
+                    text: target.modelData.label + (target.occupant
+                        && target.occupant.pane_id !== root.draggingModule
+                        ? "\n" + (root.dockLayout.isDocked(root.draggingModule)
+                            ? "Swap with " : "Move to empty dock: ")
+                            + target.occupant.pane_id : "")
+                    horizontalAlignment: Text.AlignHCenter
+                    wrapMode: Text.WordWrap
                     color: "#ccecff"
                     font.family: "JetBrains Mono"
                     font.pixelSize: 9

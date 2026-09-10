@@ -43,12 +43,25 @@ import {
   type KnowledgeForceNode,
 } from "./knowledge-3d";
 import type { ForceSimulation } from "d3-force-3d";
+import { KNOWLEDGE_CROSS_SEGMENTS as CROSS_SEGMENTS, writeKnowledgeCrossRoute } from "./knowledge-3d-links";
 
 /** Leaf sprites carry the plasma-orb halo and star flare, so the quad
  *  extends well past the disc (owner 2026-08-02: the 3D articles are the
  *  same jewel-star plasma orbs as the 2D map). */
 const LEAF_SPRITE_EXTENT = 3.2;
-const CROSS_SEGMENTS = 12;
+
+export const KNOWLEDGE_LINK_APPROVAL_DURATION_MS = 4000;
+
+/** Transient Review paint over the separate scene presentation model. */
+export interface Knowledge3dRelationEffect {
+  id: string;
+  graphId: string;
+  source: string;
+  target: string;
+  phase: "pending" | "approved";
+  /** Stable performance.now() timestamp, owned by the review projection. */
+  startedAt: number;
+}
 
 export interface Knowledge3dRenderNode {
   id: string;
@@ -144,17 +157,43 @@ export function satellitePhysicsSignature(tuning: Knowledge3dTuning): string {
   ].join(":");
 }
 
+export interface Knowledge3dSimulationState {
+  nodes: ReadonlyMap<string, KnowledgeForceNode>;
+  signature: string;
+  alpha: number;
+  tuning: Knowledge3dTuning;
+}
+
+/** Only inputs consumed by the forces can restart a settled layout. Paint,
+ * labels, array identity/order and particle geometry are not physics. */
+function simulationSignature(
+  nodes: readonly KnowledgeForceNode[],
+  links: readonly KnowledgeForceLink[],
+  tuning: Knowledge3dTuning,
+): string {
+  return JSON.stringify([
+    tuning.chargeStrength, tuning.velocityDecay, tuning.linkDistance,
+    [...nodes].sort((a, b) => a.id.localeCompare(b.id)).map((node) => [
+      node.id, node.depth, node.role, node.parentId, node.radius,
+    ]),
+    [...links].sort((a, b) => a.source.localeCompare(b.source)
+      || a.target.localeCompare(b.target) || Number(a.taxonomy) - Number(b.taxonomy))
+      .map((link) => [link.source, link.target, link.taxonomy]),
+  ]);
+}
+
 export interface Knowledge3dSatelliteCloud {
   agentId: string;
   group: THREE.Group;
   builtNodes: Knowledge3dRenderNode[];
   builtEdges: Knowledge3dRenderEdge[];
   builtSignature: string;
-  builtTuning: Knowledge3dTuning;
   isHot(): boolean;
   tickIfHot(): boolean;
   captureSimNodes(): ReadonlyMap<string, KnowledgeForceNode>;
+  captureSimulation(): Knowledge3dSimulationState;
   applyTuning(tuning: Knowledge3dTuning, pixelRatio: number): void;
+  applyRelationEffects(effects: readonly Knowledge3dRelationEffect[], now: number): void;
   updateOrbit(tuning: Knowledge3dTuning, timeSeconds: number): void;
   distanceTo(cameraPosition: THREE.Vector3): number;
   projectInto(
@@ -189,8 +228,7 @@ export function createKnowledge3dSatellite(
   deps: Knowledge3dSatelliteDeps,
   viewportHeightPx: number,
   pixelRatio: number,
-  previous?: ReadonlyMap<string, KnowledgeForceNode>,
-  previousTuning?: Knowledge3dTuning,
+  previous?: Knowledge3dSimulationState,
 ): Knowledge3dSatelliteCloud {
   const { agentId, nodes, edges } = input;
   const isMain = input.main === true;
@@ -200,9 +238,9 @@ export function createKnowledge3dSatellite(
   const renderBallScale = (live: Knowledge3dTuning): number =>
     isMain ? live.graphScale : live.graphScale * live.ballScale;
   const carriedScale = (depth: number | undefined): number => {
-    if (!previousTuning) return 1;
+    if (!previous) return 1;
     const d = Math.max(1, depth ?? 3);
-    const from = knowledge3dShellRadius(d, previousTuning);
+    const from = knowledge3dShellRadius(d, previous.tuning);
     const to = knowledge3dShellRadius(d, tuning);
     return from > 1e-6 ? to / from : 1;
   };
@@ -227,7 +265,7 @@ export function createKnowledge3dSatellite(
     knowledge3dBallTargets(ballNodes, input.hub ?? { x: 0.5, y: 0.5 }, tuning),
   );
   const simNodes: KnowledgeForceNode[] = nodes.map((node, index) => {
-    const carried = previous?.get(node.id);
+    const carried = previous?.nodes.get(node.id);
     const scale = carried ? carriedScale(node.depth) : 1;
     return {
       id: node.id,
@@ -254,17 +292,41 @@ export function createKnowledge3dSatellite(
       (edge) => indexById.has(edge.source) && indexById.has(edge.target),
     )
     .map((edge) => ({
-      source: edge.source,
-      target: edge.target,
+      source: edge.source < edge.target ? edge.source : edge.target,
+      target: edge.source < edge.target ? edge.target : edge.source,
       taxonomy: edge.taxonomy,
-    }));
+    }))
+    .sort((a, b) => a.source.localeCompare(b.source)
+      || a.target.localeCompare(b.target) || Number(a.taxonomy) - Number(b.taxonomy));
+  // d3 iterates nodes and links in input order. Keep its private order stable
+  // when a proposed spring becomes accepted; render buffers retain their order.
   const simulation: ForceSimulation<KnowledgeForceNode> =
-    createKnowledgeForceSimulation(simNodes, links, tuning);
-  if (previous && previous.size > 0) {
+    createKnowledgeForceSimulation([...simNodes].sort((a, b) => a.id.localeCompare(b.id)), links, tuning);
+  // A proposed spring can change degree-sized glyphs and their layer spacing.
+  // Keep the last painted state until the first ordinary simulation tick.
+  // Fresh nodes or changed ancestry/spacing still require initial projection;
+  // the comparison uses the semantic depths normalized by the force factory.
+  if (previous && previous.tuning.linkDistance === tuning.linkDistance
+      && previous.nodes.size === simNodes.length
+      && simNodes.every((node) => {
+        const carried = previous.nodes.get(node.id);
+        return carried && carried.depth === node.depth && carried.role === node.role
+          && carried.parentId === node.parentId;
+      })) {
+    for (const node of simNodes) {
+      const carried = previous.nodes.get(node.id)!;
+      node.x = carried.x; node.y = carried.y; node.z = carried.z;
+      node.vx = carried.vx; node.vy = carried.vy; node.vz = carried.vz;
+    }
+  }
+  const signature = simulationSignature(simNodes, links, tuning);
+  if (previous && previous.nodes.size > 0) {
     simulation.alpha(
-      previousTuning
-        ? Math.max(KNOWLEDGE_3D_REHEAT_ALPHA, 0.5)
-        : KNOWLEDGE_3D_REHEAT_ALPHA,
+      signature === previous.signature
+        ? previous.alpha
+        : previous.tuning.linkDistance !== tuning.linkDistance
+          ? Math.max(KNOWLEDGE_3D_REHEAT_ALPHA, 0.5)
+          : KNOWLEDGE_3D_REHEAT_ALPHA,
     );
   }
   const positions = new Float32Array(nodes.length * 3);
@@ -730,38 +792,46 @@ export function createKnowledge3dSatellite(
   crossLines.visible = crossPairs.length > 0;
   group.add(crossLines);
 
-  // --- Shooting-star streaks over the cross curves. ---
+  // --- Streaks clip the same exterior segments; no head/tail shortcuts. ---
   const streaksPerLink = Math.max(0, Math.round(input.tuning.streakCount));
   const streakCount = crossPairs.length * streaksPerLink;
+  const streakVertices = streakCount * CROSS_SEGMENTS * 2;
   const streakGeometry = new THREE.BufferGeometry();
   streakGeometry.setAttribute(
     "position",
-    new THREE.BufferAttribute(new Float32Array(streakCount * 2 * 3), 3),
+    new THREE.BufferAttribute(new Float32Array(streakVertices * 3), 3),
   );
-  for (const name of ["aP0", "aP1", "aP2"]) {
+  for (const name of ["aStart", "aEnd"]) {
     const attribute = new THREE.BufferAttribute(
-      new Float32Array(streakCount * 2 * 3),
+      new Float32Array(streakVertices * 3),
       3,
     );
     attribute.setUsage(THREE.DynamicDrawUsage);
     streakGeometry.setAttribute(name, attribute);
   }
   {
-    const phases = new Float32Array(streakCount * 2);
-    const speeds = new Float32Array(streakCount * 2);
-    const tips = new Float32Array(streakCount * 2);
+    const phases = new Float32Array(streakVertices);
+    const speeds = new Float32Array(streakVertices);
+    const tips = new Float32Array(streakVertices);
+    const ranges = new Float32Array(streakVertices * 2);
     for (let streak = 0; streak < streakCount; streak += 1) {
       const phase = (streak * 0.37) % 1;
       const speed = 0.09 + ((streak * 0.61) % 1) * 0.1;
-      for (let end = 0; end < 2; end += 1) {
-        phases[streak * 2 + end] = phase;
-        speeds[streak * 2 + end] = speed;
-        tips[streak * 2 + end] = end;
+      for (let segment = 0; segment < CROSS_SEGMENTS; segment++) {
+        for (let end = 0; end < 2; end++) {
+          const vertex = (streak * CROSS_SEGMENTS + segment) * 2 + end;
+          phases[vertex] = phase;
+          speeds[vertex] = speed;
+          tips[vertex] = end;
+          ranges[vertex * 2] = segment / CROSS_SEGMENTS;
+          ranges[vertex * 2 + 1] = (segment + 1) / CROSS_SEGMENTS;
+        }
       }
     }
     streakGeometry.setAttribute("aPhase", new THREE.BufferAttribute(phases, 1));
     streakGeometry.setAttribute("aSpeed", new THREE.BufferAttribute(speeds, 1));
     streakGeometry.setAttribute("aTip", new THREE.BufferAttribute(tips, 1));
+    streakGeometry.setAttribute("aRange", new THREE.BufferAttribute(ranges, 2));
   }
   const streakUniforms = {
     uTime: deps.particleTime,
@@ -789,17 +859,39 @@ export function createKnowledge3dSatellite(
   streakLines.renderOrder = 2;
   group.add(streakLines);
 
-  let liveCrossCurve = input.tuning.crossCurve;
-  const crossControl = new Float32Array(9);
-  const bezierAxis = (
-    p0: number,
-    p1: number,
-    p2: number,
-    t: number,
-  ): number => {
-    const inverse = 1 - t;
-    return inverse * inverse * p0 + 2 * inverse * t * p1 + t * t * p2;
+  let reviewMesh: THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial> | null = null;
+  let reviewCurveIndexes: number[] = [];
+  let reviewSignature = "";
+  const crossPairKey = (source: string, target: string) => JSON.stringify([source, target].sort());
+  const crossCurveByPair = new Map(crossPairs.map(([a, b], index) => [
+    crossPairKey(nodeIds[a], nodeIds[b]), index,
+  ]));
+  const clearReview = (): void => {
+    if (reviewMesh) {
+      group.remove(reviewMesh);
+      reviewMesh.geometry.dispose();
+      reviewMesh.material.dispose();
+      reviewMesh = null;
+    }
+    reviewCurveIndexes = [];
+    reviewSignature = "";
   };
+  const syncReviewPositions = (): void => {
+    if (!reviewMesh) return;
+    for (const name of ["aStart", "aEnd", "aArc", "aColor"]) {
+      const source = crossGeometry.getAttribute(name) as THREE.BufferAttribute;
+      const target = reviewMesh.geometry.getAttribute(name) as THREE.BufferAttribute;
+      const length = CROSS_SEGMENTS * 4 * source.itemSize;
+      reviewCurveIndexes.forEach((curve, pair) => {
+        (target.array as Float32Array).set(
+          (source.array as Float32Array).subarray(curve * length, (curve + 1) * length),
+          pair * length,
+        );
+      });
+      target.needsUpdate = true;
+    }
+  };
+  const crossRoute = new Float32Array((CROSS_SEGMENTS + 1) * 3);
   const syncStraightBeams = (set: BeamSet): void => {
     const startAttr = set.geometry.getAttribute(
       "aStart",
@@ -834,100 +926,60 @@ export function createKnowledge3dSatellite(
     endAttr.needsUpdate = true;
     set.arcs.needsUpdate = true;
   };
-  const syncCrossPositions = (): void => {
-    if (crossPairs.length === 0) return;
-    const startAttr = crossGeometry.getAttribute(
+  const syncCurvePositions = (
+    curveGeometry: THREE.BufferGeometry,
+    pairs: Array<[number, number]>,
+  ): void => {
+    if (pairs.length === 0) return;
+    const startAttr = curveGeometry.getAttribute(
       "aStart",
     ) as THREE.BufferAttribute;
-    const endAttr = crossGeometry.getAttribute("aEnd") as THREE.BufferAttribute;
-    const arcArray = crossArcs.array as Float32Array;
-    const sample = new Float32Array(6);
-    crossPairs.forEach(([a, b], pair) => {
-      const x0 = positions[a * 3];
-      const y0 = positions[a * 3 + 1];
-      const z0 = positions[a * 3 + 2];
-      const x2 = positions[b * 3];
-      const y2 = positions[b * 3 + 1];
-      const z2 = positions[b * 3 + 2];
-      const mx = (x0 + x2) / 2;
-      const my = (y0 + y2) / 2;
-      const mz = (z0 + z2) / 2;
-      const length = Math.hypot(x2 - x0, y2 - y0, z2 - z0);
-      const radial = Math.hypot(mx, my, mz);
-      const bulge = Math.max(2.5, length * liveCrossCurve);
-      const scale = radial > 1e-3 ? 1 + bulge / radial : 1;
-      crossControl[0] = x0;
-      crossControl[1] = y0;
-      crossControl[2] = z0;
-      crossControl[3] = radial > 1e-3 ? mx * scale : mx;
-      crossControl[4] = radial > 1e-3 ? my * scale : my + bulge;
-      crossControl[5] = radial > 1e-3 ? mz * scale : mz;
-      crossControl[6] = x2;
-      crossControl[7] = y2;
-      crossControl[8] = z2;
-      for (let segment = 0; segment < CROSS_SEGMENTS; segment += 1) {
-        const t0 = segment / CROSS_SEGMENTS;
-        const t1 = (segment + 1) / CROSS_SEGMENTS;
-        for (let axis = 0; axis < 3; axis += 1) {
-          sample[axis] = bezierAxis(
-            crossControl[axis],
-            crossControl[3 + axis],
-            crossControl[6 + axis],
-            t0,
-          );
-          sample[3 + axis] = bezierAxis(
-            crossControl[axis],
-            crossControl[3 + axis],
-            crossControl[6 + axis],
-            t1,
-          );
-        }
+    const endAttr = curveGeometry.getAttribute("aEnd") as THREE.BufferAttribute;
+    const arcs = curveGeometry.getAttribute("aArc") as THREE.BufferAttribute;
+    const arcArray = arcs.array as Float32Array;
+    const streakStart = streakGeometry.getAttribute("aStart") as THREE.BufferAttribute;
+    const streakEnd = streakGeometry.getAttribute("aEnd") as THREE.BufferAttribute;
+    pairs.forEach(([a, b], pair) => {
+      const reversed = nodeIds[a] > nodeIds[b];
+      const first = reversed ? b : a;
+      const last = reversed ? a : b;
+      writeKnowledgeCrossRoute(crossRoute,
+        [positions[first * 3], positions[first * 3 + 1], positions[first * 3 + 2]],
+        [positions[last * 3], positions[last * 3 + 1], positions[last * 3 + 2]]);
+      let arc = 0;
+      for (let segment = 0; segment < CROSS_SEGMENTS; segment++) {
+        const start = (reversed ? CROSS_SEGMENTS - segment : segment) * 3;
+        const end = (reversed ? CROSS_SEGMENTS - segment - 1 : segment + 1) * 3;
+        const length = Math.hypot(crossRoute[end] - crossRoute[start],
+          crossRoute[end + 1] - crossRoute[start + 1], crossRoute[end + 2] - crossRoute[start + 2]);
         const quad = pair * CROSS_SEGMENTS + segment;
-        for (let vertex = 0; vertex < 4; vertex += 1) {
-          startAttr.setXYZ(quad * 4 + vertex, sample[0], sample[1], sample[2]);
-          endAttr.setXYZ(quad * 4 + vertex, sample[3], sample[4], sample[5]);
-          arcArray[quad * 4 + vertex] = (vertex >= 2 ? t1 : t0) * length;
+        for (let vertex = 0; vertex < 4; vertex++) {
+          startAttr.setXYZ(quad * 4 + vertex, crossRoute[start], crossRoute[start + 1], crossRoute[start + 2]);
+          endAttr.setXYZ(quad * 4 + vertex, crossRoute[end], crossRoute[end + 1], crossRoute[end + 2]);
+          arcArray[quad * 4 + vertex] = arc + (vertex >= 2 ? length : 0);
         }
-      }
-      if (streaksPerLink > 0) {
-        const p0Attr = streakGeometry.getAttribute(
-          "aP0",
-        ) as THREE.BufferAttribute;
-        const p1Attr = streakGeometry.getAttribute(
-          "aP1",
-        ) as THREE.BufferAttribute;
-        const p2Attr = streakGeometry.getAttribute(
-          "aP2",
-        ) as THREE.BufferAttribute;
-        for (let particle = 0; particle < streaksPerLink * 2; particle += 1) {
-          const vertex = pair * streaksPerLink * 2 + particle;
-          p0Attr.setXYZ(
-            vertex,
-            crossControl[0],
-            crossControl[1],
-            crossControl[2],
-          );
-          p1Attr.setXYZ(
-            vertex,
-            crossControl[3],
-            crossControl[4],
-            crossControl[5],
-          );
-          p2Attr.setXYZ(
-            vertex,
-            crossControl[6],
-            crossControl[7],
-            crossControl[8],
-          );
+        // Repeat the exact line segment for each streak. The shader clips its
+        // moving interval within this segment, so even a long tail follows the
+        // bend instead of drawing a chord through the hierarchy's inner layers.
+        for (let streak = 0; streak < streaksPerLink; streak++) {
+          for (let tip = 0; tip < 2; tip++) {
+            const vertex = ((pair * streaksPerLink + streak) * CROSS_SEGMENTS + segment) * 2 + tip;
+            streakStart.setXYZ(vertex, crossRoute[start], crossRoute[start + 1], crossRoute[start + 2]);
+            streakEnd.setXYZ(vertex, crossRoute[end], crossRoute[end + 1], crossRoute[end + 2]);
+          }
         }
-        p0Attr.needsUpdate = true;
-        p1Attr.needsUpdate = true;
-        p2Attr.needsUpdate = true;
+        arc += length;
       }
     });
+    streakStart.needsUpdate = true;
+    streakEnd.needsUpdate = true;
     startAttr.needsUpdate = true;
     endAttr.needsUpdate = true;
-    crossArcs.needsUpdate = true;
+    arcs.needsUpdate = true;
+  };
+  const syncCrossPositions = (): void => {
+    syncCurvePositions(crossGeometry, crossPairs);
+    syncReviewPositions();
   };
   const syncAllPositions = (): void => {
     syncStraightBeams(spokes);
@@ -935,6 +987,97 @@ export function createKnowledge3dSatellite(
     syncCrossPositions();
   };
   syncAllPositions();
+
+  const applyRelationEffects = (
+    effects: readonly Knowledge3dRelationEffect[], now: number,
+  ): void => {
+    const current = effects.filter((effect) =>
+      effect.graphId === agentId && effect.source !== effect.target &&
+      crossCurveByPair.has(crossPairKey(effect.source, effect.target)) &&
+      Number.isFinite(effect.startedAt) && Number.isFinite(now) && effect.startedAt <= now &&
+      (effect.phase === "pending" || (effect.phase === "approved" &&
+        now - effect.startedAt < KNOWLEDGE_LINK_APPROVAL_DURATION_MS)),
+    );
+    if (!current.length) {
+      clearReview();
+      return;
+    }
+    const nextSignature = JSON.stringify(current.map((effect) => [
+      effect.id, effect.source, effect.target, effect.phase, effect.startedAt,
+    ]));
+    if (nextSignature !== reviewSignature) {
+      clearReview();
+      reviewSignature = nextSignature;
+      reviewCurveIndexes = current.map((effect) =>
+        crossCurveByPair.get(crossPairKey(effect.source, effect.target))!);
+      const count = current.length * CROSS_SEGMENTS;
+      const geometry = new THREE.BufferGeometry();
+      for (const [name, size] of [
+        ["position", 3], ["aStart", 3], ["aEnd", 3], ["aColor", 3],
+        ["aSide", 1], ["aEnd01", 1], ["aArc", 1], ["aWidth", 1],
+        ["aP", 1], ["aDormant", 1], ["aHover", 1], ["aReview", 2],
+      ] as const) {
+        const attribute = new THREE.BufferAttribute(new Float32Array(count * 4 * size), size);
+        if (["aStart", "aEnd", "aArc", "aReview"].includes(name)) {
+          attribute.setUsage(THREE.DynamicDrawUsage);
+        }
+        geometry.setAttribute(name, attribute);
+      }
+      const indices = new Uint32Array(count * 6);
+      reviewCurveIndexes.forEach((_, pair) => {
+        for (let segment = 0; segment < CROSS_SEGMENTS; segment += 1) {
+          const quad = pair * CROSS_SEGMENTS + segment;
+          const v = quad * 4;
+          indices.set([v, v + 1, v + 2, v + 2, v + 1, v + 3], quad * 6);
+          for (let vertex = 0; vertex < 4; vertex += 1) {
+            const t = (segment + (vertex >= 2 ? 1 : 0)) / CROSS_SEGMENTS;
+            const at = v + vertex;
+            geometry.getAttribute("aSide").setX(at, vertex % 2 ? 1 : -1);
+            geometry.getAttribute("aEnd01").setX(at, vertex >= 2 ? 1 : 0);
+            geometry.getAttribute("aWidth").setX(at, 1);
+            geometry.getAttribute("aDormant").setX(at, 1);
+            // As in thinking cross-links, two fronts meet at the center.
+            geometry.getAttribute("aP").setX(at, 1 - Math.abs(2 * t - 1));
+          }
+        }
+      });
+      geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+      const material = new THREE.ShaderMaterial({
+        defines: { KNOWLEDGE_REVIEW_EFFECT: 1 },
+        uniforms: {
+          uViewportPx: deps.viewportUniform,
+          uGlow: { value: 0 },
+          uOpacity: { value: 0.7 },
+          uWidthPx: crossWidthUniform,
+          uFloorPx: crossWidthUniform,
+          uDashFreq: crossUniforms.uDashFreq,
+        },
+        vertexShader: deps.beamVertexShader,
+        fragmentShader: deps.crossFragmentShader,
+        transparent: true, depthWrite: false, depthTest: false,
+        side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
+      });
+      reviewMesh = new THREE.Mesh(geometry, material);
+      reviewMesh.name = "knowledge-review-links";
+      reviewMesh.frustumCulled = false;
+      reviewMesh.renderOrder = 0;
+      group.add(reviewMesh);
+      syncReviewPositions();
+    }
+    // Store only a short relative age in fp32. The scene's unwrapped clock
+    // and the projection's stable start time survive rebuilds and long uptime.
+    const timeline = reviewMesh!.geometry.getAttribute("aReview") as THREE.BufferAttribute;
+    current.forEach((effect, pair) => {
+      const elapsed = Math.max(0, now - effect.startedAt) / 1000;
+      const age = effect.phase === "pending" && elapsed >= 0.8
+        ? 0.8 + ((elapsed - 0.8) % 2) : elapsed;
+      for (let vertex = 0; vertex < CROSS_SEGMENTS * 4; vertex += 1) {
+        timeline.setXY(pair * CROSS_SEGMENTS * 4 + vertex,
+          effect.phase === "approved" ? 1 : 0, age);
+      }
+    });
+    timeline.needsUpdate = true;
+  };
 
   // --- Hover subtree (main-ball law): flag every taxonomy beam whose
   // BOTH endpoints sit in the hovered node's subtree; subtree articles
@@ -1013,7 +1156,6 @@ export function createKnowledge3dSatellite(
     builtNodes: nodes,
     builtEdges: edges,
     builtSignature: satellitePhysicsSignature(input.tuning),
-    builtTuning: input.tuning,
     isHot() {
       return simulation.alpha() > KNOWLEDGE_3D_ALPHA_MIN;
     },
@@ -1028,6 +1170,15 @@ export function createKnowledge3dSatellite(
     captureSimNodes() {
       return new Map(simNodes.map((node) => [node.id, node]));
     },
+    captureSimulation() {
+      return {
+        nodes: this.captureSimNodes(),
+        signature,
+        alpha: simulation.alpha(),
+        tuning,
+      };
+    },
+    applyRelationEffects,
     applyTuning(live: Knowledge3dTuning, ratio: number) {
       glowScaleUniform.value = live.nodeGlow;
       const ballFactor = renderBallScale(live);
@@ -1050,10 +1201,6 @@ export function createKnowledge3dSatellite(
       // Taxonomy beams' flow-phase dashes ride the same slider (the cross
       // uniforms override this key with their own object above).
       inertPathUniforms.uDashFreq.value = live.dashFrequency;
-      if (live.crossCurve !== liveCrossCurve) {
-        liveCrossCurve = live.crossCurve;
-        syncCrossPositions();
-      }
       streakUniforms.uSpeedScale.value = live.streakSpeed;
       streakUniforms.uStreakSpan.value = live.streakSpan;
     },
@@ -1231,6 +1378,7 @@ export function createKnowledge3dSatellite(
       drawIndex.needsUpdate = true;
     },
     dispose(scene) {
+      clearReview();
       scene.remove(group);
       for (const disposable of disposables) disposable.dispose();
     },

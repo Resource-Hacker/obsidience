@@ -1,8 +1,9 @@
 ---
-binding: capability:model.configure
-kind: tool
-source: obsidience/harness/capabilities/model/configure.py
+type: tool
 title: model.configure
+obsidience:
+  binding: capability:model.configure
+  source: obsidience/harness/capabilities/model/configure.py
 ---
 
 Apply one bounded configuration to a registered local model through the same
@@ -13,10 +14,21 @@ Arguments:
 - `model_id`: exact registered model ID;
 - `allowed_devices`: optional list containing `rtx4080`, `rtx4000`, or
   one validated combination;
-- `context_tokens`, `max_output_tokens`, `gpu_memory_utilization`, and
-  `max_num_seqs`: optional bounded settings.
+- `context_tokens`: optional integer from 2,048 through the model's declared
+  maximum;
+- `max_output_tokens`: optional integer from 256 through 32,768 and smaller
+  than the resulting context;
+- `gpu_memory_utilization`: optional number from 0.50 through 0.99;
+- `max_num_seqs`: optional integer from 1 through 32.
 
-The call rejects invalid device layouts, CPU offload, output larger than
-context, and values outside the model contract. It may restart that model,
-preserves unrelated hardware slots, and stores an immutable configuration
-record in Source.
+At least one optional setting is required.
+
+Supply only exact GPU IDs. The current runtime filters unknown IDs and may
+restore the model's default layout when too few valid IDs remain; always check
+the returned `allowed_devices`. Other bounded values and an output size not
+smaller than context are rejected. CPU offload is unavailable.
+
+The call may restart the model, preserves unrelated hardware slots, and stores
+a new immutable configuration record on success. If startup fails, inspect the
+current model configuration before retrying; a failed restart does not
+guarantee that the prior settings were restored.

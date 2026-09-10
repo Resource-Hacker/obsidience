@@ -464,15 +464,42 @@ Rectangle {
         })
     }
 
+    function retryTask(task) {
+        return Boolean(task && task.execution && task.execution.state === "needs_attention")
+    }
+
+    function runBlockedReason(task) {
+        if (!task) {
+            return "No executable Task is selected."
+        }
+        const execution = task.execution || {}
+        if (["running", "review", "waiting"].includes(execution.state)
+                || ["running", "review"].includes(task.status)) {
+            return String(execution.reason || "This Task is not ready to run.")
+        }
+        if (retryTask(task) && (execution.retry_allowed !== true
+                || !execution.last_run || !execution.last_run.id)) {
+            return String(execution.retry_blocked_reason || "This attempt requires resolution before retry.")
+        }
+        if (!task.execution && ["failed", "blocked"].includes(task.status)) {
+            return "Current retry eligibility is unavailable."
+        }
+        return ""
+    }
+
     function runNow(task) {
-        if (!task || busyRef || task.status === "running") {
+        if (!task || busyRef || runBlockedReason(task)) {
             return
         }
         actionError = ""
         busyRef = task.ref
-        requestJson("POST", "/api/tasks/" + encodeURI(task.ref) + "/run", {
+        const body = {
             "reasoning_effort": task.reasoning_effort
-        }, function(ok, payload, error) {
+        }
+        if (retryTask(task)) {
+            body.retry_run_id = task.execution.last_run.id
+        }
+        requestJson("POST", "/api/tasks/" + encodeURI(task.ref) + "/run", body, function(ok, payload, error) {
             busyRef = ""
             if (!ok) {
                 actionError = error
@@ -544,20 +571,34 @@ Rectangle {
         if (row.excludedBy) {
             details.push("EXCLUDED · " + String(row.excludedBy).split("/").pop())
         } else {
+            const execution = task ? task.execution : null
+            if (execution && execution.state) {
+                details.push(String(execution.label || execution.state).replace(/_/g, " ").toUpperCase())
+            }
+            if (task && Number(task.queue_depth || 0) > 0) {
+                details.push(String(task.queue_depth) + " LATER")
+            }
+            const last = execution ? execution.last_run : null
+            if (execution?.state !== "waiting" && last && last.status && !["running", "pending"].includes(last.status)) {
+                let label = "LAST ATTEMPT " + String(last.status).toUpperCase()
+                if (Number.isFinite(Number(last.finished)) && Number(last.finished) > 0) {
+                    const date = new Date(Number(last.finished) * 1000)
+                    label += " " + (date.getMonth() + 1) + "/" + date.getDate()
+                        + " " + String(date.getHours()).padStart(2, "0")
+                        + ":" + String(date.getMinutes()).padStart(2, "0")
+                }
+                details.push(label)
+            } else if (!execution && task && ["failed", "blocked"].includes(task.status)) {
+                details.push("LAST ATTEMPT " + String(task.status).toUpperCase())
+            }
+            if (execution && execution.reason && execution.state !== "waiting") {
+                details.push(String(execution.reason))
+            }
             if (task && task.schedule) {
                 details.push("TRIGGER · SCHEDULE · " + task.schedule)
             }
             if (task && Array.isArray(task.triggers) && task.triggers.length) {
                 details.push("TRIGGER · EVENT · " + task.triggers.join(" · "))
-            }
-            if (task && Number(task.queue_depth || 0) > 0) {
-                details.push(String(task.queue_depth) + " QUEUED")
-            }
-            if (task && ["running", "review", "failed", "blocked"].includes(task.status)) {
-                details.push(String(task.status).toUpperCase())
-            }
-            if (task && task.blocked_reason) {
-                details.push(task.blocked_reason)
             }
             if (!task?.schedule && !(task && Array.isArray(task.triggers)
                     && task.triggers.length) && row.scopeOwner) {
@@ -569,6 +610,33 @@ Rectangle {
             }
         }
         return details.join("   ·   ")
+    }
+
+    function taskHint(row) {
+        const task = row.task
+        const execution = task ? task.execution : null
+        const lines = [taskDetail(row)]
+        if (execution && execution.reason) {
+            lines.push(String(execution.reason))
+        }
+        if (execution && execution.last_run) {
+            const last = execution.last_run
+            if (last.id) {
+                let label = "Last attempt: " + last.id + " · " + String(last.status || "unknown").toUpperCase()
+                if (Number.isFinite(Number(last.finished)) && Number(last.finished) > 0) {
+                    label += " · " + new Date(Number(last.finished) * 1000).toLocaleString()
+                }
+                lines.push(label)
+            }
+            if (last.summary) {
+                lines.push(String(last.summary))
+            }
+        }
+        const blocked = runBlockedReason(task)
+        if (task && blocked) {
+            lines.push(blocked)
+        }
+        return lines.join("\n\n")
     }
 
     function roleColor(role, dimmed) {
@@ -887,6 +955,29 @@ Rectangle {
                 acceptedButtons: Qt.NoButton
             }
 
+            ToolTip {
+                id: executionHint
+
+                parent: taskRow
+                visible: rowMouse.containsMouse && text.length > 0
+                delay: 450
+                width: Math.max(180, Math.min(520, taskList.width - 16))
+                text: root.taskHint(taskRow.modelData)
+                contentItem: Text {
+                    text: executionHint.text
+                    color: "#d5e8f2"
+                    font.family: "JetBrains Mono"
+                    font.pixelSize: 10
+                    wrapMode: Text.Wrap
+                }
+                background: Rectangle {
+                    color: "#07101b"
+                    border.width: 1
+                    border.color: "#4267e8f9"
+                    radius: 4
+                }
+            }
+
             Item {
                 id: taskCell
 
@@ -958,8 +1049,7 @@ Rectangle {
                     anchors.topMargin: 4
                     text: root.taskDetail(taskRow.modelData)
                     color: taskRow.modelData.excludedBy ? "#bffbbf24"
-                        : (taskRow.modelData.task && taskRow.modelData.task.blocked_reason)
-                            ? "#bffb7185" : "#527dd3fc"
+                        : "#8aafbf"
                     elide: Text.ElideRight
                     font.family: "JetBrains Mono"
                     font.pixelSize: 8
@@ -1097,17 +1187,19 @@ Rectangle {
                         visible: Boolean(taskRow.modelData.task
                             && taskRow.modelData.task.runbook
                             && !taskRow.modelData.excludedBy)
-                        width: visible ? 24 : 0
+                        width: visible ? (root.retryTask(taskRow.modelData.task) ? 40 : 24) : 0
                         height: 24
-                        text: "▶"
+                        text: root.retryTask(taskRow.modelData.task) ? "Retry" : "▶"
                         idleBorderOpacity: 0.25
                         idleTextOpacity: 0.70
                         textPixelSize: 9
                         textLetterSpacing: 0
                         contentHorizontalPadding: 0
                         enabled: taskRow.modelData.task
-                            && root.busyRef !== taskRow.modelData.task.ref
-                            && taskRow.modelData.task.status !== "running"
+                            && !root.busyRef
+                            && !root.runBlockedReason(taskRow.modelData.task)
+                        Accessible.name: root.retryTask(taskRow.modelData.task) ? "Retry last attempt" : "Run Task"
+                        Accessible.description: root.runBlockedReason(taskRow.modelData.task)
                         onClicked: root.runNow(taskRow.modelData.task)
                     }
                 }

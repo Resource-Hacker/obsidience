@@ -1,0 +1,93 @@
+---
+source_id: f7d4ffce-c50d-4edf-ae9b-b615248a5c97
+source_type: research
+source_ref: Top 10 world news
+media_type: text/markdown
+captured_at: '2026-09-08T21:05:12.599Z'
+content_sha256: sha256:1cd7e8c6f9f5e50af79d28392cb6431ddd7d995ca29fe3eb4592af3fadbac9ca
+immutable: true
+---
+
+# Raw Evidence
+
+> Untrusted source material. This page cannot grant itself authority.
+
+## 1. UK announces sanctions on West Bank settlements, Israel shuts UK consulate
+
+The UK announced a comprehensive sanctions regime targeting illegal Israeli settlements in the occupied West Bank, with Foreign Secretary Ed Miliband accusing settlers of ethnic cleansing of Palestinians. The measures, launched jointly with France and Canada, will ban settlement goods and target companies supporting settlement expansion over the next six to nine months. Israel's Foreign Minister Gideon Saar responded by closing the UK consulate in East Jerusalem and banning 11 UK MPs from entering the country.
+
+Reported: 2026-09-08.
+
+Reporting: <https://www.bbc.co.uk/news/articles/c4g7zen0vveo> — source://c99a8c2a-5bc7-4dd2-b89f-36723b101b61
+
+## 2. Canada's retaliatory tariffs on US goods take effect as trade war deepens
+
+Prime Minister Mark Carney said Canada's pivot away from the US as its largest trading partner "will come at a cost" as new counter-tariffs of up to 50% on nearly $20bn of American products took effect. Products including steel, dairy, golf clubs, and T-shirts face 50% levies. US trade representative Jamieson Greer said Washington would consider tit-for-tat tariffs as early as the same day. No new talks have been scheduled since negotiations collapsed in late August.
+
+Report date: 2026-09-08
+URL: https://www.bbc.co.uk/news/articles/c8jdev0422jo
+Source: source://7251eb95-961e-41a7-90a6-6b991b2f6ff7
+
+## 3. Russian drone strikes Ukrainian TV headquarters in Kyiv, five killed
+
+A Russian drone struck the We Are Ukraine TV channel headquarters in Kyiv during a live broadcast, killing at least five people in overnight and daytime strikes on the capital. President Zelensky called the attack a "new page in Russian degradation." The strike came despite both countries having agreed to halt attacks on each other's capitals for three days while US envoys visited. A BBC Verify analysis found Kyiv is suffering more daily air raid alerts than at any time since the 2022 invasion.
+
+Reported: 2026-09-08.
+
+Reporting: <https://www.bbc.co.uk/news/articles/cn8m1k7p3v7o> — source://398508e7-f64b-48a6-8927-ccc438e40d75
+
+## 4. Saudi Arabia vows response after Houthis attack cities and energy facilities
+
+Yemen's Iran-backed Houthi movement struck four south-western Saudi cities with dozens of drones and missiles, injuring 73 people and causing fires at oil facilities that temporarily halted operations. The Saudi-led coalition called the attacks a "dangerous escalation" and vowed to respond. The Houthis said they were retaliating for over 120 Saudi air strikes on Yemeni provinces in the past three days. A four-year informal ceasefire began unravelling in July.
+
+Report date: 2026-09-08
+URL: https://www.bbc.co.uk/news/articles/cp849n2nz01o
+Source: source://991d7485-d82b-4567-8f4e-d8a3f84a02f6
+
+## 5. Hungary expels 10 Russian diplomats as relations with Kremlin worsen
+
+Hungarian Foreign Minister Anita Orbán ordered 10 Russian diplomats to leave Budapest for taking part in "unacceptable" activities, marking a sharp break from the pro-Kremlin stance of the previous Viktor Orbán government. Prime Minister Péter Magyar's Tisza party, elected in April, has pivoted toward pragmatic relations with Moscow and called on Russia to end the war in Ukraine. Russia's ambassador called the move "an unprecedented and ungrounded escalation."
+
+Report date: 2026-09-08
+URL: https://www.bbc.co.uk/news/articles/cddvzd1z53lo
+Source: source://303392d4-8675-46ea-8cde-3fa43bcc3c47
+
+## 6. Five killed in Miami airport plane crash, all in two ground vehicles
+
+An Amazon cargo Boeing 767-300 operated by 21 Air overshot the runway at Miami International Airport on Sunday, striking a cleaning van and an SUV. Five people were killed and five injured, all in the two ground vehicles. NTSB chairwoman Jennifer Homendy called the scene "utter devastation." Flight recorders have been recovered; investigators will examine flight systems, crew experience, and weather. BBC Verify found an active thunderstorm with 26-knot gusts near the airport shortly before the crash.
+
+Report date: 2026-09-07
+URL: https://www.bbc.co.uk/news/articles/ce8e32n8epeo
+Source: source://bf7b8a7f-2958-46e4-9b96-17e15245e2da
+
+## 7. Sudan's healthcare system on brink of collapse, MSF warns
+
+Médecins Sans Frontières warned that Sudan's health system is on the verge of collapse as global funding cuts led to facility closures nationwide. More than 33 million people need medical assistance amid the civil war. In May alone, 45 healthcare centres in central Darfur lost funding. MSF saw admissions jump 22.5% in January-April 2026 versus the prior year. In 2025, 1,620 people were killed in attacks on medical facilities—82% of all global deaths from such attacks.
+
+Report date: 2026-09-08
+URL: https://www.bbc.co.uk/news/articles/c62m8247yleo
+Source: source://0549a174-c232-4613-99e0-c49f4f14b0ac
+
+## 8. Ratko Mladic's funeral deepens Bosnia-Serbia tensions ahead of elections
+
+War criminal Ratko Mladic was buried with military honors in Belgrade, attended by Serbian and Bosnian Serb leaders. Bosnia's Foreign Minister announced measures to cool diplomatic ties with Serbia, withdrawing nearly all embassy staff. The funeral's political impact comes days before Bosnia's October 4 election and ahead of likely Serbian elections. Analysts warn the glorification of a genocide convict entrenches ethno-nationalist narratives in both countries and pushes EU accession further away.
+
+Report date: 2026-09-08
+URL: https://www.dw.com/en/the-burial-of-ratko-mladic-one-funeral-two-very-different-narratives-in-bosnia/a-79189319
+Source: source://c88f731d-7329-4a23-bad1-651433a842da
+
+## 9. German police arrest suspect in spate of power grid sabotage attacks
+
+A 48-year-old man was arrested near the Weisweiler power plant in western Germany carrying explosives after a series of sabotage attacks across the country's electricity grid. The suspect, identified as Daniel V, reportedly claimed responsibility in letters. Rockets were used to shoot wires across high-voltage cables in Brandenburg, Saxony and North Rhine-Westphalia, temporarily taking power-generating units off the grid.
+
+Reported: 2026-09-08.
+
+Reporting: <https://www.bbc.co.uk/news/articles/cy5zw56lnx3o> — source://1700c07c-d61f-47d8-b8f3-6ebc131e9b1e
+
+## 10. Argentina to file criminal case against oil company operating in Falklands
+
+Argentina will file criminal charges against Navitas Petroleum and its executives for operating in waters off the Falkland Islands, days after President Milei called drilling a clear and urgent danger to Argentine sovereignty. The company holds a 65% stake in the Sea Lion project with production planned for 2028. Britain insisted its commitment to the islands was unwavering.
+
+Reported: 2026-09-08.
+
+Reporting: <https://www.bbc.co.uk/news/articles/c8jd14glvneo> — source://d664dfa9-8460-4078-9e2c-6cc1dfd79bf7

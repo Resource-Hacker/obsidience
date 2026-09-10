@@ -122,8 +122,10 @@ class KnowledgeDesktop:
 
         if self.window is not None:
             GtkLayerShell.set_monitor(self.window, monitor)
+            # Rebind a returning monitor without discarding its resident page.
+            # Navigation is needed only when the logical Surface changes.
             if self.webview is not None and previous_surface_id != surface_id:
-                self.webview.load_uri(self._knowledge_url(surface_id))
+                self.webview.load_request(self._knowledge_request(surface_id))
             self.window.show_all()
             print(
                 "obsidience knowledge desktop: "
@@ -135,14 +137,16 @@ class KnowledgeDesktop:
         window = Gtk.Window(type=Gtk.WindowType.TOPLEVEL)
         window.set_title("Obsidience Knowledge Desktop")
         window.set_decorated(False)
-        window.set_accept_focus(False)
+        window.set_accept_focus(True)
 
         GtkLayerShell.init_for_window(window)
         GtkLayerShell.set_namespace(window, "obsidience-knowledge-desktop")
         GtkLayerShell.set_monitor(window, monitor)
         GtkLayerShell.set_layer(window, GtkLayerShell.Layer.BACKGROUND)
         GtkLayerShell.set_exclusive_zone(window, 0)
-        GtkLayerShell.set_keyboard_mode(window, GtkLayerShell.KeyboardMode.NONE)
+        # Native on-demand focus lets the trace disclosures receive Tab/Enter
+        # only after user interaction; the background never reserves keyboard focus.
+        GtkLayerShell.set_keyboard_mode(window, GtkLayerShell.KeyboardMode.ON_DEMAND)
         for edge in (
             GtkLayerShell.Edge.TOP,
             GtkLayerShell.Edge.RIGHT,
@@ -181,7 +185,7 @@ class KnowledgeDesktop:
         )
 
         window.add(webview)
-        webview.load_uri(self._knowledge_url(surface_id))
+        webview.load_request(self._knowledge_request(surface_id))
         self.window = window
         self.webview = webview
         window.show_all()
@@ -193,6 +197,16 @@ class KnowledgeDesktop:
             f"{KNOWLEDGE_ORIGIN}?surface=knowledge"
             f"&surface_id={surface_id}"
         )
+
+    @staticmethod
+    def _knowledge_request(surface_id: str) -> WebKit2.URIRequest:
+        request = WebKit2.URIRequest.new(
+            KnowledgeDesktop._knowledge_url(surface_id)
+        )
+        # Revalidate the mutable entrypoint, including copies cached before the
+        # server advertised no-cache. Keep persistent preferences and hashed assets.
+        request.get_http_headers().replace("Cache-Control", "no-cache")
+        return request
 
 
 def main() -> int:

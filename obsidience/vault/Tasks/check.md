@@ -1,20 +1,25 @@
 ---
-assignee: '[[Agents/Heimdall/Heimdall]]'
-kind: task
-last_run: d84fd1da2c65
-model: obsidience-qwen38-27b-q8
-reasoning_effort: xhigh
-runbook: '[[Runbooks/check]]'
-schedule: 30 */6 * * *
-status: completed
-status_updated: '2026-09-01T18:12:10'
-summary: 'harness.status returned a healthy read-only snapshot: status healthy; graph_nodes
-  216, graph_links 401, notes 159, source_files 512, source_issues 0, recent_runs
-  20, recent_failures 1, reviews_pending 1, tasks 21; tasks_by_status completed 8,
-  draft 11, review 1, running 1.'
-taxonomy_path: wiki/check
+type: task
 title: Check
+obsidience:
+  assignee: '[[Agents/Heimdall/Heimdall]]'
+  model: obsidience-qwen38-27b-q8
+  reasoning_effort: xhigh
+  runbook: '[[Runbooks/check]]'
+  schedule: 30 */6 * * *
+  taxonomy_path: wiki/check
 ---
 
 Inspect one deterministic Obsidience harness snapshot and report its observed
-health without shell access, repair attempts, or inferred success.
+health without shell access, repair attempts, or inferred success. Completion
+means the inspection and report succeeded. A valid degraded finding remains a
+successful Check with an explicitly degraded result; only failure to obtain or
+report the required snapshot fails the Check execution.
+
+Include relevant recurring execution patterns from that same snapshot, with
+their bounded sample and recorded revision. Keep this historical evidence
+separate from the present healthy or degraded finding.
+
+After a completed degraded result, the existing controller emits
+`harness.degraded` to Heimdall's separate Repair Task. Check remains inspection
+and never performs recovery itself.

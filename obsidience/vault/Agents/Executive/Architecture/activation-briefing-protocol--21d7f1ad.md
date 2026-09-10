@@ -51,6 +51,17 @@ Retrieval failure may remove optional context but can never invent authority,
 procedure, a Tool, or a success claim. Immediate Observations is attached by
 exact identity rather than search.
 
+The existing Action Trace exposes bounded Knowledge selection accounting
+inside the Thinking Packet's Relevant Knowledge section. It identifies eligible
+search hits and examined direct-seed neighbors as supplied, excerpted, or
+omitted, with the selection reason and exact body character range where
+available. These counts describe that nominated candidate set, not every
+Article in the Vault. At most 32 entries are displayed, with omitted-entry
+counts and explicit clipping. Per-chunk character-based token estimates are
+selection diagnostics; they exclude joining separators and are separate from
+the exact tokenizer count of the complete provider request. This projection
+adds no provider instructions, authority, Article kind, or memory store.
+
 A Tool Article is the graph-facing interface to a real Source-backed Capability.
 A Skill teaches that Tool. Internal Obsidience Modules such as retrieval,
 execution, scheduling, indexing, Source storage, review, and speech transport

@@ -2,12 +2,10 @@
 
 ``index`` is never a semantic kind.  A Task Article with children is an index
 because it has children; a terminal Task Article is a leaf.  The top-level
-Wiki and Research Articles are Knowledge Articles that describe and organize
-their Task descendants without becoming runnable work themselves. Observations,
-Executive and Generate remain Tasks because each names a completable outcome
-family whose descendants define that work. Observations is Knowledge: its
-children describe the context lifecycle and expose only the two real
-transition Tasks.
+Wiki, Research, Executive, and Observations Articles are Knowledge Articles
+that describe and organize their Task descendants without becoming runnable
+work themselves. Generate remains an outcome family; Observations exposes
+only the two real context-lifecycle transition Tasks.
 """
 
 from __future__ import annotations
@@ -23,20 +21,11 @@ def _leaves(*names: str) -> Tree:
 
 
 TASK_TAXONOMY: Tree = {
-    # Each level is an Article that condenses the one below it. Immediate is
-    # the raw context window, Temporary is its cumulative compaction layer,
-    # and Durable is the ordinary accepted knowledge graph. Only transitions
-    # with bounded outcomes are Tasks.
-    "observations": {
-        "immediate": _leaves("compact"),
-        "temporary": {},
-        "durable": _leaves("promote"),
-    },
-    # Executive outcomes stay shallow. Computer Use absorbs the stable
-    # ``operate`` identity; observe, act, and launch remain Tool/Skill details.
-    "executive": _leaves(
-        "realtime", "respond", "operate", "recall", "delegate", "plan", "schedule", "monitor"
-    ),
+    # The outcome family exposes its two runnable transitions as direct peers.
+    "observations": _leaves("compact", "promote"),
+    # Speech is a connection to the same user work as typed Chat. Query keeps
+    # its existing canonical Article while grouping beside Computer Use.
+    "executive": _leaves("query", "operate"),
     # The wiki loop exposes only outcome-bearing operations. Collection,
     # extraction, copyediting, classification, and contradiction checks are
     # procedural Runbook steps rather than fake independently
@@ -45,7 +34,6 @@ TASK_TAXONOMY: Tree = {
     # alter either Task's authored hierarchy.
     "wiki": {
         "ingest": {},
-        "query": {},
         "curate": {},
         "merge": {},
         "link": {},
@@ -53,68 +41,52 @@ TASK_TAXONOMY: Tree = {
         "archive": {},
         "audit": {},
         "check": {},
+        "repair": {},
     },
     # Framing, discovery, collection, screening, assessment, extraction,
     # analysis, and verification are the Research Runbook's procedure. The
     # Task tree keeps only distinct evidence-producing outcomes. Model is a
     # real queueable hardware-characterization result, not a procedural stage.
-    "research": _leaves("question", "learn", "news", "model"),
+    "research": _leaves("question", "learn", "distill", "model"),
     "generate": _leaves("tool", "skill", "task", "runbook"),
 }
 
 TASK_TRIGGERS = {
-    "executive": ("voice.activation",),
-    "observations/durable/promote": ("observations.temporary.ready",),
+    "observations/promote": ("observations.temporary.ready",),
     "wiki/ingest": ("source.inbox",),
-    "research/learn": ("source.added",),
+    "wiki/repair": ("harness.degraded",),
+    "research/question": ("task.create",),
+    "research/learn": ("source.added", "task.create"),
+    "research/distill": ("source.added",),
     "research/model": ("model.added",),
-    "generate/runbook": ("task.checkout",),
-}
-
-TASK_ROUTING = {
-    "executive": "adaptive",
+    "generate/runbook": ("task.assigned",),
 }
 
 TASK_KNOWLEDGE_PATHS = frozenset({
     "observations",
-    "observations/immediate",
-    "observations/temporary",
-    "observations/durable",
     "wiki",
     "research",
+    "executive",
 })
 
 TASK_SUMMARIES = {
     "observations": (
         "The Executive memory lifecycle: raw Immediate Observations are compacted into cumulative Temporary Observations, then selected material is proposed into the ordinary reviewed knowledge graph."
     ),
-    "observations/immediate": "The Executive's raw active context window: the latest cumulative summary plus exact completed dialogue after it.",
-    "observations/immediate/compact": "Condense the completed Immediate Observations prefix into one cumulative Temporary Observation.",
-    "observations/temporary": "The bounded sequence of cumulative, transient, unverified compaction summaries for closed and active Executive context.",
-    "observations/durable": "The ordinary accepted knowledge graph after owner-reviewed promotion; it is not a separate memory store.",
-    "observations/durable/promote": "Alexandria archives one closed session's Temporary Observations in Source and stages only justified durable Knowledge changes.",
+    "observations/compact": "Condense the completed Immediate Observations prefix into one cumulative Temporary Observation.",
+    "observations/promote": "Alexandria archives one closed session's Temporary Observations in Source and stages only justified durable Knowledge changes.",
     "executive": (
-        "The voice-activated Task family owned by Executive. "
-        "It selects the relevant child task families automatically for each request."
+        "The owner's interactive work: Query answers a question and Computer Use produces one verified computer outcome, through typed Chat or speech."
     ),
-    "executive/respond": "Deliver the concise, verified owner-facing result or clarification.",
-    "executive/realtime": (
-        "Maintain one low-latency interruptible Executive session with direct Tool steps and explicit peer-Task delegation."
-    ),
-    "executive/operate": "Produce and verify one requested computer effect through checked-out executable Tools.",
-    "executive/recall": "Retrieve accepted graph knowledge needed for the current request.",
-    "executive/delegate": "Assign one bounded outcome to the appropriate specialist agent.",
-    "executive/plan": "Produce one bounded plan with explicit outcome and acceptance conditions.",
-    "executive/schedule": "Attach or revise one Task activation schedule.",
-    "executive/monitor": "Observe one active or recurring Task against its expected outcome.",
+    "executive/query": "Executive answers the owner's current question from the graph, current evidence, and activation packet.",
+    "executive/operate": "Produce and verify one requested computer effect through the Task's executable Tools.",
     "wiki": (
-        "The graph-native wiki Tasks: Ingest, Query, Curate, Merge, Link, "
-        "Improve, Archive, Audit, and Check."
+        "The graph-native wiki Tasks: Ingest, Curate, Merge, Link, "
+        "Improve, Archive, Audit, Check, and Repair."
     ),
     "wiki/ingest": (
         "Alexandria transforms one source-backed handoff from the physical Source Inbox into coherent wiki Knowledge."
     ),
-    "wiki/query": "Executive answers the owner from the current graph and activation packet.",
     "wiki/curate": (
         "Alexandria inspects one bounded maintenance snapshot and activates at most one exact accepted peer Task required by the Curate Runbook."
     ),
@@ -136,15 +108,18 @@ TASK_SUMMARIES = {
     "wiki/check": (
         "Heimdall checks one deterministic harness snapshot and reports the observed state."
     ),
-    "research": "The four evidence-producing outcomes owned by Darwin: Question, Learn, News, and Model.",
+    "wiki/repair": (
+        "Heimdall applies supported recovery to current harness findings and reports verified disposition and remaining blockers."
+    ),
+    "research": "The four evidence-producing outcomes owned by Darwin: Question, Learn, Distill, and Model.",
     "research/question": (
         "Darwin answers one bounded research question with preserved direct-source evidence."
     ),
     "research/learn": (
         "Darwin closes one useful knowledge gap or researches one newly added Source, then drops a source-backed handoff into the physical Source Inbox."
     ),
-    "research/news": (
-        "Darwin produces one bounded current-events finding from unique direct article sources."
+    "research/distill": (
+        "Darwin distills one captured Feed item into a source-cited handoff for its configured Feed destination."
     ),
     "research/model": (
         "Darwin characterizes one added local model across its valid hardware layouts and preserves the results."
@@ -164,12 +139,11 @@ TASK_TITLES = {
 # Existing persisted Tasks absorb their closest semantic Task Article.
 # Knowledge roots remain navigation-only while descendant Tasks stay checkoutable.
 CANONICAL_TASK_BY_PATH = {
-    "executive/realtime": "Tasks/executive/realtime",
-    "observations/immediate/compact": "Tasks/observations/immediate/compact",
-    "observations/durable/promote": "Tasks/observations/durable/promote",
+    "executive/query": "Tasks/query",
+    "observations/compact": "Tasks/observations/immediate/compact",
+    "observations/promote": "Tasks/observations/durable/promote",
     "executive/operate": "Tasks/executive/operate",
     "wiki/ingest": "Tasks/ingest",
-    "wiki/query": "Tasks/query",
     "wiki/curate": "Tasks/curate",
     "wiki/merge": "Tasks/merge",
     "wiki/link": "Tasks/link",
@@ -177,9 +151,10 @@ CANONICAL_TASK_BY_PATH = {
     "wiki/archive": "Tasks/archive",
     "wiki/audit": "Tasks/audit",
     "wiki/check": "Tasks/check",
+    "wiki/repair": "Tasks/repair",
     "research/question": "Tasks/research/question",
     "research/learn": "Tasks/research/learn",
-    "research/news": "Tasks/research/news",
+    "research/distill": "Tasks/research/distill",
     "research/model": "Tasks/research/model",
     "generate/runbook": "Tasks/generate/runbook",
     "generate/tool": "Tasks/generate/tool",
@@ -209,7 +184,6 @@ def _flatten(tree: Tree, parent: str = "") -> tuple[TaskTaxonomyNode, ...]:
             kind="knowledge" if path in TASK_KNOWLEDGE_PATHS else "task",
             children=tuple(f"{path}/{child}" for child in children),
             triggers=TASK_TRIGGERS.get(path, ()),
-            routing=TASK_ROUTING.get(path),
             summary=TASK_SUMMARIES.get(path),
         ))
         rows.extend(_flatten(children, path))

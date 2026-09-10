@@ -26,6 +26,8 @@ Item {
         case "hardware": return "\uf2db"
         case "camera": return "\uf06e"
         case "settings": return "\uf013"
+        case "connections": return "\uf0c1"
+        case "feeds": return "\uf09e"
         case "applications": return "\uf1b3"
         case "terminal": return "\uf120"
         case "displays": return "\uf108"

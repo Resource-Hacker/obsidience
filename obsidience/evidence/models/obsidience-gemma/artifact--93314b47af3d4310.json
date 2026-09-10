@@ -1,0 +1,39 @@
+{
+  "artifact": {
+    "expected_size_bytes": null,
+    "installed": true,
+    "path": "/home/wissenschafter/Projects/obsidience/obsidience/state/models/executive.gguf",
+    "resolved_path": "/var/lib/ai/models/jarvis-fixed/gemma-4-26b-a4b-it-qat-7b92b5b2/gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf",
+    "size_bytes": 14249047104
+  },
+  "benchmark_kind": "tokens",
+  "capabilities": [
+    "text",
+    "vision",
+    "reasoning",
+    "tools"
+  ],
+  "fingerprint": "sha256:93314b47af3d4310537553ab5c597e861b40e055a590d98d51b4ed6f3d1dabc1",
+  "hardware_assignable": true,
+  "label": "Gemma 4 26B-A4B",
+  "model_id": "obsidience-gemma",
+  "projector": {
+    "installed": true,
+    "path": "/var/lib/ai/models/jarvis-fixed/gemma-4-26b-a4b-it-qat-7b92b5b2/mmproj-F16.gguf",
+    "sha256": "d00f211a7d4f7fb19bd9b75d8e9342eccffb5920b08fd9562167560fdfcc5dd1",
+    "size_bytes": 1193058784
+  },
+  "quantization": "Q4_K_XL",
+  "runtime": "llama.cpp b10078",
+  "runtime_path": null,
+  "schema": "obsidience.model-source.v1",
+  "service": "obsidience-gemma.service",
+  "supported_device_sets": [
+    [
+      "rtx4000"
+    ]
+  ],
+  "task_capable": true,
+  "verification": [],
+  "verification_path": null
+}

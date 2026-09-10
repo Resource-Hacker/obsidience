@@ -17,6 +17,14 @@ QtObject {
     readonly property int minimumTileCount: 1
     readonly property int maximumTileCount: 16
     readonly property int workspaceTileGap: 5
+    readonly property int minimumTileResizeLimitPercent: 0
+    readonly property int maximumTileResizeLimitPercent: 25
+    readonly property int minimumOledShiftDistancePx: 1
+    readonly property int maximumOledShiftDistancePx: 50
+    readonly property int minimumOledTravelDurationSeconds: 60
+    readonly property int maximumOledTravelDurationSeconds: 86400
+    readonly property int minimumOledGlowRotationHours: 1
+    readonly property int maximumOledGlowRotationHours: 24
     // The auto-hidden shelf reserves no pane workspace.
     readonly property int paneTopInset: 0
 
@@ -24,6 +32,11 @@ QtObject {
     property var surfaces: []
     property string graphSurfaceId: "samsung"
     property int paneGridSize: 10
+    property int tileResizeLimitPercent: 25
+    property bool oledModeEnabled: false
+    property int oledShiftDistancePx: 32
+    property int oledTravelDurationSeconds: 3600
+    property int oledGlowRotationHours: 3
     property var workspaceTiling: ({
         "samsung": {"columns": 8, "rows": 2},
         "usb-c": {"columns": 3, "rows": 2},
@@ -83,6 +96,30 @@ QtObject {
                 && value <= maximumPaneGridSize ? value : 10
     }
 
+    function normalizeTileResizeLimitPercent(value) {
+        return Number.isInteger(value)
+                && value >= minimumTileResizeLimitPercent
+                && value <= maximumTileResizeLimitPercent ? value : 25
+    }
+
+    function normalizeOledShiftDistancePx(value) {
+        return Number.isInteger(value)
+                && value >= minimumOledShiftDistancePx
+                && value <= maximumOledShiftDistancePx ? value : 32
+    }
+
+    function normalizeOledTravelDurationSeconds(value) {
+        return Number.isInteger(value)
+                && value >= minimumOledTravelDurationSeconds
+                && value <= maximumOledTravelDurationSeconds ? value : 3600
+    }
+
+    function normalizeOledGlowRotationHours(value) {
+        return Number.isInteger(value)
+                && value >= minimumOledGlowRotationHours
+                && value <= maximumOledGlowRotationHours ? value : 3
+    }
+
     function defaultTiling() {
         return {
             "samsung": {"columns": 8, "rows": 2},
@@ -135,6 +172,20 @@ QtObject {
         graphSurfaceId = ids[record.graph_surface_id]
             ? record.graph_surface_id : "samsung"
         paneGridSize = normalizePaneGridSize(record.pane_grid_size)
+        tileResizeLimitPercent = normalizeTileResizeLimitPercent(
+            record.tile_resize_limit_percent
+        )
+        oledModeEnabled = typeof record.oled_mode_enabled === "boolean"
+            ? record.oled_mode_enabled : false
+        oledShiftDistancePx = normalizeOledShiftDistancePx(
+            record.oled_shift_distance_px
+        )
+        oledTravelDurationSeconds = normalizeOledTravelDurationSeconds(
+            record.oled_travel_duration_seconds
+        )
+        oledGlowRotationHours = normalizeOledGlowRotationHours(
+            record.oled_glow_rotation_hours
+        )
         workspaceTiling = normalizeWorkspaceTiling(record.workspace_tiling)
     }
 
@@ -442,6 +493,50 @@ QtObject {
         return true
     }
 
+    function commitTileResizeLimitPercent(value) {
+        if (!Number.isInteger(value)
+                || value < minimumTileResizeLimitPercent
+                || value > maximumTileResizeLimitPercent) {
+            return false
+        }
+        if (tileResizeLimitPercent === value) {
+            return true
+        }
+        tileResizeLimitPercent = value
+        revision += 1
+        writeState()
+        return true
+    }
+
+    function commitOledSettings(
+            enabled, shiftDistancePx, travelDurationSeconds, glowRotationHours) {
+        if (typeof enabled !== "boolean"
+                || !Number.isInteger(shiftDistancePx)
+                || shiftDistancePx < minimumOledShiftDistancePx
+                || shiftDistancePx > maximumOledShiftDistancePx
+                || !Number.isInteger(travelDurationSeconds)
+                || travelDurationSeconds < minimumOledTravelDurationSeconds
+                || travelDurationSeconds > maximumOledTravelDurationSeconds
+                || !Number.isInteger(glowRotationHours)
+                || glowRotationHours < minimumOledGlowRotationHours
+                || glowRotationHours > maximumOledGlowRotationHours) {
+            return false
+        }
+        if (oledModeEnabled === enabled
+                && oledShiftDistancePx === shiftDistancePx
+                && oledTravelDurationSeconds === travelDurationSeconds
+                && oledGlowRotationHours === glowRotationHours) {
+            return true
+        }
+        oledModeEnabled = enabled
+        oledShiftDistancePx = shiftDistancePx
+        oledTravelDurationSeconds = travelDurationSeconds
+        oledGlowRotationHours = glowRotationHours
+        revision += 1
+        writeState()
+        return true
+    }
+
     function commitWorkspaceTiling(surfaceId, columns, rows) {
         if (!surface(surfaceId) || !Number.isInteger(columns)
                 || !Number.isInteger(rows)
@@ -682,6 +777,11 @@ QtObject {
             "revision": revision,
             "graph_surface_id": graphSurfaceId,
             "pane_grid_size": paneGridSize,
+            "tile_resize_limit_percent": tileResizeLimitPercent,
+            "oled_mode_enabled": oledModeEnabled,
+            "oled_shift_distance_px": oledShiftDistancePx,
+            "oled_travel_duration_seconds": oledTravelDurationSeconds,
+            "oled_glow_rotation_hours": oledGlowRotationHours,
             "workspace_tiling": workspaceTiling,
             "surfaces": surfaces
         }

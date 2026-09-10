@@ -1,6 +1,8 @@
 [Unit]
 Description=Obsidience Three.js knowledge desktop
-Requires=obsidience-shell-host.service obsidience-harness-dev.service
+Requires=obsidience-shell-host.service
+# The resident graph reconnects when its data provider restarts.
+Wants=obsidience-harness-dev.service
 After=obsidience-shell-host.service obsidience-harness-dev.service
 PartOf=obsidience-shell-session.target
 StartLimitIntervalSec=30

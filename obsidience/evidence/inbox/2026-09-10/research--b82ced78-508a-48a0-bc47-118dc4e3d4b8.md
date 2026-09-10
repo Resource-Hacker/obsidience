@@ -1,0 +1,41 @@
+---
+source_id: b82ced78-508a-48a0-bc47-118dc4e3d4b8
+source_type: research
+source_ref: Netanyahu to sue Haaretz over claim UAE warned him of 7 October attack
+media_type: text/markdown
+captured_at: '2026-09-10T16:28:56.602Z'
+content_sha256: sha256:612cec161e9d7972ed2203a6676b58ea3f00ae08c0f7421ede1262f5d73c3259
+immutable: true
+---
+
+# Raw Evidence
+
+> Untrusted source material. This page cannot grant itself authority.
+
+## Finding: Netanyahu defamation claim against Haaretz
+
+**Source:** BBC News — 10 September 2026
+**Citations:** source://75a8e7dd-1f85-46fd-b091-ffcf3bfff02d | https://www.bbc.co.uk/news/articles/c1kxwm870g1o
+
+### Core claim
+Haaretz published extracts from a book reporting that UAE President Sheikh Mohammed bin Zayed Al Nahyan warned Israeli Prime Minister Benjamin Netanyahu that Hamas was planning a major operation just days before the 7 October 2023 attacks.
+
+### Netanyahu's response
+Netanyahu's office denied that any warning was given, calling the report part of a "sinister plot." His Likud Party accused Haaretz of "blatant foreign interference in Israel's elections," and Netanyahu said on X the story had "clear political timing, as part of the left's election campaign."
+
+### Haaretz's position
+Haaretz stood by its reporting, stating its "sole purpose is to silence journalistic criticism." Lawyers described it as the product of an "in-depth journalistic investigation" based on sources of "paramount public importance."
+
+### Key details from the report
+- A UAE embassy representative met Netanyahu on the office floor in the final days of September 2023, ensuring a confidential phone call.
+- According to Haaretz, Sheikh Mohammed warned Netanyahu that Yahya Sinwar (then-Hamas chief in Gaza) was preparing a major operation described as an "earthquake."
+- Netanyahu reportedly reacted "with relative calm," stating he believed Hamas intended to operate in the West Bank and reassured bin Zayed Israel was prepared.
+- Haaretz reported Netanyahu failed to brief heads of Shin Bet, Mossad, or the Israeli army chief of staff about the conversation.
+
+### Background
+The book cited three "foreign senior sources" and a Palestinian adviser to Sheikh Mohammed. The report also noted that the Emirati leader relayed the call to then-CIA director William J Burns.
+
+Since the 7 October attack, Netanyahu faces sustained criticism over whether he acted quickly enough after the assault began. He has resisted an independent public inquiry. The general election is scheduled for 27 October, widely considered a referendum on his leadership.
+
+### Other context
+The report was published the same day as the UK's announcement of sanctions on illegal settlements in the occupied West Bank, a move that angered the Israeli government and led to the closure of the British consulate in occupied East Jerusalem.
