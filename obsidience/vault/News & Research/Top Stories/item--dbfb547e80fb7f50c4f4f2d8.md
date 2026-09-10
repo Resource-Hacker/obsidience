@@ -2,48 +2,46 @@
 type: knowledge
 generated:
   by: obsidience/harness/knowledge/curation.py#feed
-  at: '2026-09-10T07:55:01.173Z'
+  at: '2026-09-10T09:29:39.340Z'
 resource: https://www.bbc.co.uk/news/articles/clyjd1jnd03o
 sources:
-- resource: source://1b7e9023-9118-4eaf-9131-57b6bfc703cd
-- resource: source://fdb55c4c-1fa6-4d63-9016-c4e4c2c8355b
-- resource: source://e3f0df91-5ceb-4d13-beda-43bacf187e45
-title: Apple unveils first folding iPhone under new CEO John Ternus
+- resource: source://37465ae0-f09b-4311-aab4-75e601b25324
+- resource: source://8ef6e62e-4b84-403c-8a15-afe88eb6bc17
+- resource: source://debb4b2d-25d4-4a4f-bc60-6e89bb586766
+title: Apple's new boss starts with big gamble on £1,999 first folding iPhone
 obsidience:
-  approved_at: '2026-09-10T00:56:14'
+  approved_at: '2026-09-10T02:30:32'
   provenance: proposed by Alexandria (task Tasks/ingest)
 ---
 
-# Apple Unveils First Folding iPhone Under New CEO
+**Source:** BBC News | **Reporting Date:** 9 September 2026
 
-**Reported by BBC News (Kali Hays, Lily Jamali)**  
-**Published:** 9 September 2026  
-**Source:** [BBC News — Apple's new boss starts with big gamble on $2,000 first folding iPhone](https://www.bbc.co.uk/news/articles/clyjd1jnd03o)  
-**Activating Source:** `source://fdb55c4c-1fa6-4d63-9016-c4e4c2c8355b`
+John Ternus, Apple's new chief executive who took over from Tim Cook this month, has launched the iPhone Duo — the company's first folding phone — priced at £1,999 ($1,999 in the US, up to $3,200). Ternus called it the first major design change to the iPhone in almost two decades, developed over eight years.
 
-## Executive Summary
+The device features a small-passport-sized foldable screen that unfolds to resemble a small iPad. Ternus said it "redefine[s] the experience of using a foldable phone" and aims to avoid the criticism that other models feel "like two phones awkwardly stuck together."
 
-Apple CEO John Ternus has entered his second week in office with the company's first major product change in nearly 20 years: a foldable iPhone called the "Duo," priced at $1,999–$3,200 (UK £1,999–£3,200).
+## Market context
+Foldables still represent a small niche. IDC EMEA's Francisco Jeronimo noted Huawei owns nearly 80% of the foldable market in China. Ben Wood of CCS Insight said foldables currently account for just 2% of smartphone sales, with IDC estimating they may reach only 4% of the total market over the next decade — even with Apple entering the space.
 
-## Key Details
+Analysts offer divergent views:
 
-| Aspect | Detail |
-|--------|--------|
-| Format | Book-style; unfolds like a small iPad, folds to a wider iPhone |
-| Price point | US starts at $1,999, rising to $3,200 |
-| Design goal | Avoid "two phones stuck together" feel of competitors |
-| Other launches | iPhone 18 Pro ($1,199), iPhone 18 Pro Max ($1,299); Siri AI features on iPhone 18 and Apple Watch |
+> "The foldable risks becoming a premium-priced ornament in the portfolio, imparting badge value but not meaningful growth." — Dipanjan Chatterjee, Forrester
 
-## Analyst Perspectives (attributed opinions)
+> "The spotlight on Ternus made it feel almost like he was a product himself," said presenter Carolina Milanesi.
 
-- **Ben Wood (FDM CCS Insight):** Suggests Ternus's promotion was "timed specifically" to coincide with a major iPhone launch, noting "Nothing happens by accident at Apple."
-- **Carolina Milanesi (Creative Strategies):** Called the spotlight on Ternus "almost like he was a product himself." Noted foldable market is only 2% of smartphone sales, expected to reach 4% within a decade.
-- **Dipanjan Chatterjee (Forrester):** Warned the foldable could "become a premium-priced ornament... imparting badge value but not meaningful growth," comparing risk to the Vision Pro headset. Noted user habits may hinder adoption.
+## Software and AI
+Apple also introduced "Siri AI," which will run cross-device queries using messages, emails and other personal data, and take actions on a user's behalf. Some features will run on-device; others will use private cloud servers. Ternus said Apple's approach prioritizes privacy, claiming "not even Apple can access what's yours."
 
-## Context
+## Further context
+- The current highest-priced iPhone was $900 (£664).
+- The iPhone 18 Pro and 18 Pro Max will start at $1,199 and $1,299 respectively.
+- Previous criticism cited Apple's inability to deliver a major product hit since 2007.
+- Apple has previously priced the Vision Pro at $3,699 with mixed adoption.
 
-The iPhone remains Apple's top-selling product, accounting for more than half of the company's annual sales. The foldable is Apple's first significant design change since the iPhone launched in 2007. Ternus oversaw the project during his years as a top executive in Apple's hardware division.
+**Provenance:** [BBC News article](https://www.bbc.co.uk/news/articles/clyjd1jnd03o) (published 9 September 2026).
 
----
+**Citations:**
+- [source://8ef6e62e-4b84-403c-8a15-afe88eb6bc17](source://8ef6e62e-4b84-403c-8a15-afe88eb6bc17) — BBC full report
+- [source://debb4b2d-25d4-4a4f-bc60-6e89bb586766](source://debb4b2d-25d4-4a4f-bc60-6e89bb586766) — RSS feed entry
 
-*Evidence bound from: `source://fdb55c4c-1fa6-4d63-9016-c4e4c2c8355b` and `source://e3f0df91-5ceb-4d13-beda-43bacf187e45`.*
+**Note:** All prices are in US dollars or pounds sterling as stated in the source; conversion is approximate.
