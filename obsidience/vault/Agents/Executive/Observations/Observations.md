@@ -3,7 +3,7 @@ type: knowledge
 title: Observations
 obsidience:
   auto_curate: true
-  approved_at: '2026-09-09T23:39:46'
+  approved_at: '2026-09-10T08:08:40'
   provenance: proposed by Alexandria (task Tasks/link)
 ---
 
@@ -30,5 +30,8 @@ an unverified observation true. Compact and Promote keep their own triggers.
   established interaction and development requirements.
 
 The [Observation lifecycle](/Agents/Executive/Architecture/observations.md) explains
-Compact, Promote, Source archival, and Review. Durable findings belong under their
-actual subject in the accepted graph, not in a second Context or Log collection.
+Compact, Promote, Source archival, and Review. Its Compact and Promote transitions
+are Task activations governed by [Task
+activation](/Agents/Executive/Architecture/task-activation--b30a4642.md), the law that
+reserves only executable edges. Durable findings belong under their actual subject
+in the accepted graph, not in a second Context or Log collection.
