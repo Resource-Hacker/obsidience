@@ -1,4 +1,4 @@
-"""Deterministic ADMECH inventory Articles from immutable System evidence.
+"""Deterministic System inventory Articles from immutable System evidence.
 
 The System schema supplies this publisher's paths. The receipt retains identities
 and hashes, never a second copy of the facts. Authored contracts live in Observations.
@@ -20,8 +20,32 @@ from .vault import _NOTE_WRITE_LOCK, _atomic_write, canonical_body, load_note, w
 
 
 def system_articles() -> dict[str, dict]:
-    from .system_schema import system_schema
-    return {row["key"]: row for row in system_schema()}
+    """Shallow Knowledge hierarchy; raw System descriptors keep their paths.
+
+    Hardware is a Source grouping, not a Knowledge node. Each application is
+    one Article with its registered sub-descriptors included as cited details.
+    """
+    from .system_schema import ROOT_REF, system_schema
+    rows = system_schema()
+    catalog = {}
+    prefix = ROOT_REF.rsplit("/", 1)[0] + "/"
+    hardware = prefix + "Hardware/"
+    for row in rows:
+        key = row["key"]
+        if key == "hardware" or (key.startswith("applications/") and key.count("/") > 1):
+            continue
+        item = dict(row)
+        if key.startswith("hardware/"):
+            item["ref"] = row["ref"].replace(hardware, prefix, 1)
+            item["parent_ref"] = (ROOT_REF if row["parent_ref"] == hardware + "Hardware"
+                else row["parent_ref"].replace(hardware, prefix, 1))
+        elif key.startswith("applications/") and row["path"] != row["descriptor_path"]:
+            item["ref"] = row["ref"].rsplit("/", 1)[0]
+            item["components"] = [child for child in rows if child["key"].startswith(key + "/")]
+        catalog[key] = item
+    if len({item["ref"].casefold() for item in catalog.values()}) != len(catalog):
+        raise ValueError("System descriptors map to ambiguous application Articles")
+    return catalog
 
 
 def _source_category(key: str) -> str:
@@ -174,8 +198,9 @@ def _render(item: dict, facts: dict, source: dict) -> tuple[dict, str]:
     meta = {"kind": "knowledge", "title": item["title"], "tags": ["system-inventory"],
             "generated": {"by": "Obsidience System inventory", "at": source["captured_at"]},
             "sources": [{"resource": source["citation"]}]}
-    if item["descriptor_path"]:
-        meta["sources"].append({"resource": item["descriptor_path"]})
+    for component in (item, *item.get("components", [])):
+        if component["descriptor_path"]:
+            meta["sources"].append({"resource": component["descriptor_path"]})
     body = ("System schema and observed inventory, populated automatically by the Harness.\n\n"
             f"Captured: {source['captured_at']}. [Immutable evidence]({source['citation']}) "
             f"({source['content_sha256']}).\n\n"
@@ -266,6 +291,9 @@ def refresh_system_knowledge(*, sync: bool = True) -> dict:
         for category, item in catalog.items():
             try:
                 facts = system_node_facts(item, inventory)
+                if item.get("components"):
+                    facts["details"] = {component["key"].removeprefix(category + "/"):
+                        system_node_facts(component, inventory) for component in item["components"]}
                 facts["children"] = [{"title": child["title"], "ref": child["ref"]} for child in catalog.values() if child["parent_ref"] == item["ref"]]
                 source = capture_system_evidence(_source_category(category), facts)
                 meta, body = _render(item, facts, source)

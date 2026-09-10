@@ -35,7 +35,7 @@ def test_real_folders_are_hubs_root_and_application_are_absorbed(catalog):
                            "applications", "applications/browser", "applications/browser/runtime"}
     assert by_key["system"]["ref"] == "ADMECH Workstation/ADMECH Workstation"
     assert by_key["system"]["parent_ref"] is None
-    assert by_key["system"]["title"] == "ADMECH Workstation"
+    assert by_key["system"]["title"] == "System"
     app = by_key["applications/browser"]
     assert app["title"] == "Web Browser"
     assert app["ref"] == "ADMECH Workstation/Applications/Browser/Browser"

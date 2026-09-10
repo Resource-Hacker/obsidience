@@ -263,9 +263,156 @@ def apply(expected_plan_sha256: str) -> dict:
         return {**plan, "status": "migrated", "receipt_version": 2, "applied": True}
 
 
+def _flatten_mapping() -> tuple[dict[str, str], dict[str, dict]]:
+    from obsidience.harness.knowledge.system import system_articles
+    catalog = system_articles()
+    mapping = {}
+    for row in system_schema():
+        owner = "system" if row["key"] == "hardware" else row["key"]
+        if owner.startswith("applications/"):
+            owner = "/".join(owner.split("/")[:2])
+        target = catalog[owner]["ref"]
+        if row["ref"] != target:
+            mapping[row["ref"]] = target
+    return mapping, catalog
+
+
+def prepare_flatten() -> dict:
+    """Preflight the shallow System layout against exact publication receipts."""
+    files = _snapshot()
+    receipt_path = _receipt_path()
+    if any(path.is_symlink() for path in (receipt_path, *receipt_path.parents)):
+        raise ValueError("Migration cannot follow a receipt symlink")
+    receipt_raw = receipt_path.read_bytes()
+    state = json.loads(receipt_raw)
+    if state.get("schema_version") != 2 or not isinstance(state.get("categories"), dict):
+        raise ValueError("Flattening requires the existing schema-v2 publisher")
+    mapping, catalog = _flatten_mapping()
+    physical = {row["key"]: row for row in system_schema()}
+    done = set(state["categories"]) == set(catalog)
+    expected = catalog if done else physical
+    if set(state["categories"]) != set(expected):
+        raise ValueError("System publication coverage changed; inspect before migrating")
+    for key, row in expected.items():
+        _publication(files, row["ref"], state["categories"][key])
+    moves = [{"source": row["ref"] + ".md", "destination": catalog[key]["ref"] + ".md"}
+             for key, row in physical.items() if key in catalog and row["ref"] != catalog[key]["ref"]]
+    archives = [{"source": row["ref"] + ".md", "successor": mapping[row["ref"]],
+                 "destination": "_archived/system-hierarchy/" + row["ref"] + ".md"}
+                for key, row in physical.items() if key not in catalog]
+    for item in moves + archives:
+        source, destination = item["source"], item["destination"]
+        if done:
+            if source in files:
+                raise ValueError("Retired System Article still exists: " + source)
+            continue
+        if destination in files:
+            raise ValueError("Migration destination already exists: " + destination)
+        target = CONFIG.vault_dir / destination
+        if any(p.is_symlink() or (p.exists() and not p.is_dir()) for p in target.parents):
+            raise ValueError("Invalid migration destination parent: " + destination)
+        if target.parent.exists() and any(p.name.casefold() == target.name.casefold()
+                                         for p in target.parent.iterdir()):
+            raise ValueError("Case-insensitive migration destination collision: " + destination)
+    # Never remove a generated grouping that still contains unregistered content.
+    for folder in (ROOT + "/Hardware/", ROOT + "/Applications/"):
+        actual = {path for path in files if path.startswith(folder)}
+        registered = {row["ref"] + ".md" for row in expected.values() if (row["ref"] + ".md").startswith(folder)}
+        if actual != registered:
+            raise ValueError("System subtree contains unregistered Articles: " + folder)
+    digest = _sha(json.dumps({"files": {p: _sha(raw) for p, raw in files.items()},
+        "receipt": _sha(receipt_raw), "catalog": catalog, "mapping": mapping}, sort_keys=True).encode())
+    return {"status": "already_migrated" if done else "ready", "plan_sha256": digest,
+            "moves": [] if done else moves, "archives": [] if done else archives,
+            "article_count": len(catalog)}
+
+
+def apply_flatten(expected_plan_sha256: str) -> dict:
+    """Move exact generated Articles, archive wrappers and repair accepted refs."""
+    from datetime import datetime, timezone
+    from obsidience.harness.knowledge.index import INDEX
+
+    with vault._NOTE_WRITE_LOCK:
+        plan = prepare_flatten()
+        if plan["plan_sha256"] != expected_plan_sha256:
+            raise ValueError("Vault or receipt changed since preview; inspect a fresh dry run")
+        if plan["status"] == "already_migrated":
+            return {**plan, "applied": False}
+        mapping, catalog = _flatten_mapping()
+        if any(INDEX.task_runtime(ref) is not None for ref in {*mapping, *mapping.values()}):
+            raise ValueError("Knowledge migration cannot move a reference owning Task runtime")
+        files, receipt_raw = _snapshot(), _receipt_path().read_bytes()
+        state = json.loads(receipt_raw)
+        directories = {path for path in CONFIG.vault_dir.rglob("*") if path.is_dir()}
+        completed = False
+        obsolete = {parent for item in plan["moves"] + plan["archives"]
+                    for parent in (CONFIG.vault_dir / item["source"]).parents
+                    if parent.is_relative_to(CONFIG.vault_dir) and parent != CONFIG.vault_dir}
+        try:
+            for item in plan["archives"]:
+                meta, body = codec.loads(files[item["source"]].decode())
+                meta.update(article_status="deprecated", superseded_by="[[" + item["successor"] + "]]",
+                    archived_at=datetime.now(timezone.utc).isoformat(),
+                    archive_reason="System hierarchy simplified; details retained in the successor Article and immutable Source.")
+                vault._atomic_write(CONFIG.vault_dir / item["destination"], codec.dumps(meta, body))
+                (CONFIG.vault_dir / item["source"]).unlink()
+            for item in plan["moves"]:
+                source = CONFIG.vault_dir / item["source"]
+                destination = CONFIG.vault_dir / item["destination"]
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                vault.move_vault_item(item["source"], destination.parent.relative_to(CONFIG.vault_dir).as_posix(),
+                    _system_migration=(_sha(source.read_bytes()), item["destination"]))
+            # Native accepted-link transformations also rebase references to
+            # absorbed wrappers. Archive editions and raw Source remain untouched.
+            for relative in files:
+                path = CONFIG.vault_dir / relative
+                if not _accepted(relative) or not path.is_file():
+                    continue
+                reserved = path.name.casefold() in {"index.md", "log.md"}
+                parse, serialize = (codec.parse, codec.serialize) if reserved else (codec.loads, codec.dumps)
+                meta, body = parse(path.read_text())
+                updated = vault._rewrite_refs(meta, mapping)
+                rebased = vault.canonical_body(body, relative, mapping)
+                if updated != meta or rebased != body:
+                    vault._atomic_write(path, serialize(updated, rebased))
+            # Include moved Articles in the same reference repair and receipt update.
+            categories = {}
+            for key, item in catalog.items():
+                path = CONFIG.vault_dir / (item["ref"] + ".md")
+                meta, body = codec.loads(path.read_text())
+                if key == "system":
+                    meta["title"] = "System"
+                vault._atomic_write(path, codec.dumps(vault._rewrite_refs(meta, mapping),
+                    vault.canonical_body(body, item["ref"] + ".md", mapping)))
+                row = state["categories"][key]
+                row["published"]["article_sha256"] = _sha(path.read_bytes())
+                categories[key] = row
+            state["categories"] = categories
+            vault._atomic_write(_receipt_path(), json.dumps(state, sort_keys=True, indent=2) + "\n")
+            if prepare_flatten()["status"] != "already_migrated":
+                raise ValueError("System flattening postcondition did not verify")
+            completed = True
+        except BaseException:
+            for path in CONFIG.vault_dir.rglob("*.md"):
+                if path.relative_to(CONFIG.vault_dir).as_posix() not in files:
+                    path.unlink()
+            for relative, raw in files.items():
+                vault._atomic_write(CONFIG.vault_dir / relative, raw.decode())
+            vault._atomic_write(_receipt_path(), receipt_raw.decode())
+            raise
+        finally:
+            # Empty historical wrapper folders must not reappear as graph hubs.
+            for path in sorted(CONFIG.vault_dir.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+                if path.is_dir() and not any(path.iterdir()) and (
+                    path not in directories or (completed and path in obsolete)):
+                    path.rmdir()
+        return {**plan, "status": "migrated", "applied": True}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--flatten", action="store_true", help="Publish System without Hardware or application-detail wrappers")
     parser.add_argument("--expected-plan-sha256", help="Exact plan_sha256 from the reviewed dry run")
     args = parser.parse_args()
     if args.apply:
@@ -275,9 +422,9 @@ def main() -> None:
                                capture_output=True, text=True, check=False).stdout.strip()
         if state not in {"inactive", "failed"}:
             raise SystemExit("Stop the Harness and retain the Vault/SQLite/receipt backup before apply")
-        result = apply(args.expected_plan_sha256)
+        result = (apply_flatten if args.flatten else apply)(args.expected_plan_sha256)
     else:
-        result = {**prepare(), "applied": False}
+        result = {**(prepare_flatten() if args.flatten else prepare()), "applied": False}
     print(json.dumps(result, indent=2))
 
 
