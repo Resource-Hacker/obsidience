@@ -1,9 +1,14 @@
 ---
 type: knowledge
+status: deprecated
 title: Coverage
 obsidience:
   approved_at: '2026-09-09T14:48:37'
   provenance: proposed by Codex (owner-requested maintenance) (task codex:owner-maintenance)
+  archived_at: '2026-09-10T02:48:08Z'
+  archive_reason: Owner requested consolidation into News & Research/News & Research.md;
+    unique coverage and evidence rules are preserved in the parent, making this separate
+    leaf redundant.
 ---
 
 Coverage comes from the owner's configured Connections and Feeds. Each Feed selects the provider endpoint, collection amount, destination, interval, retention limit and optional instructions for Darwin. Publisher ordering and timestamps are evidence about that provider's selection, not an objective ranking of world events.
