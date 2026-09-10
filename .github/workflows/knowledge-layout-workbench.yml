@@ -7,17 +7,29 @@ permissions:
 jobs:
   snapshot:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-      - name: Package source for isolated validation
+      - name: Install locked UI dependencies
         run: |
-          tar -czf /tmp/knowledge-layout-source.tar.gz AGENTS.md DESIGN.md README.md artifacts.lock.json obsidience/ui obsidience/tests obsidience/scripts
+          npm install --global pnpm@10.15.1
+          pnpm --dir obsidience/ui install --frozen-lockfile --ignore-scripts
+      - name: Check unmodified UI baseline
+        run: |
+          pnpm --dir obsidience/ui typecheck
+          pnpm --dir obsidience/ui build
+      - name: Package dependencies for isolated validation
+        if: always()
+        run: |
+          tar -czf /tmp/knowledge-layout-dependencies.tar.gz obsidience/ui/node_modules
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
         with:
-          name: knowledge-layout-source
-          path: /tmp/knowledge-layout-source.tar.gz
+          name: knowledge-layout-dependencies
+          path: /tmp/knowledge-layout-dependencies.tar.gz
           retention-days: 1
           if-no-files-found: error
