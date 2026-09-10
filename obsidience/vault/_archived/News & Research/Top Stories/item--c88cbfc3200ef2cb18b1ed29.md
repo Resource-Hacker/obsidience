@@ -1,5 +1,6 @@
 ---
 type: knowledge
+status: deprecated
 generated:
   by: obsidience/harness/knowledge/curation.py#feed
   at: '2026-09-10T06:55:06.763Z'
@@ -12,6 +13,8 @@ title: Four takeaways from Trump's speech at first Republican midterms conventio
 obsidience:
   approved_at: '2026-09-09T23:55:55'
   provenance: proposed by Alexandria (task Tasks/ingest)
+  archived_at: '2026-09-10T08:54:24Z'
+  archive_reason: Keep at most 10 active Articles for this Feed
 ---
 
 **Four takeaways from Trump's speech at the first Republican midterms convention** | BBC News | 10 Sep 2026 | source://693de623-4e35-4cf5-bb22-ded7115d7b44
