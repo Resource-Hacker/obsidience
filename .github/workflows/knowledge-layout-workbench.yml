@@ -1,0 +1,23 @@
+name: Knowledge layout workbench
+on:
+  push:
+    branches: [codex/spherical-crown-layout-20260910]
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Package source for isolated validation
+        run: |
+          tar -czf /tmp/knowledge-layout-source.tar.gz AGENTS.md DESIGN.md README.md artifacts.lock.json obsidience/ui obsidience/tests obsidience/scripts
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: knowledge-layout-source
+          path: /tmp/knowledge-layout-source.tar.gz
+          retention-days: 1
+          if-no-files-found: error
