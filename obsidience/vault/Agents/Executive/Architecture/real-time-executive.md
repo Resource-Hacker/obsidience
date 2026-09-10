@@ -2,7 +2,7 @@
 type: knowledge
 title: Real-time Executive
 obsidience:
-  approved_at: '2026-09-09T18:42:03'
+  approved_at: '2026-09-09T19:11:57'
   provenance: proposed by Alexandria (task Tasks/link)
 ---
 
@@ -56,6 +56,7 @@ normally while the connection stays ready for the next request.
 - `implements` [Task activation](/Agents/Executive/Architecture/task-activation--b30a4642.md) — Spoken and typed requests select the same accepted work Tasks and complete through one executor.
 - `implements` [Golden ontology](/Agents/Executive/Architecture/action-ontology.md) — The speech connection stays a connection, not a Task, and each final transcript selects an exact work Task, per the ontology's rule that a UI verb becomes a Task only when it names an independently queueable outcome.
 - `depends_on` [Executive model selection](/Agents/Executive/Architecture/current-executive-model--3745813a.md) — Each selected work Task supplies its model and reasoning effort.
+- `depends_on` [LLM-wiki knowledge pattern](/Agents/Executive/Architecture/llm-wiki-knowledge-pattern--dab5ff0a.md) — Realtime's final transcripts execute Tasks through the pattern's bounded Thinking Packet and exact accepted-graph capability spine.
 - `related_to` [Hyprland shell scene](/Agents/Executive/Architecture/hyprland-shell-scene.md) — Current focused and unfocused panes enter only as bounded runtime bindings.
 - `related_to` [Research requests](/Agents/Executive/Architecture/research-requests--7bf0113c.md) — Delegation from an interactive Realtime execution follows the Research delegation path to [Darwin](/Agents/Darwin/Darwin.md).
 - `implements` [Local-first architecture](/Agents/Executive/Architecture/local-first-architecture--7d8e77cc.md) — Spoken requests use the same Task executor, model lease and SQLite conversation as typed Chat; the speech connection adds no independent reasoning or memory owner.
