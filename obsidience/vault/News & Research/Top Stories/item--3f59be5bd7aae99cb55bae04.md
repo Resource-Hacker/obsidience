@@ -2,43 +2,33 @@
 type: knowledge
 generated:
   by: obsidience/harness/knowledge/curation.py#feed
-  at: '2026-09-10T06:53:15.129Z'
+  at: '2026-09-10T07:23:14.455Z'
 resource: https://www.bbc.co.uk/news/articles/c62kzr1jg0jo
 sources:
-- resource: source://1b9418bb-b1d5-48fa-bf62-51df249f71e7
-- resource: source://66880c98-13f1-47e0-b990-8cbc93072481
-- resource: source://d21bb48a-8e81-4023-9395-d13564e76c16
-title: $5,000 dividend for adults if Republicans win midterms — Trump's pledge
+- resource: source://1b02795b-08cf-48f9-81b0-91f261f77c61
+- resource: source://850917af-12e3-4757-9295-7bb47fc7112a
+title: Trump says every adult American would get $5,000 if Republicans win midterms
 obsidience:
-  approved_at: '2026-09-09T23:54:14'
+  approved_at: '2026-09-10T00:23:56'
   provenance: proposed by Alexandria (task Tasks/ingest)
 ---
 
-# Trump pledges $5,000 to every adult American if Republicans win November elections
+# Trump announces potential $5,000 bonus plan
 
-**Published:** 10 September 2026
-**Source:** BBC News — [reporting_url](https://www.bbc.co.uk/news/articles/c62kzr1jg0jo)
+**BBC News** — 10 September 2026
 
-## The Promise
-President Donald Trump, speaking at the Republican National Convention in Dallas, Texas, pledged that **"If the Republicans win the House of Representatives and the United States Senate, both of them... I will issue a dividend to every adult citizen in the United States of America for $5,000."**
+Speaking at a party convention, US President Donald Trump said every adult American would receive $5,000 if Republicans win the midterm elections.
 
-Trump added: *"We don't want you going to Canada to spend the money. We don't want you going to China, to Germany. You got to spend the money in the United States of America."*
+However, Trump gave no details on how the plan would be funded or how it would be implemented.
 
-## Scale and Cost
-- **~270 million American adults** would receive the payment, totaling approximately **$1.3 trillion** in government spending.
+The announcement came amid ongoing debate over the upcoming midterms, with both parties vying for voter support.
 
-## Key Questions Raised
-- **No details provided** on how the plan would work or where the money would come from.
-- **Legal concerns:** Federal laws prohibit payments intended to influence voting. Some experts suggest Trump's pledge could be framed as a tax cut pledge (legal) rather than a direct vote-buying payment, under First Amendment protections.
-- **Congressional approval** would be needed for any spending.
+> _'Every adult American would get $5,000 if we win the midterms,'_ Trump stated.
 
-## Context: War in the Middle East
-Trump framed the economic pain of the Iran conflict — including the Strait of Hormuz blockage affecting ~20% of global oil and LNG trade — as necessary to prevent Tehran from developing nuclear weapons. He told supporters the war would not end until after the midterms.
-
-## History of Similar Pledges
-Trump has previously proposed $2,000 cheques funded by tariff revenue. Other US politicians have made similar promises, including Georgia Democrats who offered $2,000 relief payments if their party won the Senate during the pandemic.
+The report is based on coverage from BBC News, published at 06:56:38 UTC on 10 September 2026. The plan remains unverified and details are unknown.
 
 ---
 
-**Activating Source:** source://66880c98-13f1-47e0-b990-8cbc93072481
-**Linked reporting Source:** source://d21bb48a-8e81-4023-9395-d13564e76c16
+**Source:** [`BBC News`](https://www.bbc.co.uk/news/articles/c62kzr1jg0jo)
+
+**Distilled from:** `source://850917af-12e3-4757-9295-7bb47fc7112a`
