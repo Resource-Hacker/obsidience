@@ -15,4 +15,4 @@ justified durable changes under their proper subjects. Review decides acceptance
 
 The active conversation's latest committed summary survives ordinary expiry;
 pending promotion inputs remain available until archived. Other entries follow
-the bounded cache policy in [Observation lifecycle](/Agents/Executive/Architecture/observations.md).
+the bounded cache policy in [Observation lifecycle](/Agents/Executive/Architecture/Harness/observations.md).

@@ -15,6 +15,6 @@ children. Use consistent sentence-case Article titles and preserve exact callabl
 Tool identifiers. Knowledge and Source can dock, stack, collapse, or detach;
 Reader remains the single Article and Source document viewer.
 
-See [Local-first architecture](/Agents/Executive/Architecture/local-first-architecture--7d8e77cc.md)
+See [Local-first architecture](/Agents/Executive/Architecture/Harness/local-first-architecture--7d8e77cc.md)
 for shell ownership and [Development](/Agents/Executive/Observations/Preferences/development.md)
 for the shared-component rule.

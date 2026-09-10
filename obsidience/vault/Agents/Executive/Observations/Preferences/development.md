@@ -17,5 +17,5 @@ shared Library. Update the master rather than creating an Agent-local prose copy
 Restart affected development processes after changes and verify their live result
 so the owner can test immediately. Do not restart unrelated applications or a
 securely locked shell. Keep names, Article headings, links, and all UI projections
-consistent with [Golden ontology](/Agents/Executive/Architecture/action-ontology.md)
-and [Local-first architecture](/Agents/Executive/Architecture/local-first-architecture--7d8e77cc.md).
+consistent with [Golden ontology](/Agents/Executive/Architecture/Harness/action-ontology.md)
+and [Local-first architecture](/Agents/Executive/Architecture/Harness/local-first-architecture--7d8e77cc.md).

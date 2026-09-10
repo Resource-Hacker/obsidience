@@ -28,6 +28,6 @@ prerequisite observation or extra verification screenshot is needed.
 
 ## Relationships
 
-- `implements` [Local-first architecture](/Agents/Executive/Architecture/local-first-architecture--7d8e77cc.md) — Managed launch and the single Hyprland scene preserve one authority for each desktop concern.
-- `related_to` [Hyprland shell scene](/Agents/Executive/Architecture/hyprland-shell-scene.md) — The scene defines semantic application and module-pane targeting without exposing compositor identifiers.
+- `implements` [Local-first architecture](/Agents/Executive/Architecture/Harness/local-first-architecture--7d8e77cc.md) — Managed launch and the single Hyprland scene preserve one authority for each desktop concern.
+- `related_to` [Hyprland shell scene](/Agents/Executive/Architecture/Shell/hyprland-shell-scene.md) — The scene defines semantic application and module-pane targeting without exposing compositor identifiers.
 - `runs_on` [Unified display topology](/ADMECH%20Workstation/Workstation%20Observations/display-topology-and-isolation-strategy--a8755cfa.md) — Application and module-pane effects operate across the three Surfaces owned by the one compositor.

@@ -14,7 +14,7 @@ conversation, interruption cancels pending generation and playback while the
 microphone remains available for barge-in. Chat shows the same final transcript
 and completed public reply that the Executive received and produced.
 
-- [Realtime Executive](/Agents/Executive/Architecture/real-time-executive.md)
+- [Realtime Executive](/Agents/Executive/Architecture/Harness/real-time-executive.md)
   separates the fixed speech transport from Task-selected reasoning.
-- [Observation lifecycle](/Agents/Executive/Architecture/observations.md) explains
+- [Observation lifecycle](/Agents/Executive/Architecture/Harness/observations.md) explains
   how spoken and typed turns share the current conversation.

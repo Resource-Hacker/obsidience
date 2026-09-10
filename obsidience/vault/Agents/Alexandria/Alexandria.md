@@ -58,4 +58,4 @@ graph integrity.
 
 - `related_to` [Darwin](/Agents/Darwin/Darwin.md) — Darwin supplies bounded sourced findings.
 - `related_to` [Heimdall](/Agents/Heimdall/Heimdall.md) — Heimdall independently verifies evidence and integrity.
-- `implements` [LLM-wiki knowledge pattern](/Agents/Executive/Architecture/llm-wiki-knowledge-pattern--dab5ff0a.md) — Alexandria owns ingestion and curation.
+- `implements` [LLM-wiki knowledge pattern](/Agents/Executive/Architecture/Harness/llm-wiki-knowledge-pattern--dab5ff0a.md) — Alexandria owns ingestion and curation.
