@@ -1253,12 +1253,13 @@ def article_refs_for_trees(values: object) -> list[str]:
     # Exact schema ownership, including absorbed directory hubs. System scope
     # never grants unrelated authored workstation Observations.
     if any(scope == "obsidience/state/system" or scope.startswith("obsidience/state/system/") for scope in scopes):
-        from .system_schema import system_schema
+        from .system import system_articles
         from .vault import iter_notes
         accepted = {note.ref for note in iter_notes()}
-        for row in system_schema():
-            if any(row["path"] == scope or row["path"].startswith(scope + "/")
-                   or row["descriptor_path"] == scope for scope in scopes):
+        for row in system_articles().values():
+            if any(component["path"] == scope or component["path"].startswith(scope + "/")
+                   or component["descriptor_path"] == scope
+                   for component in (row, *row.get("components", [])) for scope in scopes):
                 if row["ref"] in accepted:
                     refs.add(row["ref"])
     return sorted(refs)

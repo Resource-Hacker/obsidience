@@ -110,7 +110,7 @@ def system_schema() -> list[dict]:
         if descriptor is not None:
             absorbed.add(descriptor_path)
         rows.append({"key": "system" if directory == root else directory.relative_to(root).as_posix(),
-            "title": "ADMECH Workstation" if directory == root else descriptor["label"] if descriptor else _part(directory.name),
+            "title": "System" if directory == root else descriptor["label"] if descriptor else _part(directory.name),
             "ref": directory_ref(directory),
             "parent_ref": None if directory == root else directory_ref(directory.parent),
             "path": directory.relative_to(CONFIG.project_root).as_posix(),

@@ -1695,9 +1695,14 @@ Source integrity, and the run ledger. The native shell UI is a thin projection.
   Knowledge scope. It maps only to related accepted Articles and biases the
   existing five-Article fast retrieval. Source files never become graph nodes,
   Library assets, executable authority, or unconditional prompt content.
-  The exact System scope maps to ADMECH Workstation; Hardware and Applications
-  narrow that priority to their exact accepted schema mirror Articles, excluding
-  unrelated workstation Observations. Descriptor leaves narrow to the exact Article.
+  The exact System scope maps to the System-labelled Knowledge root (stable
+  ADMECH Workstation identity). Physical Hardware scopes narrow to the direct
+  Compute, Devices, Drives and Network branches; no Hardware wrapper is published.
+  Applications contains one leaf per application. Its sub-descriptors contribute
+  cited sections to that Article, so their Source checkout resolves to the same
+  application rather than creating child Articles. Physical descriptors stay in
+  place and unrelated workstation Observations remain excluded. The publisher,
+  not the renderer, owns this shallow projection and its protected destinations.
 - **Library** shows shared accepted Tasks and Tool+Skill pairs. Tasks may be
   assigned; Tool/Skill availability is derived from assigned Task dependencies.
 - **Tasks** shows only scheduled, event-triggered, or active Tasks, including
