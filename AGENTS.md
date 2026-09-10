@@ -1293,6 +1293,14 @@ Tool bindings, generic hierarchy edges, and framework-specific vocabulary.
   labels, Auto-curate paint and visual-only settings must not reheat layouts.
   Real node, relationship, parent, collision-radius or force changes may
   resettle only the affected cloud; the main graph and satellites share this rule.
+  All agents use createKnowledge3dCloud in knowledge-3d-cloud.ts; orbit, spin
+  and scale are presentation differences only. Keep the shared numerical
+  layout in knowledge-3d.ts, not a second executive or satellite implementation.
+  Brain-level angular relaxation remains active after edge springs cool and
+  evaluates siblings simultaneously. Bounded root substeps let the scaffold
+  converge before leaf constraints settle. Escape coplanar saddles using the
+  crown's own frame, never camera axes or fixed slots; a six-peer planar seed
+  must occupy three dimensions at rest. Sparse two/three-peer roots are exempt.
   Every shared 3D cloud puts all nodes at the same semantic depth on one
   spherical layer, including its first visible frame and every force tick.
   Direct Brain branches always occupy layer one, anchored at the original close
