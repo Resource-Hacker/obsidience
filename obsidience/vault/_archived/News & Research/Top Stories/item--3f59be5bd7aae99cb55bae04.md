@@ -1,5 +1,6 @@
 ---
 type: knowledge
+status: deprecated
 generated:
   by: obsidience/harness/knowledge/curation.py#feed
   at: '2026-09-10T13:54:48.052Z'
@@ -12,6 +13,8 @@ title: Trump promises $5,000 dividend to every adult American if Republicans win
 obsidience:
   approved_at: '2026-09-10T06:55:50'
   provenance: proposed by Alexandria (task Tasks/ingest)
+  archived_at: '2026-09-10T15:55:35Z'
+  archive_reason: Keep at most 10 active Articles for this Feed
 ---
 
 ## Trump promises $5,000 dividend to every adult American if Republicans win midterms
