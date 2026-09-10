@@ -6,8 +6,8 @@ sources:
 - resource: file:///home/wissenschafter/Projects/obsidience/obsidience/harness/conversation/store.py
 - resource: file:///home/wissenschafter/Projects/obsidience/obsidience/harness/realtime/runtime.py
 obsidience:
-  approved_at: '2026-09-07T14:59:29'
-  provenance: proposed by Alexandria (task Tasks/link)
+  approved_at: '2026-09-09T17:06:39'
+  provenance: proposed by Codex (task codex:knowledge-handoff)
 ---
 
 Observations use the same Article hierarchy as the rest of the graph. The three
@@ -34,7 +34,9 @@ writes merely because its Task was already enabled.
 is a child of Immediate Observations. It projects the active Chat's latest
 cumulative summary plus exact completed pairs after that boundary. Typed Chat
 and [Realtime](/Agents/Executive/Architecture/real-time-executive.md) share an 80-turn hot deque backed by complete SQLite dialogue.
-Realtime enable creates a new conversation; stopping Realtime retains it for Chat.
+Enabling or reconnecting Realtime preserves the selected conversation; stopping
+Realtime retains it for Chat. Only the explicit Conversation control creates a
+new conversation.
 The current request rides once as the Objective, not as a duplicate historical turn.
 
 The exact context Article rides separately in the
@@ -74,3 +76,6 @@ interaction requirements belong in
 [Preferences](/Agents/Executive/Observations/Preferences/Preferences.md); game mechanics go
 under Games, workstation facts under ADMECH. Do not create a second Durable Context,
 Log, or memory database. Hidden reasoning is never an Observation Article.
+
+## Relationships
+- `depends_on` [Executive model selection](/Agents/Executive/Architecture/current-executive-model--3745813a.md) — Context capacity comes from the selected model, while compaction executes with the Compact Task’s own authored model and Runbook; retained conversation context does not create another model selector.
