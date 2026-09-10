@@ -1,5 +1,6 @@
 ---
 type: knowledge
+status: deprecated
 generated:
   by: obsidience/harness/knowledge/curation.py#feed
   at: '2026-09-09T21:46:36.507Z'
@@ -11,6 +12,8 @@ title: Spanish intelligence warned of Ceuta mass crossing plans before surge
 obsidience:
   approved_at: '2026-09-09T14:47:44'
   provenance: proposed by Alexandria (task Tasks/ingest)
+  archived_at: '2026-09-10T02:23:58Z'
+  archive_reason: Keep at most 10 active Articles for this Feed
 ---
 
 Spanish intelligence warned of Ceuta mass crossing plans before surge
