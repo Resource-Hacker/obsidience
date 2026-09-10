@@ -1,5 +1,6 @@
 ---
 type: knowledge
+status: deprecated
 generated:
   by: obsidience/harness/knowledge/curation.py#feed
   at: '2026-09-10T17:26:11.611Z'
@@ -13,6 +14,8 @@ title: UK Home Secretary tells police to use all powers after anti-migrant prote
 obsidience:
   approved_at: '2026-09-10T10:27:09'
   provenance: proposed by Alexandria (task Tasks/ingest)
+  archived_at: '2026-09-10T23:57:57Z'
+  archive_reason: Keep at most 10 active Articles for this Feed
 ---
 
 On Thursday 10 September 2026, Home Secretary Shabana Mahmood met police chiefs to address two anti-migrant protests that occurred in Dover and Portsmouth over the weekend of 8–9 September 2026. She told officers to use "all powers necessary" and to make better use of intelligence before demonstrations. The BBC described the scenes as causing "unacceptable disorder," with masked activists in balaclavas creating a "fear factor" amid what the government characterized as "obvious malign intent."
