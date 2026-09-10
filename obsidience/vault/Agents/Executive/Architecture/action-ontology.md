@@ -2,8 +2,8 @@
 type: knowledge
 title: Golden ontology
 obsidience:
-  provenance: proposed by Alexandria (task Tasks/link)
-  approved_at: '2026-09-08T20:30:16'
+  provenance: proposed by Codex (task codex:knowledge-handoff)
+  approved_at: '2026-09-09T17:06:36'
 ---
 
 Obsidience classifies an object by what it does, never by its filename, folder,
@@ -64,3 +64,4 @@ edges may select Agent, Task, Runbook, Skill, or Tool authority.
 - `governs` [Activation packet protocol](/Agents/Executive/Architecture/activation-briefing-protocol--21d7f1ad.md) — Packet sections retain those semantic roles instead of flattening them into prompt text.
 - `governs` [Real-time Executive](/Agents/Executive/Architecture/real-time-executive.md) — The speech button and connection are not a Task; each final transcript selects an exact accepted work Task, preserving the activation/execution boundary.
 - `related_to` [LLM-wiki knowledge pattern](/Agents/Executive/Architecture/llm-wiki-knowledge-pattern--dab5ff0a.md) — The recursive Article hierarchy is the readable graph representation of this ontology.
+- `governs` [Observation lifecycle](/Agents/Executive/Architecture/observations.md) — Immediate, Temporary and Durable describe retention within the Article hierarchy; executable transitions remain the Compact and Promote Tasks rather than new Article kinds or memory authorities.
