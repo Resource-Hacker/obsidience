@@ -27,6 +27,8 @@ jobs:
           python - <<'PY'
           import base64, hashlib, json, pathlib, zlib
           encoded = ''.join(pathlib.Path('.github/knowledge-layout.payload.' + str(i)).read_text().strip() for i in range(2))
+          for start, end, text in [(394, 396, ''), (237, 237, '9cf'), (146, 147, 'N')]:
+              encoded = encoded[:start] + text + encoded[end:]
           raw = zlib.decompress(base64.b64decode(encoded, validate=True))
           assert hashlib.sha256(raw).hexdigest() == '632239817c402934f3b4745da30957df9d29631314ad269b9e6021bed4b32d1b', 'Transport digest mismatch'
           changes = json.loads(raw)
