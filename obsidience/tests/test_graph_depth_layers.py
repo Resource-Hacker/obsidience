@@ -9,7 +9,12 @@ import pytest
 from test_graph_simulation_continuity import SIMULATION_PROBE
 
 
-PROBE = SIMULATION_PROBE.split("if (options.legacy_source) {", 1)[0] + r"""
+PROBE = SIMULATION_PROBE.split("if (options.legacy_source) {", 1)[0].replace(
+    "function check(name,run) {",
+    """function check(name,run) {
+      const cohort=name.startsWith('main_')?'main':name.startsWith('Alexandria_')?'Alexandria':'other';
+      if(options.cohort && options.cohort!==cohort)return;""",
+) + r"""
 function unevenFixture(agentId, heterogeneous) {
   const input=fixture(agentId),root=clone(input.nodes[0]);
   const branch=clone(input.nodes[1]),article=clone(input.nodes[3]);
@@ -361,12 +366,17 @@ process.stdout.write(JSON.stringify(results));
 
 @pytest.fixture(scope="module")
 def layer_results():
-    result = subprocess.run(
-        ["node", "-e", PROBE], input="{}", cwd=Path(__file__).parents[2],
-        capture_output=True, text=True, timeout=60,
-    )
-    assert result.returncode == 0, result.stderr
-    return json.loads(result.stdout)
+    # Each cloud's dense settling matrix has its own bounded subprocess. More
+    # constraint iterations must not make one slow case hide the whole matrix.
+    results = {}
+    for cohort in ("main", "Alexandria", "other"):
+        result = subprocess.run(
+            ["node", "-e", PROBE], input=json.dumps({"cohort": cohort}),
+            cwd=Path(__file__).parents[2], capture_output=True, text=True, timeout=60,
+        )
+        assert result.returncode == 0, result.stderr
+        results.update(json.loads(result.stdout))
+    return results
 
 
 @pytest.fixture(params=[

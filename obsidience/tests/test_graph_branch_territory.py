@@ -1,4 +1,4 @@
-"""Moving 3D branch territories preserve dynamics and exact parent ownership."""
+"""Coupled spherical contacts and recursive moving crowns, through the real cloud."""
 
 import json
 import subprocess
@@ -10,152 +10,163 @@ from test_graph_simulation_continuity import SIMULATION_PROBE
 
 
 PROBE = SIMULATION_PROBE.split("if (options.legacy_source) {", 1)[0] + r"""
-const territory=physics.forceKnowledgeBranchTerritory;
-assert.equal(typeof territory,'function');
-const position=n=>[n.x,n.y,n.z];
-const velocity=n=>[n.vx??0,n.vy??0,n.vz??0];
-const dot=(a,b)=>a.reduce((total,value,axis)=>total+value*b[axis],0);
+const spherical=load(path.join(component,'knowledge-spherical.ts'));
+const xyz=n=>[n.x,n.y,n.z];
 const norm=a=>Math.hypot(...a);
-const minus=(a,b)=>a.map((value,axis)=>value-b[axis]);
-const unit=n=>{const p=position(n),r=norm(p);return r?p.map(value=>value/r):[0,0,0];};
-const near=(a,b)=>assert(norm(minus(a,b))<1e-8,`${a} != ${b}`);
-function forceFixture() {
-  const node=(id,parentId,depth,x,y,z,radius=1)=>({
-    id,parentId,depth,role:depth===0?'root':depth===1?'section':'claim',
-    radius,x,y,z,vx:0,vy:0,vz:0});
-  return [node('root',null,0,0,0,0,2),node('a','root',1,20,0,0,2),
-    node('b','root',1,0,20,0,2),node('c','root',1,-10,0,20,2),
-    node('inside','a',2,32,3,4),node('crossing','a',2,5,30,4),
-    node('nested','a',2,28,2,0),node('deep','nested',3,4,29,5),
-    node('margin','a',2,21,20,0,2)];
+const dot=(a,b)=>a.reduce((sum,x,i)=>sum+x*b[i],0);
+const sub=(a,b)=>a.map((x,i)=>x-b[i]);
+const unit=n=>{const p=xyz(n),r=norm(p);return r?p.map(x=>x/r):[0,0,0];};
+const kernelNode=(id,parentId,depth,x,y,z,radius=1)=>({
+  id,parentId,depth,role:depth===0?'root':'section',radius,x,y,z,vx:0,vy:0,vz:0,
+});
+function kernel(nodes,radii=new Map([[0,0],[1,20],[2,40],[3,60]]),previous) {
+  return spherical.createSphericalConstraint(nodes,{
+    velocityDecay:0.35,alphaMin:0.006,radii,avoidance:n=>n.radius,
+    signature:JSON.stringify(nodes.map(n=>[n.id,n.parentId,n.depth,n.radius]).sort()),previous,
+  });
 }
-function corrected(nodes,alpha=1) {
-  const before=new Map(nodes.map(n=>[n.id,{position:position(n),velocity:velocity(n)}]));
-  territory(nodes)(alpha);
-  for(const node of nodes) {
-    near(position(node),before.get(node.id).position);
-    const delta=minus(velocity(node),before.get(node.id).velocity);
-    assert(delta.every(Number.isFinite),'nonfinite force for '+node.id);
-    assert(Math.abs(dot(position(node),delta))<1e-7,'radial correction for '+node.id);
-  }
-  return new Map(nodes.map(n=>[n.id,velocity(n)]));
+function integrate(nodes,force,alpha=0.001) {
+  force(alpha);
+  for(const node of nodes)for(const [p,v] of [['x','vx'],['y','vy'],['z','vz']])
+    node[p]+=node[v]*=0.65;
 }
-check('tangential_and_scoped',()=>{
-  const nodes=forceFixture(),out=corrected(nodes);
-  for(const id of ['root','a','b','c','inside','nested'])near(out.get(id),[0,0,0]);
-  for(const id of ['crossing','deep','margin']) {
-    assert(norm(out.get(id))>0,'territory did not correct '+id);
-    assert(dot(out.get(id),[1,-1,0])>0,'correction points toward the competing branch');
+function verifyCloud(cloud) {
+  const nodes=cloud.captureSimNodes(),layers=new Map();
+  for(const node of nodes.values()) {
+    const radius=norm(xyz(node));
+    assert([...xyz(node),node.vx,node.vy,node.vz].every(Number.isFinite));
+    if(layers.has(node.depth))assert(Math.abs(radius-layers.get(node.depth))<1e-7);
+    else layers.set(node.depth,radius);
+    if(node.depth===0)assert.deepEqual(xyz(node),[0,0,0]);
+    else assert(node.fx==null&&node.fy==null&&node.fz==null);
+    const parent=nodes.get(node.parentId);
+    if(parent&&parent.depth>0)
+      assert(dot(sub(xyz(node),xyz(parent)),unit(parent))>=-0.001,'inward edge: '+node.id);
   }
-  assert(nodes.every(n=>n.fx==null&&n.fy==null&&n.fz==null),'force introduced coordinate pins');
+  const all=[...nodes.values()];let gap=Infinity;
+  for(let i=0;i<all.length;i++)for(let j=0;j<i;j++) {
+    const clearance=physics.knowledge3dAvoidanceRadius(all[i])+physics.knowledge3dAvoidanceRadius(all[j]);
+    gap=Math.min(gap,norm(sub(xyz(all[i]),xyz(all[j])))-clearance);
+  }
+  assert(gap>=-0.001,'avoidance spheres overlap: '+gap);
+  const state=cloud.layoutDiagnostics();
+  assert.equal(state.status,'settled',JSON.stringify(state.residuals));
+  assert(state.residuals.maxTerritoryViolation<=0.001,'recursive crown violation');
+  return {minimum_avoidance_gap:gap,ticks:state.ticks,residuals:state.residuals};
+}
+function hardwareFixture(agentId='main') {
+  const input=fixture(agentId),base=clone(input.nodes[1]),leaf=clone(input.nodes[3]);
+  input.nodes=[input.nodes[0]];input.edges=[];
+  function add(id,parentId,section=true,radius=section?7:4) {
+    const parent=input.nodes.find(n=>n.id===parentId);
+    input.nodes.push({...clone(section?base:leaf),id,parentId,depth:parent.depth+1,
+      role:section?'section':'claim',subject:section,radius});
+    input.edges.push({source:parentId,target:id,taxonomy:true,color:'#22ccff'});
+  }
+  add('ADMECH','root');add('Research','root');add('Projects','root');
+  add('Hardware','ADMECH');add('Applications','ADMECH');add('Observations','ADMECH');
+  add('Compute','Hardware');add('Devices','Hardware');add('Drives','Hardware');
+  add('Network','Hardware',false);
+  for(const [group,count] of [['Compute',4],['Devices',3],['Drives',4],
+    ['Applications',3],['Observations',8],['Research',5],['Projects',2]])
+    for(let i=0;i<count;i++)add(group+'-'+i,group,false,4+i%3);
+  return input;
+}
+check('exact_angular_clearance',()=>{
+  const angle=spherical.sphericalClearanceAngle;
+  assert.equal(angle(10,20,9),0);
+  assert.equal(angle(0,10,10),0);
+  assert.equal(angle(10,10,21),Infinity);
+  assert.equal(angle(0,10,11),Infinity);
+  assert.throws(()=>angle(-1,2,1),RangeError);
+  for(const [a,b,gap] of [[10,10,6],[10,12,7],[30,50,23],[2,3,5]]) {
+    const theta=angle(a,b,gap);
+    assert(Math.abs(Math.sqrt(a*a+b*b-2*a*b*Math.cos(theta))-gap)<1e-7);
+  }
 });
-check('independent_of_cooling',()=>{
-  const hot=corrected(forceFixture(),1),cold=corrected(forceFixture(),0.000001);
-  for(const [id,value] of hot)near(value,cold.get(id));
+check('contacts_stay_on_shells',()=>{
+  const nodes=[kernelNode('root',null,0,0,0,0),
+    kernelNode('a','root',1,20,0,0,3),kernelNode('b','root',1,20,0,0,3),
+    kernelNode('c','root',1,19,1,0,3)];
+  const force=kernel(nodes);
+  for(let tick=0;tick<100;tick++) {
+    integrate(nodes,force);
+    assert(nodes.slice(1).every(n=>Math.abs(norm(xyz(n))-20)<1e-7));
+  }
+  for(let i=1;i<nodes.length;i++)for(let j=1;j<i;j++)
+    assert(norm(sub(xyz(nodes[i]),xyz(nodes[j])))>=6-0.001);
 });
-check('rotation_and_permutation',()=>{
-  const original=forceFixture(),expected=corrected(clone(original));
-  const reversed=corrected(clone(original).reverse());
-  for(const [id,value] of expected)near(value,reversed.get(id));
-  const rotation=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,2,3).normalize(),0.73);
-  const rotate=value=>new THREE.Vector3(...value).applyQuaternion(rotation).toArray();
-  const rotated=clone(original);
-  rotated.forEach(node=>{[node.x,node.y,node.z]=rotate(position(node));});
-  const actual=corrected(rotated);
-  for(const [id,value] of expected)near(actual.get(id),rotate(value));
-  const tied=forceFixture();
-  Object.assign(tied.find(n=>n.id==='c'),{x:0,y:0,z:20});
-  Object.assign(tied.find(n=>n.id==='crossing'),{x:-5,y:20,z:20});
-  const tiedForward=corrected(clone(tied)),tiedReverse=corrected(clone(tied).reverse());
-  for(const [id,value] of tiedForward)near(value,tiedReverse.get(id));
-});
-check('three_dimensional_registration',()=>{
-  const three=physics.createKnowledgeForceSimulation(forceFixture(),[],undefined,3);
-  const two=physics.createKnowledgeForceSimulation(forceFixture(),[],undefined,2);
-  assert.equal(three.numDimensions(),3);
-  assert.equal(typeof three.force('branchTerritory'),'function');
-  assert.equal(two.numDimensions(),2);
-  assert.equal(two.force('branchTerritory'),undefined,'3D territory leaked into the 2D layout');
+check('coupled_registration_and_2d_isolation',()=>{
+  const input=[kernelNode('root',null,0,0,0,0),kernelNode('a','root',1,20,0,0)];
+  const three=physics.createKnowledgeForceSimulation(clone(input),[],undefined,3);
+  const two=physics.createKnowledgeForceSimulation(clone(input),[],undefined,2);
+  assert.equal(typeof three.force('depthLayers'),'function');
+  for(const name of ['collide','outwardHemisphere','branchTerritory'])
+    assert.equal(three.force(name),undefined,'competing 3D correction still active: '+name);
+  assert.equal(two.force('depthLayers'),undefined);
+  assert.equal(typeof two.force('collide'),'function');
+  assert.equal(typeof two.force('outwardHemisphere'),'function');
   three.stop();two.stop();
 });
-check('invalid_ancestry',()=>{
-  const nodes=forceFixture();
-  for(const [id,parentId] of [['missing','absent'],['cycle-a','cycle-b'],
-    ['cycle-b','cycle-a'],['self','self'],['unparented',null]])
-    nodes.push({...nodes[5],id,parentId});
-  const output=corrected(nodes);
-  for(const id of ['missing','cycle-a','cycle-b','self','unparented'])
-    near(output.get(id),[0,0,0]);
-});
-check('moving_boundaries',()=>{
-  const nodes=forceFixture(),force=territory(nodes);
-  const own=nodes.find(n=>n.id==='a'),competitor=nodes.find(n=>n.id==='b');
-  // Reusing the same force must use the roots' new positions, not seed rays.
-  [own.x,own.y,own.z]=[0,20,0];[competitor.x,competitor.y,competitor.z]=[20,0,0];
-  force(1);
-  near(velocity(nodes.find(n=>n.id==='crossing')),[0,0,0]);
-  assert(norm(velocity(nodes.find(n=>n.id==='inside')))>0);
-});
-check('degenerate_directions',()=>{
-  const same=forceFixture().filter(n=>['root','a','b','crossing'].includes(n.id));
-  const sameA=same.find(n=>n.id==='a'),sameB=same.find(n=>n.id==='b');
-  [sameB.x,sameB.y,sameB.z]=position(sameA);
-  const unchanged=corrected(same);for(const value of unchanged.values())near(value,[0,0,0]);
-  const opposite=forceFixture().filter(n=>['root','a','b','crossing'].includes(n.id));
-  const other=opposite.find(n=>n.id==='b'),leaf=opposite.find(n=>n.id==='crossing');
-  [other.x,other.y,other.z]=[-20,0,0];[leaf.x,leaf.y,leaf.z]=[-30,0,0];
-  const force=territory(opposite);force(1);
-  assert(norm(velocity(leaf))>0,'antipodal violation has a zero-gradient trap');
-  for(let tick=0;tick<160;tick++) {
-    force(0.001);
-    for(const node of opposite)for(const [p,v] of [['x','vx'],['y','vy'],['z','vz']])
-      node[p]+=node[v]*=0.6;
-    assert(opposite.every(n=>[...position(n),...velocity(n)].every(Number.isFinite)));
+check('rotation_and_permutation',()=>{
+  const input=[kernelNode('root',null,0,0,0,0),kernelNode('a','root',1,20,3,4),
+    kernelNode('b','root',1,-4,20,7),kernelNode('c','a',2,-3,35,8),
+    kernelNode('d','b',2,32,8,4)];
+  const q=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,2,3).normalize(),0.71);
+  const rotate=v=>new THREE.Vector3(...v).applyQuaternion(q).toArray();
+  const forward=clone(input),reverse=clone(input).reverse(),rotated=clone(input);
+  for(const n of rotated)[n.x,n.y,n.z]=rotate(xyz(n));
+  const forces=[kernel(forward),kernel(reverse),kernel(rotated)];
+  [forward,reverse,rotated].forEach((nodes,i)=>integrate(nodes,forces[i],0.1));
+  for(const node of forward) {
+    assert(norm(sub(xyz(node),xyz(reverse.find(n=>n.id===node.id))))<1e-8);
+    assert(norm(sub(rotate(xyz(node)),xyz(rotated.find(n=>n.id===node.id))))<1e-7);
   }
-  assert(leaf.x>0,'antipodal descendant never returned to its own hemisphere');
-  const origin=forceFixture();Object.assign(origin.find(n=>n.id==='crossing'),{x:0,y:0,z:0});
-  corrected(origin);
 });
-function branchViolations(cloud) {
-  const nodes=cloud.captureSimNodes(),a=unit(nodes.get('branch-a')),b=unit(nodes.get('branch-b'));
-  return ['leaf-a','leaf-b'].filter(id=>{
-    const node=nodes.get(id),own=id==='leaf-a'?a:b,other=id==='leaf-a'?b:a;
-    return dot(unit(node),own)<dot(unit(node),other)-1e-8;
-  });
-}
 for(const agentId of ['main','Alexandria']) {
-  check(agentId+'_settlement',()=>{
-    const input=fixture(agentId),initial=build(input),state=initial.captureSimulation();
-    const set=(id,r,angle)=>Object.assign(state.nodes.get(id),{
-      x:r*Math.cos(angle*Math.PI/180),y:r*Math.sin(angle*Math.PI/180),z:0,vx:0,vy:0,vz:0});
-    set('branch-a',20,0);set('branch-b',20,42);set('leaf-a',40,34);set('leaf-b',40,8);
-    state.alpha=0.4;
-    const cloud=build(input,state);assert.equal(branchViolations(cloud).length,2);
-    const ticks=settle(cloud);assert.deepEqual(branchViolations(cloud),[]);
-    const nodes=[...cloud.captureSimNodes().values()];let minimumGap=Infinity;
-    for(let i=0;i<nodes.length;i++)for(let j=i+1;j<nodes.length;j++) {
-      const gap=norm(minus(position(nodes[i]),position(nodes[j])))-nodes[i].radius-nodes[j].radius;
-      minimumGap=Math.min(minimumGap,gap);
-    }
-    assert(minimumGap>=-1e-6,'recovery overlapped node bodies');
-    [initial,cloud].forEach(dispose);return {ticks,minimum_core_gap:minimumGap};
+  check(agentId+'_hardware_crown',()=>{
+    const cloud=build(hardwareFixture(agentId));
+    try {settle(cloud);return verifyCloud(cloud);}finally{dispose(cloud);}
   });
-  check(agentId+'_approval_continuity',()=>{
-    const input=fixture(agentId);
-    input.edges.push({source:'leaf-a',target:'leaf-b',taxonomy:false,preview:true,color:'#22ccff'});
-    const pending=build(input);for(let tick=0;tick<20;tick++)pending.tickIfHot();
-    const state=pending.captureSimulation(),before=coordinates(state.nodes);
-    const next=clone(input);delete next.edges.at(-1).preview;next.nodes.reverse();next.edges.reverse();
-    const accepted=build(next,state);
-    assert.equal(accepted.captureSimulation().signature,state.signature);
-    assert.equal(accepted.captureSimulation().alpha,state.alpha);
-    assert.deepEqual(coordinates(accepted.captureSimNodes()),before);
-    for(let tick=0;tick<20;tick++){pending.tickIfHot();accepted.tickIfHot();}
-    assert.deepEqual(coordinates(accepted.captureSimNodes()),coordinates(pending.captureSimNodes()),
-      'territory changed the hot trajectory at approval');
-    [pending,accepted].forEach(dispose);
+  check(agentId+'_cold_nested_recovery',()=>{
+    const input=hardwareFixture(agentId),initial=build(input),state=initial.captureSimulation();
+    // Cross Compute and Drives articles inside the SAME Hardware/ADMECH tree.
+    // A Brain-level-only territory cannot detect this ownership error.
+    const a=state.nodes.get('Compute-0'),b=state.nodes.get('Drives-0'),position=xyz(a);
+    [a.x,a.y,a.z]=xyz(b);[b.x,b.y,b.z]=position;
+    state.alpha=0.000001;
+    const cloud=build(input,state);
+    try {
+      assert(cloud.isHot(),'cooling hid an unresolved nested crown');
+      const ticks=settle(cloud);assert(ticks>8);
+      return verifyCloud(cloud);
+    }finally{dispose(initial);dispose(cloud);}
+  });
+  check(agentId+'_capacity_refresh_continuity',()=>{
+    const input=hardwareFixture(agentId),original=build(input);let refresh;
+    try {
+      settle(original);const state=original.captureSimulation();
+      const next=clone(input);next.nodes.reverse();next.edges.reverse();paint(next,'paint');
+      refresh=build(next,state);
+      assert.deepEqual(refresh.captureSimulation().layout,state.layout);
+      assert.deepEqual(coordinates(refresh.captureSimNodes()),coordinates(original.captureSimNodes()));
+      assert.equal(refresh.tickIfHot(),false);verifyCloud(refresh);
+    }finally{dispose(original);if(refresh)dispose(refresh);}
   });
 }
+check('impossible_capacity_is_not_reported_as_settled',()=>{
+  // Twenty nonoverlapping exclusion caps need more area than this shell has,
+  // even after the documented bounded expansion budget. Never fake success.
+  const nodes=Array.from({length:20},(_,i)=>kernelNode('n'+i,null,1,20,i,1,20));
+  const force=kernel(nodes,new Map([[1,20]]));let ticks=0;
+  while(force.needsTick()) {integrate(nodes,force,0);assert(++ticks<=900);}
+  const state=force.capture();
+  assert.equal(state.status,'needs-capacity');
+  assert(state.residuals.maxOverlap>0.001);
+  const radii=nodes.map(n=>norm(xyz(n)));
+  assert(Math.max(...radii)-Math.min(...radii)<1e-7);
+  return {ticks,status:state.status};
+});
 process.stdout.write(JSON.stringify(results));
 """
 
@@ -164,19 +175,20 @@ process.stdout.write(JSON.stringify(results));
 def territory_results():
     result = subprocess.run(
         ["node", "-e", PROBE], input="{}", cwd=Path(__file__).parents[2],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True, text=True, timeout=60,
     )
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout)
 
 
 @pytest.mark.parametrize("case", [
-    "tangential_and_scoped", "independent_of_cooling", "rotation_and_permutation",
-    "three_dimensional_registration",
-    "invalid_ancestry", "moving_boundaries", "degenerate_directions",
-    "main_settlement", "Alexandria_settlement",
-    "main_approval_continuity", "Alexandria_approval_continuity",
+    "exact_angular_clearance", "contacts_stay_on_shells",
+    "coupled_registration_and_2d_isolation", "rotation_and_permutation",
+    "main_hardware_crown", "Alexandria_hardware_crown",
+    "main_cold_nested_recovery", "Alexandria_cold_nested_recovery",
+    "main_capacity_refresh_continuity", "Alexandria_capacity_refresh_continuity",
+    "impossible_capacity_is_not_reported_as_settled",
 ])
-def test_branch_territories_follow_the_live_root_fork(territory_results, case):
+def test_recursive_crowns_and_shell_constraints(territory_results, case):
     result = territory_results[case]
     assert result["ok"], result.get("error")

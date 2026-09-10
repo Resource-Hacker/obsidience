@@ -1615,18 +1615,30 @@ Source integrity, and the run ledger. The native shell UI is a thin projection.
   to a deep shell. The layer radius reserves radial clearance for node
   sizes and spherical surface space for its population. Crowding expands the
   whole layer and carries later layers outward without changing ancestry.
-  A final constraint predicts d3's damped integration and projects onto that
-  layer, so density, springs and collisions cannot push one branch into another
-  level. New seeds follow the same rule before the first frame; valid retained
-  states keep their exact positions and velocities across presentation updates.
-  Their common 3D solver also keeps root-branch subtrees angularly coherent.
-  Exact parent ancestry supplies membership; current branch directions supply
-  moving angular boundaries. Descendants receive one bounded tangential
-  correction at their most violated boundary, allowing their core radius for
-  spacing. Like collision, it continues as alpha cools. This does not pin
-  branches, prescribe radial distances, weaken semantic springs or create
-  camera-dependent coordinates. It prevents subtree interleaving; it does not
-  promise disjoint screen projections from every viewing angle.
+  One final coupled constraint predicts d3's damped integration and resolves
+  contacts as great-circle motions on the assigned shells. The outward
+  parent-child cap, recursive crown boundaries and avoidance spheres are solved
+  together, so a later radial correction cannot undo collision clearance.
+  New article and branch seeds use the same parent-derived shells before the
+  first frame. Valid retained states keep exact positions, velocities, cooling,
+  solver progress and expanded-layer capacity across presentation updates.
+  Crown membership follows exact parent ancestry at every fork. Current sibling
+  directions define moving angular boundaries; descendant avoidance demand at
+  each layer supplies a bounded capacity bias. Entire crowns receive gentle
+  angular spreading, then individual nodes resolve full avoidance-radius
+  clearance. Only Brain is pinned; there are no fixed or camera-facing sectors.
+  Direct-fan packing reserves space in each parent's outward cap. Persistent
+  capacity violations may enlarge the lowest affected whole layer and propagate
+  clearance outward, never moving an unchanged inner layer or a lone node.
+  Cooling alone does not finish layout. Eight consecutive cold, low-motion
+  ticks with valid shell, contact, outward and territory residuals mark it
+  settled. Work remains bounded: twelve constraint passes per tick, at most
+  eight capacity expansions per layer, and an 880-tick geometric budget.
+  Unresolved terminal states are explicitly needs-capacity or stalled, exposed
+  through cloud diagnostics and a one-shot warning, not reported as settled.
+  This remains inside the existing scene-owned d3 tick; semantic spring
+  strengths, separate 2D physics, review effects and graph authority are unchanged.
+  Branch coherence cannot guarantee disjoint screen projections from every angle.
   Pending Link additions spring into their eventual visual layout and glow in
   the actual link gradient, with an awaiting-review legend. This bounded preview
   belongs only to the Scene: its physical edge union and degree-sized radii match
