@@ -1,5 +1,6 @@
 ---
 type: knowledge
+status: deprecated
 generated:
   by: obsidience/harness/knowledge/curation.py#feed
   at: '2026-09-10T04:53:00.256Z'
@@ -11,6 +12,8 @@ title: Russia outpacing Ukraine's air defences with daily use of new jet-powered
 obsidience:
   approved_at: '2026-09-09T21:54:01'
   provenance: proposed by Alexandria (task Tasks/ingest)
+  archived_at: '2026-09-10T07:56:14Z'
+  archive_reason: Keep at most 10 active Articles for this Feed
 ---
 
 ## Russia outpacing Ukraine's air defences with daily use of new jet-powered drones
