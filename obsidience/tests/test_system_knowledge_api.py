@@ -8,8 +8,8 @@ from obsidience.harness.interfaces.api import app as api
 from obsidience.harness.knowledge import vault
 
 
-NETWORK = "ADMECH Workstation/Hardware/Network"
-HARDWARE = "ADMECH Workstation/Hardware/Hardware"
+NETWORK = "ADMECH Workstation/Network"
+HARDWARE = "ADMECH Workstation/Compute/Compute"
 
 
 def test_system_status_is_read_only_and_refresh_has_one_owner(monkeypatch):
@@ -25,7 +25,7 @@ def test_system_status_is_read_only_and_refresh_has_one_owner(monkeypatch):
 
 
 @pytest.mark.parametrize("note_ref,ref", [
-    (NETWORK, NETWORK), (HARDWARE, HARDWARE), (HARDWARE, "@branch/ADMECH Workstation/Hardware"),
+    (NETWORK, NETWORK), (HARDWARE, HARDWARE), (HARDWARE, "@branch/ADMECH Workstation/Compute"),
 ])
 def test_system_reader_is_read_only_through_article_and_folder_routes(tmp_path, monkeypatch, note_ref, ref):
     monkeypatch.setattr(CONFIG, "vault_dir", tmp_path / "vault")

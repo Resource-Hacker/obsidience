@@ -93,10 +93,10 @@ def test_initial_refresh_populates_native_knowledge_from_immutable_source_withou
     _facts, ledger, syncs = inventory
     assert system.system_knowledge_status()["status"] == "uninitialized"
     report = system.refresh_system_knowledge()
-    assert report["status"] == "ready" and report["article_count"] == report["current_count"] == 22
-    assert report["changed"] == 22 and len(syncs) == 1  # Every real schema node is generated.
+    assert report["status"] == "ready" and report["article_count"] == report["current_count"] == 19
+    assert report["changed"] == 19 and len(syncs) == 1  # Each projected Knowledge node is generated.
     accepted = vault.iter_notes()
-    assert len(accepted) == 22
+    assert len(accepted) == 19
     resolver = vault.Resolver(accepted)
     assert all(resolver.resolve(link) for note in accepted for link in note.links)
     for category, item in system.system_articles().items():
@@ -132,10 +132,9 @@ def test_initial_refresh_populates_native_knowledge_from_immutable_source_withou
 
 def test_publication_has_exact_physical_schema_parity_and_no_invented_branches(inventory):
     expected = {
-        "system", "applications", "hardware", "applications/obsidience", "applications/web-browser",
+        "system", "applications", "applications/obsidience", "applications/web-browser",
         "hardware/compute", "hardware/devices", "hardware/drives", "hardware/network",
-        "applications/obsidience/model-assignments",
-        "applications/obsidience/speech-runtime", "hardware/compute/amd-igpu", "hardware/compute/cpu",
+        "hardware/compute/amd-igpu", "hardware/compute/cpu",
         "hardware/compute/rtx-4000-ada", "hardware/compute/rtx-4080-super", "hardware/devices/camera",
         "hardware/devices/microphone", "hardware/devices/speaker", "hardware/drives/crucial-t705",
         "hardware/drives/samsung-990-pro-games", "hardware/drives/samsung-990-pro-storage",
@@ -143,8 +142,8 @@ def test_publication_has_exact_physical_schema_parity_and_no_invented_branches(i
     }
     catalog = system.system_articles()
     assert set(catalog) == expected
-    assert catalog["hardware/network"]["parent_ref"] == catalog["hardware"]["ref"]
-    assert catalog["hardware/network"]["ref"] == "ADMECH Workstation/Hardware/Network"
+    assert catalog["hardware/network"]["parent_ref"] == catalog["system"]["ref"]
+    assert catalog["hardware/network"]["ref"] == "ADMECH Workstation/Network"
     assert catalog["applications/web-browser"]["ref"] == "ADMECH Workstation/Applications/Web Browser"
     assert catalog["applications/web-browser"]["parent_ref"] == catalog["applications"]["ref"]
     report = system.refresh_system_knowledge()
@@ -266,7 +265,7 @@ def test_existing_authored_hubs_and_contracts_remain_exact(inventory):
     vault.write_note("ADMECH Workstation/Workstation Observations/Owner policy.md", {"title": "Owner policy"}, "Owner display policy.")
     before = _files(CONFIG.vault_dir)
     result = system.refresh_system_knowledge(sync=False)
-    assert result["changed"] == 22 and not inventory[2]
+    assert result["changed"] == 19 and not inventory[2]
     after = _files(CONFIG.vault_dir)
     assert all(after[path] == content for path, content in before.items())
 
@@ -317,7 +316,7 @@ def test_first_refresh_without_collector_has_no_dangling_links_and_recovers(inve
 
     collected["compute"] = available_compute
     recovered = system.refresh_system_knowledge()
-    assert recovered["status"] == "ready" and recovered["current_count"] == recovered["article_count"] == 22
+    assert recovered["status"] == "ready" and recovered["current_count"] == recovered["article_count"] == 19
     assert recovered["changed"] == len(missing)
     accepted = vault.iter_notes()
     assert {note.ref for note in accepted} == {row["ref"] for row in catalog.values()}
@@ -386,7 +385,7 @@ def test_publication_intent_recovers_crash_without_duplicate_source_or_effect(in
     assert _row(result, "system")["source_id"] == source_id
     identity_written = str(_article().relative_to(CONFIG.vault_dir)) in writes
     assert identity_written is (boundary == "before_write")
-    assert inventory[1].db.execute("SELECT count(*) FROM source_evidence").fetchone()[0] == 22
+    assert inventory[1].db.execute("SELECT count(*) FROM source_evidence").fetchone()[0] == 19
 
 
 def test_failed_index_is_visible_and_identical_refresh_retries(inventory, monkeypatch):
@@ -438,8 +437,9 @@ def test_generated_paths_and_branch_aliases_are_protected_without_blocking_obser
     for item in system.system_articles().values():
         assert system.is_system_article(item["ref"])
         assert system.is_system_article(item["ref"] + ".md")
-    assert system.is_system_article("@branch/ADMECH Workstation/Hardware/Compute")
-    assert system.is_system_article("ADMECH Workstation/Hardware/Hardware")
+    assert system.is_system_article("@branch/ADMECH Workstation/Compute")
+    assert system.is_system_article("ADMECH Workstation/Compute/Compute")
+    assert not system.is_system_article("ADMECH Workstation/Hardware/Hardware")
     assert not system.is_system_article("ADMECH Workstation/Workstation Observations/Workstation Observations")
     system.assert_system_article_writable("ADMECH Workstation/Workstation Observations/Owner policy")
     with pytest.raises(ValueError, match="System inventory"):
@@ -466,3 +466,110 @@ def test_large_inventory_is_explicit_excerpt_and_source_stays_complete(inventory
     assert "Showing 200 of 205" in _article(key).read_text()
     evidence = source.get_source(_row(result, key)["source_id"])
     assert len(json.loads(evidence["content"])["facts"]["observed"]["endpoints"]) == 205
+
+
+def test_shallow_system_and_application_details_are_persistent_and_cited(inventory):
+    report = system.refresh_system_knowledge()
+    catalog = system.system_articles()
+    assert catalog["system"]["title"] == "System"
+    assert {item["title"] for item in catalog.values() if item["parent_ref"] == catalog["system"]["ref"]} == {
+        "Applications", "Compute", "Devices", "Drives", "Network"}
+    app = catalog["applications/obsidience"]
+    assert app["ref"] == "ADMECH Workstation/Applications/Obsidience"
+    assert not any(item["parent_ref"] == app["ref"] for item in catalog.values())
+    note = vault.load_note(app["ref"] + ".md")
+    evidence = source.get_source(_row(report, "applications/obsidience")["source_citation"])
+    captured = json.loads(evidence["content"])["facts"]
+    runtime = inventory[0]["runtime"]["facts"]
+    assert captured["children"] == []
+    assert captured["details"]["model-assignments"]["observed"] == {
+        "hardware_assignments": runtime["hardware_assignments"]}
+    assert captured["details"]["speech-runtime"]["observed"] == {
+        "speech": runtime["speech"], "media_selections": runtime["media_selections"]}
+    for component in app["components"]:
+        assert {"resource": component["descriptor_path"]} in note.meta["sources"]
+        assert app["ref"] in source.article_refs_for_trees(component["descriptor_path"])
+    before = note.body
+    inventory[0]["runtime"] = {"status": "unavailable", "facts": {}, "detail": "Runtime offline"}
+    unavailable = system.refresh_system_knowledge()
+    assert _row(unavailable, "applications/obsidience")["status"] == "unavailable"
+    assert vault.load_note(app["ref"] + ".md").body == before
+
+
+def _legacy_system_publication(monkeypatch):
+    from obsidience.harness.knowledge.system_schema import system_schema
+    with monkeypatch.context() as old:
+        old.setattr(system, "system_articles", lambda: {row["key"]: row for row in system_schema()})
+        assert system.refresh_system_knowledge()["article_count"] == 22
+
+
+def test_flatten_migration_repairs_refs_archives_wrappers_and_survives_refresh(inventory, monkeypatch):
+    from obsidience.scripts import migrate_system_schema as migration
+    _legacy_system_publication(monkeypatch)
+    mapping, catalog = migration._flatten_mapping()
+    vault.write_note("Guides/System links.md", {"title": "System links"},
+        "\n".join("[[" + ref + "]]" for ref in mapping))
+    receipt = json.loads(system._state_path().read_text())
+    originals = {key: source.get_source(row["published"]["source_id"])["content"]
+                 for key, row in receipt["categories"].items()}
+    plan = migration.prepare_flatten()
+    assert plan["status"] == "ready" and len(plan["archives"]) == 3
+    assert migration.apply_flatten(plan["plan_sha256"])["applied"]
+    note = vault.load_note("Guides/System links.md")
+    assert set(note.links) == set(mapping.values())
+    assert not (CONFIG.vault_dir / "ADMECH Workstation/Hardware").exists()
+    assert not (CONFIG.vault_dir / "ADMECH Workstation/Applications/Obsidience").exists()
+    for item in plan["archives"]:
+        archived = vault.load_note(item["destination"])
+        assert archived.meta["article_status"] == "deprecated"
+        assert archived.meta["superseded_by"] == "[[" + item["successor"] + "]]"
+        assert archived.meta["sources"]
+    for key, original in originals.items():
+        assert source.get_source(receipt["categories"][key]["published"]["source_id"])["content"] == original
+    repeated = migration.prepare_flatten()
+    assert repeated["status"] == "already_migrated"
+    assert not migration.apply_flatten(repeated["plan_sha256"])["applied"]
+    assert system.refresh_system_knowledge()["status"] == "ready"
+    assert system.refresh_system_knowledge()["changed"] == 0
+    accepted = vault.iter_notes()
+    res = vault.Resolver(accepted)
+    assert all(res.resolve(link) for item in accepted for link in item.links)
+    assert len([item for item in accepted if "system-inventory" in item.meta.get("tags", [])]) == 19
+
+
+@pytest.mark.parametrize("change", ["edited", "extra", "stale"])
+def test_flatten_migration_rejects_unattested_or_changed_inputs(inventory, monkeypatch, change):
+    from obsidience.scripts import migrate_system_schema as migration
+    _legacy_system_publication(monkeypatch)
+    plan = migration.prepare_flatten()
+    if change == "edited":
+        path = CONFIG.vault_dir / "ADMECH Workstation/Hardware/Hardware.md"
+        path.write_text(path.read_text() + "Owner correction.\n")
+    elif change == "extra":
+        vault.write_note("ADMECH Workstation/Hardware/Unexpected.md", {"title": "Unexpected"}, "Keep.")
+    else:
+        vault.write_note("Guides/New note.md", {"title": "New note"}, "Keep.")
+    before = migration._snapshot(), system._state_path().read_bytes()
+    with pytest.raises(ValueError):
+        migration.apply_flatten(plan["plan_sha256"])
+    assert (migration._snapshot(), system._state_path().read_bytes()) == before
+
+
+def test_flatten_migration_rolls_back_the_entire_batch(inventory, monkeypatch):
+    from obsidience.scripts import migrate_system_schema as migration
+    _legacy_system_publication(monkeypatch)
+    plan = migration.prepare_flatten()
+    before = migration._snapshot(), system._state_path().read_bytes()
+    directories = {p for p in CONFIG.vault_dir.rglob("*") if p.is_dir()}
+    original = vault._atomic_write
+    failures = []
+    def fail_receipt_once(path, text):
+        if path == system._state_path() and not failures:
+            failures.append(True)
+            raise OSError("Injected receipt write failure")
+        return original(path, text)
+    monkeypatch.setattr(vault, "_atomic_write", fail_receipt_once)
+    with pytest.raises(OSError, match="Injected"):
+        migration.apply_flatten(plan["plan_sha256"])
+    assert (migration._snapshot(), system._state_path().read_bytes()) == before
+    assert {p for p in CONFIG.vault_dir.rglob("*") if p.is_dir()} == directories

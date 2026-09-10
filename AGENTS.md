@@ -1003,8 +1003,16 @@ admission and STOP behavior.
   model or Task. The bounded `knowledge/system_schema.py` catalog reads the
   physical `state/system/{hardware,applications}` descriptors and supplies
   Source labels and the deterministic `knowledge/system.py` publisher.
-  ADMECH Workstation mirrors those exact folders and descriptor-backed Articles;
-  system.json condenses into the root and application.json into its folder hub.
+  The Knowledge root is labelled System while its ADMECH Workstation reference
+  remains stable. Hardware is a physical Source grouping only: Compute, Devices,
+  Drives and Network publish directly beneath System. Applications contains one
+  leaf Article per application; registered application details are cited sections
+  within that Article, not child nodes. The publisher owns this projection;
+  collectors and Source retain their exact physical descriptor paths.
+  Existing installations migrate through `migrate_system_schema --flatten`
+  with the Harness stopped, a Vault/SQLite/receipt backup, and the exact dry-run
+  plan hash. Retire wrappers through native OKF archival and repair accepted
+  references; never rewrite historical Source or Review receipts.
   Labels cannot relocate stable descriptor-derived Article paths. Fixed approved
   observations enrich descriptor facts; collector strings never execute code.
   Immutable versions live in `evidence/system/`, outside the System schema.
@@ -1024,24 +1032,24 @@ admission and STOP behavior.
   must preserve the publisher's destinations; generated Articles remain readable
   and usable as link targets.
 - Source shows System, Knowledge Markdown, Evidence, and Project Files. Host network
-  interfaces belong at `state/system/hardware/network.json`, reflected under ADMECH
-  Workstation / Hardware / Network. Connections remain Settings configuration.
+  interfaces belong at `state/system/hardware/network.json`, reflected under
+  System / Network. Connections remain Settings configuration.
   Knowledge Markdown exposes the actual `vault/` Article paths. Evidence shows
   captured references in `raw/`, the optional manual-import folder `incoming/`,
   Alexandria handoffs in `inbox/`, and immutable System captures in `system/`.
   These are distinct stores; raw evidence is not graph Markdown. Reading Source must
   never collect hardware, rewrite descriptors or create research work.
 
-- Keep System inventory shallow: `Hardware/Drives` contains one descriptor and
-  direct Article per physical drive, matched by exact serial/model and its
+- Keep System inventory shallow: physical `hardware/drives` supplies one descriptor
+  and a direct System / Drives Article per physical drive, matched by exact serial/model and its
   attested WWN through installed util-linux `lsblk`. Device numbering is observed
   data, not identity. Partition, filesystem and mount details stay inside that
   drive Article. Obsidience and model-store paths belong in the Obsidience
   application Article; they are not drives or a System Volume branch. Network
-  is one direct Hardware Article; the standalone Web Browser is one direct
+  is one direct System Article; the standalone Web Browser is one direct
   Applications Article. Cameras, Microphones and Speakers describe endpoint
-  inventories. Keep real multi-subject groups such as Compute, Devices and
-  Obsidience's application settings. Retired condensations retain their OKF
+  inventories. Keep real multi-subject groups such as Compute and Devices;
+  Obsidience settings stay inside its application Article. Retired condensations retain their OKF
   archive fields and original Source citations.
 
 - Auto-curate is one owner-authored `auto_curate: true | false` field on the
