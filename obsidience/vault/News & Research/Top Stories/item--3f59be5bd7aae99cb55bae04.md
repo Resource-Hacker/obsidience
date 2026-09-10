@@ -2,28 +2,37 @@
 type: knowledge
 generated:
   by: obsidience/harness/knowledge/curation.py#feed
-  at: '2026-09-10T07:53:26.641Z'
+  at: '2026-09-10T09:23:30.463Z'
 resource: https://www.bbc.co.uk/news/articles/c62kzr1jg0jo
 sources:
-- resource: source://9a65edd7-b407-40f4-b7a5-2b2142c669f8
-- resource: source://e89dd021-e3ee-4755-9734-43f5414879fb
+- resource: source://3cab0bfe-e01c-4e1e-b9b5-949042d4d63c
+- resource: source://911f6a74-4f36-4c17-9fb4-d4544833e26a
 title: Trump says every adult American would get $5,000 if Republicans win midterm
   elections
 obsidience:
-  approved_at: '2026-09-10T00:54:10'
+  approved_at: '2026-09-10T02:24:09'
   provenance: proposed by Alexandria (task Tasks/ingest)
 ---
 
-**Published:** 10 September 2026 at 06:56:38 UTC
-**Source:** BBC News  
-**Reporting URL:** https://www.bbc.co.uk/news/articles/c62kzr1jg0jo
+# Trump Proposes $5,000 Universal Payment Tied to Midterm Elections
 
 ## Summary
+At a party convention, the US president announced that every adult American would receive $5,000 if Republicans win the midterm elections.
 
-Speaking at a party convention, the US president announced that every adult American would receive $5,000 if Republicans win the upcoming midterm elections.  
+## Reporting Details
+- **Date:** 10 September 2026, 09:00 UTC
+- **Source:** BBC News
+- **Reporting URL:** https://www.bbc.co.uk/news/articles/c62kzr1jg0jo
 
-**No details provided** — the president gave no specifics on how the plan would be implemented or where the funding would come from.
+## Key Details
+The president spoke at a party convention but gave no details on how the plan would work or where the money would come from.
 
 ---
 
-> **Evidence:** The activating source is captured at `source://e89dd021-e3ee-4755-9734-43f5414879fb` (RSS feed capture from BBC News). The source provides only the headline, publication date, and summary; it does not contain the full article text. All details above are drawn from the RSS entry metadata.
+> **Source citation:** source://911f6a74-4f36-4c17-9fb4-d4544833e26a (BBC News RSS feed)
+
+[Read original report](https://www.bbc.co.uk/news/articles/c62kzr1jg0jo)
+
+---
+
+> *Note: This is a single-item distillation from the Top Stories Feed. The proposition was announced at a party convention; further details on mechanics and funding were not provided."
