@@ -3,7 +3,7 @@ type: knowledge
 title: Observations
 obsidience:
   auto_curate: true
-  approved_at: '2026-09-09T20:37:40'
+  approved_at: '2026-09-09T23:39:46'
   provenance: proposed by Alexandria (task Tasks/link)
 ---
 
@@ -20,7 +20,10 @@ off. This permits their existing writers; it does not create a new Task or make
 an unverified observation true. Compact and Promote keep their own triggers.
 
 - [Immediate Observations](/Agents/Executive/Observations/Immediate%20Observations/Immediate%20Observations.md)
-  holds the current conversation Article sent with its Thinking Packet.
+  holds the current conversation Article sent with its Thinking Packet. The
+  [Activation packet protocol](/Agents/Executive/Architecture/activation-briefing-protocol--21d7f1ad.md)
+  attaches that single Current conversation Article by exact identity, and only
+  for the active Executive conversation.
 - [Temporary Observations](/Agents/Executive/Observations/Temporary%20Observations/Temporary%20Observations.md)
   holds separate, unverified compaction summaries. SQLite retains the exact dialogue.
 - [Preferences](/Agents/Executive/Observations/Preferences/Preferences.md) records the owner's
