@@ -3,7 +3,7 @@ type: knowledge
 title: Observations
 obsidience:
   auto_curate: true
-  approved_at: '2026-09-10T08:08:40'
+  approved_at: '2026-09-10T14:08:59'
   provenance: proposed by Alexandria (task Tasks/link)
 ---
 
@@ -23,7 +23,10 @@ an unverified observation true. Compact and Promote keep their own triggers.
   holds the current conversation Article sent with its Thinking Packet. The
   [Activation packet protocol](/Agents/Executive/Architecture/activation-briefing-protocol--21d7f1ad.md)
   attaches that single Current conversation Article by exact identity, and only
-  for the active Executive conversation.
+  for the active Executive conversation. The [Real-time
+  Executive](/Agents/Executive/Architecture/real-time-executive.md) speech connection and
+  typed Chat are the two sources that project completed turns into that single
+  current conversation.
 - [Temporary Observations](/Agents/Executive/Observations/Temporary%20Observations/Temporary%20Observations.md)
   holds separate, unverified compaction summaries. SQLite retains the exact dialogue.
 - [Preferences](/Agents/Executive/Observations/Preferences/Preferences.md) records the owner's
