@@ -1,5 +1,6 @@
 ---
 type: knowledge
+status: deprecated
 title: Realtime speech runtime
 tags:
 - system-inventory
@@ -9,6 +10,11 @@ generated:
 sources:
 - resource: source://b2d80e18-3e80-4c19-a1e4-d664fb853e7f
 - resource: obsidience/state/system/applications/obsidience/speech-runtime.json
+obsidience:
+  superseded_by: '[[ADMECH Workstation/Applications/Obsidience]]'
+  archived_at: '2026-09-10T23:35:15.819811+00:00'
+  archive_reason: System hierarchy simplified; details retained in the successor Article
+    and immutable Source.
 ---
 
 System schema and observed inventory, populated automatically by the Harness.

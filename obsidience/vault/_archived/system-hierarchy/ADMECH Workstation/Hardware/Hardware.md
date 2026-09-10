@@ -1,5 +1,6 @@
 ---
 type: knowledge
+status: deprecated
 title: Hardware
 tags:
 - system-inventory
@@ -8,6 +9,11 @@ generated:
   at: '2026-09-10T05:07:09.082Z'
 sources:
 - resource: source://879963ae-2704-425f-bfa9-81c835cc819c
+obsidience:
+  superseded_by: '[[ADMECH Workstation/ADMECH Workstation]]'
+  archived_at: '2026-09-10T23:35:15.813335+00:00'
+  archive_reason: System hierarchy simplified; details retained in the successor Article
+    and immutable Source.
 ---
 
 System schema and observed inventory, populated automatically by the Harness.

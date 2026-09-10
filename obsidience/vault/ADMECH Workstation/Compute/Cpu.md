@@ -52,4 +52,4 @@ No entries recorded in this capture.
 | --- | --- |
 | Total bytes | 98733195264 |
 
-[Parent](/ADMECH%20Workstation/Hardware/Compute/Compute.md).
+[Parent](/ADMECH%20Workstation/Compute/Compute.md).

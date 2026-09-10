@@ -45,4 +45,4 @@ No entries recorded in this capture.
 | Pci slot | 0000:7a:00.0 |
 | Vendor id | 0x1002 |
 
-[Parent](/ADMECH%20Workstation/Hardware/Compute/Compute.md).
+[Parent](/ADMECH%20Workstation/Compute/Compute.md).

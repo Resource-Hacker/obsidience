@@ -78,4 +78,4 @@ No entries recorded in this capture.
 
 - /mnt/wow-drive
 
-[Parent](/ADMECH%20Workstation/Hardware/Drives/Drives.md).
+[Parent](/ADMECH%20Workstation/Drives/Drives.md).

@@ -45,4 +45,4 @@ No entries recorded in this capture.
 | /sys/devices/pci0000:00/0000:00:02.1/0000:04:00.0/0000:05:08.0/0000:07:00.0/0000:08:05.0/0000:0b:00.0 | igc | enp11s0 | 1 |
 | /sys/devices/pci0000:00/0000:00:02.1/0000:04:00.0/0000:05:08.0/0000:07:00.0/0000:08:06.0/0000:0c:00.0 | atlantic | enp12s0 | 1 |
 
-[Parent](/ADMECH%20Workstation/Hardware/Hardware.md).
+[Parent](/ADMECH%20Workstation/ADMECH%20Workstation.md).

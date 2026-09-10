@@ -51,4 +51,4 @@ No entries recorded in this capture.
 | pci-0000:0e:00.0-usb-0:5:1.0 | pro-input-1 | alsa\_input.usb-Logitech\_A50\_X-00.pro-input-1 | A50 X Stream Mix | alsa:acp:X:3:capture |
 | pci-0000:0e:00.0-usb-0:2:1.2 | analog-stereo | alsa\_input.usb-Remo\_Tech\_Co.\_\_Ltd.\_OBSBOT\_Tiny\_2\_Lite-02.analog-stereo | OBSBOT Tiny 2 Lite Microphone | alsa:acp:Lite:0:capture |
 
-[Parent](/ADMECH%20Workstation/Hardware/Devices/Devices.md).
+[Parent](/ADMECH%20Workstation/Devices/Devices.md).

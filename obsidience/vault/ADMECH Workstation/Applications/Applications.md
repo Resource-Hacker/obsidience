@@ -5,14 +5,14 @@ tags:
 - system-inventory
 generated:
   by: Obsidience System inventory
-  at: '2026-09-10T05:07:09.023Z'
+  at: '2026-09-10T23:35:19.772Z'
 sources:
-- resource: source://582624b5-4507-49e7-902d-73a756a814c6
+- resource: source://e948e6a6-0fdf-442b-b700-8092a53fffb7
 ---
 
 System schema and observed inventory, populated automatically by the Harness.
 
-Captured: 2026-09-10T05:07:09.023Z. [Immutable evidence](source://582624b5-4507-49e7-902d-73a756a814c6) (sha256:23e1bb583d262e0d590ff316554c2765d28ed8528c35b149b9d9c10dd042c3b0).
+Captured: 2026-09-10T23:35:19.772Z. [Immutable evidence](source://e948e6a6-0fdf-442b-b700-8092a53fffb7) (sha256:6eeeefebd6486d610930e7ebd7695b4819378f9d5fb4fe7a101066583eaea073).
 
 | Field | Recorded value |
 | --- | --- |
@@ -22,7 +22,7 @@ Captured: 2026-09-10T05:07:09.023Z. [Immutable evidence](source://582624b5-4507-
 
 | Ref | Title |
 | --- | --- |
-| ADMECH Workstation/Applications/Obsidience/Obsidience | Obsidience |
+| ADMECH Workstation/Applications/Obsidience | Obsidience |
 | ADMECH Workstation/Applications/Web Browser | Web Browser |
 
 [Parent](/ADMECH%20Workstation/ADMECH%20Workstation.md).

@@ -53,4 +53,4 @@ No entries recorded in this capture.
 | pci-0000:0e:00.0-usb-0:5:1.0 | pro-output-0 | alsa\_output.usb-Logitech\_A50\_X-00.pro-output-0 | A50 X Voice | alsa:acp:X:0:playback |
 | pci-0000:0e:00.0-usb-0:5:1.0 | pro-output-1 | alsa\_output.usb-Logitech\_A50\_X-00.pro-output-1 | A50 X Game | alsa:acp:X:1:playback |
 
-[Parent](/ADMECH%20Workstation/Hardware/Devices/Devices.md).
+[Parent](/ADMECH%20Workstation/Devices/Devices.md).

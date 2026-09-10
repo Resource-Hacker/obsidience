@@ -1,5 +1,6 @@
 ---
 type: knowledge
+status: deprecated
 title: Hardware assignments
 tags:
 - system-inventory
@@ -9,6 +10,11 @@ generated:
 sources:
 - resource: source://e583ff90-5c91-44c3-83d3-9e12deec1daf
 - resource: obsidience/state/system/applications/obsidience/model-assignments.json
+obsidience:
+  superseded_by: '[[ADMECH Workstation/Applications/Obsidience]]'
+  archived_at: '2026-09-10T23:35:15.817590+00:00'
+  archive_reason: System hierarchy simplified; details retained in the successor Article
+    and immutable Source.
 ---
 
 System schema and observed inventory, populated automatically by the Harness.

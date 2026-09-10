@@ -50,4 +50,4 @@ No entries recorded in this capture.
 | /dev/video0 | v4l2:/dev/video0 | OBSBOT Tiny 2 Lite: OBSBOT Tiny |
 | /dev/video1 | v4l2:/dev/video1 | OBSBOT Tiny 2 Lite: OBSBOT Tiny |
 
-[Parent](/ADMECH%20Workstation/Hardware/Devices/Devices.md).
+[Parent](/ADMECH%20Workstation/Devices/Devices.md).

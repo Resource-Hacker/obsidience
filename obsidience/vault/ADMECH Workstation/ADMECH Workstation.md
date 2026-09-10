@@ -1,19 +1,19 @@
 ---
 type: knowledge
-title: ADMECH Workstation
+title: System
 tags:
 - system-inventory
 generated:
   by: Obsidience System inventory
-  at: '2026-09-10T04:33:49.448Z'
+  at: '2026-09-10T23:35:19.751Z'
 sources:
-- resource: source://b1a69448-54c8-4d80-b025-cb9e6cf4df4e
+- resource: source://a31d3048-4fef-489d-a412-62f4bd6cffc5
 - resource: obsidience/state/system/system.json
 ---
 
 System schema and observed inventory, populated automatically by the Harness.
 
-Captured: 2026-09-10T04:33:49.448Z. [Immutable evidence](source://b1a69448-54c8-4d80-b025-cb9e6cf4df4e) (sha256:8aea11eac4fdf896624bda405f948694cf3d83eeb51107fbe9427cdb30a108d8).
+Captured: 2026-09-10T23:35:19.751Z. [Immutable evidence](source://a31d3048-4fef-489d-a412-62f4bd6cffc5) (sha256:e601f7c167ebeab703862070dc86c04cfa0c5b599b26c92e7498fe19de38c1d6).
 
 | Field | Recorded value |
 | --- | --- |
@@ -24,7 +24,10 @@ Captured: 2026-09-10T04:33:49.448Z. [Immutable evidence](source://b1a69448-54c8-
 | Ref | Title |
 | --- | --- |
 | ADMECH Workstation/Applications/Applications | Applications |
-| ADMECH Workstation/Hardware/Hardware | Hardware |
+| ADMECH Workstation/Compute/Compute | Compute |
+| ADMECH Workstation/Devices/Devices | Devices |
+| ADMECH Workstation/Drives/Drives | Drives |
+| ADMECH Workstation/Network | Network |
 
 ## Descriptor
 
