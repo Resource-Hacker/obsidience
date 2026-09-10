@@ -2,7 +2,7 @@
 type: knowledge
 title: Real-time Executive
 obsidience:
-  approved_at: '2026-09-09T19:11:57'
+  approved_at: '2026-09-10T12:13:49'
   provenance: proposed by Alexandria (task Tasks/link)
 ---
 
@@ -60,3 +60,4 @@ normally while the connection stays ready for the next request.
 - `related_to` [Hyprland shell scene](/Agents/Executive/Architecture/hyprland-shell-scene.md) — Current focused and unfocused panes enter only as bounded runtime bindings.
 - `related_to` [Research requests](/Agents/Executive/Architecture/research-requests--7bf0113c.md) — Delegation from an interactive Realtime execution follows the Research delegation path to [Darwin](/Agents/Darwin/Darwin.md).
 - `implements` [Local-first architecture](/Agents/Executive/Architecture/local-first-architecture--7d8e77cc.md) — Spoken requests use the same Task executor, model lease and SQLite conversation as typed Chat; the speech connection adds no independent reasoning or memory owner.
+- `related_to` [Executive](/Agents/Executive/Executive.md) — The Realtime connection is the Executive's speech interface; each final transcript executes through that same accountable Executive as typed Chat.
