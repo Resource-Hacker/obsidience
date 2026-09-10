@@ -2,9 +2,9 @@
 type: agent
 title: Darwin
 obsidience:
-  approved_at: '2026-09-09T17:57:09'
+  approved_at: '2026-09-09T20:21:56'
   auto_curate: true
-  provenance: proposed by Codex (task codex:implementation)
+  provenance: proposed by Alexandria (task Tasks/link)
   role: researcher
   tasks:
   - '[[@library/Tasks/research/model]]'
@@ -21,7 +21,7 @@ Darwin is the Researcher: the acquisition, measurement, and synthesis role. He g
 
 - **Research → Question** answers one explicit bounded question.
 - **Research → Learn** closes one consequential knowledge gap.
-- **Research → Distill** distills one captured Feed item into Alexandria's physical Source Inbox; its selected Knowledge node owns placement and Auto-curate.
+- **Research → Distill** distill one captured Feed item into Alexandria's physical Source Inbox; its selected Knowledge node owns placement and Auto-curate.
 - **Generate** follows completed research to synthesize a bound Tool and paired Skill, a shared Task, or an agent-specific Runbook through validated proposals.
 - **Model** characterizes newly registered local models through preserved Source manifests and hardware-specific benchmarks.
 
@@ -37,5 +37,6 @@ Prefer primary or official sources, direct URLs, explicit dates, and bounded cor
 - `related_to` [Heimdall](/Agents/Heimdall/Heimdall.md) — Heimdall independently verifies research evidence and outcomes.
 - `implements` [Research requests](/Agents/Executive/Architecture/research-requests--7bf0113c.md) — Darwin owns Research activations.
 - `related_to` [Local-first architecture](/Agents/Executive/Architecture/local-first-architecture--7d8e77cc.md) — Darwin's Source documents and physical `obsidience/evidence/inbox/` handoff operate inside Obsidience's local vault and immutable Source architecture.
+- `related_to` [Task activation](/Agents/Executive/Architecture/task-activation--b30a4642.md) — Darwin's Generate → Runbook path follows that law: when an assignment lacks an accepted procedure, `task.assigned` activates Generate Runbook and Darwin chooses the minimal required Skills from the accepted shared catalog.
 
 Darwin may refine an existing Runbook body from a controller-bound failure case through Generate / Runbook. Tool authority and model settings stay fixed. Heimdall owns independent evaluation; Darwin cannot author grading criteria or accept the proposal.
