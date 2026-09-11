@@ -277,3 +277,11 @@ def test_invalid_recheck_flag_never_acquires_a_model(admission, value):
     with pytest.raises(selection.TaskSelectionError):
         admission.run("Open TFT", reclassification=value)
     assert not admission.calls and not admission.leases
+
+def test_unresolved_launch_requests_clarification_without_inventing_an_application(admission):
+    admission.response = choice("launch", None, None)
+    task, params, event = admission.run("Open NonexistentApp.")
+    assert task.ref == selection.QUERY_REF
+    assert params["computer_outcome"] == "answer"
+    assert "application" not in params and "operation" not in params
+    assert params["request"] == "Open NonexistentApp."
