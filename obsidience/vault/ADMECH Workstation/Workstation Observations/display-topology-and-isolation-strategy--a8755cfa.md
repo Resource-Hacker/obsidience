@@ -41,5 +41,5 @@ The [World of Warcraft launch policy](/ADMECH%20Workstation/Workstation%20Observ
 
 ## Relationships
 
-- `related_to` [Hyprland shell scene](/Agents/Executive/Architecture/hyprland-shell-scene.md) — The Shell scene is the bounded semantic projection of this one live compositor topology.
+- `related_to` [Hyprland shell scene](/Agents/Executive/Architecture/Shell/hyprland-shell-scene.md) — The Shell scene is the bounded semantic projection of this one live compositor topology.
 - `related_to` [Samsung display configuration](/ADMECH%20Workstation/Workstation%20Observations/samsung-display-vrr-and-edid-configuration--96ccfd7b.md) — Samsung mode, color, and VRR requirements remain a specific display contract inside the unified topology.

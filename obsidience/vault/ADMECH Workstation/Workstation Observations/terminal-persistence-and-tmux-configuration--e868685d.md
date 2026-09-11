@@ -22,5 +22,5 @@ running tmux process as proof of continuity.
 
 ## Relationships
 
-- `related_to` [Local-first architecture](/Agents/Executive/Architecture/local-first-architecture--7d8e77cc.md) — The persistent local session survives shell presentation changes without creating another agent or terminal authority.
-- `related_to` [Hyprland shell scene](/Agents/Executive/Architecture/hyprland-shell-scene.md) — Terminal is an ordinary addressable module pane in the unified Shell scene while tmux owns its process continuity.
+- `related_to` [Local-first architecture](/Agents/Executive/Architecture/Harness/local-first-architecture--7d8e77cc.md) — The persistent local session survives shell presentation changes without creating another agent or terminal authority.
+- `related_to` [Hyprland shell scene](/Agents/Executive/Architecture/Shell/hyprland-shell-scene.md) — Terminal is an ordinary addressable module pane in the unified Shell scene while tmux owns its process continuity.

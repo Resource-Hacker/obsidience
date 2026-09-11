@@ -15,5 +15,5 @@ its required shared Skill and Tool dependencies automatically.
 
 Use [task.create](/Tools/task.create.md) only for an exact accepted peer Task.
 Delegation records causation, not a new subtask hierarchy. Follow
-[Research delegation](/Agents/Executive/Architecture/research-requests--7bf0113c.md)
+[Research delegation](/Agents/Executive/Architecture/Harness/research-requests--7bf0113c.md)
 for a knowledge gap; do not create duplicate role-charter Articles here.

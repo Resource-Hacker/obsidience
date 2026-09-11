@@ -1,28 +1,27 @@
 ---
 type: knowledge
 title: Architecture
+sources:
+- resource: DESIGN.md
+- resource: obsidience/harness/interfaces/api/app.py
+- resource: obsidience/shell/qml/shell.qml
 obsidience:
-  provenance: proposed by Alexandria (task Tasks/link)
-  approved_at: '2026-09-10T15:39:24'
+  provenance: Owner-authorized Architecture reorganization and source audit at a3a04c6add819a67662a1116e643713a3b4c1324
+  approved_at: '2026-09-10T23:49:22.333585+00:00'
 ---
 
-Architecture is the stable operating map for the Executive. Read the narrowest
-Article that answers the current question; live inventory, transient state, and
-benchmarks remain in their owning System, Models, Hardware, Source, or execution
-surfaces.
+Obsidience has two cooperating product boundaries. The Harness turns accepted
+knowledge and work definitions into bounded, evidenced execution. The Shell
+presents the desktop and exposes observed state and explicit computer effects.
+Neither branch is an Agent, Task assignment, or additional runtime authority.
 
-- [Golden ontology](/Agents/Executive/Architecture/action-ontology.md) defines the six Article kinds and their boundaries.
-- [Local-first architecture](/Agents/Executive/Architecture/local-first-architecture--7d8e77cc.md) defines the one-authority system boundary and small-model design target.
-- [LLM-wiki knowledge pattern](/Agents/Executive/Architecture/llm-wiki-knowledge-pattern--dab5ff0a.md) explains how Source becomes maintained, retrievable Knowledge.
-- [Task activation](/Agents/Executive/Architecture/task-activation--b30a4642.md) defines how reusable outcomes become verified executions.
-- [Activation packet protocol](/Agents/Executive/Architecture/activation-briefing-protocol--21d7f1ad.md) defines the exact Thinking Packet sent to a model.
-- [Executive model selection](/Agents/Executive/Architecture/current-executive-model--3745813a.md) defines per-Task model and reasoning authority.
-- [Hyprland shell scene](/Agents/Executive/Architecture/hyprland-shell-scene.md) defines the current desktop observation, targeting, and effect boundary.
-- [Real-time Executive](/Agents/Executive/Architecture/real-time-executive.md) explains the speech connection and its delivery to the same work Tasks as typed Chat.
-- [Observation lifecycle](/Agents/Executive/Architecture/observations.md) defines Immediate, Temporary, and durable retention and promotion, and governs the live [Observations](/Agents/Executive/Observations/Observations.md) branch, whose live Immediate level is [Immediate Observations](/Agents/Executive/Observations/Immediate%20Observations/Immediate%20Observations.md) and which also holds the Temporary level.
-- [Research requests](/Agents/Executive/Architecture/research-requests--7bf0113c.md) defines the Executive-to-Darwin evidence handoff, executed by [Darwin](/Agents/Darwin/Darwin.md) by preserving cited evidence in Source and handing one bounded finding to Alexandria.
+- [Harness](/Agents/Executive/Architecture/Harness/Harness.md): ontology, activation, retrieval, model selection,
+  conversation memory, speech ingress, research and publication.
+- [Shell](/Agents/Executive/Architecture/Shell/Shell.md): compositor and native surface ownership, desktop scene
+  targeting, panes, and the shared knowledge-graph renderer.
 
-Together these Articles answer what an object is, where truth lives, how work is
-selected, what a model receives, which model runs it, how the desktop is
-observed or changed, how voice enters the same executor, and how missing
-knowledge is acquired.
+These Articles describe the implementation, not live state. Current application
+and device inventory belongs in [System](/ADMECH%20Workstation/ADMECH%20Workstation.md);
+window state, model residency and execution outcomes come from their current
+runtime interfaces. The source files cited by each Article are the basis for
+architecture claims. Read the narrowest relevant child before acting.

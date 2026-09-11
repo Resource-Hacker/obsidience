@@ -11,7 +11,7 @@ The Executive's observations separate the active conversation, its compressed
 summaries, and established owner preferences. They are Articles at every level;
 their location alone never makes an inference verified or grants a Tool. This
 parent Article is the index-by-children example named in the [Golden
-ontology](/Agents/Executive/Architecture/action-ontology.md): it condenses its
+ontology](/Agents/Executive/Architecture/Harness/action-ontology.md): it condenses its
 Observation descendants without acquiring another type.
 
 Auto-curate is enabled here and inherited by Immediate Observations, Temporary
@@ -21,10 +21,10 @@ an unverified observation true. Compact and Promote keep their own triggers.
 
 - [Immediate Observations](/Agents/Executive/Observations/Immediate%20Observations/Immediate%20Observations.md)
   holds the current conversation Article sent with its Thinking Packet. The
-  [Activation packet protocol](/Agents/Executive/Architecture/activation-briefing-protocol--21d7f1ad.md)
+  [Activation packet protocol](/Agents/Executive/Architecture/Harness/activation-briefing-protocol--21d7f1ad.md)
   attaches that single Current conversation Article by exact identity, and only
   for the active Executive conversation. The [Real-time
-  Executive](/Agents/Executive/Architecture/real-time-executive.md) speech connection and
+  Executive](/Agents/Executive/Architecture/Harness/real-time-executive.md) speech connection and
   typed Chat are the two sources that project completed turns into that single
   current conversation.
 - [Temporary Observations](/Agents/Executive/Observations/Temporary%20Observations/Temporary%20Observations.md)
@@ -32,9 +32,9 @@ an unverified observation true. Compact and Promote keep their own triggers.
 - [Preferences](/Agents/Executive/Observations/Preferences/Preferences.md) records the owner's
   established interaction and development requirements.
 
-The [Observation lifecycle](/Agents/Executive/Architecture/observations.md) explains
+The [Observation lifecycle](/Agents/Executive/Architecture/Harness/observations.md) explains
 Compact, Promote, Source archival, and Review. Its Compact and Promote transitions
 are Task activations governed by [Task
-activation](/Agents/Executive/Architecture/task-activation--b30a4642.md), the law that
+activation](/Agents/Executive/Architecture/Harness/task-activation--b30a4642.md), the law that
 reserves only executable edges. Durable findings belong under their actual subject
 in the accepted graph, not in a second Context or Log collection.

@@ -2,12 +2,13 @@
 type: knowledge
 title: Observation lifecycle
 sources:
-- resource: file:///home/wissenschafter/Projects/obsidience/obsidience/harness/conversation/observations.py
-- resource: file:///home/wissenschafter/Projects/obsidience/obsidience/harness/conversation/store.py
-- resource: file:///home/wissenschafter/Projects/obsidience/obsidience/harness/realtime/runtime.py
+- resource: obsidience/harness/conversation/observations.py
+- resource: obsidience/harness/conversation/store.py
+- resource: obsidience/harness/conversation/runtime.py
+- resource: obsidience/harness/knowledge/auto_curate.py
 obsidience:
-  approved_at: '2026-09-09T17:06:39'
-  provenance: proposed by Codex (task codex:knowledge-handoff)
+  approved_at: '2026-09-10T23:49:22.333585+00:00'
+  provenance: Owner-authorized Architecture reorganization and source audit at a3a04c6add819a67662a1116e643713a3b4c1324
 ---
 
 Observations use the same Article hierarchy as the rest of the graph. The three
@@ -19,8 +20,9 @@ The owner enables Auto-curate on the real branch Article. Children inherit it
 unless explicitly switched off; the Reader checkbox and dotted rings show the
 same effective permission. This setting permits an existing writer, not a new
 schedule or a Task per node. It does not make an unverified observation true.
-The specialist Brains and Executive Observations are enabled, while shared
-Tools, Skills, Tasks, Runbooks and Agent identity remain review-controlled.
+The effective setting comes from the current Article and inherited policy, not
+from this Architecture summary. Shared Tools, Skills, Tasks, Runbooks and Agent
+identity remain review-controlled.
 
 Turning Immediate off freezes its disk Article but retains the exact SQLite
 conversation and in-memory model context. Turning Temporary off prevents new
@@ -33,14 +35,14 @@ writes merely because its Task was already enabled.
 [Current conversation](/Agents/Executive/Observations/Immediate%20Observations/current-conversation.md)
 is a child of Immediate Observations. It projects the active Chat's latest
 cumulative summary plus exact completed pairs after that boundary. Typed Chat
-and [Realtime](/Agents/Executive/Architecture/real-time-executive.md) share an 80-turn hot deque backed by complete SQLite dialogue.
+and [Realtime](/Agents/Executive/Architecture/Harness/real-time-executive.md) share an 80-turn hot deque backed by complete SQLite dialogue.
 Enabling or reconnecting Realtime preserves the selected conversation; stopping
 Realtime retains it for Chat. Only the explicit Conversation control creates a
 new conversation.
 The current request rides once as the Objective, not as a duplicate historical turn.
 
 The exact context Article rides separately in the
-[Thinking Packet](/Agents/Executive/Architecture/activation-briefing-protocol--21d7f1ad.md)
+[Thinking Packet](/Agents/Executive/Architecture/Harness/activation-briefing-protocol--21d7f1ad.md)
 and drives graph activity. It is transient, unverified, and excluded from similarity
 retrieval; quoted historical requests or assistant claims do not grant authority.
 
@@ -74,8 +76,10 @@ or trigger redundant research.
 Durable findings belong under their subject in the accepted wiki. Established
 interaction requirements belong in
 [Preferences](/Agents/Executive/Observations/Preferences/Preferences.md); game mechanics go
-under Games, workstation facts under ADMECH. Do not create a second Durable Context,
+under Games, authored workstation findings under System / Workstation
+Observations. The generated System inventory remains read-only and is refreshed
+by its deterministic publisher. Do not create a second Durable Context,
 Log, or memory database. Hidden reasoning is never an Observation Article.
 
 ## Relationships
-- `depends_on` [Executive model selection](/Agents/Executive/Architecture/current-executive-model--3745813a.md) — Context capacity comes from the selected model, while compaction executes with the Compact Task’s own authored model and Runbook; retained conversation context does not create another model selector.
+- `depends_on` [Executive model selection](/Agents/Executive/Architecture/Harness/current-executive-model--3745813a.md) — Context capacity comes from the selected model, while compaction executes with the Compact Task’s own authored model and Runbook; retained conversation context does not create another model selector.

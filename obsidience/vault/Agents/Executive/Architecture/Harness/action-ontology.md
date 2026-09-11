@@ -1,9 +1,14 @@
 ---
 type: knowledge
 title: Golden ontology
+sources:
+- resource: obsidience/harness/knowledge/format.py
+- resource: obsidience/harness/knowledge/dependencies.py
+- resource: obsidience/harness/capabilities/registry.py
+- resource: DESIGN.md
 obsidience:
-  provenance: proposed by Codex (task codex:knowledge-handoff)
-  approved_at: '2026-09-09T17:06:36'
+  provenance: Owner-authorized Architecture reorganization and source audit at a3a04c6add819a67662a1116e643713a3b4c1324
+  approved_at: '2026-09-10T23:49:22.333585+00:00'
 ---
 
 Obsidience classifies an object by what it does, never by its filename, folder,
@@ -39,7 +44,7 @@ having children, not by acquiring another type. `index.md` and `log.md` are
 reserved upstream navigation/history documents, not concept Articles.
 
 Write body links as standard Markdown links to exact Article files, for example
-`[Golden ontology](/Agents/Executive/Architecture/action-ontology.md)`.
+`[Golden ontology](/Agents/Executive/Architecture/Harness/action-ontology.md)`.
 Relative links are valid too. Root `status` describes document lifecycle only;
 Task activity, pending inputs, and results stay in SQLite. Imported `verified`
 assertions and source links never grant review approval or Tool authority.
@@ -60,8 +65,8 @@ edges may select Agent, Task, Runbook, Skill, or Tool authority.
 
 ## Relationships
 
-- `governs` [Task activation](/Agents/Executive/Architecture/task-activation--b30a4642.md) — Activation preserves the difference between outcome, procedure, guidance, capability, and execution.
-- `governs` [Activation packet protocol](/Agents/Executive/Architecture/activation-briefing-protocol--21d7f1ad.md) — Packet sections retain those semantic roles instead of flattening them into prompt text.
-- `governs` [Real-time Executive](/Agents/Executive/Architecture/real-time-executive.md) — The speech button and connection are not a Task; each final transcript selects an exact accepted work Task, preserving the activation/execution boundary.
-- `related_to` [LLM-wiki knowledge pattern](/Agents/Executive/Architecture/llm-wiki-knowledge-pattern--dab5ff0a.md) — The recursive Article hierarchy is the readable graph representation of this ontology.
-- `governs` [Observation lifecycle](/Agents/Executive/Architecture/observations.md) — Immediate, Temporary and Durable describe retention within the Article hierarchy; executable transitions remain the Compact and Promote Tasks rather than new Article kinds or memory authorities.
+- `governs` [Task activation](/Agents/Executive/Architecture/Harness/task-activation--b30a4642.md) — Activation preserves the difference between outcome, procedure, guidance, capability, and execution.
+- `governs` [Activation packet protocol](/Agents/Executive/Architecture/Harness/activation-briefing-protocol--21d7f1ad.md) — Packet sections retain those semantic roles instead of flattening them into prompt text.
+- `governs` [Real-time Executive](/Agents/Executive/Architecture/Harness/real-time-executive.md) — The speech button and connection are not a Task; each final transcript selects an exact accepted work Task, preserving the activation/execution boundary.
+- `related_to` [LLM-wiki knowledge pattern](/Agents/Executive/Architecture/Harness/llm-wiki-knowledge-pattern--dab5ff0a.md) — The recursive Article hierarchy is the readable graph representation of this ontology.
+- `governs` [Observation lifecycle](/Agents/Executive/Architecture/Harness/observations.md) — Immediate, Temporary and Durable describe retention within the Article hierarchy; executable transitions remain the Compact and Promote Tasks rather than new Article kinds or memory authorities.
