@@ -8,6 +8,8 @@ sources:
 - resource: obsidience/harness/realtime/media.py
 - resource: obsidience/harness/realtime/speech/worker.py
 - resource: obsidience/harness/conversation/runtime.py
+- resource: obsidience/harness/conversation/selection.py
+- resource: obsidience/harness/execution/executor.py
 - resource: obsidience/harness/execution/scheduler.py
 obsidience:
   approved_at: '2026-09-10T23:49:22.333585+00:00'
@@ -32,6 +34,13 @@ At start, Realtime freezes the selected microphone, speaker, and Pocket voice,
 wakes the OBSBOT camera through its official SDK, and disables the camera's
 120-second no-video sleep timer. At stop, it restores that timer and sleeps the
 camera. The camera's physical state owns its microphone state.
+
+The bounded selector sees the current request in a separate final message, not
+as another field inside historical context. It classifies one coherent
+outcome/application/scope combination; the controller derives the exact assigned
+Task and rereads its accepted definition. Polite execution requests are distinct
+from explanations, quotations, withdrawals, and bare corrections. The response
+grammar prevents impossible field combinations but does not prove semantic intent.
 
 Each final transcript selects an exact work Task and executes through the one
 activation compiler, model lease, Tool path, ledger, and graph activity.
@@ -61,7 +70,13 @@ requests retain their separate acceptance condition.
 An ordinary launch dispatches once and waits for the existing Shell scene to
 witness readiness. A timeout is not permission to launch again. Query can request
 one controlled pre-effect admission correction if an action was misrouted; it
-cannot authorize a Tool or invent a target. Independent activations retain their
+cannot authorize a Tool or invent a target. An effect-free Query attempt to
+delegate Computer Use is intercepted before Tool dispatch and requests the same
+one-time recheck. It records an undispatched controller disposition, not a
+fabricated task.complete. The recheck uses the original owner turn with bounded
+feedback; attempted Tool arguments cannot select the target. Prior effects,
+created Tasks, cancellation, or an earlier recheck prevent automatic replay.
+Independent activations retain their
 own identities, context and evidence while the speech connection stays ready.
 
 ## Relationships
