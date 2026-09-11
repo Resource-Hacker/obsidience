@@ -8,6 +8,9 @@ sources:
 - resource: obsidience/harness/realtime/media.py
 - resource: obsidience/harness/realtime/speech/worker.py
 - resource: obsidience/harness/conversation/runtime.py
+- resource: obsidience/harness/conversation/selection.py
+- resource: obsidience/harness/capabilities/task/complete.py
+- resource: obsidience/harness/execution/executor.py
 - resource: obsidience/harness/execution/scheduler.py
 obsidience:
   approved_at: '2026-09-10T23:49:22.333585+00:00'
@@ -33,8 +36,14 @@ wakes the OBSBOT camera through its official SDK, and disables the camera's
 120-second no-video sleep timer. At stop, it restores that timer and sleeps the
 camera. The camera's physical state owns its microphone state.
 
-Each final transcript selects an exact work Task and executes through the one
-activation compiler, model lease, Tool path, ledger, and graph activity.
+Each final transcript first selects one coherent outcome/target choice from the
+accepted Task catalog and current scene. History is supplied to admission only
+when that choice explicitly requests one bounded referent-grounding pass. The
+controller maps the choice to Query or Computer Use; execution still receives
+its normal Immediate Observations. Historical refusals cannot stand in for
+current capability, and a bare correction does not authorize an effect.
+The selected Task executes through the one activation compiler, model lease,
+Tool path, ledger, and graph activity.
 `task.complete` records the ordinary terminal result; its public summary is
 the same answer delivered to Chat or spoken by Pocket. The visible Thinking
 Packet and its exact refs are the graph animation source. Speech onset may
@@ -60,8 +69,11 @@ requests retain their separate acceptance condition.
 
 An ordinary launch dispatches once and waits for the existing Shell scene to
 witness readiness. A timeout is not permission to launch again. Query can request
-one controlled pre-effect admission correction if an action was misrouted; it
-cannot authorize a Tool or invent a target. Independent activations retain their
+one controlled pre-effect admission correction if an action was misrouted. An
+attempt to delegate Computer Use from an effect-free Query also requests that
+correction without dispatching task.create. Applied clarifications, prior effects,
+cancellation, or absent assignments prevent this recovery. It cannot authorize
+a Tool or invent a target. Independent activations retain their
 own identities, context and evidence while the speech connection stays ready.
 
 ## Relationships

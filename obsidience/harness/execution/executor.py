@@ -1033,6 +1033,28 @@ async def _execute_session(
                 continue
             if name != "computer.act":
                 response_observation_lease = None
+            # Computer Use is admitted from the owner turn, never delegated by
+            # Query through task.create. A safe mistaken attempt re-enters the
+            # same selector once, without enqueuing or dispatching that Task.
+            from ..capabilities.task.complete import reclassification_allowed
+            from ..knowledge.links import metadata_ref
+            if (name == "task.create" and name in allowed
+                    and isinstance(args.get("task"), str)
+                    and metadata_ref(args["task"]) == "Tasks/executive/operate"
+                    and reclassification_allowed(ctx)):
+                status, summary = "failed", "Computer operation needs fresh admission from the original request; nothing was dispatched."
+                disposition = {"status": "rejected", "delivery": "not_dispatched",
+                               "reason": "routing_reclassification", "reclassify": True}
+                begin_receipt()
+                finish_receipt("undispatched", disposition)
+                trace.append({"tool": name, "args": public_args, "sig": call_sig,
+                              "obs": json.dumps(disposition), "not_dispatched": True})
+                ctx["completion"] = {"status": status, "summary": summary,
+                    "outcome": "routing_reclassification", "evidence": [], "reclassify": True}
+                emit_tool_result("Computer delegation rejected; admission recheck requested", disposition, "rejected")
+                if steering is not None:
+                    steering.close()
+                break
             if name == "task.complete":
                 if steering is not None:
                     steering.close()
