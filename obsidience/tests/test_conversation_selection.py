@@ -254,7 +254,7 @@ def test_schema_only_offers_combinations_accepted_by_the_controller(admission):
         for combination in product(*values):
             value = dict(zip(props, combination, strict=True))
             result = selection._validated_selection(
-                ChatReply(content=json.dumps(value), finish_reason="stop"), candidates, apps)
+                ChatReply(content=json.dumps(value), finish_reason="stop", completion_tokens=32), candidates, apps)
             assert result[1:] == (value["computer_outcome"], value["application"], value["computer_scope"])
     empty = selection._schema(candidates, set())["anyOf"]
     assert "action" not in [b["properties"]["computer_outcome"]["const"] for b in empty]
