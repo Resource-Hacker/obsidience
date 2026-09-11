@@ -18,4 +18,5 @@ def execute(args: dict, context: dict) -> str:
         result = archive_temporary_observations(args or {}, runtime)
     except ValueError as exc:
         return f"Temporary archive rejected: {exc}."
+    context["_observation_archive"] = dict(result["source"])
     return json.dumps(result, sort_keys=True)

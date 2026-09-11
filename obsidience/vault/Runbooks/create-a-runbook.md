@@ -10,6 +10,7 @@ obsidience:
   - '[[Skills/vault.search]]'
   - '[[Skills/vault.read]]'
   - '[[Skills/vault.propose]]'
+  - '[[Skills/observations.temporary.append]]'
 ---
 
 Choose the procedure branch from the actual activation.
@@ -73,3 +74,6 @@ applicability. That accepted Runbook supplies its dependencies automatically;
 it does not write `Agent.tools`, `Agent.skills`, or `Agent.runbooks`. The assigned
 Task waits for approval rather than executing the proposal. Callable names in
 the body never widen the set. Do not put YAML frontmatter in the body.
+
+
+When a useful nonredundant observation should survive this activation, optionally append one bounded unverified note to this Agent's own Temporary Observations. Do not record hidden reasoning or create a note merely to narrate routine work.

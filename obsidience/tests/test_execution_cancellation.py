@@ -15,7 +15,7 @@ from obsidience.harness.execution import executor
 def execution(monkeypatch):
     """Real executor, with no live model, Tool, retrieval, status or ledger writes."""
     task = NS(ref="Tasks/query", title="Query", kind="task", meta={})
-    agent = NS(ref="Agents/Executive/Executive", title="Executive", kind="agent", meta={})
+    agent = NS(ref="Agents/Executive/Executive", title="Executive", kind="agent", meta={}, body="Isolated role")
     book = NS(ref="Runbooks/query", title="Query procedure")
     model = NS(id="isolated", label="Isolated", context_tokens=10000, max_output_tokens=1000)
     state = NS(task=task, events=[], records=[], calls=[], statuses=[], contexts=[], live_meta={}, releases=0)
@@ -26,7 +26,7 @@ def execution(monkeypatch):
     async def compile_packet(*_args, **_kwargs):
         state.events.append(dict(phase="path", refs=[task.ref, book.ref]))
         return dict(
-            packet="Isolated packet", refs=[task.ref, book.ref],
+            packet="Isolated packet", refs=[task.ref, book.ref], spine=spine,
             provider_system="Isolated fixed instructions",
             provider_user="Move the requested application",
             retrieval_ms=1.25, objective="Move the requested application",
@@ -65,6 +65,9 @@ def execution(monkeypatch):
 
     monkeypatch.setattr(executor, "resolver", lambda **_kwargs: NS(resolve=lambda _ref: agent))
     monkeypatch.setattr(executor, "resolve_spine", lambda *_args: spine)
+    # Scope is tested with real accepted snapshots separately; this fixture
+    # isolates cancellation after compiler authorization.
+    monkeypatch.setattr(executor, "_scope_checkpoint", lambda *_args: None)
     monkeypatch.setattr(executor, "runbook_tree_hash", lambda _books: "isolated-hash")
     monkeypatch.setattr(executor, "compile_activation", compile_packet)
     monkeypatch.setattr(executor, "cached_text_count", lambda *_args: NS(tokens=100, method="runtime"))
@@ -79,7 +82,7 @@ def execution(monkeypatch):
     monkeypatch.setattr(executor.model_runtime, "lease", lease)
     monkeypatch.setattr(executor.llm, "chat", reply)
     monkeypatch.setattr(executor.INDEX, "record_run", lambda **row: state.records.append(row))
-    monkeypatch.setattr(executor.INDEX, "sync", lambda: None)
+    monkeypatch.setattr(executor.INDEX, "sync", lambda **_kwargs: None)
     monkeypatch.setattr(executor.action_trace, "emit", lambda *_args: None)
     monkeypatch.setattr(
         executor.knowledge_activity, "emit",

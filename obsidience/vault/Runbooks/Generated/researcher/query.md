@@ -50,3 +50,6 @@ obsidience:
 ## Recovery
 - If `web.search` fails, call it once more with alternative keywords.
 - If `web.fetch` fails, call `web.search` once for an alternative direct source.
+
+
+When a useful nonredundant observation should survive this activation, optionally append one bounded unverified note to this Agent's own Temporary Observations. Record observable findings and decisions, not a narration of routine work.

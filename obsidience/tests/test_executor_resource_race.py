@@ -74,50 +74,12 @@ def test_resource_loss_after_tool_effect_never_requeues_for_replay(execution, mo
     assert any(row.get("tool") == resource_tool for row in trace)
 
 
-@pytest.mark.parametrize("earlier_child_completed", [False, True])
-def test_container_resource_race_stops_chain_and_preserves_prior_children(
-    execution, monkeypatch, earlier_child_completed,
-):
-    child = NS(ref="Tasks/blocked-child", title="Blocked child", kind="task", meta={"status": "pending"})
-    prior = NS(ref="Tasks/prior-child", title="Prior child", kind="task", meta={"status": "pending"})
-    parent = NS(ref="Tasks/parent", title="Parent", kind="task",
-                meta={"status": "pending", "last_run": "prior-parent-run"})
-    children = [prior, child] if earlier_child_completed else [child]
-    base_spine = executor.resolve_spine(execution.task, executor.resolver())
-    states = {task.ref: dict(task.meta) for task in (parent, prior, child)}
-
-    def spine(task, _resolver):
-        return {"subtasks": children} if task is parent else base_spine
-
-    def status(task, value, fields):
-        states[task.ref].update({"status": value, **fields})
-
-    def mutate(task, callback):
-        callback(states[task.ref])
-
-    async def session(task, _model, _messages, _allowed, _ctx, *_args, **_kwargs):
-        if task is child:
-            raise unavailable()
-        return [], "completed", "Earlier child completed."
-
-    monkeypatch.setattr(executor, "resolve_spine", spine)
-    monkeypatch.setattr(executor, "update_status", status)
-    monkeypatch.setattr(executor, "mutate_note_metadata", mutate)
-    monkeypatch.setattr(executor, "_execute_session", session)
-    if earlier_child_completed:
-        with pytest.raises(runtime.ModelResourceUnavailable):
-            asyncio.run(executor.run_task(parent, emit_turn_event=False))
-        assert states[parent.ref]["status"] == "failed"
-        assert [(r["task_ref"], r["status"]) for r in execution.records] == [
-            (prior.ref, "completed"), (parent.ref, "failed"),
-        ]
-        trace = json.loads(execution.records[-1]["trace"])
-        assert any(row.get("task") == prior.ref and row["status"] == "completed" for row in trace)
-        assert any(row.get("resource_blocked_after_effect") and row["must_not_replay"] for row in trace)
-    else:
-        result = asyncio.run(executor.run_task(parent, emit_turn_event=False))
-        assert result["status"] == "pending" and result["resource_blocked"]
-        assert states[parent.ref]["last_run"] == "prior-parent-run"
-        assert execution.records == []
-    assert states[child.ref]["status"] == "pending"
-    assert "last_run" not in states[child.ref]
+def test_task_taxonomy_cannot_execute_children(execution, monkeypatch):
+    """An index is not an implicit workflow, regardless of child resources."""
+    parent = NS(ref="Tasks/parent", title="Parent", kind="task", meta={})
+    child = NS(ref="Tasks/child", title="Child", kind="task", meta={})
+    monkeypatch.setattr(executor, "resolve_spine", lambda *_: {"subtasks": [child]})
+    result = asyncio.run(executor.run_task(parent, emit_turn_event=False))
+    assert result["status"] == "blocked"
+    assert execution.calls == []
+    assert all(record["task_ref"] == parent.ref for record in execution.records)

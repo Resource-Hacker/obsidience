@@ -5,11 +5,11 @@ from obsidience.harness.knowledge import index
 from obsidience.tests.conftest import isolated_task_ledger
 
 
-def test_late_module_import_does_not_retain_closed_test_ledger(tmp_path, monkeypatch):
+def test_late_module_import_does_not_retain_closed_test_ledger(tmp_path, tmp_path_factory, monkeypatch):
     original = index.INDEX
     nested = tmp_path / "nested"
     nested.mkdir()
-    fixture = isolated_task_ledger.__wrapped__(nested)
+    fixture = isolated_task_ledger.__wrapped__(nested, tmp_path_factory)
     ledger = next(fixture)
     module = ModuleType("obsidience.tests._late_index_alias")
     module.INDEX = index.INDEX

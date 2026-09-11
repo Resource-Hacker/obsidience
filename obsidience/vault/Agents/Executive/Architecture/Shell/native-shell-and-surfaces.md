@@ -2,6 +2,8 @@
 type: knowledge
 title: Native shell and surfaces
 sources:
+- resource: obsidience/harness/knowledge/scope.py
+- resource: obsidience/harness/knowledge/index.py
 - resource: obsidience/shell/qml/shell.qml
 - resource: obsidience/shell/qml/workspace/PaneWorkspace.qml
 - resource: obsidience/shell/qml/workspace/PaneWindow.qml
@@ -32,6 +34,17 @@ can dock inside Reader or detach as ordinary panes. `PaneWorkspace`,
 `PanePlacement` and the revisioned dock layout own presentation state; docking
 does not create another document store. Exact selections travel through the
 Shell command server and are read through the existing Harness API.
+
+## Reader checkout
+
+Reader and its Knowledge explorer share `ArticleCheckouts.qml` and
+`AgentCheckoutButtons.qml`. The owner Library includes every accepted Knowledge
+Article, Agent, Runbook and Task, plus paired Tool/Skill interfaces. Agent icons
+show direct, inherited, partial and private/owned membership. Revisions prevent
+stale clicks from overwriting newer checkout. Task-derived dependencies are
+read-only here; assign the Task instead. Changes refresh through the existing
+activity transport. The separate native Library catalog no longer writes
+assignments.
 
 ## Knowledge desktop and lifetime
 

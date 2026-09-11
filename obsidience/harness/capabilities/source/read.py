@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
 
 MAX_RECEIPTS = 256
@@ -132,6 +133,43 @@ def execute(args: dict, context: dict) -> str:
     return json.dumps({"results": results}, ensure_ascii=False)
 
 
+def _private_source_allowed(result: dict, context: dict) -> bool:
+    """Raw evidence cannot be a back door into another Agent's Observations."""
+    from obsidience.harness.config import CONFIG
+    from obsidience.harness.knowledge.scope import execution_scope
+    from obsidience.harness.knowledge.vault import resolver
+    from pathlib import Path
+    from urllib.parse import unquote, urlsplit
+    try:
+        agent, allowed = execution_scope(context, resolver())
+    except PermissionError:
+        return False
+    origin = str(result.get("source_ref", ""))
+    if origin.startswith("obsidience://observations/temporary/"):
+        receipt = context.get("_observation_archive", {})
+        if (isinstance(receipt, dict) and receipt.get("citation") == result.get("citation")
+                and receipt.get("content_sha256") == result.get("content_sha256")):
+            return True  # This execution received these exact bytes as an explicit handoff.
+        refs = re.findall(r"^## \[\[([^]\n]+)\]\]$", str(result.get("content", "")), re.M)
+        return bool(refs) and all(ref.startswith(agent.ref.rsplit("/", 1)[0] + "/") for ref in refs)
+    parsed = urlsplit(origin)
+    path = None
+    if parsed.scheme == "file":
+        path = Path(unquote(parsed.path))
+    elif not parsed.scheme and origin:
+        path = Path(unquote(origin))
+        if not path.is_absolute():
+            path = CONFIG.project_root / path
+    if path is not None:
+        # Normalize traversal and symlinks before classifying a Knowledge file.
+        path = path.resolve()
+        vault_root = CONFIG.vault_dir.resolve()
+        if path.is_relative_to(vault_root):
+            return path.relative_to(vault_root).with_suffix("").as_posix() in allowed
+
+    return True
+
+
 def _read(value: str, offset: int, limit: int, context: dict) -> tuple[bool, str]:
     from obsidience.harness.knowledge.source import SourceError, get_source
 
@@ -144,6 +182,9 @@ def _read(value: str, offset: int, limit: int, context: dict) -> tuple[bool, str
     if cancel is not None and cancel.is_set():
         _forget(context, result["citation"])
         return False, "Source read cancelled."
+    if not _private_source_allowed(result, context):
+        _forget(context, result["citation"])
+        return False, "Source is outside the Agent's permitted evidence scope."
     content = result["content"]
     end = min(offset + limit, len(content))
     if offset > len(content):

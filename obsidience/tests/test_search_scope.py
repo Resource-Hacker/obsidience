@@ -145,7 +145,7 @@ def test_unscoped_search_keeps_mixed_kinds_and_historical_content(corpus):
     context = {}
     adapter.execute({"query": "shared"}, context)
     assert set(context["_vault_searches"]["shared"]["refs"]) == set(refs)
-    assert "scope" not in context["_vault_searches"]["shared"] and not snapshots
+    assert "scope" not in context["_vault_searches"]["shared"] and len(snapshots) == 1
     assert {hit["ref"] for hit in retrieval.search("shared", scope={"kind": "knowledge"})} == set(refs[1:])
 
 
@@ -175,3 +175,5 @@ def test_cancelled_scope_batch_never_attests_unshown_results(corpus):
     rows = json.loads(adapter.execute({"queries": ["headline", "next"], "scope": SCOPE}, context))["results"]
     assert all(not row["ok"] for row in rows)
     assert context["_vault_searches"] == {} and not snapshots and not encoded
+
+pytestmark = pytest.mark.usefixtures("authorized_reader_scope")

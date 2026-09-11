@@ -2,6 +2,8 @@
 type: knowledge
 title: Observation lifecycle
 sources:
+- resource: obsidience/harness/knowledge/scope.py
+- resource: obsidience/harness/knowledge/index.py
 - resource: obsidience/harness/conversation/observations.py
 - resource: obsidience/harness/conversation/store.py
 - resource: obsidience/harness/conversation/runtime.py
@@ -30,7 +32,22 @@ appends and compaction summaries; existing entries are not erased. Compact and
 Promote keep their own Task triggers. A disabled cache cannot silently accept
 writes merely because its Task was already enabled.
 
+## Agent ownership
+
+Each Agent writes only its own Temporary Observations. Appends are bound to the
+executing Agent and run; related Article refs must be in that Agent's graph.
+Observation notes are optional, short and nonredundant, never a narration quota.
+The owner can inspect all Observations in Library, but another Agent cannot check
+out or search them. Shared Knowledge is checked out by identity, not copied into
+separate memories. A curated cross-Agent result travels as explicit evidence.
+
 ## Immediate
+
+Each Agent also has a Current activation Article under its own Immediate branch.
+It displays the exact objective, resolved entities, supplied/read Article refs,
+current status and bounded controller receipts. It is a view of the execution,
+not a second authority. The model gets the objective once in its Objective
+section. Late progress from an older activation cannot replace the new view.
 
 [Current conversation](/Agents/Executive/Observations/Immediate%20Observations/current-conversation.md)
 is a child of Immediate Observations. It projects the active Chat's latest
@@ -66,7 +83,8 @@ At a conversation boundary, the ordinary `observations.temporary.ready` event
 activates [Promote](/Tasks/observations/durable/promote.md) for
 [Alexandria](/Agents/Alexandria/Alexandria.md). Her
 [Promote procedure](/Runbooks/observations/promote.md) archives the exact bundle in
-Source, searches existing Knowledge, and proposes only justified additions,
+Source, reads that exact archive through its returned attested citation, searches
+only her checked-out Knowledge, and proposes justified additions,
 corrections, or links through the normal proposal validator. Owner-enabled
 destinations may publish scoped Knowledge creates/updates automatically;
 disabled destinations and unsupported changes remain in Review. No-change is a
@@ -75,8 +93,10 @@ or trigger redundant research.
 
 Durable findings belong under their subject in the accepted wiki. Established
 interaction requirements belong in
-[Preferences](/Agents/Executive/Observations/Preferences/Preferences.md); game mechanics go
-under Games, authored workstation findings under System / Workstation
+the Executive's own [Preferences](/Agents/Executive/Observations/Preferences/Preferences.md)
+when written by its authorized owner. A Curator handoff cannot grant direct
+access to those private notes; proposed shared findings stay in the Curator's
+checked-out semantic homes. Game mechanics go under Games, authored workstation findings under System / Workstation
 Observations. The generated System inventory remains read-only and is refreshed
 by its deterministic publisher. Do not create a second Durable Context,
 Log, or memory database. Hidden reasoning is never an Observation Article.

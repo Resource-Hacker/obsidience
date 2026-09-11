@@ -1,9 +1,16 @@
 ---
 type: skill
 title: Using vault.maintenance
+description: Treat candidates as leads.
 obsidience:
   tool: '[[Tools/vault.maintenance]]'
 ---
+
+## Runtime
+
+Treat candidates as leads. Forward only the exact recommended Task, candidate key, revision, refs, kind and signals. A stale revision requires a new inspection. Disconnectedness or similar titles alone do not justify links or merges.
+
+## Reference
 
 Use `vault.maintenance` to inspect one current accepted-vault snapshot for
 bounded structural maintenance leads.

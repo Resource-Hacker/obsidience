@@ -1,10 +1,17 @@
 ---
 type: tool
 title: application.launch
+description: Open one registered application with application:<registered identifier>.
 obsidience:
   binding: capability:application.launch
   source: obsidience/harness/capabilities/application/launch.py
 ---
+
+## Runtime
+
+Open one registered application with application:<registered identifier>. Dispatch occurs at most once. The same call waits up to ten seconds for a current matching window. ready establishes an open window, not focus; dispatched:false means it was already open or starting. starting with wait_status means readiness remains unresolved. Never redispatch after timeout, cancellation, ambiguity or uncertain delivery.
+
+## Reference
 
 Dispatch one registered desktop application exactly once through the
 workstation-managed graphical launcher. Argument:

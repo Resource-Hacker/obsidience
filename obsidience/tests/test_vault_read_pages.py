@@ -159,3 +159,5 @@ def test_article_body_cannot_override_owner_identity(article_vault):
     assert projection.pages[3].citation == "Knowledge/evidence"
     assert projection.pages[3].revision == identity["view_sha256"]
     assert projection.pages[3].revision != "a" * 64
+
+pytestmark = pytest.mark.usefixtures("authorized_reader_scope")

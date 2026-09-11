@@ -286,6 +286,72 @@ def _immediate_observations_section(observations: str) -> str:
     )
 
 
+def _operation_spine(spine: dict, params: dict) -> dict:
+    """Narrow an accepted capability closure; no operation can add a Tool."""
+    outcome = params.get("computer_outcome", "")
+    primary = spine.get("runbook")
+    profiles = primary.meta.get("operation_tools", {}) if primary else {}
+    if not profiles or outcome not in profiles:
+        return spine
+    from ..knowledge.links import metadata_ref
+    allowed = {metadata_ref(ref).removeprefix("Tools/") for ref in profiles[outcome]} | {"task.complete"}
+    if not allowed <= set(spine["tools"]):
+        raise ValueError("Operation profile cannot widen its accepted Task capabilities")
+    skills = [skill for skill in spine["skills"]
+              if metadata_ref(str(skill.meta.get("tool", ""))).removeprefix("Tools/") in allowed]
+    return {**spine, "tools": sorted(allowed), "skills": skills,
+            "tool_articles": [tool for tool in spine["tool_articles"] if tool.title in allowed]}
+
+
+def _instruction_ranges(note: Note, operation: str = "") -> list[tuple[int, int]]:
+    """Select authored Runtime/operation sections, preserving exact source spans."""
+    import re
+    headings = list(re.finditer(r"^## ([^\n]+)\n", note.body, re.M))
+    wanted = ["Runtime"]
+    selected = note.meta.get("runtime_sections", {}).get(operation)
+    if selected:
+        wanted.append(selected)
+    spans = []
+    for title in dict.fromkeys(wanted):
+        matching = [i for i, heading in enumerate(headings) if heading.group(1).strip() == title]
+        if len(matching) > 1 or selected == title and not matching:
+            raise ValueError(f"Article {note.ref} has a missing or ambiguous runtime section")
+        if matching:
+            index = matching[0]
+            spans.append((headings[index].end(), headings[index+1].start() if index+1 < len(headings) else len(note.body)))
+    return spans or [(0, len(note.body))]
+
+
+def _instruction_text(note: Note, operation: str = "") -> str:
+    return "\n\n".join(note.body[start:end].strip() for start, end in _instruction_ranges(note, operation))
+
+
+def _required_context(task: Note, agent: Note | None, spine: dict, res: Resolver,
+                      allowed: set[str]) -> list[Note]:
+    """Exact accepted constraints must not compete with similarity retrieval."""
+    from ..knowledge.links import metadata_ref
+    from ..knowledge.format import lifecycle_metadata
+    refs = []
+    for definition in [agent, task, *spine.get("runbooks", [])]:
+        for raw in definition.meta.get("required_context", []) if definition else []:
+            target = metadata_ref(raw)
+            if target not in refs: refs.append(target)
+    if len(refs) > 16:
+        raise ValueError("Required context exceeds its bounded Article count")
+    notes = []
+    for ref in refs:
+        note = res.by_ref.get(ref.lower())
+        if not note or note.ref not in allowed or note.kind != "knowledge":
+            raise ValueError("Required context is unavailable in the Agent's checked-out graph")
+        lifecycle = lifecycle_metadata(note.meta)
+        if lifecycle.get("freshness") != "current" or lifecycle.get("status") == "draft":
+            raise ValueError("Required context is stale or not accepted; no constraint was silently omitted")
+        notes.append(note)
+    if sum(len(note.body) for note in notes) > 16000:
+        raise ValueError("Required context exceeds its bound; revise the contract rather than truncate it")
+    return notes
+
+
 def _activation_packet(task: Note, agent: Note | None, spine: dict,
                        activation: ActivationBinding,
                        observations: str, brief: str,
@@ -296,6 +362,7 @@ def _activation_packet(task: Note, agent: Note | None, spine: dict,
     """Compile the one semantic packet consumed and displayed for every leaf Task."""
     runbooks: list[Note] = spine["runbooks"]
     skills: list[Note] = spine["skills"]
+    operation = str(activation.bindings.get("computer_outcome", ""))
     tools = _skill_tools(skills, accepted_resolver if accepted_resolver is not None else resolver())
 
     identity = agent if _is_agent_identity(agent) else None
@@ -323,13 +390,13 @@ def _activation_packet(task: Note, agent: Note | None, spine: dict,
         "task": "## Task\n" + task_text,
         "objective": "## Objective\n" + activation.objective,
         "tools": "## Tools\n" + ("\n\n".join(
-            f"### [[{tool.ref}]] — {tool.title}\n{tool.body.strip()}" for tool in tools
+            f"### [[{tool.ref}]] — {tool.title}\n{_instruction_text(tool, operation)}" for tool in tools
         ) or "No external capability is authorized."),
         "skills": "## Skills\n" + ("\n\n".join(
-            f"### [[{skill.ref}]] — {skill.title}\n{skill.body.strip()}" for skill in skills
+            f"### [[{skill.ref}]] — {skill.title}\n{_instruction_text(skill, operation)}" for skill in skills
         ) or "No procedural Tool guidance is required."),
         "runbook": "## Runbook\n" + "\n\n".join(
-            f"### [[{runbook.ref}]] — {runbook.title}\n{runbook.body.strip()}"
+            f"### [[{runbook.ref}]] — {runbook.title}\n{_instruction_text(runbook, operation)}"
             for runbook in runbooks
         ),
         "bindings": "## Bindings\n" + (bindings if activation.bindings else "None."),
@@ -378,6 +445,7 @@ async def compile_activation(
     conversation_evidence: list[dict] | None = None,
     accepted_resolver: Resolver | None = None,
     interactive: bool = False,
+    activation_id: str = "",
 ) -> dict:
     """Resolve and retrieve the canonical packet without starting model execution.
 
@@ -394,7 +462,7 @@ async def compile_activation(
             raise RuntimeError(str(readiness.get("error") or resolved_spine["error"]))
         raise RuntimeError(str(resolved_spine["error"]))
     if "subtasks" in resolved_spine:
-        raise ValueError("a container Task must expand its subtasks before activation")
+        raise ValueError("Task hierarchy is navigation, not a procedure; select an executable Task")
 
     requested_agent = agent
     if requested_agent is None:
@@ -407,11 +475,10 @@ async def compile_activation(
     bound_params = (
         dict(params)
         if params is not None
-        else {
-            **(stored_params if isinstance(stored_params, dict) else {}),
-            **(runtime_params or {}),
-        }
+        else dict(runtime_params) if runtime_params is not None
+        else dict(stored_params if isinstance(stored_params, dict) else {})
     )
+    resolved_spine = _operation_spine(resolved_spine, bound_params)
     runbooks: list[Note] = resolved_spine["runbooks"]
     skills: list[Note] = resolved_spine["skills"]
     activation = build_activation_binding(task, runbooks, bound_params)
@@ -430,6 +497,12 @@ async def compile_activation(
             **({"historical_execution": historical_execution} if historical_execution else {}),
         },
     )
+    working = None
+    if activation_id and emit_activity and _is_agent_identity(requested_agent):
+        from ..conversation.observations import project_activation_context
+        working = project_activation_context(requested_agent.ref, task.ref, activation_id, activation.bindings, [], objective=activation.objective, begin=True)
+        activation = ActivationBinding(objective=activation.objective,
+            bindings={**activation.bindings, "working_context": working["context"]})
     retrieval_query = activation.objective
     exclude = {task.ref, *(part.ref for part in runbooks)} | {skill.ref for skill in skills}
     preferred_context = set(source.article_refs_for_trees(
@@ -437,6 +510,10 @@ async def compile_activation(
         if _is_agent_identity(requested_agent)
         else []
     ))
+    from ..knowledge.scope import knowledge_refs
+    scoped_knowledge = knowledge_refs(requested_agent, res) if _is_agent_identity(requested_agent) else set()
+    required = _required_context(task, requested_agent, resolved_spine, res, scoped_knowledge)
+    exclude.update(note.ref for note in required)
     retrieval_started = time.perf_counter()
     knowledge_accounting: dict = {}
     brief, context_refs = await asyncio.to_thread(
@@ -448,8 +525,13 @@ async def compile_activation(
         preferred_context,
         accepted_resolver=res,
         diagnostics=knowledge_accounting,
+        allowed_refs=scoped_knowledge,
     )
     retrieval_ms = (time.perf_counter() - retrieval_started) * 1_000
+    if required:
+        brief = "Required accepted context (no capability grants):\n\n" + "\n\n".join(
+            f"### [[{note.ref}]] — {note.title}\n{note.body.strip()}" for note in required) + "\n\n" + brief
+        context_refs = [note.ref for note in required] + context_refs
 
     from ..conversation.observations import read_temporary_observations
 
@@ -468,14 +550,28 @@ async def compile_activation(
         public_sections=public_sections,
     )
     selected_refs = packet_refs
+    if working and working["materialized"]:
+        selected_refs.append(working["ref"])
     selected_refs.extend(ref for ref in context_refs if ref not in selected_refs)
+    for ref in re.findall(r"(?m)^- \[\[([^]\n]+)\]\]", observations):
+        if ref in scoped_knowledge and ref not in selected_refs:
+            selected_refs.append(ref)
     if conversation_context:
         from ..conversation.observations import IMMEDIATE_OBSERVATIONS_REF
 
         if IMMEDIATE_OBSERVATIONS_REF not in selected_refs:
             selected_refs.append(IMMEDIATE_OBSERVATIONS_REF)
+    if working and working["materialized"]:
+        project_activation_context(requested_agent.ref, task.ref, activation_id, activation.bindings, [],
+                                   objective=activation.objective, context_refs=selected_refs)
     activity_query = activation.objective
     graph_id = _agent_graph_id(requested_agent)
+    instruction_accounting = [
+        {"ref": note.ref, "body_sha256": hashlib.sha256(note.body.encode()).hexdigest(),
+         "body_start": start, "body_end": end,
+         "body_chars": len(note.body), "included_chars": len(_instruction_text(note, str(activation.bindings.get("computer_outcome", ""))))}
+        for note in [*resolved_spine["runbooks"], *resolved_spine["skills"], *resolved_spine.get("tool_articles", [])]
+        for start, end in _instruction_ranges(note, str(activation.bindings.get("computer_outcome", "")))]
     if emit_activity:
         knowledge_activity.emit(
             "path", selected_refs, query=activity_query, graph_id=graph_id,
@@ -487,7 +583,8 @@ async def compile_activation(
             f"packet for {task.title}",
             selected_refs,
             {"payload": action_trace.packet_payload(public_sections, selected_refs, retrieval_ms,
-                                                    knowledge_accounting=knowledge_accounting)},
+                                                    knowledge_accounting=knowledge_accounting,
+                                                    instruction_accounting=instruction_accounting)},
         )
     return {
         "packet": packet,
@@ -501,6 +598,8 @@ async def compile_activation(
         "spine": resolved_spine,
         "brief": brief,
         "knowledge_accounting": knowledge_accounting,
+        "working_context_ref": working["ref"] if working and working["materialized"] else "",
+        "instruction_accounting": instruction_accounting,
     }
 
 
@@ -546,6 +645,23 @@ def resolve_spine(task: Note, res: Resolver) -> dict:
         return dependency
     tools = sorted(tool.title for tool in dependency["tool_articles"] if not tool.children)
     return {**dependency, "tools": tools, "excluded_subtasks": excluded}
+
+
+def _scope_checkpoint(ctx: dict, tool_name: str | None = None) -> None:
+    if not ctx.get("_scope_revision"):
+        return
+    from ..knowledge.scope import revision as scope_revision
+    current = resolver()
+    agent = current.resolve(str(ctx.get("_agent_ref", "")))
+    if agent is None or scope_revision(agent) != ctx["_scope_revision"]:
+        raise PermissionError("Agent checkout or authority changed; reactivation is required")
+    if tool_name:
+        task = current.resolve(str(ctx.get("task", "")))
+        if task is None:
+            raise PermissionError("The executing Task was removed")
+        dependency = resolve_task_dependencies(task, current, agent_ref=agent.ref)
+        if dependency.get("error") or tool_name not in {tool.title for tool in dependency["tool_articles"]}:
+            raise PermissionError("The current accepted procedure no longer authorizes this Tool")
 
 
 def _foreground_checkpoint(interruption_event: asyncio.Event | None, ctx: dict) -> None:
@@ -642,6 +758,7 @@ async def _execute_session(
     messages.append({"role": "user", "content": _step_budget_notice(max_steps)})
     try:
         for step in range(max_steps):
+            _scope_checkpoint(ctx)
             if steering is not None and steering.pending:
                 clarifications = steering.take()
                 messages.append({"role": "user", "content": (
@@ -791,6 +908,7 @@ async def _execute_session(
                 continue
             invalid_action_streak = 0
             name, args = action.get("tool"), action.get("args") or {}
+            _scope_checkpoint(ctx, str(name))
             # The model's normalized image point is an ephemeral input, not a
             # public action argument or durable trace/signature coordinate.
             public_args = {key: value for key, value in args.items() if key != "point"}
@@ -962,6 +1080,7 @@ async def _execute_session(
                     "summary": summary,
                     "outcome": str(decision.get("outcome", "")),
                     "evidence": list(decision.get("evidence") or []),
+                    **({"reclassify": True} if decision.get("reclassify") is True else {}),
                 }
                 if isinstance(decision.get("verification"), dict):
                     completion_args["verification"] = dict(decision["verification"])
@@ -1141,6 +1260,12 @@ async def _execute_session(
                 pending_observation_lease = private_observation_lease
             private_observation_lease = None
             trace.append(entry)
+            context_refs = ctx.pop("_last_context_refs", []) if name in {"vault.read", "vault.search"} else []
+            ctx.setdefault("_context_refs", []).extend(ref for ref in context_refs if ref not in ctx.get("_context_refs", []))
+            _publish_working_progress(ctx, "running")
+            if context_refs:
+                knowledge_activity.emit("path", [str(ctx.get("task", "")), *context_refs],
+                    query=str(ctx.get("objective", "")), graph_id=str(ctx.get("graph_id", "main")))
             emit_tool_result(f"{name} returned", result_object if result_object is not None else observation, call_status)
             if ctx.pop("_capability_cancelled_after_commit", False) or asyncio.current_task().cancelling():
                 raise asyncio.CancelledError("Tool outcome retained after cancellation")
@@ -1244,6 +1369,18 @@ def _computer_request_evidence(runtime_params: object) -> dict | None:
     return result
 
 
+def _publish_working_progress(ctx: dict, status: str) -> None:
+    if not ctx.get("_working_context_ref") or not ctx.get("_agent_ref"):
+        return
+    try:
+        from ..conversation.observations import project_activation_context
+        project_activation_context(ctx["_agent_ref"], str(ctx["task"]), ctx["_activation_id"],
+                                   ctx.get("params") or {}, ctx.get("trace") or [], status,
+                                   objective=str(ctx.get("objective", "")), context_refs=ctx.get("_context_refs", []))
+    except Exception as exc:
+        action_trace.emit("error", "Working context projection unavailable", [type(exc).__name__])
+
+
 def _runtime_only_query(task: Note, params: dict, interactive: bool, status: str, trace: list) -> bool:
     """A successful answer only changed the runtime ledger, already committed.
 
@@ -1296,10 +1433,10 @@ async def run_task(task: Note, depth: int = 0, reasoning_effort: str | None = No
         if task.meta.get("assignee") else res.resolve("Agents/Executive/Executive")
     )
     stored_params = task.meta.get("params") or {}
-    params = {
-        **(stored_params if isinstance(stored_params, dict) else {}),
-        **(runtime_params or {}),
-    }
+    # A new request never inherits the previous occurrence's target, event or
+    # authorization bindings. Scheduled occurrences already carry their own params.
+    params = dict(runtime_params) if runtime_params is not None else dict(
+        stored_params if isinstance(stored_params, dict) else {})
     objective = build_activation_binding(
         task,
         list(spine.get("runbooks", [])),
@@ -1320,6 +1457,8 @@ async def run_task(task: Note, depth: int = 0, reasoning_effort: str | None = No
     runbook_sha256 = ""
     model_spec = None
     claimed = False
+    activation_token = None
+    activation_id = ""
     ctx: dict = {}
     activation_evidence: dict = {}
     computer_request = _computer_request_evidence(runtime_params)
@@ -1353,7 +1492,10 @@ async def run_task(task: Note, depth: int = 0, reasoning_effort: str | None = No
         }})
 
     try:
-        update_status(task, "running", {"last_run": run_id})
+        activation_id, activation_token = INDEX.begin_activation(
+            task.ref, params, run_id, queued=runtime_params is None and bool(params.get("activation_key")))
+        activation_evidence["activation_id"] = activation_id
+        update_status(task, "running", {"last_run": run_id, "activation_id": activation_id})
         claimed = True
         effort = llm.normalize_reasoning_effort(
             reasoning_effort if reasoning_effort is not None else task.meta.get("reasoning_effort")
@@ -1383,66 +1525,15 @@ async def run_task(task: Note, depth: int = 0, reasoning_effort: str | None = No
                 {**params, "origin_task_ref": task.ref}, accepted_resolver=res,
             )
 
-        # ---- container task: its subtasks are how it completes ----
+        # Containment is taxonomy, not a sequential workflow specification.
         if "subtasks" in spine:
-            packet_refs = [task.ref, *(child.ref for child in spine["subtasks"])]
-            emit_state(
-                "run", f"{task.title} started", "running",
-                f"{len(spine['subtasks'])} subtasks; {len(active_exclusions)} exclusions",
-            )
-            if depth >= MAX_TASK_DEPTH:
-                update_status(task, "failed", {"summary": "max task depth exceeded"})
-                emit_state("error", f"{task.title} failed", "failed", "max task depth exceeded")
-                return {"run_id": run_id, "status": "failed", "summary": "max task depth exceeded"}
-            results, worst = [], "completed"
-            trace = results
-            order = {"excluded": 0, "completed": 0, "review": 1, "blocked": 2, "failed": 3}
-            for child in spine["subtasks"]:
-                _foreground_checkpoint(interruption_event, ctx)
-                if _task_is_excluded(child, active_exclusions, res):
-                    action_trace.emit("status", f"{task.title} excluded {child.title}")
-                    results.append({
-                        "task": child.ref,
-                        "status": "excluded",
-                        "summary": "excluded from this parent Task",
-                    })
-                    continue
-                action_trace.emit("run", f"{task.title} → {child.title}")
-                child_model = model
-                if child_model is None:
-                    parent_preference = model_runtime.normalize_model(task.meta.get("model"))
-                    child_preference = model_runtime.normalize_model(child.meta.get("model"))
-                    if parent_preference != model_runtime.AUTO_MODEL and child_preference == model_runtime.AUTO_MODEL:
-                        child_model = parent_preference
-                child_result = await run_task(
-                    # Reasoning is owned by the executable child Task. A container
-                    # supplies scope and order, never an implicit reasoning override.
-                    child, depth + 1, None, child_model, runtime_params,
-                    emit_turn_event, frozenset(active_exclusions), conversation_context,
-                    interactive=interactive,
-                    conversation_evidence=conversation_evidence,
-                    interruption_event=interruption_event,
-                )
-                results.append({"task": child.ref, **{k: child_result[k] for k in ("status", "summary")}})
-                if order.get(child_result["status"], 3) > order[worst]:
-                    worst = child_result["status"]
-                if child_result["status"] in ("failed", "blocked"):
-                    break  # later subtasks depend on earlier ones — stop the chain
-            summary = "; ".join(f"[[{r['task']}]] {r['status']}" for r in results)
-            finished = time.time()
-            update_status(task, worst, {"summary": summary})
-            INDEX.record_run(id=run_id, task_ref=task.ref, agent="interpreter", started=started,
-                             finished=finished, status=worst, summary=summary[:2000],
-                             trace=serialize_run_trace(results),
-                             reasoning_effort=effort, objective=objective)
-            INDEX.sync()
-            emit_state("status", f"{task.title} {worst}", worst, summary)
-            return {
-                "run_id": run_id,
-                "status": worst,
-                "summary": summary,
-                "objective": objective,
-            }
+            summary = "This Task is a taxonomy scope. Select an executable leaf or an explicit Runbook procedure; child order does not authorize execution."
+            update_status(task, "blocked", {"summary": summary, "last_run": run_id})
+            INDEX.record_run(id=run_id, task_ref=task.ref, agent=agent_name,
+                started=started, finished=time.time(), status="blocked", summary=summary,
+                trace="[]", objective=objective)
+            return {"run_id": run_id, "activation_id": activation_id,
+                    "status": "blocked", "summary": summary, "objective": objective}
 
         # ---- leaf task: runbook + skills + authorized tools ----
         runbook: Note = spine["runbook"]
@@ -1476,8 +1567,10 @@ async def run_task(task: Note, depth: int = 0, reasoning_effort: str | None = No
             conversation_evidence=conversation_evidence,
             accepted_resolver=res,
             interactive=interactive,
+            activation_id=activation_id,
         )
         action_trace.latency("activation", duration_ms=(time.monotonic() - activation_started) * 1000)
+        allowed = list(activation["spine"]["tools"])
         packet = str(activation["packet"])
         if params.get("event") == "task.continue":
             # A resumed objective may use its ordinary Tools, but it cannot
@@ -1521,7 +1614,13 @@ async def run_task(task: Note, depth: int = 0, reasoning_effort: str | None = No
         if immediate:
             messages.append({"role": "user", "content": immediate})
         messages.append({"role": "user", "content": user})
+        from ..knowledge.scope import revision as scope_revision
         ctx = {
+            "_working_context_ref": activation.get("working_context_ref", ""),
+            "_context_refs": list(packet_refs),
+            "_scope_revision": scope_revision(agent) if _is_agent_identity(agent) else "",
+            "_activation_id": activation_id,
+            "_agent_ref": agent.ref if _is_agent_identity(agent) else "",
             "agent": agent_name,
             "task": task.ref,
             "run_id": run_id,
@@ -1557,6 +1656,7 @@ async def run_task(task: Note, depth: int = 0, reasoning_effort: str | None = No
             task, model_spec, messages, allowed, ctx, agent_name, effort,
             interruption_event=interruption_event,
         )
+        _publish_working_progress(ctx, status)
         runtime_only_reply = _runtime_only_query(task, params, interactive, status, trace)
         prompt_tokens_estimate = ctx.get("prompt_tokens", prompt_tokens_estimate)
         activation_evidence.update({
@@ -1625,6 +1725,13 @@ async def run_task(task: Note, depth: int = 0, reasoning_effort: str | None = No
                          runbook_ref=runbook.ref, runbook_sha256=runbook_sha256,
                          reasoning_effort=effort, model=model_spec.id,
                          objective=objective)
+        if task.ref in {"Tasks/research/question", "Tasks/research/learn"}:
+            caller_id = str(params.get("created_by_run_id", ""))
+            if status == "completed" and ctx.get("handoff_source_id"):
+                from ..knowledge.source import get_source
+                INDEX.resolve_research_finding(caller_id, run_id, get_source(ctx["handoff_source_id"]))
+            elif status in {"failed", "blocked"}:
+                INDEX.resolve_research_failure(caller_id, run_id)
         if not runtime_only_reply or status != "completed":
             INDEX.sync()
         emit_state(
@@ -1645,9 +1752,11 @@ async def run_task(task: Note, depth: int = 0, reasoning_effort: str | None = No
             )
         return {
             "run_id": run_id,
+            "activation_id": activation_id,
             "status": status,
             "summary": summary,
             "public_summary": str(completion.get("summary", "")),
+            "routing_reclassification": completion.get("reclassify") is True,
             "objective": objective,
             "activation_refs": packet_refs,
             "retrieval_ms": round(retrieval_ms, 3),
@@ -1657,6 +1766,7 @@ async def run_task(task: Note, depth: int = 0, reasoning_effort: str | None = No
             "input_capacity_tokens": input_capacity_tokens,
         }
     except asyncio.CancelledError:
+        _publish_working_progress(ctx, "interrupted")
         summary = "Interrupted; completed Tool effects are retained and must not be replayed."
         if ctx.get("interruption_reason") == "foreground_admission":
             summary = (
@@ -1695,6 +1805,7 @@ async def run_task(task: Note, depth: int = 0, reasoning_effort: str | None = No
         # connection and microphone lifetime remain outside the Task executor.
         raise
     except Exception as exc:
+        _publish_working_progress(ctx, "failed")
         if (
             isinstance(exc, model_runtime.ModelResourceUnavailable)
             and not any("tool" in item or ("task" in item and item.get("status") != "excluded")
@@ -1760,6 +1871,8 @@ async def run_task(task: Note, depth: int = 0, reasoning_effort: str | None = No
         emit_state("error", f"{task.title} failed", "failed", summary)
         raise
     finally:
+        if activation_token is not None:
+            INDEX.reset_activation(activation_token)
         action_trace.reset(trace_scope)
         knowledge_activity.emit(
             "query_completed", packet_refs, query=objective, graph_id=graph_id,

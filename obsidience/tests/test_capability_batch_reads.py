@@ -18,6 +18,16 @@ from obsidience.harness.knowledge import retrieval, source, vault
 from obsidience.harness.models.context import TaskContext
 
 
+@pytest.fixture(autouse=True)
+def authorized_read_unit_boundary(monkeypatch):
+    """Pagination tests start after authorization; scope has separate real tests."""
+    from obsidience.harness.knowledge import scope
+    from obsidience.harness.knowledge.vault import Note
+    principal = Note("Agents/Test/Test.md", "Test", {"kind": "agent"}, "Read fixture")
+    monkeypatch.setattr(scope, "execution_scope", lambda context, res:
+        (principal, {note.ref for note in res.by_ref.values()} | {f"Knowledge/{i}" for i in range(12)}))
+
+
 def citation(number):
     return f"source://00000000-0000-0000-0000-{number:012d}"
 
@@ -175,7 +185,8 @@ def test_multiline_source_reference_cannot_forge_page_range(sources, monkeypatch
 def search_calls(monkeypatch):
     calls = []
 
-    def search(query, k=None):
+    def search(query, k=None, **scope_kwargs):
+        assert "allowed_refs" in scope_kwargs
         calls.append((query, k))
         if query == "missing":
             return []
@@ -222,8 +233,8 @@ def test_search_cancellation_prevents_later_query(search_calls, monkeypatch):
     cancel = threading.Event()
     real = retrieval.search
 
-    def cancelled_search(query, k=None):
-        hits = real(query, k)
+    def cancelled_search(query, k=None, **scope_kwargs):
+        hits = real(query, k, **scope_kwargs)
         cancel.set()
         return hits
 

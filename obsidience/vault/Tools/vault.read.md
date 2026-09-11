@@ -1,10 +1,17 @@
 ---
 type: tool
 title: vault.read
+description: Read an exact accessible Article using ref, or up to ten refs.
 obsidience:
   binding: capability:vault.read
   source: obsidience/harness/capabilities/vault/read.py
 ---
+
+## Runtime
+
+Read an exact accessible Article using ref, or up to ten refs. Optional offset and expected_sha256 continue a clipped read consistently. No guessed-path fallback or other-Agent access exists. Follow the returned continuation to obtain text beyond the current range. Retain Article identity and clipping limits; reading a contract does not assign its Tools.
+
+## Reference
 
 Read a bounded page of an Article view using exactly one of `ref` or `refs` (1-10 distinct Article refs). Refs are nonempty, at most 500 characters and contain no control characters. Canonical aliases for the same Article are duplicate batch inputs and are rejected. `offset` defaults to 0 and is a nonnegative character offset. Optional `expected_sha256` must be the exact previously returned `view_sha256`; every nonzero offset requires it.
 

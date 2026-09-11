@@ -1,9 +1,16 @@
 ---
 type: skill
 title: Using harness.status
+description: Read one current snapshot before diagnosing health.
 obsidience:
   tool: '[[Tools/harness.status]]'
 ---
+
+## Runtime
+
+Read one current snapshot before diagnosing health. Distinguish current admission problems from historical failures. Use exact returned task/run identities for further inspection; a process being alive is not sufficient evidence of a healthy workflow.
+
+## Reference
 
 Use `harness.status` for one deterministic, read-only Obsidience health
 snapshot.

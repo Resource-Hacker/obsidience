@@ -13,6 +13,7 @@ obsidience:
   - '[[Skills/web.fetch]]'
   - '[[Skills/source.read]]'
   - '[[Skills/source.handoff]]'
+  - '[[Skills/observations.temporary.append]]'
 ---
 
 1. If activated by `source.added`, require its exact Source identity and read
@@ -36,3 +37,6 @@ obsidience:
    complete with `outcome: no_change` and a bounded `evidence` list naming the
    exact accepted or Source evidence that supports that disposition. Do not stage
    an intermediate Review or activate Ingest manually.
+
+
+When a useful nonredundant observation should survive this activation, optionally append one bounded unverified note to this Agent's own Temporary Observations. Do not record hidden reasoning or create a note merely to narrate routine work.

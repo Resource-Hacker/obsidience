@@ -1,11 +1,18 @@
 ---
 type: skill
 title: Using model.benchmark
+description: Benchmark only valid layouts for the exact event model.
 obsidience:
   approved_at: '2026-08-25T18:19:10'
   provenance: proposed by Codex (task codex:knowledge-handoff)
   tool: '[[Tools/model.benchmark]]'
 ---
+
+## Runtime
+
+Benchmark only valid layouts for the exact event model. Preserve every failure and restore the saved hardware selection. Compare equivalent settings; do not treat an incomplete measurement as a verified performance result.
+
+## Reference
 
 Use `model.benchmark` to measure one registered text-generating model by itself
 on one declared valid device layout.

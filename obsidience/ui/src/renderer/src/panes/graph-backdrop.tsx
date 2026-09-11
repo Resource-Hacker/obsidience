@@ -69,7 +69,7 @@ const ROOT_ID = "@vault";
 const FOCUS_LINGER_MS = 6_000;
 
 interface ActivityWireEntry {
-  phase?: KnowledgeActivity["phase"] | "review_changed";
+  phase?: KnowledgeActivity["phase"] | "review_changed" | "graph_changed";
   review?: LinkReviewChange;
   refs?: string[];
   query?: string;
@@ -84,7 +84,7 @@ interface ActivityWireMessage extends ActivityWireEntry {
 }
 
 function activityFromWire(entry: ActivityWireEntry): KnowledgeActivity | null {
-  if (!entry.phase || entry.phase === "review_changed") return null;
+  if (!entry.phase || entry.phase === "review_changed" || entry.phase === "graph_changed") return null;
   return {
     phase: entry.phase,
     refs: Array.isArray(entry.refs) ? entry.refs : [],
@@ -337,6 +337,10 @@ export function GraphBackdrop({
     let socket: WebSocket | null = null;
     let retry: number | null = null;
     const reviewChanged = (entry: ActivityWireEntry) => {
+      if (entry.phase === "graph_changed") {
+        window.dispatchEvent(new Event("obsidience:graph-refresh"));
+        return;
+      }
       if (entry.phase !== "review_changed" || !entry.review) return;
       const review = entry.review;
       const wallNow = Date.now();
@@ -547,7 +551,6 @@ export function GraphBackdrop({
       }
       return parentOf;
     };
-    const libraryKinds = new Set(["tool", "task"]);
     const primitiveFolderByKind: Record<string, string> = {
       tool: "Tools", skill: "Skills", runbook: "Runbooks", task: "Tasks",
     };
@@ -770,6 +773,9 @@ export function GraphBackdrop({
         const primitiveKind = primitiveKindOf(node);
         if (primitiveKind) return satelliteSubjectId(primitiveFolderByKind[primitiveKind].toLowerCase());
         if (otherAgentMembers.includes(node)) return satelliteSubjectId("other-agents");
+        const folder = node.id.split("/").slice(0, -1).join("/");
+        const subject = satelliteSubjects.find((item) => item.path === folder);
+        if (subject) return subject.id;
         if (name === "Darwin" && node.id.startsWith("Sources/")) {
           return satelliteSubjectId("sources");
         }
@@ -862,18 +868,24 @@ export function GraphBackdrop({
     // their owning agents.
     const libraryGroup = graph.navigation.groups.find((group) => group.id === "library");
     const libraryMembers = graphArticleIds(libraryGroup, displayAliases);
-    const libraryNotes = primitiveNotes.filter((node) => libraryMembers.has(node.id)
-      && libraryKinds.has(primitiveKindOf(node) ?? ""));
+    const absorbedLibraryRefs = new Set((libraryGroup?.subjects ?? []).flatMap((subject) =>
+      subject.article_ref ? [subject.article_ref] : []));
+    const libraryNotes = all.filter((node) => libraryMembers.has(displayAliases.get(node.id) ?? node.id)
+      && !absorbedLibraryRefs.has(node.id)
+      && node.kind !== "skill");
     const libraryRoot = libraryGroup?.root_ref ?? "@library";
     const libraryTitle = libraryGroup?.title ?? "Library";
     const librarySubjects = libraryGroup?.subjects ?? [];
     const librarySubjectByKind = new Map<string, string>([
       ["tool", librarySubjects.find((subject) => subject.id === "@library/Tools")?.id ?? libraryRoot],
       ["task", librarySubjects.find((subject) => subject.id === "@library/Tasks")?.id ?? libraryRoot],
+      ["runbook", librarySubjects.find((subject) => subject.id === "@library/Runbooks")?.id ?? libraryRoot],
+      ["agent", librarySubjects.find((subject) => subject.id === "@library/Agents")?.id ?? libraryRoot],
     ]);
     const libraryParents = hierarchyParents(libraryNotes);
     const libraryContainers = new Set(libraryParents.values());
-    const libraryArticleIds = new Set(libraryNotes.filter(isArticleEndpoint).map((node) => node.id));
+    const libraryArticleIds = new Set(all.filter(isArticleEndpoint)
+      .map((node) => displayAliases.get(node.id) ?? node.id).filter((id) => libraryMembers.has(id)));
     const libraryLayoutNodes = [
       { id: libraryRoot, degree: libraryNotes.length, kind: "concept" as never, label: libraryTitle, role: "root" as never, parentId: null as string | null, order: 0 },
       ...librarySubjects.map((subject, index) => ({
@@ -893,7 +905,8 @@ export function GraphBackdrop({
         label: node.title,
         role: (libraryContainers.has(node.id) ? "section" : "claim") as never,
         parentId: libraryParents.get(node.id) ??
-          librarySubjectByKind.get(primitiveKindOf(node) ?? "") ?? libraryRoot,
+          librarySubjects.find((subject) => subject.path === node.id.split("/").slice(0, -1).join("/"))?.id ??
+          librarySubjectByKind.get(primitiveKindOf(node) ?? node.kind) ?? libraryRoot,
         order: index,
       })),
     ];

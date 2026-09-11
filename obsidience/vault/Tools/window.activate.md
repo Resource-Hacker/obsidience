@@ -1,10 +1,18 @@
 ---
 type: tool
 title: window.activate
+description: Focus one exact current application or pane using target:{kind:application|pane,name:<exact
+  name>,surface?:<surface>}.
 obsidience:
   binding: capability:window.activate
   source: obsidience/harness/capabilities/window/activate.py
 ---
+
+## Runtime
+
+Focus one exact current application or pane using target:{kind:application|pane,name:<exact name>,surface?:<surface>}. The result uses the shared scene and verified post-state. An already active result is not a new effect. Missing, ambiguous, locked or stale targets fail closed.
+
+## Reference
 
 Bring one existing native application or module pane to the front and give it
 focus. Argument:

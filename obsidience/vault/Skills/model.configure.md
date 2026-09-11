@@ -1,9 +1,16 @@
 ---
 type: skill
 title: Using model.configure
+description: Change only the requested supported fields.
 obsidience:
   tool: '[[Tools/model.configure]]'
 ---
+
+## Runtime
+
+Change only the requested supported fields. Preserve valid GPU residency and output/context bounds. A reconciliation warning may follow a committed setting; inspect the result before another call, rather than blindly repeating it.
+
+## Reference
 
 Use `model.configure` to apply one bounded configuration update to one
 registered local model.

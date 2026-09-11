@@ -9,6 +9,7 @@ obsidience:
   - '[[Skills/vault.read]]'
   - '[[Skills/vault.validate]]'
   - '[[Skills/vault.propose]]'
+  - '[[Skills/observations.temporary.append]]'
   task: '[[Tasks/link]]'
 ---
 
@@ -37,3 +38,6 @@ obsidience:
    before a fresh proposal can be staged.
 6. Finish with `review`, naming each staged Article and the relationship added,
    or `completed` with the exact reason no useful link was warranted.
+
+
+When a useful nonredundant observation should survive this activation, optionally append one bounded unverified note to this Agent's own Temporary Observations. Do not record hidden reasoning or create a note merely to narrate routine work.

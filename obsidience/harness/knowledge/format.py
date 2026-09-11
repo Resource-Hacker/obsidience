@@ -27,7 +27,7 @@ import yaml
 
 ARTICLE_TYPES = frozenset({"knowledge", "task", "runbook", "skill", "tool", "agent"})
 TASK_RUNTIME_FIELDS = frozenset({
-    "status", "params", "event_queue", "status_updated", "triggered_at",
+    "status", "params", "event_queue", "status_updated", "triggered_at", "activation_id",
     "last_run", "summary", "blocked_reason", "generated_runbook",
 })
 COMMON_FIELDS = frozenset({
@@ -38,6 +38,8 @@ COMMON_FIELDS = frozenset({
 # Only known application fields move between the flat runtime view and the
 # namespace. Unknown fields retain their original root/namespace placement.
 OBSIDIENCE_FIELDS = frozenset({
+    "knowledge", "exclude_knowledge", "required_context", "relations", "context_role",
+    "operation_tools", "runtime_sections",
     "acceptance", "action", "agent", "approved_at", "archive_reason", "archived_at", "articles", "assignee",
     "authored_fields", "auto_curate", "auto_done", "base_sha256", "binding", "compacted_through",
     "compaction", "compaction_committed", "context_threshold", "conversation_id",
@@ -282,6 +284,30 @@ def validate_profile(raw: Mapping[str, Any], path: str | Path | None = None) -> 
             for key in ("tools", "skills", "runbooks"):
                 if key in namespace:
                     errors.append(f"obsidience.{key} is derived from assigned Tasks, not an Agent grant")
+    if isinstance(namespace, Mapping):
+        from .links import metadata_ref
+        for key in ("knowledge", "exclude_knowledge", "required_context"):
+            values = namespace.get(key, [])
+            if (not isinstance(values, list) or len(values) > (16 if key == "required_context" else 128)
+                    or any(not isinstance(value, str) or len(value) > 512
+                           or not metadata_ref(value) or metadata_ref(value).startswith("@")
+                           or any(part in {"", ".", ".."} for part in metadata_ref(value).split("/"))
+                           for value in values)):
+                errors.append(f"obsidience.{key} requires bounded exact Article references")
+        if "context_role" in namespace and namespace["context_role"] not in {
+            "constraint", "decision", "inventory", "reference", "working",
+        }:
+            errors.append("obsidience.context_role is not a recognized Knowledge role")
+        for key in ("operation_tools", "runtime_sections"):
+            values = namespace.get(key, {})
+            if not isinstance(values, Mapping) or len(values) > 12:
+                errors.append(f"obsidience.{key} requires a bounded operation mapping")
+            elif key == "runtime_sections" and any(not isinstance(value, str) or not 1 <= len(value) <= 120 for value in values.values()):
+                errors.append("runtime section names must be bounded text")
+            elif key == "operation_tools" and any(not isinstance(value, list) or len(value) > 32
+                    or any(not isinstance(ref, str) or not metadata_ref(ref).startswith("Tools/") for ref in value)
+                    for value in values.values()):
+                errors.append("operation tools require exact Tool reference lists")
     for key in sorted((OBSIDIENCE_FIELDS - COMMON_FIELDS) & raw.keys()):
         errors.append(f"{key} belongs under obsidience, not at the root")
     return errors

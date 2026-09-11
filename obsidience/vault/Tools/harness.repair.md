@@ -1,10 +1,18 @@
 ---
 type: tool
 title: harness.repair
+description: Request one receipt-safe recovery with exact task and run_id from current
+  status evidence.
 obsidience:
   binding: capability:harness.repair
   source: obsidience/harness/capabilities/harness/repair.py
 ---
+
+## Runtime
+
+Request one receipt-safe recovery with exact task and run_id from current status evidence. The controller rejects stale, unsafe or potentially replaying effects. Report remaining blockers. Retry admission does not establish the final requested outcome.
+
+## Reference
 
 Requeue one exact failed Task occurrence through the existing scheduler, only
 from an active Repair Task and its current controller-observed health plan.

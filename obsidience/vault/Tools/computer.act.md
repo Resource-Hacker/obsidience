@@ -1,12 +1,19 @@
 ---
 type: tool
 title: computer.act
+description: Deliver one click to the immediately observed application.
 obsidience:
   binding: capability:computer.act
   source: obsidience/harness/capabilities/computer/act.py
   approved_at: '2026-09-06T01:04:54'
   provenance: proposed by Codex (task codex:knowledge-handoff)
 ---
+
+## Runtime
+
+Deliver one click to the immediately observed application. Pass application, target description, point:{x,y} with integer coordinates 0..999, and optional postcondition. A fresh computer.observe must immediately precede this call. The result can attest click delivery and return a fresh post-image, not mechanically prove the semantic goal. Never repeat uncertain delivery. State outcomes allow at most three verified distinct steps.
+
+## Reference
 
 Apply one click at the point selected by the Task's vision model in its immediately preceding computer.observe image. Arguments:
 `{"application": str, "action": "click", "target": str, "point": {"x": int, "y": int}, "postcondition": str optional}`.

@@ -1,12 +1,19 @@
 ---
 type: tool
 title: task.complete
+description: Finish with status:completed|failed|review and a factual summary.
 obsidience:
   binding: capability:task.complete
   source: obsidience/harness/capabilities/task/complete.py
   approved_at: '2026-09-06T01:04:57'
   provenance: proposed by Codex (task codex:knowledge-handoff)
 ---
+
+## Runtime
+
+Finish with status:completed|failed|review and a factual summary. Use outcome:no_change and concrete evidence only after a completed evidence-bound inspection. Computer outcomes require matching current controller evidence. State actions additionally require verification:{status:established,observation:<visible evidence>}. Intent, dispatch alone, historical prose and a target label do not prove completion. Never replay uncertain effects. An interactive Query with no effects may request reclassify:true once; this only asks the controller to recheck the same Objective, never grants Tools.
+
+## Reference
 
 Record one terminal result for the active Task. Arguments: `{"status":"completed|failed|review","summary":str optional,"outcome":"changed|no_change" optional,"evidence":[str] optional,"verification":{"status":"established","observation":str} optional}`. Summary: at most 2,000 characters. Evidence: at most eight nonempty strings, each at most 500 characters. Verification has exactly the shown keys; observation is 1–1,000 characters. Unknown status or malformed evidence/verification is rejected.
 

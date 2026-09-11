@@ -2,6 +2,8 @@
 type: knowledge
 title: Activation packet protocol
 sources:
+- resource: obsidience/harness/knowledge/scope.py
+- resource: obsidience/harness/knowledge/index.py
 - resource: obsidience/harness/execution/executor.py
 - resource: obsidience/harness/knowledge/retrieval.py
 - resource: obsidience/harness/models/llm.py
@@ -20,6 +22,24 @@ The harness first selects one exact accepted Task. That Task's authored edges
 resolve the assignee, Runbook, Skills, and Tools under
 [Task activation](/Agents/Executive/Architecture/Harness/task-activation--b30a4642.md).
 Similarity may supply Knowledge but cannot replace or broaden authority.
+
+## Compiled instructions
+
+The selected Tool, paired Skill and Runbook contribute authored Runtime sections
+and applicable operation sections. Complete reference text remains in Reader.
+Operation profiles only narrow the accepted Task capability set. Exact section
+hashes and ranges are recorded with the packet. The decoder constrains Tool name,
+argument types, required fields and allowed keys; adapters enforce bounds and
+state-dependent acceptance. Finite nested string/array ceilings stay out of the
+llama.cpp grammar because expanding them exceeds its rule-repetition limit.
+They remain in canonical contracts and adapter checks, with output-token limits
+bounding model generation.
+
+Each Agent's Current activation Article displays the exact objective, selected
+context identities and controller evidence. Actual read/search results extend
+that view. A displayed thinking path represents supplied or read context, not
+access to hidden model reasoning; proposed relationships become durable only
+through ordinary publication. Checkout refresh is passive, not a fake activation.
 
 ## Visible packet order
 
@@ -51,9 +71,12 @@ The Knowledge lane uses lexical and vector search with weighted reciprocal-rank
 fusion, preserves three direct hits when available, and admits at most two
 directly linked Knowledge neighbors within a 1,200-estimated-token allowance.
 It performs no generative expansion, cross-encoder pass, or elapsed-time cutoff.
-The current packer uses at most the first 1,200 body characters of each nominated
-Article and can include fewer than five Articles when the estimated budget is
-exhausted. These are explicitly excerpts, not full-document retrieval.
+The packer selects a query-relevant contiguous passage of at most 1,200 body
+characters with exact Unicode offsets; it does not always take the introduction.
+Agent membership is applied before lexical/vector top-K and neighbor expansion.
+Fewer than five Articles may fit. Explicit `required_context` is included
+separately, without competing for similarity rank; unavailable or oversized
+required constraints fail instead of silently disappearing.
 Retrieval failure may remove optional context but can never invent authority,
 procedure, a Tool, or a success claim. Immediate Observations is attached by
 exact identity rather than search.

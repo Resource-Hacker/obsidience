@@ -23,6 +23,9 @@ OTHER = "source://f95a9235-fd6a-47fc-87e0-4284087e9774"
 
 @pytest.fixture
 def capture(monkeypatch):
+    from obsidience.harness.knowledge import scope
+    agent = Note("Agents/Darwin/Darwin.md", "Darwin", {"kind": "agent"}, "Source-bound research")
+    monkeypatch.setattr(scope, "execution_scope", lambda context, res: (agent, set()))
     content = json.dumps({"title": "Police investigate donations", "summary": "A reported inquiry.",
                           "reporting_url": "https://example.com/report"})
     document = {"citation": CITATION, "content": content, "source_type": "document",

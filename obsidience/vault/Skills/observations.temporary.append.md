@@ -1,11 +1,18 @@
 ---
 type: skill
 title: Using observations.temporary.append
+description: Record only a useful compact observation for this Agent.
 obsidience:
   tool: '[[Tools/observations.temporary.append]]'
   approved_at: '2026-09-06T01:05:09'
   provenance: proposed by Codex (task codex:knowledge-handoff)
 ---
+
+## Runtime
+
+Record only a useful compact observation for this Agent. Mark inference and uncertainty explicitly and cite accessible related Articles. Never record hidden reasoning. A temporary observation is unverified context, not durable policy or a Tool grant.
+
+## Reference
 
 Use `observations.temporary.append` to append one bounded, unverified temporary
 observation to the runtime-selected destination.

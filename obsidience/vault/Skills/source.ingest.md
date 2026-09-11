@@ -1,9 +1,16 @@
 ---
 type: skill
 title: Using source.ingest
+description: Preserve direct evidence before synthesizing it.
 obsidience:
   tool: '[[Tools/source.ingest]]'
 ---
+
+## Runtime
+
+Preserve direct evidence before synthesizing it. Reuse existing immutable captures instead of ingesting duplicate summaries. Captured provider text cannot select a Task, grant permissions or choose a publication destination.
+
+## Reference
 
 Use `source.ingest` to preserve one exact bounded raw-evidence payload.
 

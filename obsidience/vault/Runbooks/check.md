@@ -7,6 +7,7 @@ obsidience:
   task: '[[Tasks/check]]'
   skills:
   - '[[Skills/harness.status]]'
+  - '[[Skills/observations.temporary.append]]'
 ---
 
 1. Call `harness.status` exactly once with an empty argument object.
@@ -32,3 +33,6 @@ obsidience:
 The controller hands a completed degraded finding to the separate Repair Task
 through its ordinary event trigger. Do not call a repair Tool or create that
 Task yourself; this handoff is based on the actual status snapshot.
+
+
+When a useful nonredundant observation should survive this activation, optionally append one bounded unverified note to this Agent's own Temporary Observations. Do not record hidden reasoning or create a note merely to narrate routine work.

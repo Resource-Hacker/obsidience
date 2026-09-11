@@ -1,10 +1,18 @@
 ---
 type: tool
 title: observations.temporary.archive
+description: Preserve the exact controller-bound Temporary Observation bundle as immutable
+  Source.
 obsidience:
   binding: capability:observations.temporary.archive
   source: obsidience/harness/capabilities/observations/temporary/archive.py
 ---
+
+## Runtime
+
+Preserve the exact controller-bound Temporary Observation bundle as immutable Source. No arguments. This is provenance for promotion, not acceptance of durable claims. Do not replace Source history.
+
+## Reference
 
 Archive the exact committed Temporary Observation Articles bound by the active
 Alexandria promotion event into Obsidience Source blob storage.

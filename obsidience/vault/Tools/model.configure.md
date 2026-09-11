@@ -1,10 +1,19 @@
 ---
 type: tool
 title: model.configure
+description: 'Update one registered model with model_id and at least one supported
+  setting: allowed_devices, context_tokens, max_output_tokens, gpu_memory_utilization
+  or max_num_seqs.'
 obsidience:
   binding: capability:model.configure
   source: obsidience/harness/capabilities/model/configure.py
 ---
+
+## Runtime
+
+Update one registered model with model_id and at least one supported setting: allowed_devices, context_tokens, max_output_tokens, gpu_memory_utilization or max_num_seqs. The resource owner validates and reconciles settings. Observe cancellation-after-commit and reconciliation warnings. Never replay an uncertain committed change.
+
+## Reference
 
 Apply one bounded configuration to a registered local model through the same
 validator used by the Models Reader.

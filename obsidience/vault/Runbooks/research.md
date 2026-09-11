@@ -10,6 +10,7 @@ obsidience:
   - '[[Skills/source.ingest]]'
   - '[[Skills/source.read]]'
   - '[[Skills/source.handoff]]'
+  - '[[Skills/observations.temporary.append]]'
   subrunbooks:
   - '[[Runbooks/research/question]]'
   - '[[Runbooks/research/learn]]'
@@ -36,3 +37,6 @@ once. That Tool writes an immutable file under `obsidience/evidence/inbox/` and 
 `source.inbox`. Alexandria's centralized Ingest Task consumes that event and
 stages the final wiki change for owner Review. Darwin never writes the vault or
 creates an intermediate Review object.
+
+
+When a useful nonredundant observation should survive this activation, optionally append one bounded unverified note to this Agent's own Temporary Observations. Do not record hidden reasoning or create a note merely to narrate routine work.

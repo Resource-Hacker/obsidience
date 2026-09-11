@@ -1,12 +1,19 @@
 ---
 type: tool
 title: harness.evaluate
+description: Evaluate one exact Runbook proposal in frozen Tool trials using proposal.
 obsidience:
   binding: capability:harness.evaluate
   source: obsidience/harness/capabilities/harness/evaluate.py
   approved_at: '2026-09-09T17:56:32'
   provenance: proposed by Codex (task codex:implementation)
 ---
+
+## Runtime
+
+Evaluate one exact Runbook proposal in frozen Tool trials using proposal. Inputs, baseline, cases and acceptance are controller-bound. The candidate author cannot choose grades. Results are evaluation evidence, not approval or permission for live effects.
+
+## Reference
 
 Evaluate one exact Runbook proposal bound to the current Heimdall Audit.
 

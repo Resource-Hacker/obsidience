@@ -22,7 +22,7 @@ def test_current_context_excludes_deprecated_and_expired_direct_and_neighbor_hit
         _note("Knowledge/neighbor-current", body="Current neighboring fact.", meta={"stale_after": "2999-01-01T00:00:00Z"}),
     ]
     monkeypatch.setattr(retrieval, "iter_notes", lambda: notes)
-    monkeypatch.setattr(retrieval, "_lanes_for", lambda *_args: [(1, [(note.ref, 1) for note in notes[:3]])])
+    monkeypatch.setattr(retrieval, "_lanes_for", lambda *_args, **_kwargs: [(1, [(note.ref, 1) for note in notes[:3]])])
     brief, refs = retrieval.fast_context_with_refs("fact", set(), limit=5,
                                                 preferred={"Knowledge/direct-old", "Knowledge/direct-stale"})
     assert refs == ["Knowledge/seed", "Knowledge/neighbor-current"]
@@ -44,7 +44,7 @@ def test_expiration_refreshes_without_index_or_article_mutation(monkeypatch, sha
     before = dict(note.meta)
     monkeypatch.setattr(retrieval, "datetime", Clock)
     monkeypatch.setattr(retrieval, "iter_notes", lambda: [note])
-    monkeypatch.setattr(retrieval, "_lanes_for", lambda *_args: [(1, [(note.ref, 1)])])
+    monkeypatch.setattr(retrieval, "_lanes_for", lambda *_args, **_kwargs: [(1, [(note.ref, 1)])])
     monkeypatch.setattr(retrieval.INDEX, "sync", lambda: (_ for _ in ()).throw(AssertionError("unexpected index rebuild")))
     kwargs = {"accepted_resolver": vault.Resolver([note])} if shared_snapshot else {}
     if shared_snapshot:
@@ -68,7 +68,7 @@ def test_shared_activation_snapshot_excludes_system_articles_and_resolves_curren
         note.title = "Neighbor"
     snapshot = vault.Resolver([*hidden, seed, neighbor])
     monkeypatch.setattr(retrieval, "iter_notes", lambda: pytest.fail("activation snapshot must not be rescanned"))
-    monkeypatch.setattr(retrieval, "_lanes_for", lambda *_args: [(1, [(note.ref, 1) for note in [*hidden, seed]])])
+    monkeypatch.setattr(retrieval, "_lanes_for", lambda *_args, **_kwargs: [(1, [(note.ref, 1) for note in [*hidden, seed]])])
 
     brief, refs = retrieval.fast_context_with_refs("evidence", set(), accepted_resolver=snapshot)
 
@@ -111,12 +111,13 @@ def test_explicit_search_and_read_preserve_stale_deprecated_and_archived_content
     ]
     for ref, meta, body in rows:
         vault.write_note(ref + ".md", {"kind": "knowledge", "title": ref, **meta}, body)
-    monkeypatch.setattr(retrieval, "_lanes_for", lambda *_args: [(1, [(ref, 1) for ref, _meta, _body in rows[:2]])])
+    monkeypatch.setattr(retrieval, "_lanes_for", lambda *_args, **_kwargs: [(1, [(ref, 1) for ref, _meta, _body in rows[:2]])])
     assert [hit["ref"] for hit in retrieval.search("retained")] == [row[0] for row in rows[:2]]
     for ref, _meta, body in rows:
         output = read.execute({"ref": ref}, {})
-        assert body in output
-        assert ('"freshness": "stale"' if ref == "Knowledge/stale" else '"freshness": "deprecated"') in output
+        assert ("Note not found" in output) if ref.startswith("_archived/") else (body in output)
+        if not ref.startswith("_archived/"):
+            assert ('"freshness": "stale"' if ref == "Knowledge/stale" else '"freshness": "deprecated"') in output
         assert body in vault.load_note(ref + ".md").body
 
 
@@ -154,3 +155,5 @@ def test_expiry_changes_explicit_read_revision_and_rejects_stale_pagination(monk
     assert fresh["view_sha256"] != identity["view_sha256"]
     assert '"freshness": "stale"' in body
     assert (tmp_path / "Knowledge/timed.md").read_bytes() == original
+
+pytestmark = pytest.mark.usefixtures("authorized_reader_scope")

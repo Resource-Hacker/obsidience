@@ -871,6 +871,27 @@ one becomes a separately queueable outcome with its own acceptance condition.
 Observations is the model exception: Immediate, Temporary, and Durable have
 genuinely different lifecycles, so their deeper Task structure is useful.
 
+
+A Task definition is not an active request. The existing SQLite ledger stores
+one `task_activations` occurrence for each event or user turn and links every
+attempt in `runs` to its `activation_id`. The Task status/FIFO is a compatibility
+projection of those occurrences, not a second authority. Each occurrence keeps
+its original objective, inputs and result; a later request never inherits its
+predecessor's target. Completed occurrences cannot be implicitly replayed.
+Different occurrences of the same definition retain independent history. Unknown
+effects remain unresolved; only evidenced independent work may pass a terminal
+head. Review resolves the originating occurrence rather than a newer Task head.
+Existing state is normalized once without rewriting historical receipts.
+New admissions, completed work and foreground release wake the existing scheduler
+so a ready response need not wait for the periodic housekeeping interval.
+
+Task hierarchy supplies navigation and assignment scope only. It does not
+execute descendants sequentially. Order and prerequisites belong to a Runbook;
+select one applicable executable Task for an activation. Application launch
+uses a complete bounded operation: dispatch once, await the existing scene's
+readiness witness, then report ready, timeout or uncertain delivery honestly.
+No readiness timeout authorizes a second launch.
+
 ## Work, procedure, and capability
 
 A Task says what must become true. A Runbook says how to make it true. A Tool
@@ -908,8 +929,9 @@ new authored bindings, or additional retrieval expansion are introduced.
 The navigation manifest owns each graph's Article membership, including assigned
 Task dependencies, selected hierarchy, and physical aliases. Reader selection carries the originating
 graph identity; links and backlinks remain in that scope as the user navigates.
-Library navigation uses its declared Tool+Skill and Task shelves without a
-second filesystem projection. Displaying a related Article never assigns it or
+Library and Agent navigation use one declared subject/membership projection.
+The owner Library includes all accepted Knowledge, Agents and Runbooks alongside
+Task and Tool+Skill shelves, without a second filesystem tree. Displaying a related Article never assigns it or
 grants executable authority. Parent and index Articles keep their own semantic
 links through their exact visible aliases; hierarchy duplicates and absorbed
 self-links are drawn only once or omitted, respectively.
@@ -923,8 +945,10 @@ Generated `@library/Skills/<tool/id>` IDs are display aliases, not authored
 assignments. Multi-Tool order belongs in the Runbook, not in either Skill.
 
 Runbooks are applicable procedures rather than independent Agent assignments.
-The shared Library contains Tasks and Tool+Skill pairs. `Agent.tasks` is the
-only manual work assignment. Accepted Runbook `task` and `for_agent` bindings
+The shared Library contains all accepted Article types, not only capabilities.
+Reader's Agent icons manage exact Knowledge checkout and Task assignments.
+`Agent.tasks` is the only manual executable-work assignment; `Agent.knowledge`
+and `Agent.exclude_knowledge` select contextual access without granting Tools. Accepted Runbook `task` and `for_agent` bindings
 identify Agent-specific applicability; an applicable authored `Task.runbook`
 also supplies its dependency set. Execution, graph membership, Reader, and
 dependency displays resolve the same accepted bindings and hierarchy.
@@ -964,6 +988,23 @@ it contains unique detail or relationships. Merge must absorb that material
 into the Agent Article, redirect references and meaningful edges, then stage the
 ordinary shadow Article for archival.
 
+
+Each Agent keeps a separate orbiting graph with the Executive's existing base
+Knowledge branches preserved. One canonical Vault stores shared Articles, but
+`knowledge` checkout roots and `exclude_knowledge` define each Agent's contextual
+view. Own Knowledge and Observations stay owned; another Agent's Observations
+are private even when the owner Library can display them. Search and direct read
+use the same accepted scope as graph membership. Folder proxies are navigation,
+not permission to read unselected siblings. A checked-out Article is one shared
+identity, never a per-Agent copy. Reader checkout changes are revision-checked;
+revocation stops further model decisions/dispatch under the stale scope.
+
+The Library is a passive owner view, not a globally knowledgeable fifth Agent.
+Agent role icons in Reader and its explorer assign Knowledge or Tasks. Shared
+Tool/Skill/Runbook dependencies follow accepted Task bindings and cannot be
+independently widened by Knowledge links. Whole-branch toggles remove hidden
+descendant selections, and partially selected branches are explicit.
+
 ## Activation and RAPTOR retrieval
 
 Every live, manual, scheduled, or event-triggered request follows one executor
@@ -975,10 +1016,39 @@ request or event
   -> resolve Runbook, Skills, and Tools by graph edge
   -> retrieve Knowledge with lexical and vector lanes
   -> fuse ranks deterministically
-  -> attach at most two direct typed graph neighbors
+  -> attach at most two direct in-scope graph neighbors
   -> pack one token-budgeted activation packet
   -> execute, verify, and record the attempt
 ```
+
+
+The compiler uses authored `Runtime` instruction sections and applicable
+operation sections without discarding the full reference Articles. A Runbook's
+`operation_tools` may only narrow its accepted capability set. Static registry
+argument schemas constrain each Tool with its own input shape; Tool adapters
+still verify effects, targets, and evidence. Instruction hashes and character
+ranges record what was supplied. Knowledge prose cannot become executable policy.
+
+Required context is explicitly selected through `required_context` on accepted
+Agent/Task/Runbook contracts. It must be in the Agent's checked-out graph and
+current; missing or oversized required constraints fail instead of being silently
+omitted. Optional Knowledge uses scoped lexical/vector ranks plus bounded direct
+neighbors. Relevant contiguous passages replace fixed leading excerpts; exact
+Unicode offsets and omission accounting remain visible. A retrieved relation is
+context, not an authorization edge.
+
+Each Agent has a lifecycle-owned Current activation Article containing its exact
+objective, selected/read Article refs, resolved entities and controller receipts.
+It is transient, unverified, and excluded from search. The model receives the
+current request once in Objective; Reader additionally displays that request in
+its working-state view. Public graph activity means actual context supplied,
+Article read/search, Tool dispatch/result or accepted relationship, not inspection
+of hidden model reasoning. Idle transport and checkout refreshes never fabricate
+thinking. Late progress from a superseded activation cannot replace the new view.
+
+Realtime Query may request one bounded admission reclassification before any
+effect. Reclassification reuses the original user request and exact authorized
+Task selection; it cannot create a Tool grant or repeat an operation.
 
 The one visible Thinking Packet is semantically labeled and packed in this
 order:
@@ -1786,12 +1856,14 @@ and a failed restore reports its error without a retry loop. In that error state
 speech is inactive and the scheduler uses ordinary hardware admission. This runtime marker
 does not survive reboot or become conversation, Task, or Knowledge state.
 
-While the Realtime connection is active, autonomous specialist schedules and
-triggers remain pending before claim. An interactive Executive execution may
-use its authorized `task.create` to activate Research Question or Learn as an
-explicit delegation exception. The controller derives that interactive and
-creator provenance from the actual execution; caller arguments cannot supply
-it and it never creates hierarchy.
+An idle Realtime connection does not close all specialist admission. Startup,
+shutdown, actual foreground demand and the existing GPU reservations still gate
+conflicting work. No extra model is made resident merely to enable concurrency.
+An Executive may delegate an accepted Research Question or Learn through its
+existing Tool; the controller binds the original user request and creator run.
+A source-backed finding returns independently of later wiki publication unless
+that activation explicitly requested `await_publication`. Neither routing nor
+handoff creates hierarchy or widens an Agent's searchable Knowledge.
 
 ## Definition of done
 

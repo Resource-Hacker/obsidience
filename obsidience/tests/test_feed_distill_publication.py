@@ -53,6 +53,9 @@ def pipeline(monkeypatch, tmp_path, isolated_task_ledger, request):
         "assignee": "[[Agents/Darwin/Darwin]]", "status": "running", "last_run": "distill-run"}, "Distill.")
     vault.write_note("Tasks/ingest.md", {"kind": "task", "title": "Ingest",
         "assignee": "[[Agents/Alexandria/Alexandria]]", "status": "running", "last_run": "ingest-run"}, "Ingest.")
+    for name, role in (("Darwin", "researcher"), ("Alexandria", "curator")):
+        vault.write_note(f"Agents/{name}/{name}.md", {"kind": "agent", "title": name,
+            "role": role, "knowledge": [destination]}, name)
     item = {"record_type": "parsed_rss_item", "native_id": "report-1", "title": "Original headline",
             "reporting_url": "https://example.com/report", "published": "2026-09-09T10:00:00Z",
             "entry": {"summary": "A sparse report."}, "provenance": {"feed_id": feed_id}}
@@ -66,7 +69,7 @@ def pipeline(monkeypatch, tmp_path, isolated_task_ledger, request):
 
     raw = capture()
     params = {"event": "source.added", **events[-1][1]}
-    research = {"agent": "Darwin", "task": source.DISTILL_TASK, "run_id": "distill-run",
+    research = {"_agent_ref": "Agents/Darwin/Darwin", "agent": "Darwin", "task": source.DISTILL_TASK, "run_id": "distill-run",
                 "event": "source.added", "params": params}
     read.execute({"source": raw["citation"]}, research)
     summary = "# Complete finding\n\nExact summary with qualifications and dates.\n\nEvidence: " + raw["citation"]
@@ -78,7 +81,7 @@ def pipeline(monkeypatch, tmp_path, isolated_task_ledger, request):
 
     assert "Research dropped" in deliver()
     inbox_params = {"event": "source.inbox", **events[-1][1]}
-    ingest = {"agent": "Alexandria", "task": "Tasks/ingest", "run_id": "ingest-run",
+    ingest = {"_agent_ref": "Agents/Alexandria/Alexandria", "agent": "Alexandria", "task": "Tasks/ingest", "run_id": "ingest-run",
               "event": "source.inbox", "params": inbox_params,
               "task_note": vault.load_note("Tasks/ingest.md")}
     read.execute({"source": inbox_params["source_citation"]}, ingest)

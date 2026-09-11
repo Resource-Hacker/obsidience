@@ -27,6 +27,23 @@ from .executor import run_task
 
 _running: set[str] = set()
 _background: set[asyncio.Task] = set()
+_wake_loop: asyncio.AbstractEventLoop | None = None
+_wake_event: asyncio.Event | None = None
+
+
+def wake_scheduler() -> None:
+    """Wake the existing scheduler for new work/results; never create a worker."""
+    if _wake_loop is not None and _wake_event is not None:
+        try:
+            _wake_loop.call_soon_threadsafe(_wake_event.set)
+        except RuntimeError:
+            pass  # Shutdown already owns this loop.
+
+
+def _background_finished(task: asyncio.Task) -> None:
+    _background.discard(task)
+    wake_scheduler()
+
 _continuations_running: set[str] = set()
 _last_fired: dict[str, float] = {}
 _foreground_admissions = 0
@@ -199,7 +216,7 @@ def retry_blocked_reason(note: Note, run: dict | None = None) -> str:
                         or set(entry) - {"tool", "args", "obs", "sig"}):
                     return "The previous execution contains an effect or uncertain Tool outcome."
             elif set(entry) - {
-                "activation_packet", "retrieval_ms", "task_activation", "source_inbox", "created_tasks",
+                "activation_id", "activation_packet", "retrieval_ms", "task_activation", "source_inbox", "created_tasks",
                 "interactive_turn", "computer_request", "provider_metrics", "context_projection",
                 "interruption_reason", "must_not_replay", "invalid", "parse_error", "finish_reason",
             }:
@@ -549,7 +566,7 @@ def _maintenance_failure_clear(run: dict, params: dict, *, required: bool) -> bo
     # Only a conclusively empty execution is automatically disposed here.
     # Reads, child work, truncated traces, unknown records and possible effects
     # remain available for an explicit owner decision.
-    return all(not (set(entry) - {"activation_packet", "retrieval_ms", "task_activation",
+    return all(not (set(entry) - {"activation_id", "activation_packet", "retrieval_ms", "task_activation",
                                  "provider_metrics", "context_projection"}) for entry in entries)
 
 
@@ -588,6 +605,7 @@ async def foreground_admission(reason: str):
         yield
     finally:
         _foreground_admissions -= 1
+        wake_scheduler()
 
 
 def _autonomous_occurrence(note: Note) -> bool:
@@ -708,7 +726,7 @@ def _interactive_occurrence(task_ref: str, params: dict) -> bool:
 
 
 def _realtime_allows(note: Note, accepted_resolver: Resolver | None = None) -> bool:
-    """Pause autonomous specialists while allowing attested work for a user turn."""
+    """Prioritize foreground and speech transitions, not idle microphone time."""
 
     from ..realtime.runtime import RUNTIME
 
@@ -1066,6 +1084,65 @@ def enqueue_named_event(
     return results
 
 
+def _independent_occurrence(task: Note, incoming: dict) -> bool:
+    """An unrelated request may pass a terminal occurrence, never replay it."""
+    if str(task.meta.get("status")) not in {"failed", "blocked", "review", "interrupted"}:
+        return False
+    old = task.meta.get("params")
+    if not isinstance(old, dict) or _event_key(old) == _event_key(incoming):
+        return False
+    def targets(params):
+        exact = params.get("candidate_refs")
+        if isinstance(exact, list) and exact and all(isinstance(ref, str) for ref in exact):
+            return set(exact)
+        for key in ("target", "target_ref", "destination_ref"):
+            value = params.get(key)
+            if isinstance(value, str) and value:
+                return {value.removesuffix(".md")}
+        return set()
+    previous_targets, incoming_targets = targets(old), targets(incoming)
+    if (str(task.meta.get("status")) == "review" and previous_targets and incoming_targets
+            and not any(a == b or a.startswith(b + "/") or b.startswith(a + "/")
+                        for a in previous_targets for b in incoming_targets)):
+        return True  # Exact disjoint publication candidates retain separate Reviews.
+    if str(task.meta.get("status")) == "review":
+        return False  # Unknown publication target cannot be assumed independent.
+    run_id = str(task.meta.get("last_run", ""))
+    if not run_id:
+        return False
+    coverage = INDEX.tool_run_receipts(run_id)
+    if not coverage or coverage.get("task_ref") != task.ref:
+        return False  # Missing receipts are not evidence that no effect occurred.
+    append_only = {"source.ingest", "source.handoff", "observations.temporary.append", "task.complete"}
+    return all(call.get("status") == "returned" and (
+        call.get("read_only") is True or call.get("read_only") == 1 or call.get("tool") in append_only
+    ) for call in coverage["calls"])
+
+
+def _promote_independent_event(task: Note) -> bool:
+    waiting = _event_queue(task.meta)
+    selected = next((entry for entry in waiting if _independent_occurrence(task, entry)), None)
+    if selected is None:
+        return False
+    prior_id = task.meta.get("activation_id")
+    def promote(meta):
+        if meta.get("activation_id") != prior_id or str(meta.get("status")) not in {"failed", "blocked", "review", "interrupted"}:
+            return
+        queue = _event_queue(meta)
+        if selected not in queue:
+            return
+        queue.remove(selected)
+        meta.update(params=selected, status="pending", triggered_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
+        for key in ("last_run", "summary", "blocked_reason", "activation_id"):
+            meta.pop(key, None)
+        if queue:
+            meta["event_queue"] = queue
+        else:
+            meta.pop("event_queue", None)
+    mutate_note_metadata(task, promote)
+    return True
+
+
 def enqueue_event(
     task: Note, params: dict, *, source_event: tuple[str, str] | None = None,
 ) -> dict:
@@ -1077,9 +1154,10 @@ def enqueue_event(
     """
     result = {"state": "queued", "status": "pending", "position": 1, "queue_depth": 1}
     applied = False
+    new_occurrence = False
 
     def mutate(meta: dict) -> None:
-        nonlocal applied
+        nonlocal applied, new_occurrence
         applied = True
         queue = _event_queue(meta)
         current_status = str(meta.get("status", "draft"))
@@ -1098,7 +1176,7 @@ def enqueue_event(
             )
             return
         if current_status == "review":
-            if params.get("queue_after_review") is True:
+            if params.get("queue_after_review") is True or _independent_occurrence(task, params):
                 for index, waiting in enumerate(queue):
                     if _event_key(waiting) == key:
                         result.update(
@@ -1106,6 +1184,7 @@ def enqueue_event(
                             queue_depth=len(queue),
                         )
                         return
+                new_occurrence = True
                 queue.append(dict(params))
                 meta["event_queue"] = queue
                 result.update(
@@ -1139,6 +1218,7 @@ def enqueue_event(
             if _event_key(waiting) == key:
                 result.update(state="queued", position=index + 1, queue_depth=len(queue))
                 return
+        new_occurrence = True
         queue.append(dict(params))
         if active:
             result.update(state="queued", position=len(queue), queue_depth=len(queue))
@@ -1156,6 +1236,9 @@ def enqueue_event(
     admission = {"source_event": source_event} if source_event is not None else {}
     mutate_note_metadata(task, mutate, **admission)
     current = load_note(task.path) or task
+    if applied and _promote_independent_event(current):
+        current = load_note(task.path) or current
+        result.update(state="queued", status="pending", reason="independent_activation", position=0)
     if not applied:
         result.update(
             state="processed", status=str(current.meta.get("status", "draft")),
@@ -1169,6 +1252,9 @@ def enqueue_event(
             result.update(state="queued", reason=RESOURCE_WAIT_PREFIX + str(error))
             if str(current.meta.get("status", "")) == "pending":
                 _resources_allow(current)
+    result["activation_id"] = INDEX.activation_id_for(task.ref, params)
+    if new_occurrence:
+        wake_scheduler()
     return result
 
 
@@ -1260,9 +1346,10 @@ def due_tasks(notes: list[Note] | None = None) -> list:
         if note.kind != "task" or note.ref in _running:
             continue
         if settle_maintenance_occurrence(note):
-            # One FIFO head per tick. Reconcile the next head before admitting
-            # a model, including when Realtime pauses autonomous model work.
+            # Attest invalidated input before admitting an independent successor.
             continue
+        if _promote_independent_event(note):
+            note = load_note(note.path) or note
         if not _realtime_allows(note, accepted_resolver):
             if not _event_queue(note.meta) or not _promote_interactive_event(note):
                 continue
@@ -1317,7 +1404,7 @@ def due_tasks(notes: list[Note] | None = None) -> list:
                 nxt = croniter(str(schedule), base).get_next(float)
             except (ValueError, KeyError):
                 continue
-            if nxt <= now and status != "review":  # never re-fire past an unreviewed result
+            if nxt <= now and status != "review":
                 due.append((2, nxt, note.ref, note))
         elif not schedule and status == "pending":
             due.append((2, note.mtime, note.ref, note))
@@ -1338,6 +1425,15 @@ async def _run(note, **run_kwargs) -> None:
     # occurrence with the saved Task's potentially different model or inputs.
     if not ephemeral and not _resources_allow(note):
         return
+    if (note.meta.get("schedule") and note.meta.get("status") != "pending"
+            and not ephemeral):
+        previous = INDEX.run(str(note.meta.get("last_run", "")))
+        base = _last_fired.get(note.ref, max(note.mtime, float((previous or {}).get("started") or 0)))
+        firing = croniter(str(note.meta["schedule"]), base).get_next(float)
+        enqueue_event(note, {"event": "schedule", "activation_key": f"schedule:{note.ref}:{firing}"})
+        note = load_note(note.path) or note
+        if note.meta.get("status") != "pending":
+            return
     interruption = None
     if _autonomous_occurrence(note):
         interruption = asyncio.Event()
@@ -1481,7 +1577,7 @@ def launch(note, **run_kwargs) -> asyncio.Task:
     _claim(note)
     task = asyncio.create_task(_run_claimed(note, **run_kwargs))
     _background.add(task)
-    task.add_done_callback(_background.discard)
+    task.add_done_callback(_background_finished)
     return task
 
 
@@ -1512,23 +1608,30 @@ def _launch_due_tasks() -> None:
 
 
 async def loop() -> None:
-    while True:
-        try:
-            from ..knowledge.source import dispatch_pending_source_events
-
-            dispatch_pending_source_events()
-            INDEX.sync()
-            reconcile_check_health()
-            from .refinement import reconcile_candidates
-
-            reconcile_candidates()
-            continuation = _claim_ready_continuation()
-            if continuation is not None:
-                task = asyncio.create_task(_resume_claimed(continuation))
-                _background.add(task)
-                task.add_done_callback(_background.discard)
-            else:
-                _launch_due_tasks()
-        except Exception as exc:  # noqa: BLE001 — the tick must survive anything
-            print(f"[scheduler] tick error: {exc}")
-        await asyncio.sleep(CONFIG.tick_seconds)
+    global _wake_loop, _wake_event
+    _wake_loop, _wake_event = asyncio.get_running_loop(), asyncio.Event()
+    try:
+        while True:
+            _wake_event.clear()
+            try:
+                from ..knowledge.source import dispatch_pending_source_events
+                dispatch_pending_source_events()
+                INDEX.sync()
+                reconcile_check_health()
+                from .refinement import reconcile_candidates
+                reconcile_candidates()
+                continuation = _claim_ready_continuation()
+                if continuation is not None:
+                    task = asyncio.create_task(_resume_claimed(continuation))
+                    _background.add(task)
+                    task.add_done_callback(_background_finished)
+                else:
+                    _launch_due_tasks()
+            except Exception as exc:  # A failed tick must not lose queued work.
+                print(f"[scheduler] tick error: {exc}")
+            try:
+                await asyncio.wait_for(_wake_event.wait(), timeout=CONFIG.tick_seconds)
+            except TimeoutError:
+                pass
+    finally:
+        _wake_loop, _wake_event = None, None

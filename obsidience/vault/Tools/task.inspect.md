@@ -1,10 +1,18 @@
 ---
 type: tool
 title: task.inspect
+description: Inspect one exact accepted task and optional run_id for bounded execution
+  and receipt evidence.
 obsidience:
   binding: capability:task.inspect
   source: obsidience/harness/capabilities/task/inspect.py
 ---
+
+## Runtime
+
+Inspect one exact accepted task and optional run_id for bounded execution and receipt evidence. A run is an attempt, not the definition. Receipt delivery, execution completion and publication approval are distinct. This Tool does not retry or resolve a run.
+
+## Reference
 
 Read one accepted Task's current state and existing execution evidence. No
 activation, retry, cancellation, approval, model call, or Source write occurs.

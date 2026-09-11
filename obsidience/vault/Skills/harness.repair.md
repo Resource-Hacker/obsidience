@@ -1,9 +1,16 @@
 ---
 type: skill
 title: Using harness.repair
+description: Use only the exact recovery candidate from current evidence.
 obsidience:
   tool: '[[Tools/harness.repair]]'
 ---
+
+## Runtime
+
+Use only the exact recovery candidate from current evidence. Inspect whether a prior effect already happened before any retry. Report unsafe or stale candidates instead of clearing their history or forcing admission.
+
+## Reference
 
 Use `harness.repair` only while executing Repair after reading `harness.status`.
 

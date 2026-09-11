@@ -2,6 +2,8 @@
 type: knowledge
 title: Task activation
 sources:
+- resource: obsidience/harness/knowledge/scope.py
+- resource: obsidience/harness/knowledge/index.py
 - resource: obsidience/harness/execution/executor.py
 - resource: obsidience/harness/execution/scheduler.py
 - resource: obsidience/harness/execution/ledger.py
@@ -13,8 +15,11 @@ obsidience:
 
 Obsidience has one reusable Task Article and several ways to activate it: manual
 invocation, voice, typed input, a graph or shell event, a schedule, or an exact
-peer `task.create`. Runtime state belongs to the execution ledger and Tasks
-pane, not to another object type.
+peer `task.create`. Each requested occurrence receives an activation identity
+and each attempt has a run identity linked to it. The existing SQLite ledger
+owns those occurrences, their original objectives, bound parameters and receipts.
+The Task status/FIFO is a compatibility projection. A new request never inherits
+a previous target; completed effects are not automatically replayed.
 
 The Tasks pane is a filtered operational matrix. It shows only Tasks with a
 schedule, event trigger, or active execution. It is not the Task repository; the
@@ -23,6 +28,9 @@ shared Task hierarchy lives in Library.
 A selected parent includes its descendant Task scope unless an exact descendant
 is excluded. Only an explicit `subtasks` edge creates that hierarchy. Causation,
 sequence, shared assignee, or Runbook branching never creates a child relation.
+Selecting a taxonomy container does not execute its descendants; choose a Task
+with an accepted procedure. Evidenced independent occurrences may progress past
+a terminal head, but unknown effects still require disposition.
 
 A leaf Task resolves one applicable accepted Runbook. The Runbook loads only
 its required Skills; each Skill resolves exactly one Tool, and each Tool

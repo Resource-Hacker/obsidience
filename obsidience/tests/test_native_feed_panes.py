@@ -130,6 +130,8 @@ QtObject {
     settings = settings.replace('import "../../../components/visual"', 'import ' + visual)
     (tmp_path / settings_source.name).write_text(settings)
     reader = (SOURCE.parent.parent / 'reader/ReaderPane.qml').read_text().replace('http://127.0.0.1:8765', f'http://127.0.0.1:{server.server_port}')
+    knowledge = json.dumps((SOURCE.parents[2] / 'components/knowledge').as_uri())
+    reader = reader.replace('import "../../components/knowledge"', 'import ' + knowledge)
     (tmp_path / 'ReaderPane.qml').write_text(reader.replace('active: root.followShellSelection', 'active: false'))
     fixture = tmp_path / 'fixture.qml'
     fixture.write_text('''

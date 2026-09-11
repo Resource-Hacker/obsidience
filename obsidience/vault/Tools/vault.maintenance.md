@@ -1,10 +1,17 @@
 ---
 type: tool
 title: vault.maintenance
+description: Inspect accessible Knowledge for bounded maintenance candidates.
 obsidience:
   binding: capability:vault.maintenance
   source: obsidience/harness/capabilities/vault/maintenance.py
 ---
+
+## Runtime
+
+Inspect accessible Knowledge for bounded maintenance candidates. No arguments. Candidate keys and revisions are controller evidence, not permission to edit. Use only the recommended accepted Task with the exact returned candidate fields. An empty result is a valid no-change finding.
+
+## Reference
 
 Inspect one current vault snapshot and return a bounded, ranked list of
 high-signal maintenance candidates with exact Article references, stable

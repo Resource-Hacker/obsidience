@@ -1,9 +1,16 @@
 ---
 type: skill
 title: Using model.inspect
+description: Inspect the named model's current Source and layouts.
 obsidience:
   tool: '[[Tools/model.inspect]]'
 ---
+
+## Runtime
+
+Inspect the named model's current Source and layouts. Hardware capacity, valid placement and benchmark results are separate facts. Do not assume CPU fallback or combine incompatible device layouts.
+
+## Reference
 
 Use `model.inspect` to read the current registered definition and installed
 state of one local model.

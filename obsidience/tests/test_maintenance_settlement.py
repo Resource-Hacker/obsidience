@@ -395,7 +395,7 @@ def test_real_activation_admission_race_settles_without_replaying_and_preserves_
     monkeypatch.setattr(executor, "_execute_session", lambda *_a, **_kw: pytest.fail("No provider or Tool may run"))
 
     async def compile_packet(*_args, **_kwargs):
-        return {"packet": "Isolated packet", "refs": [note.ref, book.ref], "retrieval_ms": 1.0,
+        return {"spine": executor.resolve_spine(note, executor.resolver()), "packet": "Isolated packet", "refs": [note.ref, book.ref], "retrieval_ms": 1.0,
                 "objective": "Inspect the bound candidate", "provider_system": "Isolated", "provider_user": "Inspect"}
 
     monkeypatch.setattr(executor, "compile_activation", compile_packet)

@@ -28,7 +28,7 @@ def test_checked_out_source_scope_only_reorders_real_search_results(monkeypatch)
     monkeypatch.setattr(
         retrieval,
         "_lanes_for",
-        lambda _query, _weight, _k, _kinds=None: [
+        lambda _query, _weight, _k, _kinds=None, **_kwargs: [
             (1.0, [("Knowledge/general", 1.0), ("ADMECH Workstation/Hardware/GPU", 0.9)])
         ],
     )
@@ -61,7 +61,7 @@ def test_fast_context_filters_search_lanes_to_knowledge(monkeypatch) -> None:
     calls: list[tuple[str, str | None]] = []
 
     def lane(name: str):
-        def search(_query: str, _k: int, kind=None):
+        def search(_query: str, _k: int, kind=None, **_kwargs):
             calls.append((name, kind))
             return [("Knowledge/eligible", 1.0)]
 
@@ -115,7 +115,7 @@ def test_fast_context_excludes_nonretrievable_and_system_neighbors(
     monkeypatch.setattr(
         retrieval,
         "_lanes_for",
-        lambda _query, _weight, _k, _kinds=None: [
+        lambda _query, _weight, _k, _kinds=None, **_kwargs: [
             (
                 1.0,
                 [
@@ -147,7 +147,7 @@ def test_fast_context_excludes_nonretrievable_and_system_neighbors(
 def test_generic_search_preserves_mixed_article_kinds(monkeypatch) -> None:
     calls: list[str | None] = []
 
-    def lanes(_query: str, _weight: float, _k: int, kind=None):
+    def lanes(_query: str, _weight: float, _k: int, kind=None, **_kwargs):
         calls.append(kind)
         return [
             (1.0, [("Tools/example", 1.0), ("Knowledge/example", 0.9)])

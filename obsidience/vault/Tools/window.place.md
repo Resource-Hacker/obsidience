@@ -1,10 +1,18 @@
 ---
 type: tool
 title: window.place
+description: Place one exact current target on a logical Surface and optional integer
+  tile edges.
 obsidience:
   binding: capability:window.place
   source: obsidience/harness/capabilities/window/place.py
 ---
+
+## Runtime
+
+Place one exact current target on a logical Surface and optional integer tile edges. Pass target and destination:{surface,tile?:{left,top,right,bottom}} from current tile_grids. The verified returned scene establishes placement. Only a not_dispatched invalid_destination result explicitly allowing correction permits a distinct corrected request. Never replay uncertain effects.
+
+## Reference
 
 Place one existing native application or module pane on a declared Surface and
 optional workspace tile. Arguments:

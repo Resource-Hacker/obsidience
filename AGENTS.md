@@ -539,18 +539,26 @@ Task Articles use `triggers`.
   duplicates, provenance and useful links without a second research review.
 - Darwin is the Researcher. He owns Question, Learn, Distill, Model, and Generate.
 - Heimdall is the Guardian. He owns Audit, Check, bounded Repair, and independent acceptance.
-- Library is a passive projection of shared accepted Tasks and Tool+Skill pairs.
-  It is not an Agent and cannot be an assignment target.
+- Library is the owner's complete accepted Article catalog, including Knowledge,
+  Agent identities, Tasks, Runbooks, and paired Tools and Skills. It is not an
+  Agent and cannot be an assignment target. Reader owns revision-checked Agent
+  checkout icons; the separate Library catalog has no assignment writer.
 
 The Executive and specialist Agent Articles use the same direct subjects:
 Architecture, Tools, Skills, Runbooks, Tasks, Other Agents or Subagents, and
 Observations. Specialist domain subjects may be added when they are genuine
 Knowledge indexes.
 
-Assign only Tasks to an Agent. Resolve each selected Task's applicable accepted
-Runbook, inherited guidance, explicit required Skills, and exact paired Tools
-through the shared dependency resolver. Knowledge retrieval and Source-tree
-checkout remain separate and never broaden that executable set.
+Assign Tasks for executable work and check out Knowledge for context. Resolve
+Task -> applicable Runbook -> paired Skill -> real Tool through the existing
+dependency owner; no independent capability grants. Agent `knowledge` roots and
+`exclude_knowledge` determine shared Knowledge access, while owned Knowledge
+remains local. Apply that exact scope before lexical/vector top-K, direct graph
+expansion, reads, listings, maintenance candidates, and graph membership.
+Missing principals fail closed. Another Agent's Observations cannot be checked
+out or read indirectly through raw-file Source. Explicit attested handoffs
+supply only their exact evidence, not the producer's private graph. Source-tree
+selection is only a preference within Knowledge already checked out.
 
 If a Task assignment lacks an applicable accepted Runbook, the ordinary
 `task.assigned` event activates Generate → Runbook. Darwin receives the accepted
@@ -997,6 +1005,57 @@ receipt, so later context distinguishes an applied clarification from an
 unresolved request. New requests and speech interruption retain ordinary Task
 admission and STOP behavior.
 
+## Scoped activation implementation
+
+
+A Task definition is not an active request. The existing SQLite ledger stores
+one `task_activations` occurrence for each event or user turn and links every
+attempt in `runs` to its `activation_id`. The Task status/FIFO is a compatibility
+projection of those occurrences, not a second authority. Each occurrence keeps
+its original objective, inputs and result; a later request never inherits its
+predecessor's target. Completed occurrences cannot be implicitly replayed.
+Different occurrences of the same definition retain independent history. Unknown
+effects remain unresolved; only evidenced independent work may pass a terminal
+head. Review resolves the originating occurrence rather than a newer Task head.
+Existing state is normalized once without rewriting historical receipts.
+New admissions, completed work and foreground release wake the existing scheduler
+so a ready response need not wait for the periodic housekeeping interval.
+
+Task hierarchy supplies navigation and assignment scope only. It does not
+execute descendants sequentially. Order and prerequisites belong to a Runbook;
+select one applicable executable Task for an activation. Application launch
+uses a complete bounded operation: dispatch once, await the existing scene's
+readiness witness, then report ready, timeout or uncertain delivery honestly.
+No readiness timeout authorizes a second launch.
+
+The compiler uses authored `Runtime` instruction sections and applicable
+operation sections without discarding the full reference Articles. A Runbook's
+`operation_tools` may only narrow its accepted capability set. Static registry
+argument schemas constrain each Tool with its own input shape; Tool adapters
+still verify effects, targets, and evidence. Instruction hashes and character
+ranges record what was supplied. Knowledge prose cannot become executable policy.
+
+Required context is explicitly selected through `required_context` on accepted
+Agent/Task/Runbook contracts. It must be in the Agent's checked-out graph and
+current; missing or oversized required constraints fail instead of being silently
+omitted. Optional Knowledge uses scoped lexical/vector ranks plus bounded direct
+neighbors. Relevant contiguous passages replace fixed leading excerpts; exact
+Unicode offsets and omission accounting remain visible. A retrieved relation is
+context, not an authorization edge.
+
+Each Agent has a lifecycle-owned Current activation Article containing its exact
+objective, selected/read Article refs, resolved entities and controller receipts.
+It is transient, unverified, and excluded from search. The model receives the
+current request once in Objective; Reader additionally displays that request in
+its working-state view. Public graph activity means actual context supplied,
+Article read/search, Tool dispatch/result or accepted relationship, not inspection
+of hidden model reasoning. Idle transport and checkout refreshes never fabricate
+thinking. Late progress from a superseded activation cannot replace the new view.
+
+Realtime Query may request one bounded admission reclassification before any
+effect. Reclassification reuses the original user request and exact authorized
+Task selection; it cannot create a Tool grant or repeat an operation.
+
 ## Knowledge maintenance
 
 - System evidence is collected and published by the Harness itself, without a
@@ -1426,12 +1485,12 @@ requests. Each requested outcome completes as an ordinary Task while the
 connection remains enabled; starting or stopping audio creates no work Task,
 Thinking Packet, or model selection of its own.
 
-While that connection is enabled, the scheduler leaves autonomous
-non-Executive Tasks pending before claim. An interactive Executive execution
-may use its Task-authorized `task.create` to delegate an accepted Research Question
-or Learn Task. The harness binds that exception to the actual execution and
-creator provenance, never a caller-supplied argument. Tool calls remain steps
-and causal order never creates task hierarchy.
+An idle enabled speech connection is not a global scheduler pause. Foreground
+admission, speech transitions and the existing physical GPU reservations gate
+work that actually conflicts. User-requested research remains explicitly bound
+to its creating execution; arguments cannot manufacture that provenance.
+No additional scheduler, resident model, or per-Agent physics engine is needed.
+Tool calls remain steps, and causal order never creates Task hierarchy.
 
 Create a timestamped rollback copy before broad or destructive changes. Keep
 unrelated user work intact.

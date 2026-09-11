@@ -1,10 +1,17 @@
 ---
 type: tool
 title: model.inspect
+description: Inspect one registered model using model_id.
 obsidience:
   binding: capability:model.inspect
   source: obsidience/harness/capabilities/model/inspect.py
 ---
+
+## Runtime
+
+Inspect one registered model using model_id. Use its current manifest, supported layouts and settings rather than inferring them from historical architecture prose.
+
+## Reference
 
 Read one registered local model's executable definition, installed artifact
 state, immutable Source manifest, valid GPU layouts, active configuration,

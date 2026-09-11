@@ -1,10 +1,17 @@
 ---
 type: tool
 title: harness.status
+description: Read bounded current runtime-health and receipt findings.
 obsidience:
   binding: capability:harness.status
   source: obsidience/harness/capabilities/harness/status.py
 ---
+
+## Runtime
+
+Read bounded current runtime-health and receipt findings. No arguments. The result supplies controller observations for Check/Repair. Historical Knowledge and process presence alone do not establish health. This call does not retry work or mutate application state.
+
+## Reference
 
 Return one deterministic, read-only Obsidience health snapshot without shell
 access.

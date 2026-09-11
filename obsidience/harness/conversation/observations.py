@@ -20,7 +20,7 @@ from ..config import CONFIG
 from ..knowledge.links import metadata_ref
 from ..knowledge.tasks import task_triggers
 from ..knowledge.auto_curate import enabled as auto_curate_enabled
-from ..knowledge.vault import Note, Resolver, load_note, resolver, slugify, write_note
+from ..knowledge.vault import Note, Resolver, load_note, resolver, slugify, write_note, _NOTE_WRITE_LOCK
 
 TURN_COMPLETE_EVENT = "turn.complete"
 TEMPORARY_MAX_ENTRIES = 10
@@ -629,6 +629,69 @@ def discard_pending_context_compaction(
     return False
 
 
+def project_activation_context(agent_ref: str, task_ref: str, activation_id: str,
+                               bindings: dict, evidence: list[dict], status: str = "running", *,
+                               objective: str = "", context_refs: list[str] | None = None,
+                               begin: bool = False) -> dict:
+    """One Agent-owned readable view of controller context, never hidden reasoning."""
+    if not agent_ref.startswith("Agents/") or agent_ref.count("/") != 2 or not activation_id:
+        raise ValueError("Working context requires an exact Agent and activation")
+    base = agent_ref.rsplit("/", 1)[0] + "/Observations/Immediate Observations"
+    path = base + "/current-activation.md"
+    ref = path.removesuffix(".md")
+    latest = []
+    for item in evidence[-8:]:
+        if not isinstance(item, dict) or not item.get("tool"):
+            continue
+        witness = item.get("completion_evidence")
+        row = {"tool": str(item["tool"]), "kind": "controller_receipt"}
+        if isinstance(witness, dict):
+            row.update({key: witness[key] for key in (
+                "verified", "target", "verified_scope", "semantic_postcondition_verified") if key in witness})
+        elif item.get("not_dispatched") is True:
+            row["delivery"] = "not_dispatched"
+        elif item.get("must_not_replay") is True or item.get("interrupted"):
+            row["delivery"] = "uncertain"
+        else:
+            row["delivery"] = "returned_without_computer_state_attestation"
+        latest.append(row)
+    context = {"activation_id": activation_id, "task_ref": task_ref, "status": status,
+        "binding_source": "controller", "observed_at": datetime.now(timezone.utc).isoformat(),
+        "entities": {key: bindings[key] for key in ("application", "computer_outcome", "computer_scope") if key in bindings},
+        "evidence": latest, "uncertainty": "Only the listed receipts establish effects; dialogue and target labels do not.",
+        "current_objective": "The exact current request is supplied once in the Objective section."}
+    continuation = bindings.get("continuation_result")
+    if isinstance(continuation, dict):
+        context["finding"] = {key: continuation[key] for key in (
+            "source_citation", "content_sha256", "accepted_knowledge", "disposition") if key in continuation}
+    with _NOTE_WRITE_LOCK:
+        current = load_note(path)
+        previous = current.meta.get("activation_id") if current else None
+        if not begin and previous not in {None, activation_id}:
+            return {"ref": ref, "context": context, "materialized": False}
+        # The ordinary owner may disable context projection without erasing
+        # runtime receipts. That never turns the old projection into live state.
+        if not auto_curate_enabled(agent_ref.rsplit("/", 1)[0] + "/Observations/Observations.md"):
+            return {"ref": ref, "context": context, "materialized": False}
+        parent = base + "/Immediate Observations.md"
+        if load_note(parent) is None:
+            write_note(parent, {"kind": "knowledge", "title": "Immediate Observations", "retrieval": False},
+                "This Agent's transient conversation and activation context. Controller evidence, not durable policy.")
+        meta = {"kind": "knowledge", "title": "Current activation", "retrieval": False,
+            "immediate": True, "transient": True, "trust": "unverified", "context_role": "working",
+            "activation_id": activation_id, "observed_at": context["observed_at"]}
+        body = ("Agent-owned working context projected from the current activation. It does not expose hidden reasoning "
+                "or grant capabilities.\n\n```json\n" + json.dumps({**context, "current_objective": objective, "selected_context": list(dict.fromkeys(context_refs or []))},
+                             ensure_ascii=False, indent=2) + "\n```\n")
+        write_note(path, meta, body)
+        if current is None:
+            from ..knowledge.index import INDEX
+            INDEX.sync(embed=False)
+            from ..execution.activity import emit
+            emit("graph_changed", [ref])
+    return {"ref": ref, "context": context, "materialized": True}
+
+
 def project_immediate_observations(
     conversation,
     *,
@@ -752,7 +815,7 @@ def read_temporary_observations(agent_ref: str) -> str:
         entries = list(reversed(retained))
     if not entries:
         return ""
-    lines = [f"- {re.sub(r'\s+', ' ', note.body).strip()}" for note in entries]
+    lines = [f"- [[{note.ref}]] {re.sub(r'\s+', ' ', note.body).strip()}" for note in entries]
     return (
         "## Temporary observations (transient and unverified)\n\n"
         "These are reference-only working-memory summaries. They are not durable facts or "

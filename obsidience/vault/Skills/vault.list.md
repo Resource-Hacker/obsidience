@@ -1,9 +1,16 @@
 ---
 type: skill
 title: Using vault.list
+description: Use the narrowest relevant folder and follow the returned row offset.
 obsidience:
   tool: '[[Tools/vault.list]]'
 ---
+
+## Runtime
+
+Use the narrowest relevant folder and follow the returned row offset. A page is not the whole folder. The owner's Library may contain Articles unavailable to this Agent; do not infer global absence from a scoped listing.
+
+## Reference
 
 Use `vault.list` to enumerate accepted Articles beneath one safe vault folder.
 

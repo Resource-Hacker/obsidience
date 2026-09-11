@@ -66,6 +66,12 @@ CREATE TABLE IF NOT EXISTS task_runtime(
   state TEXT NOT NULL,
   updated_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS task_activations(
+  id TEXT PRIMARY KEY, task_ref TEXT NOT NULL, activation_key TEXT NOT NULL,
+  state TEXT NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL,
+  UNIQUE(task_ref,activation_key)
+);
+CREATE INDEX IF NOT EXISTS task_activations_task ON task_activations(task_ref,created_at);
 CREATE TABLE IF NOT EXISTS tool_receipt_runs(
   run_id TEXT PRIMARY KEY, task_ref TEXT NOT NULL, params_sha256 TEXT NOT NULL,
   started REAL NOT NULL
@@ -331,6 +337,11 @@ def _embedding_text(title: str, body: str) -> str:
     return f"{title}\n{body[:4000]}"
 
 
+from contextvars import ContextVar
+
+_ACTIVE_OCCURRENCE: ContextVar[tuple[str, str] | None] = ContextVar("obsidience_activation", default=None)
+
+
 class Index:
     def __init__(self):
         self.db_path = str(CONFIG.db_path)
@@ -350,6 +361,11 @@ class Index:
 
     def _migrate(self) -> None:
         """Keep the development ledger forward-compatible without a framework."""
+        continuation_columns = {row[1] for row in self.db.execute("PRAGMA table_info(task_continuations)")}
+        if "await_publication" not in continuation_columns:
+            # Existing waits retain their reviewed publication contract. New
+            # caller requests choose evidence-first explicitly at creation.
+            self.db.execute("ALTER TABLE task_continuations ADD COLUMN await_publication INTEGER NOT NULL DEFAULT 1")
         run_columns = {row[1] for row in self.db.execute("PRAGMA table_info(runs)")}
         if "objective" not in run_columns:
             self.db.execute(
@@ -360,6 +376,7 @@ class Index:
             "runbook_sha256",
             "reasoning_effort",
             "model",
+            "activation_id",
         ):
             if name not in run_columns:
                 self.db.execute(f"ALTER TABLE runs ADD COLUMN {name} TEXT")
@@ -390,6 +407,14 @@ class Index:
             self.db.execute("ALTER TABLE feed_items ADD COLUMN destination_ref TEXT NOT NULL DEFAULT ''")
         if "distill_instructions" not in feed_columns:
             self.db.execute("ALTER TABLE feed_items ADD COLUMN distill_instructions TEXT NOT NULL DEFAULT ''")
+        # Materialize legacy active/FIFO occurrences once without admitting or
+        # replaying any work. task_runtime remains only their compatibility head.
+        for ref, raw in self.db.execute("SELECT task_ref,state FROM task_runtime").fetchall():
+            state = json.loads(raw)
+            if not state.get("activation_id"):
+                state = self._persist_occurrences(ref, state)
+                self.db.execute("UPDATE task_runtime SET state=? WHERE task_ref=?",
+                    (json.dumps(state, sort_keys=True, default=str), ref))
         self.db.commit()
 
     # ---------- sync ----------
@@ -609,7 +634,7 @@ class Index:
         with self.lock:
             rows = self.db.execute("SELECT ref, title, kind, meta, links FROM notes").fetchall()
             runtime_states = {
-                ref: json.loads(state)
+                ref: self._hydrate_occurrence(ref, json.loads(state))
                 for ref, state in self.db.execute("SELECT task_ref,state FROM task_runtime")
             }
         known = {r[0] for r in rows}
@@ -772,6 +797,151 @@ class Index:
                 parent["children"].append(node["id"])
         return {"nodes": nodes, "links": links}
 
+    # ---------- activation occurrences and compatible Task projection ----------
+
+    @staticmethod
+    def _occurrence_key(task_ref: str, params: dict, last_run: str = "") -> str:
+        if params.get("activation_key"):
+            return "event:" + str(params["activation_key"])
+        if params.get("reply_to_turn_id"):
+            return "turn:" + str(params["reply_to_turn_id"])
+        if last_run:
+            return "run:" + last_run
+        return "legacy:" + hashlib.sha256(json.dumps(
+            [task_ref, params], sort_keys=True, default=str).encode()).hexdigest()
+
+    def _persist_occurrences(self, task_ref: str, state: dict) -> dict:
+        """Atomic normalization behind the legacy Task-status/FIFO projection."""
+        state = dict(state)
+        if not state.get("params") and not state.get("last_run") and not state.get("activation_id") and not state.get("event_queue"):
+            return state
+        now = time.time()
+        params = state.get("params") if isinstance(state.get("params"), dict) else {}
+        existing = self.db.execute("SELECT task_ref,activation_key,state FROM task_activations WHERE id=?",
+            (state.get("activation_id", ""),)).fetchone()
+        same = bool(existing and existing[0] == task_ref and ("params" not in state or json.loads(existing[2]).get("params", {}) == params))
+        key = existing[1] if same else self._occurrence_key(task_ref, params, str(state.get("last_run", "")))
+        identifier = state["activation_id"] if same else "activation-" + hashlib.sha256(
+            (task_ref + "\0" + key).encode()).hexdigest()[:24]
+        state["activation_id"] = identifier
+        active = {k: v for k, v in state.items() if k not in {"event_queue", "_queue_ids", "_params_hidden"}}
+        if "params" in state:
+            active["params"] = params
+            state.pop("_params_hidden", None)
+        elif same and "params" in json.loads(existing[2]):
+            active["params"] = json.loads(existing[2])["params"]
+            state["_params_hidden"] = True
+        self.db.execute("INSERT INTO task_activations(id,task_ref,activation_key,state,created_at,updated_at) "
+            "VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state,updated_at=excluded.updated_at",
+            (identifier, task_ref, key, json.dumps(active, sort_keys=True, default=str), now, now))
+        queue_ids = []
+        for waiting in state.get("event_queue", []):
+            key = self._occurrence_key(task_ref, waiting)
+            queue_id = "activation-" + hashlib.sha256((task_ref + "\0" + key).encode()).hexdigest()[:24]
+            if queue_id == identifier or queue_id in queue_ids:
+                continue
+            queue_ids.append(queue_id)
+            queued = {"activation_id": queue_id, "status": "pending", "params": waiting}
+            self.db.execute("INSERT OR IGNORE INTO task_activations(id,task_ref,activation_key,state,created_at,updated_at) "
+                "VALUES(?,?,?,?,?,?)", (queue_id, task_ref, key, json.dumps(queued, sort_keys=True, default=str), now, now))
+        if queue_ids:
+            state["_queue_ids"] = queue_ids
+        else:
+            state.pop("_queue_ids", None)
+        return state
+
+    def _hydrate_occurrence(self, task_ref: str, projection: dict) -> dict:
+        binding = _ACTIVE_OCCURRENCE.get()
+        identifier = binding[1] if binding and binding[0] == task_ref else projection.get("activation_id")
+        if not identifier:
+            return projection
+        row = self.db.execute("SELECT state FROM task_activations WHERE id=? AND task_ref=?", (identifier, task_ref)).fetchone()
+        if row is None:
+            raise ValueError("Task projection lost its authoritative activation")
+        state = json.loads(row[0])
+        queue = []
+        if identifier == projection.get("activation_id"):
+            for queue_id in projection.get("_queue_ids", []):
+                item = self.db.execute("SELECT state FROM task_activations WHERE id=? AND task_ref=?", (queue_id, task_ref)).fetchone()
+                if item is None:
+                    raise ValueError("Task queue lost an activation")
+                queue.append(json.loads(item[0])["params"])
+        if queue or identifier == projection.get("activation_id") and "event_queue" in projection:
+            state["event_queue"] = queue
+        if identifier == projection.get("activation_id") and projection.get("_params_hidden"):
+            state.pop("params", None)
+        return state
+
+    def begin_activation(self, task_ref: str, params: dict, run_id: str, *, queued: bool = False) -> tuple[str, object]:
+        """Bind this attempt to one immutable occurrence identity in the same DB."""
+        clean = {key: value for key, value in params.items() if key not in {"activation_id", "_activation_id"}}
+        key = self._occurrence_key(task_ref, clean, "" if queued else run_id)
+        identifier = "activation-" + hashlib.sha256((task_ref + "\0" + key).encode()).hexdigest()[:24]
+        with self.lock, self.db:
+            row = self.db.execute("SELECT state FROM task_activations WHERE id=?", (identifier,)).fetchone()
+            prior = json.loads(row[0]) if row else {}
+            if prior.get("status") == "running" and prior.get("last_run") != run_id:
+                raise ValueError("This exact activation already has a running attempt")
+            if prior.get("status") == "completed":
+                raise ValueError("This activation already completed; it cannot be implicitly replayed")
+            if prior.get("params", {}).get("request") not in {None, clean.get("request")}:
+                raise ValueError("An activation cannot change its original objective")
+            state = {**prior, "activation_id": identifier, "params": clean,
+                     "status": "running", "last_run": run_id}
+            now = time.time()
+            self.db.execute("INSERT INTO task_activations(id,task_ref,activation_key,state,created_at,updated_at) "
+                "VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state,updated_at=excluded.updated_at",
+                (identifier, task_ref, key, json.dumps(state, sort_keys=True, default=str), now, now))
+            head = self.db.execute("SELECT state FROM task_runtime WHERE task_ref=?", (task_ref,)).fetchone()
+            projected = json.loads(head[0]) if head else {}
+            # A scheduled claim keeps its FIFO; a direct user occurrence does
+            # not consume unrelated queued events from this reusable Task.
+            for field in ("event_queue", "_queue_ids"):
+                if field in projected:
+                    state[field] = projected[field]
+            self.db.execute("INSERT INTO task_runtime(task_ref,state,updated_at) VALUES(?,?,?) "
+                "ON CONFLICT(task_ref) DO UPDATE SET state=excluded.state,updated_at=excluded.updated_at",
+                (task_ref, json.dumps(state, sort_keys=True, default=str), now))
+        return identifier, _ACTIVE_OCCURRENCE.set((task_ref, identifier))
+
+    @staticmethod
+    def reset_activation(token) -> None:
+        _ACTIVE_OCCURRENCE.reset(token)
+
+    def activation(self, identifier: str) -> dict | None:
+        with self.lock:
+            row = self.db.execute("SELECT id,task_ref,activation_key,state,created_at,updated_at "
+                "FROM task_activations WHERE id=?", (identifier,)).fetchone()
+        return {"id":row[0],"task_ref":row[1],"activation_key":row[2],
+                **json.loads(row[3]),"created_at":row[4],"updated_at":row[5]} if row else None
+
+    def activation_id_for(self, task_ref: str, params: dict) -> str:
+        """Resolve this admitted occurrence, not the Task's possibly different head."""
+        key = self._occurrence_key(task_ref, params)
+        with self.lock:
+            row = self.db.execute("SELECT id FROM task_activations WHERE task_ref=? AND activation_key=?",
+                                  (task_ref, key)).fetchone()
+        return str(row[0]) if row else ""
+
+    def activations(self, task_ref: str, limit: int = 50) -> list[dict]:
+        if not 1 <= limit <= 200:
+            raise ValueError("Activation history is bounded to 200 occurrences")
+        with self.lock:
+            rows = self.db.execute("SELECT id FROM task_activations WHERE task_ref=? ORDER BY created_at DESC,id DESC LIMIT ?",
+                (task_ref, limit)).fetchall()
+        return [self.activation(row[0]) for row in rows]
+
+    def complete_review_occurrences(self, task_ref: str, pending_run_ids: set[str]) -> None:
+        """Publication decisions settle their exact occurrences, not a newer head."""
+        with self.lock, self.db:
+            for identifier, material in self.db.execute("SELECT id,state FROM task_activations WHERE task_ref=?", (task_ref,)).fetchall():
+                state = json.loads(material)
+                if state.get("status") == "review" and state.get("last_run") not in pending_run_ids:
+                    state.update(status="completed", publication_disposition="review_resolved")
+                    self.db.execute("UPDATE task_activations SET state=?,updated_at=? WHERE id=?",
+                        (json.dumps(state, sort_keys=True, default=str),time.time(),identifier))
+
+
     # ---------- current Task execution state ----------
 
     @staticmethod
@@ -783,7 +953,8 @@ class Index:
             row = self.db.execute(
                 "SELECT state FROM task_runtime WHERE task_ref=?", (task_ref,),
             ).fetchone()
-        return json.loads(row[0]) if row else None
+        with self.lock:
+            return self._hydrate_occurrence(task_ref, json.loads(row[0])) if row else None
 
     def seed_task_runtime(self, task_ref: str, legacy_meta: dict) -> dict:
         """Import an explicit initial state once; replay never overwrites live work."""
@@ -791,6 +962,9 @@ class Index:
         state.setdefault("status", "draft")
         payload = json.dumps(state, sort_keys=True, separators=(",", ":"), default=str)
         with self.lock, self.db:
+            if self.db.execute("SELECT 1 FROM task_runtime WHERE task_ref=?", (task_ref,)).fetchone() is None:
+                state = self._persist_occurrences(task_ref, state)
+                payload = json.dumps(state, sort_keys=True, separators=(",", ":"), default=str)
             self.db.execute(
                 "INSERT OR IGNORE INTO task_runtime(task_ref,state,updated_at) VALUES(?,?,?)",
                 (task_ref, payload, time.time()),
@@ -798,7 +972,8 @@ class Index:
             row = self.db.execute(
                 "SELECT state FROM task_runtime WHERE task_ref=?", (task_ref,),
             ).fetchone()
-        return json.loads(row[0])
+        with self.lock:
+            return self._hydrate_occurrence(task_ref, json.loads(row[0]))
 
     def project_task_runtime(self, task_ref: str, meta: dict) -> dict:
         """Project current work without importing state from Article reads."""
@@ -820,7 +995,8 @@ class Index:
                 row = self.db.execute(
                     "SELECT state FROM task_runtime WHERE task_ref=?", (task_ref,),
                 ).fetchone()
-                state = json.loads(row[0]) if row else self._runtime_fields(initial or {})
+                projection = json.loads(row[0]) if row else self._runtime_fields(initial or {})
+                state = self._hydrate_occurrence(task_ref, projection) if row else projection
                 state.setdefault("status", "draft")
                 if source_event is not None:
                     source_id, event_key = source_event
@@ -847,9 +1023,11 @@ class Index:
                         self.db.commit()
                         return state
                 mutate(state)
-                state = self._runtime_fields(state)
+                state = self._persist_occurrences(task_ref, self._runtime_fields(state))
                 payload = json.dumps(state, sort_keys=True, separators=(",", ":"), default=str)
-                if row is None or row[0] != payload:
+                binding = _ACTIVE_OCCURRENCE.get()
+                is_head = not binding or binding[0] != task_ref or binding[1] == projection.get("activation_id")
+                if is_head and (row is None or row[0] != payload):
                     self.db.execute(
                         "INSERT INTO task_runtime(task_ref,state,updated_at) VALUES(?,?,?) "
                         "ON CONFLICT(task_ref) DO UPDATE SET state=excluded.state,updated_at=excluded.updated_at",
@@ -906,6 +1084,7 @@ class Index:
                 for old in moves:
                     self.db.execute("DELETE FROM task_runtime WHERE task_ref=?", (old,))
                 for old, new in moves.items():
+                    self.db.execute("UPDATE task_activations SET task_ref=? WHERE task_ref=?", (new, old))
                     state, updated_at = rows[old]
                     self.db.execute(
                         "INSERT INTO task_runtime(task_ref,state,updated_at) VALUES(?,?,?)",
@@ -1098,6 +1277,8 @@ class Index:
     def record_run(self, *, overwrite: bool = True, commit: bool = True, **kw) -> None:
         values = {
             "objective": "",
+            "activation_id": (_ACTIVE_OCCURRENCE.get() or ("", ""))[1]
+                if (_ACTIVE_OCCURRENCE.get() or ("", ""))[0] == kw.get("task_ref") else "",
             "runbook_ref": "",
             "runbook_sha256": "",
             "reasoning_effort": "",
@@ -1110,16 +1291,16 @@ class Index:
             self.db.execute(
                 f"INSERT OR {'REPLACE' if overwrite else 'IGNORE'} INTO runs("
                 "id,task_ref,objective,agent,started,finished,status,summary,trace,"
-                "runbook_ref,runbook_sha256,reasoning_effort,model) VALUES("
+                "runbook_ref,runbook_sha256,reasoning_effort,model,activation_id) VALUES("
                 ":id,:task_ref,:objective,:agent,:started,:finished,:status,:summary,:trace,"
-                ":runbook_ref,:runbook_sha256,:reasoning_effort,:model)", values)
+                ":runbook_ref,:runbook_sha256,:reasoning_effort,:model,:activation_id)", values)
             if commit:
                 self.db.commit()
 
     def runs(self, limit: int = 50) -> list[dict]:
         cols = [
             "id", "task_ref", "objective", "agent", "started", "finished", "status", "summary",
-            "runbook_ref", "runbook_sha256", "reasoning_effort", "model",
+            "runbook_ref", "runbook_sha256", "reasoning_effort", "model", "activation_id",
         ]
         with self.lock:
             rows = self.db.execute(
@@ -1162,7 +1343,7 @@ class Index:
     _RUN_COLUMNS = (
         "id", "task_ref", "objective", "agent", "started", "finished",
         "status", "summary", "trace", "runbook_ref", "runbook_sha256",
-        "reasoning_effort", "model",
+        "reasoning_effort", "model", "activation_id",
     )
 
     def run(self, run_id: str) -> dict | None:
@@ -1315,7 +1496,7 @@ class Index:
         "id", "caller_task_ref", "caller_run_id", "target_task_ref",
         "target_activation_key", "objective", "conversation_id",
         "reply_to_turn_id", "reply_source", "status", "handoff_source_id",
-        "ingest_run_id", "result", "resumed_run_id", "created_at", "updated_at",
+        "ingest_run_id", "result", "resumed_run_id", "created_at", "updated_at", "await_publication",
     )
 
     def _continuation_row(self, row) -> dict | None:
@@ -1339,6 +1520,7 @@ class Index:
         conversation_id: str = "",
         reply_to_turn_id: str = "",
         reply_source: str = "",
+        await_publication: bool = False,
     ) -> dict:
         """Create one immutable causal wait, idempotently by caller run."""
         continuation_id = "continuation-" + hashlib.sha256(
@@ -1355,6 +1537,7 @@ class Index:
             "conversation_id": conversation_id,
             "reply_to_turn_id": reply_to_turn_id,
             "reply_source": reply_source,
+            "await_publication": int(await_publication),
             "status": "waiting",
             "handoff_source_id": "",
             "ingest_run_id": "",
@@ -1381,6 +1564,7 @@ class Index:
                         "conversation_id": conversation_id,
                         "reply_to_turn_id": reply_to_turn_id,
                         "reply_source": reply_source,
+                        "await_publication": int(await_publication),
                     }
                     if any(row[key] != value for key, value in immutable.items()):
                         raise ValueError("caller run is already bound to a different continuation")
@@ -1450,6 +1634,9 @@ class Index:
                 if current is None:
                     self.db.commit()
                     return None
+                if not current["await_publication"]:
+                    self.db.commit()
+                    return current
                 if current["ingest_run_id"] and current["ingest_run_id"] != ingest_run_id:
                     raise ValueError("continuation is already bound to another Ingest run")
                 self.db.execute(
@@ -1472,6 +1659,38 @@ class Index:
                 (payload, time.time(), continuation_id),
             )
             self.db.commit()
+
+    def resolve_research_finding(self, caller_run_id: str, research_run_id: str, source: dict) -> bool:
+        """Resume from an attested finding, without falsely claiming publication."""
+        row = self.continuation_for_caller(caller_run_id)
+        run = self.run(research_run_id)
+        if not row or row["await_publication"] or row["status"] not in {"waiting", "ingesting"}:
+            return False
+        if (not run or run.get("status") != "completed" or run.get("task_ref") != row["target_task_ref"]
+                or source.get("id") != row["handoff_source_id"] or source.get("immutable") is not True
+                or source.get("citation") != "source://" + str(source.get("id"))):
+            raise ValueError("Research finding lacks its exact completed run and immutable handoff")
+        content = source.get("content")
+        if not isinstance(content, str) or source.get("content_sha256") != "sha256:" + hashlib.sha256(content.encode()).hexdigest():
+            raise ValueError("Research finding content does not match its attested Source hash")
+        self._ready_continuation(row["id"], {
+            "disposition": "evidenced_finding", "publication": "not_required_for_reply",
+            "accepted_knowledge": False, "research_run_id": research_run_id,
+            "source_id": source["id"], "source_citation": source["citation"],
+            "content_sha256": source["content_sha256"], "captured_at": source.get("captured_at"),
+            "finding": content[:10000], "finding_truncated": len(content) > 10000,
+        })
+        return True
+
+    def resolve_research_failure(self, caller_run_id: str, research_run_id: str) -> bool:
+        row = self.continuation_for_caller(caller_run_id)
+        run = self.run(research_run_id)
+        if not row or not run or run.get("task_ref") != row["target_task_ref"] or run.get("status") not in {"failed", "blocked"}:
+            return False
+        self._ready_continuation(row["id"], {"disposition": "research_failed", "accepted_knowledge": False,
+            "research_run_id": research_run_id, "summary": str(run.get("summary", ""))[:2000],
+            "rule": "Report the exact blocker; no successful research or publication was established."})
+        return True
 
     def resolve_research_no_change(
         self,

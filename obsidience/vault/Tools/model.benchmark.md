@@ -1,12 +1,19 @@
 ---
 type: tool
 title: model.benchmark
+description: Measure one registered model using model_id and devices.
 obsidience:
   approved_at: '2026-08-25T18:19:11'
   binding: capability:model.benchmark
   provenance: proposed by Codex (task codex:knowledge-handoff)
   source: obsidience/harness/capabilities/model/benchmark.py
 ---
+
+## Runtime
+
+Measure one registered model using model_id and devices. The existing resource owner validates the layout and restores saved assignments. Preserve measured failures as failures. CPU offload or an unapproved model substitution is not authorized.
+
+## Reference
 
 Run one standalone comparison for one registered text-generating model on one exact valid GPU layout.
 

@@ -6,8 +6,8 @@ tags:
 - invariant
 title: Unified display topology
 obsidience:
-  approved_at: '2026-09-02T03:01:41'
-  provenance: proposed by Codex (task codex:knowledge-handoff)
+  approved_at: '2026-09-10T16:05:37'
+  provenance: proposed by Alexandria (task Tasks/link)
 ---
 
 The Samsung Odyssey OLED G9, USB-C display, and logical DP-4 display are three
@@ -37,6 +37,7 @@ ordinary desktop topology.
 
 HDR, physical fullscreen VRR and World of Warcraft performance remain explicit
 acceptance gates; the unified desktop topology alone does not establish them.
+The [World of Warcraft launch policy](/ADMECH%20Workstation/Workstation%20Observations/world-of-warcraft-launch-policy--3e5e73cc.md) is the evidence path for that performance gate, defining the registered launch route and readiness criteria.
 
 ## Relationships
 

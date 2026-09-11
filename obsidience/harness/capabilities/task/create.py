@@ -100,6 +100,9 @@ def execute(args: dict, context: dict) -> str:
             "task.create activations."
         )
     wait_for_result = args.get("wait_for_result", False)
+    await_publication = args.get("await_publication", False)
+    if not isinstance(await_publication, bool) or await_publication and not wait_for_result:
+        return "Task activation rejected: await_publication requires wait_for_result."
     if not isinstance(wait_for_result, bool):
         return "Task activation rejected: wait_for_result must be true or false."
     if wait_for_result and target.ref not in RESEARCH_TARGETS:
@@ -197,16 +200,19 @@ def execute(args: dict, context: dict) -> str:
             target_activation_key=activation_key,
             objective=str(context.get("objective", "")),
             **continuation_binding,
+            await_publication=await_publication,
         )
     return json.dumps({
         "state": queued["state"],
         "task": target.ref,
         "target_status": queued.get("status", "pending"),
+        "activation_id": queued.get("activation_id", ""),
         "reason": queued.get("reason", ""),
         "created_by": str(context["task"]),
         "hierarchy": "unchanged",
         "queue_position": queued["position"],
         "procedure": readiness,
         "waiting_for_result": continuation is not None,
+        "await_publication": await_publication,
         "continuation_id": "" if continuation is None else continuation["id"],
     }, sort_keys=True)

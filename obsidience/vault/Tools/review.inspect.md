@@ -1,10 +1,17 @@
 ---
 type: tool
 title: review.inspect
+description: Read bounded review evidence for an exact task or proposal.
 obsidience:
   binding: capability:review.inspect
   source: obsidience/harness/capabilities/review/inspect.py
 ---
+
+## Runtime
+
+Read bounded review evidence for an exact task or proposal. Missing, stale or clipped records are not approval. Inspect existing dispositions before proposing another change. Review is not permission to replay effects.
+
+## Reference
 
 Read pending review evidence without accepting, rejecting or modifying it.
 Arguments: `{"task":"optional exact Task ref","proposal":"optional exact filename"}`.

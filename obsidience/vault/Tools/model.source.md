@@ -1,10 +1,18 @@
 ---
 type: tool
 title: model.source
+description: Register the current immutable Source identity of a registered model
+  using model_id.
 obsidience:
   binding: capability:model.source
   source: obsidience/harness/capabilities/model/source.py
 ---
+
+## Runtime
+
+Register the current immutable Source identity of a registered model using model_id. This attests artifact identity; it does not benchmark, download or accept performance claims.
+
+## Reference
 
 Register or verify one local model artifact as an immutable Source manifest.
 

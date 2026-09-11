@@ -1,10 +1,17 @@
 ---
 type: tool
 title: vault.search
+description: Search only the executing Agent's owned and checked-out graph.
 obsidience:
   binding: capability:vault.search
   source: obsidience/harness/capabilities/vault/search.py
 ---
+
+## Runtime
+
+Search only the executing Agent's owned and checked-out graph. Pass query, or up to ten queries, and optional scope:{kind,current_only,exclude_subtrees}. Scope only narrows access. Results are evidence leads and exact snippets, not proof of the full Article or executable grants. Identify the missing fact before searching and stop repeated low-value searches.
+
+## Reference
 
 Hybrid BM25/vector search over the accepted graph. Supply exactly one of `query` or `queries`. Each query is 1-300 characters of nonempty focused descriptive text. `queries` contains 1-10 distinct queries. Invalid or oversized queries are rejected before search; they are not silently shortened.
 

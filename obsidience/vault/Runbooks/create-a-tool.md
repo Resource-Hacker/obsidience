@@ -11,6 +11,7 @@ obsidience:
   - '[[Skills/vault.read]]'
   - '[[Skills/vault.propose]]'
   - '[[Skills/vault.validate]]'
+  - '[[Skills/observations.temporary.append]]'
 ---
 
 Synthesize one quality Tool contract and its mandatory paired Skill.
@@ -36,3 +37,6 @@ Quality gate: one Tool, one Skill, one exact Capability binding, one singular
 entrypoint, exact dotted basename parity, the `Using <tool.id>` Skill title, no
 duplicate interface, no invented Capability, and enough contract detail for
 deterministic validation. Supporting Modules remain internal plumbing.
+
+
+When a useful nonredundant observation should survive this activation, optionally append one bounded unverified note to this Agent's own Temporary Observations. Do not record hidden reasoning or create a note merely to narrate routine work.

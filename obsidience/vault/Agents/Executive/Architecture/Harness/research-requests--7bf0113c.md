@@ -2,6 +2,8 @@
 type: knowledge
 title: Research requests
 sources:
+- resource: obsidience/harness/knowledge/scope.py
+- resource: obsidience/harness/knowledge/index.py
 - resource: obsidience/harness/knowledge/tasks.py
 - resource: obsidience/harness/knowledge/source.py
 - resource: obsidience/harness/execution/executor.py
@@ -40,8 +42,14 @@ event feeds [Alexandria's](/Agents/Alexandria/Alexandria.md) centralized
 publication; the existing proposal owner checks current destinations,
 permissions and provenance. Model follows its distinct measurement procedure.
 
+An interactive caller may receive a completed sourced Question or Learn finding
+before Ingest or Review finishes. The continuation carries preserved source
+identity, hash and bounded content, marked as not-yet-accepted Knowledge.
+`await_publication` is explicit when durable publication is part of the requested
+outcome. Later ingestion cannot overwrite an already delivered finding.
+
 Framing, collection, verification and handoff are Runbook steps, not invented
-child Tasks. During foreground or Realtime work, only controller-attested
-interactive delegation and its eligible continuation bypass autonomous-work
-pauses. A caller cannot grant that provenance with arbitrary parameters.
+child Tasks. Idle Realtime is not a global pause; foreground demand and physical
+model/speech reservations still gate conflicting work. Interactive delegation is
+controller-attested, never authority supplied by arbitrary model arguments.
 See [Task activation](/Agents/Executive/Architecture/Harness/task-activation--b30a4642.md).

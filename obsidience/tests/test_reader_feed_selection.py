@@ -46,6 +46,7 @@ const state = {XMLHttpRequest:Request, Qt:{callLater:fn=>later.add(fn)},
     editing:false, curationBusy:false, draftTitle:'', draftBody:'', feedProvenance:{},
     documentPath:'', sourceStorage:'', articleTitle:'', articleBody:'', errorMessage:'', noticeMessage:''};
 state.root = state;
+state.checkouts = {refresh(){}};
 function flush() {
     for (let remaining = 10; later.size; --remaining) {
         assert(remaining > 0, 'callLater did not settle');
@@ -174,7 +175,7 @@ assert.equal(state.articleBody,'Ordinary source text');
 assert.equal(state.documentPath,'obsidience/ordinary.txt');
 select(preview('Preview before article')); flush();
 select({kind:'article',ref:'Knowledge/World/World',graph_id:'main'}); flush();
-const article=requests.findLast(request=>request.url.endsWith('/api/articles/Knowledge/World/World'));
+const article=requests.findLast(request=>request.url.endsWith('/api/articles/Knowledge/World/World?graph_id=main'));
 assert(article);
 article.respond(200,{title:'World',body:'Accepted article',kind:'knowledge',ref:'Knowledge/World/World',
     auto_curate_supported:true,auto_curate:true});

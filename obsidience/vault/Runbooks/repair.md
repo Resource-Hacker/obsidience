@@ -8,6 +8,7 @@ obsidience:
   skills:
   - '[[Skills/harness.status]]'
   - '[[Skills/harness.repair]]'
+  - '[[Skills/observations.temporary.append]]'
 ---
 
 1. Use [harness.status](/Skills/harness.status.md) to inspect current health.
@@ -31,3 +32,6 @@ obsidience:
 5. If the required status read is unavailable or invalid, or an eligible
    operation cannot be handled, finish `failed` with the concrete blocker.
    Never clear evidence or claim healthy merely to satisfy completion.
+
+
+When a useful nonredundant observation should survive this activation, optionally append one bounded unverified note to this Agent's own Temporary Observations. Do not record hidden reasoning or create a note merely to narrate routine work.

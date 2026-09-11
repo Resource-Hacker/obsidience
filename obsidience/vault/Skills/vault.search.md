@@ -1,9 +1,16 @@
 ---
 type: skill
 title: Using vault.search
+description: Identify the missing fact before lookup.
 obsidience:
   tool: '[[Tools/vault.search]]'
 ---
+
+## Runtime
+
+Identify the missing fact before lookup. Search only the current Agent graph and prefer already sufficient supplied Knowledge. Related results do not prove the identity of an object on screen. Stop repeated or low-value searches instead of rephrasing indefinitely.
+
+## Reference
 
 Use `vault.search` to find candidate context in the accepted graph.
 

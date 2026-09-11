@@ -69,7 +69,10 @@ class RealtimeSessionManager:
         self.conversation = conversation or conversation_runtime.RUNTIME
 
     def scheduler_paused(self) -> bool:
-        return self._phase not in {"off", "error"}
+        # Connection setup/teardown is a short transition. Idle listening does
+        # not block nonconflicting work; actual GPU reservations remain owned
+        # by the existing model runtime and foreground demand preempts safely.
+        return self._phase in {"starting", "stopping"}
 
     def snapshot(self) -> dict[str, Any]:
         process = self._process

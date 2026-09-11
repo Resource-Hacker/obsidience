@@ -37,6 +37,7 @@ const state = {{XMLHttpRequest:Request, feedItemMode:false, feedItemId:'', sourc
   previewMode:false, previewItem:{{}}, selectionKind:'article',
   articleRef:tool, graphId:'', requestGeneration:0}};
 state.root = state;
+state.checkouts = {{refresh(){{}}}};
 vm.createContext(state);
 vm.runInContext({json.dumps(functions)}, state);
 const refs = incoming => Array.from(state.articleConnections(incoming), item => item.ref);
@@ -136,6 +137,7 @@ const state = {{followShellSelection:true,requestGeneration:0,selectionKind:'art
   Qt:{{callLater() {{}}}},loadDocument() {{}},WebSocket:{{Open:1}},
   shellSocket:{{status:1,sendTextMessage(text) {{sent.push(JSON.parse(text));}}}}}};
 state.root = state;
+state.checkouts = {{refresh(){{}}}};
 vm.createContext(state);
 vm.runInContext({json.dumps(functions)},state);
 const event = selection => JSON.stringify({{schema:'obsidience.shell.event.v1',type:'pane.state',

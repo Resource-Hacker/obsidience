@@ -514,6 +514,18 @@ def execute(args: dict, context: dict) -> dict:
 
     args = args or {}
     context = context or {}
+    if args.get("reclassify") is True:
+        from obsidience.harness.capabilities.registry import READ_ONLY_CAPABILITIES
+        rows = context.get("trace", [])
+        allowed = (context.get("task") == "Tasks/query" and context.get("interactive") is True
+            and not (context.get("params") or {}).get("routing_rechecked")
+            and not context.get("_created_tasks")
+            and all(not row.get("tool") or row.get("not_dispatched") is True
+                or row["tool"] in READ_ONLY_CAPABILITIES or row["tool"] == "task.complete" for row in rows))
+        if not allowed:
+            return {"accepted": False, "error": "Routing correction is allowed once before effects in an interactive Query"}
+        return {"accepted": True, "status": "failed", "summary": str(args.get("summary", "Routing requires reclassification"))[:2000],
+                "outcome": "routing_reclassification", "evidence": [], "reclassify": True}
     requested_status = str(args.get("status", "completed")).strip()
     if requested_status not in ("completed", "failed", "review"):
         return {

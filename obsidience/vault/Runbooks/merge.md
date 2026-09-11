@@ -9,6 +9,7 @@ obsidience:
   - '[[Skills/vault.read]]'
   - '[[Skills/vault.validate]]'
   - '[[Skills/vault.propose]]'
+  - '[[Skills/observations.temporary.append]]'
   task: '[[Tasks/merge]]'
 ---
 
@@ -59,3 +60,6 @@ from consolidation into its actual canonical Agent Article. Stale unused
 maintenance leads are settled against exact creator and revision evidence
 before model admission; changing a queued lead never authorizes executing
 its old proposal or discarding an uncertain prior Tool effect.
+
+
+When a useful nonredundant observation should survive this activation, optionally append one bounded unverified note to this Agent's own Temporary Observations. Do not record hidden reasoning or create a note merely to narrate routine work.

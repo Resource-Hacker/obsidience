@@ -24,6 +24,12 @@ def ledger(tmp_path, monkeypatch):
     result.db.close()
 
 
+def semantic_runtime(state):
+    if state.get("params") or state.get("last_run"):
+        assert state.get("activation_id"), "An actual occurrence retains its exact identity"
+    return {key: value for key, value in state.items() if key != "activation_id"}
+
+
 def test_explicit_migration_preserves_runtime_and_cannot_overwrite_newer_work(ledger):
     original = {
         "status": "review", "last_run": "run-one", "summary": "Awaiting exact review.",
@@ -31,13 +37,13 @@ def test_explicit_migration_preserves_runtime_and_cannot_overwrite_newer_work(le
         "event_queue": [{"activation_key": "next", "source_id": "source-one"}],
         "status_updated": "2026-09-05T01:02:03", "triggered_at": "2026-09-05T01:00:00",
     }
-    assert ledger.seed_task_runtime("Tasks/ingest", {**original, "article_status": "stable"}) == original
+    assert semantic_runtime(ledger.seed_task_runtime("Tasks/ingest", {**original, "article_status": "stable"})) == original
     ledger.mutate_task_runtime("Tasks/ingest", lambda state: state.update(status="completed"))
     expected = {**original, "status": "completed"}
-    assert ledger.seed_task_runtime("Tasks/ingest", original) == expected
+    assert semantic_runtime(ledger.seed_task_runtime("Tasks/ingest", original)) == expected
     second = index.Index()
     try:
-        assert second.task_runtime("Tasks/ingest") == expected
+        assert semantic_runtime(second.task_runtime("Tasks/ingest")) == expected
     finally:
         second.db.close()
 
@@ -104,7 +110,7 @@ def test_cleared_queue_survives_migration_replay(ledger):
         state.pop("event_queue")
 
     ledger.mutate_task_runtime("Tasks/link", finish)
-    assert ledger.seed_task_runtime("Tasks/link", old) == {"status": "completed"}
+    assert semantic_runtime(ledger.seed_task_runtime("Tasks/link", old)) == {"status": "completed"}
 
 
 def test_state_mutation_rolls_back_on_failure_and_allows_ledger_reads(ledger):
@@ -117,7 +123,7 @@ def test_state_mutation_rolls_back_on_failure_and_allows_ledger_reads(ledger):
 
     with pytest.raises(ValueError, match="commitment changed"):
         ledger.mutate_task_runtime("Tasks/link", rejected)
-    assert ledger.task_runtime("Tasks/link") == {"status": "pending", "event_queue": []}
+    assert semantic_runtime(ledger.task_runtime("Tasks/link")) == {"status": "pending", "event_queue": []}
 
 
 def test_task_move_keeps_pending_state_and_rejects_destination_collision(ledger):
@@ -129,17 +135,17 @@ def test_task_move_keeps_pending_state_and_rejects_destination_collision(ledger)
     )
     ledger.remap_task_runtime({"Tasks/original": "Tasks/renamed"})
     assert ledger.task_runtime("Tasks/original") is None
-    assert ledger.task_runtime("Tasks/renamed") == state
+    assert semantic_runtime(ledger.task_runtime("Tasks/renamed")) == state
     assert ledger.run("historical")["task_ref"] == "Tasks/original"
 
     ledger.seed_task_runtime("Tasks/occupied", {"status": "review"})
     with pytest.raises(ValueError, match="already owns"):
         ledger.remap_task_runtime({"Tasks/renamed": "Tasks/occupied"})
-    assert ledger.task_runtime("Tasks/renamed") == state
-    assert ledger.task_runtime("Tasks/occupied") == {"status": "review"}
+    assert semantic_runtime(ledger.task_runtime("Tasks/renamed")) == state
+    assert semantic_runtime(ledger.task_runtime("Tasks/occupied")) == {"status": "review"}
 
     ledger.remap_task_runtime({"Tasks/renamed": "Tasks/original"})
-    assert ledger.task_runtime("Tasks/original") == state
+    assert semantic_runtime(ledger.task_runtime("Tasks/original")) == state
     assert ledger.task_runtime("Tasks/renamed") is None
 
 

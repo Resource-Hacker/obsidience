@@ -43,12 +43,12 @@ def test_permission_inherits_with_nearest_explicit_child_override(vault):
 
 
 def test_toggle_specialist_subject_writes_real_index_without_task(vault):
-    result = server.set_article_auto_curate("@sat/Darwin/observations", {"enabled": False})
-    assert result == {"article": "@sat/Darwin/observations", "enabled": False, "task": None}
+    result = server.set_article_auto_curate("@branch/Agents/Darwin/Observations", {"enabled": False})
+    assert result == {"article": "@branch/Agents/Darwin/Observations", "enabled": False, "task": None}
     assert load_note("Agents/Darwin/Observations/Observations.md").meta["auto_curate"] is False
     assert not list(vault.glob("Tasks/**/*.md"))
     assert not server.get_article("@sat/Darwin/temporary-observations")["auto_curate"]
-    server.set_article_auto_curate("@sat/Darwin/observations", {"enabled": True})
+    server.set_article_auto_curate("@branch/Agents/Darwin/Observations", {"enabled": True})
     assert server.get_article("@sat/Darwin/temporary-observations")["auto_curate"]
 
 
@@ -104,7 +104,7 @@ def test_scoped_knowledge_approval_uses_permission_and_normal_review(vault, monk
         assert not curation.try_auto_approve(bad, args, context).get("auto_approved")
     assert not curation.try_auto_approve(result, {**args, "metadata": {"kind": "knowledge", "auto_curate": True}}, context).get("auto_approved")
     assert not curation.try_auto_approve(result, args, {**context, "run_id": "forged"}).get("auto_approved")
-    server.set_article_auto_curate("@sat/Darwin/observations", {"enabled": False})
+    server.set_article_auto_curate("@branch/Agents/Darwin/Observations", {"enabled": False})
     assert not curation.try_auto_approve(result, args, context).get("auto_approved")
     assert calls == ["test.md"]
 
@@ -116,7 +116,7 @@ def test_graph_and_reader_use_the_same_effective_permission(vault, monkeypatch):
     graph = server.graph()
     assert graph["auto_curate_resolved"]
     active = set(graph["auto_curated"])
-    assert {"Agents/Darwin/Darwin", "@sat/Darwin/observations", "Agents/Darwin/Observations/child"} <= active
+    assert {"Agents/Darwin/Darwin", "@branch/Agents/Darwin/Observations", "Agents/Darwin/Observations/child"} <= active
     assert "@sat/Darwin/tools" not in active
     assert "Agents/Darwin/Observations/private/child" not in active
     assert not server.get_article("Agents/Darwin/Observations/private/child")["auto_curate"]

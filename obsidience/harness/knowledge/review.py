@@ -1126,13 +1126,18 @@ def reconcile_origin_review_task(origin_ref: str) -> str:
         continuation = _transaction_feed_continuation(plan)
         if continuation and continuation["context"]["task"] == origin.ref:
             return status
+    pending_run_ids = set()
     for pending in CONFIG.staging_dir.glob("*.md"):
         pending_meta, _ = article_format.loads(pending.read_text(encoding="utf-8"))
         if _has_group_decision(pending.name, pending_meta):
             continue
         pending_origin = resolver().resolve(str(pending_meta.get("task", "")))
         if pending_origin and pending_origin.ref == origin.ref:
-            return status
+            pending_run_ids.add(str(pending_meta.get("run_id", "")))
+    from .index import INDEX
+    INDEX.complete_review_occurrences(origin.ref, pending_run_ids)
+    if str(origin.meta.get("last_run", "")) in pending_run_ids or "" in pending_run_ids:
+        return status
     if status != "review":
         return status
 

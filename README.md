@@ -98,9 +98,13 @@ The supervisor API is `GET /api/realtime`, `POST /api/realtime/start`,
   stable System descriptors, and immutable raw sources remain typed and
   distinct while every displayed path is the real project-relative disk path.
 
-The shared Library contains Tasks and Tool+Skill pairs. Runbooks are synthesized
-for individual Agents. The Tasks pane contains only active activation rules and
-executions, not the complete Task repository.
+The Library is the owner's complete catalog of accepted Knowledge, Agents,
+Tasks, Runbooks, and paired Tools and Skills. Reader Agent icons check out shared
+Knowledge or assign Tasks. Each orbiting Agent searches only its own scoped
+graph and writes its own Observations; sharing an Article reuses its canonical
+identity rather than copying it. The Tasks pane shows active rules and execution
+occurrences, not the complete repository. The Executive remains a personal
+Realtime assistant, with the existing System and domain branches.
 
 The actual wiki files use [Open Knowledge Format v0.2](https://github.com/GoogleCloudPlatform/open-knowledge-format/blob/ad30107c31c06aec8a7d5636e0d1058118604e6f/SPEC.md)
 with the small Obsidience profile. Required `type` identifies the Article;

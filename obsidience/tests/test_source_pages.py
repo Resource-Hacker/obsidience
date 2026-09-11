@@ -19,8 +19,8 @@ def test_source_paging_reaches_exact_end(monkeypatch):
 
 
 def test_vault_pages_include_knowledge_but_not_private(monkeypatch):
-    rows = [SimpleNamespace(ref=f"News & Research/{n:03}", title=f"Story {n}") for n in range(65)]
-    rows.append(SimpleNamespace(ref="_staging/private", title="secret"))
+    rows = [vault.Note(f"News & Research/{n:03}.md", f"Story {n}", {"kind": "knowledge"}, "") for n in range(65)]
+    rows.append(vault.Note("_staging/private.md", "secret", {"kind": "knowledge"}, ""))
     monkeypatch.setattr(vault, "iter_notes", lambda: rows)
     first = list_capability.execute({"folder": "News & Research"}, {})
     assert "Next offset: 60" in first and "Story 64" not in first
@@ -45,3 +45,7 @@ def test_supporting_research_capture_identity_comes_from_execution():
     assert source.research_activation_key(context) == "source.added:research:abc:Tasks/research/news"
     assert source.research_activation_key({**context, "agent": "Alexandria"}) is None
     assert source.research_activation_key({"params": {"handled_by_run_id": "fake"}}) is None
+
+import pytest
+
+pytestmark = pytest.mark.usefixtures("authorized_reader_scope")

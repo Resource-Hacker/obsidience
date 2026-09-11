@@ -95,16 +95,18 @@ def candidate_invalidation(task_ref: str, params: dict, res) -> dict | None:
             "current_revision": current}
 
 
-def _maintenance_candidates() -> dict:
+def _maintenance_candidates(context: dict | None = None) -> dict:
     from obsidience.harness.knowledge.vault import Resolver, folder_article_path, is_folder_article, iter_notes
     from obsidience.harness.knowledge.system import is_system_article
 
     snapshot = iter_notes()
     res = Resolver(snapshot)
+    from obsidience.harness.knowledge.scope import execution_scope
+    allowed = execution_scope(context, res)[1] if context is not None else {note.ref for note in snapshot}
     notes = [
         note
         for note in snapshot
-        if note.kind in {"agent", "knowledge"} and not note.runtime_observation and not is_system_article(note.ref)
+        if note.ref in allowed and note.kind in {"agent", "knowledge"} and not note.runtime_observation and not is_system_article(note.ref)
     ]
     title_words = {
         note.ref: _curation_words(note.title, title=True)
@@ -115,7 +117,7 @@ def _maintenance_candidates() -> dict:
         note.ref: {
             target.ref
             for raw in note.links
-            if (target := res.resolve(raw)) is not None and target.ref != note.ref
+            if (target := res.resolve(raw)) is not None and target.ref != note.ref and target.ref in allowed
         }
         for note in notes
     }
@@ -371,5 +373,8 @@ def _maintenance_candidates() -> dict:
 
 
 def execute(args: dict, context: dict) -> str:
-    del args, context
-    return json.dumps(_maintenance_candidates(), sort_keys=True)
+    del args
+    try:
+        return json.dumps(_maintenance_candidates(context), sort_keys=True)
+    except PermissionError as exc:
+        return str(exc)

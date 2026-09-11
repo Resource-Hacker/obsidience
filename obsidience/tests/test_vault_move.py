@@ -50,7 +50,7 @@ def test_folder_rename_moves_own_hub_and_preserves_nested_hubs_runtime_and_links
     assert vault.is_folder_article(hub)
     assert vault.is_folder_article(vault.load_note("Renamed/Nested/Nested.md"))
     assert ledger.task_runtime("Collection/task") is None
-    assert ledger.task_runtime("Renamed/task") == state
+    assert {k:v for k,v in ledger.task_runtime("Renamed/task").items() if k != "activation_id"} == state
     assert vault.load_note("Renamed/task.md").meta["status"] == "review"
     assert ledger.run("review-run")["task_ref"] == "Collection/task"
     outside = vault.load_note("Outside.md")
@@ -147,7 +147,7 @@ def test_move_cannot_adopt_stale_destination_state_when_source_has_no_row(move_v
 
     assert _snapshot(root) == before
     assert ledger.task_runtime("Tasks/work") is None
-    assert ledger.task_runtime("Tasks/renamed") == {"status": "review", "last_run": "unrelated"}
+    assert {k:v for k,v in ledger.task_runtime("Tasks/renamed").items() if k != "activation_id"} == {"status": "review", "last_run": "unrelated"}
 
 
 @pytest.mark.parametrize("name", ["Index", "Log"])

@@ -1,9 +1,17 @@
 ---
 type: skill
 title: Using observations.temporary.archive
+description: Archive only the exact event-bound bundle, preserving original hashes
+  and Source citations.
 obsidience:
   tool: '[[Tools/observations.temporary.archive]]'
 ---
+
+## Runtime
+
+Archive only the exact event-bound bundle, preserving original hashes and Source citations. Archival does not accept its claims. Promotion must independently reconcile useful findings with accessible durable Knowledge.
+
+## Reference
 
 Use `observations.temporary.archive` to preserve the exact temporary-observation
 bundle already bound to the call.

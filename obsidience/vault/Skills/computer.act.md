@@ -1,11 +1,18 @@
 ---
 type: skill
 title: Using computer.act
+description: Choose the intended control from the immediately preceding image.
 obsidience:
   tool: '[[Tools/computer.act]]'
   approved_at: '2026-09-06T01:04:58'
   provenance: proposed by Codex (task codex:knowledge-handoff)
 ---
+
+## Runtime
+
+Choose the intended control from the immediately preceding image. Coordinates are normalized image coordinates, not desktop pixels. input asks for one click; state asks for the requested result. Interpret each fresh post-image before claiming a state or taking another distinct step. Never repeat an uncertain click.
+
+## Reference
 
 Use computer.act for one bounded click inside the application bound by the current Task.
 

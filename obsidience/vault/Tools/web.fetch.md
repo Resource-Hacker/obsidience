@@ -1,10 +1,17 @@
 ---
 type: tool
 title: web.fetch
+description: Fetch one URL or up to ten URLs using exactly url or urls.
 obsidience:
   binding: capability:web.fetch
   source: obsidience/harness/capabilities/web/fetch.py
 ---
+
+## Runtime
+
+Fetch one URL or up to ten URLs using exactly url or urls. Returned material preserves source URLs and clipping/failure information. Complete bound-source read prerequisites remain enforced. Never infer a successful fetch or full coverage from a partial response.
+
+## Reference
 
 Fetch one public HTTP(S) page or a batch of one to ten independent pages.
 Pass exactly `{"url": "<direct public URL>"}` or `{"urls": ["<URL>", ...]}`.
