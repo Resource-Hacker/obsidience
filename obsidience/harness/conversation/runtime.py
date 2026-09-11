@@ -279,7 +279,8 @@ class ConversationRuntime:
                 conversation_evidence=prior_effects,
                 steering=inbox,
             )
-            if result.get("routing_reclassification") is True and generation == self._generation:
+            if (result.get("routing_reclassification") is True and generation == self._generation
+                    and (inbox is None or not (inbox.applied or inbox.pending))):
                 # Re-run the SAME bounded admission once. No Task or Tool is
                 # added by the failed Query, and the Objective stays unchanged.
                 corrected, correction, correction_event = await select_task(
