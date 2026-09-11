@@ -2260,48 +2260,53 @@ class Index:
         return dict(zip(self._SOURCE_COLUMNS, row)) if row else None
 
     def source(self, source_id: str) -> dict | None:
-        row = self.db.execute(
-            f"SELECT {','.join(self._SOURCE_COLUMNS)} FROM source_evidence WHERE id=?",
-            (source_id,),
-        ).fetchone()
-        return self._source_row(row)
+        with self.lock:
+            row = self.db.execute(
+                f"SELECT {','.join(self._SOURCE_COLUMNS)} FROM source_evidence WHERE id=?",
+                (source_id,),
+            ).fetchone()
+            return self._source_row(row)
 
     def source_by_material(self, material_sha256: str) -> dict | None:
-        row = self.db.execute(
-            f"SELECT {','.join(self._SOURCE_COLUMNS)} FROM source_evidence "
-            "WHERE material_sha256=?",
-            (material_sha256,),
-        ).fetchone()
-        return self._source_row(row)
+        with self.lock:
+            row = self.db.execute(
+                f"SELECT {','.join(self._SOURCE_COLUMNS)} FROM source_evidence "
+                "WHERE material_sha256=?",
+                (material_sha256,),
+            ).fetchone()
+            return self._source_row(row)
 
     def source_by_event_key(self, event_key: str) -> dict | None:
-        row = self.db.execute(
-            f"SELECT {','.join(self._SOURCE_COLUMNS)} FROM source_evidence WHERE event_key=?",
-            (event_key,),
-        ).fetchone()
-        return self._source_row(row)
+        with self.lock:
+            row = self.db.execute(
+                f"SELECT {','.join(self._SOURCE_COLUMNS)} FROM source_evidence WHERE event_key=?",
+                (event_key,),
+            ).fetchone()
+            return self._source_row(row)
 
     def source_by_fingerprint(
         self, lane: str, source_type: str, source_ref: str,
         media_type: str, content_sha256: str,
     ) -> dict | None:
-        row = self.db.execute(
-            f"SELECT {','.join(self._SOURCE_COLUMNS)} FROM source_evidence WHERE "
-            "source_type=? AND source_ref=? AND media_type=? AND content_sha256=? "
-            "AND path LIKE ? "
-            "ORDER BY created_at LIMIT 1",
-            (source_type, source_ref, media_type, content_sha256, f"{lane}/%"),
-        ).fetchone()
-        return self._source_row(row)
+        with self.lock:
+            row = self.db.execute(
+                f"SELECT {','.join(self._SOURCE_COLUMNS)} FROM source_evidence WHERE "
+                "source_type=? AND source_ref=? AND media_type=? AND content_sha256=? "
+                "AND path LIKE ? "
+                "ORDER BY created_at LIMIT 1",
+                (source_type, source_ref, media_type, content_sha256, f"{lane}/%"),
+            ).fetchone()
+            return self._source_row(row)
 
     def pending_source_events(self, limit: int = 100) -> list[dict]:
-        rows = self.db.execute(
-            f"SELECT {','.join(self._SOURCE_COLUMNS)} FROM source_evidence "
-            "WHERE event_key IS NOT NULL AND event_dispatched_at IS NULL "
-            "ORDER BY created_at LIMIT ?",
-            (limit,),
-        ).fetchall()
-        return [self._source_row(row) for row in rows]
+        with self.lock:
+            rows = self.db.execute(
+                f"SELECT {','.join(self._SOURCE_COLUMNS)} FROM source_evidence "
+                "WHERE event_key IS NOT NULL AND event_dispatched_at IS NULL "
+                "ORDER BY created_at LIMIT ?",
+                (limit,),
+            ).fetchall()
+            return [self._source_row(row) for row in rows]
 
     def mark_source_event_dispatched(self, source_id: str, dispatched_at: float) -> None:
         with self.lock:
@@ -2313,12 +2318,13 @@ class Index:
             self.db.commit()
 
     def sources(self, limit: int = 500) -> list[dict]:
-        rows = self.db.execute(
-            f"SELECT {','.join(self._SOURCE_COLUMNS)} FROM source_evidence "
-            "ORDER BY captured_at DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
-        return [self._source_row(row) for row in rows]
+        with self.lock:
+            rows = self.db.execute(
+                f"SELECT {','.join(self._SOURCE_COLUMNS)} FROM source_evidence "
+                "ORDER BY captured_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+            return [self._source_row(row) for row in rows]
 
 
 INDEX = Index()

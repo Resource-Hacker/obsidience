@@ -199,3 +199,33 @@ def test_ordinary_ingest_cannot_suppress_events_or_select_system_lane(system_sou
     assert ledger.source(result["id"])["event_key"].startswith("source.added:")
 
 pytestmark = pytest.mark.usefixtures("authorized_reader_scope")
+
+
+@pytest.mark.parametrize('method,args',[
+    ('source',('absent',)),('source_by_material',('absent',)),
+    ('source_by_event_key',('absent',)),
+    ('source_by_fingerprint',('raw','document','fixture','text/plain','hash')),
+    ('pending_source_events',()),('sources',()),
+])
+def test_source_queries_wait_for_the_existing_ledger_transaction_lock(isolated_task_ledger,method,args):
+    import threading
+    ledger=isolated_task_ledger
+    started,finished=threading.Event(),threading.Event()
+    errors=[]
+    def read():
+        started.set()
+        try:
+            getattr(ledger,method)(*args)
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            finished.set()
+    thread=threading.Thread(target=read)
+    try:
+        with ledger.lock:
+            thread.start()
+            assert started.wait(2)
+            assert not finished.wait(0.1), 'Source query used the shared connection during another transaction'
+    finally:
+        thread.join(2)
+    assert finished.is_set() and not errors
