@@ -180,3 +180,41 @@ def test_reader_scope_proxy_does_not_show_unselected_parent_or_siblings(scoped, 
         api.get_article('Shared/second', graph_id='Darwin')
     assert failure.value.status_code == 404
     assert 'Second shared fact' in api.get_article('Shared/second', graph_id='library')['body']
+
+
+def test_link_never_stages_unread_or_out_of_scope_endpoints(scoped):
+    from obsidience.harness.capabilities.vault import propose
+    vault.write_note('Tasks/link.md', {'kind':'task','title':'Link','taxonomy_path':'wiki/link'}, 'Link read Articles.')
+    context={'_agent_ref':'Agents/Executive/Executive','agent':'Executive','task':'Tasks/link','run_id':'link-scope'}
+    args={'target':'Shared/first','action':'update','title':'First',
+          'body':'First shared fact. [Second](/Shared/second.md) supplies a related fact.'}
+    assert 'complete current vault.read' in propose.execute(args,context)
+    assert not context.get('staged_proposals')
+    read.execute({'refs':['Shared/first','Shared/second']},context)
+    outside={**args,'body':'First fact. [Private](/Agents/Darwin/Observations/Observations.md)'}
+    assert 'Knowledge scope' in propose.execute(outside,context)
+    assert not context.get('staged_proposals')
+    assert 'staged for owner review' in propose.execute(args,context)
+    assert len(context['staged_proposals'])==1
+
+
+def test_queued_private_candidate_stops_before_compiler_or_model(scoped, monkeypatch, execution):
+    import asyncio
+    from obsidience.harness.execution import executor
+    execution.task.ref='Tasks/link'
+    execution.task.meta['assignee']='Agents/Darwin/Darwin'
+    monkeypatch.setattr(executor,'resolver',lambda **_kwargs:scoped())
+    monkeypatch.setattr(executor.model_runtime,'resolve_model',lambda *_args:pytest.fail('Out-of-scope candidate acquired model'))
+    monkeypatch.setattr(executor,'compile_activation',lambda *_a,**_kw:pytest.fail('Out-of-scope candidate compiled'))
+    with pytest.raises(PermissionError,match='current Knowledge scope'):
+        asyncio.run(execution.run(runtime_params={'event':'task.create','activation_key':'private-candidate',
+            'candidate_key':'candidate','candidate_refs':['Shared/first','Agents/Executive/Observations/Observations']}))
+    assert execution.calls==[]
+    assert execution.records[-1]['status']=='failed'
+    receipts=executor.INDEX.tool_run_receipts(execution.records[-1]['id'])
+    assert receipts['task_ref']=='Tasks/link' and receipts['calls']==[]
+    assert execution.events[-1]['phase']=='query_completed'
+    assert execution.events[-1]['graph_id']=='Darwin'
+
+
+from obsidience.tests.test_execution_cancellation import execution  # noqa: F401

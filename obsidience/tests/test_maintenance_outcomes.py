@@ -158,3 +158,32 @@ def test_review_inspection_is_pending_only_and_bounded(isolated, monkeypatch):
     assert len(result["pending"]) == 1
     assert result["pending"][0]["body_truncated"]
     assert result["pending"][0]["blocked_reason"] == "stale"
+
+
+def test_review_approval_during_run_explains_exact_completion_repair(isolated, monkeypatch):
+    from obsidience.harness.capabilities.task import complete
+    note('Tasks/link', kind='task', auto_done=True)
+    context={'task':'Tasks/link','run_id':'link-run','task_note':vault.load_note('Tasks/link.md'),
+        'maintenance_candidate':{'candidate_refs':['Articles/one','Articles/two']},
+        'staged_proposals':[{'staged':'_staging/approved.md','target':'Articles/one.md','action':'update'}]}
+    monkeypatch.setattr(review,'list_proposals',lambda:[])
+    isolated.record_review_decision(proposal_id='approved.md',run_id='link-run',task_ref='Tasks/link',
+        target='Articles/one.md',decision='approved')
+    stale=complete.execute({'status':'review','summary':'Staged link'},context)
+    assert not stale['accepted']
+    assert 'already approved' in stale['error'] and 'Do not stage another' in stale['error']
+    result=complete.execute({'status':'completed','summary':'The owner approved the link.'},context)
+    assert result['accepted'] and result['outcome']=='changed'
+    assert result['evidence']==['Owner review approved Articles/one.md']
+
+
+def test_no_change_requires_fields_not_their_names_inside_summary(isolated):
+    from obsidience.harness.capabilities.task import complete
+    note('Tasks/link', kind='task', auto_done=True)
+    context={'task':'Tasks/link','task_note':vault.load_note('Tasks/link.md'),
+        'maintenance_candidate':{'candidate_refs':['Articles/one','Articles/two']}}
+    bad=complete.execute({'status':'completed','summary':'outcome:no_change; explicit evidence: inspected both'},context)
+    assert not bad['accepted'] and 'separate args fields' in bad['error']
+    valid=complete.execute({'status':'completed','outcome':'no_change','evidence':['Read both Articles; relation already present.'],
+        'summary':'No additional link is useful.'},context)
+    assert valid['accepted'] and valid['outcome']=='no_change'

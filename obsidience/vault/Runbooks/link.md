@@ -14,7 +14,10 @@ obsidience:
 ---
 
 1. Read both exact `candidate_refs` Articles and their current accepted
-   relationships. The maintenance signal is only a lead.
+   relationships. The maintenance signal is only a lead, not an access grant.
+   If either endpoint is outside this Agent's checked-out graph or cannot be
+   read, finish `failed` with that blocker. Do not search other Agents' private
+   Observations, infer a missing body, or add a link to satisfy completion.
 2. Confirm the Articles are distinct, not already directly linked, and share a
    specific relationship that improves retrieval or explains a real dependency,
    constraint, implementation, effect, or evidence path. Shared words, folder
@@ -36,8 +39,15 @@ obsidience:
    produces a visible review warning, including after a reciprocal Link is
    approved. If Review blocks a stale proposal, reject it and reread both Articles
    before a fresh proposal can be staged.
-6. Finish with `review`, naming each staged Article and the relationship added,
-   or `completed` with the exact reason no useful link was warranted.
+6. While this execution's proposal is pending, call `task.complete` with
+   `{"status":"review","summary":"the staged Article and relationship"}`.
+   If the owner has already approved it, finish `completed` with
+   `outcome:"changed"`; do not stage another proposal. If rejected, finish
+   `failed` and report the decision. When both endpoints were read and no useful
+   change is warranted, use `{"status":"completed","outcome":"no_change",
+   "evidence":["the exact Articles and relationship inspected"],"summary":"why no link was warranted"}`.
+   `outcome` and `evidence` are separate argument fields, not prose inside
+   `summary`. An incomplete inspection is a failure, not an evidenced no-change.
 
 
 When a useful nonredundant observation should survive this activation, optionally append one bounded unverified note to this Agent's own Temporary Observations. Do not record hidden reasoning or create a note merely to narrate routine work.

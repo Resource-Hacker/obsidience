@@ -1352,7 +1352,10 @@ Tool bindings, generic hierarchy edges, and framework-specific vocabulary.
   letter. Do not rewrite terminal callable Tool identifiers; `vault.read` is an
   exact executable name, while its parent index is `Vault`.
 - The graph animation must represent the exact packet path for every Task
-  activation and remain passive when no work is being resolved. Automatic
+  activation and remain passive when no work is being resolved. Read/search
+  paths carry the same controller-bound graph ID, run ID and measured retrieval
+  duration as that run's start and completion. A terminal event cannot clear a
+  different graph/run or resurrect completed activity on reconnect. Automatic
   speed follows measured fast-search duration without a time clamp; its
   checkbox yields to the per-graph Animation speed slider when disabled.
   A render refresh preserves each cloud's force positions, velocities and

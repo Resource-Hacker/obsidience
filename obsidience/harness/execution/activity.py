@@ -66,7 +66,7 @@ def _publish(event: dict) -> dict:
 
 
 def emit(phase: str, refs: list[str], *, query: str = "", graph_id: str = "main",
-         retrieval_ms: float | None = None) -> dict:
+         retrieval_ms: float | None = None, run_id: str = "") -> dict:
     unique_refs = list(dict.fromkeys(str(ref) for ref in refs if ref))
     event = {
         "phase": phase,
@@ -77,6 +77,8 @@ def emit(phase: str, refs: list[str], *, query: str = "", graph_id: str = "main"
         "graph_id": str(graph_id or "main")[:80],
         "at": int(time.time() * 1000),
     }
+    if run_id:
+        event["run_id"] = str(run_id)[:128]
     if retrieval_ms is not None:
         event["retrieval_ms"] = max(0.0, float(retrieval_ms))
     return _publish(event)

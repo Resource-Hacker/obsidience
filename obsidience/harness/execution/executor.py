@@ -446,6 +446,7 @@ async def compile_activation(
     accepted_resolver: Resolver | None = None,
     interactive: bool = False,
     activation_id: str = "",
+    run_id: str = "",
 ) -> dict:
     """Resolve and retrieve the canonical packet without starting model execution.
 
@@ -575,7 +576,7 @@ async def compile_activation(
     if emit_activity:
         knowledge_activity.emit(
             "path", selected_refs, query=activity_query, graph_id=graph_id,
-            retrieval_ms=retrieval_ms,
+            retrieval_ms=retrieval_ms, run_id=run_id,
         )
         action_trace.emit(
             "activation",
@@ -1265,7 +1266,8 @@ async def _execute_session(
             _publish_working_progress(ctx, "running")
             if context_refs:
                 knowledge_activity.emit("path", [str(ctx.get("task", "")), *context_refs],
-                    query=str(ctx.get("objective", "")), graph_id=str(ctx.get("graph_id", "main")))
+                    query=str(ctx.get("objective", "")), graph_id=ctx["_graph_id"],
+                    retrieval_ms=ctx["_retrieval_ms"], run_id=str(ctx["run_id"]))
             emit_tool_result(f"{name} returned", result_object if result_object is not None else observation, call_status)
             if ctx.pop("_capability_cancelled_after_commit", False) or asyncio.current_task().cancelling():
                 raise asyncio.CancelledError("Tool outcome retained after cancellation")
@@ -1444,7 +1446,7 @@ async def run_task(task: Note, depth: int = 0, reasoning_effort: str | None = No
     ).objective
     graph_id = _agent_graph_id(requested_agent)
     knowledge_activity.emit(
-        "query_started", [task.ref], query=objective, graph_id=graph_id,
+        "query_started", [task.ref], query=objective, graph_id=graph_id, run_id=run_id,
     )
     # This activation owns its terminal event, including cancellation before
     # packet compilation or after a Tool effect has already completed.
@@ -1548,6 +1550,18 @@ async def run_task(task: Note, depth: int = 0, reasoning_effort: str | None = No
         # interpreter executes the session AS that agent (Obsidience model).
         agent = requested_agent
         agent_name = agent.title if _is_agent_identity(agent) else "Obsidience"
+        if params.get("event") == "task.create" and params.get("candidate_key"):
+            from ..knowledge.scope import execution_scope
+            _identity, readable = execution_scope({"_agent_ref": agent.ref if agent else ""}, res)
+            candidates = params.get("candidate_refs")
+            if not isinstance(candidates, list) or any(str(ref) not in readable for ref in candidates):
+                # Attest this empty attempt so an independent queued request
+                # need not remain behind an input that can never be read.
+                INDEX.begin_tool_run(run_id=run_id, task_ref=task.ref, params=params, started=started)
+                raise PermissionError(
+                    "Maintenance candidate is outside this Agent's current Knowledge scope. "
+                    "No model or Tool was invoked. Run Curate to select a current in-scope candidate."
+                )
         model_spec = model_runtime.resolve_model(
             model if model is not None else task.meta.get("model"),
             agent.ref if _is_agent_identity(agent) else "Agents/Executive/Executive",
@@ -1567,7 +1581,7 @@ async def run_task(task: Note, depth: int = 0, reasoning_effort: str | None = No
             conversation_evidence=conversation_evidence,
             accepted_resolver=res,
             interactive=interactive,
-            activation_id=activation_id,
+            activation_id=activation_id, run_id=run_id,
         )
         action_trace.latency("activation", duration_ms=(time.monotonic() - activation_started) * 1000)
         allowed = list(activation["spine"]["tools"])
@@ -1621,6 +1635,8 @@ async def run_task(task: Note, depth: int = 0, reasoning_effort: str | None = No
             "_scope_revision": scope_revision(agent) if _is_agent_identity(agent) else "",
             "_activation_id": activation_id,
             "_agent_ref": agent.ref if _is_agent_identity(agent) else "",
+            "_graph_id": _agent_graph_id(agent),
+            "_retrieval_ms": retrieval_ms,
             "agent": agent_name,
             "task": task.ref,
             "run_id": run_id,
@@ -1876,5 +1892,5 @@ async def run_task(task: Note, depth: int = 0, reasoning_effort: str | None = No
         action_trace.reset(trace_scope)
         knowledge_activity.emit(
             "query_completed", packet_refs, query=objective, graph_id=graph_id,
-            retrieval_ms=retrieval_ms,
+            retrieval_ms=retrieval_ms, run_id=run_id,
         )

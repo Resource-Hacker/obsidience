@@ -199,7 +199,7 @@ def test_task_complete_fails_closed_and_distinguishes_auto_approved_change(ledge
         base_context,
     )
     assert unsupported["accepted"] is False
-    assert "outcome \"no_change\"" in unsupported["error"]
+    assert '"outcome":"no_change"' in unsupported["error"]
 
     supported = task_complete.execute(
         {

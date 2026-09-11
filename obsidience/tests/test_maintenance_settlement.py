@@ -359,6 +359,8 @@ def test_numeric_recovery_requires_complete_args_and_exact_signature(scene, faul
 
 
 def test_real_activation_admission_race_settles_without_replaying_and_preserves_fifo(scene, monkeypatch):
+    vault.write_note("Agents/Executive/Executive.md", {"kind":"agent","title":"Executive",
+        "knowledge":["[[Knowledge/one]]","[[Knowledge/two]]"]}, "Fixture principal.")
     params = activation(["Knowledge/one", "Knowledge/two"])
     params["candidate_signals"].update(title_coverage=1.0, same_parent=False)
     raw = deepcopy({key: value for key, value in params.items() if key.startswith("candidate_")})

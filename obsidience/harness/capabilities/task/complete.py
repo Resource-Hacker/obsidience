@@ -467,8 +467,11 @@ def _completion_error(
         )
     ):
         return (
-            "this evidence-bound execution has no staged change; complete with "
-            'outcome "no_change" and explicit evidence'
+            'this evidence-bound execution has no staged change. After completing the inspection, '
+            'send {"status":"completed","outcome":"no_change","evidence":["what was inspected"],'
+            '"summary":"why no change was warranted"}. outcome and evidence are separate args fields, '
+            'not text inside summary. If an input is inaccessible or the inspection is incomplete, '
+            'send {"status":"failed","summary":"the exact blocker"}; do not invent a change to finish'
         )
     if status != "review":
         return None
@@ -502,6 +505,17 @@ def _completion_error(
         return None
     if task.meta.get("acceptance"):
         return None
+    if approved:
+        return (
+            "The owner already approved this execution's proposal; no pending Review remains. "
+            'Finish with {"status":"completed","outcome":"changed","summary":"the approved change"}. '
+            'The controller supplies the approval evidence. Do not stage another proposal.'
+        )
+    if rejected:
+        return (
+            "The owner already rejected this execution's proposal; no pending Review remains. "
+            'Finish with status failed and report that decision without claiming a change or resubmitting it.'
+        )
     return (
         "review requires a proposal staged by this exact execution or an explicit "
         "acceptance gate authored on the Task; a deferred downstream activation "

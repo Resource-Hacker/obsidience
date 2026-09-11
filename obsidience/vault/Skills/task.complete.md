@@ -10,7 +10,7 @@ obsidience:
 
 ## Runtime
 
-For an ordinary successful answer, status:completed and summary are sufficient. Do not use no_change as a generic success code. Report a blocker rather than an unobserved result. Visual state verification describes current image evidence; it is not independent mechanical proof.
+For an ordinary successful answer, status:completed and summary are sufficient. An evidence-bound no-change instead requires separate JSON args: {"status":"completed","outcome":"no_change","evidence":["the inspected evidence"],"summary":"why no change is warranted"}. Writing outcome or evidence inside summary does not set those fields. Use review only while this execution's proposal is pending; an actual owner approval permits completed with outcome:changed, and rejection or inaccessible inputs should be reported as failed. Do not stage a change merely to escape a completion error. Visual state verification describes current image evidence; it is not independent mechanical proof.
 
 ## Reference
 

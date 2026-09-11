@@ -433,21 +433,23 @@ const source=fs.readFileSync({json.dumps(str(PANES / 'graph-backdrop.tsx'))},'ut
 const tree=ts.createSourceFile('graph.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
 const functions=tree.statements.filter(node=>ts.isFunctionDeclaration(node)
   && ['activityFromWire','latestActivityTransaction'].includes(node.name?.text));
-let callback;
+let callback, bridge;
 const visit=node=>{{
   if(ts.isCallExpression(node)&&node.expression.getText(tree)==='onKnowledgeActivity') callback=node.arguments[0];
+  if(ts.isCallExpression(node)&&node.expression.getText(tree)==='useEffect'
+    &&node.arguments[0]?.getText(tree).includes('new WebSocket(`${{WS_BASE}}/ws/activity`)')) bridge=node.arguments[0];
   ts.forEachChild(node,visit);
 }};
 visit(tree);
-assert.equal(functions.length,2);assert(callback);
+assert.equal(functions.length,2);assert(callback);assert(bridge);
 let state=null;let now=1788665811270;const timers=[];
 const context={{setActivity:next=>{{state=typeof next==='function'?next(state):next;}},
-  activityKey:{{current:0}},lingerTimer:{{current:null}},FOCUS_LINGER_MS:6000,MAIN_GRAPH_ID:'main',
+  activityKey:{{current:0}},lingerTimer:{{current:null}},activityTransaction:{{current:null}},FOCUS_LINGER_MS:6000,MAIN_GRAPH_ID:'main',
   Date:{{now:()=>now}},window:{{clearTimeout(){{}},setTimeout(fn,ms){{timers.push({{fn,ms}});return timers.length;}}}}}};
 const compiled=ts.transpileModule(functions.map(node=>node.getText(tree)).join('\n')
-  +'\n({{replay:latestActivityTransaction,fromWire:activityFromWire,receive:'+callback.getText(tree)+'}})',
+  +'\n({{replay:latestActivityTransaction,fromWire:activityFromWire,receive:'+callback.getText(tree)+',bridge:'+bridge.getText(tree)+'}})',
   {{compilerOptions:{{target:ts.ScriptTarget.ESNext}}}}).outputText;
-const {{replay,fromWire,receive}}=vm.runInNewContext(compiled,context);
+const {{replay,fromWire,receive,bridge:connectBridge}}=vm.runInNewContext(compiled,context);
 const wire=(phase,at)=>({{phase,at,query:'Harness health',graph_id:'main',refs:[]}});
 const start=wire('query_started',1788665807345);
 // The presenter connects after query_started but before packet compilation.
@@ -475,6 +477,56 @@ assert.equal(replay([start,wire('query_completed',now)]).length,2);
 assert.equal(replay([start,wire('cleared',now)]).length,0);
 assert.equal(replay([start,wire('query_completed',now-6000)]).length,0);
 receive(fromWire(wire('query_started',now+1)));assert.equal(state.startedAt,now+1);
+
+// A Link read from Alexandria must not inherit Executive identity or lose speed.
+now += 10000;
+const run=(phase,id,graph,at=now)=>fromWire({{phase,at,run_id:id,graph_id:graph,
+  query:'Same reusable Task',refs:['Shared/fact']}});
+receive(run('query_started','exec-a','main'));
+receive({{...run('path','exec-a','main'),retrievalMs:25}});
+receive(run('path','exec-a','main',now+1));
+assert.equal(state.retrievalMs,25);
+const executiveState=state;
+receive(run('query_completed','link-b','Alexandria',now+2));
+assert.equal(state,executiveState); // A foreign terminal cannot change the Executive.
+receive(run('query_started','link-b','Alexandria',now+3));
+receive({{...run('path','link-b','Alexandria',now+4),retrievalMs:30}});
+assert.equal(state.graphId,'Alexandria');assert.equal(state.runId,'link-b');
+receive(run('query_completed','exec-a','main',now+5));
+assert.equal(state.phase,'thinking');
+receive(run('query_completed','link-b','Alexandria',now+6));
+const linkExpiry=timers.at(-1);
+receive(run('query_started','link-c','Alexandria',now+7));
+linkExpiry.fn();assert.equal(state.runId,'link-c'); // Old timer cannot clear new work.
+receive(run('query_completed','link-b','Alexandria',now+8));
+assert.equal(state.runId,'link-c');assert.equal(state.phase,'thinking');
+receive(run('query_completed','link-c','Alexandria',now+9));
+timers.at(-1).fn();assert.equal(state,null);
+receive(run('path','link-c','Alexandria',now+10));assert.equal(state,null);
+const latest=replay([
+  {{...wire('query_started',now),run_id:'new'}},
+  {{...wire('path',now+1),run_id:'old',refs:['Wrong']}},
+  {{...wire('path',now+2),run_id:'new',refs:['Correct']}},
+  {{...wire('query_completed',now+3),run_id:'old'}},
+]);
+assert.equal(latest.length,2);assert.deepEqual(Array.from(latest[1].refs),['Correct']);
+
+const sockets=[];
+context.WS_BASE='ws://fixture';
+context.WebSocket=class {{constructor(){{sockets.push(this);}} close(){{}}}};
+context.announceKnowledgeActivity=receive;
+const disconnect=connectBridge();
+receive(run('query_started','stale','main',now+20));
+assert(state);
+sockets[0].onmessage({{data:JSON.stringify({{type:'snapshot',entries:[]}})}});
+assert.equal(state,null); // An empty authoritative snapshot clears abandoned activity.
+const resumed={{phase:'query_started',at:now+30,run_id:'resume',graph_id:'Alexandria',query:'Link',refs:[]}};
+sockets[0].onmessage({{data:JSON.stringify({{type:'snapshot',entries:[resumed]}})}});
+assert.equal(state.graphId,'Alexandria');assert.equal(state.runId,'resume');
+sockets[0].onclose();assert.equal(state,null); // A disconnected stream cannot keep a ghost highlight.
+disconnect();
+
+
 """)
 
 
@@ -503,7 +555,7 @@ const visit=node=>{{
 visit(tree);assert(receive);assert(visibilityEffect);assert(popup);
 const timers=[];
 const context={{activity:null,traceInspectionSince:null,traceDismissedSince:null,
- visible:true,lockMode:false,activityKey:{{current:0}},lingerTimer:{{current:null}},FOCUS_LINGER_MS:6000,
+ visible:true,lockMode:false,activityKey:{{current:0}},lingerTimer:{{current:null}},activityTransaction:{{current:null}},FOCUS_LINGER_MS:6000,
  Date:{{now:()=>1000}},ActionTracePopup:'ActionTracePopup',exports:{{}},
  window:{{clearTimeout(){{}},setTimeout(fn,ms){{timers.push({{fn,ms}});return timers.length;}}}},
  require:name=>{{assert.equal(name,'react/jsx-runtime');return{{jsx:(type,props)=>({{type,props}})}}}},

@@ -431,9 +431,21 @@ def stage_proposal(args: dict, context: dict) -> dict:
     if review_class == "link":
         if action != "update" or authored_meta:
             raise ValueError("Link updates an existing Article body, not its authority metadata")
-        proposal_meta["link_evidence"] = link_evidence(
-            existing_target, body, Resolver(iter_notes()),
-        )
+        link_resolver = Resolver(iter_notes())
+        proposal_meta["link_evidence"] = link_evidence(existing_target, body, link_resolver)
+        if context.get("_agent_ref"):
+            from obsidience.harness.knowledge.scope import execution_scope
+            _agent, readable = execution_scope(context, link_resolver)
+            endpoints = {existing_target.ref, *(item["ref"] for item in proposal_meta["link_evidence"])}
+            if not endpoints <= readable:
+                raise PermissionError("Link endpoints must be within the executing Agent's Knowledge scope")
+            reads = context.get("_article_reads", {})
+            for ref in sorted(endpoints):
+                endpoint = link_resolver.by_ref[ref.casefold()]
+                receipt = reads.get(ref, {})
+                expected = hashlib.sha256(endpoint.text().encode()).hexdigest()
+                if receipt.get("complete") is not True or receipt.get("article_sha256") != expected:
+                    raise ValueError("Link requires a complete current vault.read of each changed endpoint: " + ref)
         proposal_meta["proposal_body_sha256"] = hashlib.sha256(body.encode()).hexdigest()
     accepted_note = load_note(target) if action == "update" else None
     effective_meta = dict(accepted_note.meta) if accepted_note else {}
