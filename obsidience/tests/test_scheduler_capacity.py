@@ -21,7 +21,7 @@ def admission(ledger, monkeypatch):
     monkeypatch.setattr(scheduler, "_autonomous_interruptions", {})
     monkeypatch.setattr(scheduler, "_foreground_admissions", 0)
     monkeypatch.setattr(RUNTIME, "scheduler_paused", lambda: False)
-    monkeypatch.setattr(scheduler, "_resource_error", lambda _note, _model=None: None)
+    monkeypatch.setattr(scheduler, "_resource_error", lambda _note, _model=None, **_snapshot: None)
     prepared = []
     monkeypatch.setattr(scheduler, "prepare_task", lambda note: prepared.append(note.ref) or True)
     return prepared
@@ -280,7 +280,7 @@ def test_unprepared_head_does_not_consume_free_capacity(admission, monkeypatch):
 def test_resource_wait_remains_pending_and_does_not_reserve_slot(admission, monkeypatch):
     inbox = waiting("Tasks/ingest", event="source.inbox")
     ready = waiting("Tasks/link", event="task.create", triggered="2026-09-02T00:00:00")
-    monkeypatch.setattr(scheduler, "_resources_allow", lambda note, _model=None: note.ref != inbox.ref)
+    monkeypatch.setattr(scheduler, "_resources_allow", lambda note, _model=None, **_snapshot: note.ref != inbox.ref)
     calls = []
 
     async def exercise():

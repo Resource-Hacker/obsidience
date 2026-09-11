@@ -1602,3 +1602,18 @@ historical selection. Invalid older summaries do not advance the active
 sequence boundary; exact SQLite dialogue remains recoverable. Required sections
 are Goal, Constraints and corrections, Verified state, and Outstanding, each
 nonempty. Structural validity does not establish semantic truth.
+
+## Read-path latency contract
+
+Repeated status and scheduler reads reuse syntax, not authority. The existing
+Vault reader rereads each file and memoizes YAML/Markdown parsing by exact
+decoded content plus relative link-resolution path, bounded to 512 entries
+and 128 Ki characters per cached Article. It returns private mutable copies
+and projects Task state from SQLite on every read. File existence, checkout,
+expiry, review and Source integrity decisions remain fresh. Changed bytes,
+including same-size/same-mtime edits, cannot reuse an old parse. Oversized
+Articles bypass the cache. Source evidence retains per-read validation.
+The two existing safe YAML loaders use installed LibYAML when available,
+retaining timestamp and duplicate-key rules; serialization is unchanged.
+Resource admission reuses the current scheduler pass's accepted snapshot;
+actual resource reservations and execution authority are still rechecked.

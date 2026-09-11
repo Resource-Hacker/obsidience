@@ -15,6 +15,8 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from copy import deepcopy
+from functools import lru_cache
 from pathlib import Path
 
 from ..config import CONFIG
@@ -118,6 +120,17 @@ def _extract_links(meta: dict, body: str, path: str = "") -> list[str]:
     return [l.strip() for l in links if l and l.strip()]
 
 
+@lru_cache(maxsize=512)
+def _parsed_note(text: str, path: str) -> tuple[dict, str, tuple[str, ...]]:
+    """Cache parsing only, keyed by current bytes and link-resolution path.
+
+    Callers always reread the file and copy mutable output. Task state, access,
+    lifecycle and timestamps are projected fresh, never cached here.
+    """
+    meta, body = article_format.loads(text)
+    return meta, body, tuple(_extract_links(meta, body, path))
+
+
 def load_note(rel_path: str | Path) -> Note | None:
     with _NOTE_WRITE_LOCK:
         p = CONFIG.vault_dir / rel_path
@@ -125,13 +138,18 @@ def load_note(rel_path: str | Path) -> Note | None:
             return None
         if p.name.lower() in {"index.md", "log.md"}:
             return None  # OKF listings/history are never Articles.
-        meta, body = article_format.loads(p.read_text(encoding="utf-8"))
+        text = p.read_text(encoding="utf-8")
+        # Bound retained input as well as entry count; oversized Articles still
+        # parse normally, without evicting the ordinary working set.
+        parse = _parsed_note if len(text) <= 128 * 1024 else _parsed_note.__wrapped__
+        authored, body, links = parse(text, str(rel_path))
+        meta = deepcopy(authored)
         if meta.get("kind") == "task" and not str(rel_path).startswith(("_", ".")):
             from .index import INDEX
             meta = INDEX.project_task_runtime(str(Path(rel_path).with_suffix("")), meta)
         return Note(
             path=str(Path(rel_path)), title=_title_of(p, meta), meta=meta, body=body,
-            mtime=p.stat().st_mtime, links=_extract_links(meta, body, str(rel_path)),
+            mtime=p.stat().st_mtime, links=list(links),
         )
 
 

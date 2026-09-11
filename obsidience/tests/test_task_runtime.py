@@ -225,7 +225,7 @@ def test_graph_non_task_status_is_article_lifecycle_not_local_review_or_trust(le
 @pytest.mark.parametrize("historical_ref", ["Tasks/check", "Tasks/original-name"])
 def test_scheduler_restart_uses_recorded_firing_time_without_article_writes(ledger, monkeypatch, historical_ref):
     task = SimpleNamespace(
-        ref="Tasks/check", kind="task", mtime=1.0,
+        ref="Tasks/check", kind="task", title="Check", mtime=1.0,
         meta={"status": "completed", "last_run": "latest", "schedule": "0 * * * *"},
     )
     ledger.record_run(

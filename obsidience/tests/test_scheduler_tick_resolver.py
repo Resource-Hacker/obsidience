@@ -35,7 +35,7 @@ def test_tick_builds_one_role_resolver_and_reads_changes_on_next_tick(ledger, mo
 
     monkeypatch.setattr(scheduler, "Resolver", snapshot)
     monkeypatch.setattr(scheduler, "iter_notes", read_notes)
-    monkeypatch.setattr(scheduler, "_resources_allow", lambda _note: True)
+    monkeypatch.setattr(scheduler, "_resources_allow", lambda _note, **_snapshot: True)
     assert scheduler.due_tasks() == []
     assert len(snapshots) == 1  # all five Task admissions share this snapshot
     assert len(scans) == 1  # Task and role admission share the same fresh read
@@ -59,7 +59,7 @@ def test_tick_uses_supplied_snapshot_and_rechecks_resources(ledger, monkeypatch,
     resource_checks = []
     available = False
 
-    def resources(note):
+    def resources(note, *, accepted_resolver=None):
         resource_checks.append(note.ref)
         return available
 
@@ -94,3 +94,27 @@ def test_tick_reuse_preserves_attested_delegation_and_pending_fifo(ledger, monke
     after = vault.load_note(task.path)
     assert after.meta["event_queue"] == [later]
     assert after.meta["params"]["created_by_run_id"] == "missing-caller"
+
+
+def test_resource_admission_reuses_tick_snapshot_without_rescanning(monkeypatch):
+    agent=vault.Note('Agents/A/A.md','A',{'kind':'agent'},'')
+    notes=[agent,*[vault.Note(f'Tasks/pending-{i}.md','Pending',
+        {'kind':'task','status':'pending','assignee':'Agents/A/A','model':'auto'},'') for i in range(4)]]
+    monkeypatch.setattr(scheduler,'_running',set())
+    monkeypatch.setattr(scheduler,'_foreground_admissions',0)
+    monkeypatch.setattr(RUNTIME,'scheduler_paused',lambda:False)
+    monkeypatch.setattr(vault,'resolver',lambda **_kw:pytest.fail('Per-Task Vault rescan'))
+    checked=[]
+    monkeypatch.setattr(scheduler.model_runtime,'resolve_model',lambda preference,owner:(preference,owner))
+    monkeypatch.setattr(scheduler.model_runtime,'check_resources',lambda spec:checked.append(spec))
+    builds=[]
+    def build(snapshot):
+        builds.append(snapshot)
+        return vault.Resolver(snapshot)
+    monkeypatch.setattr(scheduler,'Resolver',build)
+    assert scheduler.due_tasks(notes)==notes[1:]
+    assert builds==[notes]
+    assert checked==[('auto',agent.ref)]*4
+    assert scheduler.due_tasks(notes)==notes[1:]
+    assert len(builds)==2 and len(checked)==8
+    assert not scheduler._running

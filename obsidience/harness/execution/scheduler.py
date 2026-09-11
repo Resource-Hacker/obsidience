@@ -738,13 +738,14 @@ def _realtime_allows(note: Note, accepted_resolver: Resolver | None = None) -> b
     return isinstance(params, dict) and _interactive_occurrence(note.ref, params)
 
 
-def _resource_error(note: Note, model: str | None = None) -> model_runtime.ModelResourceUnavailable | None:
+def _resource_error(note: Note, model: str | None = None, *,
+                    accepted_resolver: Resolver | None = None) -> model_runtime.ModelResourceUnavailable | None:
     """Ask the model owner about the Task's unchanged selection before claim."""
     from ..knowledge.vault import resolver
 
     if note.meta.get("subtasks"):
         return None  # Containers do not lease their own model.
-    res = resolver()
+    res = accepted_resolver if accepted_resolver is not None else resolver(include_system=False)
     agent = res.resolve(str(note.meta.get("assignee", "Agents/Executive/Executive")))
     agent_ref = (
         agent.ref if agent and (agent.kind == "agent" or agent.ref == "Agents/Executive/Executive")
@@ -762,8 +763,9 @@ def _resource_error(note: Note, model: str | None = None) -> model_runtime.Model
     return None
 
 
-def _resources_allow(note: Note, model: str | None = None) -> bool:
-    error = _resource_error(note, model)
+def _resources_allow(note: Note, model: str | None = None, *,
+                     accepted_resolver: Resolver | None = None) -> bool:
+    error = _resource_error(note, model, accepted_resolver=accepted_resolver)
     reason = RESOURCE_WAIT_PREFIX + str(error) if error else ""
     previous = str(note.meta.get("blocked_reason", ""))
     if reason and previous != reason:
@@ -1408,8 +1410,10 @@ def due_tasks(notes: list[Note] | None = None) -> list:
                 due.append((2, nxt, note.ref, note))
         elif not schedule and status == "pending":
             due.append((2, note.mtime, note.ref, note))
+    if due and accepted_resolver is None:
+        accepted_resolver = Resolver(notes)
     return [note for _kind, _since, _ref, note in sorted(due, key=lambda item: item[:3])
-            if _resources_allow(note)]
+            if _resources_allow(note, accepted_resolver=accepted_resolver)]
 
 
 async def _run(note, **run_kwargs) -> None:

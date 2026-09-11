@@ -20,7 +20,7 @@ def projected(tmp_path, monkeypatch, isolated_task_ledger):
     monkeypatch.setattr(source, "list_source_files", lambda: {"files": [], "issues": []})
     monkeypatch.setattr(isolated_task_ledger, "graph", lambda: {"nodes": [], "links": []})
     monkeypatch.setattr(api.scheduler, "_realtime_allows", lambda *_args: True)
-    monkeypatch.setattr(api.scheduler, "_resource_error", lambda *_args: None)
+    monkeypatch.setattr(api.scheduler, "_resource_error", lambda *_args, **_snapshot: None)
     return isolated_task_ledger
 
 

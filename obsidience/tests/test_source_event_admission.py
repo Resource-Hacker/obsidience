@@ -19,7 +19,7 @@ def ledger(tmp_path, monkeypatch):
     current = index.Index()
     monkeypatch.setattr(index, "INDEX", current)
     monkeypatch.setattr(scheduler, "INDEX", current)
-    monkeypatch.setattr(scheduler, "_resource_error", lambda _task: None)
+    monkeypatch.setattr(scheduler, "_resource_error", lambda _task, **_snapshot: None)
     monkeypatch.setattr(assignments, "ensure_task_runbook", lambda *_args: {"status": "ready"})
     for event, ref in source.SOURCE_EVENT_TASKS.items():
         vault.write_note(ref + ".md", {

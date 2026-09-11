@@ -60,14 +60,14 @@ OBSIDIENCE_FIELDS = frozenset({
 }) | TASK_RUNTIME_FIELDS
 
 
-class _Loader(yaml.SafeLoader):
+class _Loader(getattr(yaml, "CSafeLoader", yaml.SafeLoader)):
     """Keep authored timestamp spellings, including offsets, as strings."""
 
 
 _Loader.yaml_implicit_resolvers = {
     key: [(tag, pattern) for tag, pattern in values
           if tag != "tag:yaml.org,2002:timestamp"]
-    for key, values in yaml.SafeLoader.yaml_implicit_resolvers.items()
+    for key, values in _Loader.yaml_implicit_resolvers.items()
 }
 
 

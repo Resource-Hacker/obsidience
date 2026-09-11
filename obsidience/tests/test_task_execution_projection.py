@@ -37,7 +37,7 @@ def test_pending_realtime_wait_keeps_failed_history_without_marking_live_error(t
     task.meta["status"] = "pending"
     monkeypatch.setattr(api.scheduler, "_realtime_allows", lambda *_args: False)
     monkeypatch.setattr(api.realtime.RUNTIME, "scheduler_paused", lambda: True)
-    monkeypatch.setattr(api.scheduler, "_resource_error", lambda *_args: pytest.fail("no GPU query while paused"))
+    monkeypatch.setattr(api.scheduler, "_resource_error", lambda *_args, **_snapshot: pytest.fail("no GPU query while paused"))
     result = api.task_execution_state(task, NS())
     assert result["state"] == "waiting" and "Realtime" in result["reason"]
     assert result["label"] == "Paused: Realtime"
