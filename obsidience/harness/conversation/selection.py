@@ -47,7 +47,9 @@ Choose the requested behavior, not the sentence's grammatical form:
 
 application is a canonical registered ID for launch, an exact application ID
 from the current scene for other computer outcomes, or null for answer or pane
-targets. computer_scope is null except for action. A named application absent
+targets. For a launch whose application is not registered or is unresolved,
+return application=null. Never substitute an unrelated registered application
+just because it fits the response schema; null requests clarification. computer_scope is null except for action. A named application absent
 from the scene may still be launched; absence is not ambiguity. An in-app action
 needs a scene application. 'Open the game' requests launch; 'start a match' in
 an open game requests action/state; 'click Play' requests action/input.
@@ -177,7 +179,7 @@ def _schema(candidates: dict[str, Note], scene_applications: set[str]) -> dict:
     for outcome in OUTCOMES:
         if (QUERY_REF if outcome == "answer" else OPERATE_REF) not in candidates:
             continue
-        applications = ([None] if outcome == "answer" else sorted(APPLICATIONS)
+        applications = ([None] if outcome == "answer" else [None, *sorted(APPLICATIONS)]
                         if outcome == "launch" else sorted(scene_applications)
                         if outcome == "action" else [None, *sorted(scene_applications)])
         if not applications:
@@ -227,7 +229,11 @@ def _validated_selection(reply, candidates, scene_applications):
             raise TaskSelectionError("Task selection returned an invalid application binding.")
         if outcome != "launch" and application not in scene_applications:
             raise TaskSelectionError("Task selection application is absent from the semantic scene.")
-    if outcome in {"action", "launch"} and application is None:
+    if outcome == "launch" and application is None:
+        # Explicit target abstention narrows to clarification, never an effect.
+        # Missing fields and unknown non-null IDs are still invalid responses.
+        return QUERY_REF, "answer", None, None
+    if outcome == "action" and application is None:
         raise TaskSelectionError("Task selection did not identify the required application.")
     return ref, outcome, application, scope
 
