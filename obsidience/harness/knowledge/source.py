@@ -208,7 +208,7 @@ def feed_source_binding(source_id: str, *, index=None, restore: bool = True) -> 
             "published": item.get("published")}
 
 
-class _StrictLoader(yaml.SafeLoader):
+class _StrictLoader(getattr(yaml, "CSafeLoader", yaml.SafeLoader)):
     pass
 
 

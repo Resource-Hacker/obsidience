@@ -124,6 +124,12 @@
       "verified_python_version": "3.14.7",
       "verified_sqlite_version": "3.53.4",
       "integration": "Use the installed standard-library driver with serialized SQLite and cached_statements=0 on the shared Index connection. Avoid concurrent prepared-statement reuse while preserving existing write transactions and Source lock ownership. No upstream code, extra connection, dependency, retry service or database migration added."
+    },
+    "pyyaml_libyaml_parser": {
+      "repository": "https://github.com/yaml/pyyaml",
+      "version": "6.0.3",
+      "license": "MIT",
+      "integration": "Use the installed optional CSafeLoader in existing OKF and strict Source parsers, falling back to SafeLoader. No new dependency or global monkeypatch. Preserve OKF timestamp spellings, duplicate Source-key rejection, and unchanged safe_dump serialization. No trust or integrity verdict is cached."
     }
   }
 }

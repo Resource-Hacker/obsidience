@@ -19,7 +19,7 @@ def health_ledger(tmp_path, monkeypatch, isolated_task_ledger):
     monkeypatch.setattr(CONFIG, "vault_dir", tmp_path / "vault")
     monkeypatch.setattr(scheduler, "_running", set())
     monkeypatch.setattr(scheduler, "_last_fired", {})
-    monkeypatch.setattr(scheduler, "_resource_error", lambda _task: None)
+    monkeypatch.setattr(scheduler, "_resource_error", lambda _task, **_snapshot: None)
     monkeypatch.setattr(assignments, "ensure_task_runbook", lambda *_args: {"status": "ready"})
     monkeypatch.setattr(scheduler.action_trace, "emit", lambda *_args: None)
     monkeypatch.setattr(scheduler, "launch", lambda *_args, **_kwargs: pytest.fail("Reconciliation must only admit an occurrence"))

@@ -108,7 +108,7 @@ def test_research_can_return_evidence_before_publication(isolated_task_ledger):
 
 def test_queued_receipt_identifies_its_own_occurrence(isolated_task_ledger, monkeypatch):
     vault.write_note('Tasks/example.md', {'kind':'task','title':'Example','triggers':['task.create']}, 'Work.')
-    monkeypatch.setattr(scheduler, '_resource_error', lambda *args: None)
+    monkeypatch.setattr(scheduler, '_resource_error', lambda *args, **_snapshot: None)
     first = scheduler.enqueue_event(vault.load_note('Tasks/example.md'), {'event':'task.create','activation_key':'first'})
     second = scheduler.enqueue_event(vault.load_note('Tasks/example.md'), {'event':'task.create','activation_key':'second'})
     assert first['activation_id'] and second['activation_id'] and first['activation_id'] != second['activation_id']
