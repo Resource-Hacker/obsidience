@@ -14,5 +14,5 @@ so it is not repeated in this Article before execution.
 This branch holds runtime observations, not a second transcript database.
 [Compact](/Tasks/observations/immediate/compact.md) condenses the older completed
 prefix into a separate [Temporary Observation](/Agents/Executive/Observations/Temporary%20Observations/Temporary%20Observations.md) and keeps recent exact dialogue.
-See [Observation lifecycle](/Agents/Executive/Architecture/observations.md) for
+See [Observation lifecycle](/Agents/Executive/Architecture/Harness/observations.md) for
 retention and promotion rules.

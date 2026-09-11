@@ -13,4 +13,4 @@ Live acceptance verified authentication, credential-helper routing, attribution,
 
 ## Relationships
 
-- `implements` [Local-first architecture](/Agents/Executive/Architecture/local-first-architecture--7d8e77cc.md) — Dedicated local repositories and keyring-backed credentials keep project state owner-controlled without embedding secrets in the graph.
+- `implements` [Local-first architecture](/Agents/Executive/Architecture/Harness/local-first-architecture--7d8e77cc.md) — Dedicated local repositories and keyring-backed credentials keep project state owner-controlled without embedding secrets in the graph.

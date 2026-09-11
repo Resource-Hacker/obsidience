@@ -44,6 +44,6 @@ his own consequential change. A clean audit is a valid result.
 
 - `governs` [Alexandria](/Agents/Alexandria/Alexandria.md) — Heimdall verifies curator evidence and graph effects.
 - `governs` [Darwin](/Agents/Darwin/Darwin.md) — Heimdall verifies research acquisition and findings.
-- `governs` [Task activation](/Agents/Executive/Architecture/task-activation--b30a4642.md) — Heimdall audits execution evidence without becoming another scheduler.
+- `governs` [Task activation](/Agents/Executive/Architecture/Harness/task-activation--b30a4642.md) — Heimdall audits execution evidence without becoming another scheduler.
 
 Heimdall independently evaluates Darwin-authored Runbook candidates through Audit and harness.evaluate. Frozen Tool trials produce internal Source evidence through the controller without editing existing Source or performing live effects. Check and receipt-safe Repair retain their existing separate outcomes.
