@@ -1661,3 +1661,27 @@ def test_misrouted_turn_rechecks_once_without_new_user_turn(monkeypatch, source,
         assert [row['role'] for row in turns] == ['user']
     assert speech._phase != 'off'
     assert len([item for item in spoken if item['type'] == 'speak']) == (1 if source == 'realtime' else 0)
+
+@pytest.mark.parametrize("interruption", ["generation", "clarification"])
+def test_admission_recheck_cannot_outlive_cancellation_or_ignore_clarification(monkeypatch, interruption):
+    runtime = ConversationRuntime(MemoryConversation())
+    selections, attempts = [], []
+    async def select(text, transport, **kwargs):
+        selections.append(kwargs)
+        correcting = kwargs.get("reclassification") is True
+        if correcting and interruption == "generation":
+            runtime._generation += 1
+        ref = "Tasks/executive/operate" if correcting else "Tasks/query"
+        return resolver().resolve(ref), {"request":text,"computer_outcome":"launch" if correcting else "answer"}, "chat.request"
+    async def run(task, **kwargs):
+        attempts.append(task.ref)
+        if interruption == "clarification":
+            kwargs["steering"].applied.append("a-persisted-clarification")
+        return {"status":"failed","run_id":"first","routing_reclassification":True}
+    monkeypatch.setattr(conversation_runtime, "select_task", select)
+    monkeypatch.setattr(executor, "run_task", run)
+    result = asyncio.run(runtime.submit("Can you start TFT?"))
+    assert attempts == ["Tasks/query"]
+    assert len(selections) == (2 if interruption == "generation" else 1)
+    assert result["status"] == ("interrupted" if interruption == "generation" else "failed")
+    assert [turn["role"] for turn in runtime._conversation.turns] == ["user"]
