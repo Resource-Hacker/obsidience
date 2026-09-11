@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 from copy import deepcopy
+from itertools import product
 import json
 from types import SimpleNamespace as NS
 
@@ -18,8 +19,15 @@ from obsidience.harness.models.llm import ChatReply
 
 
 def choice(outcome="answer", application=None, scope=None):
-    return {"task_ref": selection.QUERY_REF if outcome == "answer" else selection.OPERATE_REF,
-            "computer_outcome": outcome, "application": application, "computer_scope": scope}
+    return {"computer_outcome": outcome, "application": application, "computer_scope": scope}
+
+
+def context_payload(messages):
+    return json.loads(messages[1]["content"].split("\n", 1)[1])
+
+
+def current_request(messages):
+    return json.loads(messages[-1]["content"].split("\n", 1)[1])["objective"]
 
 
 @pytest.fixture
@@ -84,22 +92,27 @@ def test_incident_requests_receive_context_before_the_structured_choice(admissio
     admission.response = choice(outcome, "teamfight_tactics" if outcome == "action" else None, scope)
     context = "User: Click Normal in TFT.\nExecutive: The Normal tile was clicked."
     task, params, event = admission.run(utterance, conversation_context=context)
-    assert task.ref == admission.response["task_ref"]
+    assert task.ref == (selection.QUERY_REF if outcome == "answer" else selection.OPERATE_REF)
     assert params["request"] == utterance and params["computer_outcome"] == outcome
     assert event == "voice.activation" and params["source"] == "voice"
     assert params.get("computer_scope") == scope
     assert len(admission.calls) == len(admission.leases) == len(admission.releases) == 1
     messages, kwargs = admission.calls[0]
-    payload = json.loads(messages[1]["content"])
-    assert payload["objective"] == utterance and payload["recent_conversation"] == context
+    payload = context_payload(messages)
+    assert current_request(messages) == utterance and payload["recent_conversation"] == context
+    assert "objective" not in payload
     assert payload["shell_scene"] == admission.scene
     assert payload["task_catalog"] == [
         {"task_ref": note.ref, "title": note.title, "outcome": note.body}
         for note in admission.assigned
     ]
+    assert next(item for item in payload["registered_applications"]
+                if item["name"] == "teamfight_tactics")["aliases"] == ["tft"]
     assert kwargs["reasoning_effort"] == "none" and kwargs["temperature"] == 0
     assert kwargs["max_tokens"] == 192 and "allowed_tools" not in kwargs
-    assert kwargs["response_schema"]["properties"]["task_ref"]["enum"] == [selection.QUERY_REF, selection.OPERATE_REF]
+    branches = kwargs["response_schema"]["anyOf"]
+    assert [b["properties"]["computer_outcome"]["const"] for b in branches] == list(selection.OUTCOMES)
+    assert all("task_ref" not in b["properties"] for b in branches)
     assert admission.preferences == [("configured-query-model", selection.EXECUTIVE_REF)]
     assert admission.events[0][:2] == ("model", "Task selection timing")
     assert utterance not in repr(admission.events)
@@ -117,7 +130,7 @@ def test_historical_no_effect_evidence_cannot_leak_private_trace_material(admiss
                           "verified_scope": "click", "delivery": "acknowledged", "semantic_postcondition_verified": False,
                           "args": {"point": {"x": 1, "y": 2}}, "_private_image_png": "private pixels"}]
     admission.run("It's already up", historical_evidence=[evidence])
-    payload = json.loads(admission.calls[0][0][1]["content"])
+    payload = context_payload(admission.calls[0][0])
     record = payload["historical_execution_evidence"][0]
     assert record["effect_dispatched"] is False and record["current_state"] is False
     assert record["tools"] == [{"tool": "computer.act", "target": {"kind": "application", "name": "teamfight_tactics"},
@@ -133,8 +146,8 @@ def test_context_bound_preserves_recent_whole_paragraphs_and_exact_request(admis
     context = "old " * 4000 + "\n\nUser: Select Normal.\nExecutive: Clicked.\n\nUser: Start it."
     request = "  Please start it.  "
     _, params, _ = admission.run(request, conversation_context=context)
-    payload = json.loads(admission.calls[0][0][1]["content"])
-    assert params["request"] == payload["objective"] == request
+    payload = context_payload(admission.calls[0][0])
+    assert params["request"] == current_request(admission.calls[0][0]) == request
     assert len(payload["recent_conversation"]) <= selection.MAX_CONTEXT_CHARS
     assert payload["recent_conversation"].endswith("User: Select Normal.\nExecutive: Clicked.\n\nUser: Start it.")
     assert "Earlier conversation omitted" in payload["recent_conversation"]
@@ -148,10 +161,11 @@ def test_context_bound_preserves_recent_whole_paragraphs_and_exact_request(admis
     choice("action", "teamfight_tactics", "state") | {"task_ref": selection.QUERY_REF},
     choice("observation"), choice("action", "teamfight_tactics"),
     choice("action", None, "state"), choice("action", "invented-app", "state"),
-    choice("launch", "fixture.editor"), choice("launch"),
+    choice("launch", "fixture.editor"),
     choice("answer", "teamfight_tactics"), choice("observe", "teamfight_tactics", "input"),
-    '{"task_ref":"Tasks/query","task_ref":"Tasks/executive/operate","computer_outcome":"answer"}',
-    '```json\n{"task_ref":"Tasks/query","computer_outcome":"answer"}\n```',
+    choice() | {"computer_outcome": []}, choice() | {"computer_scope": {}},
+    '{"computer_outcome":"answer","computer_outcome":"launch","application":null,"computer_scope":null}',
+    '```json\n{"computer_outcome":"answer","application":null,"computer_scope":null}\n```',
 ])
 def test_invalid_or_incoherent_selection_never_falls_back_to_a_task(admission, response):
     admission.response = response
@@ -177,7 +191,8 @@ def test_unassigned_and_changed_tasks_cannot_be_admitted(admission):
     admission.response = choice("action", "teamfight_tactics", "state")
     with pytest.raises(selection.TaskSelectionError, match="unavailable"):
         admission.run("Start the match")
-    assert admission.calls[0][1]["response_schema"]["properties"]["task_ref"]["enum"] == [selection.QUERY_REF]
+    branches = admission.calls[0][1]["response_schema"]["anyOf"]
+    assert [b["properties"]["computer_outcome"]["const"] for b in branches] == ["answer"]
     admission.assigned = []
     with pytest.raises(selection.TaskSelectionError, match="Query Task is unavailable"):
         admission.run("Hello")
@@ -227,3 +242,46 @@ def test_oversized_request_is_rejected_before_model_admission(admission):
     with pytest.raises(selection.TaskSelectionError, match="bound"):
         admission.run("x" * (selection.MAX_REQUEST_CHARS + 1))
     assert not admission.calls and not admission.leases
+
+
+def test_schema_only_offers_combinations_accepted_by_the_controller(admission):
+    candidates = selection._catalog()
+    apps = selection._scene_applications(admission.scene)
+    for branch in selection._schema(candidates, apps)["anyOf"]:
+        props = branch["properties"]
+        values = [[item["const"]] if "const" in item else item["enum"]
+                  for item in props.values()]
+        for combination in product(*values):
+            value = dict(zip(props, combination, strict=True))
+            result = selection._validated_selection(
+                ChatReply(content=json.dumps(value), finish_reason="stop", completion_tokens=32), candidates, apps)
+            if value["computer_outcome"] == "launch" and value["application"] is None:
+                assert result == (selection.QUERY_REF, "answer", None, None)
+            else:
+                assert result[1:] == (value["computer_outcome"], value["application"], value["computer_scope"])
+    empty = selection._schema(candidates, set())["anyOf"]
+    assert "action" not in [b["properties"]["computer_outcome"]["const"] for b in empty]
+
+
+def test_recheck_feedback_never_replaces_the_exact_owner_request(admission):
+    request = "Do not start it."
+    task, params, _ = admission.run(request, conversation_context="User: Open TFT.", reclassification=True)
+    messages, _ = admission.calls[0]
+    assert "recheck" in messages[0]["content"]
+    assert current_request(messages) == params["request"] == request
+    assert task.ref == selection.QUERY_REF and len(admission.calls) == 1
+
+
+@pytest.mark.parametrize("value", [1, "true", None])
+def test_invalid_recheck_flag_never_acquires_a_model(admission, value):
+    with pytest.raises(selection.TaskSelectionError):
+        admission.run("Open TFT", reclassification=value)
+    assert not admission.calls and not admission.leases
+
+def test_unresolved_launch_requests_clarification_without_inventing_an_application(admission):
+    admission.response = choice("launch", None, None)
+    task, params, event = admission.run("Open NonexistentApp.")
+    assert task.ref == selection.QUERY_REF
+    assert params["computer_outcome"] == "answer"
+    assert "application" not in params and "operation" not in params
+    assert params["request"] == "Open NonexistentApp."

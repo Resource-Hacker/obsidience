@@ -1947,3 +1947,21 @@ historical selection. Invalid older summaries do not advance the active
 sequence boundary; exact SQLite dialogue remains recoverable. Required sections
 are Goal, Constraints and corrections, Verified state, and Outstanding, each
 nonempty. Structural validity does not establish semantic truth.
+
+## Executive admission correction: 2026-09-11
+
+The selector classifies a coherent computer_outcome/application/computer_scope
+combination. The controller derives its exact assigned Task, rereads the
+accepted catalog and retains normal executor authorization. The exact current
+request has its own final data message; historical dialogue is separate.
+The grammar restricts field combinations, not semantic intent. Validate the
+installed model with positive, negative and contextual cases, not only mocked
+classifier responses.
+
+An interactive Query attempt to task.create Computer Use may request the
+existing one-time effect-free recheck before dispatch. It is an undispatched
+controller disposition, not a successful Tool or invented task.complete.
+The recheck uses the original request and bounded feedback, never the rejected
+Tool target as authority. No new trigger, Tool grant, model or executor exists.
+Created Tasks, effects, applied clarifications and stale generations prevent
+automatic replay. Incoherent or ambiguous outcomes remain non-effectful.

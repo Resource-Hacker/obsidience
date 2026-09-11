@@ -279,12 +279,15 @@ class ConversationRuntime:
                 conversation_evidence=prior_effects,
                 steering=inbox,
             )
-            if result.get("routing_reclassification") is True and generation == self._generation:
+            if (result.get("routing_reclassification") is True and generation == self._generation
+                    and (inbox is None or not (inbox.applied or inbox.pending))):
                 # Re-run the SAME bounded admission once. No Task or Tool is
                 # added by the failed Query, and the Objective stays unchanged.
                 corrected, correction, correction_event = await select_task(
                     text, "voice" if source == "realtime" else "text",
-                    conversation_context=context, historical_evidence=prior_effects)
+                    conversation_context=context, historical_evidence=prior_effects, reclassification=True)
+                if generation != self._generation:
+                    return {"status": "interrupted"}
                 if corrected is not None and corrected.ref == "Tasks/executive/operate":
                     correction.update(conversation_id=str(user_turn["conversation_id"]),
                         reply_to_turn_id=str(user_turn["id"]), routing_rechecked=True)
@@ -292,6 +295,9 @@ class ConversationRuntime:
                         correction["response_contract"] = SPEECH_RESPONSE_CONTRACT
                     trace.emit("event", "Admission corrected before effects", [task.ref, corrected.ref, correction_event])
                     task = corrected
+                    self._last_task_ref = task.ref
+                    if self._context_model(task.ref) != context_model:
+                        context = await self.prepare_immediate_observations(user_turn, context_task_ref=task.ref)
                     result = await run_task(task, runtime_params=correction, emit_turn_event=False,
                         interactive=True, conversation_context=context, conversation_evidence=prior_effects, steering=inbox)
             self.record_prompt_usage(result, request_text=text)

@@ -590,3 +590,37 @@ def test_completion_decoder_tracks_controller_proposal_state(execution, monkeypa
     monkeypatch.setattr(executor,'execute_capability',dispatch)
     assert asyncio.run(execution.run())['status']=='completed'
     assert observed==[True,False]
+
+def test_query_desktop_delegation_rechecks_without_dispatch_or_fake_completion(execution, monkeypatch):
+    execution.tools.append("task.create")
+    async def delegate(*_args, **_kwargs):
+        return NS(content=json.dumps({"tool":"task.create", "args":{
+            "task":"Tasks/executive/operate", "params":{"application":"teamfight_tactics"}}}),
+            prompt_tokens=100)
+    monkeypatch.setattr(executor.llm, "chat", delegate)
+    result = asyncio.run(execution.run())
+    assert result["status"] == "failed" and result["routing_reclassification"] is True
+    assert execution.calls == []
+    entries = json.loads(execution.records[-1]["trace"])
+    attempt = next(row for row in entries if row.get("tool") == "task.create")
+    assert attempt["not_dispatched"] is True
+    assert json.loads(attempt["obs"])["delivery"] == "not_dispatched"
+    assert not any(row.get("tool") == "task.complete" for row in entries)
+
+
+@pytest.mark.parametrize("change,expected", [
+    ({}, True),
+    ({"interactive":False}, False),
+    ({"task":"Tasks/executive/operate"}, False),
+    ({"params":{"routing_rechecked":True}}, False),
+    ({"_created_tasks":[{"target_task_ref":"Tasks/research/question"}]}, False),
+    ({"trace":[{"tool":"application.launch"}]}, False),
+    ({"trace":[{"tool":"task.create","obs":"rejected"}]}, False),
+    ({"trace":[{"tool":"task.create","not_dispatched":True}]}, True),
+    ({"trace":[{"tool":"vault.read"}]}, True),
+    ({"trace":[{"tool":"observations.temporary.append"}]}, False),
+])
+def test_admission_recheck_preserves_existing_effect_boundary(change, expected):
+    from obsidience.harness.capabilities.task.complete import reclassification_allowed
+    context={"task":"Tasks/query","interactive":True,"params":{},"trace":[]}
+    assert reclassification_allowed({**context,**change}) is expected
