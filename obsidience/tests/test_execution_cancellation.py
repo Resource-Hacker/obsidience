@@ -590,3 +590,49 @@ def test_completion_decoder_tracks_controller_proposal_state(execution, monkeypa
     monkeypatch.setattr(executor,'execute_capability',dispatch)
     assert asyncio.run(execution.run())['status']=='completed'
     assert observed==[True,False]
+
+
+@pytest.mark.parametrize('target', ['Tasks/executive/operate', '[[Tasks/executive/operate]]', 'Tasks/executive/operate.md'])
+def test_misrouted_query_reclassifies_before_delegation_dispatch(execution, monkeypatch, target):
+    execution.tools.append('task.create')
+    async def mistaken(*_args, **_kwargs):
+        return NS(content=json.dumps({'tool':'task.create','args':{
+            'task':target, 'params':{'application':'teamfight_tactics'}}}), prompt_tokens=100)
+    monkeypatch.setattr(executor.llm, 'chat', mistaken)
+    result = asyncio.run(execution.run(runtime_params={'request':'Can you start TFT?'}))
+    assert result['status'] == 'failed' and result['routing_reclassification'] is True
+    assert execution.calls == []  # No task.create adapter, computer effect, or synthetic task.complete.
+    recorded = json.loads(execution.records[-1]['trace'])
+    attempts = [row for row in recorded if row.get('tool') == 'task.create']
+    assert len(attempts) == 1 and attempts[0]['not_dispatched'] is True
+    receipt = executor.INDEX.tool_run_receipts(result['run_id'])
+    assert len(receipt['calls']) == 1 and receipt['calls'][0]['status'] == 'undispatched'
+    assert [row['phase'] for row in execution.events].count('query_completed') == 1
+
+
+@pytest.mark.parametrize('changes', [
+    {'interactive':False}, {'params':{'routing_rechecked':True}},
+    {'_created_tasks':[{'target_task_ref':'Tasks/research/question'}]},
+    {'trace':[{'tool':'application.launch'}]}, {'trace':[{'tool':'task.create'}]},
+    {'trace':[{'tool':'observations.temporary.append'}]},
+])
+def test_admission_repair_cannot_repeat_effects_or_prior_reclassification(changes):
+    from obsidience.harness.capabilities.task.complete import reclassification_allowed
+    assert not reclassification_allowed({'task':'Tasks/query','interactive':True,**changes})
+
+
+@pytest.mark.parametrize('field', ['applied','pending'])
+def test_reclassification_cannot_ignore_an_owner_clarification(field):
+    from obsidience.harness.capabilities.task.complete import reclassification_allowed
+    steering = NS(applied=[],pending=[])
+    setattr(steering,field,['exact-clarification'])
+    assert not reclassification_allowed({'task':'Tasks/query','interactive':True,'_steering':steering})
+
+
+def test_reclassification_allows_only_observed_readonly_or_undispatched_calls():
+    from obsidience.harness.capabilities.task.complete import reclassification_allowed
+    context = {'task':'Tasks/query','interactive':True,'trace':[
+        {'tool':'vault.read'}, {'tool':'task.create','not_dispatched':True}]}
+    assert reclassification_allowed(context)
+    context['trace'].append({'tool':'window.place','interrupted':True})
+    assert not reclassification_allowed(context)

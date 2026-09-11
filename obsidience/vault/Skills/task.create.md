@@ -8,7 +8,7 @@ obsidience:
 
 ## Runtime
 
-Select an existing accepted outcome, not a new task name. Pass one bounded objective and required bindings. Waiting for research does not transfer its Tools to the caller. Causal delegation does not create taxonomy children or authorize repeating earlier effects.
+Select an existing accepted outcome that explicitly accepts task.create, not a new task name. Computer Use is admitted from the owner turn, never delegated from Query; an effect-free misrouted Query may request task.complete reclassify:true once. Pass one bounded objective and required bindings. Waiting for research does not transfer its Tools to the caller. Causal delegation does not create taxonomy children or authorize repeating earlier effects.
 
 ## Reference
 

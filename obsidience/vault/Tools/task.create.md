@@ -9,7 +9,7 @@ obsidience:
 
 ## Runtime
 
-Activate one accepted Task with task and bounded params. This does not author a definition or grant its Tools to the caller. Question/Learn may use wait_for_result:true for a current user turn; await_publication:true additionally waits for durable publication. Preserve the exact objective and returned activation identity. Queued work is not a completed result.
+Activate one accepted Task with task and bounded params. This does not author a definition or grant its Tools to the caller. Question/Learn may use wait_for_result:true for a current user turn; await_publication:true additionally waits for durable publication. Preserve the exact objective and returned activation identity. Queued work is not a completed result. Computer Use is not a delegable research Task: an interactive Query must return to bounded admission before effects, never enqueue computer control.
 
 ## Reference
 

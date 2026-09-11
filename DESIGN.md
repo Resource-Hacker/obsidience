@@ -1904,10 +1904,10 @@ An architecture change is complete only when:
 ## Contextual Executive admission and completion: 2026-09-05
 
 The existing Conversation coordinator prepares current context before semantic
-Task admission. One bounded non-reasoning call through the configured Executive
-model selects only the assigned Query or Computer Use Task from the accepted
-outcome catalog, exact request, current semantic Shell Scene, recent dialogue and
-bounded historical Tool evidence. It creates no additional Agent, Task, model,
+Task admission. Bounded non-reasoning admission through the configured Executive model selects
+only the assigned Query or Computer Use Task from the accepted outcome catalog,
+exact request and current semantic Shell Scene. A context-dependent request may
+use one further grounding pass over recent dialogue and bounded historical Tool evidence. It creates no additional Agent, Task, model,
 scheduler or knowledge store. Invalid selection fails before Task claim; there
 is no current-text keyword fallback. Measure selection latency separately.
 
@@ -1947,3 +1947,24 @@ historical selection. Invalid older summaries do not advance the active
 sequence boundary; exact SQLite dialogue remains recoverable. Required sections
 are Goal, Constraints and corrections, Verified state, and Outstanding, each
 nonempty. Structural validity does not establish semantic truth.
+
+
+Realtime admission repair, 2026-09-11: the selector returns one exact closed
+choice binding outcome, target, and input/state scope together; the controller
+maps that tuple to an assigned Task. It cannot independently predict contradictory
+fields. Registered aliases come from the existing application registry.
+Classify the current owner message against the accepted catalog and fresh scene
+first. Only an explicit context choice supplies the existing bounded history for
+one further grounding pass, under the same model lease. A named current request
+must not inherit earlier assistant refusals or invented capabilities. Execution
+still receives its normal Immediate Observations; no history or context limit
+is deleted, compacted, or lowered by admission. Ambiguous references can clarify.
+Polite execution requests remain effects; explanations, quotations, withdrawals,
+and bare corrections do not. Choice and context usage are diagnostic routing,
+not an additional Agent, Tool, memory store, or current-text keyword fallback.
+An interactive Query attempt to task.create Computer Use is rejected before
+dispatch and requests the existing recheck once, only before effects, delegation,
+or applied/pending owner clarifications. The original user turn remains bound;
+attempted Tool target arguments do not authorize its corrected operation.
+Cancellation, missing assignments, or an unresolved recheck prevent execution.
+The trace retains an undispatched attempted call, never synthetic effect success.
