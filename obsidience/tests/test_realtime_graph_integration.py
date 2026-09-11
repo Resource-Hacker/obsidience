@@ -1618,3 +1618,46 @@ def test_invalid_semantic_selection_has_no_task_run_or_successful_pair(monkeypat
     notices = [event for event in memory.events if event["type"] == "error"]
     assert len(notices) == 1
     assert notices[0]["text"] == "I couldn't complete that request. The Action Trace has the error details."
+
+@pytest.mark.parametrize('source', ['text', 'realtime'])
+@pytest.mark.parametrize('corrected', [True, False])
+def test_misrouted_turn_rechecks_once_without_new_user_turn(monkeypatch, source, corrected):
+    runtime = ConversationRuntime(MemoryConversation())
+    speech = RealtimeSessionManager(runtime)
+    speech._phase = 'command'
+    runtime.speech = speech
+    selections, attempts, spoken = [], [], []
+    async def select(text, transport, **kwargs):
+        selections.append((text, transport, kwargs))
+        effect = len(selections) == 2 and corrected
+        ref = 'Tasks/executive/operate' if effect else 'Tasks/query'
+        params = {'request':text, 'source':transport,
+                  'computer_outcome':'launch' if effect else 'answer'}
+        if effect: params['application'] = 'teamfight_tactics'
+        return resolver().resolve(ref), params, 'voice.activation' if transport == 'voice' else 'chat.request'
+    async def run(task, **kwargs):
+        attempts.append((task.ref, kwargs))
+        if len(attempts) == 1:
+            return {'status':'failed','run_id':'misrouted', 'routing_reclassification':True}
+        return {'status':'completed','run_id':'corrected','summary':'The requested application is ready.'}
+    async def send(payload): spoken.append(payload)
+    monkeypatch.setattr(conversation_runtime, 'select_task', select)
+    monkeypatch.setattr(executor, 'run_task', run)
+    monkeypatch.setattr(speech, '_send_worker', send)
+    result = asyncio.run(runtime.submit('Can you start TFT?', source=source))
+    assert len(selections) == 2
+    assert selections[0][:2] == selections[1][:2]
+    assert selections[1][2]['reclassification'] is True
+    assert len(attempts) == (2 if corrected else 1)
+    assert result['status'] == ('completed' if corrected else 'failed')
+    turns = runtime._conversation.turns
+    assert len([row for row in turns if row['role'] == 'user']) == 1
+    if corrected:
+        assert attempts[0][1]['runtime_params']['reply_to_turn_id'] == attempts[1][1]['runtime_params']['reply_to_turn_id']
+        assert attempts[1][1]['runtime_params']['routing_rechecked'] is True
+        assert runtime._last_task_ref == 'Tasks/executive/operate'
+        assert turns[-1]['run_id'] == 'corrected' and turns[-1]['reply_to'] == turns[0]['id']
+    else:
+        assert [row['role'] for row in turns] == ['user']
+    assert speech._phase != 'off'
+    assert len([item for item in spoken if item['type'] == 'speak']) == (1 if source == 'realtime' else 0)
