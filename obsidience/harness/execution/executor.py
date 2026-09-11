@@ -1033,6 +1033,28 @@ async def _execute_session(
                 continue
             if name != "computer.act":
                 response_observation_lease = None
+            # A Query cannot delegate desktop authority through task.create.
+            # Reject that attempt before dispatch and ask the existing owner-
+            # turn selector to recheck once. The attempted args are not reused.
+            from ..capabilities.task.complete import reclassification_allowed
+            from ..knowledge.links import metadata_ref
+            if (name == "task.create" and name in allowed
+                    and isinstance(args.get("task"), str)
+                    and metadata_ref(args["task"]) == "Tasks/executive/operate"
+                    and reclassification_allowed(ctx)
+                    and (steering is None or not (steering.applied or steering.pending))):
+                status = "failed"
+                summary = "Computer delegation was not dispatched; the original request needs admission recheck."
+                disposition = {"status": "rejected", "delivery": "not_dispatched",
+                               "reason": "routing_reclassification"}
+                begin_receipt()
+                finish_receipt("undispatched", disposition)
+                trace.append({"tool": name, "args": public_args, "sig": call_sig,
+                              "obs": json.dumps(disposition), "not_dispatched": True})
+                # Controller disposition, not an invented task.complete receipt.
+                ctx["_routing_reclassification"] = True
+                emit_tool_result("Computer delegation rejected; admission recheck requested", disposition, "rejected")
+                break
             if name == "task.complete":
                 if steering is not None:
                     steering.close()
@@ -1775,7 +1797,7 @@ async def run_task(task: Note, depth: int = 0, reasoning_effort: str | None = No
             "status": status,
             "summary": summary,
             "public_summary": str(completion.get("summary", "")),
-            "routing_reclassification": completion.get("reclassify") is True,
+            "routing_reclassification": completion.get("reclassify") is True or ctx.get("_routing_reclassification") is True,
             "objective": objective,
             "activation_refs": packet_refs,
             "retrieval_ms": round(retrieval_ms, 3),
