@@ -6,7 +6,7 @@ tags:
 - invariant
 title: Unified display topology
 obsidience:
-  approved_at: '2026-09-10T16:05:37'
+  approved_at: '2026-09-10T22:38:54'
   provenance: proposed by Alexandria (task Tasks/link)
 ---
 
@@ -42,4 +42,13 @@ The [World of Warcraft launch policy](/ADMECH%20Workstation/Workstation%20Observ
 ## Relationships
 
 - `related_to` [Hyprland shell scene](/Agents/Executive/Architecture/Shell/hyprland-shell-scene.md) — The Shell scene is the bounded semantic projection of this one live compositor topology.
+- `related_to` [Shell](/Agents/Executive/Architecture/Shell/Shell.md) — The Quickshell host and WebKitGTK graph presenter in this topology are the ADMECH realization of the Shell's presentation boundary.
 - `related_to` [Samsung display configuration](/ADMECH%20Workstation/Workstation%20Observations/samsung-display-vrr-and-edid-configuration--96ccfd7b.md) — Samsung mode, color, and VRR requirements remain a specific display contract inside the unified topology.
+
+## Accepted inbound references
+- [agent-launch-and-gui-application-management--339f2788](/ADMECH%20Workstation/Workstation%20Observations/agent-launch-and-gui-application-management--339f2788.md)
+- [input-mapping-and-mouse-configuration--5579dfc0](/ADMECH%20Workstation/Workstation%20Observations/input-mapping-and-mouse-configuration--5579dfc0.md)
+- [samsung-display-vrr-and-edid-configuration--96ccfd7b](/ADMECH%20Workstation/Workstation%20Observations/samsung-display-vrr-and-edid-configuration--96ccfd7b.md)
+- [samsung-total-display-loss-incident-and-failover-contract--5c280a8c](/ADMECH%20Workstation/Workstation%20Observations/samsung-total-display-loss-incident-and-failover-contract--5c280a8c.md)
+- [tft-launch-via-rtx-4080-android-avd--3e5726a8](/ADMECH%20Workstation/Workstation%20Observations/tft-launch-via-rtx-4080-android-avd--3e5726a8.md)
+- [hyprland-shell-scene](/Agents/Executive/Architecture/Shell/hyprland-shell-scene.md)

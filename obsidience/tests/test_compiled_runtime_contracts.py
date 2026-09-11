@@ -91,3 +91,25 @@ def test_shipped_articles_use_native_okf_namespacing():
         if 'type' not in metadata and path.name in {'index.md','log.md'}: continue
         failures.extend(f'{relative}: {error}' for error in validate_profile(metadata,relative))
     assert failures == []
+
+
+def test_evidence_bound_completion_schema_requires_fields_without_forcing_success():
+    from obsidience.harness.capabilities.task.complete import completion_requires_no_change
+    from obsidience.harness.models import llm, runtime
+    ctx={'task':'Tasks/link','maintenance_candidate':{'candidate_refs':['A','B']}}
+    assert completion_requires_no_change(ctx)
+    payload=llm._chat_payload([{'role':'user','content':'Finish the inspection.'}],
+        runtime.MODELS[runtime.EXECUTIVE_MODEL], max_tokens=100, temperature=0,
+        reasoning_effort='none', allowed_tools=['task.complete'], completion_no_change=True)
+    branches=payload['response_format']['json_schema']['schema']['anyOf'][0]['properties']['args']['anyOf']
+    success, other=branches
+    assert success['properties']['status']=={'const':'completed'}
+    assert success['properties']['outcome']=={'const':'no_change'}
+    assert {'outcome','evidence'} <= set(success['required'])
+    assert success['properties']['evidence']['minItems']==1
+    assert 'failed' in other['properties']['status']['enum']
+    assert 'outcome' not in other['required']
+    assert not completion_requires_no_change({'task':'Tasks/query'})
+    assert not completion_requires_no_change({**ctx,'staged_proposals':[{'auto_approved':True,'target':'A.md'}]})
+    assert not completion_requires_no_change({**ctx,'staged_proposals':[{'staged':'','target':'A.md'}]})
+    assert 'outcome' not in registry.argument_schema('task.complete')['required']

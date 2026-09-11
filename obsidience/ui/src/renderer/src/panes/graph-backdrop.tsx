@@ -69,6 +69,7 @@ const ROOT_ID = "@vault";
 const FOCUS_LINGER_MS = 6_000;
 
 interface ActivityWireEntry {
+  run_id?: string;
   phase?: KnowledgeActivity["phase"] | "review_changed" | "graph_changed";
   review?: LinkReviewChange;
   refs?: string[];
@@ -87,6 +88,7 @@ function activityFromWire(entry: ActivityWireEntry): KnowledgeActivity | null {
   if (!entry.phase || entry.phase === "review_changed" || entry.phase === "graph_changed") return null;
   return {
     phase: entry.phase,
+    runId: entry.run_id,
     refs: Array.isArray(entry.refs) ? entry.refs : [],
     query: entry.query,
     at: typeof entry.at === "number" ? entry.at : undefined,
@@ -116,7 +118,8 @@ function latestActivityTransaction(entries: ActivityWireEntry[]): KnowledgeActiv
   let speaking: KnowledgeActivity | null = null;
   let terminal: KnowledgeActivity | null = null;
   for (const entry of activity.slice(startIndex + 1)) {
-    if ((entry.graphId ?? MAIN_GRAPH_ID) !== graphId || (entry.query ?? "") !== query) continue;
+    if ((entry.graphId ?? MAIN_GRAPH_ID) !== graphId
+      || (started.runId ? entry.runId !== started.runId : (entry.query ?? "") !== query)) continue;
     if (entry.phase === "path") path = entry;
     else if (entry.phase === "speaking") speaking = entry;
     else if (entry.phase === "query_completed" || entry.phase === "cleared") terminal = entry;
@@ -221,6 +224,7 @@ function buildThinkingRoute(cloud: GraphCloud, refs: readonly string[]): Thinkin
 
 interface NodeMenuState { id: string; x: number; y: number }
 interface ActiveThinking {
+  runId?: string;
   refs: string[];
   phase: "thinking" | "speaking";
   key: number;
@@ -287,6 +291,7 @@ export function GraphBackdrop({
   const graphFingerprint = useRef<string | null>(null);
   const activityKey = useRef(0);
   const lingerTimer = useRef<number | null>(null);
+  const activityTransaction = useRef<KnowledgeActivity | null>(null);
   const testTimers = useRef<number[]>([]);
   const satelliteTestTimer = useRef<number | null>(null);
   const [satelliteTest, setSatelliteTest] = useState<SatelliteThinkingTest | null>(null);
@@ -355,6 +360,12 @@ export function GraphBackdrop({
       }
       window.dispatchEvent(new Event("obsidience:graph-refresh"));
     };
+    const resetActivity = () => {
+      if (lingerTimer.current !== null) window.clearTimeout(lingerTimer.current);
+      lingerTimer.current = null;
+      activityTransaction.current = null;
+      setActivity(null);
+    };
     const connect = () => {
       if (stopped) return;
       socket = new WebSocket(`${WS_BASE}/ws/activity`);
@@ -366,6 +377,7 @@ export function GraphBackdrop({
             const activity = activityFromWire(message);
             if (activity) announceKnowledgeActivity(activity);
           } else if (message.type === "snapshot" && Array.isArray(message.entries)) {
+            resetActivity(); // Replace stale display state with the current stream snapshot.
             message.entries.forEach(reviewChanged);
             latestActivityTransaction(message.entries).forEach(announceKnowledgeActivity);
           }
@@ -373,7 +385,10 @@ export function GraphBackdrop({
       };
       socket.onclose = () => {
         socket = null;
-        if (!stopped) retry = window.setTimeout(connect, 1_000);
+        if (!stopped) {
+          resetActivity(); // A lost stream is not evidence that a graph is still thinking.
+          retry = window.setTimeout(connect, 1_000);
+        }
       };
     };
     connect();
@@ -385,7 +400,18 @@ export function GraphBackdrop({
   }, []);
 
   useEffect(() => onKnowledgeActivity((next: KnowledgeActivity) => {
+    const previous = activityTransaction.current;
+    const same = previous && (previous.graphId ?? "main") === (next.graphId ?? "main")
+      && (previous.runId || next.runId ? previous.runId === next.runId : previous.query === next.query);
+    const terminal = next.phase === "query_completed" || next.phase === "cleared";
+    if (terminal && !same) return; // Another run cannot finish the visible run.
+    if (!terminal && previous && next.at !== undefined && previous.at !== undefined
+      && next.at < previous.at) return;
+    if (same && (previous.phase === "query_completed" || previous.phase === "cleared")
+      && !terminal && (next.phase !== "query_started" || Boolean(next.runId))) return;
     if (lingerTimer.current !== null) window.clearTimeout(lingerTimer.current);
+    lingerTimer.current = null;
+    activityTransaction.current = next;
     if (next.phase === "cleared") {
       setActivity(null);
       return;
@@ -394,7 +420,7 @@ export function GraphBackdrop({
       activityKey.current += 1;
       setActivity({
         refs: [], phase: "thinking", key: activityKey.current, query: next.query,
-        retrievalMs: next.retrievalMs, graphId: next.graphId,
+        retrievalMs: next.retrievalMs, graphId: next.graphId, runId: next.runId,
         startedAt: next.at ?? Date.now(),
       });
       return;
@@ -403,32 +429,32 @@ export function GraphBackdrop({
       activityKey.current += 1;
       setActivity((current) => ({
         refs: next.refs, phase: "thinking", key: activityKey.current, query: next.query,
-        retrievalMs: next.retrievalMs, graphId: next.graphId,
-        startedAt: current?.query === next.query && current?.graphId === next.graphId
-          ? current.startedAt : next.at ?? Date.now(),
+        retrievalMs: next.retrievalMs ?? (same ? current?.retrievalMs : undefined),
+        graphId: next.graphId, runId: next.runId,
+        startedAt: same && current ? current.startedAt : next.at ?? Date.now(),
       }));
       return;
     }
     if (next.phase === "speaking") {
       setActivity((current) => ({
-        refs: next.refs.length > 0 ? next.refs : (current?.refs ?? []),
-        phase: "speaking",
-        key: current?.key ?? ++activityKey.current,
-        query: next.query ?? current?.query,
-        retrievalMs: next.retrievalMs ?? current?.retrievalMs,
-        graphId: next.graphId ?? current?.graphId,
-        startedAt: current?.startedAt ?? next.at ?? Date.now(),
+        refs: next.refs.length > 0 ? next.refs : (same ? current?.refs ?? [] : []),
+        phase: "speaking", key: same && current ? current.key : ++activityKey.current,
+        query: next.query, retrievalMs: next.retrievalMs ?? (same ? current?.retrievalMs : undefined),
+        graphId: next.graphId, runId: next.runId,
+        startedAt: same && current ? current.startedAt : next.at ?? Date.now(),
       }));
       return;
     }
     setActivity((current) => current ? { ...current, phase: "speaking" } : null);
     const elapsed = next.at === undefined ? 0 : Math.max(0, Date.now() - next.at);
     const remaining = Math.max(0, FOCUS_LINGER_MS - elapsed);
-    if (remaining === 0) {
+    const clear = () => {
+      if (activityTransaction.current !== next) return;
       setActivity(null);
-      return;
-    }
-    lingerTimer.current = window.setTimeout(() => setActivity(null), remaining);
+      lingerTimer.current = null;
+    };
+    if (remaining === 0) clear();
+    else lingerTimer.current = window.setTimeout(clear, remaining);
   }), []);
 
   useEffect(() => {

@@ -372,6 +372,28 @@ def _runbook_evaluation_completion_error(status: str, context: dict) -> str | No
     return None
 
 
+def _evidence_bound_completion(task_ref: str, context: dict) -> bool:
+    params = context.get("params") if isinstance(context.get("params"), dict) else {}
+    return bool(
+        context.get("maintenance_candidate")
+        or (
+            task_ref == "Tasks/ingest"
+            and context.get("event") == "source.inbox"
+        )
+        or (
+            task_ref in {"Tasks/research/question", "Tasks/research/learn"}
+            and params.get("created_by_run_id")
+            and not context.get("handoff_source_id")
+        )
+    )
+
+
+def completion_requires_no_change(context: dict) -> bool:
+    """Narrow successful completion syntax from current controller-owned state."""
+    return (_evidence_bound_completion(str(context.get("task", "")), context)
+            and not any(_staged_proposal_states(context)))
+
+
 def _completion_error(
     task,
     status: str,
@@ -444,18 +466,7 @@ def _completion_error(
             and not any((context.get("feed_publication_result") or {}).get(key)
                         for key in ("auto_approved", "already_current"))):
         return "Feed Ingest completion requires its actual bound publication; disabled Auto-curate remains Review"
-    evidence_bound_completion = bool(
-        context.get("maintenance_candidate")
-        or (
-            task.ref == "Tasks/ingest"
-            and context.get("event") == "source.inbox"
-        )
-        or (
-            task.ref in {"Tasks/research/question", "Tasks/research/learn"}
-            and params.get("created_by_run_id")
-            and not context.get("handoff_source_id")
-        )
-    )
+    evidence_bound_completion = _evidence_bound_completion(task.ref, context)
     if (
         status == "completed"
         and not staged
@@ -467,8 +478,11 @@ def _completion_error(
         )
     ):
         return (
-            "this evidence-bound execution has no staged change; complete with "
-            'outcome "no_change" and explicit evidence'
+            'this evidence-bound execution has no staged change. After completing the inspection, '
+            'send {"status":"completed","outcome":"no_change","evidence":["what was inspected"],'
+            '"summary":"why no change was warranted"}. outcome and evidence are separate args fields, '
+            'not text inside summary. If an input is inaccessible or the inspection is incomplete, '
+            'send {"status":"failed","summary":"the exact blocker"}; do not invent a change to finish'
         )
     if status != "review":
         return None
@@ -502,6 +516,17 @@ def _completion_error(
         return None
     if task.meta.get("acceptance"):
         return None
+    if approved:
+        return (
+            "The owner already approved this execution's proposal; no pending Review remains. "
+            'Finish with {"status":"completed","outcome":"changed","summary":"the approved change"}. '
+            'The controller supplies the approval evidence. Do not stage another proposal.'
+        )
+    if rejected:
+        return (
+            "The owner already rejected this execution's proposal; no pending Review remains. "
+            'Finish with status failed and report that decision without claiming a change or resubmitting it.'
+        )
     return (
         "review requires a proposal staged by this exact execution or an explicit "
         "acceptance gate authored on the Task; a deferred downstream activation "

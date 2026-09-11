@@ -11,7 +11,11 @@ obsidience:
 
 ## Runtime
 
+Use separate JSON argument fields. An ordinary answer is `{"status":"completed","summary":"the answer"}`. An evidence-bound no-change is `{"status":"completed","outcome":"no_change","evidence":["what was inspected"],"summary":"why no change is warranted"}`. Put these fields in args, never only in summary. A proposal already approved by the owner is no longer pending Review; completed/changed records that approval without another write.
+
 Finish with status:completed|failed|review and a factual summary. Use outcome:no_change and concrete evidence only after a completed evidence-bound inspection. Computer outcomes require matching current controller evidence. State actions additionally require verification:{status:established,observation:<visible evidence>}. Intent, dispatch alone, historical prose and a target label do not prove completion. Never replay uncertain effects. An interactive Query with no effects may request reclassify:true once; this only asks the controller to recheck the same Objective, never grants Tools.
+
+The controller constrains successful evidence-bound completion to separate outcome and evidence fields when no proposal or change is recorded. Failure remains available. This enforces argument structure, not the truth of supplied evidence.
 
 ## Reference
 

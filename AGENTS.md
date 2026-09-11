@@ -1032,7 +1032,10 @@ The compiler uses authored `Runtime` instruction sections and applicable
 operation sections without discarding the full reference Articles. A Runbook's
 `operation_tools` may only narrow its accepted capability set. Static registry
 argument schemas constrain each Tool with its own input shape; Tool adapters
-still verify effects, targets, and evidence. Instruction hashes and character
+still verify effects, targets, and evidence. The completion owner narrows successful
+evidence-bound completion to explicit no_change/evidence fields while no change or
+proposal is recorded. Failure remains available; a decoding constraint is not
+verification of the model's evidence. Instruction hashes and character
 ranges record what was supplied. Knowledge prose cannot become executable policy.
 
 Required context is explicitly selected through `required_context` on accepted
@@ -1352,7 +1355,10 @@ Tool bindings, generic hierarchy edges, and framework-specific vocabulary.
   letter. Do not rewrite terminal callable Tool identifiers; `vault.read` is an
   exact executable name, while its parent index is `Vault`.
 - The graph animation must represent the exact packet path for every Task
-  activation and remain passive when no work is being resolved. Automatic
+  activation and remain passive when no work is being resolved. Read/search
+  paths carry the same controller-bound graph ID, run ID and measured retrieval
+  duration as that run's start and completion. A terminal event cannot clear a
+  different graph/run or resurrect completed activity on reconnect. Automatic
   speed follows measured fast-search duration without a time clamp; its
   checkbox yields to the per-graph Animation speed slider when disabled.
   A render refresh preserves each cloud's force positions, velocities and

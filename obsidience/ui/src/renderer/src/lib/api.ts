@@ -294,6 +294,7 @@ export interface RealtimeState {
 }
 export type KnowledgeActivityPhase = "query_started" | "path" | "speaking" | "query_completed" | "cleared";
 export interface KnowledgeActivity {
+  runId?: string;
   phase: KnowledgeActivityPhase;
   refs: string[];
   query?: string;

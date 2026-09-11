@@ -27,8 +27,10 @@ PROTOCOL = """\
 ## Action protocol
 The provider constrains your public response to one JSON object. Return only:
 {"tool": "<tool-name>", "args": { ... }}
-To complete the task, use:
-{"tool": "task.complete", "args": {"status": "completed|failed|review", "summary": "<one paragraph result>"}}
+To finish, call task.complete with the arguments required by its selected
+Tool and Skill contract. Completion requirements depend on the Task. Do not
+assume status and summary alone suffice for an evidence-bound inspection.
+Outcome and evidence belong in separate args fields when the contract requires them.
 Use private reasoning when available, but put no commentary or Markdown in the
 public response. Never invent tool names.
 """
@@ -102,7 +104,7 @@ def normalize_reasoning_effort(value: object) -> str:
 def _chat_payload(messages: list[dict], spec: ModelSpec, *, max_tokens: int | None,
                   temperature: float | None, reasoning_effort: str,
                   allowed_tools: list[str] | None = None,
-                  response_schema: dict | None = None) -> dict:
+                  response_schema: dict | None = None, completion_no_change: bool = False) -> dict:
     """Build one Task-owned request for the sole executor path."""
     if response_schema is not None:
         if allowed_tools is not None:
@@ -169,7 +171,7 @@ def _chat_payload(messages: list[dict], spec: ModelSpec, *, max_tokens: int | No
             payload["response_format"] = {
                 "type": "json_schema",
                 "json_schema": {"name": "obsidience_action", "strict": True,
-                                "schema": decoder_action_schema(allowed_tools)},
+                                "schema": decoder_action_schema(allowed_tools, completion_no_change=completion_no_change)},
             }
     if reasoning_effort != "none" or spec.id == MUSE_MODEL:
         payload["reasoning_format"] = "auto"
@@ -189,14 +191,14 @@ async def chat(messages: list[dict], max_tokens: int | None = None,
                model: ModelSpec | None = None,
                allowed_tools: list[str] | None = None,
                task_context=None,
-               response_schema: dict | None = None) -> ChatReply:
+               response_schema: dict | None = None, completion_no_change: bool = False) -> ChatReply:
     effort = normalize_reasoning_effort(reasoning_effort)
     spec = model or model_runtime.configured_spec(EXECUTIVE_MODEL)
     payload = _chat_payload(
         messages, spec, max_tokens=max_tokens, temperature=temperature,
         reasoning_effort=effort,
         allowed_tools=allowed_tools,
-        response_schema=response_schema,
+        response_schema=response_schema, completion_no_change=completion_no_change,
     )
     from .context import PROMPT_SAFETY_TOKENS, TaskContext
 

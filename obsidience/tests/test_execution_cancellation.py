@@ -536,3 +536,57 @@ def test_late_failure_does_not_overwrite_a_newer_task_claim(execution, monkeypat
     assert execution.live_meta["status"] == "running"
     assert execution.records[0]["id"] != "newer-run"
     assert execution.records[0]["status"] == "failed"
+
+
+def test_specialist_read_activity_keeps_its_execution_graph_and_identity(execution, monkeypatch):
+    agent = executor.resolver().resolve("Agents/Executive/Executive")
+    agent.ref, agent.title = "Agents/Alexandria/Alexandria", "Alexandria"
+    execution.tools.append("vault.read")
+    actions = iter([
+        {"tool": "vault.read", "args": {"ref": "Shared/fact"}},
+        {"tool": "task.complete", "args": {"status": "completed", "summary": "Read the fact."}},
+    ])
+    ordinary = executor.execute_capability
+
+    async def response(*_args, **_kwargs):
+        return NS(content=json.dumps(next(actions)), prompt_tokens=100)
+
+    def dispatch(name, args, context):
+        if name == "vault.read":
+            context["_last_context_refs"] = ["Shared/fact"]
+            return "Current fact."
+        return ordinary(name, args, context)
+
+    monkeypatch.setattr(executor.llm, "chat", response)
+    monkeypatch.setattr(executor, "execute_capability", dispatch)
+    result = asyncio.run(execution.run())
+    reads = [row for row in execution.events if "Shared/fact" in row.get("refs", [])]
+    assert len(reads) == 1
+    assert reads[0]["graph_id"] == "Alexandria"
+    assert reads[0]["run_id"] == result["run_id"]
+    assert reads[0]["retrieval_ms"] == 1.25
+    lifecycle = [row for row in execution.events if row["phase"] in {"query_started", "query_completed"}]
+    assert all(row["graph_id"] == "Alexandria" and row["run_id"] == result["run_id"] for row in lifecycle)
+
+
+def test_completion_decoder_tracks_controller_proposal_state(execution, monkeypatch):
+    execution.tools.append('vault.propose')
+    monkeypatch.setattr(executor,'_maintenance_candidate_evidence',lambda *_:{'candidate_refs':['Shared/fact']})
+    observed=[]
+    actions=iter([
+        {'tool':'vault.propose','args':{'target':'Shared/fact','body':'Inspected supported fact.'}},
+        {'tool':'task.complete','args':{'status':'completed','summary':'The owner approved the update.'}},
+    ])
+    ordinary=executor.execute_capability
+    async def response(*_args,**kwargs):
+        observed.append(kwargs.get('completion_no_change',False))
+        return NS(content=json.dumps(next(actions)),prompt_tokens=100)
+    def dispatch(name,args,context):
+        if name=='vault.propose':
+            context['staged_proposals']=[{'auto_approved':True,'target':'Shared/fact.md'}]
+            return 'Approved in isolated fixture.'
+        return ordinary(name,args,context)
+    monkeypatch.setattr(executor.llm,'chat',response)
+    monkeypatch.setattr(executor,'execute_capability',dispatch)
+    assert asyncio.run(execution.run())['status']=='completed'
+    assert observed==[True,False]
