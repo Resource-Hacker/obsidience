@@ -534,20 +534,25 @@ def _completion_error(
     )
 
 
+def reclassification_allowed(context: dict) -> bool:
+    """Share the existing effect-free, one-time Query admission boundary."""
+    from obsidience.harness.capabilities.registry import READ_ONLY_CAPABILITIES
+
+    return (context.get("task") == "Tasks/query" and context.get("interactive") is True
+        and not (context.get("params") or {}).get("routing_rechecked")
+        and not context.get("_created_tasks")
+        and all(not row.get("tool") or row.get("not_dispatched") is True
+            or row["tool"] in READ_ONLY_CAPABILITIES or row["tool"] == "task.complete"
+            for row in context.get("trace", [])))
+
+
 def execute(args: dict, context: dict) -> dict:
     from obsidience.harness.knowledge.vault import resolver
 
     args = args or {}
     context = context or {}
     if args.get("reclassify") is True:
-        from obsidience.harness.capabilities.registry import READ_ONLY_CAPABILITIES
-        rows = context.get("trace", [])
-        allowed = (context.get("task") == "Tasks/query" and context.get("interactive") is True
-            and not (context.get("params") or {}).get("routing_rechecked")
-            and not context.get("_created_tasks")
-            and all(not row.get("tool") or row.get("not_dispatched") is True
-                or row["tool"] in READ_ONLY_CAPABILITIES or row["tool"] == "task.complete" for row in rows))
-        if not allowed:
+        if not reclassification_allowed(context):
             return {"accepted": False, "error": "Routing correction is allowed once before effects in an interactive Query"}
         return {"accepted": True, "status": "failed", "summary": str(args.get("summary", "Routing requires reclassification"))[:2000],
                 "outcome": "routing_reclassification", "evidence": [], "reclassify": True}
