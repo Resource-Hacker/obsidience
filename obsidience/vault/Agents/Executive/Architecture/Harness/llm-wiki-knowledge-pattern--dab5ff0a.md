@@ -8,8 +8,8 @@ sources:
 - resource: obsidience/harness/execution/scheduler.py
 title: LLM-wiki knowledge pattern
 obsidience:
-  approved_at: '2026-09-10T23:49:22.333585+00:00'
-  provenance: Owner-authorized Architecture reorganization and source audit at a3a04c6add819a67662a1116e643713a3b4c1324
+  approved_at: '2026-09-10T22:19:56'
+  provenance: proposed by Alexandria (task Tasks/link)
 ---
 
 The maintained Markdown wiki is the Agent fleet's durable knowledge. Source
@@ -49,4 +49,5 @@ handoff does not by itself accept durable claims.
 
 [Golden ontology](/Agents/Executive/Architecture/Harness/action-ontology.md) defines the Article boundaries, and
 [Observation lifecycle](/Agents/Executive/Architecture/Harness/observations.md) distinguishes temporary conversation
-context from accepted Knowledge.
+context from accepted Knowledge. The Executive's [Observations](/Agents/Executive/Observations/Observations.md)
+hierarchy is the concrete index behind that temporary-versus-durable split.
