@@ -161,7 +161,7 @@ def test_context_bound_preserves_recent_whole_paragraphs_and_exact_request(admis
     choice("action", "teamfight_tactics", "state") | {"task_ref": selection.QUERY_REF},
     choice("observation"), choice("action", "teamfight_tactics"),
     choice("action", None, "state"), choice("action", "invented-app", "state"),
-    choice("launch", "fixture.editor"), choice("launch"),
+    choice("launch", "fixture.editor"),
     choice("answer", "teamfight_tactics"), choice("observe", "teamfight_tactics", "input"),
     choice() | {"computer_outcome": []}, choice() | {"computer_scope": {}},
     '{"computer_outcome":"answer","computer_outcome":"launch","application":null,"computer_scope":null}',
@@ -255,7 +255,10 @@ def test_schema_only_offers_combinations_accepted_by_the_controller(admission):
             value = dict(zip(props, combination, strict=True))
             result = selection._validated_selection(
                 ChatReply(content=json.dumps(value), finish_reason="stop", completion_tokens=32), candidates, apps)
-            assert result[1:] == (value["computer_outcome"], value["application"], value["computer_scope"])
+            if value["computer_outcome"] == "launch" and value["application"] is None:
+                assert result == (selection.QUERY_REF, "answer", None, None)
+            else:
+                assert result[1:] == (value["computer_outcome"], value["application"], value["computer_scope"])
     empty = selection._schema(candidates, set())["anyOf"]
     assert "action" not in [b["properties"]["computer_outcome"]["const"] for b in empty]
 
