@@ -1617,3 +1617,21 @@ The two existing safe YAML loaders use installed LibYAML when available,
 retaining timestamp and duplicate-key rules; serialization is unchanged.
 Resource admission reuses the current scheduler pass's accepted snapshot;
 actual resource reservations and execution authority are still rechecked.
+
+## Executive admission correction: 2026-09-11
+
+The selector classifies a coherent computer_outcome/application/computer_scope
+combination. The controller derives its exact assigned Task, rereads the
+accepted catalog and retains normal executor authorization. The exact current
+request has its own final data message; historical dialogue is separate.
+The grammar restricts field combinations, not semantic intent. Validate the
+installed model with positive, negative and contextual cases, not only mocked
+classifier responses.
+
+An interactive Query attempt to task.create Computer Use may request the
+existing one-time effect-free recheck before dispatch. It is an undispatched
+controller disposition, not a successful Tool or invented task.complete.
+The recheck uses the original request and bounded feedback, never the rejected
+Tool target as authority. No new trigger, Tool grant, model or executor exists.
+Created Tasks, effects, applied clarifications and stale generations prevent
+automatic replay. Incoherent or ambiguous outcomes remain non-effectful.
