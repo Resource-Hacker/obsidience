@@ -736,7 +736,7 @@ def test_new_event_waits_behind_unresolved_active_occurrence(
     waiting = {"event": "source.inbox", "activation_key": "source.inbox:waiting"}
     incoming = {"event": "source.inbox", "activation_key": "source.inbox:incoming"}
     task = SimpleNamespace(
-        path="Tasks/ingest.md",
+        path="Tasks/ingest.md", ref="Tasks/ingest",
         meta={
             "status": unresolved_status,
             "params": active,

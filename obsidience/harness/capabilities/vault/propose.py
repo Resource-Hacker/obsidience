@@ -515,9 +515,12 @@ def _stage_feed_article(args: dict, context: dict) -> dict:
 
 
 def execute(args: dict, context: dict) -> str:
+    from obsidience.harness.knowledge.scope import assert_proposal_scope
+    from obsidience.harness.knowledge.vault import resolver
     try:
+        assert_proposal_scope(str((args or {}).get("target", "")), context or {}, resolver())
         result = stage_proposal(args or {}, context or {})
-    except ValueError as exc:
+    except (ValueError, PermissionError) as exc:
         return f"Proposal rejected: {exc}."
     if result.get("feed_publication") and result.get("already_current"):
         return f"Article already published at {result['target']} from this Feed item version. Accepted content and timestamps were preserved."

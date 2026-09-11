@@ -10,6 +10,13 @@ obsidience:
   - '[[Tasks/query]]'
   - '[[Tasks/observations/immediate/compact]]'
   - '[[Tasks/executive/operate]]'
+  knowledge:
+  - '[[ADMECH Workstation/ADMECH Workstation]]'
+  - '[[Games/Games]]'
+  - '[[Projects/Projects]]'
+  - '[[Websites/Websites]]'
+  - '[[News & Research/News & Research]]'
+  exclude_knowledge: []
 ---
 
 JARVIS is the personal name of the Executive, Obsidience's user-facing

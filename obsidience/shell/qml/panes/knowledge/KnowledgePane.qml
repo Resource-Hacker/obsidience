@@ -4,6 +4,7 @@ import QtQuick
 import QtQuick.Controls
 import QtWebSockets
 import "../../components/visual"
+import "../../components/knowledge"
 import "../../workspace"
 
 Rectangle {
@@ -26,6 +27,12 @@ Rectangle {
     property string errorMessage: ""
     property string bridgeError: ""
     property int requestGeneration: 0
+    ArticleCheckouts {
+        id: checkout
+        nodes: root.graphNodes
+        onChanged: root.refresh()
+        onErrorChanged: { if (error) root.errorMessage = error }
+    }
 
     color: "#bf020a12"
     clip: true
@@ -128,66 +135,6 @@ Rectangle {
         return result
     }
 
-    function buildFileTree(entries, stripPrefix) {
-        const roots = []
-        const folders = {}
-        const prefix = String(stripPrefix || "").replace(/\/$/, "")
-        for (const file of entries) {
-            if (!file || typeof file.path !== "string"
-                    || typeof file.ref !== "string") continue
-            const displayPath = prefix && file.path.startsWith(prefix + "/")
-                ? file.path.slice(prefix.length + 1) : file.path
-            const parts = displayPath.replace(/\.md$/i, "").split("/")
-                .filter(Boolean)
-            const basename = parts.pop() || file.title
-            let siblings = roots
-            let currentPath = prefix
-            let parent = null
-            for (const part of parts) {
-                currentPath = currentPath ? currentPath + "/" + part : part
-                const key = "folder:" + currentPath
-                let folder = folders[key]
-                if (!folder) {
-                    folder = {
-                        "key": key, "name": part, "path": currentPath,
-                        "folder": true, "ref": "@branch/" + currentPath,
-                        "kind": "knowledge", "children": []
-                    }
-                    folders[key] = folder
-                    siblings.push(folder)
-                }
-                parent = folder
-                siblings = folder.children
-            }
-            if (parent && file.kind === "knowledge"
-                    && String(basename).toLowerCase()
-                        === currentPath.split("/").pop().toLowerCase()) {
-                parent.ref = file.ref
-                parent.kind = file.kind
-                parent.name = file.title
-            } else {
-                siblings.push({
-                    "key": "file:" + file.ref,
-                    "name": file.title || basename,
-                    "path": file.path,
-                    "folder": false,
-                    "ref": file.ref,
-                    "kind": file.kind || "knowledge",
-                    "children": []
-                })
-            }
-        }
-        function sort(rows) {
-            rows.sort(function(left, right) {
-                if (left.folder !== right.folder) return left.folder ? -1 : 1
-                return left.name.toLowerCase().localeCompare(right.name.toLowerCase())
-            })
-            for (const node of rows) sort(node.children)
-        }
-        sort(roots)
-        return roots
-    }
-
     function subjectTree(group) {
         const subjects = {}
         const roots = []
@@ -210,34 +157,6 @@ Rectangle {
         return {"roots": roots, "subjects": subjects}
     }
 
-    function subjectByTitle(subjects, title) {
-        const needle = String(title || "").toLowerCase()
-        for (const id of Object.keys(subjects)) {
-            if (String(subjects[id].name).toLowerCase() === needle) return subjects[id]
-        }
-        return null
-    }
-
-    function groupFiles(groupId) {
-        if (groupId === "guardian") {
-            return files.filter(file => file.path.startsWith("Agents/Heimdall/"))
-        }
-        if (groupId === "curator") {
-            return files.filter(file => file.path.startsWith("Agents/Alexandria/"))
-        }
-        if (groupId === "researcher") {
-            return files.filter(file => file.path.startsWith("Agents/Darwin/")
-                || file.path.startsWith("Sources/"))
-        }
-        if (groupId === "library") {
-            return files.filter(file => /^(Tools|Skills|Tasks)\//.test(file.path))
-        }
-        return files.filter(file => !file.path.startsWith("Agents/Heimdall/")
-            && !file.path.startsWith("Agents/Alexandria/")
-            && !file.path.startsWith("Agents/Darwin/")
-            && !/^(Tools|Skills|Tasks)\//.test(file.path))
-    }
-
     function countRefs(nodes) {
         const refs = {}
         function visit(rows) {
@@ -253,124 +172,52 @@ Rectangle {
     function buildGroups() {
         const result = []
         const byId = graphMap()
-        for (const group of Array.isArray(navigation.groups)
-                ? navigation.groups : []) {
+        for (const group of navigation.groups || []) {
             const spec = subjectTree(group)
-            const identity = byId[group.root_ref]
-            if (group.id === "library") {
-                // Match the Library graph: a Tool represents its paired Skill,
-                // and Task taxonomy indexes retain the declared hierarchy.
-                const capabilities = spec.subjects["@library/Tools"]
-                const tasks = spec.subjects["@library/Tasks"]
-                const members = group.article_refs || []
-                const libraryNodes = graphNodes.filter(node => members.includes(node.id))
-                if (capabilities) {
-                    capabilities.children = projectionRoots(
-                        libraryNodes.filter(node => node.kind === "tool").map(node => node.id),
-                        "library:capabilities", members
-                    )
-                }
-                if (tasks) {
-                    tasks.children = projectionRoots(
-                        libraryNodes.filter(node => node.kind === "task"
-                            || (Array.isArray(node.tags) && node.tags.includes("task-taxonomy")))
-                            .map(node => node.id), "library:tasks", members
-                    )
-                }
-                result.push({
-                    "id": group.id, "label": group.title,
-                    "subtitle": group.subtitle, "role": group.role,
-                    "rootRef": group.root_ref, "tree": spec.roots,
-                    "count": countRefs(spec.roots)
-                })
-                // Raw files belong to Source, not a duplicate Library tree.
-                continue
-            } else if (identity && identity.dependencies) {
-                for (const field of ["tools", "skills", "runbooks", "tasks"]) {
-                    const subjectId = group.id === "executive"
-                        ? "@branch/" + field.slice(0, 1).toUpperCase() + field.slice(1)
-                        : "@sat/" + group.root_ref.split("/")[1] + "/" + field
-                    const subject = spec.subjects[subjectId]
-                    if (subject) {
-                        subject.children = projectionRoots(
-                            Array.isArray(identity.dependencies[field])
-                                ? identity.dependencies[field] : [],
-                            group.id + ":" + field,
-                            group.article_refs || []
-                        )
-                    }
-                }
-            }
-
             const members = new Set(group.article_refs || [])
-            const physical = groupFiles(group.id).filter(file =>
-                file.kind === "knowledge" && members.has(file.ref))
-            if (group.id === "executive") {
-                // Navigation owns folder identity, title and parentage. Attach
-                // each physical leaf once; its declared Article is the folder.
-                for (const declared of group.subjects || []) {
-                    if (!declared.path) continue
-                    const subject = spec.subjects[declared.id]
-                    subject.ref = declared.article_ref || declared.id
-                    for (const file of physical) {
-                        if (file.kind !== "knowledge"
-                                || file.path.slice(0, file.path.lastIndexOf("/")) !== declared.path
-                                || file.ref === declared.article_ref) continue
-                        subject.children.push({
-                            "key": "file:" + file.ref, "name": file.title,
-                            "path": file.path, "folder": false, "ref": file.ref,
-                            "kind": file.kind, "children": []
-                        })
-                    }
-                }
-                const subagents = spec.subjects["@agent/Subagents"]
-                if (subagents) subagents.children = projectionRoots(
-                    graphNodes.filter(node => node.kind === "agent" && node.id !== group.root_ref)
-                        .map(node => node.id), "executive:subagents"
-                )
-                result.push({
-                    "id": group.id, "label": group.title,
-                    "subtitle": group.subtitle, "role": group.role,
-                    "rootRef": group.root_ref, "tree": spec.roots,
-                    "count": countRefs(spec.roots)
-                })
-                continue
+            const selected = graphNodes.filter(node => members.has(node.id))
+            const identity = byId[group.root_ref]
+            for (const kind of ["tool", "skill", "runbook", "task", "agent"]) {
+                if (group.id === "library" && kind === "skill") continue
+                const field = kind + "s"
+                const title = field.slice(0, 1).toUpperCase() + field.slice(1)
+                const subjectId = group.id === "library" ? "@library/" + title
+                    : group.id === "executive" ? "@branch/" + title
+                    : "@sat/" + group.root_ref.split("/")[1] + "/" + field
+                const subject = spec.subjects[subjectId]
+                if (!subject) continue
+                const refs = group.id === "library"
+                    ? selected.filter(node => node.kind === kind
+                        || (kind === "task" && (node.tags || []).includes("task-taxonomy")))
+                        .map(node => node.id)
+                    : ((identity && identity.dependencies) || {})[field] || []
+                subject.children = projectionRoots(refs, group.id + ":" + field, group.article_refs || [])
             }
-            let prefix = ""
-            if (group.id === "guardian") prefix = "Agents/Heimdall"
-            if (group.id === "curator") prefix = "Agents/Alexandria"
-            if (group.id === "researcher") prefix = "Agents/Darwin"
-            if (group.id === "executive") prefix = "Agents/Executive"
-            const localFiles = prefix
-                ? physical.filter(file => file.path.startsWith(prefix + "/")) : []
-            const localTree = buildFileTree(localFiles, prefix)
-            for (const node of localTree) {
-                const subject = subjectByTitle(spec.subjects, node.name)
-                if (subject) {
-                    subject.children = subject.children.concat(node.children)
-                    if (node.ref && !String(node.ref).startsWith("@branch/")) {
-                        subject.ref = node.ref
-                    }
-                } else {
-                    spec.roots.push(node)
-                }
+            for (const declared of group.subjects || []) {
+                if (!declared.path) continue
+                const subject = spec.subjects[declared.id]
+                subject.ref = declared.article_ref || declared.id
+                subject.children = subject.children.concat(selected.filter(node =>
+                    node.kind === "knowledge" && !node.id.startsWith("@")
+                    && node.id !== declared.article_ref
+                    && node.id.slice(0, node.id.lastIndexOf("/")) === declared.path)
+                    .map(node => ({key: "file:" + group.id + ":" + node.id,
+                        name: node.title, path: node.id + ".md", folder: false,
+                        ref: node.id, kind: node.kind, children: []})))
             }
-            const remaining = physical.filter(file => !prefix
-                || !file.path.startsWith(prefix + "/"))
-            spec.roots = spec.roots.concat(buildFileTree(remaining, ""))
-            result.push({
-                "id": group.id, "label": group.title,
-                "subtitle": group.subtitle, "role": group.role,
-                "rootRef": group.root_ref, "tree": spec.roots,
-                "count": countRefs(spec.roots)
-            })
+            const subagents = spec.subjects["@agent/Subagents"]
+            if (subagents) subagents.children = projectionRoots(
+                graphNodes.filter(node => node.kind === "agent" && node.id !== group.root_ref)
+                    .map(node => node.id), "executive:subagents")
+            result.push({id: group.id, label: group.title, subtitle: group.subtitle,
+                role: group.role, rootRef: group.root_ref, tree: spec.roots,
+                count: countRefs(spec.roots)})
         }
         groups = result
         if (Object.keys(expandedPaths).length === 0) {
             const defaults = {}
-            for (const group of result) {
+            for (const group of result)
                 for (const node of group.tree) if (node.folder) defaults[node.key] = true
-            }
             expandedPaths = defaults
         }
         revealSelection()
@@ -470,9 +317,11 @@ Rectangle {
         const generation = requestGeneration
         let nextFiles = null
         let nextGraph = null
+        let nextCheckout = null
         function finish() {
             if (!root || generation !== root.requestGeneration
-                    || nextFiles === null || nextGraph === null) return
+                    || nextFiles === null || nextGraph === null || nextCheckout === null) return
+            checkout.applyManifest(nextCheckout)
             root.files = nextFiles
             root.graphNodes = Array.isArray(nextGraph.nodes) ? nextGraph.nodes : []
             root.navigation = nextGraph.navigation
@@ -517,8 +366,19 @@ Rectangle {
                 finish()
             } catch (error) { fail("Knowledge graph response was invalid.") }
         }
+        const checkoutRequest = new XMLHttpRequest()
+        checkoutRequest.open("GET", "http://127.0.0.1:8765/api/library/assignments")
+        checkoutRequest.onreadystatechange = function() {
+            if (checkoutRequest.readyState !== XMLHttpRequest.DONE) return
+            if (checkoutRequest.status < 200 || checkoutRequest.status >= 300) {
+                fail("Checkout state is unavailable."); return
+            }
+            try { nextCheckout = JSON.parse(checkoutRequest.responseText); finish() }
+            catch (error) { fail("Checkout state response was invalid.") }
+        }
         filesRequest.send()
         graphRequest.send()
+        checkoutRequest.send()
     }
 
     function sendShellCommand(command) {
@@ -852,7 +712,7 @@ Rectangle {
                 }
                 Text {
                     id: kindLabel
-                    anchors.right: parent.right
+                    anchors.right: checkoutIcons.left
                     anchors.rightMargin: 5
                     anchors.verticalCenter: parent.verticalCenter
                     text: row.modelData.node && !row.modelData.node.folder
@@ -861,10 +721,21 @@ Rectangle {
                     font.family: "JetBrains Mono"
                     font.pixelSize: 7
                 }
+                AgentCheckoutButtons {
+                    id: checkoutIcons
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: row.modelData.group.id === "library"
+                    width: visible ? implicitWidth : 0
+                    controller: checkout
+                    node: row.modelData.node
+                    agents: root.navigation.groups || []
+                }
+
                 MouseArea {
                     id: nodeMouse
                     anchors.left: nodeIcon.left
-                    anchors.right: parent.right
+                    anchors.right: checkoutIcons.left
                     anchors.top: parent.top
                     anchors.bottom: parent.bottom
                     hoverEnabled: true

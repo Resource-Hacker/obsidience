@@ -1,9 +1,16 @@
 ---
 type: skill
 title: Using window.activate
+description: Use the current exact name and optional Surface to disambiguate.
 obsidience:
   tool: '[[Tools/window.activate]]'
 ---
+
+## Runtime
+
+Use the current exact name and optional Surface to disambiguate. The returned scene is sufficient verification; an extra screenshot is not mandatory. Do not claim a new focus effect when the target was already active.
+
+## Reference
 
 Use `window.activate` when one existing native application or module pane must
 become the focused front window.

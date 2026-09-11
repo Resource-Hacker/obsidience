@@ -10,6 +10,7 @@ obsidience:
   - '[[Skills/model.source]]'
   - '[[Skills/model.benchmark]]'
   - '[[Skills/model.configure]]'
+  - '[[Skills/observations.temporary.append]]'
 ---
 
 1. Read the ordinary `model.added` Task parameters and select only their exact
@@ -34,3 +35,6 @@ obsidience:
 8. Complete with the measured layouts, rejected layouts, chosen settings,
    intended Task or interface role, and exact Source paths. Fail honestly if
    no fully resident safe configuration exists.
+
+
+When a useful nonredundant observation should survive this activation, optionally append one bounded unverified note to this Agent's own Temporary Observations. Do not record hidden reasoning or create a note merely to narrate routine work.

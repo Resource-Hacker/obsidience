@@ -92,10 +92,10 @@ def test_executor_checks_promote_before_compiler_model_or_tools(execution, monke
         monkeypatch.setattr(executor.llm, "chat", forbidden)
         monkeypatch.setattr(executor, "execute_capability", forbidden)
     if valid:
-        result = asyncio.run(execution.run(runtime_params={}, interactive=False))
+        result = asyncio.run(execution.run(runtime_params=None, interactive=False))
     else:
         with pytest.raises(ValueError, match="not an exact committed input"):
-            asyncio.run(execution.run(runtime_params={}, interactive=False))
+            asyncio.run(execution.run(runtime_params=None, interactive=False))
     assert (note.body, note.meta, execution.task.meta) == before
     if valid:
         assert result["status"] == "completed"
@@ -104,5 +104,6 @@ def test_executor_checks_promote_before_compiler_model_or_tools(execution, monke
     else:
         assert execution.records[-1]["status"] == "failed"
         assert "not an exact committed input" in execution.records[-1]["summary"]
-        assert execution.records[-1]["trace"] == "[]"
+        import json
+        assert all(set(row) == {"activation_id"} for row in json.loads(execution.records[-1]["trace"]))
         assert execution.calls == [] and execution.releases == 0

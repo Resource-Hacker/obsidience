@@ -165,17 +165,11 @@ def _chat_payload(messages: list[dict], spec: ModelSpec, *, max_tokens: int | No
         # Use the model spec's verified backend decoder; no new tool-call parser
         # or Tool authority. The executor still validates every argument/effect.
         if allowed_tools:
+            from ..capabilities.registry import decoder_action_schema
             payload["response_format"] = {
                 "type": "json_schema",
                 "json_schema": {"name": "obsidience_action", "strict": True,
-                                "schema": {
-                                    "type": "object", "required": ["tool", "args"],
-                                    "properties": {
-                                        "tool": {"type": "string", "enum": sorted(set(allowed_tools))},
-                                        "args": {"type": "object"},
-                                    },
-                                    "additionalProperties": False,
-                                }},
+                                "schema": decoder_action_schema(allowed_tools)},
             }
     if reasoning_effort != "none" or spec.id == MUSE_MODEL:
         payload["reasoning_format"] = "auto"

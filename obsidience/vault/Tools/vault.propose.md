@@ -1,12 +1,20 @@
 ---
 type: tool
 title: vault.propose
+description: Stage an accepted-scope Article revision with target, action:create|update|archive,
+  and applicable title/body/reason/metadata.
 obsidience:
   approved_at: '2026-08-21T04:02:35'
   binding: capability:vault.propose
   provenance: proposed by Codex (task research generation kit)
   source: obsidience/harness/capabilities/vault/propose.py
 ---
+
+## Runtime
+
+Stage an accepted-scope Article revision with target, action:create|update|archive, and applicable title/body/reason/metadata. Preserve exact Sources and current revision evidence. Feed publication uses only the bound source and target. Checkout does not allow writing another Agent's Observations. Authority and lifecycle changes retain Review. Read the Reference before generating definitions or grouped relation changes.
+
+## Reference
 
 An active controller-bound Feed Distill Inbox uses only `source` (its exact Inbox citation) and `target` (the exact activation target); optional `action` and `reason` remain documentary inputs. Omit `body`, title and authored metadata. The owner requires the complete Inbox read, preserves Darwin's entire summary, derives native resource/sources/generated fields, and stages one ordinary Article Review under the Feed's selected existing Knowledge node. The node's current Auto-curate selection controls automatic approval. A changed/deleted destination fails clearly; repeated published item versions preserve accepted content and timestamps. The Feed's active-Article limit retires exact oldest excess publications by attested Feed lineage, including earlier destinations. Incoming publication and required archival form one bounded decision through the existing Review owner; do not submit separate Feed archives.
 

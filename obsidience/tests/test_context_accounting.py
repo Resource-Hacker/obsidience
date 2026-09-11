@@ -19,7 +19,7 @@ from obsidience.tests.test_source_retrieval_scope import _note
 def nominate(monkeypatch, notes, direct):
     snapshot = vault.Resolver(notes)
     monkeypatch.setattr(retrieval, "iter_notes", lambda: pytest.fail("must use activation snapshot"))
-    monkeypatch.setattr(retrieval, "_lanes_for", lambda *_args: [(1, [(ref, 1) for ref in direct])])
+    monkeypatch.setattr(retrieval, "_lanes_for", lambda *_args, **_kwargs: [(1, [(ref, 1) for ref in direct])])
     return snapshot
 
 
@@ -40,7 +40,7 @@ def test_no_matches_and_budget_omissions_are_distinct(monkeypatch):
     assert report["estimated_used_tokens"] == len(text) // 4
     assert report["entries"][2]["included_estimated_tokens"] == 0
     assert "stale" not in report
-    monkeypatch.setattr(retrieval, "_lanes_for", lambda *_args: [])
+    monkeypatch.setattr(retrieval, "_lanes_for", lambda *_args, **_kwargs: [])
     assert retrieval.fast_context_with_refs("no facts", set(), accepted_resolver=snapshot,
                                             diagnostics=report) == ("", [])
     assert report["status"] == "no_matches"
@@ -57,7 +57,7 @@ def test_first_item_clipping_reports_exact_unicode_body_range(monkeypatch, budge
     text, refs = retrieval.fast_context_with_refs("facts", set(), budget=budget,
                                                 accepted_resolver=snapshot, diagnostics=report)
     assert (text, refs) == legacy
-    expected = "### [[Knowledge/first]] — first (direct match)\n" + note.body[:1200].strip() + "\n"
+    expected = "### [[Knowledge/first]] — first (direct match)\n" + note.body[slice(*retrieval.passage_range(note.body, "facts"))] + "\n"
     if len(expected) // 4 > budget:
         expected = expected[:budget * 4]
     assert text == expected and refs == [note.ref]
@@ -163,7 +163,7 @@ def test_shared_snapshot_rechecks_expiry_for_accounting(monkeypatch):
 
 @pytest.mark.parametrize("query,limit,status", [(" ", 5, "empty_query"), ("facts", 0, "disabled")])
 def test_skipped_search_has_explicit_accounting(monkeypatch, query, limit, status):
-    monkeypatch.setattr(retrieval, "_lanes_for", lambda *_args: pytest.fail("search must remain skipped"))
+    monkeypatch.setattr(retrieval, "_lanes_for", lambda *_args, **_kwargs: pytest.fail("search must remain skipped"))
     report = {}
     assert retrieval.fast_context_with_refs(query, set(), limit=limit, diagnostics=report) == ("", [])
     assert report["status"] == status and report["considered_count"] == 0
@@ -183,11 +183,12 @@ def test_accounting_has_bounded_entries_and_exact_candidate_counts(monkeypatch):
 def test_compiler_accounting_is_visible_but_provider_payloads_are_identical(monkeypatch, stream):
     res, agent, tasks = graph()
     note = _note("Knowledge/accepted", body="Accepted complete Knowledge.")
+    agent.meta["knowledge"] = [note.ref]
     res = vault.Resolver([*res.by_ref.values(), note])
-    monkeypatch.setattr(executor.source, "article_refs_for_trees", lambda *_args: [])
+    monkeypatch.setattr(executor.source, "article_refs_for_trees", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(executor.shell_scene.SCENE, "activation_binding", lambda: {})
     monkeypatch.setattr(executor.knowledge_activity, "emit", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(retrieval, "_lanes_for", lambda *_args: [(1, [(note.ref, 1)])])
+    monkeypatch.setattr(retrieval, "_lanes_for", lambda *_args, **_kwargs: [(1, [(note.ref, 1)])])
     kwargs = dict(agent=agent, accepted_resolver=res, params={"request": "Exact owner question"},
                   conversation_context="Owner: Earlier context.")
     activation = asyncio.run(executor.compile_activation(tasks[0], **kwargs))

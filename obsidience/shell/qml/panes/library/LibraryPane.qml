@@ -11,15 +11,11 @@ Rectangle {
     property var nodes: []
     property var tasks: []
     property var navigationAgents: []
-    property var assignments: ({})
-    property var busyAssignments: ({})
     property var expanded: ({})
     property var initializedShelves: ({})
     property var rows: []
     property string shelf: "task"
     property string query: ""
-    property string assignmentError: ""
-    property string assignmentNotice: ""
     property int reviewCount: 0
     property int acceptedCount: 0
     property int taskCount: 0
@@ -31,25 +27,6 @@ Rectangle {
     function cleanLink(value) {
         return String(value ?? "").trim()
             .replace(/^\[\[/, "").replace(/\]\]$/, "").split("|")[0]
-    }
-
-    function assignmentKey(ref, agent) {
-        return ref + "\u0000" + agent
-    }
-
-    function canAssign(node) {
-        return node && node.kind === "task" && node.synthetic !== true
-    }
-
-    function assignmentHint(ref, agent) {
-        const assignment = assignments[assignmentKey(ref, agent)]
-        if (assignment && assignment.inherited && !assignment.direct) {
-            return "Assigned by this Task's triggers or active ownership. Edit the Task in Reader."
-        }
-        return assignment && assignment.direct
-            ? "Remove the manual Task assignment"
-                + (assignment.inherited ? "; triggered or active ownership remains." : ".")
-            : "Assign this Task; its Runbook, Skills and Tools follow automatically."
     }
 
     function requestError(request, fallback) {
@@ -115,20 +92,7 @@ Rectangle {
                 reviewCount = payload.length
             }
         })
-        requestJson("GET", "/api/library/assignments", null, function(ok, payload) {
-            if (!ok || !payload || !Array.isArray(payload.assignments)) {
-                return
-            }
-            const selected = {}
-            for (const assignment of payload.assignments) {
-                if (assignment && assignment.kind === "task"
-                        && assignment.ref && assignment.agent
-                        && (assignment.direct || assignment.inherited)) {
-                    selected[assignmentKey(assignment.ref, assignment.agent)] = assignment
-                }
-            }
-            assignments = selected
-        })
+
     }
 
     function updateCounts() {
@@ -282,52 +246,6 @@ Rectangle {
     function setQuery(value) {
         query = value
         rebuildRows()
-    }
-
-    function toggleAssignment(ref, agent) {
-        const key = assignmentKey(ref, agent)
-        const assignment = assignments[key]
-        if (!canAssign(nodes.find(node => node.id === ref)) || busyAssignments[key]
-                || (assignment && assignment.inherited && !assignment.direct)) {
-            return
-        }
-        const assigned = !(assignment && assignment.direct)
-        assignmentError = ""
-        assignmentNotice = ""
-        const nextBusy = Object.assign({}, busyAssignments)
-        nextBusy[key] = true
-        busyAssignments = nextBusy
-        requestJson("PUT", "/api/library/assignments/" + encodeURI(ref), {
-            "agent": agent,
-            "assigned": assigned
-        }, function(ok, payload, error) {
-            const finishedBusy = Object.assign({}, busyAssignments)
-            delete finishedBusy[key]
-            busyAssignments = finishedBusy
-            if (!ok) {
-                assignmentError = error.slice(0, 180)
-                return
-            }
-            const nextAssignments = Object.assign({}, assignments)
-            if (payload.direct || payload.inherited) nextAssignments[key] = payload
-            else delete nextAssignments[key]
-            assignments = nextAssignments
-            const group = navigationAgents.find(candidate => candidate.role === agent)
-            const label = group ? group.title : agent
-            if (payload.activation_state === "queued") {
-                assignmentNotice = "Task assigned to " + label + ". Runbook generation is queued for review."
-            } else if (payload.activation_error) {
-                assignmentError = "Task assignment saved for " + label + ", but " + payload.activation_error
-            } else if (!payload.assignment_changed) {
-                assignmentNotice = "Task assignment is already current for " + label + "."
-            } else if (!assigned) {
-                assignmentNotice = "Manual Task assignment removed from " + label
-                    + (payload.inherited ? "; triggered or active ownership remains." : ".")
-            } else {
-                assignmentNotice = "Task assigned to " + label + ". Dependencies follow automatically."
-            }
-            refresh()
-        })
     }
 
     function roleColor(role, dimmed) {
@@ -527,7 +445,7 @@ Rectangle {
             anchors.left: parent.left
             anchors.leftMargin: 8
             anchors.verticalCenter: parent.verticalCenter
-            text: "ASSIGNMENT"
+            text: "CHECK OUT IN READER"
             color: "#405eead4"
             font.family: "JetBrains Mono"
             font.pixelSize: 8
@@ -576,36 +494,12 @@ Rectangle {
         }
     }
 
-    Rectangle {
-        id: noticeStrip
-
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.top: assignmentLegend.bottom
-        anchors.topMargin: 4
-        height: (root.assignmentError || root.assignmentNotice) ? 28 : 0
-        visible: height > 0
-        color: root.assignmentError ? "#30190a12" : "#165eead4"
-
-        Text {
-            anchors.fill: parent
-            anchors.leftMargin: 12
-            anchors.rightMargin: 12
-            text: root.assignmentError || root.assignmentNotice
-            color: root.assignmentError ? "#fda4af" : "#a7f3d0"
-            elide: Text.ElideRight
-            verticalAlignment: Text.AlignVCenter
-            font.family: "JetBrains Mono"
-            font.pixelSize: 9
-        }
-    }
-
     ListView {
         id: libraryList
 
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.top: noticeStrip.bottom
+        anchors.top: assignmentLegend.bottom
         anchors.bottom: parent.bottom
         anchors.topMargin: 4
         clip: true
@@ -741,51 +635,7 @@ Rectangle {
                         + String(libraryRow.modelData.node.title).split(".").join("/"))
                 }
 
-                Repeater {
-                    model: root.canAssign(libraryRow.modelData.node) ? root.navigationAgents : []
 
-                    delegate: Rectangle {
-                        id: assignmentButton
-
-                        required property var modelData
-                        readonly property string key: root.assignmentKey(
-                            libraryRow.modelData.node.id,
-                            modelData.role
-                        )
-                        readonly property bool selected: Boolean(root.assignments[key])
-                        readonly property bool busy: Boolean(root.busyAssignments[key])
-                        readonly property bool inheritedOnly: selected
-                            && root.assignments[key].inherited && !root.assignments[key].direct
-                        width: 24
-                        height: 24
-                        radius: 5
-                        color: selected ? Qt.alpha(root.roleColor(modelData.role, false), 0.15)
-                            : (assignmentMouse.containsMouse ? "#11071119" : "#80020a0c")
-                        border.width: 1
-                        border.color: root.roleColor(modelData.role, !selected)
-                        opacity: busy ? 0.35 : (selected ? 1.0 : 0.58)
-                        ToolTip.visible: assignmentMouse.containsMouse
-                        ToolTip.text: root.assignmentHint(libraryRow.modelData.node.id, modelData.role)
-
-                        RoleIcon {
-                            anchors.fill: parent
-                            anchors.margins: 2
-                            role: String(assignmentButton.modelData.role || "executive")
-                        }
-
-                        MouseArea {
-                            id: assignmentMouse
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: !assignmentButton.busy && !assignmentButton.inheritedOnly
-                                ? Qt.PointingHandCursor : Qt.ArrowCursor
-                            onClicked: root.toggleAssignment(
-                                libraryRow.modelData.node.id,
-                                assignmentButton.modelData.role
-                            )
-                        }
-                    }
-                }
             }
         }
 

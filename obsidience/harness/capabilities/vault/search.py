@@ -11,7 +11,8 @@ MAX_RECEIPTS = 256
 
 def execute(args: dict, context: dict) -> str:
     from obsidience.harness.knowledge.retrieval import normalize_search_scope, search
-    from obsidience.harness.knowledge.vault import iter_notes
+    from obsidience.harness.knowledge.vault import iter_notes, Resolver
+    from obsidience.harness.knowledge.scope import execution_scope
 
     args = args or {}
     batch = "queries" in args
@@ -31,7 +32,18 @@ def execute(args: dict, context: dict) -> str:
             for query in queries:
                 context.get("_vault_searches", {}).pop(query, None)
             return f"Invalid search scope: {exc}."
-    snapshot = None
+    cancel = context.get("_capability_cancel_event")
+    if cancel is not None and cancel.is_set():
+        for query in queries:
+            context.get("_vault_searches", {}).pop(query, None)
+        return (json.dumps({"results": [{"query": query, "ok": False, "result": "Search cancelled."}
+                                        for query in queries]}) if batch else "Search cancelled.")
+    snapshot = iter_notes()
+    try:
+        _agent, allowed = execution_scope(context, Resolver(snapshot))
+    except PermissionError as exc:
+        return str(exc)
+    context["_last_context_refs"] = []
     results = []
     for query in queries:
         cancel = context.get("_capability_cancel_event")
@@ -40,12 +52,7 @@ def execute(args: dict, context: dict) -> str:
             if cancel is not None and cancel.is_set():
                 output = "Search cancelled."
             else:
-                if scope is not None:
-                    if snapshot is None:
-                        snapshot = iter_notes()
-                    hits = search(query, scope=scope, snapshot=snapshot)
-                else:
-                    hits = search(query)
+                hits = search(query, scope=scope, snapshot=snapshot, allowed_refs=allowed)
                 hits = hits[:5 if batch else 10]
                 if cancel is not None and cancel.is_set():
                     output = "Search cancelled."
@@ -57,6 +64,7 @@ def execute(args: dict, context: dict) -> str:
                     if query not in receipts and len(receipts) >= MAX_RECEIPTS:
                         del receipts[next(iter(receipts))]
                     receipts[query] = {"refs": [hit["ref"] for hit in hits]}
+                    context["_last_context_refs"].extend(hit["ref"] for hit in hits)
                     if scope is not None:
                         receipts[query]["scope"] = deepcopy(scope)
                     ok = True

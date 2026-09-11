@@ -1,9 +1,16 @@
 ---
 type: skill
 title: Using computer.observe
+description: Use the scene to select an exact target; focused targets omit name.
 obsidience:
   tool: '[[Tools/computer.observe]]'
 ---
+
+## Runtime
+
+Use the scene to select an exact target; focused targets omit name. Observe without a prerequisite focus change. Interpret the attached image, not an invented screen description. After observing for a click, make computer.act the next Tool call or obtain a new observation.
+
+## Reference
 
 Use `computer.observe` to answer one bounded visual question about one current
 native application or module pane without changing focus or placement.

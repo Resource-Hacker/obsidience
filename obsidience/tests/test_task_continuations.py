@@ -50,6 +50,7 @@ def _continuation(ledger, suffix: str = "one") -> dict:
         conversation_id=f"conversation-{suffix}",
         reply_to_turn_id=f"turn-{suffix}",
         reply_source="text",
+        await_publication=True,
     )
 
 

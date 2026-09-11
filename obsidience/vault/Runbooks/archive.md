@@ -11,6 +11,7 @@ obsidience:
   - '[[Skills/vault.read]]'
   - '[[Skills/source.read]]'
   - '[[Skills/vault.propose]]'
+  - '[[Skills/observations.temporary.append]]'
 ---
 
 1. Use the supplied exact maintenance candidate refs and signals. An ordinary
@@ -50,3 +51,6 @@ retention records retirement from the active collection without declaring an
 old report false. This is not general permission to archive arbitrary Knowledge,
 reclassify elapsed `stale_after`, or delete Source. No additional model Archive
 execution is required for this deterministic policy application.
+
+
+When a useful nonredundant observation should survive this activation, optionally append one bounded unverified note to this Agent's own Temporary Observations. Do not record hidden reasoning or create a note merely to narrate routine work.

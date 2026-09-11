@@ -268,7 +268,7 @@ def test_scheduled_leaf_uses_one_task_runbook_objective_everywhere(monkeypatch) 
     monkeypatch.setattr(knowledge_activity, "emit", capture_activity)
     monkeypatch.setattr(executor, "_execute_session", complete_without_a_model)
     monkeypatch.setattr(executor.INDEX, "record_run", lambda **fields: runs.append(fields))
-    monkeypatch.setattr(executor.INDEX, "sync", lambda: None)
+    monkeypatch.setattr(executor.INDEX, "sync", lambda **_kwargs: None)
 
     result = asyncio.run(
         executor.run_task(task, emit_turn_event=False)
@@ -310,7 +310,9 @@ def test_idle_realtime_has_no_task_or_synthetic_thinking_packet(monkeypatch):
     runtime = RealtimeSessionManager(ConversationRuntime(MemoryConversation()))
     runtime._phase = "command"
     state = runtime.snapshot()
-    assert state["ready"] and state["scheduler_paused"]
+    assert state["ready"] and not state["scheduler_paused"]
+    # Idle listening is not global admission policy; real reservations and
+    # foreground demand remain independently checked by the scheduler.
     assert not {"task_ref", "task_run_id", "task_status", "model"} & state.keys()
     assert not hasattr(runtime, "_begin_task")
     assert not hasattr(runtime, "_activate_task_activity")
@@ -551,7 +553,7 @@ def test_compact_commits_the_captured_conversation_after_rotation(monkeypatch) -
         lambda **_fields: pytest.fail("successful Compact must not discard"),
     )
     monkeypatch.setattr(executor, "run_task", complete)
-    monkeypatch.setattr(indexer.INDEX, "sync", lambda: None)
+    monkeypatch.setattr(indexer.INDEX, "sync", lambda **_kwargs: None)
 
     async def seed_pair() -> None:
         user = await memory.append(role="user", source="text", text="old")
@@ -615,7 +617,7 @@ def test_compact_discards_unaccepted_output(monkeypatch, mode: str) -> None:
         lambda **_fields: pytest.fail("unaccepted Compact must not commit"),
     )
     monkeypatch.setattr(executor, "run_task", reject)
-    monkeypatch.setattr(indexer.INDEX, "sync", lambda: None)
+    monkeypatch.setattr(indexer.INDEX, "sync", lambda **_kwargs: None)
 
     async def seed_pair() -> None:
         user = await memory.append(role="user", source="text", text="old")
@@ -739,7 +741,7 @@ def test_every_realtime_utterance_emits_one_canonical_thinking_packet(monkeypatc
     )
     monkeypatch.setattr(executor, "_execute_session", complete_without_a_model)
     monkeypatch.setattr(executor.INDEX, "record_run", lambda **fields: runs.append(fields))
-    monkeypatch.setattr(executor.INDEX, "sync", lambda: None)
+    monkeypatch.setattr(executor.INDEX, "sync", lambda **_kwargs: None)
 
     runtime = RealtimeSessionManager(ConversationRuntime(MemoryConversation()))
     runtime._phase = "command"
@@ -770,8 +772,8 @@ def test_every_realtime_utterance_emits_one_canonical_thinking_packet(monkeypatc
         assert "Tasks/query" in path["refs"]
         assert "Runbooks/answer-the-user" in path["refs"]
         assert turn_memory.IMMEDIATE_OBSERVATIONS_REF in path["refs"]
-        assert "Skills/observations.temporary.append" not in path["refs"]
-        assert "Tools/observations.temporary.append" not in path["refs"]
+        assert "Skills/observations.temporary.append" in path["refs"]
+        assert "Tools/observations.temporary.append" in path["refs"]
 
     assert len(packets) == 2
     for utterance, (messages, allowed) in zip(utterances, packets, strict=True):

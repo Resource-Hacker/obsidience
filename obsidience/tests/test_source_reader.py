@@ -187,11 +187,12 @@ def test_source_tree_mapping_prefers_related_knowledge_without_exposing_files(mo
     shell_ref = "ADMECH Workstation/Applications/Obsidience/Obsidience"
     gpu_path = "obsidience/state/system/hardware/compute/rtx-4080-super.json"
     shell_path = "obsidience/state/system/applications/obsidience"
-    monkeypatch.setattr(system_schema, "system_schema", lambda: [
-        {"ref": gpu_ref, "path": gpu_path, "descriptor_path": gpu_path},
-        {"ref": shell_ref, "path": shell_path,
-         "descriptor_path": shell_path + "/application.json"},
-    ])
+    from obsidience.harness.knowledge import system
+    monkeypatch.setattr(system, "system_articles", lambda: {
+        "gpu": {"ref": gpu_ref, "path": gpu_path, "descriptor_path": gpu_path},
+        "shell": {"ref": shell_ref, "path": shell_path,
+                  "descriptor_path": shell_path + "/application.json"},
+    })
     notes = [
         SimpleNamespace(
             ref=gpu_ref,

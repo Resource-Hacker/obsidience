@@ -22,7 +22,7 @@ def _scan_counter(execution, monkeypatch):
     scans = []
     # A snapshot parameter is supported by the production resolver. This fixture
     # deliberately supplies only the already admitted isolated Executive.
-    agent = NS(ref="Agents/Executive/Executive", title="Executive", kind="agent", meta={})
+    agent = NS(ref="Agents/Executive/Executive", title="Executive", kind="agent", meta={}, body="")
     monkeypatch.setattr(executor, "resolver", lambda **_kwargs: NS(resolve=lambda _ref: agent))
     monkeypatch.setattr(executor.INDEX, "sync", lambda: scans.append(True))
     return scans

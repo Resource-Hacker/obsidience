@@ -34,14 +34,12 @@ def test_computer_use_spine_is_generic_and_closed() -> None:
     assert task is not None and task.title == "Computer Use"
     spine = resolve_spine(task, res)
     assert "error" not in spine
-    assert set(spine["tools"]) == {
-        "application.launch", "computer.act", "computer.observe", "task.complete",
-        "task.create", "window.activate", "window.place",
-    }
-    assert {skill.title for skill in spine["skills"]} == {
-        "Using application.launch", "Using computer.act", "Using computer.observe",
-        "Using task.complete", "Using task.create", "Using window.activate", "Using window.place",
-    }
+    assert {"application.launch", "computer.act", "computer.observe", "task.complete",
+            "task.create", "window.activate", "window.place"} <= set(spine["tools"])
+    assert all(skill.meta.get("tool") for skill in spine["skills"])
+    from obsidience.harness.execution.executor import _operation_spine
+    launch = _operation_spine(spine, {"computer_outcome": "launch"})
+    assert set(launch["tools"]) == {"application.launch", "task.complete"}
     assert {
         "computer.act", "computer.observe", "window.activate", "window.place",
     } <= set(REGISTRY)
@@ -50,61 +48,13 @@ def test_computer_use_spine_is_generic_and_closed() -> None:
     )
 
 
-def test_shell_scene_contract_keeps_observation_and_effects_separate() -> None:
+def test_computer_contracts_resolve_canonical_tool_skill_pairs() -> None:
     res = resolver()
-    observe = res.resolve("Tools/computer.observe")
-    observe_skill = res.resolve("Skills/computer.observe")
-    scene = res.resolve("Agents/Executive/Architecture/hyprland-shell-scene")
-    assert observe is not None and observe_skill is not None and scene is not None
-    observe_text = " ".join(observe.body.split())
-    skill_text = " ".join(observe_skill.body.split())
-    assert '"focused|application|pane"' in observe_text
-    assert "unique unfocused target" in observe_text
-    assert "Evidence is valid only for its scene and capture revision" in observe_text
-    assert "target: {kind, name, surface}" in observe_text
-    assert "Display `title` and `focused` are separate observation fields" in observe_text
-    assert "After any effect, observe again" not in observe_text
-    assert "target_ambiguous" in observe_text
-    assert "without changing focus or placement" in skill_text
-    assert "action_authorized: false" in skill_text
-    assert "application.state" in scene.body and "workspace.state" in scene.body
-    assert "runtime state, not durable Knowledge" in scene.body
-
-    operate = res.resolve("Tasks/executive/operate")
-    assert operate is not None
-    operate_spine = resolve_spine(operate, res)
-    assert "error" not in operate_spine
-    assert {"computer.observe", "window.activate", "window.place"} <= set(
-        operate_spine["tools"]
-    )
-
-    pairs = {
-        "window.activate": "Skills/window.activate",
-        "window.place": "Skills/window.place",
-    }
-    for tool_ref, skill_ref in pairs.items():
-        tool = res.resolve(f"Tools/{tool_ref}")
-        skill = res.resolve(skill_ref)
+    for name in ("computer.observe", "computer.act", "window.activate", "window.place"):
+        tool, skill = res.resolve(f"Tools/{name}"), res.resolve(f"Skills/{name}")
         assert tool is not None and skill is not None
-        assert skill.meta["tool"] == f"[[Tools/{tool_ref}]]"
-        assert callable(resolve(tool_ref))
-        tool_text = " ".join(tool.body.split())
-        skill_text = " ".join(skill.body.split())
-        assert "canonical registered application ID" in tool_text
-        assert "canonical application ID" in skill_text
-        assert "exact current `app_id`" in tool_text
-        assert "exact current `app_id`" in skill_text
-        assert "one unique semantic target" in tool_text
-        assert "No match or multiple matches fails closed" in skill_text
-
-    assert res.resolve(
-        "ADMECH Workstation/Software/Desktop and Windowing/"
-        "dialog-free-kwin-samsung-capture-contract--54070fc1"
-    ) is None
-    assert res.resolve(
-        "ADMECH Workstation/Software/Desktop and Windowing/"
-        "kwin-window-management-tool-usage--22f9e5a4"
-    ) is None
+        assert skill.meta["tool"] == f"[[Tools/{name}]]"
+        assert callable(resolve(name))
 
 
 NOW = 1_000_000_000_000

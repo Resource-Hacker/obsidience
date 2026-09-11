@@ -15,6 +15,11 @@ def window(app_id, title, *, window_id="0xprimary", visible=True, minimized=Fals
     }
 
 
+@pytest.fixture(autouse=True)
+def no_readiness_delay(monkeypatch):
+    monkeypatch.setattr(launch, "READINESS_TIMEOUT_SECONDS", 0)
+
+
 @pytest.fixture
 def scene(monkeypatch):
     cache = ShellSceneCache()

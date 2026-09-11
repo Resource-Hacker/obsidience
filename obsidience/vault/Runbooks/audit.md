@@ -16,6 +16,7 @@ obsidience:
   - '[[Skills/task.inspect]]'
   - '[[Skills/review.inspect]]'
   - '[[Skills/harness.evaluate]]'
+  - '[[Skills/observations.temporary.append]]'
   approved_at: '2026-09-09T17:57:05'
   provenance: proposed by Codex (task codex:implementation)
 ---
@@ -55,3 +56,6 @@ For other Audit activations, use the existing procedure below.
    needs no correction, use `outcome: no_change`, a short `summary`, and
    `evidence` listing the exact reads and observed justification;
    unresolved evidence is not a clean no-change verdict.
+
+
+When a useful nonredundant observation should survive this activation, optionally append one bounded unverified note to this Agent's own Temporary Observations. Do not record hidden reasoning or create a note merely to narrate routine work.

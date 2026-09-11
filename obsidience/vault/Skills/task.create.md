@@ -1,9 +1,16 @@
 ---
 type: skill
 title: Using task.create
+description: Select an existing accepted outcome, not a new task name.
 obsidience:
   tool: '[[Tools/task.create]]'
 ---
+
+## Runtime
+
+Select an existing accepted outcome, not a new task name. Pass one bounded objective and required bindings. Waiting for research does not transfer its Tools to the caller. Causal delegation does not create taxonomy children or authorize repeating earlier effects.
+
+## Reference
 
 Use `task.create` to activate one exact accepted Task from an authorized active
 execution.

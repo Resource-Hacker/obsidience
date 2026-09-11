@@ -1,9 +1,16 @@
 ---
 type: skill
 title: Using vault.read
+description: Use exact references returned by search or the active contract.
 obsidience:
   tool: '[[Tools/vault.read]]'
 ---
+
+## Runtime
+
+Use exact references returned by search or the active contract. Continue clipped reads with the returned offset and revision hash when full content is required. Do not treat an excerpt as the complete Article, and do not reread an already sufficient passage.
+
+## Reference
 
 Use `vault.read` for bounded pages of exact Articles and their deterministic inbound graph references.
 

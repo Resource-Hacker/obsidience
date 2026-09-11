@@ -2,6 +2,8 @@
 type: knowledge
 title: Golden ontology
 sources:
+- resource: obsidience/harness/knowledge/scope.py
+- resource: obsidience/harness/knowledge/index.py
 - resource: obsidience/harness/knowledge/format.py
 - resource: obsidience/harness/knowledge/dependencies.py
 - resource: obsidience/harness/capabilities/registry.py
@@ -49,6 +51,21 @@ Relative links are valid too. Root `status` describes document lifecycle only;
 Task activity, pending inputs, and results stay in SQLite. Imported `verified`
 assertions and source links never grant review approval or Tool authority.
 OKF supplies the portable document contract, not another agent runtime.
+
+## Ownership and execution identity
+
+The Library holds every accepted Article for the owner. Each separate orbiting
+Agent owns its local Knowledge and Observations and checks out selected shared
+Knowledge by exact Article identity. Search, reads, graph expansion and displayed
+membership use the same scope. Observations from another Agent are private;
+an explicitly handed-off Source supplies evidence without granting graph access.
+Reader role icons manage checkouts, not copies. Task assignment still supplies
+the exact capability closure and Knowledge checkout cannot create a Tool grant.
+
+Task is a reusable outcome definition. Activation is one requested occurrence;
+Run is one attempt; Tool receipts establish dispatch and delivery evidence.
+These runtime identities remain in the same SQLite ledger, not new Article types.
+A Task status is a view over occurrences, not permission to replay a failed effect.
 
 ## Structural rules
 

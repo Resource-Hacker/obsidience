@@ -2,6 +2,28 @@
 type: runbook
 title: Computer Use procedure
 obsidience:
+  operation_tools:
+    launch:
+    - '[[Tools/application.launch]]'
+    focus:
+    - '[[Tools/window.activate]]'
+    placement:
+    - '[[Tools/window.place]]'
+    observe:
+    - '[[Tools/computer.observe]]'
+    action:
+    - '[[Tools/computer.observe]]'
+    - '[[Tools/computer.act]]'
+    - '[[Tools/vault.read]]'
+    - '[[Tools/vault.search]]'
+    - '[[Tools/task.create]]'
+    - '[[Tools/observations.temporary.append]]'
+  runtime_sections:
+    launch: Launch
+    focus: Focus
+    placement: Placement
+    observe: Observe
+    action: Action
   owner_maintained: true
   for_agent: '[[Agents/Executive/Executive]]'
   task: '[[Tasks/executive/operate]]'
@@ -13,9 +35,40 @@ obsidience:
   - '[[Skills/computer.act]]'
   - '[[Skills/task.create]]'
   - '[[Skills/task.complete]]'
+  - '[[Skills/vault.read]]'
+  - '[[Skills/vault.search]]'
+  - '[[Skills/observations.temporary.append]]'
   approved_at: '2026-09-06T01:04:55'
   provenance: proposed by Codex (task codex:knowledge-handoff)
+  required_context:
+  - '[[ADMECH Workstation/Workstation Observations/agent-launch-and-gui-application-management--339f2788]]'
 ---
+
+## Runtime
+
+Follow only the current owner Objective and controller computer_outcome/scope. Historical dialogue resolves references, not permission for a new effect. Use exact semantic targets and current evidence. Stop on ambiguity, lock, stale identity, missing capability, cancellation or uncertain delivery. Never invent another Tool or replay an uncertain effect. Finish through task.complete with the actual evidenced result.
+
+## Launch
+
+Call application.launch once with the supplied registered identifier. Its bounded scene wait belongs to that same dispatch. ready means open, not focused. Report already open when dispatched:false. A readiness timeout is unresolved, not permission to launch again. Complete only with the returned ready witness.
+
+## Focus
+
+Call window.activate on the exact current target. Its verified scene establishes focus; no prerequisite screenshot is needed. An already active result is not a new effect.
+
+## Placement
+
+Call window.place using the exact target and current Surface tile edges. Use its verified post-scene. Only an explicit not_dispatched correction allowance permits one distinct corrected request. Never repeat uncertain delivery.
+
+## Observe
+
+Call computer.observe for the exact target and question. Interpret the attached current image and report its limitations. Observation does not change focus, placement, or application state.
+
+## Action
+
+Use sufficient supplied context; retrieve only a specific missing fact from this Agent's graph. If external evidence is essential, delegate a bounded Question/Learn before input. Then observe the exact application and immediately call computer.act at the image-selected point. input means one click; state means the requested result, with at most three verified distinct steps. Inspect each post-image, stop at the requested goal, and obtain a new observe lease before another click. For completed state outcomes provide verification:{status:established,observation:<current visible evidence>}. Inconclusive images permit read-only observation, never repeating uncertain input.
+
+## Reference
 
 Produce the bounded computer outcome requested by the owner.
 
@@ -29,3 +82,6 @@ Produce the bounded computer outcome requested by the owner.
 8. Finish with task.complete and one factual public summary. Launch needs a ready window; focus and placement need their matching verified scene. Input needs acknowledged delivery and fresh post-image. State additionally requires the immediately preceding model input to contain a current post-action image and verification: {"status":"established","observation":"concrete visible evidence for the requested state"}. This is your visual interpretation, not independent mechanical proof. If it cannot be established, finish failed with the exact observed limit. Historical evidence, a requested postcondition and a target label cannot replace current evidence.
 
 Use only the assigned Tools. Missing capability, invalid parameter, lock, stale identity or uncertain delivery is a blocker, not permission to invent a Tool, game-specific Task, or alternative mutation route.
+
+
+When a useful nonredundant observation should survive this activation, optionally append one bounded unverified note to this Agent's own Temporary Observations. Do not record hidden reasoning or create a note merely to narrate routine work.

@@ -10,6 +10,7 @@ obsidience:
   - '[[Skills/vault.search]]'
   - '[[Skills/vault.read]]'
   - '[[Skills/vault.propose]]'
+  - '[[Skills/observations.temporary.append]]'
 ---
 
 Synthesize one quality shared Task definition.
@@ -39,3 +40,6 @@ Quality gate: one outcome, narrow placement, deterministic completion evidence,
 resolved Agent and Runbook or subtask references, valid event names and model
 when supplied, no runtime occurrence state, and no procedure copied into the
 Task.
+
+
+When a useful nonredundant observation should survive this activation, optionally append one bounded unverified note to this Agent's own Temporary Observations. Do not record hidden reasoning or create a note merely to narrate routine work.

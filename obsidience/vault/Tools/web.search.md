@@ -1,10 +1,17 @@
 ---
 type: tool
 title: web.search
+description: Acquire bounded current-source leads using query and optional limit.
 obsidience:
   binding: capability:web.search
   source: obsidience/harness/capabilities/web/search.py
 ---
+
+## Runtime
+
+Acquire bounded current-source leads using query and optional limit. Results are leads, not complete evidence; open the exact source needed for the identified question. Do not broaden a bound Feed distillation into research.
+
+## Reference
 
 Search the public web for direct source candidates.
 

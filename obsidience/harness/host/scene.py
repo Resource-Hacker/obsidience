@@ -262,6 +262,8 @@ class ShellSceneCache:
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
+        self._changed = threading.Condition(self._lock)
+        self._change_sequence = 0
         self._generation = 0
         self._connected = False
         self._workspace: dict[str, object] | None = None
@@ -273,6 +275,7 @@ class ShellSceneCache:
             self._connected = True
             self._workspace = None
             self._surfaces = {}
+            self._notify_changed()
             return self._generation
 
     def disconnect(self, generation: int) -> None:
@@ -282,6 +285,7 @@ class ShellSceneCache:
             self._connected = False
             self._workspace = None
             self._surfaces = {}
+            self._notify_changed()
 
     def accept(self, generation: int, event: object) -> bool:
         if (
@@ -307,13 +311,29 @@ class ShellSceneCache:
                 if workspace == self._workspace:
                     return False
                 self._workspace = workspace
+                self._notify_changed()
                 return True
             assert surface is not None
             current = self._surfaces.get(surface.surface_id)
             if current is not None and surface.revision <= current.revision:
                 return False
             self._surfaces[surface.surface_id] = surface
+            self._notify_changed()
             return True
+
+    def _notify_changed(self) -> None:
+        self._change_sequence += 1
+        self._changed.notify_all()
+
+    def change_token(self) -> int:
+        with self._lock:
+            return self._change_sequence
+
+    def wait_for_change(self, token: int, timeout: float) -> int:
+        """Wait on the existing scene publisher; never enumerate another scene."""
+        with self._changed:
+            self._changed.wait_for(lambda: token != self._change_sequence, max(0.0, timeout))
+            return self._change_sequence
 
     def snapshot(self) -> SceneSnapshot:
         with self._lock:
@@ -520,6 +540,12 @@ class ShellSceneClient:
             await task
         except asyncio.CancelledError:
             pass
+
+    def change_token(self) -> int:
+        return self.cache.change_token()
+
+    def wait_for_change(self, token: int, timeout: float) -> int:
+        return self.cache.wait_for_change(token, timeout)
 
     def snapshot(self) -> SceneSnapshot:
         return self.cache.snapshot()

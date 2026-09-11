@@ -49,7 +49,7 @@ from ...knowledge.skills import (
     node_id as skill_mirror_node_id,
 )
 from ...knowledge.vault import (
-    Note,
+    Note, Resolver,
     folder_article_path,
     is_folder_article,
     iter_notes,
@@ -84,7 +84,7 @@ CHECKOUT_FIELDS = {
     "runbook": "runbooks",
     "task": "tasks",
 }
-LIBRARY_KINDS = ("tool", "task")
+LIBRARY_KINDS = ("knowledge", "agent", "task", "runbook", "tool", "skill")
 SOURCE_SCOPE_FIELD = "source_trees"
 TASK_TAXONOMY_PATH_BY_REF = {ref: path for path, ref in CANONICAL_TASK_BY_PATH.items()}
 _CHECKOUT_LOCK = threading.RLock()
@@ -687,6 +687,34 @@ def _navigation_subject(ref: str, parent_ref: str | None, overrides: dict[str, N
     }
 
 
+
+def _scoped_knowledge_subjects(identity: Note | None, notes: list[Note], base: list[dict], overrides: dict) -> list[dict]:
+    """Folder proxies follow the same exact Knowledge scope as model reads."""
+    from ...knowledge.scope import knowledge_refs
+    if identity is None:  # The owner's Library sees all accepted Knowledge.
+        selected = [note for note in notes if note.kind == "knowledge"]
+    else:
+        try:
+            allowed = knowledge_refs(identity, Resolver(notes))
+        except ValueError:
+            allowed = set()
+        selected = [note for note in notes if note.ref in allowed]
+    folders = set()
+    for note in selected:
+        parts = Path(note.path).parts[:-1]
+        first = 3 if parts and parts[0] == "Agents" else 1
+        folders.update("/".join(parts[:depth]) for depth in range(first, len(parts)+1))
+    ids = {folder: _executive_folder_ref(folder) for folder in folders}
+    subjects = [item for item in base if not item.get("path") and (
+        item["id"].rsplit("/", 1)[-1].lower() in {"tools", "skills", "runbooks", "tasks", "other-agents"})]
+    for folder in sorted(folders):
+        authored = next((note for note in selected if note.path == folder_article_path(folder)), None)
+        subjects.append({"id": ids[folder], "title": authored.title if authored else folder.rsplit("/",1)[-1],
+            "parent_id": ids.get(str(Path(folder).parent)), "path": folder,
+            **({"article_ref": authored.ref} if authored else {}), "scope_proxy": authored is None})
+    return subjects
+
+
 def _navigation_manifest(overrides: dict[str, Note]) -> dict:
     """Canonical naming and subject topology for every graph/UI projection."""
     notes = iter_notes()
@@ -698,71 +726,37 @@ def _navigation_manifest(overrides: dict[str, Note]) -> dict:
         ("@branch/Runbooks", None),
         ("@branch/Tasks", None),
     ]
-    satellite_base = [
-        ("tools", None),
-        ("skills", None),
-        ("runbooks", None),
-        ("tasks", None),
-        ("architecture", None),
-        ("knowledge", None),
-        ("other-agents", None),
-        ("observations", None),
-        ("temporary-observations", "observations"),
-    ]
-
     for group_id, identity_ref in CHECKOUT_AGENTS.items():
         identity = by_ref.get(identity_ref)
         if not identity:
             continue
         role = str(identity.meta.get("role") or group_id).strip().lower()
         if group_id == "executive":
-            subjects = [
-                _navigation_subject(ref, parent_ref, overrides)
-                for ref, parent_ref in executive_subjects
-            ]
-            folders = _executive_folder_paths(notes)
-            for folder in folders:
-                parent = str(Path(folder).parent)
-                subject_ref = _executive_folder_ref(folder)
-                article = _apply_reader_override(_folder_article(folder, subject_ref, notes), overrides)
-                subjects.append({
-                    "id": subject_ref, "title": article["title"],
-                    "parent_id": _executive_folder_ref(parent) if parent in folders else None,
-                    "path": folder, "article_ref": article["ref"],
-                })
+            subjects = [_navigation_subject(ref, parent, overrides) for ref, parent in executive_subjects]
         else:
-            agent_name = identity_ref.split("/")[1]
-            role_subjects = SATELLITE_ROLE_SUBJECTS.get(agent_name, {})
-            role_parent = {
-                child: parent
-                for parent, children in SATELLITE_ROLE_CHILDREN.get(agent_name, {}).items()
-                for child in children
-            }
-            subject_rows = [
-                *satellite_base,
-                *((key, role_parent.get(key)) for key in role_subjects),
-            ]
-            subjects = [
-                _navigation_subject(
-                    f"@sat/{agent_name}/{key}",
-                    f"@sat/{agent_name}/{parent}" if parent else None,
-                    overrides,
-                )
-                for key, parent in subject_rows
-            ]
+            name = identity_ref.split("/")[1]
+            subjects = [_navigation_subject(f"@sat/{name}/{key}", None, overrides)
+                        for key in ("tools", "skills", "runbooks", "tasks", "other-agents")]
+        subjects = _scoped_knowledge_subjects(identity, notes, subjects, overrides)
+        from ...knowledge.scope import readable_refs
+        try:
+            access_refs = sorted(readable_refs(identity, Resolver(notes)))
+        except ValueError:
+            access_refs = []
         groups.append({
             "id": group_id,
             "title": identity.title,
             "subtitle": role.replace("-", " ").title(),
             "role": role,
             "root_ref": identity.ref,
+            "access_refs": access_refs,
             "subjects": subjects,
         })
 
     library = _apply_reader_override({"ref": "@library", "title": "Library"}, overrides)
     library_subjects = [
         _navigation_subject(ref, None, overrides)
-        for ref in ("@library/Tools", "@library/Tasks")
+        for ref in ("@library/Tools", "@library/Tasks", "@library/Runbooks", "@library/Agents")
     ]
     groups.append({
         "id": "library",
@@ -770,7 +764,8 @@ def _navigation_manifest(overrides: dict[str, Note]) -> dict:
         "subtitle": "Shared assets",
         "role": "library",
         "root_ref": "@library",
-        "subjects": library_subjects,
+        "subjects": _scoped_knowledge_subjects(None, notes, library_subjects, overrides)
+                    + [item for item in library_subjects if item["id"] == "@library/Agents"],
     })
     return {"groups": groups}
 
@@ -1177,39 +1172,14 @@ def _graph_article_membership(nodes: list[dict], groups: list[dict]) -> dict[str
         return selected
 
     memberships = {}
-    shared_prefixes = ("Tools/", "Skills/", "Tasks/",
-                       "@library/Tools/", "@library/Skills/", "@library/Tasks/")
     for group in groups:
         root = group["root_ref"]
         if group["id"] == "library":
-            selected = {ref for ref, node in primitives.items()
-                        if primitive_kind(node) in {"tool", "skill", "task"}
-                        and ref.startswith(shared_prefixes)
-                        and node.get("article_ref", ref).startswith(shared_prefixes)}
+            selected = set(by_id)
         else:
-            identity = by_id.get(root, {})
-            local = root.rsplit("/", 1)[0] + "/"
-            roots = {resolve(raw) for field in CHECKOUT_FIELDS.values()
-                     for raw in identity.get("dependencies", {}).get(field, [])}
-            selected = closure(roots)
-            paths = [subject["path"].rstrip("/") + "/" for subject in group["subjects"]
-                     if subject.get("path")]
-            scoped = {resolve(ref) for ref in identity.get("source_scope_refs", [])}
-            for ref, node in by_id.items():
-                if node["kind"] != "knowledge" or primitive_kind(node):
-                    continue
-                if ref.startswith("Agents/") and not ref.startswith(local):
-                    continue
-                if (ref.startswith(local) or ref in scoped or any(ref.startswith(path) for path in paths)
-                        or root == CHECKOUT_AGENTS["researcher"] and ref.startswith("Sources/")
-                        or group["id"] == "executive" and not ref.startswith(
-                            ("Agents/", "Sources/", "Library/", "@library/"))
-                        and ref not in {"Sources", "Library", "@library"}):
-                    selected.add(ref)
-            # A local cloud never acquires another Agent's private Articles.
-            selected = {ref for ref in selected
-                        if all(not candidate.startswith("Agents/") or candidate.startswith(local)
-                               for candidate in (ref, by_id[ref].get("article_ref", ref)))}
+            readable = set(group.get("access_refs", []))
+            selected = {resolve(ref) for ref in readable if resolve(ref) in by_id}
+            selected.update(closure(selected))
         selected.add(root)
         selected.update(subject["id"] for subject in group["subjects"])
         selected.update(by_id[ref]["article_ref"] for ref in list(selected)
@@ -1232,8 +1202,7 @@ def _graph_snapshot():
     doc = INDEX.graph()
     overrides = _reader_overrides()
     navigation = _navigation_manifest(overrides)
-    subjects = next((group["subjects"] for group in navigation["groups"]
-                     if group["id"] == "executive"), [])
+    subjects = [subject for group in navigation["groups"] for subject in group["subjects"]]
     folders = {subject["path"]: subject for subject in subjects if subject.get("path")}
     for node in doc["nodes"]:
         override = overrides.get(node["id"])
@@ -1242,7 +1211,7 @@ def _graph_snapshot():
         subject = folders.get(str(Path(node["id"]).parent))
         if subject and node["kind"] == "knowledge":
             node["parent_id"] = subject["id"]
-            if node["id"] == subject["article_ref"]:
+            if node["id"] == subject.get("article_ref"):
                 node["navigation_ref"] = subject["id"]
     from ...knowledge.auto_curate import enabled
     notes_by_ref = {note.ref: note for note in iter_notes()}
@@ -1275,40 +1244,32 @@ def _base_article(ref: str):
             return _folder_article(str(Path(note.path).parent), ref)
         return _note_doc(note)
 
-    # Match the main graph's visible knowledge pool. Raw sources are excluded
-    # by iter_notes() and are available only through the Source surface.
-    notes = [
-        item for item in iter_notes()
-        if not item.ref.startswith("Agents/") or item.ref.startswith("Agents/Executive/")
-    ]
+    # Reader is an owner surface. Agent execution uses the separate, mandatory
+    # access resolver; the Library must not hide other Agents from its owner.
+    notes = list(iter_notes())
     if ref == "@vault":
         identity = load_note("Agents/Executive/Executive.md")
         if identity:
-            folders = _executive_folder_paths()
+            group = next(item for item in _navigation_manifest(_reader_overrides())["groups"]
+                         if item["id"] == "executive")
             doc = _note_doc(identity)
             doc["ref"] = ref
-            doc["children"] = [
-                "@branch/Tools",
-                "@branch/Skills",
-                "@branch/Runbooks",
-                "@branch/Tasks",
-                *(_executive_folder_ref(folder) for folder in folders
-                  if str(Path(folder).parent) not in folders),
-            ]
+            doc["children"] = [item.get("article_ref") or item["id"] for item in group["subjects"]
+                               if item["parent_id"] is None]
             return doc
         return _virtual_index(ref, "Obsidience", "The root Agent Brain Article.", notes, kind="agent")
     if ref == "@library":
-        primitives = [item for item in notes if item.kind in LIBRARY_KINDS]
-        body = (
-            "The curated shared repository for paired Tools and Skills, plus Tasks. "
-            "Runbooks are synthesized for and retained by individual agents.\n\n"
-            "## Indexed shelves\n\n"
-            "- [[@library/Tools|Tools + Skills]]\n"
-            "- [[@library/Tasks|Tasks]]"
-        )
+        group = next(item for item in _navigation_manifest(_reader_overrides())["groups"]
+                     if item["id"] == "library")
+        children = [item.get("article_ref") or item["id"] for item in group["subjects"]
+                    if item["parent_id"] is None]
         return {"ref": ref, "title": "Library", "kind": "knowledge",
-                "meta": {"node": "true", "articles": str(len(primitives))},
-                "body": body, "children": ["@library/Tools", "@library/Tasks"]}
+                "meta": {"node": "true", "articles": str(len(notes))},
+                "body": "All accepted Knowledge, Agents, Tasks, Runbooks, and paired Tools and Skills. "
+                        "Use the Reader's Agent icons to check out shared Knowledge or assign Tasks. "
+                        "Each Agent searches only its own checked-out graph and owns its Observations. "
+                        "The Library is the owner's complete catalog, not an Agent with global search authority.",
+                "children": children}
     if ref.startswith("@library/"):
         relative = ref.removeprefix("@library/").strip("/")
         if relative == "Tools":
@@ -1438,8 +1399,29 @@ def _base_article(ref: str):
 
 
 @app.get("/api/articles/{ref:path}")
-def get_article(ref: str):
-    return _article_with_curation(ref, _apply_reader_override(_base_article(ref)))
+def get_article(ref: str, graph_id: str = ""):
+    doc = _article_with_curation(ref, _apply_reader_override(_base_article(ref)))
+    if not graph_id or graph_id == "library":
+        return doc
+    snapshot = graph()
+    group = next((item for item in snapshot["navigation"]["groups"] if graph_id in {
+        item["id"], item["root_ref"], item["root_ref"].split("/")[1]
+        if "/" in item["root_ref"] else "library", "main" if item["id"] == "executive" else item["id"]}), None)
+    if group is None:
+        raise HTTPException(404, "Agent graph is unavailable")
+    members = set(group["article_refs"])
+    subject = next((item for item in group["subjects"] if ref in {item["id"], item.get("article_ref")}), None)
+    if subject and subject.get("scope_proxy"):
+        children = [item.get("article_ref") or item["id"] for item in group["subjects"]
+                    if item["parent_id"] == subject["id"]]
+        children += [node["id"] for node in snapshot["nodes"] if node["id"] in members
+                     and node["kind"] == "knowledge" and str(Path(node["id"]).parent) == subject["path"]]
+        return {"ref":ref, "title":subject["title"], "kind":"knowledge", "meta":{"scope_proxy":"true"},
+                "body":"Navigation for this Agent's checked-out descendants. The unselected parent Article is not supplied to the Agent.",
+                "children":sorted(set(children)), "read_only":True, "auto_curate_supported":False}
+    if ref not in members and doc["ref"] not in members and ref != "@vault" and doc.get("kind") != "agent":
+        raise HTTPException(404, "Article is outside this Agent graph; open it from Library")
+    return {**doc, "children":[child for child in doc.get("children", []) if child in members]}
 
 
 @app.put("/api/articles/{ref:path}/auto-curate")
@@ -1696,11 +1678,18 @@ def _assignment_row(agent: str, identity: Note, task: Note, res) -> dict:
 def library_assignments():
     """Task assignments and their read-only shared Library dependencies."""
     res = dependency_resolver(resolver())
-    assignments, dependencies = [], []
+    from ...knowledge.scope import checkout_state, revision
+    assignments, dependencies, knowledge, revisions = [], [], [], {}
     for agent, identity_ref in CHECKOUT_AGENTS.items():
         identity = res.resolve(identity_ref)
         if not identity:
             continue
+        revisions[agent] = revision(identity)
+        try:
+            knowledge.extend({**checkout_state(note, identity, res), "agent": agent}
+                             for note in res.by_ref.values() if note.kind == "knowledge")
+        except ValueError as exc:
+            knowledge.append({"agent": agent, "error": str(exc)})
         effective = agent_dependencies(identity, res)
         for kind, field in CHECKOUT_FIELDS.items():
             for ref in effective[field]:
@@ -1710,7 +1699,43 @@ def library_assignments():
                     if not row["direct"] and not row["inherited"]:
                         row["inherited"] = True  # Parent/descendant Task scope.
                     assignments.append(row)
-    return {"assignments": assignments, "dependencies": dependencies}
+    return {"assignments": assignments, "dependencies": dependencies,
+            "knowledge": knowledge, "revisions": revisions}
+
+
+
+def _set_knowledge_assignment(agent: str, identity: Note, note: Note, checked: bool, res) -> dict:
+    """Owner mutation of exact Knowledge scope, never a capability grant."""
+    from ...knowledge.scope import MAX_CHECKOUTS, checkout_state, revision, _within, _roots
+    try:
+        before = checkout_state(note, identity, res)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    if not before["editable"]:
+        raise HTTPException(400, "Own Articles remain owned; another Agent's Observations cannot be checked out")
+    # Toggling a branch is one subtree operation, not a hidden collection of
+    # descendant grants that survive unchecking their parent.
+    selected = [item for item in _roots(identity, res, "knowledge") if not _within(item, note)]
+    excluded = [item for item in _roots(identity, res, "exclude_knowledge") if not _within(item, note)]
+    if checked:
+        if any(_within(note, item) for item in excluded):
+            raise HTTPException(409, "A parent scope is excluded; enable that parent first")
+        if not any(_within(note, item) for item in selected):
+            selected.append(note)
+    elif any(_within(note, item) for item in selected):
+        excluded.append(note)
+    if max(len(selected), len(excluded)) > MAX_CHECKOUTS:
+        raise HTTPException(400, "Knowledge checkout limit reached")
+    meta = {**identity.meta, "knowledge": [f"[[{item.ref}]]" for item in selected],
+            "exclude_knowledge": [f"[[{item.ref}]]" for item in excluded]}
+    changed = meta != identity.meta
+    if changed:
+        write_note(identity.path, meta, identity.body)
+        INDEX.sync()
+        knowledge_activity.emit("graph_changed", [identity.ref, note.ref])
+    updated = replace(identity, meta=meta)
+    return {**checkout_state(note, updated, res), "agent": agent, "assigned": checked,
+            "assignment_changed": changed, "revision": revision(updated)}
 
 
 @app.put("/api/library/assignments/{ref:path}")
@@ -1722,9 +1747,21 @@ def set_library_assignment(ref: str, payload: dict):
     assigned = payload.get("assigned")
     if not isinstance(assigned, bool):
         raise HTTPException(400, "assigned must be boolean")
-    with _CHECKOUT_LOCK:
+    from ...knowledge.vault import _NOTE_WRITE_LOCK
+    with _CHECKOUT_LOCK, _NOTE_WRITE_LOCK:
         res = dependency_resolver(resolver())
+        identity = res.resolve(CHECKOUT_AGENTS[agent])
+        if not identity:
+            raise HTTPException(500, "Agent Article missing")
+        from ...knowledge.scope import revision
+        expected = payload.get("expected_revision")
+        if expected is not None and expected != revision(identity):
+            raise HTTPException(409, "Agent checkout changed; refresh before assigning")
         task = res.resolve(ref)
+        if task and task.kind == "knowledge":
+            if expected is None:
+                raise HTTPException(409, "Knowledge checkout requires expected_revision")
+            return _set_knowledge_assignment(agent, identity, task, assigned, res)
         if not task or task.kind != "task":
             raise HTTPException(400, "Only an accepted Task Article can be assigned")
         identity = res.resolve(CHECKOUT_AGENTS[agent])
@@ -1746,6 +1783,7 @@ def set_library_assignment(ref: str, payload: dict):
         activation = ensure_task_runbook(task, res, agent_ref=identity.ref) if assigned else {}
         if changed:
             INDEX.sync()
+            knowledge_activity.emit("graph_changed", [identity.ref, task.ref])
         row = _assignment_row(agent, replace(identity, meta=meta), task, res)
         return {
             **row, "assigned": assigned or row["inherited"],

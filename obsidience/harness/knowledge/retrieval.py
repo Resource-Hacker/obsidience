@@ -9,6 +9,7 @@ Edges dispatch; retrieval only supplies context and may nominate a Task.
 from __future__ import annotations
 
 import time
+import re
 from datetime import datetime, timezone
 
 from ..config import CONFIG
@@ -88,19 +89,20 @@ def _matches_search_scope(note: Note, scope: dict, now: datetime) -> bool:
 
 
 def search(query: str, k: int | None = None, *, scope: dict | None = None,
-           snapshot: list[Note] | None = None) -> list[dict]:
+           snapshot: list[Note] | None = None, allowed_refs: set[str] | None = None) -> list[dict]:
     """Fast interactive search: lexical+dense weighted RRF, with no model pass."""
     k = k or CONFIG.search_k
-    if scope is None:
+    if scope is None and allowed_refs is None:
         ranked = rrf_fuse(_lanes_for(query, RRF_ORIGINAL_WEIGHT, k))[:k]
         accepted = None
     else:
-        scope = normalize_search_scope(scope)
+        scope = normalize_search_scope(scope or {})
         now = datetime.now(timezone.utc)
         # A batch reuses one fresh accepted-Article snapshot, never a persistent
         # policy cache. Time-based freshness is still evaluated for each query.
         accepted = {note.ref: note for note in (snapshot if snapshot is not None else iter_notes())
-                    if _matches_search_scope(note, scope, now)}
+                    if _matches_search_scope(note, scope, now)
+                    and (allowed_refs is None or note.ref in allowed_refs)}
         if not accepted:
             return []
         ranked = rrf_fuse(_lanes_for(query, RRF_ORIGINAL_WEIGHT, k, scope.get("kind"),
@@ -110,8 +112,53 @@ def search(query: str, k: int | None = None, *, scope: dict | None = None,
         note = accepted.get(ref) if accepted is not None else load_note(ref + ".md")
         if note:
             out.append({"ref": ref, "title": note.title, "kind": note.kind,
-                        "snippet": note.body[:280]})
+                        "snippet": note.body[slice(*passage_range(note.body, query, 280))]})
     return out
+
+
+
+def passage_range(body: str, query: str, maximum: int = 1200) -> tuple[int, int]:
+    """Choose a contiguous evidence passage without rewriting its contents.
+
+    Paragraph windows retain negations/context and exact character offsets.
+    Long single paragraphs use overlapping word-boundary windows. This is a
+    deterministic selection aid, not a claim that omitted text is irrelevant.
+    """
+    if not body or maximum < 1:
+        return 0, 0
+    if len(body) <= maximum:
+        return len(body) - len(body.lstrip()), len(body.rstrip())
+    terms = {word.casefold() for word in re.findall(r"[^\W_]+", query) if len(word) > 2}
+    terms -= {"the", "this", "that", "with", "from", "what", "which", "please", "about", "would", "could"}
+    spans = [(match.start(), match.end()) for match in re.finditer(r"\S(?:[\s\S]*?)(?=\n\s*\n|\Z)", body)]
+    starts = {0, *(start for start, _ in spans)}
+    for start, end in spans:
+        if end-start > maximum:
+            for offset in range(start, end, max(1, maximum // 2)):
+                boundary = body.find(" ", offset, min(end, offset+80))
+                starts.add(boundary+1 if boundary >= 0 and offset != start else offset)
+    best = (float("-inf"), 0, min(maximum, len(body)))
+    for start in sorted(starts):
+        end = min(start+maximum, len(body))
+        complete = [stop for a, stop in spans if a >= start and stop <= end]
+        if complete:
+            end = max(complete)
+        elif end < len(body):
+            boundary = body.rfind(" ", start, end)
+            if boundary > start:
+                end = boundary
+        text = body[start:end]
+        words = [word.casefold() for word in re.findall(r"[^\W_]+", text)]
+        hits = terms.intersection(words)
+        score = len(hits) * 100 + sum(min(words.count(term), 3) for term in hits)
+        # Prefer the first complete occurrence at equal relevance, not length.
+        candidate = (score, -start)
+        if candidate > (best[0], -best[1]):
+            best = (score, start, end)
+    _, start, end = best
+    while start < end and body[start].isspace(): start += 1
+    while end > start and body[end-1].isspace(): end -= 1
+    return start, end
 
 
 def _tokens(text: str) -> int:
@@ -128,7 +175,8 @@ def _eligible_knowledge(note: Note | None, now: datetime) -> bool:
         and note.meta.get("temporary") is not True
     ):
         return False
-    return lifecycle_metadata(note.meta, now)["freshness"] == "current"
+    lifecycle = lifecycle_metadata(note.meta, now)
+    return lifecycle["freshness"] == "current" and lifecycle.get("status") != "draft"
 
 
 def fast_context_with_refs(
@@ -140,6 +188,7 @@ def fast_context_with_refs(
     *,
     accepted_resolver: Resolver | None = None,
     diagnostics: dict | None = None,
+    allowed_refs: set[str] | None = None,
 ) -> tuple[str, list[str]]:
     """Deterministic no-timeout context for every Task activation.
 
@@ -169,14 +218,17 @@ def fast_context_with_refs(
     )
     accepted_notes = [note for note in accepted_notes
                       if note.path.split("/")[0] not in (*SYSTEM_DIRS, *SOURCE_DIRS)
-                      and not any(part.startswith(".") for part in note.path.split("/"))]
+                      and not any(part.startswith(".") for part in note.path.split("/"))
+                      and (allowed_refs is None or note.ref in allowed_refs)]
     now = datetime.now(timezone.utc)
     accepted_by_ref = {note.ref: note for note in accepted_notes}
     context_resolver = Resolver(accepted_notes)
     k = max(CONFIG.search_k, limit)
     ranked: list[str] = []
     for ref in rrf_fuse(
-        _lanes_for(query, RRF_ORIGINAL_WEIGHT, k, "knowledge")
+        _lanes_for(query, RRF_ORIGINAL_WEIGHT, k, "knowledge",
+                   eligible_refs={ref for ref, note in accepted_by_ref.items()
+                                  if ref not in exclude and _eligible_knowledge(note, now)})
     ):
         note = accepted_by_ref.get(ref)
         if ref not in exclude and _eligible_knowledge(note, now):
@@ -236,13 +288,15 @@ def fast_context_with_refs(
     included: list[str] = []
     packed: dict[str, tuple[str, int]] = {}
     budget_stop_ref: str | None = None
+    passages = {ref: passage_range(accepted_by_ref[ref].body, query)
+                for ref in dict.fromkeys([*ordered, *ranked, *graph_origins])}
     used = 0
     for ref in ordered:
         note = accepted_by_ref.get(ref)
         if not note:
             continue
         origin = "graph neighbor" if ref in graph_refs else "direct match"
-        chunk = f"### [[{ref}]] — {note.title} ({origin})\n{note.body[:1200].strip()}\n"
+        chunk = f"### [[{ref}]] — {note.title} ({origin})\n{note.body[slice(*passages[ref])]}\n"
         cost = _tokens(chunk)
         if used + cost > budget:
             if used > 0:
@@ -257,7 +311,7 @@ def fast_context_with_refs(
             packed[ref] = (chunk, cost)
     if diagnostics is not None:
         _record_fast_context(diagnostics, accepted_by_ref, ranked, graph_origins,
-                             ordered, packed, preferred_refs, budget_stop_ref, used)
+                             ordered, packed, preferred_refs, budget_stop_ref, used, passages)
     if not parts:
         return "", []
     return "\n".join(parts), included
@@ -266,7 +320,8 @@ def fast_context_with_refs(
 def _record_fast_context(diagnostics: dict, notes: dict[str, Note], ranked: list[str],
                          graph_origins: dict[str, str], ordered: list[str],
                          packed: dict[str, tuple[str, int]], preferred: set[str],
-                         budget_stop_ref: str | None, used: int) -> None:
+                         budget_stop_ref: str | None, used: int,
+                         passages: dict[str, tuple[int, int]] | None = None) -> None:
     """Explain this bounded nomination pass without changing prompt selection.
 
     Counts cover eligible lane hits and neighbors examined from the direct seeds,
@@ -288,9 +343,8 @@ def _record_fast_context(diagnostics: dict, notes: dict[str, Note], ranked: list
         note = notes[ref]
         graph = ref in graph_origins
         header = f"### [[{ref}]] — {note.title} ({'graph neighbor' if graph else 'direct match'})\n"
-        prefix = note.body[:1200]
-        excerpt = prefix.strip()
-        body_start = len(prefix) - len(prefix.lstrip())
+        body_start, body_stop = (passages or {}).get(ref, passage_range(note.body, ""))
+        excerpt = note.body[body_start:body_stop]
         selected, charged = packed.get(ref, ("", 0))
         body_length = min(len(excerpt), max(0, len(selected) - len(header)))
         if ref in packed:

@@ -4,8 +4,14 @@ from __future__ import annotations
 
 
 def execute(args: dict, context: dict) -> str:
-    del context
-    from obsidience.harness.knowledge.vault import iter_notes
+    from obsidience.harness.knowledge.vault import iter_notes, Resolver
+    from obsidience.harness.knowledge.scope import execution_scope
+
+    notes = iter_notes()
+    try:
+        _agent, allowed = execution_scope(context, Resolver(notes))
+    except PermissionError as exc:
+        return str(exc)
 
     folder = str((args or {}).get("folder", "")).strip().strip("/")
     parts = folder.split("/") if folder else []
@@ -17,8 +23,8 @@ def execute(args: dict, context: dict) -> str:
     offset = args.get("offset", 0)
     if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
         return "Invalid offset: use a nonnegative row offset."
-    rows = sorted((note for note in iter_notes()
-                   if (not folder or note.ref.startswith(folder + "/"))
+    rows = sorted((note for note in notes
+                   if note.ref in allowed and (not folder or note.ref.startswith(folder + "/"))
                    and not any(part.startswith(("_", ".")) for part in note.ref.split("/"))),
                   key=lambda note: note.ref)
     if not rows:

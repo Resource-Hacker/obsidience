@@ -13,6 +13,7 @@ obsidience:
   - '[[Skills/web.fetch]]'
   - '[[Skills/source.read]]'
   - '[[Skills/source.handoff]]'
+  - '[[Skills/observations.temporary.append]]'
 ---
 
 1. Frame one bounded question, success criterion, scope, and freshness need.
@@ -29,3 +30,6 @@ obsidience:
    the question and no handoff is justified, complete with `outcome: no_change`
    and cite the exact accepted evidence in the `evidence` list. Report failed or
    partial acquisition honestly without staging an intermediate Review.
+
+
+When a useful nonredundant observation should survive this activation, optionally append one bounded unverified note to this Agent's own Temporary Observations. Do not record hidden reasoning or create a note merely to narrate routine work.

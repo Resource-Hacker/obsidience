@@ -1,11 +1,18 @@
 ---
 type: skill
 title: Using task.complete
+description: For an ordinary successful answer, status:completed and summary are sufficient.
 obsidience:
   tool: '[[Tools/task.complete]]'
   approved_at: '2026-09-06T01:05:00'
   provenance: proposed by Codex (task codex:knowledge-handoff)
 ---
+
+## Runtime
+
+For an ordinary successful answer, status:completed and summary are sufficient. Do not use no_change as a generic success code. Report a blocker rather than an unobserved result. Visual state verification describes current image evidence; it is not independent mechanical proof.
+
+## Reference
 
 Put the verified public answer, change, pending proposal or precise blocker in summary, within the Tool's limits. Choose completed for an established outcome, review for this execution's unresolved proposal or explicit acceptance gate, and failed for a terminal blocker. Pending proposals must remain review; a downstream Task's state is not its caller's result.
 

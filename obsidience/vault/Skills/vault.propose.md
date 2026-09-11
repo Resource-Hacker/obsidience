@@ -1,11 +1,18 @@
 ---
 type: skill
 title: Using vault.propose
+description: Read the current accessible target and exact supporting Source first.
 obsidience:
   approved_at: '2026-08-21T04:02:08'
   provenance: proposed by Codex (task research generation kit)
   tool: '[[Tools/vault.propose]]'
 ---
+
+## Runtime
+
+Read the current accessible target and exact supporting Source first. Prefer the smallest correction, preserve citations and uncertainty, and avoid duplicate Articles. For generated definitions or relation groups, read the detailed Reference before proposing. Never alter another Agent's Observations.
+
+## Reference
 
 For a Feed Distill Inbox, use only its exact controller `source` and activation `target`, after reading the entire Inbox. Omit body/title/metadata and preserve the complete Darwin summary through the compiler. No placement search, reporting reread or summary rewrite is needed. Existing destination Auto-curate controls publication; an attested already-published item version permits no-change, while a staged item remains Review.
 

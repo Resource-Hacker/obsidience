@@ -1,10 +1,18 @@
 ---
 type: tool
 title: computer.observe
+description: Read the current image of one exact target without changing focus or
+  placement.
 obsidience:
   binding: capability:computer.observe
   source: obsidience/harness/capabilities/computer/observe.py
 ---
+
+## Runtime
+
+Read the current image of one exact target without changing focus or placement. Pass target:{kind:application|pane,name:<exact name>,surface?:<surface>} or target:{kind:focused}, plus query. The image is private in-memory evidence. Only the immediately following computer.act may consume an application observation lease. An unavailable image does not authorize input.
+
+## Reference
 
 Answer one visual question about an exact native application or module pane,
 including a unique unfocused target. The current Shell Scene already supplies

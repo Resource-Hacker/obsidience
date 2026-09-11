@@ -67,9 +67,12 @@ def _publish(event: dict) -> dict:
 
 def emit(phase: str, refs: list[str], *, query: str = "", graph_id: str = "main",
          retrieval_ms: float | None = None) -> dict:
+    unique_refs = list(dict.fromkeys(str(ref) for ref in refs if ref))
     event = {
         "phase": phase,
-        "refs": list(dict.fromkeys(str(ref) for ref in refs if ref))[:32],
+        "refs": unique_refs[:128],
+        "ref_count": len(unique_refs), "omitted_refs": max(0, len(unique_refs)-128),
+        "evidence_scope": "runtime_activity_not_hidden_reasoning",
         "query": str(query)[:300],
         "graph_id": str(graph_id or "main")[:80],
         "at": int(time.time() * 1000),

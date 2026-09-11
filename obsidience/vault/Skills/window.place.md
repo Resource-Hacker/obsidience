@@ -1,9 +1,17 @@
 ---
 type: skill
 title: Using window.place
+description: Use the current destination Surface's integer tile edges, not percentages
+  or screen pixels.
 obsidience:
   tool: '[[Tools/window.place]]'
 ---
+
+## Runtime
+
+Use the current destination Surface's integer tile edges, not percentages or screen pixels. Pass the exact semantic target. The returned scene establishes placement. Do not wake sleeping Surfaces or substitute another target.
+
+## Reference
 
 Use `window.place` to move one existing native application or module pane to one
 declared Surface and optional workspace tile.

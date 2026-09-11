@@ -16,7 +16,7 @@ from obsidience.harness.knowledge import source, vault
 def system_source(tmp_path, monkeypatch, isolated_task_ledger):
     monkeypatch.setattr(config, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(config.CONFIG, "vault_dir", tmp_path / "obsidience/vault")
-    monkeypatch.setattr(vault, "iter_notes", lambda: [])
+    monkeypatch.setattr(vault, "iter_notes", lambda **_kwargs: [])
     events = []
     monkeypatch.setattr(scheduler, "enqueue_named_event", lambda *args, **kwargs: events.append(args) or [])
     return tmp_path, isolated_task_ledger, events
@@ -197,3 +197,5 @@ def test_ordinary_ingest_cannot_suppress_events_or_select_system_lane(system_sou
     assert result["path"].startswith("raw/") and len(events) == 1
     assert result["source_path"] == "obsidience/evidence/" + result["path"]
     assert ledger.source(result["id"])["event_key"].startswith("source.added:")
+
+pytestmark = pytest.mark.usefixtures("authorized_reader_scope")

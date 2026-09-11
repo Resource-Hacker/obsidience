@@ -1,11 +1,18 @@
 ---
 type: skill
 title: Using harness.evaluate
+description: Keep candidate authorship separate from independent acceptance.
 obsidience:
   tool: '[[Tools/harness.evaluate]]'
   approved_at: '2026-09-09T17:56:32'
   provenance: proposed by Codex (task codex:implementation)
 ---
+
+## Runtime
+
+Keep candidate authorship separate from independent acceptance. Evaluate the exact proposal against controller-bound baseline and held-out cases. Do not alter test criteria, call live effects or promote a merely faster failing candidate.
+
+## Reference
 
 Use `harness.evaluate` only for the exact Runbook candidate bound to the current Audit.
 

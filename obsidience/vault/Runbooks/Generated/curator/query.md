@@ -49,3 +49,6 @@ obsidience:
 ## Recovery
 - If `vault.search` yields no results, call it once more with broader or different descriptive terms.
 - If `vault.read` fails due to an ambiguous reference, follow [vault.list](/Skills/vault.list.md) and call `vault.list` to locate the correct article path.
+
+
+When a useful nonredundant observation should survive this activation, optionally append one bounded unverified note to this Agent's own Temporary Observations. Record observable findings and decisions, not a narration of routine work.

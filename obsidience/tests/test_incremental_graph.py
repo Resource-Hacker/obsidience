@@ -38,7 +38,7 @@ def graph_index(tmp_path, monkeypatch):
     monkeypatch.setattr(
         retrieval,
         "_lanes_for",
-        lambda *_args: [(1.0, [("Knowledge/seed", 1.0)])],
+        lambda *_args, **_kwargs: [(1.0, [("Knowledge/seed", 1.0)])],
     )
     try:
         yield ledger, write, encoded

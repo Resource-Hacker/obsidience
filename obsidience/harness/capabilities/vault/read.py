@@ -44,10 +44,15 @@ def execute(args: dict, context: dict) -> str:
     # One current snapshot and backlink traversal serve every requested page.
     # The existing owner lock prevents a group publication splitting this view.
     with _NOTE_WRITE_LOCK:
-        notes = iter_notes(include_system=True)
+        from obsidience.harness.knowledge.scope import execution_scope
+        notes = iter_notes()
+        try:
+            _agent, allowed = execution_scope(context, Resolver(notes))
+        except PermissionError as exc:
+            return str(exc)
+        notes = [note for note in notes if note.ref in allowed]
         res = Resolver(notes)
-        selected = [res.resolve(ref) or load_note(ref if ref.endswith(".md") else ref + ".md")
-                    for ref in refs]
+        selected = [res.resolve(ref) for ref in refs]
         identities = [note.ref if note else ref for ref, note in zip(refs, selected)]
         if batch and len(set(identities)) != len(identities):
             return "Invalid refs: duplicate Article refs are not allowed."
@@ -59,6 +64,7 @@ def execute(args: dict, context: dict) -> str:
                 target = res.resolve(raw)
                 if target and target.ref in inbound and target.ref != candidate.ref:
                     inbound[target.ref].add(candidate.ref)
+        context["_last_context_refs"] = []
         results = []
         for ref, note in zip(refs, selected):
             if cancel is not None and cancel.is_set():
@@ -127,6 +133,7 @@ def _read(note, inbound: list[str], offset: int, expected: str | None, context: 
         "view_sha256": revision, "ranges": merged[-MAX_RECEIPTS:], "total_characters": len(view),
         "complete": merged == [[0, len(view)]],
     }
+    context.setdefault("_last_context_refs", []).append(note.ref)
     state = "End of Article view." if end == len(view) else f"Continue at offset {end} with the same expected_sha256."
     identity = json.dumps({"ref": note.ref, "view_sha256": revision}, ensure_ascii=False, sort_keys=True)
     return True, f"Article: {identity}\nCharacters {offset}-{end} of {len(view)}. {state}\n\n{view[offset:end]}"

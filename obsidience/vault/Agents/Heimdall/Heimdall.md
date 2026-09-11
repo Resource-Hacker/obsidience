@@ -11,6 +11,14 @@ obsidience:
   - '[[Tasks/check]]'
   - '[[Tasks/query]]'
   - '[[Tasks/repair]]'
+  knowledge:
+  - '[[ADMECH Workstation/ADMECH Workstation]]'
+  - '[[Games/Games]]'
+  - '[[Projects/Projects]]'
+  - '[[Websites/Websites]]'
+  - '[[News & Research/News & Research]]'
+  - '[[Agents/Executive/Architecture/Architecture]]'
+  exclude_knowledge: []
 ---
 
 Heimdall is the Guardian: verifier, evidence auditor, and gatekeeper. He

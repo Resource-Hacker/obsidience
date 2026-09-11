@@ -1,9 +1,16 @@
 ---
 type: skill
 title: Using model.source
+description: Register only a present, known artifact.
 obsidience:
   tool: '[[Tools/model.source]]'
 ---
+
+## Runtime
+
+Register only a present, known artifact. Source identity is not performance evidence. Follow the model characterization Task for measurement and leave existing accepted model selections unchanged unless explicitly authorized.
+
+## Reference
 
 Use `model.source` to register or verify the immutable Source manifest for one
 registered local model artifact.

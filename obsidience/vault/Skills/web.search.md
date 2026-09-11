@@ -1,9 +1,16 @@
 ---
 type: skill
 title: Using web.search
+description: Use a focused query for the identified gap.
 obsidience:
   tool: '[[Tools/web.search]]'
 ---
+
+## Runtime
+
+Use a focused query for the identified gap. Prefer primary sources and retain the exact result URL before fetching. Search snippets establish leads, not the full source's conclusions.
+
+## Reference
 
 Use `web.search` to discover a bounded set of direct public source candidates.
 

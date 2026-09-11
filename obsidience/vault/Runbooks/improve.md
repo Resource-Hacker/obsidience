@@ -11,6 +11,7 @@ obsidience:
   - '[[Skills/vault.read]]'
   - '[[Skills/source.read]]'
   - '[[Skills/vault.propose]]'
+  - '[[Skills/observations.temporary.append]]'
 ---
 
 1. Use the exact `candidate_refs` and `candidate_signals` when supplied; otherwise
@@ -41,3 +42,6 @@ obsidience:
    that no correction is needed, with that reason in `summary` and exact observed
    findings in the `evidence` list. Missing evidence
    is unresolved, not a clean verdict.
+
+
+When a useful nonredundant observation should survive this activation, optionally append one bounded unverified note to this Agent's own Temporary Observations. Do not record hidden reasoning or create a note merely to narrate routine work.

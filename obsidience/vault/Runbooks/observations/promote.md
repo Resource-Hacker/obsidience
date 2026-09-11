@@ -6,12 +6,14 @@ obsidience:
   owner_maintained: true
   skills:
   - '[[Skills/observations.temporary.archive]]'
+  - '[[Skills/source.read]]'
   - '[[Skills/vault.search]]'
   - '[[Skills/vault.read]]'
   - '[[Skills/vault.propose]]'
   - '[[Skills/task.create]]'
   - '[[Skills/vault.validate]]'
   - '[[Skills/task.complete]]'
+  - '[[Skills/observations.temporary.append]]'
   task: '[[Tasks/observations/durable/promote]]'
 ---
 
@@ -22,8 +24,10 @@ obsidience:
 2. Call `observations.temporary.archive` once with `{}` before proposing any
    change. Keep every returned `source://` citation as provenance. Archival
    preserves the input; it does not make its statements true.
-3. Read the newest bound Temporary Observation. Read earlier cumulative
-   summaries only to resolve a correction or recover detail omitted later.
+3. Read the exact Source archive with `source.read`, paging to its end. This
+   explicit handoff contains the committed summaries without permitting search
+   or direct reads of the Executive's private observation graph. Interpret the
+   newest summary first; earlier summaries resolve corrections and omissions.
 4. Distill only durable owner intent, preferences, accepted decisions, stable
    constraints, clearly attributed facts, and unresolved commitments that
    matter after this conversation. Reject greetings, repetition, transient
@@ -50,3 +54,6 @@ obsidience:
    names, and any issued peer Task IDs. Finish `completed` for explicitly
    published changes or an honest no-change/archival-only result. Peer Tasks retain their own lifecycle and
    do not by themselves put Promote in review.
+
+
+When a useful nonredundant observation should survive this activation, optionally append one bounded unverified note to this Agent's own Temporary Observations. Do not record hidden reasoning or create a note merely to narrate routine work.

@@ -7,6 +7,7 @@ obsidience:
   skills:
   - '[[Skills/vault.maintenance]]'
   - '[[Skills/task.create]]'
+  - '[[Skills/observations.temporary.append]]'
   task: '[[Tasks/curate]]'
 ---
 
@@ -57,3 +58,6 @@ receipt remains available; a new inspection of changed inputs has its own
 revision-bound occurrence and must not be dropped as already processed.
 Agent-owned Knowledge folder condensations are structural scope Articles,
 not duplicate candidates merely because different agents share index prose.
+
+
+When a useful nonredundant observation should survive this activation, optionally append one bounded unverified note to this Agent's own Temporary Observations. Do not record hidden reasoning or create a note merely to narrate routine work.

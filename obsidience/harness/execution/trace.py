@@ -44,7 +44,7 @@ _SECRET_KEYS = {
 _PAYLOAD_FIELDS = {
     "run": ("kind", "status", "task_title", "agent_title", "model", "reasoning_effort", "summary"),
     "tool": ("kind", "name", "phase", "status", "duration_ms", "arguments", "result"),
-    "packet": ("kind", "refs", "retrieval_ms", "knowledge_accounting", "sections"),
+    "packet": ("kind", "refs", "retrieval_ms", "knowledge_accounting", "instruction_accounting", "sections"),
     "model": ("kind", "phase", "model", "model_label", "metrics", "error"),
     "context": ("kind", "projection"),
     "latency": ("kind", "stage", "monotonic_ms", "duration_ms", "turn_id",
@@ -242,7 +242,7 @@ def public_value(value: object, limit: int = MAX_PAYLOAD_CHARS) -> tuple[object,
 
 
 def packet_payload(sections: dict[str, str], refs: list[str], retrieval_ms: float, *,
-                   knowledge_accounting: dict | None = None) -> dict:
+                   knowledge_accounting: dict | None = None, instruction_accounting: list | None = None) -> dict:
     """Project compiler-owned sections, retaining identities when text is clipped."""
     projected = []
     remaining = MAX_PAYLOAD_CHARS - 4_096
@@ -280,6 +280,7 @@ def packet_payload(sections: dict[str, str], refs: list[str], retrieval_ms: floa
         })
     return {"kind": "packet", "refs": refs, "retrieval_ms": retrieval_ms,
             **({"knowledge_accounting": accounting} if accounting is not None else {}),
+            **({"instruction_accounting": public_value(instruction_accounting, 8192)[0]} if instruction_accounting else {}),
             "sections": projected}
 
 

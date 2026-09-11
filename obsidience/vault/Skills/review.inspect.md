@@ -1,9 +1,16 @@
 ---
 type: skill
 title: Using review.inspect
+description: Inspect the existing proposal disposition before making another change.
 obsidience:
   tool: '[[Tools/review.inspect]]'
 ---
+
+## Runtime
+
+Inspect the existing proposal disposition before making another change. Missing or truncated records do not prove approval or rejection. A successful execution can still be awaiting publication Review.
+
+## Reference
 
 Call `review.inspect` with `{}` or an exact `task` ref to locate pending
 proposals. To inspect one, pass its exact returned `proposal` filename.

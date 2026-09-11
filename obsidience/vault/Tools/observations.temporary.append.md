@@ -1,12 +1,20 @@
 ---
 type: tool
 title: observations.temporary.append
+description: Write an unverified observation under the executing Agent's own Temporary
+  Observations using text and up to three accessible related_refs.
 obsidience:
   binding: capability:observations.temporary.append
   source: obsidience/harness/capabilities/observations/temporary/append.py
   approved_at: '2026-09-06T01:05:07'
   provenance: proposed by Codex (task codex:knowledge-handoff)
 ---
+
+## Runtime
+
+Write an unverified observation under the executing Agent's own Temporary Observations using text and up to three accessible related_refs. Ordinary notes allow 200 characters; the exact Compact Task permits 2,000 in its required cumulative format. The controller supplies identity and target. Another Agent's Observation path cannot be selected.
+
+## Reference
 
 Append one transient, unverified observation to the Temporary Observations
 node bound by the active Task.

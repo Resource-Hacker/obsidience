@@ -1,10 +1,18 @@
 ---
 type: tool
 title: source.ingest
+description: Preserve external evidence as immutable Source using content, source_ref,
+  source_type, media_type and optional captured_at.
 obsidience:
   binding: capability:source.ingest
   source: obsidience/harness/capabilities/source/ingest.py
 ---
+
+## Runtime
+
+Preserve external evidence as immutable Source using content, source_ref, source_type, media_type and optional captured_at. The ordinary source.added event may admit research. This does not create accepted Knowledge or grant capabilities. Do not duplicate an already preserved source.
+
+## Reference
 
 Capture one bounded source payload in the immutable raw-evidence ledger.
 

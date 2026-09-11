@@ -12,8 +12,8 @@ def _projection_functions() -> str:
     return "\n".join(
         re.search(rf"^    function {name}\([^\n]*\) \{{.*?^    \}}", source, re.M | re.S)[0]
         for name in (
-            "cleanRef", "graphMap", "graphNode", "projectionRoots", "buildFileTree",
-            "subjectTree", "subjectByTitle", "groupFiles", "countRefs", "buildGroups",
+            "cleanRef", "graphMap", "graphNode", "projectionRoots",
+            "subjectTree", "countRefs", "buildGroups",
         )
     )
 

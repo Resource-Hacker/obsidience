@@ -1,10 +1,17 @@
 ---
 type: tool
 title: task.create
+description: Activate one accepted Task with task and bounded params.
 obsidience:
   binding: capability:task.create
   source: obsidience/harness/capabilities/task/create.py
 ---
+
+## Runtime
+
+Activate one accepted Task with task and bounded params. This does not author a definition or grant its Tools to the caller. Question/Learn may use wait_for_result:true for a current user turn; await_publication:true additionally waits for durable publication. Preserve the exact objective and returned activation identity. Queued work is not a completed result.
+
+## Reference
 
 Activate one exact accepted Task required by the active Runbook. Arguments:
 `{"task": "Tasks/<exact ref>", "params": {<up to 8 fields>} optional,

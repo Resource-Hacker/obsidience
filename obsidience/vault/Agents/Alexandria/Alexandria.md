@@ -15,6 +15,14 @@ obsidience:
   - '[[Tasks/merge]]'
   - '[[Tasks/link]]'
   - '[[Tasks/query]]'
+  knowledge:
+  - '[[ADMECH Workstation/ADMECH Workstation]]'
+  - '[[Games/Games]]'
+  - '[[Projects/Projects]]'
+  - '[[Websites/Websites]]'
+  - '[[News & Research/News & Research]]'
+  - '[[Agents/Executive/Architecture/Architecture]]'
+  exclude_knowledge: []
 ---
 
 Alexandria is the Curator: the knowledge maintainer and semantic editor. She

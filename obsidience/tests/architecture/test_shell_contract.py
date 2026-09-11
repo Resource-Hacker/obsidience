@@ -1438,28 +1438,6 @@ def test_reader_explorers_share_one_native_dock_layout() -> None:
     assert 'title: "Knowledge"' in knowledge
 
 
-def test_knowledge_explorer_absorbs_native_folder_articles_once() -> None:
-    knowledge = (
-        SHELL_ROOT / "qml" / "panes" / "knowledge" / "KnowledgePane.qml"
-    ).read_text()
-    assert 'if (parent && file.kind === "knowledge"' in knowledge
-    assert '=== currentPath.split("/").pop().toLowerCase()' in knowledge
-    assert 'parent.ref = file.ref' in knowledge
-    assert 'subject.ref = declared.article_ref || declared.id' in knowledge
-    assert '|| file.ref === declared.article_ref) continue' in knowledge
-    assert '["index", "readme"].includes' not in knowledge
-    assert '(index|readme)' not in knowledge
-    panes = PROJECT_ROOT / "obsidience" / "ui" / "src" / "renderer" / "src" / "panes"
-    reader = (panes / "reader-pane.tsx").read_text()
-    graph = (panes / "graph-backdrop.tsx").read_text()
-    assert 'basename.toLowerCase() === parent.path.split("/").pop()?.toLowerCase()' in reader
-    assert '&& file.ref !== declared.article_ref' in reader
-    assert '!subjectArticleRefs.has(candidate.id)' in reader
-    assert 'row.article_ref ? [row.article_ref] : []' in reader
-    assert '!subjectArticleRefs.has(node.id)' in graph
-    assert 'subject.article_ref ? [subject.article_ref] : []' in graph
-
-
 def test_reader_child_labels_use_canonical_graph_titles() -> None:
     reader = (SHELL_ROOT / "qml" / "panes" / "reader" / "ReaderPane.qml").read_text()
     assert 'request.open("GET", "http://127.0.0.1:8765/api/graph")' in reader

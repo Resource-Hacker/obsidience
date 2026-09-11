@@ -3,9 +3,17 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtWebSockets
+import "../../components/knowledge"
 
 Item {
     id: root
+
+    ArticleCheckouts {
+        id: checkouts
+        nodes: root.articleGraph.nodes
+        active: root.visible && !root.sourceMode && root.articleRef !== ""
+        onChanged: root.loadArticleTitles(root.requestGeneration)
+    }
 
     property string articleRef: ""
     property string graphId: ""
@@ -192,6 +200,7 @@ Item {
     }
 
     function loadArticleTitles(generation) {
+        checkouts.refresh()
         const request = new XMLHttpRequest()
         request.open("GET", "http://127.0.0.1:8765/api/graph")
         request.onreadystatechange = function() {
@@ -238,7 +247,9 @@ Item {
         const request = new XMLHttpRequest()
         request.open("GET", "http://127.0.0.1:8765/"
             + (feedItemMode ? "api/feeds/items/" : sourceMode ? "api/source-files/" : "api/articles/")
-            + (feedItemMode ? encodeURIComponent(ref) : encodeURI(ref)))
+            + (feedItemMode ? encodeURIComponent(ref) : encodeURI(ref))
+            + (!root.sourceMode && root.graphId && root.graphId !== "library"
+                ? "?graph_id=" + encodeURIComponent(root.graphId) : ""))
         request.onreadystatechange = function() {
             if (request.readyState !== XMLHttpRequest.DONE
                     || generation !== root.requestGeneration) return
@@ -608,6 +619,23 @@ Item {
                         font.letterSpacing: root.indexArticle ? 0.55 : 0.72
                         lineHeightMode: Text.ProportionalHeight
                         lineHeight: root.indexArticle ? 1.1 : 1.25
+                    }
+                    AgentCheckoutButtons {
+                        visible: !root.sourceMode && !root.editing && root.articleRef !== ""
+                        controller: checkouts
+                        node: ({ref: root.documentPath || root.articleRef, kind: root.articleKind})
+                        agents: (root.articleGraph.navigation || {}).groups || []
+                        buttonSize: 24
+                    }
+                    Text {
+                        visible: !root.sourceMode && checkouts.error !== ""
+                        width: parent.width
+                        text: checkouts.error
+                        textFormat: Text.PlainText
+                        color: "#fda4af"
+                        wrapMode: Text.Wrap
+                        font.family: "JetBrains Mono"
+                        font.pixelSize: 9
                     }
                     Text {
                         visible: root.sourceMode

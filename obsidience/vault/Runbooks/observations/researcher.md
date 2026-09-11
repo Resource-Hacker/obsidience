@@ -33,3 +33,6 @@ Maintain the owner-selected Darwin node after one completed turn.
 5. Call `task.complete` with only an operational result, not the observation
    text. Use `review` only for this execution's unresolved proposals; an
    explicitly published result is a completed change.
+
+
+When a useful nonredundant observation should survive this activation, optionally append one bounded unverified note to this Agent's own Temporary Observations. Do not record hidden reasoning or create a note merely to narrate routine work.

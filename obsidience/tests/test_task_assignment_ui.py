@@ -25,82 +25,64 @@ def _node(code: str) -> None:
     assert result.returncode == 0, result.stderr
 
 
-def test_native_assignments_require_real_tasks_and_preserve_inherited_ownership():
-    source = (PRODUCT / "shell/qml/panes/library/LibraryPane.qml").read_text()
-    functions = _functions(source, ("assignmentKey", "canAssign", "assignmentHint", "toggleAssignment"))
+def test_reader_checkout_controls_share_revisioned_authoritative_state():
+    source = (PRODUCT / "shell/qml/components/knowledge/ArticleCheckouts.qml").read_text()
+    functions = source[source.index("    function key("):source.rfind("\n}")]
     _node(f"""
 import {{strict as assert}} from 'node:assert';
 import vm from 'node:vm';
-const task='Tasks/query', tool='Tools/web.fetch';
 const requests=[];
-const state={{nodes:[{{id:task,kind:'task'}},{{id:tool,kind:'tool'}},
-  {{id:'@library/Tasks/future',kind:'task',synthetic:true}}],
-  assignments:{{}},busyAssignments:{{}},navigationAgents:[{{role:'executive',title:'Executive'}}],
-  refresh(){{}},requestJson(method,path,body,callback){{requests.push({{method,path,body,callback}});}}}};
-vm.createContext(state);
-vm.runInContext({json.dumps(functions)},state);
-const key=state.assignmentKey(task,'executive');
-for(const ref of [tool,'@library/Tasks/future','Tasks/missing'])state.toggleAssignment(ref,'executive');
-assert.equal(requests.length,0);
-state.assignments[key]={{kind:'task',direct:false,inherited:true}};
-state.toggleAssignment(task,'executive');
-assert.equal(requests.length,0);
-assert.match(state.assignmentHint(task,'executive'),/Edit the Task in Reader/);
-delete state.assignments[key];
-state.toggleAssignment(task,'executive');
-assert.equal(requests.length,1);
-assert.equal(requests[0].path,'/api/library/assignments/Tasks/query');
-assert.deepEqual(JSON.parse(JSON.stringify(requests[0].body)),{{agent:'executive',assigned:true}});
-assert.equal(state.assignments[key],undefined); // No optimistic grant.
-state.toggleAssignment(task,'executive');
-assert.equal(requests.length,1); // Single flight.
-requests[0].callback(true,{{ref:task,agent:'executive',kind:'task',direct:true,inherited:true,assignment_changed:true}},'');
-assert.equal(state.assignments[key].direct,true);
-state.toggleAssignment(task,'executive');
-assert.equal(requests[1].body.assigned,false);
-requests[1].callback(false,null,'Rejected');
-assert.equal(state.assignments[key].direct,true); // Failure preserves accepted state.
-state.toggleAssignment(task,'executive');
-requests[2].callback(true,{{ref:task,agent:'executive',kind:'task',direct:false,inherited:true,assignment_changed:true}},'');
-assert.equal(state.assignments[key].inherited,true);
-assert.equal(state.assignments[key].direct,false);
-assert.match(state.assignmentNotice,/ownership remains/);
-state.toggleAssignment(task,'executive');
-assert.equal(requests.length,3); // The remaining inherited assignment is read-only.
-delete state.assignments[key];
-state.toggleAssignment(task,'executive');
-requests[3].callback(true,{{ref:task,agent:'executive',kind:'task',direct:true,inherited:false,
-  assignment_changed:true,activation_state:'queued',activation_error:'awaiting-runbook: ordinary Runbook generation is pending'}},'');
-assert.equal(state.assignmentError,''); // Normal queued generation is not a failure.
-assert.match(state.assignmentNotice,/Runbook generation is queued for review/);
-assert.equal(state.assignmentNotice.includes('undefined'),false);
+class XHR {{
+  static DONE=4;
+  open(method,path){{this.method=method;this.path=path;}}
+  setRequestHeader(){{}}
+  send(body){{this.body=body;requests.push(this);}}
+  finish(status,payload){{this.status=status;this.responseText=JSON.stringify(payload);this.readyState=4;this.onreadystatechange();}}
+}}
+const task='Tasks/query', fact='Shared/fact', role={{id:'executive',role:'executive',title:'Executive'}};
+const state={{nodes:[{{id:task,kind:'task'}},{{id:fact,kind:'knowledge'}},{{id:'Tools/read',kind:'tool'}}],
+ rows:{{}},revisions:{{}},pending:false,active:true,error:'',generation:0,changes:0,
+ changed(){{state.changes++;}},XMLHttpRequest:XHR}};
+state.root=state;vm.createContext(state);vm.runInContext({json.dumps(functions)},state);
+state.applyManifest({{revisions:{{executive:'r1'}},knowledge:[{{ref:fact,agent:'executive',checked:false,editable:true}}]}});
+state.toggle({{ref:'Tools/read'}},role);assert.equal(requests.length,0);
+state.toggle({{ref:task}},role);assert.equal(requests.length,1);
+assert.deepEqual(JSON.parse(requests[0].body),{{agent:'executive',assigned:true,expected_revision:'r1'}});
+assert.equal(state.state({{ref:task}},'executive').checked,false); // No optimistic grant.
+state.toggle({{ref:fact}},role);assert.equal(requests.length,1); // Single flight.
+requests[0].finish(409,{{detail:'stale'}});
+assert.equal(state.pending,false);assert.match(state.error,/changed/);
+assert.equal(requests[1].method,'GET');
+requests[1].finish(200,{{revisions:{{executive:'r2'}},assignments:[{{ref:task,agent:'executive',direct:true,inherited:false}}]}});
+assert.equal(state.state({{ref:task}},'executive').checked,true);
+state.toggle({{ref:task}},role);assert.equal(JSON.parse(requests[2].body).assigned,false);
+assert.equal(JSON.parse(requests[2].body).expected_revision,'r2');
+requests[2].finish(200,{{}});assert.equal(state.changes,1);
+requests[3].finish(200,{{revisions:{{executive:'r3'}},assignments:[{{ref:task,agent:'executive',direct:false,inherited:true}}]}});
+state.toggle({{ref:task}},role);assert.equal(requests.length,4); // Inherited execution dependency is not a manual grant.
 """)
-    assert 'model: root.canAssign(libraryRow.modelData.node) ? root.navigationAgents : []' in source
-    assert 'text: "SKILL"' in source
-    assert "/api/library/checkouts" not in source and '"checked_out"' not in source
+    reader = (PRODUCT / "shell/qml/panes/reader/ReaderPane.qml").read_text()
+    explorer = (PRODUCT / "shell/qml/panes/knowledge/KnowledgePane.qml").read_text()
+    catalog = (PRODUCT / "shell/qml/panes/library/LibraryPane.qml").read_text()
+    assert all("ArticleCheckouts {" in text and "AgentCheckoutButtons {" in text for text in (reader, explorer))
+    assert "toggleAssignment" not in catalog and "/api/library/assignments" not in catalog
+    assert 'text: "SKILL"' in catalog
 
 
-def test_native_library_fetches_only_task_assignments_and_canonical_members():
+def test_native_catalog_uses_only_declared_members_and_has_no_assignment_writer():
     source = (PRODUCT / "shell/qml/panes/library/LibraryPane.qml").read_text()
-    functions = _functions(source, ("assignmentKey", "refresh"))
+    functions = _functions(source, ("refresh",))
     _node(f"""
 import {{strict as assert}} from 'node:assert';
 import vm from 'node:vm';
 const requests=[];
 const state={{updateCounts(){{}},rebuildRows(){{}},requestJson(method,path,body,callback){{requests.push({{method,path,callback}});}}}};
 vm.createContext(state);vm.runInContext({json.dumps(functions)},state);state.refresh();
-const respond=(path,data)=>requests.find(row=>row.path===path).callback(true,data,'');
-respond('/api/graph',{{nodes:[{{id:'Tasks/query',kind:'task'}},{{id:'Tools/read',kind:'tool'}},
-  {{id:'Agents/Darwin/Tasks/private',kind:'task'}}],navigation:{{groups:[
-  {{id:'library',role:'library',article_refs:['Tasks/query','Tools/read']}},
-  {{id:'executive',role:'executive'}}]}}}});
+requests.find(row=>row.path==='/api/graph').callback(true,{{nodes:[{{id:'Tasks/query',kind:'task'}},
+ {{id:'Tools/read',kind:'tool'}},{{id:'Agents/Darwin/Tasks/private',kind:'task'}}],navigation:{{groups:[
+ {{id:'library',role:'library',article_refs:['Tasks/query','Tools/read']}}]}}}},'');
 assert.deepEqual(Array.from(state.nodes,row=>row.id),['Tasks/query','Tools/read']);
-respond('/api/library/assignments',{{assignments:[
-  {{ref:'Tasks/query',agent:'executive',kind:'task',direct:false,inherited:true}},
-  {{ref:'Tools/read',agent:'executive',kind:'tool',direct:true}}],
-  dependencies:[{{ref:'Tools/read',agent:'executive',kind:'tool'}}]}});
-assert.deepEqual(Object.keys(state.assignments),[state.assignmentKey('Tasks/query','executive')]);
-assert.equal(requests.some(row=>row.path.includes('checkouts')),false);
+assert.equal(requests.some(row=>row.path.includes('assignments')),false);
 """)
 
 
@@ -174,7 +156,5 @@ await api.setSourceCheckout('obsidience/evidence','researcher',true);
 assert.deepEqual(JSON.parse(calls[2].options.body),{{agent:'researcher',checked_out:true}});
 """)
     library = (PRODUCT / "ui/src/renderer/src/panes/library-pane.tsx").read_text()
-    assert 'return node.kind === "task" && node.synthetic !== true;' in library
-    assert 'disabled={busy.has(key) || inheritedOnly}' in library
-    assert 'isAssignmentable(node) ? (' in library
-    assert "setCheckout" not in library and "checked_out" not in library
+    assert "toggleAssignment" not in library and "api.setAssignment" not in library
+    assert "openReader" in library

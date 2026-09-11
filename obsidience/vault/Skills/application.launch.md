@@ -1,9 +1,16 @@
 ---
 type: skill
 title: Using application.launch
+description: Use the controller's registered identifier.
 obsidience:
   tool: '[[Tools/application.launch]]'
 ---
+
+## Runtime
+
+Use the controller's registered identifier. Let the original call observe readiness. ready with dispatched:false means already open, not newly launched. Focus and visibility are separate outcomes. Report timeout as unverified and do not launch again.
+
+## Reference
 
 Use `application.launch` to dispatch one registered desktop application through
 the managed graphical launcher.

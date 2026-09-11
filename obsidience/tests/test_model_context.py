@@ -75,10 +75,11 @@ def test_gemma_projection_is_selected_by_family_and_does_not_mutate_packet():
     assert "<|think|>" not in payload["messages"][0]["content"]
     assert payload["chat_template_kwargs"] == {"enable_thinking": True}
     schema = payload["response_format"]["json_schema"]["schema"]
-    assert schema["properties"]["tool"]["enum"] == ["task.complete", "window.place"]
-    assert schema["required"] == ["tool", "args"]
-    assert set(schema["properties"]) == {"tool", "args"}
-    assert schema["additionalProperties"] is False
+    branches = schema["anyOf"]
+    assert [row["properties"]["tool"]["enum"][0] for row in branches] == ["task.complete", "window.place"]
+    assert all(row["required"] == ["tool", "args"] and not row["additionalProperties"] for row in branches)
+    assert branches[1]["properties"]["args"]["required"] == ["target", "destination"]
+
 
     other = llm._chat_payload(messages, MODELS[SPECIALIST_MODEL], max_tokens=None,
                               temperature=0, reasoning_effort="none",

@@ -2,6 +2,8 @@
 type: knowledge
 title: Real-time Executive
 sources:
+- resource: obsidience/harness/knowledge/scope.py
+- resource: obsidience/harness/knowledge/index.py
 - resource: obsidience/harness/realtime/runtime.py
 - resource: obsidience/harness/realtime/media.py
 - resource: obsidience/harness/realtime/speech/worker.py
@@ -48,15 +50,19 @@ Canceled, failed, blocked, interrupted or stale model output is not committed as
 a successful assistant reply, but its user's request is not erased. Conversation compaction
 and promotion use their ordinary Tasks and never create a second memory path.
 
-While the connection is enabled, autonomous specialist schedules and triggers
-remain pending. An interactive Executive execution may use its authorized
-`task.create` to delegate a Research Question or Learn outcome along the
-[Research requests](/Agents/Executive/Architecture/Harness/research-requests--7bf0113c.md)
-path. The controller derives that interactive provenance from the real
-execution; caller arguments cannot grant it and causal order never creates
-hierarchy. Turning Realtime off closes the speech connection and releases the
-pause without rewriting pending Tasks. Individual work executions complete
-normally while the connection stays ready for the next request.
+Idle listening is not a global pause. Actual foreground work, speech startup or
+shutdown, and the existing physical GPU reservations control admission. The
+scheduler never unloads speech simply to start an incompatible specialist model.
+An Executive may delegate a Question or Learn through its authorized `task.create`;
+controller provenance binds the actual caller and user turn. A completed sourced
+finding can return before background wiki publication. Explicit publication
+requests retain their separate acceptance condition.
+
+An ordinary launch dispatches once and waits for the existing Shell scene to
+witness readiness. A timeout is not permission to launch again. Query can request
+one controlled pre-effect admission correction if an action was misrouted; it
+cannot authorize a Tool or invent a target. Independent activations retain their
+own identities, context and evidence while the speech connection stays ready.
 
 ## Relationships
 

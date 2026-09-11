@@ -145,3 +145,114 @@ async def execute_async(name: str, args: dict | None, context: dict | None) -> A
         if cancel is not None:
             cancel.set()
         raise
+
+
+def _schema_object(properties: dict, required: tuple[str, ...] = ()) -> dict:
+    return {"type": "object", "properties": properties,
+            "required": list(required), "additionalProperties": False}
+
+
+def _schema_text(maximum: int = 512, *, empty: bool = False) -> dict:
+    return {"type": "string", "minLength": 0 if empty else 1, "maxLength": maximum}
+
+
+def _schema_array(item: dict, maximum: int, minimum: int = 0) -> dict:
+    return {"type": "array", "items": item, "minItems": minimum, "maxItems": maximum}
+
+
+@lru_cache(maxsize=1)
+def _argument_schemas() -> dict[str, dict]:
+    """The registry's decoder-facing interface; adapters still validate effects."""
+    from ..computer.applications import APPLICATIONS
+    from ..host.scene import SURFACE_IDS
+    text = _schema_text
+    obj = _schema_object
+    array = _schema_array
+    integer = {"type": "integer", "minimum": 0}
+    surface = {"type": "string", "enum": list(SURFACE_IDS)}
+    target = {"anyOf": [obj({"kind": {"const": kind}, "name": text(256 if kind == "application" else 48),
+                             "surface": surface}, ("kind", "name")) for kind in ("application", "pane")]}
+    observe_target = {"anyOf": [*target["anyOf"], obj({"kind": {"const": "focused"}, "surface": surface}, ("kind",))]}
+    tile = obj({key: integer for key in ("left", "top", "right", "bottom")}, ("left", "top", "right", "bottom"))
+    bounded_scope = obj({"kind": {"enum": ["knowledge", "task", "runbook", "tool", "skill", "agent"]},
+        "current_only": {"type": "boolean"}, "exclude_subtrees": array(text(300),10)})
+    schemas = {
+        "application.launch": obj({"application": {"type":"string","enum":sorted(APPLICATIONS)}},("application",)),
+        "computer.observe": obj({"target":observe_target,"query":text(500)},("target","query")),
+        "computer.act": obj({"application":text(256),"action":{"const":"click"},"target":text(128),
+            "point":obj({axis:{"type":"integer","minimum":0,"maximum":999} for axis in ("x","y")},("x","y")),
+            "postcondition":text(500)},("application","target","point")),
+        "window.activate": obj({"target":target},("target",)),
+        "window.place": obj({"target":target,"destination":obj({"surface":surface,"tile":tile},("surface",))},("target","destination")),
+        "vault.search": {"anyOf":[obj({"query":text(300),"scope":bounded_scope},("query",)),
+                                  obj({"queries":array(text(300),10,1),"scope":bounded_scope},("queries",))]},
+        "vault.read": {"anyOf":[obj({key:value,"offset":integer,"expected_sha256":{"type":"string","pattern":"^[0-9a-f]{64}$"}},(key,))
+            for key,value in (("ref",text(500)),("refs",array(text(500),10,1)))]},
+        "vault.list":obj({"folder":text(512,empty=True),"offset":integer}),
+        "vault.propose":obj({"target":text(512),"action":{"enum":["create","update","archive"]},
+            "title":text(300),"body":text(96000,empty=True),"reason":text(400,empty=True),
+            "source":text(512),"metadata":{"type":"object","additionalProperties":True}},("target",)),
+        "vault.maintenance":obj({}), "vault.validate":obj({}), "harness.status":obj({}),
+        "harness.repair":obj({"task":text(512),"run_id":text(128)},("task","run_id")),
+        "harness.evaluate":obj({"proposal":text(512)},("proposal",)),
+        "task.inspect":obj({"task":text(512),"run_id":text(128)},("task",)),
+        "review.inspect":obj({"task":text(512),"proposal":text(512)}),
+        "task.create":obj({"task":text(512),"params":{"type":"object","additionalProperties":True,"maxProperties":8},
+            "wait_for_result":{"type":"boolean"},"await_publication":{"type":"boolean"}},("task",)),
+        "task.complete":obj({"status":{"enum":["completed","failed","review"]},"summary":text(2000,empty=True),
+            "reclassify":{"type":"boolean"},
+            "outcome":text(100,empty=True),"evidence":array(text(500),8),
+            "verification":obj({"status":{"enum":["established","not_established"]},"observation":text(1000)},("status","observation"))},("status","summary")),
+        "observations.temporary.append":obj({"text":text(2000),"related_refs":array(text(512),3)},("text",)),
+        "observations.temporary.archive":obj({}),
+        "source.read":{"anyOf":[obj({key:value,"offset":integer,"limit":{"type":"integer","minimum":1,"maximum":12000}},(key,))
+            for key,value in (("source",text(128)),("sources",array(text(128),10,1)))]},
+        "source.ingest":obj({"source_type":text(32),"source_ref":text(2048,empty=True),"media_type":text(128),
+            "captured_at":text(80),"content":text(500000)},("content",)),
+        "source.handoff":obj({"title":text(300),"content":text(500000)},("title","content")),
+        "web.search":obj({"query":text(2000),"limit":{"type":"integer","minimum":1,"maximum":20}},("query",)),
+        "web.fetch":{"anyOf":[obj({"url":text(8192)},("url",)),obj({"urls":array(text(8192),10,1)},("urls",))]},
+        "web.feed":obj({"url":text(8192),"limit":{"type":"integer","minimum":1,"maximum":100}},("url",)),
+        "model.inspect":obj({"model_id":text(200)},("model_id",)),
+        "model.source":obj({"model_id":text(200)},("model_id",)),
+        "model.benchmark":obj({"model_id":text(200),"devices":array(text(100),8,1)},("model_id",)),
+        "model.configure":obj({"model_id":text(200),"allowed_devices":array(text(100),8,1),
+            "context_tokens":{"type":"integer","minimum":1},"max_output_tokens":{"type":"integer","minimum":1},
+            "gpu_memory_utilization":{"type":"number","exclusiveMinimum":0,"maximum":1},
+            "max_num_seqs":{"type":"integer","minimum":1}},("model_id",)),
+    }
+    if set(schemas) != set(REGISTRY):
+        raise ValueError("Every registered Tool requires an argument schema")
+    return schemas
+
+
+def argument_schema(name: str) -> dict:
+    from copy import deepcopy
+    return deepcopy(_argument_schemas()[name])
+
+
+def action_schema(allowed: list[str]) -> dict:
+    """Constrain each permitted Tool together with its own argument shape."""
+    if not allowed or set(allowed) - set(REGISTRY):
+        raise ValueError("Action schema requires exact registered capabilities")
+    return {"anyOf": [_schema_object({"tool":{"type":"string","enum":[name]},
+                                     "args":argument_schema(name)},("tool","args"))
+                      for name in sorted(set(allowed))]}
+
+
+def decoder_action_schema(allowed: list[str]) -> dict:
+    """Keep exact argument structure without exponential grammar repetitions.
+
+    llama.cpp expands nested finite string/array bounds into grammar rules.
+    Canonical contracts and adapters retain those bounds; the decoding grammar
+    enforces types, required keys, enums and closed property sets. The request's
+    output-token limit bounds generation before adapter validation.
+    """
+    def structural(value):
+        if isinstance(value, dict):
+            return {key: structural(item) for key, item in value.items()
+                    if key not in {"maxLength", "maxItems", "maxProperties"}}
+        if isinstance(value, list):
+            return [structural(item) for item in value]
+        return value
+    return structural(action_schema(allowed))
