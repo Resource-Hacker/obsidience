@@ -116,6 +116,14 @@
       "revision": "30e20ce004486c58e7ee97c66182a8d0d41ec90e",
       "license": "MIT",
       "integration": "Design references only: exact paired case/repetition matching, immutable baseline/candidate identity, held-out regression evaluation and causal diagnosis. Locally implemented in harness/execution/evaluation.py and refinement.py over the existing executor, Task-selected provider, Source files and Review ledger. No upstream source copied and no AutoSaddler engine, provider SDK, candidate Git store or scheduler installed. Acceptance requires complete coverage, all candidate cases passing, no pass-to-fail regression and strict training improvement."
+    },
+    "cpython_sqlite3_compatibility": {
+      "repository": "https://github.com/python/cpython",
+      "reference": "https://github.com/python/cpython/issues/118172",
+      "license": "PSF-2.0",
+      "verified_python_version": "3.14.7",
+      "verified_sqlite_version": "3.53.4",
+      "integration": "Use the installed standard-library driver with serialized SQLite and cached_statements=0 on the shared Index connection. Avoid concurrent prepared-statement reuse while preserving existing write transactions and Source lock ownership. No upstream code, extra connection, dependency, retry service or database migration added."
     }
   }
 }

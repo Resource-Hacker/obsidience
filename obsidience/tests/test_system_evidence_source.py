@@ -199,3 +199,89 @@ def test_ordinary_ingest_cannot_suppress_events_or_select_system_lane(system_sou
     assert ledger.source(result["id"])["event_key"].startswith("source.added:")
 
 pytestmark = pytest.mark.usefixtures("authorized_reader_scope")
+
+
+def test_shared_ledger_disables_cpython_statement_cache(tmp_path, monkeypatch):
+    from obsidience.harness.knowledge import index
+    calls = []
+    connect = index.sqlite3.connect
+    def capture(*args, **kwargs):
+        calls.append(kwargs)
+        return connect(*args, **kwargs)
+    monkeypatch.setattr(config.CONFIG, "db_path", tmp_path / "fresh.sqlite3")
+    monkeypatch.setattr(index.sqlite3, "connect", capture)
+    ledger = index.Index()
+    try:
+        assert calls == [{"check_same_thread": False, "cached_statements": 0}]
+        assert ledger.db.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+    finally:
+        ledger.db.close()
+
+
+@pytest.mark.parametrize("threadsafety", [0, 1])
+def test_shared_ledger_requires_serialized_sqlite(tmp_path, monkeypatch, threadsafety):
+    from obsidience.harness.knowledge import index
+    monkeypatch.setattr(config.CONFIG, "db_path", tmp_path / "unsupported.sqlite3")
+    monkeypatch.setattr(index.sqlite3, "threadsafety", threadsafety)
+    with pytest.raises(RuntimeError, match="serialized SQLite"):
+        index.Index()
+    assert not config.CONFIG.db_path.exists()
+
+
+def test_concurrent_source_rows_keep_exact_identity_during_writes(system_source):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    _, ledger, events = system_source
+    captures = [source.capture_system_evidence("identity", {"fixture": i}) for i in range(16)]
+    expected = [ledger.source(item["id"]) for item in captures]
+    barrier = Barrier(9)
+    def reader(worker):
+        barrier.wait(timeout=5)
+        for iteration in range(250):
+            row = expected[(worker + iteration) % len(expected)]
+            assert ledger.source(row["id"]) == row
+            assert ledger.source_by_material(row["material_sha256"]) == row
+            assert ledger.source_by_fingerprint("system", row["source_type"],
+                row["source_ref"], row["media_type"], row["content_sha256"]) == row
+    def writer():
+        barrier.wait(timeout=5)
+        for i in range(16, 48):
+            source.capture_system_evidence("identity", {"fixture": i})
+    with ThreadPoolExecutor(max_workers=9) as pool:
+        futures = [pool.submit(reader, i) for i in range(8)] + [pool.submit(writer)]
+        for future in futures:
+            future.result(timeout=20)
+    assert len(ledger.sources()) == 48 and not ledger.pending_source_events() and not events
+    assert ledger.db.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+
+
+def test_status_attestation_survives_concurrent_system_publication(system_source, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    from fastapi.testclient import TestClient
+    from obsidience.harness.interfaces.api import app as api
+    _, ledger, events = system_source
+    monkeypatch.setattr(api.model_runtime, "settings", lambda: {
+        "active_models": [], "residency_policy": "hardware_slots"})
+    for i in range(12):
+        source.capture_system_evidence("identity", {"fixture": i})
+    barrier = Barrier(5)
+    def reader():
+        client = TestClient(api.app)  # Do not enter live service startup.
+        try:
+            barrier.wait(timeout=5)
+            for _ in range(12):
+                response = client.get("/api/status")
+                assert response.status_code == 200, response.text
+                assert response.json()["source_issues"] == 0
+        finally:
+            client.close()
+    def writer():
+        barrier.wait(timeout=5)
+        for i in range(12, 36):
+            source.capture_system_evidence("identity", {"fixture": i})
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        futures = [pool.submit(reader) for _ in range(4)] + [pool.submit(writer)]
+        for future in futures:
+            future.result(timeout=30)
+    assert len(ledger.sources()) == 36 and not events
