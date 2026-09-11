@@ -1093,6 +1093,14 @@ through a file lock, compute before publishing one SQLite transaction, and
 invalidate the derived in-memory vector matrix on relevant local changes or
 external database commits. This adds no service or second knowledge store.
 
+The existing Index connection requires serialized SQLite and disables CPython's
+prepared-statement cache (`cached_statements=0`, upstream issue #118172).
+Concurrent Source/status readers use separate cursors, not cached statements
+shared with another in-flight query. Existing transaction owners still serialize
+writes. This compatibility setting neither adds Source-read locks nor changes
+publication order, database schema, evidence integrity checks or error reporting.
+
+
 The shared conversation selector binds the current explicit request and its
 canonical application hint together, preserving the complete Objective. Spoken
 repairs and foreground/visual requests select ordinary Computer Use; quoted

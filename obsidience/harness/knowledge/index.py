@@ -345,7 +345,14 @@ _ACTIVE_OCCURRENCE: ContextVar[tuple[str, str] | None] = ContextVar("obsidience_
 class Index:
     def __init__(self):
         self.db_path = str(CONFIG.db_path)
-        self.db = sqlite3.connect(self.db_path, check_same_thread=False)
+        # SQLite serializes native connection calls, but CPython's shared
+        # statement cache can reuse a statement across concurrent cursors
+        # (python/cpython#118172), producing mixed rows or SQLITE_MISUSE.
+        # Keep private cursors and existing transaction ownership; do not add
+        # additional Source-read locks or alter publication lock ownership.
+        if sqlite3.threadsafety != 3:
+            raise RuntimeError("The shared ledger requires serialized SQLite support")
+        self.db = sqlite3.connect(self.db_path, check_same_thread=False, cached_statements=0)
         self.db.executescript(_SCHEMA)
         self._migrate()
         self.lock = threading.RLock()
