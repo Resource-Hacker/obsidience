@@ -752,6 +752,8 @@ async def _execute_session(
                 for part in message["content"])
         for message in messages
     )
+    from ..capabilities.task.complete import completion_requires_no_change
+
     ctx.pop(_OBSERVATION_CONTEXT_FIELD, None)
     steering = ctx.get("_steering")
     # Keep the first notice in actual history so subsequent requests extend
@@ -815,6 +817,7 @@ async def _execute_session(
                     model=model,
                     allowed_tools=allowed,
                     task_context=task_context,
+                    **({"completion_no_change": True} if completion_requires_no_change(ctx) else {}),
                 )
             except asyncio.CancelledError:
                 emit_model("interrupted", ["Provider request interrupted."])

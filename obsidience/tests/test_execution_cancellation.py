@@ -567,3 +567,26 @@ def test_specialist_read_activity_keeps_its_execution_graph_and_identity(executi
     assert reads[0]["retrieval_ms"] == 1.25
     lifecycle = [row for row in execution.events if row["phase"] in {"query_started", "query_completed"}]
     assert all(row["graph_id"] == "Alexandria" and row["run_id"] == result["run_id"] for row in lifecycle)
+
+
+def test_completion_decoder_tracks_controller_proposal_state(execution, monkeypatch):
+    execution.tools.append('vault.propose')
+    monkeypatch.setattr(executor,'_maintenance_candidate_evidence',lambda *_:{'candidate_refs':['Shared/fact']})
+    observed=[]
+    actions=iter([
+        {'tool':'vault.propose','args':{'target':'Shared/fact','body':'Inspected supported fact.'}},
+        {'tool':'task.complete','args':{'status':'completed','summary':'The owner approved the update.'}},
+    ])
+    ordinary=executor.execute_capability
+    async def response(*_args,**kwargs):
+        observed.append(kwargs.get('completion_no_change',False))
+        return NS(content=json.dumps(next(actions)),prompt_tokens=100)
+    def dispatch(name,args,context):
+        if name=='vault.propose':
+            context['staged_proposals']=[{'auto_approved':True,'target':'Shared/fact.md'}]
+            return 'Approved in isolated fixture.'
+        return ordinary(name,args,context)
+    monkeypatch.setattr(executor.llm,'chat',response)
+    monkeypatch.setattr(executor,'execute_capability',dispatch)
+    assert asyncio.run(execution.run())['status']=='completed'
+    assert observed==[True,False]

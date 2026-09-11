@@ -231,16 +231,28 @@ def argument_schema(name: str) -> dict:
     return deepcopy(_argument_schemas()[name])
 
 
-def action_schema(allowed: list[str]) -> dict:
-    """Constrain each permitted Tool together with its own argument shape."""
+def action_schema(allowed: list[str], *, completion_no_change: bool = False) -> dict:
+    """Constrain Tool arguments and the active completion contract, not its evidence."""
     if not allowed or set(allowed) - set(REGISTRY):
         raise ValueError("Action schema requires exact registered capabilities")
-    return {"anyOf": [_schema_object({"tool":{"type":"string","enum":[name]},
-                                     "args":argument_schema(name)},("tool","args"))
-                      for name in sorted(set(allowed))]}
+    choices = []
+    for name in sorted(set(allowed)):
+        args = argument_schema(name)
+        if name == "task.complete" and completion_no_change:
+            from copy import deepcopy
+            successful = deepcopy(args)
+            successful["properties"]["status"] = {"const": "completed"}
+            successful["properties"]["outcome"] = {"const": "no_change"}
+            successful["properties"]["evidence"]["minItems"] = 1
+            successful["required"] = list(dict.fromkeys([*successful["required"], "outcome", "evidence"]))
+            args["properties"]["status"] = {"enum": ["failed", "review"]}
+            args = {"anyOf": [successful, args]}
+        choices.append(_schema_object({"tool": {"type": "string", "enum": [name]},
+                                       "args": args}, ("tool", "args")))
+    return {"anyOf": choices}
 
 
-def decoder_action_schema(allowed: list[str]) -> dict:
+def decoder_action_schema(allowed: list[str], *, completion_no_change: bool = False) -> dict:
     """Keep exact argument structure without exponential grammar repetitions.
 
     llama.cpp expands nested finite string/array bounds into grammar rules.
@@ -255,4 +267,4 @@ def decoder_action_schema(allowed: list[str]) -> dict:
         if isinstance(value, list):
             return [structural(item) for item in value]
         return value
-    return structural(action_schema(allowed))
+    return structural(action_schema(allowed, completion_no_change=completion_no_change))
