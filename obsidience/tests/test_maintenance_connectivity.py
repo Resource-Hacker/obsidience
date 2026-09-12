@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pytest
 
+from obsidience.harness.knowledge import scope as knowledge_scope
+
 from obsidience.harness.capabilities.vault import maintenance
 from obsidience.harness.config import CONFIG
 from obsidience.harness.knowledge import vault
@@ -80,11 +82,12 @@ def test_native_parent_coverage_does_not_invent_semantic_relationships(monkeypat
     assert [row["kind"] for row in result["candidates"]] == ["missing_link"]
     candidate = _only_candidate(result)
     assert candidate["connectivity"] == {
-        "isolated_endpoint_refs": [_LEFT_REF, _RIGHT_REF],
-        "separate_components": True, "shared_neighbor_refs": [],
+        "isolated_endpoint_refs": [],
+        "separate_components": False, "shared_neighbor_refs": ["Knowledge/Knowledge"],
     }
+    assert candidate["signals"]["shared_neighbors"] == 0  # Hierarchy is not a semantic anchor.
     assert result["connectivity"] == {
-        "component_count": 3, "isolated_article_count": 3, "largest_component_size": 1,
+        "component_count": 1, "isolated_article_count": 0, "largest_component_size": 3,
     }
     assert all(note.links == [] for note in vault.iter_notes())
     assert before == {path: path.read_bytes() for path in before}
@@ -205,3 +208,76 @@ def test_disconnectedness_alone_does_not_create_a_link_candidate(
         "isolated_article_count": 2,
         "largest_component_size": 1,
     }
+
+
+@pytest.mark.parametrize('depth', [0, 1, 4])
+@pytest.mark.parametrize('reverse', [False, True])
+def test_hierarchy_already_connects_link_endpoints(monkeypatch, tmp_path, depth, reverse):
+    monkeypatch.setattr(CONFIG, 'vault_dir', tmp_path)
+    hub = 'Knowledge/Branch/Branch'
+    leaf = 'Knowledge/Branch/' + 'Nested/' * depth + 'leaf'
+    pairs = [(hub, 'Alpha bridge', _LEFT_BODY), (leaf, 'Alpha connection', _RIGHT_BODY)]
+    for ref, title, body in reversed(pairs) if reverse else pairs:
+        write_note(ref + '.md', {'kind': 'knowledge', 'title': title}, body)
+    before = {p: p.read_bytes() for p in tmp_path.rglob('*.md')}
+    result = maintenance._maintenance_candidates()
+    assert not [row for row in result['candidates'] if row['kind'] == 'missing_link']
+    assert result['connectivity'] == {
+        'component_count': 1, 'isolated_article_count': 0, 'largest_component_size': 2,
+    }
+    res = vault.resolver(include_system=False)
+    params = {'candidate_refs': [leaf, hub], 'candidate_kind': 'missing_link',
+              'candidate_key': 'a' * 20,
+              'candidate_revision': maintenance.candidate_revision([res.resolve(leaf), res.resolve(hub)])}
+    disposition = maintenance.candidate_invalidation('Tasks/link', params, res)
+    assert disposition['reason'] == 'native_hierarchy_connection'
+    assert disposition['current_revision'] == params['candidate_revision']
+    assert before == {p: p.read_bytes() for p in before}
+
+
+@pytest.mark.parametrize('left,right', [
+    ('Knowledge/Branch/Branch', 'Knowledge/BranchOther/leaf'),
+    ('Knowledge/Branch', 'Knowledge/Branch/leaf'),
+    ('Knowledge/Branch/a', 'Knowledge/Branch/b'),
+    ('Knowledge/Branch/One/One', 'Knowledge/Branch/Two/Two'),
+])
+def test_nonancestral_pairs_remain_link_candidates(monkeypatch, tmp_path, left, right):
+    monkeypatch.setattr(CONFIG, 'vault_dir', tmp_path)
+    write_note(left + '.md', {'kind': 'knowledge', 'title': 'Alpha bridge'}, _LEFT_BODY)
+    write_note(right + '.md', {'kind': 'knowledge', 'title': 'Alpha connection'}, _RIGHT_BODY)
+    rows = maintenance._maintenance_candidates()['candidates']
+    assert any(row['kind'] == 'missing_link' and set(row['refs']) == {left, right} for row in rows)
+
+
+def test_agent_brain_is_an_ancestor_of_its_own_folder_articles(monkeypatch, tmp_path):
+    monkeypatch.setattr(CONFIG, 'vault_dir', tmp_path)
+    write_note('Agents/A/A.md', {'kind': 'agent', 'title': 'Renamed brain'}, 'Role.')
+    write_note('Agents/A/Architecture/Architecture.md', {'kind': 'knowledge', 'title': 'Renamed hub'}, 'Overview.')
+    write_note('Agents/A/Architecture/Deep/leaf.md', {'kind': 'knowledge', 'title': 'Leaf'}, 'Facts.')
+    res = vault.resolver(include_system=False)
+    leaf = res.resolve('Agents/A/Architecture/Deep/leaf')
+    assert knowledge_scope.knowledge_ancestry(res)[leaf.ref] == [
+        'Agents/A/Architecture/Architecture', 'Agents/A/A',
+    ]
+
+
+def test_checked_out_knowledge_is_already_beneath_agent_root(monkeypatch, tmp_path):
+    monkeypatch.setattr(CONFIG, 'vault_dir', tmp_path)
+    root = 'Agents/A/A'
+    hub = 'Knowledge/Shared/Shared'
+    leaf = 'Knowledge/Shared/Deep/leaf'
+    write_note(root + '.md', {'kind': 'agent', 'title': 'Alpha bridge',
+                             'knowledge': ['[[' + hub + ']]']}, _LEFT_BODY)
+    write_note(hub + '.md', {'kind': 'knowledge', 'title': 'Shared'}, 'Overview.')
+    write_note(leaf + '.md', {'kind': 'knowledge', 'title': 'Alpha connection'}, _RIGHT_BODY)
+    res = vault.resolver(include_system=False)
+    ancestry = knowledge_scope.knowledge_ancestry(res)
+    assert root in ancestry[leaf] and root in ancestry[hub]
+    result = maintenance._maintenance_candidates({'_agent_ref': root})
+    assert not [row for row in result['candidates'] if row['kind'] == 'missing_link']
+    assert result['connectivity']['component_count'] == 1
+    # Removing a checkout immediately removes only that structural root edge.
+    vault.write_note(root + '.md', {'kind': 'agent', 'title': 'Alpha bridge'}, _LEFT_BODY)
+    res = vault.resolver(include_system=False)
+    assert root not in knowledge_scope.knowledge_ancestry(res)[leaf]
+    assert hub in knowledge_scope.knowledge_ancestry(res)[leaf]

@@ -15,7 +15,9 @@ obsidience:
    scan or treat a similarity or connectivity signal as a conclusion. For a
    missing-link lead, isolated endpoints, separate components, and shared
    semantic neighbors are inspection context only; none proves a useful
-   relationship.
+   relationship. Native hierarchy already connects every ancestor and descendant,
+   including checked-out Knowledge beneath its Agent root. Never request a Link
+   for those pairs. Shared ancestry alone does not justify a sibling cross-link.
 2. If no unclaimed candidate exists, complete with the checked Article count
    and a clean no-change result. A disconnected-vault summary alone never
    activates Link.

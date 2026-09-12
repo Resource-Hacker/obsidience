@@ -383,6 +383,9 @@ def stage_proposal(args: dict, context: dict) -> dict:
                      and pending.meta.get("feed_retention") == context.get("_feed_retention")))
         )
         if same_proposal:
+            if review_class == "link":
+                # Revalidate old pending suggestions under the current hierarchy.
+                link_evidence(existing_target, body, Resolver(iter_notes()))
             result = {
                 "staged": str(pending_path),
                 "target": target,

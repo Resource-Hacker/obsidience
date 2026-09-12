@@ -763,10 +763,13 @@ def _resolved_body_links(body: str, accepted_resolver: Resolver, path: str = "")
 
 def link_evidence(existing, body: str, accepted_resolver: Resolver) -> list[dict]:
     """Locate changed Article links; syntax is not semantic approval."""
+    from .scope import knowledge_ancestry
+
     if not existing or existing.kind not in {"knowledge", "agent"} or existing.runtime_observation:
         raise ValueError("Link requires an accepted non-runtime Knowledge or Agent Article")
     before = _resolved_body_links(existing.body, accepted_resolver, existing.path)
     after = _resolved_body_links(body, accepted_resolver, existing.path)
+    ancestors = knowledge_ancestry(accepted_resolver)
     evidence = []
     for change, refs, text in (
         ("added", after - before, body),
@@ -779,6 +782,11 @@ def link_evidence(existing, body: str, accepted_resolver: Resolver) -> list[dict
                 or endpoint.kind not in {"knowledge", "agent"} or endpoint.runtime_observation
             ):
                 raise ValueError(f"Link endpoint must be a distinct accepted Knowledge or Agent Article: {ref}")
+            if change == "added" and (endpoint.ref in ancestors[existing.ref]
+                                      or existing.ref in ancestors[endpoint.ref]):
+                raise ValueError(
+                    f"Link endpoints are already connected by native hierarchy: {existing.ref} and {ref}"
+                )
             try:
                 endpoint_sha256 = hashlib.sha256(
                     (CONFIG.vault_dir / endpoint.path).read_bytes(),

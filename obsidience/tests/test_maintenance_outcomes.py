@@ -77,7 +77,8 @@ def test_old_coverage_invalidates_at_unchanged_revision_without_invalidating_oth
     result = maintenance.candidate_invalidation("Tasks/improve", params, res)
     assert result["reason"] == "native_hierarchy_coverage"
     assert result["expected_revision"] == result["current_revision"] == revision
-    assert maintenance.candidate_invalidation("Tasks/link", params, res) is None
+    assert maintenance.candidate_invalidation("Tasks/link", params, res)["reason"] == "native_hierarchy_connection"
+    assert maintenance.candidate_invalidation("Tasks/audit", params, res) is None
     assert maintenance.candidate_invalidation("Tasks/improve", {**params, "candidate_kind": "broken_reference"}, res) is None
     assert maintenance.candidate_invalidation("Tasks/improve", {**params, "candidate_revision": "invalid"}, res) is None
 

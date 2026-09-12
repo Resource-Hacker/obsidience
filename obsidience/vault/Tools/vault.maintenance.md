@@ -9,7 +9,7 @@ obsidience:
 
 ## Runtime
 
-Inspect accessible Knowledge for bounded maintenance candidates. No arguments. Candidate keys and revisions are controller evidence, not permission to edit. Use only the recommended accepted Task with the exact returned candidate fields. An empty result is a valid no-change finding.
+Inspect accessible Knowledge for bounded maintenance candidates. No arguments. Candidate keys and revisions are controller evidence, not permission to edit. Use only the recommended accepted Task with the exact returned candidate fields. An empty result is a valid no-change finding. Native hierarchy already connects ancestors and descendants at every depth, including Agent-owned/checked-out Knowledge; those pairs are not missing-link candidates.
 
 ## Reference
 
@@ -33,7 +33,9 @@ candidate. Completed explicit no-change decisions for the same revision are
 suppressed using the existing run ledger; failures and summaries alone cannot
 suppress work. It also reports a constant-size connectivity summary over accepted
 Agent and Knowledge Articles: component count, isolated Article count, and the
-largest component size. Each missing-link candidate includes any isolated
+largest component size. This topology includes native folder and Agent-scope
+connections without writing duplicate hyperlinks. Semantic ranking still uses
+actual content and authored links, not structural adjacency alone. Each missing-link candidate includes any isolated
 endpoint refs, whether its endpoints occupy separate components, and at most
 four exact shared-neighbor refs. Runtime observations and nonsemantic
 Task/Runbook/Skill/Tool links are excluded from this topology.

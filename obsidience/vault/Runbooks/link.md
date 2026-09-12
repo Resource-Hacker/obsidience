@@ -18,7 +18,11 @@ obsidience:
    If either endpoint is outside this Agent's checked-out graph or cannot be
    read, finish `failed` with that blocker. Do not search other Agents' private
    Observations, infer a missing body, or add a link to satisfy completion.
-2. Confirm the Articles are distinct, not already directly linked, and share a
+2. Confirm neither Article is an ancestor or descendant of the other at any
+   depth. Native folder hierarchy and Agent Knowledge checkout already supply
+   those connections; another written link is redundant. If such a pair reaches
+   inspection, report the evidenced no-change result without a proposal.
+   Otherwise confirm the Articles are distinct, not already directly linked, and share a
    specific relationship that improves retrieval or explains a real dependency,
    constraint, implementation, effect, or evidence path. Shared words, folder
    placement, and a generic sense of relevance are insufficient.
