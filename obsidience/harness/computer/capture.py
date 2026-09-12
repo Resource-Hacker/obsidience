@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import struct
 import subprocess
@@ -21,6 +22,10 @@ _STABLE_ID = re.compile(r"[0-9a-fA-F]{1,32}\Z")
 
 class ScreenCaptureError(ValueError):
     """A one-shot screen capture failed its bounded contract."""
+
+    def __init__(self, message: str, *, code: str = "capture_unavailable") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,6 +98,14 @@ def capture_screen(
         target_kind = "toplevel"
         target = _hyprland_stable_id(stable_id)
         selector = "--toplevel"
+
+    if not os.environ.get("WAYLAND_DISPLAY", "").strip():
+        # Never guess wayland-0 or probe other sessions when the Harness was
+        # started outside its graphical session. UWSM owns this environment.
+        raise ScreenCaptureError(
+            "The Harness has no Wayland display; restart it after graphical-session readiness.",
+            code="capture_session_unavailable",
+        )
 
     command = [
         str(WAYSHOT_BINARY),

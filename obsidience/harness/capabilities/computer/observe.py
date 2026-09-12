@@ -143,6 +143,12 @@ def _observe(args: dict[str, Any]) -> dict[str, object]:
     try:
         capture = capture_screen(stable_id=target.window.stable_id)
     except ScreenCaptureError as exc:
+        if exc.code == "capture_session_unavailable":
+            raise _ObserveFailure(
+                exc.code,
+                "The Harness is not attached to the graphical session. "
+                "Restart the Harness after desktop startup; retrying other windows will not help.",
+            ) from exc
         raise _ObserveFailure(
             "capture_unavailable", "The selected target could not be captured."
         ) from exc

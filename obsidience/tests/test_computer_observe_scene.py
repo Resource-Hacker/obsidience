@@ -367,3 +367,30 @@ def test_capture_failure_returns_no_private_lease(monkeypatch):
     assert result["observation"]["failure"]["code"] == "capture_unavailable"
     assert observe.PRIVATE_OBSERVATION_FIELD not in result
     assert observe.PRIVATE_IMAGE_FIELD not in result
+
+
+def test_missing_capture_session_reports_global_nonretryable_failure(monkeypatch):
+    from obsidience.harness.computer import capture
+    edge = _window("0xedge", stable_id="18000007")
+    monkeypatch.setattr(observe, "SCENE", _scene(samsung=[edge]))
+    monkeypatch.setattr(observe, "capture_screen", capture.capture_screen)
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    monkeypatch.setattr(capture.subprocess, "run", lambda *args, **kwargs:
+                        pytest.fail("no native capture without a session"))
+    result = observe.execute({
+        "target": {"kind": "application", "name": "Edge"},
+        "query": "What is visible?",
+    }, {})
+    failure = result["observation"]["failure"]
+    assert failure["code"] == "capture_session_unavailable"
+    assert failure["retryable"] is False
+    assert "retrying other windows will not help" in failure["message"]
+    assert result["observation"]["action_authorized"] is False
+    assert observe.PRIVATE_IMAGE_FIELD not in result
+    assert observe.PRIVATE_OBSERVATION_FIELD not in result
+
+
+def test_default_capture_errors_keep_generic_safe_code():
+    from obsidience.harness.computer.capture import ScreenCaptureError
+    error = ScreenCaptureError("native private detail")
+    assert error.code == "capture_unavailable"
