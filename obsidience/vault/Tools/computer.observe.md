@@ -10,7 +10,7 @@ obsidience:
 
 ## Runtime
 
-Read the current image of one exact target without changing focus or placement. Pass target:{kind:application|pane,name:<exact name>,surface?:<surface>} or target:{kind:focused}, plus query. The image is private in-memory evidence. Only the immediately following computer.act may consume an application observation lease. An unavailable image does not authorize input.
+Read the current image of one exact target without changing focus or placement. Pass target:{kind:application|pane,name:<exact name>,surface?:<surface>} or target:{kind:focused}, plus query. The image is private in-memory evidence. Only the immediately following computer.act may consume an application observation lease. An unavailable image does not authorize input. capture_session_unavailable is a Harness startup failure, not a window problem: report it without retrying other targets.
 
 ## Reference
 
@@ -41,5 +41,5 @@ effect; take another observation only for a separate visual question.
 
 Failures are typed as `scene_unavailable`, `target_missing`,
 `target_ambiguous`, `target_not_visible` for a sleeping Surface,
-`stale_scene`, `capture_unavailable`, or `observation_failed`. A failure never grants
+`stale_scene`, `capture_unavailable`, `capture_session_unavailable`, or `observation_failed`. A failure never grants
 permission to guess, change focus, or use another mutation route.

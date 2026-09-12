@@ -8,7 +8,7 @@ obsidience:
 
 ## Runtime
 
-Use the scene to select an exact target; focused targets omit name. Observe without a prerequisite focus change. Interpret the attached image, not an invented screen description. After observing for a click, make computer.act the next Tool call or obtain a new observation.
+Use the scene to select an exact target; focused targets omit name. Observe without a prerequisite focus change. Interpret the attached image, not an invented screen description. After observing for a click, make computer.act the next Tool call or obtain a new observation. If capture_session_unavailable is returned, report the missing graphical session and stop; trying other applications cannot repair it.
 
 ## Reference
 

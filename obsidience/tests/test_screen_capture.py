@@ -8,6 +8,12 @@ import pytest
 from obsidience.harness.computer import capture
 
 
+@pytest.fixture(autouse=True)
+def graphical_session_environment(monkeypatch):
+    # Unit tests use a fake Wayland name and never connect to the workstation.
+    monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-test")
+
+
 def _png(width: int = 2, height: int = 3) -> bytes:
     return (
         b"\x89PNG\r\n\x1a\n"
@@ -119,3 +125,53 @@ def test_rejects_malformed_or_oversized_png(monkeypatch):
     monkeypatch.setattr(capture.subprocess, "run", result(_png(5000, 5000)))
     with pytest.raises(capture.ScreenCaptureError, match="pixel bound"):
         capture.capture_screen(output_name="DP-8")
+
+
+@pytest.mark.parametrize("display", [None, "", "   "])
+def test_missing_session_fails_before_native_capture(monkeypatch, display):
+    if display is None:
+        monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    else:
+        monkeypatch.setenv("WAYLAND_DISPLAY", display)
+    monkeypatch.setattr(capture.subprocess, "run", lambda *args, **kwargs:
+                        pytest.fail("must not guess another Wayland socket"))
+    with pytest.raises(capture.ScreenCaptureError, match="no Wayland display") as error:
+        capture.capture_screen(stable_id="18000007")
+    assert error.value.code == "capture_session_unavailable"
+
+
+def test_session_recovery_uses_exported_name_without_persistent_failure(monkeypatch):
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    with pytest.raises(capture.ScreenCaptureError):
+        capture.capture_screen(output_name="HDMI-A-1")
+    monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-17")
+    calls = []
+    run = _successful_run(calls)
+    def native(command, **kwargs):
+        assert capture.os.environ["WAYLAND_DISPLAY"] == "wayland-17"
+        return run(command, **kwargs)
+    monkeypatch.setattr(capture.subprocess, "run", native)
+    assert capture.capture_screen(output_name="HDMI-A-1").image_png == _png()
+    assert len(calls) == 1
+
+
+def test_harness_autostart_waits_for_exported_graphical_environment():
+    from configparser import ConfigParser
+    from pathlib import Path
+
+    units = Path(__file__).resolve().parents[1] / "shell" / "systemd"
+    path = units / "obsidience-harness-dev.service.d" / "10-graphical-session.conf"
+    text = path.read_text()
+    config = ConfigParser(strict=False)
+    config.read_string(text)
+    assert "graphical-session.target" in config["Unit"]["After"].split()
+    assert "graphical-session.target" in config["Unit"]["PartOf"].split()
+    # Empty assignment clears inherited default.target enablement.
+    assert [line for line in text.splitlines() if line.startswith("WantedBy=")] == [
+        "WantedBy=", "WantedBy=obsidience-shell-session.target",
+    ]
+    assert config["Install"]["WantedBy"] == "obsidience-shell-session.target"
+    assert "Wants=obsidience-harness-dev.service" in (
+        units / "obsidience-shell-session.target").read_text()
+    assert "After=obsidience-harness-dev.service" in (
+        units / "obsidience-shell-host.service").read_text()
