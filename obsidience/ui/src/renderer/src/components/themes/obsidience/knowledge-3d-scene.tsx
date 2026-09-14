@@ -85,6 +85,8 @@ export interface Knowledge3dSceneProps {
   /** thinking → tendrils reach out; speaking → they arrive and the
    *  articles light up; null → no query path. */
   focusPhase: KnowledgeFocusPhase;
+  /** Speaker PCM envelope; read by the existing frame loop, never graph physics. */
+  speechEnvelope?: { current: { level: number; updatedAt: number } };
   visible: boolean;
   reducedMotion: boolean;
   /** Startup adapter request and live cadence are independent: adapter
@@ -203,6 +205,7 @@ attribute float aSeed;
 attribute float aCurate;
 uniform float uPerspective;
 uniform float uPulse;
+uniform float uSpeechLevel;
 uniform float uTime;
 uniform float uGlowScale;
 uniform float uModelScale;
@@ -218,6 +221,7 @@ varying float vFocus;
 varying float vTwinkle;
 varying float vSeed;
 varying float vCurate;
+varying float vSpeech;
 void main() {
   vCore = aCore;
   vDark = aDark;
@@ -228,6 +232,7 @@ void main() {
   vFocus = aFocus;
   vSeed = aSeed;
   vCurate = aCurate;
+  vSpeech = step(1.5, aStyle.x) * uSpeechLevel;
   // Article orbs TWINKLE as RARE, FAST events (owner 2026-08-02, second
   // round: the constant shimmer read as nothing — an individual twinkle
   // must be noticeable during the idle spin). Time is cut into per-node
@@ -251,6 +256,7 @@ void main() {
   vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
   // 2D parity: active/hovered discs grow ~2.5px, not a multiplicative bloom.
   float swell = 1.0 + aFocus * (0.10 + 0.06 * uPulse);
+  swell *= 1.0 + 0.32 * vSpeech;
   float radiusPx = aRadius * uModelScale * swell * uPerspective / max(1.0, -mvPosition.z);
   float size = clamp(radiusPx * aExtent * 2.0, 1.5, 1200.0);
   vRadiusPx = max(radiusPx, 0.75);
@@ -277,6 +283,7 @@ varying float vFocus;
 varying float vTwinkle;
 varying float vSeed;
 varying float vCurate;
+varying float vSpeech;
 uniform float uArticleStyle;
 uniform float uCoreStyle;
 uniform float uSubjectStyle;
@@ -353,7 +360,7 @@ void main() {
   if (vStyle.x > 0.5) {
     // Depth glow: gradient from 0.25r (palette glow) to glowScale*r (clear).
     float glowT = clamp((r - 0.25) / max(vGlowScale - 0.25, 1e-3), 0.0, 1.0);
-    float glowA = vGlow.a * uGlowScale * (1.0 - glowT);
+    float glowA = vGlow.a * uGlowScale * (1.0 - glowT) * (1.0 + 0.45 * vSpeech);
     acc = vGlow.rgb * glowA;
     accA = glowA;
     acc = vRing.rgb * ringA + acc * (1.0 - ringA);
@@ -449,6 +456,7 @@ void main() {
         brightness = clamp(
           plasmaCore + depth * 0.35 + wave * wave * depth * 0.55, 0.0, 1.0);
       }
+      brightness = min(1.0, brightness * (1.0 + 0.3 * vSpeech));
       disc = mix(vec3(0.45, 0.75, 1.0), vec3(1.0), brightness);
       discA = brightness * (1.0 - smoothstep(0.88, 1.02, r)) * effAlpha;
       }
@@ -960,6 +968,7 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
     const uniforms = {
       uPerspective: { value: 1 },
       uPulse: { value: 0 },
+      uSpeechLevel: { value: 0 },
       uTime: { value: 0 },
     };
     const sharedParticleTime = { value: 0 };
@@ -1349,9 +1358,12 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
       // least at the idle cadence; a settling satellite ORs into the sim
       // term so its fall keeps ticking at full rate.
       const simActive = (mainCloud?.isHot() ?? false) || satellitesHot;
+      const envelope = current.speechEnvelope?.current;
+      const speechTarget = envelope && now - envelope.updatedAt < 250 ? envelope.level : 0;
       const interval = knowledge3dFrameIntervalMs({
         focusActive:
-          current.focusActive || simActive || lastSweepHot || approvalActive ||
+          current.focusActive || speechTarget > 0 || uniforms.uSpeechLevel.value > 0.001 ||
+          simActive || lastSweepHot || approvalActive ||
           deliveryComets.size > 0 || (current.deliveries?.length ?? 0) > 0 ||
           current.cameraFocus != null,
         interacting: interacting || lastSweepHeld || pendingLinks,
@@ -1366,6 +1378,11 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
       const dt = Math.min(0.2, (now - lastTick) / 1000);
       frameDeadline = nextDeadline;
       lastTick = now;
+      // A quick attack follows consonants; a short release bridges 40 ms PCM
+      // samples. Silence, STOP and a stalled stream return the orb to rest.
+      const speechTau = speechTarget > uniforms.uSpeechLevel.value ? 0.025 : 0.085;
+      uniforms.uSpeechLevel.value += (speechTarget - uniforms.uSpeechLevel.value)
+        * (1 - Math.exp(-dt / speechTau));
 
       // The render model and the host geometry are the only build inputs:
       // a new snapshot layout, a resize, or an aspect change re-targets the

@@ -2,6 +2,8 @@ from pathlib import Path
 
 import pytest
 
+from obsidience.harness.knowledge import scope as knowledge_scope
+
 from obsidience.harness.capabilities.vault.propose import stage_proposal
 from obsidience.harness.config import CONFIG
 from obsidience.harness.knowledge import index, review
@@ -153,3 +155,47 @@ def test_link_evidence_uses_persisted_body_whitespace(link_vault, prefix, suffix
     assert row["approvable"] is True
     assert row["link_evidence"][0]["body_line"] == 1
     assert review.approve(name)["approved"] == "Knowledge/a.md"
+
+
+@pytest.mark.parametrize('depth', [0, 1, 4])
+@pytest.mark.parametrize('reverse', [False, True])
+def test_link_cannot_duplicate_native_ancestry(link_vault, depth, reverse):
+    parent = 'Knowledge/Branch/Branch'
+    descendant = 'Knowledge/Branch/' + 'Nested/' * depth + 'leaf'
+    write_note(parent + '.md', {'kind': 'knowledge', 'title': 'Renamed parent'}, 'Parent overview.')
+    write_note(descendant + '.md', {'kind': 'knowledge', 'title': 'Leaf'}, 'Descendant facts.')
+    source, target = (descendant, parent) if reverse else (parent, descendant)
+    with pytest.raises(ValueError, match='already connected by native hierarchy'):
+        stage('Useful facts. See [[' + target + ']].', target=source + '.md', title='Article')
+    assert not list(CONFIG.staging_dir.glob('*.md'))
+
+
+def test_existing_parent_references_are_not_removed_or_rejected(link_vault):
+    write_note('Knowledge/Knowledge.md', {'kind': 'knowledge', 'title': 'Overview'}, 'Overview.')
+    write_note('Knowledge/a.md', {'kind': 'knowledge', 'title': 'A'}, 'Facts. See [[Knowledge/Knowledge]].')
+    name = stage('Facts. See [[Knowledge/Knowledge]].\n\nSee [[Knowledge/b]].')
+    assert review.approve(name)['approved'] == 'Knowledge/a.md'
+    assert '/Knowledge/Knowledge.md' in load_note('Knowledge/a.md').body
+
+
+def test_old_redundant_link_is_blocked_at_approval_and_repeat_staging(link_vault, monkeypatch):
+    parent = 'Knowledge/Branch/Branch'
+    child = 'Knowledge/Branch/Deep/leaf'
+    write_note(parent + '.md', {'kind': 'knowledge', 'title': 'Parent'}, 'Overview.')
+    write_note(child + '.md', {'kind': 'knowledge', 'title': 'Leaf'}, 'Facts.')
+    body = 'Overview. See [[' + child + ']].'
+    with monkeypatch.context() as legacy:
+        legacy.setattr(knowledge_scope, 'knowledge_ancestry', lambda res: {n.ref: [] for n in res.by_ref.values()})
+        name = stage(body, target=parent + '.md', title='Parent')
+    original = (link_vault / (parent + '.md')).read_bytes()
+    proposal = (CONFIG.staging_dir / name).read_bytes()
+    row, = review.list_proposals()
+    assert row['approvable'] is False
+    assert 'already connected by native hierarchy' in row['blocked_reason']
+    assert review.link_proposals()['entries'] == []
+    with pytest.raises(ValueError, match='already connected by native hierarchy'):
+        review.approve(name)
+    with pytest.raises(ValueError, match='already connected by native hierarchy'):
+        stage(body, target=parent + '.md', title='Parent')
+    assert (link_vault / (parent + '.md')).read_bytes() == original
+    assert (CONFIG.staging_dir / name).read_bytes() == proposal

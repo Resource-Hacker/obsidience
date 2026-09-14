@@ -137,6 +137,7 @@ export interface Knowledge3dCloudDeps {
   sharedUniforms: {
     uPerspective: { value: number };
     uPulse: { value: number };
+    uSpeechLevel: { value: number };
     uTime: { value: number };
   };
   viewportUniform: { value: THREE.Vector2 };
@@ -413,6 +414,7 @@ export function createKnowledge3dCloud(
   const pointUniforms = {
     uPerspective: deps.sharedUniforms.uPerspective,
     uPulse: deps.sharedUniforms.uPulse,
+    uSpeechLevel: isMain ? deps.sharedUniforms.uSpeechLevel : { value: 0 },
     uTime: deps.sharedUniforms.uTime,
     uGlowScale: glowScaleUniform,
     uModelScale: modelScaleUniform,

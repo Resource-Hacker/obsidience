@@ -1,0 +1,7 @@
+# Copy to obsidience/obsidience.toml and configure this installation.
+# The real file is ignored; do not store credentials in the example.
+llm_base_url = "http://127.0.0.1:8089/v1"
+llm_model = "obsidience-gemma"
+git_commit = true  # Local Vault audit only; never the application repository.
+# vault_dir = "/absolute/path/to/your/local/vault"
+# db_path = "/absolute/path/to/your/local/state/obsidience.sqlite3"

@@ -251,6 +251,47 @@ def _retention_link_blocker(refs: set[str], notes: list) -> str:
     return ("Feed retirement is blocked by accepted inbound references from " + ", ".join(inbound[:6])) if inbound else ""
 
 
+def _retention_victims(members: list[dict], count: int, *, notes: list, incoming=None,
+                       keep_ref: str | None = None) -> list[dict]:
+    """Select oldest eligible leaves while preserving retained Article links."""
+    if count <= 0:
+        return []
+    incoming_ref = incoming["target"].removesuffix(".md") if incoming else None
+    eligible = {row["ref"] for row in members
+                if not row.get("retention_protection") and row["ref"] not in {incoming_ref, keep_ref}}
+    res = Resolver(notes)
+    inbound = {ref: set() for ref in eligible}
+    links = [(note.ref, note.links) for note in notes if note.ref != incoming_ref]
+    if incoming:
+        links.append((incoming_ref, body_links(incoming["body"], incoming["target"])))
+    for source, refs in links:
+        for raw in refs:
+            target = res.resolve(raw)
+            if target is not None and target.ref in inbound:
+                inbound[target.ref].add(source)
+    selected = set()
+    for row in members:
+        ref = row["ref"]
+        if ref not in eligible or ref in selected:
+            continue
+        # A dependent group can retire together; an outside or protected
+        # inbound Article pins its target. No authored links are removed.
+        group, waiting = set(), [ref]
+        while waiting:
+            current = waiting.pop()
+            if current in group or current in selected:
+                continue
+            group.add(current)
+            if current not in eligible or len(group) + len(selected) > count:
+                break
+            waiting.extend(inbound[current] - group - selected)
+        else:
+            selected.update(group)
+        if len(selected) == count:
+            return [row for row in members if row["ref"] in selected]
+    raise SourceError("Feed active limit cannot be met without breaking retained Article links or protected placement")
+
+
 def feed_retention_states(caps_by_id: dict[str, int], *, index=None) -> dict[str, dict]:
     """Read-only projection: never materialize Source or start retention work."""
     from ..config import CONFIG
@@ -312,6 +353,11 @@ def feed_retention_states(caps_by_id: dict[str, int], *, index=None) -> dict[str
             state, detail = ("over_limit", f"{excess} active Articles need retirement") if excess else ("within_limit", "Active Article limit is satisfied")
             waiting = pending.get(feed_id)
             retiring = {row["ref"] for row in members[:excess]}
+            if not waiting and excess:
+                try:
+                    retiring = {row["ref"] for row in _retention_victims(members, excess, notes=notes)}
+                except SourceError as exc:
+                    state, detail = "blocked", str(exc)
             if waiting:
                 envelope = waiting["envelope"]
                 retiring = waiting["archives"]
@@ -335,7 +381,7 @@ def feed_retention_state(feed_id: str, cap: int, *, index=None) -> dict:
 
 
 def _retention_plan(feed_id: str, destination: dict, members: list[dict], publication=None) -> dict:
-    """Keep the incoming leaf and retire only the oldest attested prior leaves."""
+    """Keep the incoming leaf and retire the oldest eligible attested leaves."""
     from .review import MAX_REVIEW_MEMBERS
 
     cap = _retention_cap(destination.get("max_active_articles", 10))
@@ -370,11 +416,12 @@ def _retention_plan(feed_id: str, destination: dict, members: list[dict], public
                 captured = datetime.fromisoformat(get_source(binding["source_id"])["captured_at"].replace("Z", "+00:00"))
                 if previous >= captured:
                     raise SourceError("An equal or newer Feed item version is already published; preserve that accepted Article")
-    incoming_ref = publication["target"].removesuffix(".md") if publication else None
     count = len(members) + int(incoming is not None and incoming["action"] == "create")
     overflow = max(0, count - cap)
     include_incoming = incoming is not None and overflow < MAX_REVIEW_MEMBERS
-    victims = [row for row in members if row["ref"] != incoming_ref][:min(overflow, MAX_REVIEW_MEMBERS)]
+    victims = _retention_victims(members, min(overflow, MAX_REVIEW_MEMBERS),
+                                notes=iter_notes(), incoming=incoming,
+                                keep_ref=publication["target"].removesuffix(".md") if publication else None)
     if overflow and not victims:
         raise SourceError("Feed active limit cannot be met without retiring the incoming Article")
     if block := _retention_placement_blocker(victims):

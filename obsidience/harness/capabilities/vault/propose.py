@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import time
 
@@ -304,6 +305,7 @@ def _validate_task_definition(
 
 
 def stage_proposal(args: dict, context: dict) -> dict:
+    from .read import ARTICLE_BODY_END, INBOUND_REFERENCES_HEADING
     from obsidience.harness.knowledge.links import canonical_body
     from obsidience.harness.knowledge.review import link_evidence, review_class_for_task
     from obsidience.harness.knowledge.vault import (
@@ -313,6 +315,7 @@ def stage_proposal(args: dict, context: dict) -> dict:
         normalize_article_body,
     )
 
+    context.pop("_proposal_read_prerequisite", None)
     target = str(args.get("target", "")).strip()
     if not target or target.startswith("_") or ".." in target:
         raise ValueError("invalid target path")
@@ -333,6 +336,13 @@ def stage_proposal(args: dict, context: dict) -> dict:
         raise ValueError("proposal source is supported only for the active source-bound Feed Ingest")
     if "contextual_links" in args:
         raise ValueError("contextual_links is not a proposal field; use ordinary Article links")
+    if any(line.strip() in {ARTICLE_BODY_END, INBOUND_REFERENCES_HEADING}
+           for line in str(args.get("body", "")).splitlines()):
+        raise ValueError(
+            "body contains generated vault.read context; omit the end marker and "
+            "Accepted inbound references section, preserve the Article body and its authored links, "
+            "then submit the corrected body"
+        )
     existing_target = load_note(target)
     if existing_target and existing_target.runtime_observation:
         raise ValueError("runtime Observations are maintained by Compact and Promote, not wiki proposals")
@@ -383,6 +393,9 @@ def stage_proposal(args: dict, context: dict) -> dict:
                      and pending.meta.get("feed_retention") == context.get("_feed_retention")))
         )
         if same_proposal:
+            if review_class == "link":
+                # Revalidate old pending suggestions under the current hierarchy.
+                link_evidence(existing_target, body, Resolver(iter_notes()))
             result = {
                 "staged": str(pending_path),
                 "target": target,
@@ -440,12 +453,24 @@ def stage_proposal(args: dict, context: dict) -> dict:
             if not endpoints <= readable:
                 raise PermissionError("Link endpoints must be within the executing Agent's Knowledge scope")
             reads = context.get("_article_reads", {})
+            missing_reads = {}
             for ref in sorted(endpoints):
                 endpoint = link_resolver.by_ref[ref.casefold()]
                 receipt = reads.get(ref, {})
                 expected = hashlib.sha256(endpoint.text().encode()).hexdigest()
                 if receipt.get("complete") is not True or receipt.get("article_sha256") != expected:
-                    raise ValueError("Link requires a complete current vault.read of each changed endpoint: " + ref)
+                    missing_reads[ref] = expected
+            if missing_reads:
+                context["_proposal_read_prerequisite"] = missing_reads
+                batch = list(missing_reads)[:10]
+                remaining = len(missing_reads) - len(batch)
+                raise ValueError(
+                    "Link requires a complete current vault.read of each changed endpoint: "
+                    + json.dumps({"refs": batch}, ensure_ascii=False)
+                    + (f"; {remaining} further endpoints remain" if remaining else "")
+                    + ". Complete these reads before retrying the proposal; unchanged arguments "
+                    "are valid after the missing evidence is supplied"
+                )
         proposal_meta["proposal_body_sha256"] = hashlib.sha256(body.encode()).hexdigest()
     accepted_note = load_note(target) if action == "update" else None
     effective_meta = dict(accepted_note.meta) if accepted_note else {}
@@ -529,6 +554,7 @@ def _stage_feed_article(args: dict, context: dict) -> dict:
 def execute(args: dict, context: dict) -> str:
     from obsidience.harness.knowledge.scope import assert_proposal_scope
     from obsidience.harness.knowledge.vault import resolver
+    context.pop("_proposal_read_prerequisite", None)
     try:
         assert_proposal_scope(str((args or {}).get("target", "")), context or {}, resolver())
         result = stage_proposal(args or {}, context or {})

@@ -116,6 +116,14 @@ def execute(args: dict, context: dict) -> str:
         return "Task activation rejected: active Task execution context is incomplete."
     continuation_binding = None
     if wait_for_result:
+        # A waited continuation starts a new execution from the original owner
+        # objective. Resolve research before effects so it cannot replay work
+        # already delivered by its suspended caller. Background delegation is
+        # still available and does not resume the caller.
+        effects = {"application.launch", "computer.act", "window.activate", "window.place"}
+        if any(row.get("tool") in effects and row.get("not_dispatched") is not True
+               for row in context.get("trace", []) if isinstance(row, dict)):
+            return "Waited research must precede computer effects; finish with the actual receipts instead of suspending and replaying this request."
         from obsidience.harness.knowledge.index import INDEX
 
         caller_params = (

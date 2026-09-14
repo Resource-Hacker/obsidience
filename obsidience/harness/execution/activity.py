@@ -17,6 +17,7 @@ class _Subscriber:
     scheduled: bool = False
 
 _HISTORY: deque[dict] = deque(maxlen=100)
+_PLAYBACK: dict = {"status": "idle", "level": 0.0, "run_id": "", "playback_id": ""}
 _SUBSCRIBERS: dict[asyncio.Queue, _Subscriber] = {}
 _LOCK = threading.RLock()
 MAX_REVIEW_LINKS = 64
@@ -40,13 +41,14 @@ def _deliver(queue: asyncio.Queue) -> None:
         queue.put_nowait(event)
 
 
-def _publish(event: dict) -> dict:
+def _publish(event: dict, *, retain: bool = True) -> dict:
     try:
         current_loop = asyncio.get_running_loop()
     except RuntimeError:
         current_loop = None
     with _LOCK:
-        _HISTORY.append(event)
+        if retain:
+            _HISTORY.append(event)
         for queue, subscriber in tuple(_SUBSCRIBERS.items()):
             subscriber.pending.append(event)
             if subscriber.scheduled:
@@ -66,7 +68,7 @@ def _publish(event: dict) -> dict:
 
 
 def emit(phase: str, refs: list[str], *, query: str = "", graph_id: str = "main",
-         retrieval_ms: float | None = None, run_id: str = "") -> dict:
+         retrieval_ms: float | None = None, run_id: str = "", turn_id: str = "") -> dict:
     unique_refs = list(dict.fromkeys(str(ref) for ref in refs if ref))
     event = {
         "phase": phase,
@@ -79,9 +81,30 @@ def emit(phase: str, refs: list[str], *, query: str = "", graph_id: str = "main"
     }
     if run_id:
         event["run_id"] = str(run_id)[:128]
+    if turn_id:
+        event["turn_id"] = str(turn_id)[:128]
     if retrieval_ms is not None:
         event["retrieval_ms"] = max(0.0, float(retrieval_ms))
     return _publish(event)
+
+
+def emit_playback(status: str, *, level: float = 0.0, run_id: str = "",
+                  playback_id: str = "") -> dict:
+    """Ephemeral speaker envelope, separate from the retained Thinking Packet."""
+    global _PLAYBACK
+    with _LOCK:
+        _PLAYBACK = {
+            "status": status, "level": level,
+            "run_id": run_id, "playback_id": playback_id,
+            "at": int(time.time() * 1000),
+        }
+        # Audio samples must never evict the packet needed on reconnect.
+        return _publish({"type": "playback", "playback": dict(_PLAYBACK)}, retain=False)
+
+
+def playback() -> dict:
+    with _LOCK:
+        return dict(_PLAYBACK)
 
 
 def emit_review_change(proposal_id: str, run_id: str, state: str, *,

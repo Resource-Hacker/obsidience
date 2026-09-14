@@ -1645,12 +1645,14 @@ def test_misrouted_turn_rechecks_once_without_new_user_turn(monkeypatch, source,
     monkeypatch.setattr(conversation_runtime, 'select_task', select)
     monkeypatch.setattr(executor, 'run_task', run)
     monkeypatch.setattr(speech, '_send_worker', send)
-    result = asyncio.run(runtime.submit('Can you start TFT?', source=source))
+    request = 'Can you start TFT?' if corrected else "But you didn't open it"
+    result = asyncio.run(runtime.submit(request, source=source))
     assert len(selections) == 2
     assert selections[0][:2] == selections[1][:2]
     assert selections[1][2]['reclassification'] is True
-    assert len(attempts) == (2 if corrected else 1)
-    assert result['status'] == ('completed' if corrected else 'failed')
+    assert len(attempts) == 2
+    assert attempts[1][1]['runtime_params']['routing_rechecked'] is True
+    assert result['status'] == 'completed'
     turns = runtime._conversation.turns
     assert len([row for row in turns if row['role'] == 'user']) == 1
     if corrected:
@@ -1659,7 +1661,8 @@ def test_misrouted_turn_rechecks_once_without_new_user_turn(monkeypatch, source,
         assert runtime._last_task_ref == 'Tasks/executive/operate'
         assert turns[-1]['run_id'] == 'corrected' and turns[-1]['reply_to'] == turns[0]['id']
     else:
-        assert [row['role'] for row in turns] == ['user']
+        assert attempts[1][0] == 'Tasks/query'
+        assert [row['role'] for row in turns] == ['user', 'assistant']
     assert speech._phase != 'off'
     assert len([item for item in spoken if item['type'] == 'speak']) == (1 if source == 'realtime' else 0)
 

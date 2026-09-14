@@ -1,8 +1,9 @@
-"""Read-only Task-owned procedure and capability dependencies.
+"""Read-only Agent capability and Task procedure dependencies.
 
 Accepted Articles and exact metadata bindings are the only input. Agent Task
-assignments select work; neither independent capability lists nor related links
-grant capabilities. Execution and presentation use this same projection.
+assignments select reusable work; Agent Skills supply its conversational catalog.
+Related Knowledge links never grant capabilities. Execution and presentation
+use this same projection.
 """
 
 from __future__ import annotations
@@ -84,15 +85,25 @@ def paired_leaf_skills(tool: Note, res: Resolver) -> list[Note]:
             and res.resolve(_links(note.meta.get("tool"))[0]) is tool]
 
 
-def resolve_task_dependencies(task: Note, res: Resolver, *, agent_ref: str | None = None) -> dict:
-    """Expand one leaf's exact procedure plus the existing completion contract."""
+def resolve_dependencies(task: Note, res: Resolver, *, agent_ref: str | None = None) -> dict:
+    """Resolve an Agent catalog or Task procedure through the same paired Skills."""
     res = dependency_resolver(res)
-    runbook, error = select_runbook(task, res, agent_ref=agent_ref)
-    if error or not runbook:
-        return {"error": error or "awaiting-runbook: leaf task has no applicable runbook", "missing": not error}
-    runbooks, error = expand_primitive(runbook, res, "runbook")
-    if error:
-        return {"error": error}
+    if task.kind == "agent":
+        if (not isinstance(task.meta.get("skills"), list) or not task.meta["skills"]
+                or task.meta.get("runbook") or task.meta.get("runbooks") or task.meta.get("tools")):
+            return {"error": "Agent conversation requires its direct Skill catalog and identity instructions"}
+        runbook, runbooks, contracts = None, [], [task]
+        agent_ref = task.ref
+    elif task.kind == "task":
+        runbook, error = select_runbook(task, res, agent_ref=agent_ref)
+        if error or not runbook:
+            return {"error": error or "awaiting-runbook: leaf task has no applicable runbook", "missing": not error}
+        runbooks, error = expand_primitive(runbook, res, "runbook")
+        if error:
+            return {"error": error}
+        contracts = runbooks
+    else:
+        return {"error": "Only an accepted Agent or Task owns an execution contract"}
     skills: dict[str, Note] = {}
     tools: dict[str, Note] = {}
 
@@ -124,7 +135,7 @@ def resolve_task_dependencies(task: Note, res: Resolver, *, agent_ref: str | Non
             tools.update((item.ref, item) for item in tree)
         return None
 
-    for part in runbooks:
+    for part in contracts:
         scope = metadata_ref(str(part.meta.get("for_agent", "")))
         effective_agent = metadata_ref(agent_ref or str(task.meta.get("assignee") or "Agents/Executive/Executive"))
         if scope and scope != effective_agent:
@@ -152,6 +163,13 @@ def resolve_task_dependencies(task: Note, res: Resolver, *, agent_ref: str | Non
             "tool_articles": list(tools.values())}
 
 
+def resolve_task_dependencies(task: Note, res: Resolver, *, agent_ref: str | None = None) -> dict:
+    """Task-only entry point retained for assignment and specialist procedures."""
+    if task.kind != "task":
+        return {"error": "Task dependencies require a Task Article"}
+    return resolve_dependencies(task, res, agent_ref=agent_ref)
+
+
 def scheduled_assignment(task: Note, agent: Note, res: Resolver) -> bool:
     """Implicit ownership from exact assignee and scheduled, triggered, or live work."""
     return bool(task.kind == "task" and metadata_ref(str(task.meta.get("assignee", ""))) == agent.ref
@@ -171,6 +189,15 @@ def agent_dependencies(agent: Note, res: Resolver) -> dict:
     res = dependency_resolver(res)
     fields = {name: set() for name in ("tasks", "runbooks", "skills", "tools")}
     errors: list[str] = []
+
+    # Direct Agent Skills supply the router catalog without an intermediate hub.
+    if agent.meta.get("skills"):
+        dependency = resolve_dependencies(agent, res, agent_ref=agent.ref)
+        if dependency.get("error"):
+            errors.append(f"{agent.ref}: {dependency['error']}")
+        else:
+            for field, key in (("runbooks", "runbooks"), ("skills", "skills"), ("tools", "tool_articles")):
+                fields[field].update(note.ref for note in dependency[key])
 
     def visit(task: Note, inherited: set[str], stack: tuple[str, ...]) -> None:
         if task_is_excluded(task, inherited, res):

@@ -18,3 +18,4 @@ markdownify==1.2.3
 trafilatura==2.2.0
 markdown-it-py==4.0.0
 psutil==7.2.2
+jsonschema==4.25.1

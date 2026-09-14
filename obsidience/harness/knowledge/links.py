@@ -73,7 +73,8 @@ def body_link_locations(body: str, path: str = "") -> list[tuple[str, int, str]]
             elif token.type == "link_close":
                 link_depth -= 1
             elif token.type == "text" and not link_depth:
-                refs.extend(match.group(1).strip() for match in _WIKI.finditer(token.content))
+                refs.extend(match.group(1).strip() for match in _WIKI.finditer(token.content)
+                            if not match.group(1).strip().startswith("source://"))
             elif token.type in {"softbreak", "hardbreak"}:
                 line += 1
             links.extend((ref, line, lines[line - 1].strip()[:400]) for ref in refs)
@@ -92,6 +93,11 @@ def canonical_body(body: str, path: str, mapping: dict[str, str] | None = None) 
         ref = match.group(1).strip().removesuffix(".md")
         if ref.startswith("@"):
             return match.group(0)  # UI-only generated navigation, never a concept file.
+        if ref.startswith("source://"):
+            # An evidence citation is an external resource, not an Article
+            # path. Preserve its URI instead of inventing /source:/...md.
+            label = (match.group(3) or ref).replace("[", "\\[").replace("]", "\\]")
+            return f"[{label}]({ref}{match.group(2) or ''})"
         ref = mapping.get(ref.casefold(), ref)
         label = (match.group(3) or match.group(1).rsplit("/", 1)[-1]).replace("[", "\\[").replace("]", "\\]")
         fragment = match.group(2)

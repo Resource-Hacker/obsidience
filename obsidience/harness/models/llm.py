@@ -104,7 +104,8 @@ def normalize_reasoning_effort(value: object) -> str:
 def _chat_payload(messages: list[dict], spec: ModelSpec, *, max_tokens: int | None,
                   temperature: float | None, reasoning_effort: str,
                   allowed_tools: list[str] | None = None,
-                  response_schema: dict | None = None, completion_no_change: bool = False) -> dict:
+                  response_schema: dict | None = None, completion_no_change: bool = False,
+                  proposal_mode: str = "") -> dict:
     """Build one Task-owned request for the sole executor path."""
     if response_schema is not None:
         if allowed_tools is not None:
@@ -171,7 +172,8 @@ def _chat_payload(messages: list[dict], spec: ModelSpec, *, max_tokens: int | No
             payload["response_format"] = {
                 "type": "json_schema",
                 "json_schema": {"name": "obsidience_action", "strict": True,
-                                "schema": decoder_action_schema(allowed_tools, completion_no_change=completion_no_change)},
+                                "schema": decoder_action_schema(allowed_tools, completion_no_change=completion_no_change,
+                                                                proposal_mode=proposal_mode)},
             }
     if reasoning_effort != "none" or spec.id == MUSE_MODEL:
         payload["reasoning_format"] = "auto"
@@ -191,7 +193,8 @@ async def chat(messages: list[dict], max_tokens: int | None = None,
                model: ModelSpec | None = None,
                allowed_tools: list[str] | None = None,
                task_context=None,
-               response_schema: dict | None = None, completion_no_change: bool = False) -> ChatReply:
+               response_schema: dict | None = None, completion_no_change: bool = False,
+               measurements: bool = True, proposal_mode: str = "") -> ChatReply:
     effort = normalize_reasoning_effort(reasoning_effort)
     spec = model or model_runtime.configured_spec(EXECUTIVE_MODEL)
     payload = _chat_payload(
@@ -199,6 +202,7 @@ async def chat(messages: list[dict], max_tokens: int | None = None,
         reasoning_effort=effort,
         allowed_tools=allowed_tools,
         response_schema=response_schema, completion_no_change=completion_no_change,
+        proposal_mode=proposal_mode,
     )
     from .context import PROMPT_SAFETY_TOKENS, TaskContext
 
@@ -208,9 +212,11 @@ async def chat(messages: list[dict], max_tokens: int | None = None,
         started = asyncio.get_running_loop().time()
         count = await projection.fit_payload(payload, spec, client, capacity)
         metrics = {"preflight_ms": round((asyncio.get_running_loop().time() - started) * 1000, 3)}
-        action_trace.latency("model_preflight", duration_ms=metrics["preflight_ms"])
+        if measurements:
+            action_trace.latency("model_preflight", duration_ms=metrics["preflight_ms"])
         try:
-            content, finish_reason, completion_tokens = await _stream_reply(client, payload, spec, metrics)
+            content, finish_reason, completion_tokens = await _stream_reply(
+                client, payload, spec, metrics, measurements=measurements)
         except (httpx.TimeoutException, TimeoutError):
             raise TimeoutError(
                 f"{spec.id} generation timed out after {CHAT_TIMEOUT_SECONDS:g} seconds "
@@ -226,7 +232,8 @@ async def chat(messages: list[dict], max_tokens: int | None = None,
 
 
 async def _stream_reply(client: httpx.AsyncClient, payload: dict,
-                         spec: ModelSpec, metrics: dict | None = None) -> tuple[str, str, int | None]:
+                         spec: ModelSpec, metrics: dict | None = None, *,
+                         measurements: bool = True) -> tuple[str, str, int | None]:
     """Receive one action; private reasoning is progress, never retained content."""
     chunks: list[str] = []
     finish_reason = ""
@@ -280,7 +287,8 @@ async def _stream_reply(client: httpx.AsyncClient, payload: dict,
                         chunks.append(content)
                         if "first_public_delta_ms" not in metrics:
                             metrics["first_public_delta_ms"] = round((loop.time() - dispatched) * 1000, 3)
-                            action_trace.latency("model_first_public", duration_ms=metrics["first_public_delta_ms"])
+                            if measurements:
+                                action_trace.latency("model_first_public", duration_ms=metrics["first_public_delta_ms"])
                         progress = True
                     # Do not append, log, or return the private field.
                     progress |= any(isinstance(delta.get(key), str) and bool(delta[key])
@@ -295,7 +303,8 @@ async def _stream_reply(client: httpx.AsyncClient, payload: dict,
     if not done or not finish_reason:
         raise ValueError(f"{spec.id} completion stream ended before a complete action")
     metrics["generation_ms"] = round((loop.time() - dispatched) * 1000, 3)
-    action_trace.latency("model_complete", duration_ms=metrics["generation_ms"])
+    if measurements:
+        action_trace.latency("model_complete", duration_ms=metrics["generation_ms"])
     return "".join(chunks), finish_reason, completion_tokens
 
 

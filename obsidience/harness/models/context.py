@@ -148,6 +148,8 @@ async def measure_payload(payload: dict, spec: ModelSpec, client: httpx.AsyncCli
         body = {"model": spec.id, "messages": payload["messages"],
                 "add_generation_prompt": True,
                 "chat_template_kwargs": payload.get("chat_template_kwargs", {})}
+        if payload.get("tools"):
+            body["tools"] = payload["tools"]
     try:
         response = await client.post(url, json=body, timeout=3)
         response.raise_for_status()
@@ -162,7 +164,8 @@ async def measure_payload(payload: dict, spec: ModelSpec, client: httpx.AsyncCli
         if any(isinstance(message.get("content"), list) for message in payload["messages"]):
             raise ValueError("model context accounting unavailable for a multimodal request")
         return PayloadCount(
-            len(json.dumps(payload["messages"], ensure_ascii=False).encode("utf-8"))
+            len(json.dumps({"messages": payload["messages"], "tools": payload.get("tools", [])},
+                           ensure_ascii=False).encode("utf-8"))
             + PROMPT_SAFETY_TOKENS,
             "utf8_upper_bound",
         )
@@ -358,7 +361,7 @@ class TaskContext:
             page for index, page in self.pages.items()
             if index < len(messages) - 1
             and index != self.latest_result_index
-            and messages[index].get("role") == "user"
+            and messages[index].get("role") in {"user", "tool"}
             and messages[index].get("content") == page.original
         ]
         for page in pages:

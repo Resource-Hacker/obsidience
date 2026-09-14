@@ -13,6 +13,8 @@ MMPROJ=$(jq -er '.projector_path // empty' "$LAUNCH") || exit 64
 # Keep the compiler's fixed-prefix message checkpoint across Tool follow-ups.
 # b10078's 8192-token spacing evicts that boundary from ordinary ~6K packets.
 # The upstream 32-checkpoint bound remains unchanged; this does not expand KV.
+# Retain the selector and several Task prefixes across ordinary work changes.
+# Their SWA snapshots exceed the server's default 8 GiB RAM cache together.
 exec env CUDA_DEVICE_ORDER=PCI_BUS_ID \
   CUDA_VISIBLE_DEVICES="$GPU_UUIDS" \
   LD_LIBRARY_PATH="$LLAMA/lib:$LD_LIBRARY_PATH" \
@@ -20,4 +22,4 @@ exec env CUDA_DEVICE_ORDER=PCI_BUS_ID \
   -m "$MODEL" --alias obsidience-gemma \
   --mmproj "$MMPROJ" --mmproj-offload --image-max-tokens 512 \
   --host 127.0.0.1 --port 8089 -ngl 99 -c "$CTX" --parallel "$PARALLEL" \
-  --checkpoint-min-step 0 --jinja
+  --checkpoint-min-step 0 --cache-ram 16384 --jinja

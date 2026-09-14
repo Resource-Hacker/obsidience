@@ -1,9 +1,59 @@
+import json
+import subprocess
 from types import SimpleNamespace
 
 import pytest
 
 from obsidience.harness.capabilities.application import launch
 from obsidience.harness.host.scene import EVENT_SCHEMA, SURFACE_IDS, ShellSceneCache
+
+
+def test_managed_receipt_rejects_wrong_or_duplicate_identity():
+    unit = "agent-gui-tft-waydroid-123-456.service"
+    assert launch._managed_unit(f"Transient unit: {unit}\n", "tft-waydroid.desktop") == unit
+    assert launch._managed_unit(f"Transient unit: {unit}\n", "microsoft-edge.desktop") is None
+    assert launch._managed_unit(f"Transient unit: {unit}\n" * 2, "tft-waydroid.desktop") is None
+
+
+def test_launch_accepted_then_collected_before_window_is_failure(monkeypatch):
+    commands = []
+    unit = "agent-gui-tft-waydroid-123-456.service"
+    def run(command, **kwargs):
+        commands.append(command)
+        if command[0].endswith("agent-launch-gui"):
+            return SimpleNamespace(returncode=0, stdout=f"Transient unit: {unit}\n", stderr="")
+        return SimpleNamespace(returncode=0, stdout="LoadState=not-found\nActiveState=inactive\n", stderr="")
+    monkeypatch.setattr(launch, "SCENE", ShellSceneCache())
+    monkeypatch.setattr(launch.subprocess, "run", run)
+    result = launch._launch_application({"application": "teamfight_tactics"})
+    assert result["state"] == "failed" and result["ready"] is False
+    assert result["wait_status"] == "terminated_before_ready"
+    assert result["dispatched"] is True and result["must_not_replay"] is True
+    assert sum(command[0].endswith("agent-launch-gui") for command in commands) == 1
+
+
+@pytest.mark.parametrize("lifetime", ["running", "unknown"])
+def test_timeout_does_not_claim_app_is_still_loading(monkeypatch, lifetime):
+    monkeypatch.setattr(launch, "SCENE", ShellSceneCache())
+    monkeypatch.setattr(launch, "READINESS_TIMEOUT_SECONDS", 0)
+    monkeypatch.setattr(launch, "_launch_lifetime", lambda unit: lifetime)
+    result = launch._await_readiness({"application": "teamfight_tactics", "label": "TFT",
+                                     "state": "starting", "ready": False}, {}, launch_unit="exact")
+    assert result["state"] == "unverified" and result["launch_lifetime"] == lifetime
+    assert result["must_not_replay"] is True
+
+
+def test_late_window_after_live_startup_is_ready_without_replay(monkeypatch, scene):
+    monkeypatch.setattr(launch, "READINESS_TIMEOUT_SECONDS", 1)
+    cache = launch.SCENE
+    def changed(*args):
+        scene(windows=[window("tft-waydroid", "TFT")])
+        return cache.change_token()
+    monkeypatch.setattr(cache, "wait_for_change", changed)
+    monkeypatch.setattr(launch, "_launch_lifetime", lambda unit: "running")
+    result = launch._await_readiness({"application": "teamfight_tactics", "label": "TFT",
+                                     "ready": False}, {}, launch_unit="exact")
+    assert result["ready"] is True
 
 
 def window(app_id, title, *, window_id="0xprimary", visible=True, minimized=False):
@@ -83,7 +133,7 @@ def test_unavailable_scene_preserves_managed_launch(monkeypatch) -> None:
 
     result = launch._launch_application({"application": "microsoft_edge"})
 
-    assert result["state"] == "starting"
+    assert result["state"] == "unverified"
     assert result["ready"] is False
     assert result["dispatched"] is True
     assert commands == [[
@@ -145,7 +195,7 @@ def test_ambiguous_windows_preserve_active_unit_guard_without_relaunch(monkeypat
     monkeypatch.setattr(launch.subprocess, "run", run)
     assert launch._visible_application_window("world_of_warcraft") is None
     result = launch._launch_application({"application": "world_of_warcraft"})
-    assert result["state"] == "starting" and result["dispatched"] is False
+    assert result["state"] == "unverified" and result["dispatched"] is False
     assert commands == [["systemctl", "--user", "is-active", "--quiet", "wow-retail-wow-drive.service"]]
 
 
@@ -161,7 +211,7 @@ def test_tft_dispatch_uses_current_managed_desktop_without_retired_unit(monkeypa
     result = launch._launch_application({"application": "teamfight_tactics"})
     assert commands == [["/home/wissenschafter/bin/agent-launch-gui", "tft-waydroid.desktop"]]
     assert result["desktop_id"] == "tft-waydroid.desktop"
-    assert result["state"] == "starting"
+    assert result["state"] == "unverified"
     assert result["dispatched"] is True and result["ready"] is False
 
 
@@ -173,3 +223,19 @@ def test_witness_preserves_visibility_and_bounded_title(scene, awake, visible, m
     assert witness["visible"] is False
     assert len(witness["title"]) <= 80
     assert witness["title"].endswith("…")
+
+
+def test_launcher_timeout_retains_target_without_claiming_delivery(monkeypatch):
+    from obsidience.harness.capabilities.task.complete import computer_completion_evidence
+
+    def timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired("managed-launcher", 30)
+
+    monkeypatch.setattr(launch, "_launch_application", timeout)
+    result = json.loads(launch.execute({"application": "teamfight_tactics"}, {}))
+    assert result["application"] == "teamfight_tactics"
+    assert result["delivery"] == "uncertain" and result["must_not_replay"] is True
+    evidence = computer_completion_evidence("application.launch", result)
+    assert evidence["verified"] is False
+    assert evidence["target"] == {"kind": "application", "name": "teamfight_tactics"}
+    assert evidence["launch_outcome"] == "launcher_timeout"

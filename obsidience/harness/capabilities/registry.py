@@ -38,6 +38,7 @@ _CAPABILITY_NAMES = (
     "observations.temporary.append",
     "observations.temporary.archive",
     "review.inspect",
+    "session.unlock",
     "source.handoff",
     "source.ingest",
     "source.read",
@@ -172,16 +173,19 @@ def _argument_schemas() -> dict[str, dict]:
     surface = {"type": "string", "enum": list(SURFACE_IDS)}
     target = {"anyOf": [obj({"kind": {"const": kind}, "name": text(256 if kind == "application" else 48),
                              "surface": surface}, ("kind", "name")) for kind in ("application", "pane")]}
-    observe_target = {"anyOf": [*target["anyOf"], obj({"kind": {"const": "focused"}, "surface": surface}, ("kind",))]}
+    observe_target = {"anyOf": [
+        obj({"kind": {"const": "application"}, "name": text(256), "surface": surface,
+             "title": text(200)}, ("kind", "name")),
+        target["anyOf"][1], obj({"kind": {"const": "focused"}, "surface": surface}, ("kind",))]}
     tile = obj({key: integer for key in ("left", "top", "right", "bottom")}, ("left", "top", "right", "bottom"))
     bounded_scope = obj({"kind": {"enum": ["knowledge", "task", "runbook", "tool", "skill", "agent"]},
         "current_only": {"type": "boolean"}, "exclude_subtrees": array(text(300),10)})
     schemas = {
         "application.launch": obj({"application": {"type":"string","enum":sorted(APPLICATIONS)}},("application",)),
         "computer.observe": obj({"target":observe_target,"query":text(500)},("target","query")),
-        "computer.act": obj({"application":text(256),"action":{"const":"click"},"target":text(128),
+        "computer.act": obj({"scope":{"enum":["input","state"]},"application":text(256),"action":{"const":"click"},"target":text(128),
             "point":obj({axis:{"type":"integer","minimum":0,"maximum":999} for axis in ("x","y")},("x","y")),
-            "postcondition":text(500)},("application","target","point")),
+            "postcondition":text(500)},("scope","application","target","point")),
         "window.activate": obj({"target":target},("target",)),
         "window.place": obj({"target":target,"destination":obj({"surface":surface,"tile":tile},("surface",))},("target","destination")),
         "vault.search": {"anyOf":[obj({"query":text(300),"scope":bounded_scope},("query",)),
@@ -189,18 +193,25 @@ def _argument_schemas() -> dict[str, dict]:
         "vault.read": {"anyOf":[obj({key:value,"offset":integer,"expected_sha256":{"type":"string","pattern":"^[0-9a-f]{64}$"}},(key,))
             for key,value in (("ref",text(500)),("refs",array(text(500),10,1)))]},
         "vault.list":obj({"folder":text(512,empty=True),"offset":integer}),
-        "vault.propose":obj({"target":text(512),"action":{"enum":["create","update","archive"]},
-            "title":text(300),"body":text(96000,empty=True),"reason":text(400,empty=True),
-            "source":text(512),"metadata":{"type":"object","additionalProperties":True}},("target",)),
+        "vault.propose":{"anyOf":[
+            obj({"target":text(512),"action":{"enum":["create","update"]},
+                "title":text(300),"body":text(96000),"source":text(512),"reason":text(400,empty=True),
+                "metadata":{"type":"object","additionalProperties":True}},("target","body")),
+            obj({"target":text(512),"source":text(512),"action":{"enum":["create","update"]},
+                "reason":text(400,empty=True),"metadata":{"type":"object","additionalProperties":True}},("target","source")),
+            obj({"target":text(512),"action":{"const":"archive"},"title":text(300),
+                "body":text(96000,empty=True),"source":text(512),"reason":text(400,empty=True),
+                "metadata":{"type":"object","additionalProperties":True}},("target","action")),
+        ]},
         "vault.maintenance":obj({}), "vault.validate":obj({}), "harness.status":obj({}),
         "harness.repair":obj({"task":text(512),"run_id":text(128)},("task","run_id")),
         "harness.evaluate":obj({"proposal":text(512)},("proposal",)),
         "task.inspect":obj({"task":text(512),"run_id":text(128)},("task",)),
         "review.inspect":obj({"task":text(512),"proposal":text(512)}),
+        "session.unlock":obj({}),
         "task.create":obj({"task":text(512),"params":{"type":"object","additionalProperties":True,"maxProperties":8},
             "wait_for_result":{"type":"boolean"},"await_publication":{"type":"boolean"}},("task",)),
         "task.complete":obj({"status":{"enum":["completed","failed","review"]},"summary":text(2000,empty=True),
-            "reclassify":{"type":"boolean"},
             "outcome":text(100,empty=True),"evidence":array(text(500),8),
             "verification":obj({"status":{"enum":["established","not_established"]},"observation":text(1000)},("status","observation"))},("status","summary")),
         "observations.temporary.append":obj({"text":text(2000),"related_refs":array(text(512),3)},("text",)),
@@ -228,16 +239,48 @@ def _argument_schemas() -> dict[str, dict]:
 
 def argument_schema(name: str) -> dict:
     from copy import deepcopy
-    return deepcopy(_argument_schemas()[name])
+    schema = deepcopy(_argument_schemas()[name])
+    if name == "computer.observe":
+        from ..host.scene import SCENE
+
+        # Copying a long Unicode title is unreliable. Constrain this optional
+        # observation filter to exact public labels from the current Scene.
+        # Native target resolution still rejects wrong-app and duplicate labels.
+        scene = SCENE.activation_binding()
+        fields = scene.get("fields", [])
+        titles = set()
+        if scene.get("available") is True and "kind" in fields and "title" in fields:
+            kind_index, title_index = fields.index("kind"), fields.index("title")
+            titles = {row[title_index] for rows in scene.get("surfaces", {}).values() for row in rows
+                      if len(row) > max(kind_index, title_index) and row[kind_index] == "application"
+                      and isinstance(row[title_index], str) and row[title_index]}
+        properties = schema["properties"]["target"]["anyOf"][0]["properties"]
+        if titles:
+            properties["title"] = {"type": "string", "enum": sorted(titles)}
+        else:
+            properties.pop("title", None)
+    return schema
 
 
-def action_schema(allowed: list[str], *, completion_no_change: bool = False) -> dict:
+def action_schema(allowed: list[str], *, completion_no_change: bool = False,
+                  proposal_mode: str = "") -> dict:
     """Constrain Tool arguments and the active completion contract, not its evidence."""
     if not allowed or set(allowed) - set(REGISTRY):
         raise ValueError("Action schema requires exact registered capabilities")
     choices = []
     for name in sorted(set(allowed)):
         args = argument_schema(name)
+        if name == "vault.propose" and proposal_mode == "feed":
+            # The Feed owner compiles the body and any retention. The model
+            # only names its bound Inbox and destination, never an archive.
+            args = args["anyOf"][1]
+            args["properties"].pop("metadata", None)
+        elif name == "vault.propose" and proposal_mode == "link":
+            args = args["anyOf"][0]
+            args["properties"]["action"] = {"const": "update"}
+            args["required"].append("action")
+            for key in ("metadata", "source"):
+                args["properties"].pop(key, None)
         if name == "task.complete" and completion_no_change:
             from copy import deepcopy
             successful = deepcopy(args)
@@ -252,7 +295,8 @@ def action_schema(allowed: list[str], *, completion_no_change: bool = False) -> 
     return {"anyOf": choices}
 
 
-def decoder_action_schema(allowed: list[str], *, completion_no_change: bool = False) -> dict:
+def decoder_action_schema(allowed: list[str], *, completion_no_change: bool = False,
+                          proposal_mode: str = "") -> dict:
     """Keep exact argument structure without exponential grammar repetitions.
 
     llama.cpp expands nested finite string/array bounds into grammar rules.
@@ -267,4 +311,5 @@ def decoder_action_schema(allowed: list[str], *, completion_no_change: bool = Fa
         if isinstance(value, list):
             return [structural(item) for item in value]
         return value
-    return structural(action_schema(allowed, completion_no_change=completion_no_change))
+    return structural(action_schema(allowed, completion_no_change=completion_no_change,
+                                    proposal_mode=proposal_mode))

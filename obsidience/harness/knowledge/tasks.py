@@ -23,9 +23,8 @@ def _leaves(*names: str) -> Tree:
 TASK_TAXONOMY: Tree = {
     # The outcome family exposes its two runnable transitions as direct peers.
     "observations": _leaves("compact", "promote"),
-    # Speech is a connection to the same user work as typed Chat. Query keeps
-    # its existing canonical Article while grouping beside Computer Use.
-    "executive": _leaves("query", "operate"),
+    # Live conversation is Agent-owned; Query remains independently queueable.
+    "executive": _leaves("query"),
     # The wiki loop exposes only outcome-bearing operations. Collection,
     # extraction, copyediting, classification, and contradiction checks are
     # procedural Runbook steps rather than fake independently
@@ -76,10 +75,9 @@ TASK_SUMMARIES = {
     "observations/compact": "Condense the completed Immediate Observations prefix into one cumulative Temporary Observation.",
     "observations/promote": "Alexandria archives one closed session's Temporary Observations in Source and stages only justified durable Knowledge changes.",
     "executive": (
-        "The owner's interactive work: Query answers a question and Computer Use produces one verified computer outcome, through typed Chat or speech."
+        "The owner's interactive work through one Executive Task and standing Runbook, shared by typed Chat and speech."
     ),
-    "executive/query": "Executive answers the owner's current question from the graph, current evidence, and activation packet.",
-    "executive/operate": "Produce and verify one requested computer effect through the Task's executable Tools.",
+    "executive/query": "Answer a question through an assigned specialist's applicable Runbook; Executive Chat and voice use Executive directly.",
     "wiki": (
         "The graph-native wiki Tasks: Ingest, Curate, Merge, Link, "
         "Improve, Archive, Audit, Check, and Repair."
@@ -132,7 +130,6 @@ TASK_SUMMARIES = {
 
 TASK_TITLES = {
     # Stable stored identity; one user-facing label across graph, Reader, and Tasks.
-    "executive/operate": "Computer Use",
 }
 
 
@@ -142,7 +139,6 @@ CANONICAL_TASK_BY_PATH = {
     "executive/query": "Tasks/query",
     "observations/compact": "Tasks/observations/immediate/compact",
     "observations/promote": "Tasks/observations/durable/promote",
-    "executive/operate": "Tasks/executive/operate",
     "wiki/ingest": "Tasks/ingest",
     "wiki/curate": "Tasks/curate",
     "wiki/merge": "Tasks/merge",

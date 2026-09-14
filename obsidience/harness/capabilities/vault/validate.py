@@ -83,7 +83,7 @@ def execute(args: dict, context: dict) -> str:
             broken.append(
                 f"- [[{note.ref}]] kind: index (index behavior is derived from children)"
             )
-        for field in ("runbook", *HIERARCHY_FIELDS, "skills", "exclude_subtasks"):
+        for field in ("runbook", *HIERARCHY_FIELDS, "skills", "requires", "exclude_subtasks"):
             value = note.meta.get(field)
             for ref in (
                 value if isinstance(value, list) else [value] if value else []
@@ -105,6 +105,8 @@ def execute(args: dict, context: dict) -> str:
                 target = res.resolve(str(ref))
                 if not target:
                     broken.append(f"- [[{note.ref}]] {field}: {ref} (unresolved)")
+                elif field == "requires" and (note.kind != "skill" or target.kind != "skill"):
+                    broken.append(f"- [[{note.ref}]] requires: {ref} (expected Skill prerequisite)")
                 elif field == CHILD_FIELD_BY_KIND.get(note.kind) and target.kind != note.kind:
                     broken.append(
                         f"- [[{note.ref}]] {field}: {ref} "

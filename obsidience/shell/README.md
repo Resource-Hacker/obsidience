@@ -294,6 +294,15 @@ removal by itself.
 
 ## Verification
 
+The optional active-session unlock command is
+`obsidience/shell/session/session-lock unlock`. It uses the existing native
+LockController IPC, dispatches once and verifies both Quickshell and compositor
+state. The Executive can expose it as `session.unlock` after an explicit local
+owner grant; the starter identity does not grant it. With Voice mode on,
+“JARVIS, unlock the computer” follows the ordinary voice/Executive Tool path.
+This command does not identify the speaker. Password/PAM unlock remains the
+manual alternative. The web graph has no unlock command or credentials.
+
 Before a live session change:
 
 ```sh

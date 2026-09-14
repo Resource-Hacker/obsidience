@@ -6,11 +6,14 @@ import argparse
 import asyncio
 import json
 import sys
+from pathlib import Path
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(prog="obsidience", description="The vault is the harness.")
     sub = ap.add_subparsers(dest="cmd", required=True)
+    p = sub.add_parser("init", help="create a local Vault from reviewed installation defaults")
+    p.add_argument("--vault-dir", type=Path, help="destination; defaults to configured vault_dir")
     sub.add_parser("serve", help="run the daemon (API + scheduler)")
     sub.add_parser("status", help="vault + harness status")
     sub.add_parser("index", help="sync the search index")
@@ -22,6 +25,14 @@ def main() -> None:
     p.add_argument("name", nargs="?")
     p.add_argument("--reason", default="")
     args = ap.parse_args()
+
+    if args.cmd == "init":
+        from ...knowledge.vault import initialize_vault
+        try:
+            print(json.dumps(initialize_vault(args.vault_dir)))
+        except (OSError, ValueError) as error:
+            sys.exit(str(error))
+        return
 
     if args.cmd == "serve":
         from ..api.app import main as serve

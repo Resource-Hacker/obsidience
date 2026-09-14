@@ -763,10 +763,13 @@ def _resolved_body_links(body: str, accepted_resolver: Resolver, path: str = "")
 
 def link_evidence(existing, body: str, accepted_resolver: Resolver) -> list[dict]:
     """Locate changed Article links; syntax is not semantic approval."""
+    from .scope import knowledge_ancestry
+
     if not existing or existing.kind not in {"knowledge", "agent"} or existing.runtime_observation:
         raise ValueError("Link requires an accepted non-runtime Knowledge or Agent Article")
     before = _resolved_body_links(existing.body, accepted_resolver, existing.path)
     after = _resolved_body_links(body, accepted_resolver, existing.path)
+    ancestors = knowledge_ancestry(accepted_resolver)
     evidence = []
     for change, refs, text in (
         ("added", after - before, body),
@@ -779,6 +782,11 @@ def link_evidence(existing, body: str, accepted_resolver: Resolver) -> list[dict
                 or endpoint.kind not in {"knowledge", "agent"} or endpoint.runtime_observation
             ):
                 raise ValueError(f"Link endpoint must be a distinct accepted Knowledge or Agent Article: {ref}")
+            if change == "added" and (endpoint.ref in ancestors[existing.ref]
+                                      or existing.ref in ancestors[endpoint.ref]):
+                raise ValueError(
+                    f"Link endpoints are already connected by native hierarchy: {existing.ref} and {ref}"
+                )
             try:
                 endpoint_sha256 = hashlib.sha256(
                     (CONFIG.vault_dir / endpoint.path).read_bytes(),
@@ -835,16 +843,19 @@ def _validate_link_evidence(meta: dict, existing, body: str, accepted_resolver: 
 
 
 def git_commit(message: str, rel_paths: list[str]) -> None:
-    if not CONFIG.git_commit:
+    # Never walk upward into the application's publishable repository. The
+    # live Vault may opt into its own local audit repository, created by init.
+    root = CONFIG.vault_dir.resolve()
+    if not CONFIG.git_commit or not rel_paths or not (root / ".git").is_dir():
         return
     try:
-        root = CONFIG.project_root
-        vault_prefix = CONFIG.vault_dir.relative_to(root)
-        subprocess.run(["git", "-C", str(root), "add", "--"] +
-                       [str(vault_prefix / p) for p in rel_paths],
+        added = subprocess.run(["git", "-C", str(root), "add", "--", *rel_paths],
                        check=False, capture_output=True, timeout=15)
+        if added.returncode:
+            return
         subprocess.run(["git", "-C", str(root), "commit", "-q", "-m", message,
-                        "--author", "Obsidience Harness <harness@obsidience.local>"],
+                        "--author", "Obsidience Harness <harness@obsidience.local>",
+                        "--only", "--", *rel_paths],
                        check=False, capture_output=True, timeout=15)
     except Exception:  # noqa: BLE001 — audit trail must never break the run
         pass
@@ -1118,8 +1129,14 @@ def reconcile_origin_review_task(origin_ref: str) -> str:
     """
     clean_ref = origin_ref.strip().strip("[]").split("|", 1)[0]
     origin = resolver().resolve(clean_ref) if clean_ref else None
-    if not origin or origin.kind != "task":
+    conversational = (origin is not None and origin.kind == "agent"
+                      and origin.ref == "Agents/Executive/Executive" and origin.meta.get("skills"))
+    if not origin or (origin.kind != "task" and not conversational):
         return ""
+    if conversational:
+        from dataclasses import replace
+        from .index import INDEX
+        origin = replace(origin, meta={**origin.meta, **(INDEX.task_runtime(origin.ref) or {})})
     status = str(origin.meta.get("status", ""))
     for journal in CONFIG.staging_dir.glob(".review-transaction-*.json"):
         plan = json.loads(journal.read_text())
@@ -1148,7 +1165,10 @@ def reconcile_origin_review_task(origin_ref: str) -> str:
         meta["status_updated"] = time.strftime("%Y-%m-%dT%H:%M:%S")
         meta.pop("blocked_reason", None)
 
-    mutate_note_metadata(origin, complete)
+    if conversational:
+        INDEX.mutate_task_runtime(origin.ref, complete)
+    else:
+        mutate_note_metadata(origin, complete)
     run_id = str(origin.meta.get("last_run", ""))
     if origin.ref == "Tasks/ingest" and run_id:
         from .index import INDEX

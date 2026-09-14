@@ -9,12 +9,13 @@ import math
 import os
 import signal
 import time
+import uuid
 from collections import deque
 from pathlib import Path
 from typing import Any, Literal
 
 from ..conversation import runtime as conversation_runtime
-from ..execution import trace
+from ..execution import activity, trace
 from ..models import runtime as model_runtime
 from . import media as media_runtime
 
@@ -66,6 +67,8 @@ class RealtimeSessionManager:
         self._hardware_leased = False
         self._playback_timing_binding: tuple | None = None
         self._playback_timing_stages: set[str] = set()
+        self._playback_id: str | None = None
+        self._playback_run_id = ""
         self.conversation = conversation or conversation_runtime.RUNTIME
 
     def scheduler_paused(self) -> bool:
@@ -91,6 +94,7 @@ class RealtimeSessionManager:
             "audio_source": self._audio_source,
             "audio_sink": self._audio_sink,
             "input_level": self._input_level,
+            "playback": activity.playback(),
             "capture_active": self._capture_active,
             "user_speaking": self._user_speaking,
             "live_transcript": self._live_transcript,
@@ -110,6 +114,8 @@ class RealtimeSessionManager:
         }
 
     async def _publish(self, kind: str, **payload: Any) -> None:
+        if kind == "state" and self._phase not in {"command", "proactive"}:
+            self._clear_playback()
         event = {
             "type": kind,
             "monotonic_ns": time.monotonic_ns(),
@@ -178,13 +184,48 @@ class RealtimeSessionManager:
         if process is None or process.returncode is not None or process.stdin is None:
             return
         if payload.get("type") in {"speak", "cancel", "stop"}:
+            if payload["type"] == "speak":
+                self._playback_id = uuid.uuid4().hex
+                self._playback_run_id = str(payload.get("run_id") or "")[:128]
+                payload = {**payload, "playback_id": self._playback_id}
+                activity.emit_playback("pending", run_id=self._playback_run_id,
+                                       playback_id=self._playback_id)
+            else:
+                self._clear_playback()
             self._playback_timing_binding = (
                 tuple(payload.get(key) for key in ("generation", "speech_sequence", "turn_id", "run_id"))
                 if payload.get("type") == "speak" else None
             )
             self._playback_timing_stages.clear()
-        process.stdin.write((json.dumps(payload) + "\n").encode())
-        await process.stdin.drain()
+        try:
+            process.stdin.write((json.dumps(payload) + "\n").encode())
+            await process.stdin.drain()
+        except Exception:
+            self._clear_playback()
+            raise
+
+    def _clear_playback(self) -> None:
+        self._playback_id = None
+        self._playback_run_id = ""
+        if activity.playback()["status"] != "idle":
+            activity.emit_playback("idle")
+
+    def _record_output_audio(self, event: dict[str, Any]) -> None:
+        playback_id = event.get("playback_id")
+        if (type(event.get("generation")) is not int
+                or event["generation"] != self.conversation._generation
+                or not isinstance(playback_id, str)
+                or not (playback_id == self._playback_id
+                        or (playback_id == "startup" and self._playback_id is None))
+                or event.get("status") not in {"speaking", "idle"}
+                or type(event.get("level")) not in {int, float}
+                or not math.isfinite(event["level"])):
+            return
+        activity.emit_playback(
+            event["status"], level=max(0.0, min(1.0, event["level"]))
+            if event["status"] == "speaking" else 0.0,
+            run_id=self._playback_run_id, playback_id=playback_id,
+        )
 
     def _record_playback_timing(self, event: dict[str, Any]) -> None:
         stage = event.get("stage")
@@ -469,6 +510,8 @@ class RealtimeSessionManager:
         operation: int,
     ) -> None:
         assert process.stdout is not None
+        pending_partial: tuple[int, str] | None = None
+        prepared_sequence = 0
         try:
             while True:
                 raw = await process.stdout.readline()
@@ -498,6 +541,9 @@ class RealtimeSessionManager:
                 )
                 if event_type == "speech_timing":
                     self._record_playback_timing(worker_event)
+                    continue
+                if event_type == "output_audio":
+                    self._record_output_audio(worker_event)
                     continue
                 if event_type == "input_capture":
                     active = worker_event.get("active")
@@ -574,6 +620,8 @@ class RealtimeSessionManager:
                     self._phase = "command"
                     await self._publish("state", reason="runtime_ready")
                 elif event_type == "transcript_final":
+                    pending_partial = None
+                    prepared_sequence = 0
                     async with self._lock:
                         if (operation != self._operation or self._process is not process
                                 or self._phase not in {"command", "proactive"}):
@@ -587,6 +635,13 @@ class RealtimeSessionManager:
                             **({"speech_timing": timing} if timing is not None else {}),
                         )
                     await self._publish("runtime", line=display_line)
+                elif event_type == "transcript_partial":
+                    if exact_sequence:
+                        pending_partial = (sequence, transcript_text)
+                        if (sequence == prepared_sequence and self._user_speaking
+                                and self._phase in {"command", "proactive"}):
+                            self.conversation.prepare_speech_prefix(transcript_text, sequence)
+                    await self._publish("runtime", line=display_line)
                 elif event_type == "interruption":
                     async with self._lock:
                         if (operation != self._operation or self._process is not process
@@ -596,12 +651,19 @@ class RealtimeSessionManager:
                         await self.conversation.cancel(
                             reason="speech.interruption", stop_playback=False,
                         )
+                        # Pipecat queues the interruption frames independently
+                        # of partial text. Admit the exact pending prefix only
+                        # after its own interruption has drained previous work.
+                        prepared_sequence = self._speech_sequence
+                        if pending_partial and pending_partial[0] == prepared_sequence:
+                            self.conversation.prepare_speech_prefix(pending_partial[1], prepared_sequence)
                     await self._publish("runtime", line=display_line)
                 elif event_type == "fatal":
+                    self._clear_playback()
                     self._last_error = display_line[:MAX_EVENT_TEXT]
                     await self._publish("runtime", line=display_line)
                 elif event_type in {
-                    "transport_ready", "transcript_partial", "speech_detected", "speech_ended",
+                    "transport_ready", "speech_detected", "speech_ended",
                     "speech_started", "speech_stopped", "playback_started",
                     "playback_stopped",
                 }:

@@ -51,6 +51,21 @@ Scope {
         }
     }
 
+    function ownerUnlock() {
+        if (!sessionLock.locked) {
+            return "unlocked"
+        }
+        if (!sessionLock.secure || authenticating) {
+            return "busy"
+        }
+        // Owner-authorized local IPC, also used by the Executive's session.unlock.
+        // The web graph has no unlock command and never receives credentials.
+        password = ""
+        authenticationFailed = false
+        sessionLock.locked = false
+        return "unlocking"
+    }
+
     onPasswordChanged: authenticationFailed = false
 
     PamContext {
@@ -109,6 +124,10 @@ Scope {
         function status(): string {
             return root.secure ? "secure"
                 : root.active ? "locking" : "unlocked"
+        }
+
+        function unlock(): string {
+            return root.ownerUnlock()
         }
     }
 }

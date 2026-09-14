@@ -170,21 +170,44 @@ class SpeechTimingAudioOutput(LocalAudioOutputTransport):
         self._playback = playback
         self._timing = None
         self._first_write = False
+        self._binding = None
 
     async def push_frame(self, frame: Frame, direction=FrameDirection.DOWNSTREAM) -> None:
         # Upstream queues this marker with PCM and forwards it only when its
         # output task reaches it. Binding at process_frame would race old audio.
         if direction is FrameDirection.DOWNSTREAM and isinstance(frame, TTSStartedFrame):
             self._timing = frame.metadata.get("obsidience_timing")
+            self._binding = frame.metadata.get("obsidience_output")
             self._first_write = False
+        elif direction is FrameDirection.DOWNSTREAM and isinstance(frame, (TTSStoppedFrame, BotStoppedSpeakingFrame)):
+            self._output_level("idle", 0.0)
         await super().push_frame(frame, direction)
+
+    def _output_level(self, status: str, level: float) -> None:
+        binding = self._binding
+        if (binding is not None and self._playback is not None
+                and (binding["generation"], binding["epoch"])
+                == (self._playback.generation, self._playback.epoch)):
+            emit("output_audio", playback_id=binding["playback_id"],
+                 generation=binding["generation"], status=status, level=round(level, 4))
 
     async def write_audio_frame(self, frame) -> bool:
         timing = self._timing
-        written = await super().write_audio_frame(frame)
+        try:
+            written = await super().write_audio_frame(frame)
+        except Exception:
+            self._output_level("idle", 0.0)
+            raise
         if written and not self._first_write and self._playback is not None:
             self._first_write = True
             self._playback.record_timing("first_output_write", timing, since="first_pcm_ns")
+        if written and isinstance(frame, TTSAudioRawFrame):
+            # The existing transport writes 40 ms PCM chunks at playback pace.
+            # RMS follows the spoken syllables without another capture stream,
+            # FFT, audio copy to the UI, or waiting for more synthesis.
+            samples = np.frombuffer(frame.audio, dtype="<i2").astype(np.float32)
+            rms = float(np.sqrt(np.mean(samples * samples))) / 32768.0 if samples.size else 0.0
+            self._output_level("speaking", min(1.0, 3.0 * rms ** 0.65))
         return written
 
 
@@ -231,7 +254,9 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
     async def _close_unvoiced_transcript(self, direction: FrameDirection) -> None:
         try:
             await asyncio.sleep(TRANSCRIPT_IDLE_SECS)
-            if self._user_speaking_buffer.strip():
+            if self._user_speaking_buffer.strip() and not self._vad_user_speaking:
+                # A gap in recognized words is not silence while VAD still
+                # hears speech. Keep the fallback for late, unvoiced ASR only.
                 # The endpoint has won. Disarm it before the first await so a
                 # real VAD edge cannot cancel NeMo halfway through finalizing.
                 self._transcript_timeout = None
@@ -275,10 +300,11 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
             return
         if self._timing is not None:
             self._timing.partial()
-        emit("transcript_partial", text=transcript)
         if not self._have_sent_user_started_speaking:
             await self._handle_user_interruption(UserStartedSpeakingFrame())
             self._have_sent_user_started_speaking = True
+        emit("transcript_partial", text=transcript,
+             **({"speech_sequence": self._timing.sequence} if self._timing else {}))
         await self._cancel_transcript_timeout()
         self._transcript_timeout = self.create_task(
             self._close_unvoiced_transcript(direction),
@@ -293,6 +319,7 @@ class PocketTTSService(TTSService):
         super().__init__(sample_rate=TTS_SAMPLE_RATE)
         self._playback = playback
         self._timing = None
+        self._output_binding = None
         config = root / "english.yaml"
         voice_path = root / "voices" / f"{voice}.safetensors"
         if not config.is_file() or not voice_path.is_file():
@@ -305,10 +332,12 @@ class PocketTTSService(TTSService):
         )
         self._model.to("cpu")
         self._voice_state = self._model.get_state_for_audio_prompt(str(voice_path))
+        self._synthesis_lock = threading.Lock()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         if isinstance(frame, TTSSpeakFrame):
             self._timing = frame.metadata.get("obsidience_timing")
+            self._output_binding = frame.metadata.get("obsidience_output")
         await super().process_frame(frame, direction)
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
@@ -327,23 +356,45 @@ class PocketTTSService(TTSService):
 
         def synthesize() -> None:
             try:
-                for chunk in self._model.generate_audio_stream(self._voice_state, clean):
+                # Pocket's generator is not thread-safe and only joins its
+                # native workers when consumed to completion. Cancel its latent
+                # producer cooperatively, then drain its ordinary cleanup path.
+                with self._synthesis_lock:
                     if cancelled.is_set():
-                        break
-                    samples = chunk.detach().float().cpu().numpy().reshape(-1)
-                    pcm = np.rint(np.clip(samples, -1.0, 1.0) * 32767.0).astype("<i2")
-                    loop.call_soon_threadsafe(queue.put_nowait, pcm.tobytes())
-            except BaseException as exc:
-                loop.call_soon_threadsafe(queue.put_nowait, exc)
-            finally:
-                loop.call_soon_threadsafe(queue.put_nowait, None)
+                        return
+                    owner_thread = threading.get_ident()
 
-        worker = threading.Thread(target=synthesize, name="pocket-tts", daemon=True)
+                    def cancel_generation(_module, _inputs) -> None:
+                        # Pocket catches producer errors, stops the decoder and
+                        # joins it. Stop at a Python boundary in that producer,
+                        # never during the caller's initial prompt preparation.
+                        if cancelled.is_set() and threading.get_ident() != owner_thread:
+                            raise InterruptedError("Speech synthesis cancelled")
+
+                    hook = self._model.flow_lm.conditioner.register_forward_pre_hook(cancel_generation)
+                    try:
+                        for chunk in self._model.generate_audio_stream(self._voice_state, clean):
+                            if cancelled.is_set():
+                                continue
+                            samples = chunk.detach().float().cpu().numpy().reshape(-1)
+                            pcm = np.rint(np.clip(samples, -1.0, 1.0) * 32767.0).astype("<i2")
+                            loop.call_soon_threadsafe(queue.put_nowait, pcm.tobytes())
+                    finally:
+                        hook.remove()
+            except BaseException as exc:
+                if not cancelled.is_set():
+                    loop.call_soon_threadsafe(queue.put_nowait, exc)
+            finally:
+                if not cancelled.is_set():
+                    loop.call_soon_threadsafe(queue.put_nowait, None)
+
+        worker = threading.Thread(target=synthesize, name="pocket-tts", daemon=False)
         worker.start()
         started = TTSStartedFrame()
         started.metadata["obsidience_timing"] = timing
-        yield started
+        started.metadata["obsidience_output"] = self._output_binding
         try:
+            yield started
             while True:
                 item = await queue.get()
                 if item is None:
@@ -438,7 +489,7 @@ class PlaybackCommands:
     def __init__(self) -> None:
         self.generation = -1
         self.epoch = 0
-        self._queued: tuple[int, int, str, dict | None] | None = None
+        self._queued: tuple[int, int, str, dict | None, str] | None = None
         self._preparing: asyncio.Task | None = None
         self._controller_ready = asyncio.Event()
         self._startup_pending = True
@@ -498,7 +549,7 @@ class PlaybackCommands:
         self.epoch += 1
         timing = self._timing_context(command)
         self.record_timing("speech_received", timing)
-        self._queued = (generation, self.epoch, text, timing)
+        self._queued = (generation, self.epoch, text, timing, command.get("playback_id", "startup"))
         if self._preparing is None or self._preparing.done():
             self._preparing = asyncio.create_task(
                 self._prepare(task, route), name="speech-playback-prepare",
@@ -514,7 +565,7 @@ class PlaybackCommands:
     async def _prepare(self, task: PipelineTask, route: PlaybackInputRoute) -> None:
         try:
             while self._queued is not None:
-                generation, epoch, text, timing = self._queued
+                generation, epoch, text, timing, playback_id = self._queued
                 self._queued = None
                 # Let the bounded PipeWire operation finish before restoring raw
                 # capture; cancelling to_thread would leave its mutation running.
@@ -526,6 +577,9 @@ class PlaybackCommands:
                 frame = TTSSpeakFrame(text)
                 frame.metadata["obsidience_playback"] = (generation, epoch)
                 frame.metadata["obsidience_timing"] = timing
+                frame.metadata["obsidience_output"] = {
+                    "generation": generation, "epoch": epoch, "playback_id": playback_id,
+                }
                 await task.queue_frame(frame)
         except Exception as exc:
             self.invalidate()

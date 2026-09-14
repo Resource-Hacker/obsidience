@@ -130,6 +130,20 @@
       "version": "6.0.3",
       "license": "MIT",
       "integration": "Use the installed optional CSafeLoader in existing OKF and strict Source parsers, falling back to SafeLoader. No new dependency or global monkeypatch. Preserve OKF timestamp spellings, duplicate Source-key rejection, and unchanged safe_dump serialization. No trust or integrity verdict is cached."
+    },
+    "deepseek_harness": {
+      "repository": "https://github.com/deepseek-ai/deepseek-harness",
+      "revision": "c291e7961a515f6d7af9304e7fd1d257929aef26",
+      "version": "CLI 0.1.5-rc.1; agent-loop, agent, llm and tools 0.1.5-rc.2; Cordis 4.0.2",
+      "license": "MIT",
+      "dependency_lock": "obsidience/harness/execution/deepseek/package-lock.json",
+      "integration": "Pinned npm distribution drives Executive conversation through the supported dsh profile launcher. Obsidience provides Cordis model, prompt, capability and application ports. SQLite remains the conversation and receipt owner; upstream sessions are ephemeral, with no disk image store. Scheduled Tasks retain the Python model loop and share CapabilityDispatch. The inspected source revision and npm distributions are distinct artifacts, not asserted byte-identical."
+    },
+    "jsonschema": {
+      "repository": "https://github.com/python-jsonschema/jsonschema",
+      "version": "4.25.1",
+      "license": "MIT",
+      "integration": "Validate the complete code-owned argument schema before native Tool dispatch, including conditional variants and limits beyond the model-facing DeepSeek schema vocabulary."
     }
   }
 }

@@ -22,7 +22,7 @@ APPLICATIONS = {
     },
     "teamfight_tactics": {
         "label": "Teamfight Tactics",
-        "aliases": ("tft",),
+        "aliases": ("tft", "team fight tactics"),
         "desktop_id": "tft-waydroid.desktop",
         "window_app_ids": ("tft-waydroid",),
         "window_needles": ("tft-waydroid",),

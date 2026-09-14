@@ -10,7 +10,7 @@ import json
 from pathlib import PurePosixPath
 
 from .links import metadata_ref
-from .vault import Note, Resolver
+from .vault import Note, Resolver, folder_article_path
 
 MAX_CHECKOUTS = 128
 
@@ -68,6 +68,39 @@ def knowledge_refs(agent: Note, res: Resolver) -> set[str]:
                 and not any(_within(note, item) for item in exclusions)):
             visible.add(note.ref)
     return visible
+
+
+def knowledge_ancestry(res: Resolver) -> dict[str, list[str]]:
+    """Derive structural ancestors from native folders and Agent graph scope.
+
+    Folder ancestors are nearest-first, even across unauthored intermediate
+    folders. Agent roots also contain their checked-out Knowledge, matching
+    graph membership. This supplies no semantic link or executable authority.
+    """
+    notes = [note for note in res.by_ref.values() if note.kind in {"knowledge", "agent"} and _accepted(note)]
+    ancestors: dict[str, list[str]] = {}
+    for note in notes:
+        parents = []
+        for folder in PurePosixPath(note.path).parents:
+            if str(folder) == ".":
+                break
+            parent = res.resolve(folder_article_path(folder))
+            if (parent is not None and parent.ref != note.ref
+                    and parent.kind in {"knowledge", "agent"} and _accepted(parent)):
+                parents.append(parent.ref)
+        ancestors[note.ref] = parents
+    for agent in notes:
+        if agent.kind != "agent":
+            continue
+        try:
+            members = knowledge_refs(agent, res)
+        except ValueError:
+            # An invalid checkout has no membership, just as in navigation.
+            continue
+        for ref in members & ancestors.keys():
+            if agent.ref != ref and agent.ref not in ancestors[ref]:
+                ancestors[ref].append(agent.ref)
+    return ancestors
 
 
 def readable_refs(agent: Note, res: Resolver) -> set[str]:

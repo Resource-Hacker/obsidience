@@ -70,6 +70,7 @@ const FOCUS_LINGER_MS = 6_000;
 
 interface ActivityWireEntry {
   run_id?: string;
+  turn_id?: string;
   phase?: KnowledgeActivity["phase"] | "review_changed" | "graph_changed";
   review?: LinkReviewChange;
   refs?: string[];
@@ -80,8 +81,16 @@ interface ActivityWireEntry {
 }
 
 interface ActivityWireMessage extends ActivityWireEntry {
-  type?: "activity" | "snapshot";
+  type?: "activity" | "snapshot" | "playback";
   entries?: ActivityWireEntry[];
+  playback?: SpeechPlayback;
+}
+
+interface SpeechPlayback {
+  status: "idle" | "pending" | "speaking";
+  level: number;
+  run_id: string;
+  playback_id: string;
 }
 
 function activityFromWire(entry: ActivityWireEntry): KnowledgeActivity | null {
@@ -89,6 +98,7 @@ function activityFromWire(entry: ActivityWireEntry): KnowledgeActivity | null {
   return {
     phase: entry.phase,
     runId: entry.run_id,
+    turnId: entry.turn_id,
     refs: Array.isArray(entry.refs) ? entry.refs : [],
     query: entry.query,
     at: typeof entry.at === "number" ? entry.at : undefined,
@@ -100,11 +110,12 @@ function activityFromWire(entry: ActivityWireEntry): KnowledgeActivity | null {
 
 /** Replay only the newest coherent transaction. Activity history is recovery
  * state, not a second animation source or a backlog of old turns. */
-function latestActivityTransaction(entries: ActivityWireEntry[]): KnowledgeActivity[] {
+function latestActivityTransaction(entries: ActivityWireEntry[], playbackRunId = ""): KnowledgeActivity[] {
   const activity = entries.map(activityFromWire).filter((entry): entry is KnowledgeActivity => entry !== null);
   let startIndex = -1;
   for (let index = activity.length - 1; index >= 0; index -= 1) {
-    if (activity[index].phase === "query_started") {
+    if ((activity[index].phase === "query_started" || activity[index].phase === "admission_started")
+      && (!playbackRunId || activity[index].runId === playbackRunId)) {
       startIndex = index;
       break;
     }
@@ -119,13 +130,14 @@ function latestActivityTransaction(entries: ActivityWireEntry[]): KnowledgeActiv
   let terminal: KnowledgeActivity | null = null;
   for (const entry of activity.slice(startIndex + 1)) {
     if ((entry.graphId ?? MAIN_GRAPH_ID) !== graphId
-      || (started.runId ? entry.runId !== started.runId : (entry.query ?? "") !== query)) continue;
+      || (started.runId ? entry.runId !== started.runId
+        : started.turnId ? entry.turnId !== started.turnId : (entry.query ?? "") !== query)) continue;
     if (entry.phase === "path") path = entry;
     else if (entry.phase === "speaking") speaking = entry;
-    else if (entry.phase === "query_completed" || entry.phase === "cleared") terminal = entry;
+    else if (entry.phase === "query_completed" || entry.phase === "cleared" || entry.phase === "admission_completed") terminal = entry;
   }
-  if (terminal?.phase === "cleared") return [];
-  if (terminal?.at !== undefined && Date.now() - terminal.at >= FOCUS_LINGER_MS) return [];
+  if (terminal?.phase === "cleared" || terminal?.phase === "admission_completed") return [];
+  if (!playbackRunId && terminal?.at !== undefined && Date.now() - terminal.at >= FOCUS_LINGER_MS) return [];
   // A reconnect may land between start and packet compilation. Preserve that
   // start so the popup includes the Task trace emitted before its graph path.
   return [started, path, speaking, terminal].filter(
@@ -183,14 +195,15 @@ function buildThinkingRoute(cloud: GraphCloud, refs: readonly string[]): Thinkin
   const taxonomyEdgeByChild = new Map(edges
     .filter((edge) => edge.taxonomy)
     .map((edge) => [edge.target, edge]));
-  const nodeIds = new Set<string>();
+  const nodeIds = new Set(targets);
+  const routeNodeIds = new Set<string>();
   const activeEdgeIds = new Set<string>();
   for (const target of targets) {
     let cursor: string | null | undefined = target;
     const seen = new Set<string>();
     while (cursor && byId.has(cursor) && !seen.has(cursor)) {
       seen.add(cursor);
-      nodeIds.add(cursor);
+      routeNodeIds.add(cursor);
       const edge = taxonomyEdgeByChild.get(cursor);
       if (edge) activeEdgeIds.add(edge.id);
       cursor = byId.get(cursor)?.parentId;
@@ -198,28 +211,35 @@ function buildThinkingRoute(cloud: GraphCloud, refs: readonly string[]): Thinkin
   }
   const root = cloud.nodes.find((node) => node.role === "root");
   if (!root) return null;
-  nodeIds.add(root.id);
-  // Obsidience's test continues through the reached path's real relationships;
-  // this is the characteristic branching tail that makes the animation show
-  // graph retrieval rather than a single decorative root-to-leaf line.
+  routeNodeIds.add(root.id);
+  // Keep the branching comets between supplied Articles. A relationship or
+  // hierarchy waypoint is not evidence that another Article entered the packet.
   for (const edge of edges) {
-    if (edge.taxonomy || (!nodeIds.has(edge.source) && !nodeIds.has(edge.target))) continue;
+    if (edge.taxonomy || !nodeIds.has(edge.source) || !nodeIds.has(edge.target)) continue;
     activeEdgeIds.add(edge.id);
-    nodeIds.add(edge.source);
-    nodeIds.add(edge.target);
   }
-  const activeEdges = edges.filter((edge) => activeEdgeIds.has(edge.id));
-  if (activeEdges.length === 0) return null;
   const positions = new Map(cloud.nodes.map((node) => [node.id, { x: node.x, y: node.y }]));
   const plan = computeKnowledgeSweepPlan(
     root.id,
-    [...nodeIds],
-    activeEdges.map((edge) => edge.id),
+    [...routeNodeIds],
+    [...activeEdgeIds],
     edges,
     positions,
-    new Set(targets),
+    nodeIds,
   );
-  return { nodeIds, pathSpec: knowledge3dPathSpec(plan, edges) };
+  const pathSpec = knowledge3dPathSpec(plan, edges);
+  // A root-only acknowledgement has no beam to travel before Brain can light.
+  // Keep the normal sweep timing for every route that reaches another node.
+  if (nodeIds.size === 1 && nodeIds.has(root.id) && activeEdgeIds.size === 0) {
+    return { nodeIds, pathSpec: { ...pathSpec,
+      firstNodeProgress: 0, firstArticleProgress: 0, maxProgress: 0,
+    } };
+  }
+  // Calculate beam timing through the full hierarchy first, then restrict node
+  // ignition (including satellite sweeps and labels) to the supplied refs.
+  return { nodeIds, pathSpec: { ...pathSpec,
+    nodeArrival: new Map([...pathSpec.nodeArrival].filter(([id]) => nodeIds.has(id))),
+  } };
 }
 
 interface NodeMenuState { id: string; x: number; y: number }
@@ -292,6 +312,8 @@ export function GraphBackdrop({
   const activityKey = useRef(0);
   const lingerTimer = useRef<number | null>(null);
   const activityTransaction = useRef<KnowledgeActivity | null>(null);
+  const playback = useRef<SpeechPlayback>({ status: "idle", level: 0, run_id: "", playback_id: "" });
+  const speechEnvelope = useRef({ level: 0, updatedAt: 0 });
   const testTimers = useRef<number[]>([]);
   const satelliteTestTimer = useRef<number | null>(null);
   const [satelliteTest, setSatelliteTest] = useState<SatelliteThinkingTest | null>(null);
@@ -300,6 +322,25 @@ export function GraphBackdrop({
   const [linkProposals, setLinkProposals] = useState<GraphLinkProposals>({ entries: [], truncated: false });
   const [linkApprovals, setLinkApprovals] = useState<LinkApproval[]>([]);
   const proposalStarts = useRef(new Map<string, number>());
+
+  function speechHolds(next: KnowledgeActivity): boolean {
+    return playback.current.status !== "idle" && Boolean(next.runId)
+      && next.runId === playback.current.run_id && (next.graphId ?? MAIN_GRAPH_ID) === MAIN_GRAPH_ID;
+  }
+
+  function settleActivity(next: KnowledgeActivity, completedAt = next.at ?? Date.now()): void {
+    if (lingerTimer.current !== null) window.clearTimeout(lingerTimer.current);
+    lingerTimer.current = null;
+    if (speechHolds(next)) return;
+    const remaining = Math.max(0, FOCUS_LINGER_MS - Math.max(0, Date.now() - completedAt));
+    const clear = () => {
+      if (activityTransaction.current !== next || speechHolds(next)) return;
+      setActivity(null);
+      lingerTimer.current = null;
+    };
+    if (remaining === 0) clear();
+    else lingerTimer.current = window.setTimeout(clear, remaining);
+  }
 
   // One expiry deadline for finite approval paint; the scene owns every frame.
   useEffect(() => {
@@ -341,6 +382,43 @@ export function GraphBackdrop({
     let stopped = false;
     let socket: WebSocket | null = null;
     let retry: number | null = null;
+    let recent: ActivityWireEntry[] = [];
+    const applyPlayback = (next?: SpeechPlayback) => {
+      if (!next || !["idle", "pending", "speaking"].includes(next.status)
+        || !Number.isFinite(next.level) || typeof next.run_id !== "string"
+        || typeof next.playback_id !== "string") return;
+      const previous = playback.current;
+      playback.current = next;
+      // Levels reach the scene's existing frame loop without React renders.
+      speechEnvelope.current = {
+        level: next.status === "speaking" ? Math.max(0, Math.min(1, next.level)) : 0,
+        updatedAt: performance.now(),
+      };
+      if (previous.status === next.status && previous.playback_id === next.playback_id) return;
+      const transaction = activityTransaction.current;
+      if (next.status !== "idle" && next.run_id) {
+        if (transaction && speechHolds(transaction)) {
+          if (lingerTimer.current !== null) window.clearTimeout(lingerTimer.current);
+          lingerTimer.current = null;
+        } else {
+          const transaction = latestActivityTransaction(recent, next.run_id);
+          if (transaction.length) {
+            resetActivity();
+            transaction.forEach(announceKnowledgeActivity);
+          }
+        }
+      } else if (transaction?.runId && transaction.runId === previous.run_id) {
+        if (!next.playback_id) {
+          // STOP, replacement, or transport loss ends only the old reply.
+          if (lingerTimer.current !== null) window.clearTimeout(lingerTimer.current);
+          lingerTimer.current = null;
+          activityTransaction.current = null;
+          setActivity(null);
+        } else if (transaction.phase === "query_completed") {
+          settleActivity(transaction, Date.now());
+        }
+      }
+    };
     const reviewChanged = (entry: ActivityWireEntry) => {
       if (entry.phase === "graph_changed") {
         window.dispatchEvent(new Event("obsidience:graph-refresh"));
@@ -373,13 +451,20 @@ export function GraphBackdrop({
         try {
           const message = JSON.parse(event.data as string) as ActivityWireMessage;
           if (message.type === "activity") {
+            recent = [...recent, message].slice(-100);
             reviewChanged(message);
             const activity = activityFromWire(message);
             if (activity) announceKnowledgeActivity(activity);
           } else if (message.type === "snapshot" && Array.isArray(message.entries)) {
             resetActivity(); // Replace stale display state with the current stream snapshot.
+            recent = message.entries.slice(-100);
+            applyPlayback(message.playback);
             message.entries.forEach(reviewChanged);
-            latestActivityTransaction(message.entries).forEach(announceKnowledgeActivity);
+            latestActivityTransaction(message.entries,
+              playback.current.status !== "idle" ? playback.current.run_id : "",
+            ).forEach(announceKnowledgeActivity);
+          } else if (message.type === "playback") {
+            applyPlayback(message.playback);
           }
         } catch { /* malformed activity frames are ignored */ }
       };
@@ -387,6 +472,7 @@ export function GraphBackdrop({
         socket = null;
         if (!stopped) {
           resetActivity(); // A lost stream is not evidence that a graph is still thinking.
+          applyPlayback({ status: "idle", level: 0, run_id: "", playback_id: "" });
           retry = window.setTimeout(connect, 1_000);
         }
       };
@@ -396,11 +482,24 @@ export function GraphBackdrop({
       stopped = true;
       if (retry !== null) window.clearTimeout(retry);
       socket?.close();
+      speechEnvelope.current = { level: 0, updatedAt: 0 };
     };
   }, []);
 
   useEffect(() => onKnowledgeActivity((next: KnowledgeActivity) => {
     const previous = activityTransaction.current;
+    // Background work cannot replace the Executive packet during its reply.
+    if (previous && speechHolds(previous) && next.runId !== previous.runId) return;
+    // Admission has a real user-turn identity but no Task/run yet. Its terminal
+    // edge may clear only that preparation state, never a compiled Task path.
+    if (next.phase === "admission_completed") {
+      if (previous?.phase !== "admission_started" || !next.turnId || previous.turnId !== next.turnId) return;
+      activityTransaction.current = null;
+      setActivity(null);
+      return;
+    }
+    const admissionHandoff = previous?.phase === "admission_started"
+      && next.phase === "query_started" && Boolean(next.turnId) && previous.turnId === next.turnId;
     const same = previous && (previous.graphId ?? "main") === (next.graphId ?? "main")
       && (previous.runId || next.runId ? previous.runId === next.runId : previous.query === next.query);
     const terminal = next.phase === "query_completed" || next.phase === "cleared";
@@ -416,13 +515,14 @@ export function GraphBackdrop({
       setActivity(null);
       return;
     }
-    if (next.phase === "query_started") {
+    if (next.phase === "query_started" || next.phase === "admission_started") {
       activityKey.current += 1;
-      setActivity({
-        refs: [], phase: "thinking", key: activityKey.current, query: next.query,
+      setActivity((current) => ({
+        refs: next.phase === "admission_started" ? next.refs : [],
+        phase: "thinking", key: activityKey.current, query: next.query,
         retrievalMs: next.retrievalMs, graphId: next.graphId, runId: next.runId,
-        startedAt: next.at ?? Date.now(),
-      });
+        startedAt: admissionHandoff && current ? current.startedAt : next.at ?? Date.now(),
+      }));
       return;
     }
     if (next.phase === "path") {
@@ -446,15 +546,7 @@ export function GraphBackdrop({
       return;
     }
     setActivity((current) => current ? { ...current, phase: "speaking" } : null);
-    const elapsed = next.at === undefined ? 0 : Math.max(0, Date.now() - next.at);
-    const remaining = Math.max(0, FOCUS_LINGER_MS - elapsed);
-    const clear = () => {
-      if (activityTransaction.current !== next) return;
-      setActivity(null);
-      lingerTimer.current = null;
-    };
-    if (remaining === 0) clear();
-    else lingerTimer.current = window.setTimeout(clear, remaining);
+    settleActivity(next);
   }), []);
 
   useEffect(() => {
@@ -1094,8 +1186,11 @@ export function GraphBackdrop({
   }), [model]);
 
   const renderedActivityRefs = useMemo(() => {
-    return (activity?.refs ?? []).map((ref) => displayAliases.get(ref) ?? ref);
-  }, [activity?.refs, displayAliases]);
+    const executiveRef = graph.navigation.groups.find((group) => group.id === "executive")?.root_ref;
+    return (activity?.refs ?? []).map((ref) =>
+      ref === executiveRef && (!activity?.graphId || activity.graphId === MAIN_GRAPH_ID)
+        ? ROOT_ID : displayAliases.get(ref) ?? ref);
+  }, [activity?.refs, activity?.graphId, displayAliases, graph.navigation]);
   const mainRoute = useMemo(() => {
     if (!activity || (activity.graphId && activity.graphId !== MAIN_GRAPH_ID)) return null;
     return buildThinkingRoute(model, renderedActivityRefs);
@@ -1255,6 +1350,7 @@ export function GraphBackdrop({
           pathSpec={mainRoute?.pathSpec ?? null}
           focusActive={Boolean(activity)}
           focusPhase={activity ? activity.phase : null}
+          speechEnvelope={visible && !lockMode ? speechEnvelope : undefined}
           visible={visible}
           reducedMotion={false}
           adapterPreference="system"

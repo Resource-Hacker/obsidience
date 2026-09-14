@@ -29,6 +29,14 @@ _running: set[str] = set()
 _background: set[asyncio.Task] = set()
 _wake_loop: asyncio.AbstractEventLoop | None = None
 _wake_event: asyncio.Event | None = None
+_shutting_down = False
+
+
+def stop_admission() -> None:
+    """Disarm new work as soon as the API receives its shutdown signal."""
+    global _shutting_down
+    _shutting_down = True
+    wake_scheduler()
 
 
 def wake_scheduler() -> None:
@@ -54,6 +62,28 @@ LEARN_TASK_REF = "Tasks/research/learn"
 RESOURCE_WAIT_PREFIX = "Waiting for model hardware: "
 _RETRY_READ_ONLY_TOOLS = READ_ONLY_CAPABILITIES
 RESTART_DISPOSITION_REASON = "Restart requires disposition; Tool effects are unknown or retained."
+_PROPOSAL_ARGUMENT_REJECTIONS = frozenset({
+    "Proposal rejected: create and update proposals require a nonempty body.",
+    "Proposal rejected: Feed publication accepts exact source and target, without body or authored metadata.",
+})
+
+
+def _proposal_preflight_receipt(call: dict) -> bool:
+    """These exact adapter rejections occur before any proposal is staged."""
+    return (call.get("tool") == "vault.propose" and call.get("status") == "returned"
+            and call.get("tool_ref") == "Tools/vault.propose" and bool(call.get("tool_sha256"))
+            and any(call.get("result_chars") == len(encoded)
+                    and call.get("result_sha256") == hashlib.sha256(encoded).hexdigest()
+                    for text in _PROPOSAL_ARGUMENT_REJECTIONS
+                    for encoded in [json.dumps(text, sort_keys=True).encode()]))
+
+
+def _failed_completion(run: dict, entries: list[dict] | None) -> bool:
+    return bool(run.get("status") == "failed" and entries
+                and entries[-1].get("tool") == "task.complete"
+                and entries[-1].get("accepted") is True
+                and isinstance(entries[-1].get("args"), dict)
+                and entries[-1].get("args", {}).get("status") == "failed")
 
 
 def _retry_trace(run: dict) -> list[dict] | None:
@@ -77,6 +107,12 @@ def _retry_trace(run: dict) -> list[dict] | None:
 def _retry_binding_matches(note: Note, entries: list[dict]) -> bool:
     params = note.meta["params"]
     event = params["event"]
+    if event == "schedule":
+        if not _scheduled_binding_matches(note, params):
+            return False
+        activation = INDEX.activation(str(entries[0].get("activation_id", "")))
+        return bool(activation and activation["task_ref"] == note.ref
+                    and activation.get("params") == params)
     if event == "task.create":
         identity = {key: params.get(key) for key in (
             "event", "activation_key", "created_by_task_ref", "created_by_run_id",
@@ -176,6 +212,25 @@ def _retry_binding_matches(note: Note, entries: list[dict]) -> bool:
     return False
 
 
+def _scheduled_binding_matches(note: Note, params: dict) -> bool:
+    """Cron occurrences are controller events even without Article triggers."""
+    prefix = f"schedule:{note.ref}:"
+    key = params.get("activation_key")
+    if (set(params) != {"event", "activation_key"} or params.get("event") != "schedule"
+            or not note.meta.get("schedule") or not isinstance(key, str)
+            or not key.startswith(prefix)):
+        return False
+    try:
+        firing = float(key.removeprefix(prefix))
+        return (math.isfinite(firing) and 0 < firing <= time.time()
+                and key == prefix + str(firing)
+                # The recorded activation owns the original firing. A later
+                # timezone or cron edit cannot rewrite that historical event.
+                and croniter.is_valid(str(note.meta["schedule"])))
+    except (ValueError, OverflowError, OSError):
+        return False
+
+
 def retry_blocked_reason(note: Note, run: dict | None = None) -> str:
     """Explain whether an explicit owner retry can preserve this failed event."""
     from ..knowledge.vault import _NOTE_WRITE_LOCK
@@ -187,7 +242,9 @@ def retry_blocked_reason(note: Note, run: dict | None = None) -> str:
         if note.ref in _running:
             return "This Task already has an active executor claim."
         if (not isinstance(params, dict) or not isinstance(params.get("activation_key"), str)
-                or not params["activation_key"] or params.get("event") not in task_triggers(note.meta)):
+                or not params["activation_key"]
+                or (params.get("event") not in task_triggers(note.meta)
+                    and not _scheduled_binding_matches(note, params))):
             return "The failed request has no exact durable event identity."
         last_run = note.meta.get("last_run")
         run = INDEX.run(last_run) if run is None and isinstance(last_run, str) else run
@@ -206,17 +263,26 @@ def retry_blocked_reason(note: Note, run: dict | None = None) -> str:
         entries = _retry_trace(run)
         if entries is None:
             return "The previous execution trace is incomplete or unreadable."
+        coverage = INDEX.tool_run_receipts(last_run)
+        rejected = {call["signature"] for call in (coverage or {}).get("calls", [])
+                    if _proposal_preflight_receipt(call)}
         for entry in entries:
             if entry.get("created_tasks") or "task" in entry or entry.get("resource_blocked_after_effect"):
                 return "The previous execution created work or may have committed effects."
             if "tool" in entry:
+                if (entry.get("tool") == "vault.propose" and entry.get("sig") in rejected
+                        and entry.get("obs") in _PROPOSAL_ARGUMENT_REJECTIONS | {
+                            "You have repeated this exact call three times; the result will not change. Vary your approach or call task.complete now with your best status."}):
+                    continue
+                if entry is entries[-1] and coverage is not None and _failed_completion(run, entries):
+                    continue
                 if (not isinstance(entry["tool"], str) or entry["tool"] not in _RETRY_READ_ONLY_TOOLS
                         or not isinstance(entry.get("args"), dict)
                         or not isinstance(entry.get("obs"), str)
                         or set(entry) - {"tool", "args", "obs", "sig"}):
                     return "The previous execution contains an effect or uncertain Tool outcome."
             elif set(entry) - {
-                "activation_id", "activation_packet", "retrieval_ms", "task_activation", "source_inbox", "created_tasks",
+                "activation_id", "activation_packet", "retrieval_ms", "task_activation", "source_inbox", "created_tasks", "maintenance_candidate",
                 "interactive_turn", "computer_request", "provider_metrics", "context_projection",
                 "interruption_reason", "must_not_replay", "invalid", "parse_error", "finish_reason",
             }:
@@ -582,6 +648,164 @@ def settle_maintenance_occurrence(note: Note) -> dict | None:
         return None
 
 
+def _completed_feed_publication(note: Note, params: dict, origin: dict) -> dict | None:
+    """Attest committed publication after interruption, without replaying it."""
+    from ..knowledge.curation import FEED_GENERATOR, _accepted_feed_origin, _feed_article
+    from ..knowledge.links import canonical_body
+    from ..knowledge.source import get_source
+
+    run_id = str(note.meta.get("last_run", ""))
+    run = INDEX.run(run_id) or {}
+    coverage = INDEX.tool_run_receipts(run_id)
+    entries = _retry_trace(run)
+    if (run.get("task_ref") != note.ref or run.get("status") != "interrupted"
+            or not coverage or coverage["task_ref"] != note.ref
+            or coverage["params_sha256"] != INDEX.tool_params_sha256(params)
+            or not entries or not _retry_binding_matches(note, entries)):
+        return None
+    effects = []
+    for call in coverage["calls"]:
+        if (call["status"] != "returned" or not call["finished"]
+                or call["tool_ref"] != "Tools/" + call["tool"] or not call["tool_sha256"]):
+            return None
+        if not (call["read_only"] is True and call["tool"] in READ_ONLY_CAPABILITIES):
+            effects.append(call)
+    if len(effects) != 1 or effects[0]["tool"] != "vault.propose":
+        return None
+    call = effects[0]
+    proposals = [entry for entry in entries if entry.get("tool") == "vault.propose"]
+    if len(proposals) != 1:
+        return None
+    entry = proposals[0]
+    args, result = entry.get("args"), entry.get("obs")
+    if (not isinstance(args, dict) or not isinstance(result, str)
+            or entry.get("sig") != call["signature"]
+            or call["signature"] != "vault.propose:sha256:" + hashlib.sha256(
+                json.dumps(args, sort_keys=True).encode()).hexdigest()
+            or hashlib.sha256(json.dumps(result, sort_keys=True).encode()).hexdigest() != call["result_sha256"]
+            or len(json.dumps(result, sort_keys=True).encode()) != call["result_chars"]):
+        return None
+    handoff = get_source(str(params.get("source_citation", "")))
+    article = _feed_article(handoff, origin)
+    target = article["target"]
+    if (set(args) - {"target", "source", "action", "reason", "metadata"}
+            or args.get("source") != handoff["citation"]
+            or str(args.get("target", "")).removesuffix(".md") != target.removesuffix(".md")
+            or args.get("action", "create") not in {"create", "update"}
+            or args.get("metadata", {}) not in ({}, {"type": "knowledge"})):
+        return None
+    accepted = load_note(target)
+    if (accepted is None or accepted.kind != "knowledge"
+            or accepted.meta.get("article_status") == "deprecated"
+            or _accepted_feed_origin(accepted, origin) != origin
+            or canonical_body(article["body"], target).strip() != accepted.body.strip()
+            or any(accepted.meta.get(key) != article["metadata"][key]
+                   for key in ("resource", "sources", "generated"))):
+        return None
+    decisions = INDEX.db.execute(
+        "SELECT proposal_id,target,decision,decided_at FROM review_decisions "
+        "WHERE run_id=? AND task_ref=?", (run_id, note.ref),
+    ).fetchall()
+    if (not 1 <= len(decisions) <= 31
+            or len({row[1] for row in decisions}) != len(decisions)
+            or sum(row[1] == target for row in decisions) != 1
+            or any(row[2] != "approved" or not call["started"] <= row[3] <= call["finished"]
+                   for row in decisions)):
+        return None
+    expected_result = (
+        f"Article published at {target} under owner Auto-curate policy {origin['destination_ref']}. "
+        f"{len(decisions) - 1} older Feed Articles were archived with their complete content and Sources preserved."
+    )
+    if result != expected_result:
+        return None
+    for _proposal, retired, _decision, _at in decisions:
+        if retired == target:
+            continue
+        archived = load_note("_archived/" + retired)
+        if (load_note(retired) is not None or archived is None or archived.kind != "knowledge"
+                or archived.meta.get("article_status") != "deprecated"
+                or archived.meta.get("generated", {}).get("by") != FEED_GENERATOR):
+            return None
+    return {"disposition": "published_feed_item", "source_id": handoff["id"],
+            "target": target, "call_id": call["call_id"], "result_sha256": call["result_sha256"],
+            "approved_proposals": [row[0] for row in decisions],
+            "reason": "The exact Feed Article and required retention already committed before interruption"}
+
+
+def _resolved_input_evidence(note: Note, params: dict) -> dict | None:
+    """Attest obsolete input through its owner; never infer it from a summary."""
+    if note.ref == "Tasks/audit" and params.get("event") == "runbook.proposed":
+        name = params.get("proposal")
+        if not isinstance(name, str) or load_note("_staging/" + name) is not None:
+            return None
+        row = INDEX.db.execute(
+            "SELECT decision,decided_at FROM review_decisions WHERE proposal_id=?", (name,),
+        ).fetchone()
+        if row and row[0] == "rejected":
+            return {"disposition": "proposal_rejected", "proposal": name, "decided_at": row[1],
+                    "reason": "The owner already rejected this exact Runbook proposal"}
+    if note.ref not in {"Tasks/ingest", "Tasks/research/distill"}:
+        return None
+    from ..knowledge.source import (
+        feed_binding_matches, feed_source_binding, research_handoff_origin, research_source_binding,
+    )
+
+    def bound_feed(value: dict) -> tuple[dict, dict] | None:
+        binding = (research_source_binding(value) if value.get("event") == "source.added"
+                   else research_handoff_origin(value) if value.get("event") == "source.inbox" else None)
+        if binding is None:
+            return None
+        source = INDEX.source(str(value.get("source_id", "")))
+        if (source is None or source["content_sha256"] != value.get("source_sha256")
+                or source["event_key"] != value.get("activation_key")):
+            return None
+        origin = feed_source_binding(source["id"], restore=False)
+        if origin is None or not feed_binding_matches(value.get("feed_binding"), origin):
+            return None
+        return source, origin
+
+    current = bound_feed(params)
+    if current is None:
+        return None
+    bound, origin = current
+    if note.ref == "Tasks/ingest" and params.get("event") == "source.inbox":
+        published = _completed_feed_publication(note, params, origin)
+        if published is not None:
+            return published
+    original = INDEX.source(origin["source_id"])
+    for successor in _event_queue(note.meta):
+        candidate = successor.get("feed_binding")
+        if (not isinstance(candidate, dict) or successor.get("event") != params.get("event")
+                or any(candidate.get(key) != origin[key] for key in ("feed_id", "item_key", "destination_ref"))):
+            continue
+        following = bound_feed(successor)
+        if following is None:
+            continue
+        newer, binding = following
+        replacement = INDEX.source(binding["source_id"])
+        if (replacement["id"] == original["id"]
+                or replacement["captured_at"] <= original["captured_at"]):
+            continue
+        return {"disposition": "superseded_feed_version", "source_id": bound["id"],
+                "successor_source_id": newer["id"], "successor_activation_key": successor["activation_key"],
+                "reason": "A newer attested version of the same Feed item is already queued"}
+    return None
+
+
+def settle_resolved_occurrence(note: Note) -> dict | None:
+    """Close an obsolete failed commitment and retain every prior effect."""
+    if note.meta.get("status") != "failed" or note.ref not in {
+        "Tasks/audit", "Tasks/ingest", "Tasks/research/distill",
+    }:
+        return None
+    try:
+        return _settle_occurrence(note, kind="resolved_input",
+            classify=lambda params: _resolved_input_evidence(note, params),
+            summary_for=lambda evidence: evidence["reason"] + ". Prior effects and history are retained; no Tool was replayed.")
+    except (ValueError, TypeError, KeyError, AttributeError, OSError):
+        return None
+
+
 def foreground_pending() -> bool:
     """Controller demand, never a model-supplied Task parameter."""
     return _foreground_admissions > 0
@@ -829,8 +1053,16 @@ def _receipt_retry_blocked_reason(note: Note, run_id: str) -> str:
         same_params = False
     if coverage["task_ref"] != note.ref or not same_params:
         return "The Tool receipt does not attest these exact Task inputs."
+    run = INDEX.run(run_id) or {}
+    failed_completion = _failed_completion(run, _retry_trace(run))
     for call in coverage["calls"]:
         if call["status"] == "undispatched":
+            continue
+        if _proposal_preflight_receipt(call):
+            continue
+        if (call["tool"] == "task.complete" and call["status"] == "returned"
+                and call["tool_ref"] == "Tools/task.complete" and call["tool_sha256"]
+                and failed_completion):
             continue
         if (call["read_only"] is not True or call["tool"] not in READ_ONLY_CAPABILITIES
                 or not call["tool_ref"] or not call["tool_sha256"]):
@@ -865,13 +1097,17 @@ def reconcile_interrupted_runs() -> list[str]:
 def _reconcile_interrupted_runs() -> list[str]:
     interrupted = []
     for note in iter_notes():
-        if note.kind != "task":
+        conversational = (note.kind == "agent" and note.ref == "Agents/Executive/Executive"
+                          and bool(note.meta.get("skills")))
+        if note.kind != "task" and not conversational:
             continue
+        if conversational:
+            note = replace(note, meta={**note.meta, **(INDEX.task_runtime(note.ref) or {})})
         status = str(note.meta.get("status", ""))
         was_running = status == "running"
         params = note.meta.get("params")
         retry_event = bool(
-            task_triggers(note.meta)
+            not conversational and task_triggers(note.meta)
             and isinstance(params, dict)
             and (params.get("activation_key") or params.get("event"))
         )
@@ -902,7 +1138,8 @@ def _reconcile_interrupted_runs() -> list[str]:
 
             mutate_note_metadata(note, requeue)
         else:
-            update_status(note, "failed", {"blocked_reason": (
+            from .executor import _update_execution_status
+            _update_execution_status(note, "failed", {"blocked_reason": (
                 RESTART_DISPOSITION_REASON if retry_event else INTERRUPTED_RUN_SUMMARY
             )})
         if was_running:
@@ -912,7 +1149,7 @@ def _reconcile_interrupted_runs() -> list[str]:
                 overwrite=False,
                 id=run_id,
                 task_ref=note.ref,
-                objective=note.title,
+                objective=str(params.get("request") or note.title) if isinstance(params, dict) else note.title,
                 agent="interpreter",
                 started=note.mtime,
                 finished=time.time(),
@@ -1347,7 +1584,7 @@ def due_tasks(notes: list[Note] | None = None) -> list:
     for note in notes:
         if note.kind != "task" or note.ref in _running:
             continue
-        if settle_maintenance_occurrence(note):
+        if settle_resolved_occurrence(note) or settle_maintenance_occurrence(note):
             # Attest invalidated input before admitting an independent successor.
             continue
         if _promote_independent_event(note):
@@ -1520,7 +1757,8 @@ def _claim(note: Note) -> None:
 
 async def _run_claimed(note: Note, **run_kwargs) -> None:
     try:
-        await _run(note, **run_kwargs)
+        if not _shutting_down:
+            await _run(note, **run_kwargs)
     finally:
         _running.discard(note.ref)
 
@@ -1573,6 +1811,8 @@ def _claim_ready_continuation() -> dict | None:
 
 def launch(note, **run_kwargs) -> asyncio.Task:
     """Start one tracked Task through the same failure boundary as the scheduler."""
+    if _shutting_down:
+        raise RuntimeError("Harness shutdown has stopped Task admission")
     if not _realtime_allows(note):
         raise RuntimeError("task is paused while foreground input owns execution")
     error = _resource_error(note, run_kwargs.get("model"))
@@ -1615,7 +1855,7 @@ async def loop() -> None:
     global _wake_loop, _wake_event
     _wake_loop, _wake_event = asyncio.get_running_loop(), asyncio.Event()
     try:
-        while True:
+        while not _shutting_down:
             _wake_event.clear()
             try:
                 from ..knowledge.source import dispatch_pending_source_events

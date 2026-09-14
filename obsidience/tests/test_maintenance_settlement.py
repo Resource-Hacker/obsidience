@@ -418,3 +418,29 @@ def test_real_activation_admission_race_settles_without_replaying_and_preserves_
     assert scene.run(previous["id"]) == previous
     assert (CONFIG.vault_dir / note.path).read_bytes() == authored
     assert [item.ref for item in scheduler.due_tasks()] == [note.ref]
+
+
+def test_redundant_hierarchy_link_settles_without_model_or_losing_fifo(scene, monkeypatch):
+    vault.write_note('Tasks/link.md', {'kind': 'task', 'title': 'Link',
+                     'triggers': ['task.create']}, 'Confirm a useful cross-link.')
+    vault.write_note('Agents/A/Records/deep/leaf.md', {'kind': 'knowledge', 'title': 'Leaf'}, BODY)
+    params = activation(['Agents/A/Records/Records', 'Agents/A/Records/deep/leaf'])
+    params.update(target_task='Tasks/link', candidate_kind='missing_link')
+    creator(scene, params)
+    waiting = activation(['Knowledge/one', 'Knowledge/two'], key='b' * 20)
+    waiting.update(target_task='Tasks/link', candidate_kind='missing_link')
+    creator(scene, waiting)
+    note = head(scene, params, queue=[waiting], status='pending')
+    previous = scene.run('previous')
+    authored = (CONFIG.vault_dir / note.path).read_bytes()
+    monkeypatch.setattr(scheduler, 'run_task', lambda *_a, **_k: pytest.fail('must not execute'))
+    result = scheduler.settle_maintenance_occurrence(note)
+    assert result and result['promoted'] is True
+    current = vault.load_note(note.path)
+    assert current.meta['params'] == waiting and current.meta['status'] == 'pending'
+    evidence = json.loads(scene.run(result['settlement_run_id'])['trace'])[0]['controller_disposition']
+    assert evidence['reason'] == 'native_hierarchy_connection'
+    assert evidence['tools_executed'] is False and evidence['effect_applied'] is False
+    assert scene.run('previous') == previous
+    assert (CONFIG.vault_dir / note.path).read_bytes() == authored
+    assert scheduler.settle_maintenance_occurrence(current) is None

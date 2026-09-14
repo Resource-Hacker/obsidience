@@ -39,7 +39,7 @@ COMMON_FIELDS = frozenset({
 # namespace. Unknown fields retain their original root/namespace placement.
 OBSIDIENCE_FIELDS = frozenset({
     "knowledge", "exclude_knowledge", "required_context", "relations", "context_role",
-    "operation_tools", "runtime_sections",
+    "operation_tools", "runtime_sections", "requires", "router_model",
     "acceptance", "action", "agent", "approved_at", "archive_reason", "archived_at", "articles", "assignee",
     "authored_fields", "auto_curate", "auto_done", "base_sha256", "binding", "compacted_through",
     "compaction", "compaction_committed", "context_threshold", "conversation_id",
@@ -281,9 +281,20 @@ def validate_profile(raw: Mapping[str, Any], path: str | Path | None = None) -> 
             for key in sorted(TASK_RUNTIME_FIELDS & namespace.keys()):
                 errors.append(f"obsidience.{key} is Task execution state, not Article metadata")
         if kind == "agent":
-            for key in ("tools", "skills", "runbooks"):
+            for key in ("tools", "runbook", "runbooks"):
                 if key in namespace:
-                    errors.append(f"obsidience.{key} is derived from assigned Tasks, not an Agent grant")
+                    errors.append(f"Agent {key} is derived; standing instructions belong to identity and capabilities to Skills")
+            if "skills" in namespace and (not isinstance(namespace["skills"], list)
+                    or len(namespace["skills"]) > 128
+                    or any(not isinstance(ref, str) or not ref.startswith("[[Skills/")
+                           or not ref.endswith("]]") for ref in namespace["skills"])):
+                errors.append("Agent skills require bounded exact Skill references")
+        if "requires" in namespace:
+            requirements = namespace["requires"]
+            if (kind != "skill" or not isinstance(requirements, list) or len(requirements) > 24
+                    or any(not isinstance(ref, str) or not ref.startswith("[[Skills/")
+                           or not ref.endswith("]]") for ref in requirements)):
+                errors.append("Skill requires must contain bounded exact Skill prerequisites")
     if isinstance(namespace, Mapping):
         from .links import metadata_ref
         for key in ("knowledge", "exclude_knowledge", "required_context"):

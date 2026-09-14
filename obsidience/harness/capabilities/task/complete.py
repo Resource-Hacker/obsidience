@@ -174,6 +174,10 @@ def computer_completion_evidence(
         "verified": bool(verified and target),
         **({"target": target} if target else {}),
         **({"effect": effect} if effect else {}),
+        **({"launch_outcome": result["wait_status"]}
+           if name == "application.launch" and result.get("wait_status") in {
+               "terminated_before_ready", "timeout", "launcher_timeout",
+           } else {}),
         **({"verified_scope": "click", "semantic_postcondition_verified": False} if effect else {}),
     }
 
@@ -182,80 +186,83 @@ def _normalized_click_text(value: str) -> str:
     return " ".join(unicodedata.normalize("NFKC", value).casefold().split())
 
 
+def _latest_computer_results(context: dict) -> dict:
+    latest = {}
+    for item in context.get("trace", []):
+        if not isinstance(item, dict) or item.get("tool") not in COMPUTER_OUTCOME_TOOLS.values():
+            continue
+        args = item.get("args") or {}
+        target = args.get("application") or args.get("target") or {}
+        if isinstance(target, dict):
+            target = tuple((key, target.get(key)) for key in ("kind", "name", "surface", "title"))
+        latest[(item["tool"], str(target))] = item
+    return latest
+
+
+def native_text_arguments(text: str, context: dict) -> dict:
+    """Derive terminal state from controller findings, not the LLM stop token.
+
+    A failed observation remains a failed operation even when the model explains
+    the blocker in ordinary text. State verification still requires the native
+    completion Tool; this helper cannot infer a visual postcondition.
+    """
+    status = "completed"
+    if any((item.get("completion_evidence") or {}).get("verified") is not True
+           for item in _latest_computer_results(context).values()):
+        status = "failed"
+    if _pending_staged_proposals(context):
+        status = "review"
+    return {"status": status, "summary": text}
+
+
 def _computer_completion_error(task, status: str, context: dict, verification=None) -> str | None:
+    """Attest actual computer operations for every Task with these Tools.
+
+    Legacy explicit outcome bindings remain enforceable. Ordinary Executive
+    runs acquire their operation/scope from real Tool decisions, not admission.
+    A different successful Tool cannot erase a failed or uncertain operation.
+    """
     if status != "completed":
         return None
     params = context.get("params") if isinstance(context.get("params"), dict) else {}
-    outcome = params.get("computer_outcome", "")
-    scope = params.get("computer_scope")
-    invalid = validate_computer_outcome(outcome, scope)
-    if invalid:
+    outcome, scope = params.get("computer_outcome", ""), params.get("computer_scope")
+    if invalid := validate_computer_outcome(outcome, scope):
         return invalid
-    if task.ref != "Tasks/executive/operate":
-        if outcome in COMPUTER_OUTCOME_TOOLS:
-            return "the controller-bound computer outcome requires the Computer Use Task; the selected Task does not match"
-        return None
     expected = COMPUTER_OUTCOME_TOOLS.get(outcome)
-    candidates = [
-        item for item in context.get("trace", [])
-        if isinstance(item, dict)
-        and item.get("tool") in (
-            {expected} if expected else COMPUTER_OUTCOME_TOOLS.values()
-        )
-    ]
-    witness = candidates[-1].get("completion_evidence") if candidates else None
-    if candidates and candidates[-1].get("tool") == "computer.act" and isinstance(witness, dict):
-        effect = witness.get("effect")
-        if not (
-            witness.get("verified_scope") == "click"
-            and witness.get("semantic_postcondition_verified") is False
-            and isinstance(effect, dict)
-            and effect.get("kind") == "click"
-            and isinstance(effect.get("label"), str)
-            and bool(effect["label"])
-        ):
-            witness = None
-    if (
-        isinstance(witness, dict)
-        and witness.get("verified") is True
-        and _computer_target(witness.get("target")) is not None
-    ):
+    latest = _latest_computer_results(context)
+    if expected and not any(item["tool"] == expected for item in latest.values()):
+        return f"Completion requires a verified result from {expected} in this execution."
+    # A fresh result can settle the same target; a different target cannot hide it.
+    for item in latest.values():
+        name, witness = item["tool"], item.get("completion_evidence")
+        if not (isinstance(witness, dict) and witness.get("verified") is True
+                and _computer_target(witness.get("target")) is not None):
+            return (f"Completion requires a verified result from {name} for its requested target. "
+                    "Report the actual blocker with status failed; never replay uncertain delivery.")
         application = params.get("application")
-        if application:
-            bound = _computer_target({"kind": "application", "name": application})
-            if bound is None or witness.get("target") != bound:
-                return (
-                    "The verified Tool result does not match the controller's "
-                    "requested application. Do not claim completion for a different "
-                    "target; report the mismatch and never replay uncertain delivery."
-                )
-        if outcome == "action" and scope == "state":
+        if application and witness["target"] != _computer_target({"kind": "application", "name": application}):
+            return "The verified result does not match the explicitly bound application; do not claim completion."
+        if name != "computer.act":
+            continue
+        effect = witness.get("effect")
+        if not (witness.get("verified_scope") == "click"
+                and witness.get("semantic_postcondition_verified") is False
+                and isinstance(effect, dict) and effect.get("kind") == "click"
+                and isinstance(effect.get("label"), str) and effect["label"]):
+            return "Input completion requires an acknowledged intended click with a fresh post-image."
+        action_scope = (item.get("args") or {}).get("scope", scope)
+        if action_scope not in {"input", "state"}:
+            return "The computer action has no valid input/state scope."
+        if action_scope == "state":
             current = context.get("_computer_response_observation")
-            if not (
-                isinstance(current, dict)
-                and current.get("verified") is True
-                and _computer_target(current.get("target")) == witness["target"]
-            ):
-                return (
-                    "the requested application state requires the actual fresh post-action image "
-                    "in this completion response, for the same Task action and target; "
-                    "a click receipt or historical evidence cannot establish it"
-                )
+            if not (isinstance(current, dict) and current.get("verified") is True
+                    and _computer_target(current.get("target")) == witness["target"]):
+                return ("The requested application state requires its actual fresh post-action image "
+                        "in this completion response for the same action and target; historical evidence cannot establish it.")
             if not verification or verification["status"] != "established":
-                return (
-                    "the requested application state requires verification with status established "
-                    "and an observation describing the visible evidence for the bound objective; "
-                    "if the image does not establish it, finish failed without replaying input"
-                )
-        return None
-    required = expected or "the selected computer Tool"
-    return (
-        f"Computer Use completion requires a verified result from {required} "
-        "in this execution. Intent, a failed Tool, input acknowledgement, and "
-        "model-authored evidence do not establish that outcome. If the target "
-        "is unclear, finish failed with the clarification question in summary; "
-        "otherwise report the exact blocker. Never replay uncertain delivery."
-    )
+                return ("Application state requires verification with status established and an observation "
+                        "describing the visible evidence; otherwise finish failed without replaying input.")
+    return None
 
 
 def _staged_proposal_states(context: dict) -> tuple[list[dict], list[dict], list[dict]]:
@@ -426,7 +433,9 @@ def _completion_error(
                     "Source-bound Learn completion requires successful source.handoff, or "
                     'outcome "no_change" with explicit evidence citing ' + citation
                 )
-    if task.ref == "Tasks/repair" and status == "completed":
+    if status == "completed" and (task.ref == "Tasks/repair" or any(
+            item.get("tool") == "harness.repair" for item in context.get("trace", [])
+            if isinstance(item, dict))):
         from obsidience.harness.execution.repair import PASS_ATTEMPT_LIMIT, repair_attempt_count
 
         snapshot = context.get("_harness_snapshot")
@@ -534,31 +543,11 @@ def _completion_error(
     )
 
 
-def reclassification_allowed(context: dict) -> bool:
-    """One admission repair before effects, shared by explicit and controller requests."""
-    from obsidience.harness.capabilities.registry import READ_ONLY_CAPABILITIES
-
-    return (context.get("task") == "Tasks/query" and context.get("interactive") is True
-        and not (context.get("params") or {}).get("routing_rechecked")
-        and not context.get("_created_tasks")
-        and not getattr(context.get("_steering"), "applied", ())
-        and not getattr(context.get("_steering"), "pending", ())
-        and all(not row.get("tool") or row.get("not_dispatched") is True
-            or row["tool"] in READ_ONLY_CAPABILITIES or row["tool"] == "task.complete"
-            for row in context.get("trace", [])))
-
-
 def execute(args: dict, context: dict) -> dict:
     from obsidience.harness.knowledge.vault import resolver
 
     args = args or {}
     context = context or {}
-    if args.get("reclassify") is True:
-        allowed = reclassification_allowed(context)
-        if not allowed:
-            return {"accepted": False, "error": "Routing correction is allowed once before effects in an interactive Query"}
-        return {"accepted": True, "status": "failed", "summary": str(args.get("summary", "Routing requires reclassification"))[:2000],
-                "outcome": "routing_reclassification", "evidence": [], "reclassify": True}
     requested_status = str(args.get("status", "completed")).strip()
     if requested_status not in ("completed", "failed", "review"):
         return {
@@ -621,12 +610,15 @@ def execute(args: dict, context: dict) -> dict:
     task = context.get("task_note")
     if task is None:
         task = resolver().resolve(str(context.get("task", "")))
-    if not task or task.kind != "task":
+    conversational = (task is not None and task.kind == "agent"
+                      and task.ref == "Agents/Executive/Executive" and context.get("interactive") is True
+                      and context.get("_agent_ref") == task.ref)
+    if not task or (task.kind != "task" and not conversational):
         return {
             "accepted": False,
             "status": requested_status,
             "summary": "",
-            "error": "active Task execution context is incomplete",
+            "error": "active execution context is incomplete",
         }
     verification = args.get("verification")
     valid_verification = (

@@ -1,5 +1,26 @@
 # Obsidience design
 
+## Installation knowledge and Git publication
+
+The application repository tracks `obsidience/defaults/vault/`, a reviewed starter
+graph. The running `obsidience/vault/`, `obsidience/evidence/`, and
+`obsidience/state/` trees are installation-owned and ignored, including future
+Articles, Source Inbox, archives, proposals, conversations, receipts and settings.
+`obsidience init` installs defaults once into a fresh destination; it refuses an
+existing Vault. Application updates never overwrite live knowledge or export it.
+
+The live Vault may have a separate local Git repository without a remote.
+Article Review commits use only that repository and their exact affected paths;
+they cannot commit the application index. SQLite remains the Review/execution
+ledger. The default template is distribution input, not another runtime authority.
+
+Reusable default changes are deliberately authored and reviewed separately from
+live Articles. Strip local facts, permission grants, Source IDs and audit metadata;
+validate native Article profiles, links and Agent/Task dependencies. Default
+Agents and Tasks use configurable model selection and empty observation subjects.
+Local setup notes belong in ignored `AGENTS.local.md` and similar files.
+See `obsidience/defaults/README.md` for setup and publication rules.
+
 Obsidience is a standalone, graph-native agent harness built first for small
 local models on consumer hardware. Its central premise is simple:
 
@@ -28,10 +49,10 @@ or infer procedures from a giant system prompt.
    `index`, `folder`, and `domain` are therefore presentation roles, not kinds.
    Generated index titles are human-facing and begin uppercase; terminal
    executable identifiers such as `vault.read` retain their exact spelling.
-3. **Edges dispatch; retrieval informs.** Fast retrieval may nominate a Task
-   candidate, but the harness must select one exact accepted Task Article.
-   That Task's typed links select Runbooks, Skills, Tools, assignees, and
-   hierarchy. Similarity never grants executable authority.
+3. **Edges dispatch; retrieval informs.** Task execution resolves one exact
+   accepted Task and its Runbook/Skill/Tool bindings. Conversation resolves the
+   Executive identity's direct Skills, which supply its native capability schemas.
+   Similarity and model output never create executable authority.
 4. **Definitions and execution are separate.** Articles define reusable
    objects. Schedules, event occurrences, attempts, status, traces, and results
    live in runtime state and the bounded execution ledger.
@@ -49,6 +70,63 @@ or infer procedures from a giant system prompt.
    A Source path shown in the UI is the exact project-relative path opened by
    the Reader, never a copied file or synthetic alias.
 
+## Cordis composition — standing design
+
+The owner adopted Cordis's dependency and lifecycle design on 2026-09-12 for
+all future Obsidience development: Harness, Shell, UI and integrations.
+The canonical ontology Article is
+[Cordis composition](obsidience/vault/Agents/Executive/Architecture/Harness/cordis-composition.md).
+
+- A plugin provides or consumes explicit service interfaces and owns its effects.
+  Plugin and service are implementation roles, not Article types or Tool grants.
+  Modules retain their existing product boundaries; not every file needs a plugin.
+- Declare required dependencies and optional integrations. Compose compatible
+  providers through existing contracts; do not import another owner's private
+  mutable state or create a duplicate owner to bypass an unavailable service.
+- Register cleanup alongside acquisition for subscriptions, registrations,
+  timers, clients, workers and leases. Use the existing host lifecycle, Python
+  context managers/ExitStack or equivalent. Stop and drain owned work on
+  cancellation, dependency loss and teardown; release only owned resources.
+- Keep one authority for each store, conversation, scheduler, model reservation
+  and desktop input path. Reloading a component never undoes delivered external
+  effects; preserve receipts, uncertain-outcome handling and explicit compensation.
+- Prefer maintained upstream components through supported adapters. Record code
+  actually adopted and licenses in the existing manifest. Apply these principles
+  at real change seams; do not add a generic framework or language migration.
+- Keep the foreground path compact and measurable. Chat and final speech enter
+  the Executive Agent's session. Its identity owns standing instructions and
+  an explicit `skills` catalog. DeepSeek receives the accepted native capability
+  schemas directly, alongside the compiled identity, context and Knowledge.
+  There is no preliminary model call to select capabilities. Schema availability
+  does not imply that every Tool or Skill Article body was read.
+  Conversation requires no Executive Task or standing Runbook. Independently
+  queueable Tasks retain Task -> Runbook -> Skill -> Tool resolution. New Tools
+  require an accepted pair and an explicit grant in the applicable owner.
+
+The owner accepts DeepSeek's native Tool schema and invocation protocol for the
+Executive-loop migration. The code-owned Tool definition is the executable
+contract: name, parameters, output and implementation. Tool and Skill Articles
+explain the registered capability and its use; they do not impose a second
+machine-call schema or require Obsidience's existing `{tool, args}` response
+format. Keep exact Article-to-Capability provenance and accepted Agent bindings,
+while changing adapters and documentation together when the executable interface
+changes. Ordinary conversational text can use the upstream response stream;
+capability code retains argument validation, receipts, target verification and
+cancellation. DeepSeek now owns the Executive model/Tool loop. The existing
+completion authority validates ordinary final text locally; native task.complete
+remains available for structured terminal status and computer-state verification.
+
+DeepSeek Harness now owns the Executive conversation model/Tool loop through
+its supported CLI profile and public Cordis interfaces. The existing Python
+capability owner retains argument validation, committed receipts, fresh target
+verification, cancellation and completion acceptance. Ordinary answers are native
+text; the shared completion authority accepts them locally without another model
+request. SQLite remains the only durable conversation and receipt store. Native
+sessions and observation images are ephemeral. Scheduled Tasks retain their
+Python decision loop and share the same CapabilityDispatch operation boundary.
+Primary references: [Cordis primer](https://github.com/deepseek-ai/deepseek-harness/blob/c291e7961a515f6d7af9304e7fd1d257929aef26/docs/cordis-primer.md)
+and [spatiotemporal composability paper](https://arxiv.org/abs/2608.25512).
+
 ## Canonical Article types
 
 Accepted frontmatter uses exactly six semantic types through Open Knowledge
@@ -59,7 +137,7 @@ Format v0.2 and the Obsidience profile. The six meanings do not change.
 | `knowledge` | Facts, constraints, context, explanations, indexes, domains, and observations |
 | `task` | A reusable outcome with inputs and acceptance conditions |
 | `runbook` | The ordered or branching process for completing a Task |
-| `tool` | One executable interface with declared arguments, effects, and failures |
+| `tool` | Knowledge describing one registered executable interface, its arguments, effects, and failures |
 | `skill` | Exact practical instructions for using one Tool correctly |
 | `agent` | An accountable executor with a role, assigned Tasks, Knowledge, and Observations |
 
@@ -106,6 +184,39 @@ Remaining eligible work is explicitly deferred to a later pass.
 A completed Repair pass reports its disposition, including unresolved blockers
 or a queued outcome that has not yet executed. It does not assert universal
 health or replace independent acceptance of consequential changes.
+
+Scheduled occurrences use their recorded cron activation identity even when the
+Task has no event triggers. Exact controller receipts for empty-body and
+invalid Feed-publication arguments attest that staging never began; generic errors and
+uncertain writes remain blocked. A failed completion only finalizes runtime
+state and cannot conceal preceding Tool effects. The scheduler may settle an
+obsolete failed Audit after the exact proposal's recorded rejection, or a failed
+Feed version after attesting a newer queued version of the same item and
+destination. Settlement preserves the original run, effects and FIFO; it never
+reports the failed work as performed or replays a Tool.
+
+An interrupted Feed Ingest can also settle after attesting its already committed
+publication: complete exact-input Tool coverage, one returned publication with
+its original argument/result hashes, approved publication and retention decisions,
+matching current Article and immutable Source, and the preserved retired Articles.
+The scheduler writes a separate disposition receipt and advances one FIFO head.
+It retains the interrupted run unchanged. Missing or uncertain evidence, pending
+Review and active continuations still block settlement; no publication is retried.
+
+The existing Uvicorn server disarms new scheduler admission on its stop signal,
+before the WebSocket drain and lifespan cleanup. A queued executor claim checks
+that same shutdown flag before entering execution. Already running work retains
+the normal cancellation, durable receipt and recovery boundaries. This prevents
+an otherwise idle maintenance restart from starting a new Task during teardown.
+
+The decision schema reflects each active proposal contract: Feed Ingest can
+name its Source and destination while the publication owner compiles the body
+and retention; Link can update an Article body without changing metadata.
+Learn and Distill expose source.read and task.complete while the bound Source
+remains unread; the dispatch prerequisite permits only reading that Source or
+reporting terminal failure until its complete-read receipt is present.
+Wikilink notation around a source:// citation normalizes to that Source URI,
+without creating an Article path or knowledge-graph edge.
 
 Runbook refinement preserves the researcher/verifier split. Darwin's existing
 Generate / Runbook Task may revise the body of one accepted leaf procedure from
@@ -662,7 +773,8 @@ opaque `#02060c` before optional content loads. The Surface selected by
 the canonical Three.js graph and physics, while the other Surfaces show the
 shared Obsidience identity on the branded background. The password prompt is a
 native QML overlay, authentication cannot begin before the compositor reports
-the lock secure, and only PAM success releases it. The web graph never receives
+the lock secure. PAM success or the owner's explicitly authorized native
+`session.unlock` operation releases it. The web graph never receives
 credentials or decides unlock. PAM policy is installed root-owned at
 `/etc/pam.d/obsidience`. The pinned Quickshell host carries the two source lines
 required to satisfy Qt WebEngine's application-argument and shared-context
@@ -672,6 +784,18 @@ patches and the deterministic build recipe live beneath `adapter/quickshell`.
 Hyprlock, gtklock, and a second lock process are not part of this architecture;
 greetd remains responsible only for fresh-login authentication. A native Polkit
 agent remains a separate acceptance gate.
+
+An installation owner may explicitly grant the Executive session unlock.
+The starter Executive does not include that Skill; a local permission must not
+be inherited from another installation. When granted, the `session.unlock`
+Tool/Skill invokes the fixed `shell/session/session-lock unlock` helper through
+the existing native Quickshell IPC, with no caller-selected command or password.
+It dispatches once and requires fresh native and compositor unlocked state;
+uncertain delivery is never replayed. No browser-facing unlock command exists.
+Normal Voice mode accepts an ordinary spoken request without speaker identity
+verification. Voice and Chat retain the same DeepSeek/CapabilityDispatch route,
+receipts and cancellation; no additional microphone or Executive loop is created.
+Password/PAM unlock and subsequent Computer Use integrity checks remain in force.
 
 ```text
 obsidience/harness/
@@ -799,13 +923,16 @@ Owner-moved Feed Articles remain counted but are protected from automatic
 retirement; unexpected copies protect every copy of that item. Neither a move
 nor a filename sort can silently remove provenance or authorize deletion.
 Darwin's Distill handoff remains the automatic trigger: Alexandria's Ingest
-compiles the incoming Article and the oldest excess Feed Articles into the
+compiles the incoming Article and the oldest eligible excess Feed Articles into the
 existing atomic Review group. Retirement preserves complete content, Sources and
 history under `_archived/` with native OKF `status: deprecated` and namespaced
 archive time/reason. It does not assert that an older report became false.
 All affected Article Auto-curate policies and surviving inbound links remain
 authoritative. A blocked or review-required retirement holds incoming
 publication; the system must never claim the cap is satisfied while it is not.
+Retirement selects the oldest eligible leaves, retaining any leaf pinned by
+surviving inbound links or protected placement. Dependent Feed leaves may retire
+together within the required batch; no authored link is removed to meet the cap.
 An explicit retention-policy save also reconciles quiet Feeds through that same
 owner, in bounded archive-only groups when a large reduction needs them. GETs
 and the network collector never archive. No extra model pass or scheduler is
@@ -890,7 +1017,13 @@ execute descendants sequentially. Order and prerequisites belong to a Runbook;
 select one applicable executable Task for an activation. Application launch
 uses a complete bounded operation: dispatch once, await the existing scene's
 readiness witness, then report ready, timeout or uncertain delivery honestly.
-No readiness timeout authorizes a second launch.
+The exact managed-launch receipt binds a bounded lifetime check during that
+wait. Ending before readiness is failed; a deadline leaves readiness unverified
+and does not establish continued loading. No failure or timeout authorizes replay.
+Accepted failed public replies retain bounded exact-run Tool outcomes for later
+explanation without becoming successful conversation pairs. The Executive model
+uses that context in the same Task; it never repeats uncertain effects or adds
+a routing-reclassification pass.
 
 ## Work, procedure, and capability
 
@@ -914,12 +1047,16 @@ Task
 A leaf Task must resolve an applicable accepted Runbook. A Runbook loads only
 its explicitly required Skills. Each Skill resolves exactly one Tool, and each
 leaf Tool resolves exactly one Capability entrypoint in Source. Assigning the
-Task supplies that dependency closure; separate Agent Tool, Skill, or Runbook
-grants do not widen or narrow it. Missing or malformed links fail closed; the
+Task supplies that dependency closure. Conversation instead uses the Executive
+identity's standing Runtime instructions and direct Skill catalog, resolved
+through the same authority into native capability schemas.
+Direct conversational bindings cannot widen a specialist Task's authority. Missing or malformed links fail closed; the
 model does not invent a replacement Tool or procedure.
 
 The graph response makes the same declared dependencies visible end-to-end:
-Runbooks connect to their Tools, and Tasks connect to their Skills and Tools.
+Runbooks connect to their Tools, Tasks connect to their Skills and Tools, and
+the conversational Agent connects directly to its declared Skills and their
+paired Tools.
 These are derived views of the typed binding chain, carrying the intermediate
 Article refs and any Agent-specific applicability. Reader displays that path;
 the desktop renders the same connections inside each appropriate Agent or
@@ -939,16 +1076,18 @@ self-links are drawn only once or omitted, respectively.
 The shared Library is authoritative for capability guidance. A callable named
 `<tool.id>` has exactly one `Tools/<tool.id>` Article and one
 `Skills/<tool.id>` Article titled `Using <tool.id>` with the singular edge
-`tool: [[Tools/<tool.id>]]`. The applicable Runbook selects exact paired Skills;
-the Agent never owns separate Tool/Skill grants or duplicate Skill prose.
+`tool: [[Tools/<tool.id>]]`. A Task's applicable Runbook or the conversational
+Agent's direct catalog selects exact paired Skills. The Agent never duplicates
+Skill prose or maintains an independent Tool list.
 Generated `@library/Skills/<tool/id>` IDs are display aliases, not authored
 assignments. Multi-Tool order belongs in the Runbook, not in either Skill.
 
 Runbooks are applicable procedures rather than independent Agent assignments.
 The shared Library contains all accepted Article types, not only capabilities.
 Reader's Agent icons manage exact Knowledge checkout and Task assignments.
-`Agent.tasks` is the only manual executable-work assignment; `Agent.knowledge`
-and `Agent.exclude_knowledge` select contextual access without granting Tools. Accepted Runbook `task` and `for_agent` bindings
+`Agent.tasks` assigns independently queueable work; `Agent.skills` defines the
+accepted conversational catalog. `Agent.knowledge` and `Agent.exclude_knowledge`
+select contextual access without granting Tools. Accepted Runbook `task` and `for_agent` bindings
 identify Agent-specific applicability; an applicable authored `Task.runbook`
 also supplies its dependency set. Execution, graph membership, Reader, and
 dependency displays resolve the same accepted bindings and hierarchy.
@@ -1001,25 +1140,26 @@ revocation stops further model decisions/dispatch under the stale scope.
 
 The Library is a passive owner view, not a globally knowledgeable fifth Agent.
 Agent role icons in Reader and its explorer assign Knowledge or Tasks. Shared
-Tool/Skill/Runbook dependencies follow accepted Task bindings and cannot be
-independently widened by Knowledge links. Whole-branch toggles remove hidden
+Tool/Skill/Runbook dependencies follow accepted Task bindings; conversation
+uses direct Agent Skills. Knowledge links cannot widen either dependency set. Whole-branch toggles remove hidden
 descendant selections, and partially selected branches are explicit.
 
 ## Activation and RAPTOR retrieval
 
-Every live, manual, scheduled, or event-triggered request follows one executor
-and one visible path:
+Both execution paths share the compiler, Knowledge retrieval and capability
+owner. Their model loops follow the accepted execution owner:
 
 ```text
-request or event
-  -> select exact Task and assignee
-  -> resolve Runbook, Skills, and Tools by graph edge
-  -> retrieve Knowledge with lexical and vector lanes
-  -> fuse ranks deterministically
-  -> attach at most two direct in-scope graph neighbors
-  -> pack one token-budgeted activation packet
-  -> execute, verify, and record the attempt
+Chat/final speech -> Executive identity and direct Skill catalog
+  -> compiled context + Knowledge -> DeepSeek native model/Tool loop
+manual/scheduled/event Task -> exact Task and assignee -> Runbook/Skills/Tools
+  -> compiled context + Knowledge -> existing Task procedure loop
+Both -> shared capability dispatch -> verification and durable receipts
 ```
+
+The compiler retrieves Knowledge with lexical and vector lanes, fuses ranks
+deterministically, admits at most two direct in-scope graph neighbors and packs
+one token-budgeted activation packet.
 
 
 The compiler uses authored `Runtime` instruction sections and applicable
@@ -1046,19 +1186,19 @@ Article read/search, Tool dispatch/result or accepted relationship, not inspecti
 of hidden model reasoning. Idle transport and checkout refreshes never fabricate
 thinking. Late progress from a superseded activation cannot replace the new view.
 
-Realtime Query may request one bounded admission reclassification before any
-effect. Reclassification reuses the original user request and exact authorized
-Task selection; it cannot create a Tool grant or repeat an operation.
+Chat and speech use the same Agent-owned session and native DeepSeek loop. The
+Executive identity supplies standing instructions; selected Skill/Tool pairs
+supply capability guidance. A clarification cannot widen the compiled grant.
 
 The one visible Thinking Packet is semantically labeled and packed in this
 order:
 
 1. Agent Identity Article;
-2. exact Task Article and acceptance conditions;
+2. exact Task Article and acceptance conditions, only for Task execution;
 3. immutable runtime Objective for this activation;
 4. authorized Tool Articles;
 5. their exact paired Skill Articles;
-6. applicable Runbook Articles;
+6. applicable Runbook Articles for Task execution; omitted for conversation;
 7. typed bindings and exclusions that are not the Objective or controller
    provenance;
 8. up to five accepted Knowledge Articles from fast lexical+dense RRF,
@@ -1080,8 +1220,8 @@ when present; otherwise it is the deterministic Task title followed by ordered
 Runbook titles. Request, source, event, and response-contract controller data
 are not duplicated into Bindings. Objective is runtime data, not an Article.
 One typed result set may supply Knowledge and nominate a Task candidate, but
-only the selected Task's authored edges fill the Agent, Runbook, Skill, and
-Tool slots. The retrieval path is prewarmed before the API accepts its first
+only the actual execution owner's accepted edges fill instruction, Skill and
+Tool slots. Conversation has identity instructions and no Task or Runbook slot. The retrieval path is prewarmed before the API accepts its first
 activation. It degrades without widening authority.
 The Knowledge lane filters Article kind before each lexical/vector top-K, then
 uses one accepted-Article snapshot for direct results, graph expansion, and
@@ -1114,16 +1254,12 @@ Resource admission reuses the current scheduler pass's accepted snapshot;
 actual resource reservations and execution authority are still rechecked.
 
 
-The shared conversation selector binds the current explicit request and its
-canonical application hint together, preserving the complete Objective. Spoken
-repairs and foreground/visual requests select ordinary Computer Use; quoted
-examples, descriptive questions and withdrawn commands do not gain Tool authority.
-Its bounded computer outcome selects the completion evidence requirement:
-focus, placement, observation, launch or in-client action. The executor records
-that witness from the actual Tool result, never from model-authored evidence.
-A missing witness or acknowledgment without a verified postcondition cannot
-complete Computer Use successfully. Clarifications use a failed Task's public
-summary instead of falsely declaring the computer effect complete.
+The Executive model resolves the current request and conversation inside the
+Agent-owned run using the compiled identity, Knowledge and native capability schemas. Health questions use harness.status; visible-content questions
+use computer.observe. Quoted examples, hypotheses, bare target corrections and
+withdrawals do not authorize effects. Each requested operation uses its Tool's
+exact current target and matching receipt. Missing evidence requires a factual
+failure/clarification, never an invented outcome or another classification pass.
 
 An accepted task.complete decision is provisional until normal execution
 finalization. Action Trace labels that distinction and records bounded speech
@@ -1233,9 +1369,11 @@ reports `review` for staged proposals and `completed` for an honest no-change.
 
 The activation compiler exposes one canonical packet and a provider serialization
 of the same explicitly constructed sections. The provider system message contains
-the fixed Agent, Task, Tool, Skill and Runbook spine. Immediate Observations form
-one user-data message, followed by the current Objective, observations, bindings
-and retrieved Knowledge in the next user message. Each Article occurs once in
+the Agent identity and selected Tool/Skill instructions, plus Task/Runbook
+sections only when executing a Task. The descriptive catalog and
+complete Immediate Observations form user-data messages, followed by the current
+Objective, observations, bindings and retrieved Knowledge in the next user
+message. Each Article occurs once in
 that request; prior dialogue cannot extend current authority. The displayed packet retains the documented
 ontology order. The compiler never rediscovers sections by parsing Article prose.
 This real message boundary lets the installed model retain its existing sliding
@@ -1272,11 +1410,44 @@ compilation; scheduler admission reuses its already-fresh notes. This is scoped
 reuse, not a persistent file cache: selection still validates accepted Tasks
 after inference and retrieval still reevaluates lifecycle/expiry. Direct Compact
 threshold reads avoid a full Vault scan. A completed interactive answer-only
-Query with exactly one accepted task.complete skips terminal index reconciliation
+Executive answer with exactly one accepted task.complete skips terminal index reconciliation
 because only already-committed runtime state changed. Unknown decisions, any
 other Tool, rejected completion, failure and other Task origins retain sync.
 Selector JSON places catalog/context before the varying Objective, and the
 provider's separate conversation boundary preserves reusable prompt checkpoints.
+
+The descriptive assigned-Task catalog is compiled from the same fresh accepted
+snapshot into an earlier user-data Bindings message. The current Bindings retain
+the clock, Scene and all changing facts without duplicating that catalog. Long
+Immediate Observations are serialized as consecutive user-data messages, with
+boundaries after complete paragraphs using a 2 Ki-character chunk target that
+doubles as history grows to keep at most 24 chunks. Concatenating
+their contents reproduces the complete original conversation section exactly;
+no heading or dialogue label chooses a role. This lets the native runtime reuse
+stable conversation prefixes as new turns append, without a checkpoint for every
+short reply. The visible Thinking Packet, references, fixed instructions, Tool
+authority and full-request token guard retain their existing ownership. Cold
+prompts still require evaluation; this change accelerates reusable prefixes.
+
+The native Gemma host prompt cache is bounded to 16 GiB with `--cache-ram 16384`.
+The default 8 GiB could not retain the combined selector and several Task SWA
+checkpoint sets, so alternating work evicted reusable prefixes. In a controlled
+Query/observation/placement/launch replay, returning to Query retained 9,043
+tokens instead of zero, reducing that provider response from 4.26 to 1.34 seconds.
+This is on-demand host memory, separate from the unchanged single 64K GPU context
+and F16 KV/projector. A model restart or a cold prompt still requires evaluation.
+
+Accepted conversation input announces turn-correlated admission activity before
+foreground admission and semantic Task selection. This projects only Executive's
+identity to Brain; no Task, Tool or retrieved Article is claimed before compilation.
+A root-only route has no beam travel or lead-in and uses the existing short node
+ignition ramp. The first query_started event carries the same user-turn ID and
+hands over to normal run-correlated Thinking Packet activity. Its matching
+admission_completed can clear only a still-preparing turn, including interruption
+before Task creation, and cannot terminate a compiled packet or a newer request.
+Article routes, branching, shaders, tuning and completion linger keep their owners.
+The explicit ASR spelling `team fight tactics` belongs to the existing application
+alias set; target-name recognition neither selects an operation nor grants effects.
 
 
 The graph's existing thinking notification projects that public Action Trace
@@ -1493,8 +1664,11 @@ system-wide defaults. Agent video feeds are a separate input class: the TFT ADB
 feed belongs to the Realtime experiment and is never listed or persisted as a
 camera. Video and camera must not share one UI or semantic slot.
 
-The thinking graph visualizes this actual activation path. It stays static when
-the harness is not resolving a request.
+The thinking graph visualizes this actual activation path. The Executive's exact
+packet stays lit while its spoken answer is queued or playing, then retains the
+ordinary six-second completion linger. Background Task activity cannot replace
+that packet during speech. Speaker amplitude gently expands and brightens only
+the central Executive orb; graph physics and supplied Article refs stay fixed.
 
 ## Missing-knowledge loop
 
@@ -1523,8 +1697,9 @@ paired Skill all validate.
 
 The main maintenance families stay shallow:
 
-- **Executive:** Query and Computer Use, shared by typed and spoken requests.
-  The grouping is Knowledge and Query keeps the canonical `Tasks/query` path.
+- **Conversation:** the Executive identity owns Chat and speech runs; its
+  instructions and direct Skills define its accepted native capability catalog.
+  Query retains `Tasks/query` for existing specialist assignments.
 - **Wiki:** Ingest, Curate, Merge, Link, Improve, Archive, Audit,
   Check.
 - **Research:** Question, Learn, Distill, Model. Learn accepts general
@@ -1602,6 +1777,14 @@ rewriting the pending proposal, so reciprocal links remain independently reviewa
 Link changes only
 non-runtime Knowledge/Agent bodies, never executable authority. Evidence stays
 with the review object rather than becoming another Article kind or trust score.
+
+`vault.read` ends the editable Article body before its generated inbound-reference
+context. That context describes incoming edges; copying it into an update would
+invent outgoing links. Proposal validation rejects copied context before staging.
+Missing current endpoint reads are reported together in batches of at most ten.
+The existing loop guard permits the same proposal after the exact missing Article
+revisions have been completely read; unrelated reads, unchanged evidence and
+successful or uncertain writes do not receive this exception.
 
 Curate's existing maintenance Tool reports bounded connectivity diagnostics
 alongside its semantic leads. Components and isolated endpoints describe accepted
@@ -1821,18 +2004,59 @@ subject/name dictionary.
 
 The Realtime button controls the speech connection and session infrastructure.
 It keeps audio available between requests and has no Task, Runbook, Thinking
-Packet, or reasoning-model selection of its own. Each final transcript selects
-the same accepted work as typed Chat: `Tasks/query` or
-`Tasks/executive/operate`. Each Task's authored `model` and `reasoning_effort`
-remain the only reasoning selection. Both explicitly select `obsidience-gemma`;
-Query and Computer Use both use `none` effort, following the owner's
-2026-09-05 responsiveness preference.
+Packet, or reasoning-model selection of its own. Each final transcript enters
+the same Agent-owned session and native DeepSeek loop as typed Chat. The Executive
+identity owns standing instructions, the direct Skill catalog, execution model
+and reasoning effort (`obsidience-gemma`, `none`).
+The DeepSeek loop chooses native Tools directly; the capability owner retains exact
+accepted Skill/Tool Articles. No Executive Task or standing Runbook is created.
 Pipecat and NVIDIA NeMo provide speech transport; Nemotron transcribes on the
 RTX 4080 and Pocket speaks on CPU. No second Agent, planner, verifier, Tool
 authority, or Realtime-specific model selector exists.
 Pipecat's upstream `LocalAudioTransport` owns the selected local input and
 output. Obsidience does not add a browser audio client, audio WebSocket, or
 custom capture/playback processor.
+
+The first recognized partial transcript starts disposable preparation after its
+exact NeMo interruption has drained preceding work. The Conversation owner
+coalesces changing partials into one cancellable warmup through the shared model
+provider. It borrows only the idle, already resident llama.cpp model and renders
+the same Executive context and native Tool schemas as final execution. This
+build emits one token even for a zero-token request; preparation therefore caps
+generation at one token and discards it. No DeepSeek Agent run, Tool dispatch,
+public reply, conversation write, Observation materialization or compaction
+occurs. Read-only context projection applies normal retention selection without
+deleting expired Articles. Final speech, new Chat, STOP and lifecycle teardown
+cancel and drain preparation. Ordinary model leases preempt it, while unavailable
+hardware or context pressure simply skips it. Final admission recompiles the
+complete corrected request and fresh state; llama.cpp reuses only an exact prompt
+prefix. A recognized word is not an irrevocable instruction.
+
+The existing 700 ms pause allowance is unchanged. The transcript-idle fallback
+applies only when VAD is not hearing speech: ASR can pause between word updates
+while the speaker continues. Its timer must not manufacture a VAD stop during
+that interval. Partial events carry the worker's exact speech sequence so a new
+utterance cannot warm against an earlier interruption generation.
+
+Pocket synthesis uses one lock around its shared model. During each stream a
+temporary PyTorch forward hook cooperatively stops its native latent producer
+at the next Python boundary after cancellation, using Pocket's existing error,
+sentinel and decoder-join path. Cancelled PCM is discarded while that cleanup
+drains. The hook is removed before the next synthesis; a non-daemon owner thread
+prevents interpreter shutdown from abandoning native inference. Cancelling at
+the initial TTS marker also enters the same cleanup. Model parameters, text
+segmentation, voice and PCM streaming remain the upstream selections.
+
+The same ordered Pipecat output transport measures RMS on each written 40 ms
+speech chunk. Only a bounded, normalized envelope and playback identity cross the
+existing graph activity stream. Levels update shader uniforms through its existing
+frame loop, with a short attack/release and stale-level decay; they do not trigger
+React graph reconstruction. Generation and playback identity reject late samples
+after interruption. Playback completion starts the graph's existing linger, while
+STOP, failure, disconnect and hidden/locked presentation stop the speech pulse.
+The latest playback state joins activity reconnect snapshots, separately from
+retained Thinking Packet history. No PCM, audio history, second capture pipeline,
+or synthetic speech animation is introduced.
 
 The existing input transport reports bounded microphone levels before ASR and
 projects its provisional VAD edge as `capture_active`. That edge is visual
@@ -1901,36 +2125,55 @@ An architecture change is complete only when:
   without its real Capability binding and entrypoint.
 
 
-## Contextual Executive admission and completion: 2026-09-05
+## Unified Executive admission and completion — 2026-09-12
 
-The existing Conversation coordinator prepares current context before semantic
-Task admission. Bounded non-reasoning admission through the configured Executive model selects
-only the assigned Query or Computer Use Task from the accepted outcome catalog,
-exact request and current semantic Shell Scene. A context-dependent request may
-use one further grounding pass over recent dialogue and bounded historical Tool evidence. It creates no additional Agent, Task, model,
-scheduler or knowledge store. Invalid selection fails before Task claim; there
-is no current-text keyword fallback. Measure selection latency separately.
+The Conversation coordinator binds each persisted Chat or final speech turn to
+`Agents/Executive/Executive`. Its Runtime section carries standing instructions;
+its direct Skill bindings define the accepted capability catalog. The compiler
+supplies identity, bounded conversation, current Scene, historical receipts and
+retrieved Knowledge. DeepSeek's pinned upstream agent-loop calls the selected
+model with native function schemas and sequences returned Tools through
+Obsidience's existing capability owner. Ordinary text completes through the same
+acceptance checks without a generated task.complete envelope. Structured failure,
+Review and computer-state verification can still use native task.complete.
 
-Controller Bindings carry computer_outcome and action-only computer_scope.
-Input scope requests one click; state scope requests the resulting application
-state. A gameplay request in an open application must not become another launch.
-The immutable run records its original binding for continuation. Continuations
-reuse that binding and Task, never reclassify the objective from current state.
-Historical execution evidence is a bounded projection of exact conversation/run
-links. Assistant claims never attest delivery, and an earlier receipt never
-establishes current state or grants another effect.
+There is no preliminary Gemma router request and no Query/Computer Use Task
+classification. FunctionGemma and GLiClass are not production dependencies. A
+single API-owned DeepSeek child uses private inherited pipes; its transient
+sessions contain no durable conversation or screenshot files. The existing
+model owner preserves Agent.model, reasoning effort, whole-request accounting
+and cancellation. Current turn IDs and timestamps follow reusable prompt context
+so they do not invalidate earlier cached tokens. The public packet layout is
+unchanged; advertised schemas alone do not illuminate Tool or Skill Articles.
 
-Query cannot complete a controller-bound computer outcome. State completion
-requires a current execution action, actual post-action image supplied to the
-immediately preceding model response, and a structured visual verification
-finding. Invalid/intervening responses, rejected completion, cancellation and
-provider failure consume that image evidence. This records Gemma's visual
-interpretation, not independent proof of semantic accuracy. Three distinct
-state steps are allowed only with a separate newer computer.observe before each;
-input scope remains one attempt. An uncertain click is never retried.
+`Tasks/executive/execute` and `Runbooks/executive` are archived. Scheduled and
+specialist Tasks still use their accepted Runbooks and the same executor,
+scheduler, receipts and Review owner. Conversation run state remains in the
+existing ledger, never in Agent Markdown. Legacy `task_ref` and `runbook_ref/hash`
+columns retain compatibility names but record the actual execution/instruction
+owner: the Executive identity for conversation, Task/Runbook for Task execution.
+The compiler omits Task and Runbook sections entirely for conversation. The graph
+projects direct Agent Skill bindings and derived Tool bindings; it does not
+create a universal Task or Runbook hub.
 
-Context selection, historical evidence and completion repair preimages are under
-/home/wissenschafter/backups/obsidience-conversation-intent-20260905-230126.
+Operation integrity belongs to the actual Tool call and result. Every computer
+Tool used by any run needs its own matching verified receipt before successful
+completion. A later different Tool/target cannot conceal a failed operation.
+computer.act declares scope:input or scope:state with its first call and cannot
+change that scope mid-run. Input requires acknowledged delivery plus a fresh
+post-image; state additionally requires the actual current post-action image
+and structured visual verification. The private one-use observation lease,
+exact identity/geometry, one pre-input geometry correction, lock, cancellation,
+three-step state bound and no-replay rules remain enforced. A successful launch
+can continue other requested steps; a failed/unverified launch ends effects and
+a repeated same-application launch is blocked.
+
+The Executive identity selects Gemma with reasoning none and retains the
+existing model settings and resource owner. The stable compact instructions precede changing context. Immediate
+preparation feedback and actual Thinking Packet refs retain their separate
+existing events. Completion still owns public text and speech delivery; audio
+endpointing and TTS remain the same. Admission time, provider time and first audio
+are measured separately. No latency gain is inferred from configuration alone.
 
 Interactive Executive activation also receives an ephemeral local clock and a
 bounded catalog derived from the currently accepted assigned Task/Tool Articles.
@@ -1949,22 +2192,67 @@ are Goal, Constraints and corrections, Verified state, and Outstanding, each
 nonempty. Structural validity does not establish semantic truth.
 
 
-Realtime admission repair, 2026-09-11: the selector returns one exact closed
-choice binding outcome, target, and input/state scope together; the controller
-maps that tuple to an assigned Task. It cannot independently predict contradictory
-fields. Registered aliases come from the existing application registry.
-Classify the current owner message against the accepted catalog and fresh scene
-first. Only an explicit context choice supplies the existing bounded history for
-one further grounding pass, under the same model lease. A named current request
-must not inherit earlier assistant refusals or invented capabilities. Execution
-still receives its normal Immediate Observations; no history or context limit
-is deleted, compacted, or lowered by admission. Ambiguous references can clarify.
-Polite execution requests remain effects; explanations, quotations, withdrawals,
-and bare corrections do not. Choice and context usage are diagnostic routing,
-not an additional Agent, Tool, memory store, or current-text keyword fallback.
-An interactive Query attempt to task.create Computer Use is rejected before
-dispatch and requests the existing recheck once, only before effects, delegation,
-or applied/pending owner clarifications. The original user turn remains bound;
-attempted Tool target arguments do not authorize its corrected operation.
-Cancellation, missing assignments, or an unresolved recheck prevent execution.
-The trace retains an undispatched attempted call, never synthetic effect success.
+Executive targeting: the model resolves current explicit targets and bounded
+conversation in its normal Task response. An unclear target requires a concise
+clarification; a current go-ahead requests input only when its referent is clear.
+Computer Tools retain exact observed geometry and Surface revision at dispatch.
+A geometry-only change on the same window/connection/focus/power, before any
+activation or input, admits one new observation and model-selected point through
+computer.act's correction_allowed result. The stale point is never sent; a
+second geometry change ends the attempt. This does not permit retry of delivered
+or uncertain input. All other input failures restrict the remaining Task to
+task.complete and retain the actual Tool error. Target mismatch diagnostics name
+changed fields without exposing their private values. Image age, process-start,
+lock, original connection, pointer position and occlusion guards remain intact.
+For input scope, acknowledged delivery on the intended control plus fresh
+post-observation completes the click; the resulting application state is reported
+separately. State scope still requires visual evidence of the requested result.
+
+Executive visual questions use computer.observe in the same Agent-owned run. Target-only
+corrections preserve the preceding question; a bare application name never
+implies launch or focus. Named observations report real lock/unavailable blockers.
+A launch owns its bounded readiness wait; failed window effects end the operation
+sequence unless the Tool explicitly permits a pre-input correction.
+For a current-view question with multiple matching windows, use a uniquely
+focused matching window on its exact Surface, otherwise ask which window.
+For an owner-identified window, computer.observe accepts an optional title
+filter within the named application and Surface. Its decoder enumerates exact
+current Scene titles, preserving Unicode/ellipsis bytes without fuzzy matching.
+The resolver requires one match and pins the native window/process/revision;
+this filter does not grant window effects or bypass input target resolution.
+These rules preserve lock, exact-target, evidence, cancellation and no-replay
+checks. Source/model replay and a live locked-Edge Chat canary passed; unlocked
+image interpretation and physical speech acceptance for this repair remain
+pending. The preceding spoken Sign In click did complete with the one permitted
+fresh-geometry correction. Preimages and acceptance:
+the installation's local acceptance archive.
+
+Thinking Packet graph fidelity, 2026-09-12: buildThinkingRoute must never expand
+runtime refs through ordinary Article adjacency. Its prior growing-set traversal
+lit unrelated linked Articles, and satellite node reveal bypassed the focus set.
+The shared route uses hierarchy beams plus actual Article links whose two
+endpoints are both supplied refs; node glow and activity labels are
+limited to exact supplied refs after the existing display aliases. Ancestors may
+carry route beams but do not imply included Article content. Main and satellite
+clouds enforce the same explicit node set. Cross-links animate only within that
+fixed supplied set and cannot expand it; actual graph-neighbor retrieval still lights a
+neighbor when its passage was included by the compiler. Tool/Skill glow means
+its instructions were supplied, not that the Tool was called. Read/search events
+represent their returned content (which may be partial), not internal model
+attention or hidden reasoning. Review, hover, graph physics, speed, run correlation
+and existing completion linger retain their separate behavior.
+A captured 14-ref packet replay changed from 101 lit nodes to exactly 14, with
+zero extra/missing targets. Live run 883d922a0987's 23 activity refs exactly matched
+its compiled packet refs, completed successfully, and was visually inspected on
+USB-C. Typecheck/build and the existing activity/Reader identity check passed.
+Only the graph presenter was restarted; Harness and secure Shell host stayed up.
+Preimages, captured packet/graph data, replay result and live witness:
+the installation's local acceptance archive.
+
+Thinking-link refinement, 2026-09-12: the owner retained Article-to-Article
+animation. Cross-link admission checks BOTH endpoints against the original
+supplied-ref set, never the growing route/ancestor set. The existing sweep
+planner owns their timing and curves. A captured packet replay lit its exact
+23 Articles and all 43 eligible cross-links, with no outside-packet link or
+extra Article. Evidence and rollback:
+the installation's local acceptance archive.

@@ -41,13 +41,13 @@ def _text(value: object, field: str, maximum: int) -> str:
     return text
 
 
-def _request(args: dict[str, Any]) -> tuple[str, str, str, str]:
+def _request(args: dict[str, Any]) -> tuple[str, str, str, str, str]:
     if set(args) != {"target", "query"} or not isinstance(args["target"], dict):
         raise _ObserveFailure(
             "observation_failed", "computer.observe requires target and query."
         )
     target = args["target"]
-    if set(target) - {"kind", "name", "surface"}:
+    if set(target) - {"kind", "name", "surface", "title"}:
         raise _ObserveFailure(
             "observation_failed", "computer.observe received an unknown target field."
         )
@@ -56,6 +56,12 @@ def _request(args: dict[str, Any]) -> tuple[str, str, str, str]:
         raise _ObserveFailure(
             "observation_failed", "target kind must be focused, application, or pane."
         )
+    title = target.get("title", "")
+    if "title" in target and (
+        kind != "application" or not isinstance(title, str) or not title
+        or len(title) > 200 or any(ord(char) < 32 for char in title)
+    ):
+        raise _ObserveFailure("observation_failed", "title must be an exact current application title from the Scene.")
     surface = target.get("surface", "")
     if surface and surface not in SURFACE_IDS:
         raise _ObserveFailure("observation_failed", "target Surface is unknown.")
@@ -78,14 +84,15 @@ def _request(args: dict[str, Any]) -> tuple[str, str, str, str]:
             raise _ObserveFailure(
                 "observation_failed", f"target name must contain 1-{limit} characters."
             )
-    return kind, name, surface, _text(args.get("query"), "query", 500)
+    return kind, name, surface, _text(args.get("query"), "query", 500), title
 
 
 def _resolve(
-    scene: SceneSnapshot, kind: str, name: str, surface_id: str
+    scene: SceneSnapshot, kind: str, name: str, surface_id: str, title: str = ""
 ) -> SceneTarget:
     try:
-        target = SCENE.resolve_semantic(kind, name, surface_id)
+        target = (SCENE.resolve_semantic(kind, name, surface_id, title=title)
+                  if title else SCENE.resolve_semantic(kind, name, surface_id))
     except SceneTargetNotFound as exc:
         raise _ObserveFailure("target_missing", "No current Shell target matched.") from exc
     except SceneTargetAmbiguous as exc:
@@ -113,7 +120,7 @@ def _resolve(
 
 
 def _observe(args: dict[str, Any]) -> dict[str, object]:
-    kind, name, surface_id, query = _request(args)
+    kind, name, surface_id, query, title = _request(args)
     try:
         scene = SCENE.snapshot()
     except SceneUnavailable as exc:
@@ -125,7 +132,7 @@ def _observe(args: dict[str, Any]) -> dict[str, object]:
             "scene_unavailable", "The current Shell scene is locked."
         )
 
-    target = _resolve(scene, kind, name, surface_id)
+    target = _resolve(scene, kind, name, surface_id, title)
     if not target.surface_awake:
         raise _ObserveFailure(
             "target_not_visible", "The selected target's Surface is asleep."
@@ -143,6 +150,12 @@ def _observe(args: dict[str, Any]) -> dict[str, object]:
     try:
         capture = capture_screen(stable_id=target.window.stable_id)
     except ScreenCaptureError as exc:
+        if exc.code == "capture_session_unavailable":
+            raise _ObserveFailure(
+                exc.code,
+                "The Harness is not attached to the graphical session. "
+                "Restart the Harness after desktop startup; retrying other windows will not help.",
+            ) from exc
         raise _ObserveFailure(
             "capture_unavailable", "The selected target could not be captured."
         ) from exc

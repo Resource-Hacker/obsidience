@@ -27,10 +27,11 @@ _LOCK = threading.RLock()
 _JOURNAL_AVAILABLE = True
 _CONTEXT: ContextVar[dict] = ContextVar("public_action_trace", default={})
 LATENCY_STAGES = frozenset({
-    "input_final", "preparation", "selection", "activation", "model_wait",
+    "input_final", "preparation", "admission", "selection", "activation", "model_wait",
     "model_preflight", "model_first_public", "model_complete", "answer_committed",
     "speech_received", "aec_ready", "first_pcm", "first_output_write",
     "speech_onset", "first_partial", "speech_final",
+    "speech_prefill_started", "speech_prefill_completed", "speech_prefill_cancelled",
 })
 _PRIVATE_KEYS = {
     "point", "image", "image_url", "image_png", "pixels", "capture", "capture_token",

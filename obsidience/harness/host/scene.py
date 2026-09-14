@@ -443,13 +443,15 @@ class ShellSceneCache:
         return matches[0]
 
     def resolve_semantic(
-        self, kind: str, name: str = "", surface_id: str = ""
+        self, kind: str, name: str = "", surface_id: str = "", *, title: str = ""
     ) -> SceneTarget:
         """Resolve the same public selector for observation, activation and placement."""
         if kind not in {"application", "pane", "focused"}:
             raise ValueError("unknown target kind")
         if surface_id and surface_id not in SURFACE_IDS:
             raise ValueError("unknown Surface")
+        if title and kind != "application":
+            raise ValueError("title disambiguation requires an application")
         scene = self.snapshot()
         if scene.workspace.get("session_locked") is True:
             raise SceneLocked("shell scene is locked")
@@ -467,7 +469,7 @@ class ShellSceneCache:
                         window.app_id == name
                         or matches_application_window(name, window.app_id, window.title)
                     )
-                if matched:
+                if matched and (not title or _semantic_title(window.title) == title):
                     matches.append(
                         SceneTarget(
                             generation=scene.generation,
@@ -560,9 +562,9 @@ class ShellSceneClient:
         return self.cache.resolve(**selectors)
 
     def resolve_semantic(
-        self, kind: str, name: str = "", surface_id: str = ""
+        self, kind: str, name: str = "", surface_id: str = "", *, title: str = ""
     ) -> SceneTarget:
-        return self.cache.resolve_semantic(kind, name, surface_id)
+        return self.cache.resolve_semantic(kind, name, surface_id, title=title)
 
     def validate(self, target: SceneTarget) -> SceneTarget:
         return self.cache.validate(target)

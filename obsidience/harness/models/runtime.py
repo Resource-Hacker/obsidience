@@ -512,6 +512,13 @@ def resolve_model(preference: object, agent_ref: str) -> ModelSpec:
 
 def _healthy(spec: ModelSpec, timeout: float = 0.35) -> bool:
     try:
+        # The model owner retains transport connections, never health results.
+        # Standalone inspection still owns and closes its temporary client.
+        if RUNTIME.health_client is not None:
+            response = RUNTIME.health_client.get(
+                spec.base_url.removesuffix("/v1") + "/health", timeout=timeout,
+            )
+            return response.status_code == 200
         with httpx.Client(timeout=timeout) as client:
             response = client.get(spec.base_url.removesuffix("/v1") + "/health")
         return response.status_code == 200
@@ -965,7 +972,9 @@ async def _benchmark_text_model(active: ModelSpec) -> dict:
 class _HardwareModelRuntime:
     def __init__(self) -> None:
         self.lock = asyncio.Lock()
+        self.health_client: httpx.Client | None = None
         self.running_model: str | None = None
+        self.prefill_task: asyncio.Task | None = None
         self.switching = False
         self.reconciliation_pending = False
         self.external_models: dict[str, tuple[str, ...]] = {}
@@ -1218,7 +1227,40 @@ class _HardwareModelRuntime:
             await self._perception(False)
 
     @asynccontextmanager
+    async def resident_prefill(self, spec: ModelSpec):
+        """Borrow an idle resident model; never load, switch or queue speculative work."""
+        if self.lock.locked():
+            yield False
+            return
+        try:
+            # Also skip an unlocked lock with a foreground waiter already
+            # scheduled to acquire it. Speculation must never join that queue.
+            async with asyncio.timeout(0):
+                await self.lock.acquire()
+        except TimeoutError:
+            yield False
+            return
+        self.prefill_task = asyncio.current_task()
+        try:
+            try:
+                resident = _read_launch(spec.id) in self._unreserved_layouts(spec)
+            except (ValueError, ModelResourceUnavailable):
+                resident = False
+            yield resident and await asyncio.to_thread(_healthy, spec)
+        finally:
+            self.prefill_task = None
+            self.lock.release()
+
+    async def cancel_prefill(self) -> None:
+        task = self.prefill_task
+        if task is not None and task is not asyncio.current_task() and not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+    @asynccontextmanager
     async def lease(self, spec: ModelSpec, devices: object = None):
+        await self.cancel_prefill()
         await self.lock.acquire()
         activation_attempted = False
         cancelled = False
@@ -1251,6 +1293,8 @@ class _HardwareModelRuntime:
                 self.lock.release()
 
     async def initialize(self) -> list[dict]:
+        if self.health_client is None:
+            self.health_client = httpx.Client(timeout=0.75, trust_env=False)
         model_events = sync_model_sources()
         async with self.lock:
             self.switching = True
@@ -1476,10 +1520,13 @@ class _HardwareModelRuntime:
                 self.switching = False
 
     async def shutdown(self) -> None:
+        await self.cancel_prefill()
         # Model services outlive the development harness. Defaults are already
         # reconciled after normal Tasks/settings changes and at next initialize.
         # Interrupted leases deliberately leave a visible pending reconciliation.
-        return
+        client, self.health_client = self.health_client, None
+        if client is not None:
+            client.close()
 
     async def acquire_external_lease(
         self,
@@ -1490,6 +1537,7 @@ class _HardwareModelRuntime:
 
         if not owner or "\x00" in owner or len(owner) > 96:
             raise ValueError("external lease owner must be bounded text")
+        await self.cancel_prefill()
         await self.lock.acquire()
         self.switching = True
         try:
@@ -1556,6 +1604,12 @@ RUNTIME = _HardwareModelRuntime()
 
 def check_resources(spec: ModelSpec, devices: object = None) -> None:
     RUNTIME.check_resources(spec, devices)
+
+
+@asynccontextmanager
+async def resident_prefill(spec: ModelSpec):
+    async with RUNTIME.resident_prefill(spec) as available:
+        yield available
 
 
 @asynccontextmanager

@@ -8,6 +8,8 @@ import re
 
 PAGE_CHARACTERS = 8000
 MAX_RECEIPTS = 256
+ARTICLE_BODY_END = "--- End of Article body ---"
+INBOUND_REFERENCES_HEADING = "## Accepted inbound references"
 
 
 def execute(args: dict, context: dict) -> str:
@@ -84,7 +86,10 @@ def _read(note, inbound: list[str], offset: int, expected: str | None, context: 
     from obsidience.harness.knowledge.format import lifecycle_metadata
 
     graph_context = (
-        "\n\n## Accepted inbound references\n"
+        f"\n\n{ARTICLE_BODY_END}\n\n{INBOUND_REFERENCES_HEADING}\n"
+        "Generated read-only graph context, not Article content. These Articles link TO this "
+        "Article; this list does not establish outgoing relationships. Never copy this section "
+        "or the end marker into a proposed body.\n"
         + (
             "\n".join(f"- [[{item}]]" for item in inbound[:24])
             if inbound
@@ -103,7 +108,7 @@ def _read(note, inbound: list[str], offset: int, expected: str | None, context: 
     # backlinks outside its bounded presentation. A changed view is never
     # silently substituted for the evidence used by an earlier action.
     revision = hashlib.sha256(json.dumps(
-        {"article": article, "inbound": inbound, "lifecycle": lifecycle}, ensure_ascii=False,
+        {"view": view, "inbound": inbound}, ensure_ascii=False,
         sort_keys=True, separators=(",", ":"),
     ).encode("utf-8")).hexdigest()
     if expected is not None and expected != revision:

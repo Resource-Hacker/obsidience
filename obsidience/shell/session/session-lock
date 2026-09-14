@@ -6,7 +6,7 @@ ipc=(/usr/bin/qs ipc --path "$shell_path" --any-display call lock)
 
 compositor_locked() {
     local monitors state
-    monitors="$(/usr/bin/hyprctl -i 0 -j monitors 2>/dev/null)" || return 2
+    monitors="$(/usr/bin/timeout 2 /usr/bin/hyprctl -i 0 -j monitors 2>/dev/null)" || return 2
     state="$(/usr/bin/jq -r '
         def blockers: .solitaryBlockedBy // [];
         def readable: blockers | index("WORKSPACE") | not;
@@ -22,6 +22,57 @@ compositor_locked() {
 case "${1:-status}" in
     status)
         compositor_locked
+        ;;
+    unlock)
+        # One local owner dispatch. Only fresh native AND compositor state can
+        # establish unlock; a transport failure never triggers another dispatch.
+        state="$(/usr/bin/timeout 2 "${ipc[@]}" status 2>/dev/null || true)"
+        effect=false
+        case "$state" in
+            unlocked) ;;
+            secure)
+                state="$(/usr/bin/timeout 2 "${ipc[@]}" unlock 2>/dev/null || true)"
+                if [[ "$state" == "busy" ]]; then
+                    printf '%s\n' '{"status":"failed","failure":{"code":"lock_busy"},"effect_applied":false,"delivery":"not_dispatched","must_not_replay":true}'
+                    exit 1
+                fi
+                if [[ "$state" != "unlocking" && "$state" != "unlocked" ]]; then
+                    printf '%s\n' '{"status":"failed","failure":{"code":"unlock_delivery_uncertain"},"effect_applied":null,"delivery":"uncertain","must_not_replay":true}'
+                    exit 1
+                fi
+                [[ "$state" != "unlocking" ]] || effect=true
+                ;;
+            *)
+                printf '%s\n' '{"status":"failed","failure":{"code":"lock_unavailable_or_busy"},"effect_applied":false,"delivery":"not_dispatched","must_not_replay":true}'
+                exit 1
+                ;;
+        esac
+        deadline=$((SECONDS + 3))
+        while (( SECONDS < deadline )); do
+            state="$(/usr/bin/timeout 1 "${ipc[@]}" status 2>/dev/null || true)"
+            if compositor_locked; then
+                locked=0
+            else
+                locked=$?
+            fi
+            if [[ "$state" == "unlocked" && "$locked" == "1" ]]; then
+                # Use the same native wake operation as the existing hypridle
+                # resume path. Speech itself need not produce a keyboard event.
+                /usr/bin/timeout 2 /usr/bin/hyprctl -i 0 dispatch \
+                    'hl.dsp.dpms({action = "on"})' >/dev/null 2>&1 || true
+                awake=false
+                monitors="$(/usr/bin/timeout 2 /usr/bin/hyprctl -i 0 -j monitors 2>/dev/null || true)"
+                if /usr/bin/jq -e 'length > 0 and all(.[]; .dpmsStatus == true)' \
+                        <<<"$monitors" >/dev/null 2>&1; then
+                    awake=true
+                fi
+                printf '{"status":"completed","locked":false,"displays_awake":%s,"effect_applied":%s,"delivery":"acknowledged","must_not_replay":true}\n' "$awake" "$effect"
+                exit 0
+            fi
+            sleep 0.05
+        done
+        printf '%s\n' '{"status":"failed","failure":{"code":"unlock_not_verified"},"effect_applied":null,"delivery":"uncertain","must_not_replay":true}'
+        exit 1
         ;;
     recover)
         if compositor_locked; then
@@ -45,7 +96,7 @@ case "${1:-status}" in
         exit 1
         ;;
     *)
-        printf 'usage: %s {status|recover}\n' "$0" >&2
+        printf 'usage: %s {status|recover|unlock}\n' "$0" >&2
         exit 2
         ;;
 esac

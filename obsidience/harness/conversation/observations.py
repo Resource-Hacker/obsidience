@@ -125,6 +125,7 @@ def _prune_temporary(
     target_path: str | Path,
     *,
     active_conversation_id: str | None = None,
+    remove_expired: bool = True,
 ) -> tuple[int, list]:
     target = _temporary_dir(target_path)
     if active_conversation_id is None and target == EXECUTIVE_TEMPORARY_PATH:
@@ -188,7 +189,7 @@ def _prune_temporary(
             retained.append(note)
             normal_count += 1
             total_chars += len(text)
-        else:
+        elif remove_expired:
             (CONFIG.vault_dir / note.path).unlink()
             removed += 1
     return removed, retained
@@ -308,12 +309,14 @@ def latest_context_compaction(
     conversation_id: str,
     *,
     active: bool = False,
+    prune: bool = True,
 ) -> Note | None:
     """Return the newest cumulative Temporary Observation for one conversation."""
     with _WRITE_LOCK:
         _removed, retained = _prune_temporary(
             EXECUTIVE_TEMPORARY_PATH,
             active_conversation_id=conversation_id if active else None,
+            remove_expired=prune,
         )
     rows = [
         note for note in retained
@@ -703,6 +706,7 @@ def project_immediate_observations(
     compacted = latest_context_compaction(
         conversation_id,
         active=(conversation_id == getattr(conversation, "conversation_id", None)),
+        prune=materialize,
     )
     through_sequence = int(compacted.meta.get("through_sequence") or 0) if compacted else 0
     pairs = conversation.complete_pairs(

@@ -212,6 +212,32 @@ def _failed_public_reply(conversation, *, run_id="failed-reply", status="failed"
     return user
 
 
+def test_failed_launch_receipt_survives_into_followup_without_successful_reply(conversation):
+    from obsidience.harness.capabilities.task.complete import computer_completion_evidence
+    from obsidience.harness.conversation.selection import project_historical_evidence
+    user = _failed_public_reply(conversation)
+    row = conversation.index.run("failed-reply")
+    entries = json.loads(row["trace"])
+    witness = computer_completion_evidence("application.launch", {
+        "application": "teamfight_tactics", "ready": False,
+        "state": "failed", "wait_status": "terminated_before_ready",
+    })
+    entries.insert(1, {"tool": "application.launch", "args": {"application": "teamfight_tactics"},
+                       "completion_evidence": witness})
+    conversation.index.record_run(**{**row, "trace": json.dumps(entries)})
+    followup = asyncio.run(conversation.append(role="user", source="realtime", text="What does that mean?"))
+    evidence = historical_evidence(conversation, conversation_id=conversation.conversation_id,
+                                   before_sequence=followup["sequence"])
+    projected = project_historical_evidence(evidence)
+    assert projected[0]["status"] == "failed" and projected[0]["current_state"] is False
+    assert projected[0]["tools"][0] == {
+        "tool": "application.launch", "verified": False,
+        "target": {"kind": "application", "name": "teamfight_tactics"},
+        "launch_outcome": "terminated_before_ready",
+    }
+    assert [turn["role"] for turn in conversation.index.conversation_turns(conversation.conversation_id)] == ["user", "user"]
+
+
 @pytest.mark.parametrize("status", ["failed", "review"])
 def test_public_failure_clarification_is_recovered_as_exact_historical_dialogue(conversation, status):
     user = _failed_public_reply(conversation, status=status)

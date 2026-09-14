@@ -292,9 +292,10 @@ export interface RealtimeState {
   scheduler_paused: boolean;
   recent_log: string[];
 }
-export type KnowledgeActivityPhase = "query_started" | "path" | "speaking" | "query_completed" | "cleared";
+export type KnowledgeActivityPhase = "admission_started" | "admission_completed" | "query_started" | "path" | "speaking" | "query_completed" | "cleared";
 export interface KnowledgeActivity {
   runId?: string;
+  turnId?: string;
   phase: KnowledgeActivityPhase;
   refs: string[];
   query?: string;

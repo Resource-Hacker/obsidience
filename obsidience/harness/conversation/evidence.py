@@ -91,6 +91,12 @@ def _tool_record(entry: dict) -> dict | None:
         name == "computer.observe" and isinstance(args.get("target"), dict)
         and args["target"].get("kind") == "focused" and "name" not in args["target"]
     )
+    if name == "application.launch" and actual is not None and requested == actual:
+        # A failed launch remains historical evidence without becoming readiness
+        # or authority to repeat the operation.
+        outcome = witness.get("launch_outcome")
+        if outcome in {"terminated_before_ready", "timeout", "launcher_timeout"}:
+            record.update(target=actual, launch_outcome=outcome)
     if (
         witness.get("verified") is not True or actual is None
         or (requested != actual and not focused)
@@ -151,7 +157,17 @@ def historical_evidence(
     with conversation.index.lock:
         pairs = conversation.complete_pairs(
             conversation_id=conversation_id, before_sequence=before_sequence,
-        )[-min(limit, MAX_RECORDS):]
+        )
+        failures = historical_public_replies(conversation, conversation_id=conversation_id,
+                                            before_sequence=before_sequence)
+        # These local descriptors join accepted failure runs; they are never
+        # written as assistant conversation rows or labelled successful dialogue.
+        for user in conversation.index.conversation_turns(conversation_id):
+            failed = failures.get(user["id"])
+            if failed is not None and failed["status"] == "failed":
+                pairs.append((user, {"conversation_id": conversation_id, "role": "assistant",
+                                    "state": "failed", "reply_to": user["id"], "run_id": failed["run_id"]}))
+        pairs = sorted(pairs, key=lambda pair: pair[0]["sequence"])[-min(limit, MAX_RECORDS):]
         records = []
         for user, assistant in pairs:
             run_id = assistant.get("run_id")
@@ -159,7 +175,7 @@ def historical_evidence(
                 user.get("conversation_id") != conversation_id
                 or assistant.get("conversation_id") != conversation_id
                 or user.get("role") != "user" or assistant.get("role") != "assistant"
-                or user.get("state") != "final" or assistant.get("state") != "final"
+                or user.get("state") != "final" or assistant.get("state") not in {"final", "failed"}
                 or assistant.get("reply_to") != user.get("id")
                 or not isinstance(run_id, str) or not _OPAQUE_ID.fullmatch(run_id)
             ):

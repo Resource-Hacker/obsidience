@@ -68,6 +68,7 @@ def agent_structural_hub(note, res) -> bool:
 def candidate_invalidation(task_ref: str, params: dict, res) -> dict | None:
     """Read current accepted inputs; never reinterpret or refresh a commitment."""
     from obsidience.harness.knowledge.system import is_system_article
+    from obsidience.harness.knowledge.scope import knowledge_ancestry
     refs = params.get("candidate_refs")
     expected = params.get("candidate_revision")
     if (not isinstance(refs, list) or not refs
@@ -75,9 +76,15 @@ def candidate_invalidation(task_ref: str, params: dict, res) -> dict | None:
             or not isinstance(expected, str) or not re.fullmatch(r"[a-f0-9]{64}", expected)):
         return None
     notes = [res.resolve(ref) for ref in refs]
+    hierarchy = knowledge_ancestry(res) if task_ref == "Tasks/link" else {}
     if any(note is None or note.kind not in {"agent", "knowledge"}
            or note.runtime_observation or is_system_article(note.ref) for note in notes):
         reason, current = "inputs_unavailable", None
+    elif task_ref == "Tasks/link" and any(
+        set(hierarchy.get(note.ref, ())) & {other.ref for other in notes}
+        for note in notes
+    ):
+        reason, current = "native_hierarchy_connection", candidate_revision(notes)
     elif task_ref == "Tasks/improve" and params.get("candidate_kind") == "index_coverage":
         # Native hierarchy already enumerates children. Retire old commitments
         # through the same receipt-bound invalidation path, even at equal bytes.
@@ -101,7 +108,7 @@ def _maintenance_candidates(context: dict | None = None) -> dict:
 
     snapshot = iter_notes()
     res = Resolver(snapshot)
-    from obsidience.harness.knowledge.scope import execution_scope
+    from obsidience.harness.knowledge.scope import execution_scope, knowledge_ancestry
     allowed = execution_scope(context, res)[1] if context is not None else {note.ref for note in snapshot}
     notes = [
         note
@@ -121,12 +128,23 @@ def _maintenance_candidates(context: dict | None = None) -> dict:
         }
         for note in notes
     }
+    hierarchy = knowledge_ancestry(res)
+    ancestors = {note.ref: [parent for parent in hierarchy[note.ref] if parent in allowed]
+                 for note in notes}
     semantic_refs = set(neighbors)
     adjacency = {ref: set() for ref in semantic_refs}
     for ref, targets in neighbors.items():
         for target_ref in targets & semantic_refs:
             adjacency[ref].add(target_ref)
             adjacency[target_ref].add(ref)
+
+    # Structural edges count as connectivity, but never as semantic evidence
+    # for a new Link. Contract only missing/excluded intermediate folder hubs.
+    for ref, parents in ancestors.items():
+        parent = next((value for value in parents if value in semantic_refs), None)
+        if parent is not None:
+            adjacency[ref].add(parent)
+            adjacency[parent].add(ref)
 
     component_by_ref: dict[str, int] = {}
     component_sizes: list[int] = []
@@ -259,7 +277,8 @@ def _maintenance_candidates(context: dict | None = None) -> dict:
             directly_linked = (
                 right.ref in neighbors[left.ref] or left.ref in neighbors[right.ref]
             )
-            if directly_linked or same_subject:
+            if (directly_linked or same_subject
+                    or left.ref in ancestors[right.ref] or right.ref in ancestors[left.ref]):
                 continue
             left_title_hits = len(left_title & right_body)
             right_title_hits = len(right_title & left_body)
@@ -367,7 +386,9 @@ def _maintenance_candidates(context: dict | None = None) -> dict:
             "Candidates are evidence leads. Curate may activate only the exact accepted "
             "Task named by its Runbook. Connectivity is descriptive; disconnectedness alone "
             "never creates or authorizes a Link. Merge confirms and consolidates identity; "
-            "Link confirms a specific useful relationship. No signal authorizes a change by itself."
+            "Native hierarchy already connects ancestors and descendants at every depth; "
+            "Link is only for a missing useful non-hierarchical relationship. "
+            "Shared hierarchy alone is not semantic evidence. No signal authorizes a change by itself."
         ),
     }
 

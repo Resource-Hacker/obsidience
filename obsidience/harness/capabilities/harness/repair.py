@@ -17,9 +17,9 @@ def execute(args: dict, context: dict) -> str:
                    for key, maximum in (("task", 1024), ("run_id", 128)))):
         return result("blocked", "Exactly one Task and previous run_id are required.")
     task_ref, run_id = args["task"], args["run_id"]
-    if (context.get("task") != repair.REPAIR_TASK
+    if (not isinstance(context.get("task"), str) or not context["task"]
             or not isinstance(context.get("run_id"), str) or not context["run_id"]):
-        return result("blocked", "Only an active Repair Task can apply this recovery.", **args)
+        return result("blocked", "Recovery requires an active Task execution with the harness.repair Tool.", **args)
     snapshot = context.get("_harness_snapshot")
     plan = snapshot.get("repair_plan") if isinstance(snapshot, dict) else None
     if not isinstance(plan, list) or len(plan) > repair.PLAN_LIMIT:

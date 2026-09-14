@@ -61,10 +61,11 @@ PROJECT_SOURCE_FILES = (
 )
 SYSTEM_SOURCE_ROOT = Path("obsidience/state/system")
 PROJECT_SOURCE_SUFFIXES = frozenset({
-    ".conf", ".css", ".desktop", ".html", ".js", ".jsx", ".json", ".md",
+    ".conf", ".css", ".desktop", ".html", ".js", ".jsx", ".json", ".md", ".mjs",
     ".py", ".pyi", ".qml", ".service", ".sh", ".svg", ".target", ".toml", ".ts",
     ".tsx", ".txt", ".yaml", ".yml",
 })
+PROJECT_SOURCE_EXCLUDED_DIRS = frozenset({"__pycache__", "node_modules"})
 RAW_SOURCE_TYPES = frozenset({
     "user", "tool", "document", "import", "recovery", "research",
 })
@@ -1023,7 +1024,7 @@ def _source_storage(actual: Path) -> str | None:
         if any(part.startswith(".") for part in relative.parts):
             continue
         if storage == "code" and (
-            "__pycache__" in relative.parts
+            PROJECT_SOURCE_EXCLUDED_DIRS.intersection(relative.parts)
             or actual.suffix.lower() not in PROJECT_SOURCE_SUFFIXES
         ):
             continue
@@ -1044,7 +1045,7 @@ def _source_candidates(linked: dict[Path, set[str]], scope: str | None = None):
             target = project_root / scope
             if target.is_relative_to(root):
                 relative = target.relative_to(root)
-                if any(part.startswith(".") or (storage == "code" and part == "__pycache__")
+                if any(part.startswith(".") or (storage == "code" and part in PROJECT_SOURCE_EXCLUDED_DIRS)
                        or (root / Path(*relative.parts[:index + 1])).is_symlink()
                        for index, part in enumerate(relative.parts)):
                     continue
@@ -1055,7 +1056,7 @@ def _source_candidates(linked: dict[Path, set[str]], scope: str | None = None):
                 else os.walk(walk_root, followlinks=False))
         for directory, folders, files in walk:
             folders[:] = [name for name in folders if not name.startswith(".")
-                          and not (storage == "code" and name == "__pycache__")
+                          and not (storage == "code" and name in PROJECT_SOURCE_EXCLUDED_DIRS)
                           and not (Path(directory) / name).is_symlink()]
             for name in files:
                 actual = Path(directory) / name

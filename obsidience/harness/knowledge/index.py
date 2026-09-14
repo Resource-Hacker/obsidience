@@ -202,7 +202,7 @@ class _BindingResolver(Resolver):
 def _binding_shortcuts(notes: list[Note], direct_links: list[dict]) -> list[dict]:
     """Explain typed binding paths without altering stored links or authority."""
     from ..capabilities.registry import ALWAYS_ALLOWED, contract_error
-    from .dependencies import agent_dependencies, select_runbook
+    from .dependencies import agent_dependencies, resolve_dependencies, select_runbook
 
     res = _BindingResolver(notes)
     direct = {(link["source"], link["target"]) for link in direct_links}
@@ -288,6 +288,13 @@ def _binding_shortcuts(notes: list[Note], direct_links: list[dict]) -> list[dict
     for agent in (note for note in notes if note.kind == "agent"):
         for task_ref in agent_dependencies(agent, res)["tasks"]:
             assigned_scopes.setdefault(task_ref, set()).add(agent.ref)
+        if agent.meta.get("skills"):
+            dependency = resolve_dependencies(agent, res)
+            if not dependency.get("error"):
+                for skill in dependency["skills"]:
+                    add(agent.ref, skill.ref, "requires_skill", [], agent.ref)
+                    if tool := paired.get(skill.ref):
+                        add(agent.ref, tool.ref, "uses_tool", [skill.ref], agent.ref)
     for task in (note for note in notes if note.kind == "task"):
         agent = scope(task.meta.get("assignee"))
         scopes = {agent} if not task.meta.get("assignee") or agent else set()

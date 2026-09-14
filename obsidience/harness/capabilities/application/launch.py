@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import time
 
@@ -12,6 +13,33 @@ from obsidience.harness.host.scene import (
 )
 
 READINESS_TIMEOUT_SECONDS = 10.0
+
+
+def _managed_unit(stdout: str, desktop_id: str) -> str | None:
+    """Accept only the exact receipt emitted by the managed desktop launcher."""
+    prefix = re.escape(desktop_id.removesuffix(".desktop")[:80])
+    matches = re.findall(rf"^Transient unit: (agent-gui-{prefix}-[0-9]+-[0-9]+\.service)$",
+                         stdout, re.MULTILINE)
+    return matches[0] if len(matches) == 1 else None
+
+
+def _launch_lifetime(unit: str | None) -> str:
+    if not unit:
+        return "unknown"
+    try:
+        result = subprocess.run(
+            ["systemctl", "--user", "show", unit, "--property=LoadState,ActiveState"],
+            capture_output=True, text=True, timeout=1, check=False,
+        )
+        fields = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
+        # --collect may already have removed this exact, previously accepted unit.
+        if fields.get("LoadState") == "not-found" or fields.get("ActiveState") in {"inactive", "failed"}:
+            return "ended"
+        if result.returncode == 0 and fields.get("ActiveState") in {"active", "activating", "reloading"}:
+            return "running"
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return "unknown"
 
 
 def _witness(target) -> dict:
@@ -43,13 +71,15 @@ def _unit_is_active(unit: str | None) -> bool:
         return False
 
 
-def _await_readiness(result: dict, context: dict) -> dict:
+def _await_readiness(result: dict, context: dict, *, launch_unit: str | None = None) -> dict:
     """Read the existing scene's events; this function never dispatches."""
     if result.get("ready") is True:
         return result
     deadline = time.monotonic() + READINESS_TIMEOUT_SECONDS
     cancel = context.get("_capability_cancel_event")
     token = SCENE.change_token()
+    next_lifetime_check = 0.0
+    lifetime = "unknown"
     while True:
         if cancel is not None and cancel.is_set():
             return {**result, "wait_status": "cancelled", "must_not_replay": True}
@@ -58,13 +88,23 @@ def _await_readiness(result: dict, context: dict) -> dict:
             return {**result, "state": "ready", "ready": True, "window": witness,
                     "wait_status": "observed", "assistant_status": f"{result['label']} is open."}
         except (SceneLocked, SceneTargetAmbiguous) as exc:
-            return {**result, "wait_status": "locked" if isinstance(exc, SceneLocked) else "ambiguous",
+            return {**result, "state": "unverified", "wait_status": "locked" if isinstance(exc, SceneLocked) else "ambiguous",
                     "must_not_replay": True}
         except (SceneUnavailable, SceneTargetNotFound):
             pass
+        now = time.monotonic()
+        if launch_unit and now >= next_lifetime_check:
+            lifetime = _launch_lifetime(launch_unit)
+            next_lifetime_check = time.monotonic() + 0.5
+            if lifetime == "ended":
+                return {**result, "state": "failed", "launch_lifetime": lifetime,
+                        "wait_status": "terminated_before_ready", "must_not_replay": True,
+                        "assistant_status": f"The managed launch for {result['label']} ended before a ready window was observed. It is not verified open; do not describe it as still loading."}
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            return {**result, "wait_status": "timeout", "must_not_replay": True}
+            return {**result, "state": "unverified", "launch_lifetime": lifetime,
+                    "wait_status": "timeout", "must_not_replay": True,
+                    "assistant_status": f"No ready {result['label']} window was observed before the deadline. Its loading state is unknown; do not claim it is still loading."}
         # Scene changes wake immediately; the maximum wait bounds cancellation.
         token = SCENE.wait_for_change(token, min(remaining, 0.1))
 
@@ -116,14 +156,16 @@ def _launch_application(args: dict, context: dict | None = None) -> dict:
     return _await_readiness({"application": application, "label": spec["label"],
         "desktop_id": spec["desktop_id"], "state": "starting", "ready": False,
         "dispatched": True, "window": None,
-        "assistant_status": f"{spec['label']} is starting; readiness is not verified yet."}, context)
+        "assistant_status": f"{spec['label']} was dispatched; readiness is not verified yet."}, context,
+        launch_unit=_managed_unit(result.stdout, spec["desktop_id"]))
 
 
 def execute(args: dict, context: dict) -> str:
     try:
         return json.dumps(_launch_application(args or {}, context), sort_keys=True)
     except subprocess.TimeoutExpired:
-        return json.dumps({"state": "starting", "ready": False, "delivery": "uncertain",
+        application = str((args or {}).get("application", "")).strip().lower()
+        return json.dumps({"application": application, "state": "unverified", "ready": False, "delivery": "uncertain",
             "wait_status": "launcher_timeout", "must_not_replay": True,
             "error": "Launcher outcome is uncertain; do not repeat the dispatch."})
     except (OSError, subprocess.SubprocessError, ValueError) as exc:

@@ -798,6 +798,9 @@ async def lifespan(app: FastAPI):
         await asyncio.to_thread(retrieval.prewarm_fast_context)
         resources.push_async_callback(model_runtime.shutdown)
         model_events = await model_runtime.initialize()
+        from ...execution.deepseek.bridge import BRIDGE
+        await BRIDGE.start()
+        resources.push_async_callback(BRIDGE.close)
         resources.push_async_callback(shell_scene.SCENE.stop)
         shell_scene.SCENE.start()
         intake = SourceIntake()
@@ -2305,7 +2308,8 @@ async def knowledge_activity_ws(ws: WebSocket):
     queue = knowledge_activity.subscribe()
 
     async def send_events():
-        await ws.send_json({"type": "snapshot", "entries": knowledge_activity.history()})
+        await ws.send_json({"type": "snapshot", "entries": knowledge_activity.history(),
+                            "playback": knowledge_activity.playback()})
         while True:
             await ws.send_json({"type": "activity", **await queue.get()})
 
@@ -2423,16 +2427,24 @@ async def chat_ws(ws: WebSocket):
 
 def main():
     import uvicorn
-    # The Electron projection keeps trace/activity WebSockets open for its
+
+    class HarnessServer(uvicorn.Server):
+        def handle_exit(self, sig, frame):
+            # Uvicorn drains connections before exiting the lifespan. Disarm
+            # admission now so that drain cannot start another scheduled run.
+            scheduler.stop_admission()
+            super().handle_exit(sig, frame)
+
+    # The native projection keeps trace/activity WebSockets open for its
     # lifetime. Development restarts must cancel those stale subscribers after
     # a short drain instead of waiting forever for the old renderer connection.
-    uvicorn.run(
+    HarnessServer(uvicorn.Config(
         app,
         host=CONFIG.host,
         port=CONFIG.port,
         log_level="warning",
         timeout_graceful_shutdown=5,
-    )
+    )).run()
 
 
 if __name__ == "__main__":

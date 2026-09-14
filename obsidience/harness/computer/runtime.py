@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import secrets
 import time
-from dataclasses import asdict
+from dataclasses import asdict, fields, replace
 from typing import Any
 
 from obsidience.harness.capabilities.window.command import (
@@ -51,7 +51,13 @@ def act_computer(args: dict[str, Any], context: dict[str, Any]) -> dict[str, Any
     # Only the executor can supply the observation paired with the immediately
     # preceding model input. Consume it even if argument validation fails.
     lease = context.pop("_computer_observation_lease", None)
-    state_scope = context.get("params", {}).get("computer_scope") == "state"
+    scope = args.get("scope", context.get("params", {}).get("computer_scope"))
+    if scope not in {"input", "state"}:
+        raise ComputerError("scope must be input for a requested click or state for an application result.")
+    previous_scope = context.setdefault("_computer_act_scope", scope)
+    if scope != previous_scope:
+        raise ComputerError("The action scope cannot change after the first attempt.")
+    state_scope = scope == "state"
     attempts = context.get("_computer_act_attempts", 0)
     if attempts and (not state_scope or not context.get("_computer_act_step_observed")):
         raise ComputerError("This Task cannot send another action after consumed or unverified input; do not replay it.")
@@ -59,8 +65,8 @@ def act_computer(args: dict[str, Any], context: dict[str, Any]) -> dict[str, Any
         raise ComputerError("This Task reached its bounded computer action limit.")
     context["_computer_act_attempts"] = attempts + 1
     context["_computer_act_step_observed"] = False
-    if set(args) - {"application", "action", "target", "point", "postcondition"} or args.get("action", "click") != "click":
-        raise ComputerError("computer.act accepts one click with application, target, image point and optional postcondition.")
+    if set(args) - {"scope", "application", "action", "target", "point", "postcondition"} or args.get("action", "click") != "click":
+        raise ComputerError("computer.act accepts one click with scope, application, target, image point and optional postcondition.")
     application = _text(args.get("application"), "application", 256)
     application = canonical_application_id(application) or application
     label = _text(args.get("target"), "target", 128)
@@ -86,7 +92,31 @@ def act_computer(args: dict[str, Any], context: dict[str, Any]) -> dict[str, Any
     _check_cancel(context)
     resolved = SCENE.resolve_semantic("application", application, "")
     if resolved != target:
-        raise ComputerError("The requested application no longer matches the observed target.")
+        # A resized window needs a new image and a new model-selected point.
+        # This edge precedes activation and input, so one fresh observation is
+        # safe; the old point is never dispatched or replayed.
+        same_window = replace(target.window, local_rect=resolved.window.local_rect)
+        if (attempts == 0 and not context.get("_computer_geometry_refreshes")
+                and resolved.window.local_rect != target.window.local_rect
+                and resolved == replace(target, window=same_window,
+                                        surface_revision=resolved.surface_revision)):
+            _validate(resolved, start, context)
+            context["_computer_geometry_refreshes"] = 1
+            context["_computer_act_attempts"] = 0
+            return {
+                "status": "failed", "delivery": "not_dispatched", "must_not_replay": True,
+                "correction_allowed": True,
+                "failure": {"code": "geometry_changed_before_input",
+                            "message": "The same window moved or resized before any input. Observe it again and choose a new point from that fresh image once; never reuse the old point."},
+            }
+        changed = [field.name for field in fields(target)
+                   if getattr(target, field.name) != getattr(resolved, field.name)]
+        if "window" in changed:
+            changed.remove("window")
+            changed.extend("window." + field.name for field in fields(target.window)
+                           if getattr(target.window, field.name) != getattr(resolved.window, field.name))
+        raise ComputerError("The requested application no longer matches the observed target: "
+                            + ", ".join(changed) + ".")
     _validate(target, start, context)
     if not target.active:
         # Foreground delivery uses the existing exact activation command owner.
@@ -158,6 +188,11 @@ def act_computer(args: dict[str, Any], context: dict[str, Any]) -> dict[str, Any
             "visual_evidence": {"attached": True, "media_type": "image/png", "freshness": "validated_after_capture"},
             "action_authorized": False,
         },
-        "interpretation": "One click at your selected image point was delivered. The target label is your description, not independent recognition. Evaluate the fresh attached image before describing the application outcome.",
+        "interpretation": (
+            "One click at your selected image point was delivered. The target label is your description, not independent recognition. "
+            + ("Evaluate the fresh attached image before claiming the requested application state."
+               if state_scope else
+               "This Task requests input only. If you selected the intended control, complete the click Task successfully and describe the fresh post-image separately. An unchanged screen does not make acknowledged input fail; signing in or starting a match is not this Task's goal.")
+        ),
         "_private_image_png": post.image_png,
     }

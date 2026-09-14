@@ -77,6 +77,13 @@ def precondition_error(name: str, args: dict, context: dict) -> str | None:
     return error
 
 
+def available_tools(allowed: list[str], context: dict) -> list[str]:
+    """Project the same Source prerequisite into the next model decision."""
+    if bound_read_error(context) is None:
+        return allowed
+    return [name for name in allowed if name in {"source.read", "task.complete"}]
+
+
 def _forget(context: dict, value: str) -> None:
     """Failed aliases cannot leave a canonical successful-read receipt alive."""
     reads = context.get("_source_reads", {})

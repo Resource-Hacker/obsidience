@@ -49,6 +49,18 @@ def graph(*, tasks=2, tool_names=("computer.act",), long_description=False):
     return Resolver(notes), agent, assigned
 
 
+def test_rechecked_query_can_answer_but_cannot_delegate_or_mutate():
+    names = ("task.complete", "vault.read", "task.create", "observations.temporary.append")
+    articles = [Note(f"Tools/{name}.md", name, {"kind": "tool"}, "") for name in names]
+    skills = [Note(f"Skills/{name}.md", name, {"kind": "skill", "tool": f"Tools/{name}"}, "") for name in names]
+    spine = {"tools": list(names), "tool_articles": articles, "skills": skills}
+    narrowed = executor._operation_spine(spine, {"routing_rechecked": True, "computer_outcome": "answer"})
+    assert narrowed["tools"] == ["task.complete", "vault.read"]
+    assert {tool.title for tool in narrowed["tool_articles"]} == {"task.complete", "vault.read"}
+    assert {skill.title for skill in narrowed["skills"]} == {"task.complete", "vault.read"}
+    assert spine["tools"] == list(names)
+
+
 def test_local_clock_is_current_system_time_with_matching_zone():
     before = time.time()
     clock = bindings.local_clock()

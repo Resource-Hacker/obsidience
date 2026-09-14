@@ -110,7 +110,7 @@ def _extract_links(meta: dict, body: str, path: str = "") -> list[str]:
     links = body_links(body, path)
     for key in (
         "runbook", *HIERARCHY_FIELDS, "skills", "tool", "assignee", "parent",
-        "task", "links", "related_refs",
+        "task", "links", "related_refs", "requires",
     ):
         val = meta.get(key)
         vals = val if isinstance(val, list) else [val] if val else []
@@ -282,6 +282,50 @@ def _write_article(path: Path, meta: dict, body: str) -> None:
     content = article_format.dumps(meta, body)
     if not path.exists() or path.read_text(encoding="utf-8") != content:
         _atomic_write(path, content)
+
+
+def initialize_vault(destination: Path | None = None) -> dict:
+    """Install reviewed defaults once; never export or overwrite a live Vault."""
+    import subprocess
+
+    target = Path(destination or CONFIG.vault_dir).absolute()
+    if target.exists() or target.is_symlink():
+        raise ValueError(f"Vault already exists; initialization will not overwrite it: {target}")
+    template = CONFIG.product_root / "defaults" / "vault"
+    articles = []
+    for path in sorted(template.rglob("*.md")):
+        relative = path.relative_to(template)
+        if path.is_symlink() or any(part.startswith(("_", ".")) for part in relative.parts):
+            raise ValueError(f"Invalid default Article path: {relative}")
+        raw, body = article_format.parse(path.read_text(encoding="utf-8"))
+        errors = article_format.validate_profile(raw, relative)
+        if errors:
+            raise ValueError(f"Invalid default Article {relative}: {'; '.join(errors)}")
+        articles.append((relative, article_format.decode_metadata(raw), body))
+    if not articles:
+        raise ValueError(f"No default Articles found in {template}")
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    # Assemble beside the destination, then publish the complete installation.
+    # No live SQLite, Source, conversation, credentials or settings are copied.
+    with tempfile.TemporaryDirectory(prefix=".obsidience-init-", dir=target.parent) as temp:
+        staging = Path(temp) / "vault"
+        staging.mkdir()
+        for relative, meta, body in articles:
+            _write_article(staging / relative, meta, canonical_body(body, str(relative)))
+        (staging / ".gitignore").write_text(".obsidian/\n.reader/\n_staging/\nraw/\n", encoding="utf-8")
+        def git(*args: str) -> None:
+            subprocess.run(["git", "-C", str(staging), *args], check=True,
+                           capture_output=True, timeout=30)
+        git("init", "-q", "--initial-branch=main")
+        git("config", "user.name", "Obsidience Harness")
+        git("config", "user.email", "harness@obsidience.local")
+        git("add", "--", ".")
+        git("commit", "-q", "-m", "Initialize local Vault from reviewed defaults")
+        if target.exists() or target.is_symlink():
+            raise ValueError(f"Vault appeared during initialization; left it untouched: {target}")
+        staging.rename(target)
+    return {"vault": str(target), "articles": len(articles), "audit": "local Git; no remote"}
 
 
 def mutate_note_metadata(

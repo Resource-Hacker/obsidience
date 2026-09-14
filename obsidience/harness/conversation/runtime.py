@@ -9,21 +9,21 @@ import time
 from typing import Any, Literal
 
 from .store import CONVERSATION
-from .selection import select_task
+from .selection import EXECUTIVE_REF, admit_executive
 from .evidence import historical_evidence
 from ..execution import trace
+from ..execution import activity as knowledge_activity
 from ..knowledge.index import INDEX
 from ..knowledge.vault import Note, resolver
 from ..models import runtime as model_runtime
 from ..models.context import PROMPT_SAFETY_TOKENS, cached_text_count, measure_text
 
-QUERY_TASK_REF = "Tasks/query"
 EXECUTIVE_AGENT_REF = "Agents/Executive/Executive"
 COMPACT_TASK_REF = "Tasks/observations/immediate/compact"
 SPEECH_RESPONSE_CONTRACT = (
     "Answer the owner in one or two short spoken sentences unless detail is requested. "
     "If unclear, ask one brief question. Never narrate Task, Tool, transport, "
-    "or harness status unless asked. Put the public answer in task.complete summary."
+    "or harness status unless asked. Answer directly in text; use native Tools for operations."
 )
 MAX_EVENT_TEXT = 512
 DEFAULT_CONTEXT_THRESHOLD = 80
@@ -65,13 +65,66 @@ class ConversationRuntime:
         self._lock = asyncio.Lock()
         self._turn_task: asyncio.Task | None = None
         self._generation = 0
-        self._last_task_ref = QUERY_TASK_REF
+        self._last_task_ref = EXECUTIVE_REF
         self._compact_lock = asyncio.Lock()
         self._session_finalize_lock = asyncio.Lock()
         self._compacting = False
         self._thinking_overhead_tokens = DEFAULT_THINKING_OVERHEAD_TOKENS
         self.speech = None
         self._steering: TurnSteering | None = None
+        self._prefill_task: asyncio.Task | None = None
+        self._prefill_latest: tuple[int, str] | None = None
+
+    def prepare_speech_prefix(self, text: str, sequence: int) -> None:
+        """Coalesce partials into one cancellable, non-persistent model warmup."""
+        if (not text.strip() or len(text) > MAX_EVENT_TEXT
+                or type(sequence) is not int or sequence <= 0
+                or self._lock.locked()
+                or self.speech is None or not self.speech.snapshot()["ready"]
+                or (self._turn_task is not None and not self._turn_task.done())):
+            return
+        latest = (sequence, text)
+        if latest == self._prefill_latest:
+            return
+        self._prefill_latest = latest
+        if self._prefill_task is None or self._prefill_task.done():
+            self._prefill_task = asyncio.create_task(self._prepare_speech(), name="obsidience-speech-prefill")
+
+    async def _prepare_speech(self) -> None:
+        from ..execution.deepseek.prefill import prepare
+
+        try:
+            while self._prefill_latest is not None:
+                sequence, text = latest = self._prefill_latest
+                started = time.monotonic()
+                trace.latency("speech_prefill_started", speech_sequence=sequence)
+                try:
+                    result = await prepare(self._conversation, text, SPEECH_RESPONSE_CONTRACT)
+                    trace.latency("speech_prefill_completed", speech_sequence=sequence,
+                                  duration_ms=(time.monotonic() - started) * 1000)
+                    trace.emit("measurement", "Speech prefix preparation", [
+                        f"status: {result['status']}",
+                        f"prompt_tokens: {result.get('prompt_tokens', 0)}",
+                        f"cached_tokens: {result.get('cached_tokens', 0)}",
+                    ])
+                except asyncio.CancelledError:
+                    trace.latency("speech_prefill_cancelled", speech_sequence=sequence)
+                    raise
+                except Exception as exc:
+                    # Optional preparation never blocks final admission or exposes draft output.
+                    trace.emit("measurement", "Speech prefix preparation skipped", [type(exc).__name__])
+                if latest == self._prefill_latest:
+                    break
+        finally:
+            self._prefill_task = None
+
+    async def _cancel_speech_prefill(self) -> None:
+        self._prefill_latest = None
+        task = self._prefill_task
+        if task is not None and task is not asyncio.current_task():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
 
     def active_turn(self) -> dict:
         inbox = self._steering
@@ -133,6 +186,7 @@ class ConversationRuntime:
             self.speech._last_error = None
 
     async def cancel(self, *, stop_playback: bool = True, reason: str = "requested") -> None:
+        await self._cancel_speech_prefill()
         self._generation += 1
         if self._steering is not None:
             self._steering.close()
@@ -224,6 +278,10 @@ class ConversationRuntime:
         timing = trace.input_speech_timing(speech_timing) if source == "realtime" else None
         sequence = timing["speech_sequence"] if timing else None
         scope = trace.bind_turn(str(user_turn["id"]), speech_sequence=sequence, generation=generation)
+        # The Executive is handling this accepted request before a Task exists.
+        # Only its identity may light until the real compiler supplies the packet.
+        knowledge_activity.emit("admission_started", [EXECUTIVE_AGENT_REF],
+                                turn_id=str(user_turn["id"]))
         try:
             trace.latency("input_final", monotonic_ns=received_ns)
             for edge in timing["stages"] if timing else ():
@@ -232,6 +290,7 @@ class ConversationRuntime:
                 return await self._run_admitted_turn(text, generation, user_turn, source=source,
                                                      speech_sequence=sequence)
         finally:
+            knowledge_activity.emit("admission_completed", [], turn_id=str(user_turn["id"]))
             trace.reset(scope)
 
     async def _run_admitted_turn(
@@ -239,66 +298,37 @@ class ConversationRuntime:
         source: Literal["text", "realtime"],
         speech_sequence: int | None = None,
     ) -> dict[str, Any]:
-        from ..execution.executor import run_task
+        from ..execution.executor import run_conversation
 
         self._conversation.publish({"type": "start", "source": source})
         inbox = self._steering
         self._publish_active_turn()
         try:
-            # Intent admission must see the same conversation as execution.
-            # Selection creates no Task or Tool authority of its own.
+            admission_started = time.monotonic()
+            task, params, event = admit_executive(text, "voice" if source == "realtime" else "text")
+            trace.latency("admission", duration_ms=(time.monotonic() - admission_started) * 1000)
+            self._last_task_ref = task.ref
             preparation_started = time.monotonic()
-            context_model = self._context_model()
-            context = await self.prepare_immediate_observations(user_turn)
+            context = await self.prepare_immediate_observations(user_turn, context_task_ref=task.ref)
             prior_effects = historical_evidence(
                 self._conversation, conversation_id=str(user_turn["conversation_id"]),
                 before_sequence=int(user_turn["sequence"]),
             )
             trace.latency("preparation", duration_ms=(time.monotonic() - preparation_started) * 1000)
-            selection_started = time.monotonic()
-            task, params, event = await select_task(
-                text, "voice" if source == "realtime" else "text",
-                conversation_context=context, historical_evidence=prior_effects,
-            )
-            trace.latency("selection", duration_ms=(time.monotonic() - selection_started) * 1000)
-            if task is None or task.kind != "task":
-                raise RuntimeError("the selected Executive Task Article is missing")
-            self._last_task_ref = task.ref
             trace.emit("event", f"{task.title} activated", [task.ref, event])
-            if self._context_model(task.ref) != context_model:
-                context = await self.prepare_immediate_observations(user_turn, context_task_ref=task.ref)
             params.update({
                 "conversation_id": str(user_turn["conversation_id"]),
                 "reply_to_turn_id": str(user_turn["id"]),
             })
             if source == "realtime":
                 params["response_contract"] = SPEECH_RESPONSE_CONTRACT
-            result = await run_task(
+            result = await run_conversation(
                 task, runtime_params=params, emit_turn_event=False,
                 interactive=True, conversation_context=context,
                 conversation_evidence=prior_effects,
+                routing_context=self._routing_context(user_turn),
                 steering=inbox,
             )
-            if result.get("routing_reclassification") is True and generation == self._generation:
-                # Re-run the SAME bounded admission once. No Task or Tool is
-                # added by the failed Query, and the Objective stays unchanged.
-                corrected, correction, correction_event = await select_task(
-                    text, "voice" if source == "realtime" else "text",
-                    conversation_context=context, historical_evidence=prior_effects, reclassification=True)
-                if generation != self._generation:
-                    return {"status": "interrupted"}
-                if corrected is not None and corrected.ref == "Tasks/executive/operate":
-                    correction.update(conversation_id=str(user_turn["conversation_id"]),
-                        reply_to_turn_id=str(user_turn["id"]), routing_rechecked=True)
-                    if source == "realtime":
-                        correction["response_contract"] = SPEECH_RESPONSE_CONTRACT
-                    trace.emit("event", "Admission corrected before effects", [task.ref, corrected.ref, correction_event])
-                    task = corrected
-                    self._last_task_ref = task.ref
-                    if self._context_model(task.ref) != context_model:
-                        context = await self.prepare_immediate_observations(user_turn, context_task_ref=task.ref)
-                    result = await run_task(task, runtime_params=correction, emit_turn_event=False,
-                        interactive=True, conversation_context=context, conversation_evidence=prior_effects, steering=inbox)
             self.record_prompt_usage(result, request_text=text)
             if generation != self._generation:
                 return {"status": "interrupted"}
@@ -311,7 +341,7 @@ class ConversationRuntime:
                 return result
             reply = str(result.get("summary") or "").strip()
             if not reply:
-                raise RuntimeError("the Executive Task produced no public reply")
+                raise RuntimeError("the Executive produced no public reply")
             assistant_turn = await self._conversation.append(
                 role="assistant", source=source, text=reply,
                 run_id=str(result.get("run_id") or "") or None,
@@ -652,6 +682,15 @@ class ConversationRuntime:
             materialize=(exact_conversation_id == self._conversation.conversation_id),
         )["body"])
 
+    def _routing_context(self, user_turn: dict) -> str:
+        """Recent exact dialogue for capability selection; execution keeps full context."""
+        preceding = self._ledger().conversation_turns(
+            str(user_turn["conversation_id"]), before_sequence=int(user_turn["sequence"]), limit=6)
+        return json.dumps([{
+            "role": turn["role"], "text": turn["text"][:2000],
+            "text_truncated": len(turn["text"]) > 2000,
+        } for turn in preceding], ensure_ascii=False)
+
     async def resume_continuation(self, continuation: dict) -> dict[str, Any]:
         """Resume one claimed caller from its exact persisted user turn and result."""
         from ..execution.scheduler import foreground_admission
@@ -660,8 +699,7 @@ class ConversationRuntime:
             return await self._resume_admitted_continuation(continuation)
 
     async def _resume_admitted_continuation(self, continuation: dict) -> dict[str, Any]:
-        from ..capabilities.task.complete import validate_computer_outcome
-        from ..execution.executor import run_task
+        from ..execution.executor import run_conversation, _computer_request_evidence, run_task
         from ..knowledge.vault import resolver
 
         if continuation.get("status") != "claimed":
@@ -696,8 +734,8 @@ class ConversationRuntime:
             raise RuntimeError("continuation is no longer claimed")
         task_ref = str(continuation.get("caller_task_ref", ""))
         task = resolver().resolve(task_ref)
-        if task is None or task.kind != "task":
-            raise RuntimeError("continuation caller Task is no longer accepted")
+        if task is None or (task.kind != "task" and not (task.kind == "agent" and task.ref == EXECUTIVE_REF)):
+            raise RuntimeError("continuation caller is no longer accepted")
         try:
             bound_result = json.loads(str(continuation.get("result") or "{}"))
         except (TypeError, ValueError) as exc:
@@ -707,51 +745,25 @@ class ConversationRuntime:
         objective = str(continuation.get("objective", "")).strip()
         if not objective or objective != user_turn.get("text"):
             raise RuntimeError("continuation lost its original objective")
+        caller = ledger.run(caller_run_id)
+        if caller is None or caller.get("task_ref") != task.ref or caller.get("objective") != objective:
+            raise RuntimeError("continuation lost its original caller execution")
+        try:
+            caller_trace = json.loads(caller.get("trace") or "[]")
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError("continuation caller evidence is invalid") from exc
+        if not isinstance(caller_trace, list):
+            raise RuntimeError("continuation caller evidence is invalid")
+        bindings = [item for item in caller_trace if isinstance(item, dict) and "computer_request" in item]
         computer_request = {}
-        if task.ref == "Tasks/executive/operate":
-            caller = ledger.run(caller_run_id)
-            if (
-                caller is None or caller.get("task_ref") != task.ref
-                or caller.get("objective") != objective
-            ):
-                raise RuntimeError("computer continuation lost its original caller execution")
-            try:
-                caller_trace = json.loads(caller.get("trace") or "[]")
-            except (TypeError, ValueError) as exc:
-                raise RuntimeError("computer continuation caller evidence is invalid") from exc
-            if not isinstance(caller_trace, list):
-                raise RuntimeError("computer continuation caller evidence is invalid")
-            bindings = [
-                entry for entry in caller_trace
-                if isinstance(entry, dict) and "computer_request" in entry
-            ]
+        if bindings:
             if len(bindings) != 1 or bindings[0].get("interactive_turn") != {
-                "conversation_id": user_turn["conversation_id"], "reply_to_turn_id": turn_id,
-            }:
-                raise RuntimeError("computer continuation has no exact original outcome binding")
-            recorded_request = bindings[0]["computer_request"]
-            if not isinstance(recorded_request, dict):
-                raise RuntimeError("computer continuation outcome binding is invalid")
-            outcome = recorded_request.get("computer_outcome")
-            scope = recorded_request.get("computer_scope")
-            if outcome in (None, "", "answer") or validate_computer_outcome(outcome, scope):
-                raise RuntimeError("computer continuation outcome binding is invalid")
-            application = recorded_request.get("application")
-            if application is not None and (
-                not isinstance(application, str) or not application or len(application) > 256
-                or any(ord(char) < 32 or ord(char) == 127 for char in application)
-            ):
-                raise RuntimeError("computer continuation application binding is invalid")
-            if outcome in {"launch", "action"} and application is None:
-                raise RuntimeError("computer continuation lost its original application")
-            operation = recorded_request.get("operation")
-            if operation is not None and operation != ("launch" if outcome == "launch" else "computer_use"):
-                raise RuntimeError("computer continuation operation binding is invalid")
-            computer_request = {
-                key: recorded_request[key]
-                for key in ("computer_outcome", "computer_scope", "application", "operation")
-                if key in recorded_request
-            }
+                    "conversation_id": user_turn["conversation_id"], "reply_to_turn_id": turn_id}:
+                raise RuntimeError("continuation lost its exact explicit operation binding")
+            recorded = bindings[0]["computer_request"]
+            computer_request = _computer_request_evidence(recorded)
+            if computer_request is None or computer_request != recorded:
+                raise RuntimeError("continuation explicit operation binding is invalid")
 
         current = asyncio.current_task()
         async with self._lock:
@@ -772,7 +784,8 @@ class ConversationRuntime:
                 self._conversation, conversation_id=str(user_turn["conversation_id"]),
                 before_sequence=int(user_turn["sequence"]),
             )
-            result = await run_task(
+            execute = run_conversation if task.kind == "agent" else run_task
+            result = await execute(
                 task,
                 runtime_params={
                     "event": "task.continue",
@@ -793,6 +806,7 @@ class ConversationRuntime:
                 interactive=True,
                 conversation_context=conversation_context,
                 conversation_evidence=prior_effects,
+                routing_context=self._routing_context(user_turn),
             )
             if generation != self._generation:
                 return {"status": "interrupted"}
