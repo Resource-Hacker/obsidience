@@ -79,7 +79,9 @@ def message_producer(message: dict) -> str:
     return source.get('plugin') or source.get('kind', '').removeprefix('plugin:')
 
 
-_BUDGET_NOTICE = re.compile(r'\n\nExecution budget: [^\n]*\Z')
+CONSUMED_IMAGE = '[Earlier image consumed; observe again for current pixels.]'
+# A consumed image's placeholder follows the notice in an image result's text.
+_BUDGET_NOTICE = re.compile(r'\n\nExecution budget: [^\n]*(?=(?:\n' + re.escape(CONSUMED_IMAGE) + r')?\Z)')
 
 
 def _without_budget_notice(text: str) -> str:
@@ -199,7 +201,7 @@ def wire_messages(messages: list[dict], images: dict, objective: str = '', *,
             elif block['type'] == 'image':
                 image = images.get(block['attachment']['attachmentId'])
                 parts.append({'type': 'image_url', 'image_url': {'url': image}}
-                             if image else {'type': 'text', 'text': '[Earlier image consumed; observe again for current pixels.]'})
+                             if image else {'type': 'text', 'text': CONSUMED_IMAGE})
         if all(part['type'] == 'text' for part in parts):
             return '\n'.join(part['text'] for part in parts)
         return parts

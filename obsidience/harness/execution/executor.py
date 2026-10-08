@@ -1265,7 +1265,11 @@ class CapabilityDispatch:
             return
         _foreground_checkpoint(self.interruption_event, self.ctx)
         remaining = self.max_steps - self.step - 1
-        nudge = "\n\n" + _step_budget_notice(remaining)
+        # The specialist loop's step budget names its Runbook delivery. The
+        # native Executive loop owns its own decision budget, so its Tool
+        # results carry no specialist notice.
+        nudge = ("" if getattr(self, "prompt_format", "") == "native_wire"
+                 else "\n\n" + _step_budget_notice(remaining))
         observation_text = f"Observation:\n{observation}{nudge}"
         self.task_context.latest_result_index = len(self.messages)
         if private_image_png is None:
