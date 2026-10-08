@@ -59,7 +59,8 @@ def _adb(row, cancel, *args, timeout=8, connect=False):
                     raise InterruptedError('TV command cancelled')
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    raise TimeoutError('TV did not respond before the command deadline')
+                    raise TimeoutError('TV ADB connection timed out; the TV may be in network standby or disconnected'
+                                       if connect else 'TV ADB command timed out before a response was received')
                 try:
                     out, err = process.communicate(timeout=min(.1, remaining))
                     break
@@ -224,6 +225,7 @@ def execute(args: dict, context: dict) -> dict:
                 'note': 'Input delivered once; inspect the fresh evidence before claiming the requested outcome.', **result}
     except (OSError, ValueError, KeyError, IndexError) as error:
         return {'status': 'failed', 'delivery': delivery, 'effect_applied': None if delivery != 'not_dispatched' else False,
-                'failure': str(error), 'must_not_replay': True}
+                'failure': str(error), 'must_not_replay': True,
+                'next_step': 'Stop this turn. No retry is scheduled. If the connection is unavailable, check that the TV is awake and ADB debugging is enabled.'}
     finally:
         _LOCK.release()

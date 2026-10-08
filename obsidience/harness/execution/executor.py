@@ -1304,6 +1304,12 @@ class CapabilityDispatch:
                 # The native Executive may resolve the ambiguity in its next
                 # step; read-only failure dispatched no input to preserve.
                 self.allowed = ["task.complete"]
+        if name == "tv.control" and (not isinstance(result_object, dict)
+                                     or result_object.get("status") == "failed"):
+            # The TV adapter has already exhausted its bounded transport/read
+            # attempt. Preserve the failure and end this turn's effects.
+            self.ctx["_tv_control_failed"] = True
+            self.allowed = ["task.complete"]
         if name in {"application.launch", "media.pause"} and not (completion_evidence or {}).get("verified"):
             # The capability owns its bounded wait. Failure or uncertainty ends
             # effects; a verified launch may continue the owner's procedure.

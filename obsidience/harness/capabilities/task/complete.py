@@ -242,6 +242,8 @@ def native_text_arguments(text: str, context: dict) -> dict:
     if any((item.get("completion_evidence") or {}).get("verified") is not True
            for item in _latest_computer_results(context).values()):
         status = "failed"
+    if context.get("_tv_control_failed"):
+        status = "failed"
     if _pending_staged_proposals(context):
         status = "review"
     return {"status": status, "summary": text}
@@ -312,6 +314,10 @@ def public_claim_error(summary: str, context: dict) -> str | None:
     Early voice playback applies the same check to each sentence before it
     is spoken; it inspects text only and never routes or acts.
     """
+    if context.get("_tv_control_failed") and re.search(
+            r"\b(?:I(?:['’]ll| will)|we(?:['’]ll| will))\s+(?:try|retry|reconnect|check).*\b(?:again|later|moment|shortly|soon)\b",
+            summary, re.I):
+        return "TV control failed and no retry is scheduled. Report the current blocker without promising a later action."
     return _unlock_claim_error(summary, context) or _effect_claim_error(summary, context)
 
 
@@ -322,6 +328,8 @@ def _computer_completion_error(task, status: str, context: dict, verification=No
     runs acquire their operation/scope from real Tool decisions, not admission.
     A different successful Tool cannot erase a failed or uncertain operation.
     """
+    if context.get("_tv_control_failed") and status != "failed":
+        return "TV control failed in this run; finish with status failed and the actual blocker."
     if status != "completed":
         return None
     params = context.get("params") if isinstance(context.get("params"), dict) else {}
