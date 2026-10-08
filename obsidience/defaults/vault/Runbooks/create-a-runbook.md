@@ -8,19 +8,9 @@ obsidience:
   - '[[Skills/vault.search]]'
   - '[[Skills/vault.read]]'
   - '[[Skills/vault.propose]]'
-  - '[[Skills/observations.temporary.append]]'
+  - '[[Skills/observations.retain]]'
+  - '[[Skills/observations.recall]]'
 ---
-
-Choose the procedure branch from the actual activation.
-
-For `refinement_case`:
-1. Read the controller's refinement binding, problem, originating execution and training examples. Treat the reconstruction and historical summary as evidence with their stated limits. Identify the first divergence and smallest general correction; do not memorize case IDs, fixed counts or expected answers.
-2. Read the exact existing Runbook, target Task, selected Skills and paired Tools. Preserve the Runbook title, applicability and complete Skill set; its metadata and authority are frozen.
-3. Draft one body-only revision with the exact sections `Prerequisites`, `Ordered Actions`, `Bounded Branches`, `Stop Conditions`, `Completion Criteria`, `Verification`, and `Recovery`. Explain each existing Skill with its exact reference. Use only its selected Tools and built-in `task.complete`. Keep the change general and concise.
-4. Call `vault.propose` once with `action: update`, exact `output` path, unchanged title, complete revised body and concise causal reason. Omit metadata entirely. The controller binds the case and baseline and queues independent Heimdall evaluation.
-5. Finish `review` with the proposal identity. No evaluation or acceptance has occurred yet. If no concrete correction is justified, finish `failed` with that limitation rather than inventing an improvement.
-
-For a missing-procedure `task.assigned` activation, use the existing procedure below.
 
 Generate one quality Agent-scoped Runbook when an assigned Task lacks an
 applicable accepted procedure.
@@ -74,4 +64,4 @@ Task waits for approval rather than executing the proposal. Callable names in
 the body never widen the set. Do not put YAML frontmatter in the body.
 
 
-When a useful nonredundant observation should survive this activation, optionally append one bounded unverified note to this Agent's own Temporary Observations. Do not record hidden reasoning or create a note merely to narrate routine work.
+When a useful nonredundant observation should survive this activation, optionally retain one bounded unverified note in this Agent's own Hindsight bank. Do not record hidden reasoning or create a note merely to narrate routine work.

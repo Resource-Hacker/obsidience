@@ -24,7 +24,7 @@ snapshot.
   outstanding work belongs to history; `recent_failures` alone cannot establish
   a current fault.
 - `degraded` is an observed finding, not a Tool failure or root-cause diagnosis.
-  A Check that successfully obtains and reports it completes with that finding.
+  A successful inspection returns that finding; recovery and notification belong to the controller.
   A healthy snapshot does not establish every Article's factual accuracy or
   the health of omitted subsystems.
 - If the Tool is rejected or unavailable, report the diagnostic failure.
@@ -46,3 +46,6 @@ snapshot.
   paired repair Skill. Obtain a fresh snapshot after every attempted eligible
   operation. Blocked findings remain evidence for disposition; they never grant
   shell, Source, model or Review authority. The plan is capped at 12 entries.
+
+
+Hindsight memory recovery uses the same paired status and repair Tools. A `repair_plan` row with `component: hindsight` permits `harness.repair` with exactly {"component":"hindsight"}, instead of task/run arguments. It rechecks one failed upstream operation from that same-run snapshot, commits retry intent, and asks Hindsight to retry that exact operation once. It does not replay computer actions, create a new memory document, change models or approve wiki Knowledge. Refresh status after every attempt. Queued processing is not completion. The ordinary eight-attempt Repair budget remains; exhausted or unsupported memory faults appear in the existing Review notification queue. Hindsight emits success webhooks; the existing Harness health audit also checks backend failures without a Check Task or another scheduler.

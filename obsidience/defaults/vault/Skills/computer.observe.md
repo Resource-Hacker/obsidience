@@ -8,7 +8,7 @@ obsidience:
 
 ## Runtime
 
-Use the scene to select an exact target; focused targets omit name. Observe without a prerequisite focus change. Interpret the attached image, not an invented screen description. After observing for a click, make computer.act the next Tool call or obtain a new observation. If capture_session_unavailable is returned, report the missing graphical session and stop; trying other applications cannot repair it.
+Use the scene to select an exact target; focused targets omit name. Observe without a prerequisite focus change. Interpret the attached image, not an invented screen description. Keep the query faithful to the owner's original question when rechecking a correction. For a count or roster, distinguish people/items from status badges and duplicate tiles; a clipped list supports only a visible count. State what the image leaves unverified instead of asserting a complete total. After observing for a click, make computer.act the next Tool call or obtain a new observation. If capture_session_unavailable is returned, report the missing graphical session and stop; trying other applications cannot repair it.
 
 For a current-view question with multiple windows of the named application, use kind: focused with its exact Surface only when the Scene identifies one focused matching window. If the owner names a particular window, copy its exact displayed Scene title into target.title alongside its application name and Surface. Otherwise ask which visible window title the owner means. Never substitute an unrelated focused application or repeat an ambiguous selector.
 

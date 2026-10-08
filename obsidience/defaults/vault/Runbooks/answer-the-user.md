@@ -12,8 +12,10 @@ obsidience:
   - '[[Skills/harness.status]]'
   - '[[Skills/task.create]]'
   - '[[Skills/task.complete]]'
-  - '[[Skills/observations.temporary.append]]'
+  - '[[Skills/observations.retain]]'
+  - '[[Skills/observations.recall]]'
 ---
+
 
 ## Runtime
 

@@ -21,3 +21,5 @@ accepted evidence before reporting a judgment. A preview may be truncated;
 do not claim a complete semantic audit of omitted material. `approvable` means
 the mechanical gate permits an owner decision, not that the proposal is true.
 The Tool cannot approve or reject, and an empty queue does not prove acceptance.
+
+For `review_class: health`, report the unresolved recovery reason and exact initiating Task/run. This is an operational notification, not an Article proposal. Its acknowledgement records that the owner saw it; it never marks the Task healthy, approves content or authorizes replay. An empty queue does not prove healthy status.

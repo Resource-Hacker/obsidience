@@ -9,7 +9,7 @@ obsidience:
 
 ## Runtime
 
-Read bounded current runtime-health and receipt findings. No arguments. The result supplies controller observations for Check/Repair. Historical Knowledge and process presence alone do not establish health. This call does not retry work or mutate application state.
+Read bounded current runtime-health and receipt findings. No arguments. The result supplies controller observations for automatic recovery and direct inspection. Historical Knowledge and process presence alone do not establish health. This call does not retry work or mutate application state.
 
 ## Reference
 
@@ -60,3 +60,6 @@ occurrence identity, `retry` or `blocked` operation, and reason. It excludes
 Repair itself and lists eligible work before blocked entries. This controller projection guides the separate Repair Task; the
 status Tool remains read-only and grants no effect. Current `task_issue_count`
 remains the complete count even when the plan is bounded.
+
+
+Hindsight memory recovery uses the same paired status and repair Tools. A `repair_plan` row with `component: hindsight` permits `harness.repair` with exactly {"component":"hindsight"}, instead of task/run arguments. It rechecks one failed upstream operation from that same-run snapshot, commits retry intent, and asks Hindsight to retry that exact operation once. It does not replay computer actions, create a new memory document, change models or approve wiki Knowledge. Refresh status after every attempt. Queued processing is not completion. The ordinary eight-attempt Repair budget remains; exhausted or unsupported memory faults appear in the existing Review notification queue. Hindsight emits success webhooks; the existing Harness health audit also checks backend failures without a Check Task or another scheduler.

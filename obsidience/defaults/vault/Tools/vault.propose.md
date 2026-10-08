@@ -10,11 +10,9 @@ obsidience:
 
 ## Runtime
 
-Stage an accepted-scope Article revision with target, action:create|update|archive, and applicable title/body/reason/metadata. Preserve exact Sources and current revision evidence. Feed publication uses only the bound source and target. Checkout does not allow writing another Agent's Observations. Authority and lifecycle changes retain Review. Read the Reference before generating definitions or grouped relation changes.
+Stage an accepted-scope Article revision with target, action:create|update|archive, and applicable title/body/reason/metadata. Preserve exact Sources and current revision evidence. Checkout does not allow writing another Agent's Observations. Authority and lifecycle changes retain Review. Read the Reference before generating definitions or grouped relation changes.
 
 ## Reference
-
-An active controller-bound Feed Distill Inbox uses only `source` (its exact Inbox citation) and `target` (the exact activation target); optional `action` and `reason` remain documentary inputs. Omit `body`, title and authored metadata. The owner requires the complete Inbox read, preserves Darwin's entire summary, derives native resource/sources/generated fields, and stages one ordinary Article Review under the Feed's selected existing Knowledge node. The node's current Auto-curate selection controls automatic approval. A changed/deleted destination fails clearly; repeated published item versions preserve accepted content and timestamps. The Feed's active-Article limit retires exact oldest excess publications by attested Feed lineage, including earlier destinations. Incoming publication and required archival form one bounded decision through the existing Review owner; do not submit separate Feed archives.
 
 Submit a complete Article change through the existing validator and Review owner.
 
@@ -28,6 +26,6 @@ Only one unresolved proposal may target an Article. Exact repeats return the exi
 
 For `Tasks/link`, the controller derives Link review; `review_class` is not an argument. Link updates only existing non-runtime Knowledge or Agent bodies and records changed links, excerpts and endpoint revisions. Missing, self, runtime or executable endpoints cannot become new Knowledge links. Edited endpoints produce review warnings; changed source/proposal bytes require a fresh proposal. A recorded connection does not prove its assertion.
 
-Copied vault.read end markers and generated `Accepted inbound references` sections are rejected before staging. For Link, the complete current Article and every changed endpoint must have a full vault.read receipt. Missing reads are returned together in batches of at most ten; complete the requested reads before retrying. The same proposal may be retried after those exact evidence requirements are met.
+The Tool removes an accidentally copied generated vault.read footer only when it exactly matches this execution's complete read of the still-current target. Unattested or edited generated context remains rejected before staging. For Link, the complete current Article and every changed endpoint must have a full vault.read receipt. Missing reads are returned together in batches of at most ten; complete the requested reads before retrying. The same proposal may be retried after those exact evidence requirements are met.
 
 Results distinguish `Proposal staged for owner review`, actual `Article published`, attested no-change and `Proposal rejected`. Publication attests acceptance, not factual truth. Rejections identify draft/handoff errors, not Source loss. Unsafe targets, invalid action/body/metadata or Capability contracts, stale bases, conflicting pending work and failed evidence/relationship gates block the request.

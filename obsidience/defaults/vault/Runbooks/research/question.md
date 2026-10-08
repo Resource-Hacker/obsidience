@@ -13,8 +13,10 @@ obsidience:
   - '[[Skills/web.fetch]]'
   - '[[Skills/source.read]]'
   - '[[Skills/source.handoff]]'
-  - '[[Skills/observations.temporary.append]]'
+  - '[[Skills/observations.retain]]'
+  - '[[Skills/observations.recall]]'
 ---
+
 
 1. Frame one bounded question, success criterion, scope, and freshness need.
 2. Search the accepted graph first. If current external evidence is needed,
@@ -32,4 +34,4 @@ obsidience:
    partial acquisition honestly without staging an intermediate Review.
 
 
-When a useful nonredundant observation should survive this activation, optionally append one bounded unverified note to this Agent's own Temporary Observations. Do not record hidden reasoning or create a note merely to narrate routine work.
+When a useful nonredundant observation should survive this activation, optionally retain one bounded unverified note in this Agent's own Hindsight bank. Do not record hidden reasoning or create a note merely to narrate routine work.

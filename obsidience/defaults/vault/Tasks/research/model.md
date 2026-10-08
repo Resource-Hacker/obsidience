@@ -2,12 +2,12 @@
 type: task
 title: Model
 obsidience:
-  assignee: '[[Agents/Darwin/Darwin]]'
+  assignee: '[[Agents/Heimdall/Heimdall]]'
   enabled: true
   model: auto
   reasoning_effort: xhigh
   runbook: '[[Runbooks/research/model]]'
-  taxonomy_path: research/model
+  taxonomy_path: harness/model
   triggers:
   - model.added
 ---
@@ -20,3 +20,5 @@ Acceptance requires the exact event model to be inspected, every relevant
 valid layout to have a preserved benchmark or explicit failure, the selected
 settings to pass runtime validation without CPU offload, and the saved
 Hardware selection to be restored.
+
+Heimdall owns this operational model characterization. Darwin retains external model research. A removed event model is settled from exact receipts rather than benchmarked again. An external model without local configurable device sets is inspected and reported without invoking local benchmark or configuration.

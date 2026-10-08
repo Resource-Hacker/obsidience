@@ -9,7 +9,7 @@ obsidience:
 
 ## Runtime
 
-Acquire bounded current-source leads using query and optional limit. Results are leads, not complete evidence; open the exact source needed for the identified question. Do not broaden a bound Feed distillation into research.
+Acquire bounded current-source leads using query and optional limit. Results are leads, not complete evidence; open the exact source needed for the identified question.
 
 ## Reference
 

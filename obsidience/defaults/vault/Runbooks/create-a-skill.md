@@ -9,8 +9,10 @@ obsidience:
   - '[[Skills/vault.read]]'
   - '[[Skills/vault.propose]]'
   - '[[Skills/vault.validate]]'
-  - '[[Skills/observations.temporary.append]]'
+  - '[[Skills/observations.retain]]'
+  - '[[Skills/observations.recall]]'
 ---
+
 
 Synthesize the one usage Skill paired to an accepted leaf Tool.
 
@@ -34,4 +36,4 @@ one Skill, exact dotted basename parity, the `Using <tool.id>` title, full
 single-Tool contract coverage, and no Runbook policy disguised as a Skill.
 
 
-When a useful nonredundant observation should survive this activation, optionally append one bounded unverified note to this Agent's own Temporary Observations. Do not record hidden reasoning or create a note merely to narrate routine work.
+When a useful nonredundant observation should survive this activation, optionally retain one bounded unverified note in this Agent's own Hindsight bank. Do not record hidden reasoning or create a note merely to narrate routine work.

@@ -9,8 +9,10 @@ obsidience:
   - '[[Skills/vault.read]]'
   - '[[Skills/vault.propose]]'
   - '[[Skills/vault.validate]]'
-  - '[[Skills/observations.temporary.append]]'
+  - '[[Skills/observations.retain]]'
+  - '[[Skills/observations.recall]]'
 ---
+
 
 Synthesize one quality Tool contract and its mandatory paired Skill.
 
@@ -37,4 +39,4 @@ duplicate interface, no invented Capability, and enough contract detail for
 deterministic validation. Supporting Modules remain internal plumbing.
 
 
-When a useful nonredundant observation should survive this activation, optionally append one bounded unverified note to this Agent's own Temporary Observations. Do not record hidden reasoning or create a note merely to narrate routine work.
+When a useful nonredundant observation should survive this activation, optionally retain one bounded unverified note in this Agent's own Hindsight bank. Do not record hidden reasoning or create a note merely to narrate routine work.

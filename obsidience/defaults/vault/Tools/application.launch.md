@@ -9,7 +9,7 @@ obsidience:
 
 ## Runtime
 
-Open one registered application with application:<registered identifier>. Dispatch occurs at most once. The same call waits up to ten seconds for a current matching window. ready establishes an open window, not focus; dispatched:false means it was already open or starting. If the exact managed launch ends without a ready window, state:failed and wait_status:terminated_before_ready report that observed failure. A readiness deadline returns state:unverified, not evidence of continued loading. Never redispatch after timeout, cancellation, ambiguity or uncertain delivery.
+Open one registered application with application:<registered identifier>. For microsoft_edge, optional url:<absolute HTTP/HTTPS URL> opens a page or video through the same managed desktop entry, including an already running browser. URL dispatch and browser readiness do not prove page contents or playback; observe and verify that state before reporting success. Dispatch occurs at most once. The same call waits up to ten seconds for a current matching window. ready establishes an open window, not focus; dispatched:false means it was already open or starting. If the exact managed launch ends without a ready window, state:failed and wait_status:terminated_before_ready report that observed failure. A readiness deadline returns state:unverified, not evidence of continued loading. Never redispatch after timeout, cancellation, ambiguity or uncertain delivery.
 
 ## Reference
 

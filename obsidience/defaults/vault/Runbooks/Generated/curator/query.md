@@ -5,14 +5,16 @@ obsidience:
   assignee: Agents/Alexandria/Alexandria
   for_agent: '[[Agents/Alexandria/Alexandria]]'
   skills:
-  - '[[Skills/observations.temporary.append]]'
+  - '[[Skills/observations.retain]]'
   - '[[Skills/source.read]]'
   - '[[Skills/task.complete]]'
   - '[[Skills/vault.list]]'
   - '[[Skills/vault.read]]'
   - '[[Skills/vault.search]]'
+  - '[[Skills/observations.recall]]'
   task: '[[Tasks/query]]'
 ---
+
 
 # Runbook: Query (Alexandria)
 
@@ -24,7 +26,7 @@ obsidience:
 2. **Search for Context**: Follow [vault.search](/Skills/vault.search.md) and call `vault.search` to find relevant articles related to the query.
 3. **Retrieve Relevant Articles**: Follow [vault.read](/Skills/vault.read.md) and call `vault.read` for the full content of the identified candidate articles.
 4. **Synthesize and Verify**: Compare the retrieved information against the query. If the query requires external evidence, follow [source.read](/Skills/source.read.md) and call `source.read`.
-5. **Preserve Useful State**: Only when it will help a later activation, follow [observations.temporary.append](/Skills/observations.temporary.append.md) and call `observations.temporary.append` with concise findings, decisions, blockers, and next actions. Never store private reasoning.
+5. **Preserve Useful State**: Only when it will help a later activation, follow [observations.retain](/Skills/observations.retain.md) and call `observations.retain` with concise findings, decisions, blockers, and next actions. Never store private reasoning.
 6. **Formulate Response**: Synthesize the findings into a clear, direct answer.
 7. **Complete Task**: Follow [task.complete](/Skills/task.complete.md) and call `task.complete` to submit the final answer.
 
@@ -48,4 +50,4 @@ obsidience:
 - If `vault.read` fails due to an ambiguous reference, follow [vault.list](/Skills/vault.list.md) and call `vault.list` to locate the correct article path.
 
 
-When a useful nonredundant observation should survive this activation, optionally append one bounded unverified note to this Agent's own Temporary Observations. Record observable findings and decisions, not a narration of routine work.
+When a useful nonredundant observation should survive this activation, optionally retain one bounded unverified note in this Agent's own Hindsight bank. Record observable findings and decisions, not a narration of routine work.

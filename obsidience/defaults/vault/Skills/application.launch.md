@@ -8,7 +8,7 @@ obsidience:
 
 ## Runtime
 
-Use the controller's registered identifier. Let the original call observe readiness. ready with dispatched:false means already open, not newly launched. Focus and visibility are separate outcomes. Report timeout as unverified. Report terminated_before_ready as a failed managed launch, never still loading. Do not launch again.
+Use the controller's registered identifier; browser requests may include url. A URL receipt attests dispatch and browser readiness only. Observe the returned exact browser target, then use task.complete verification for the requested page or playback state. Let the original call observe readiness. ready with dispatched:false means already open, not newly launched. Focus and visibility are separate outcomes. Report timeout as unverified. Report terminated_before_ready as a failed managed launch, never still loading. Do not launch again.
 
 ## Reference
 
@@ -16,7 +16,7 @@ Use `application.launch` to dispatch one registered desktop application through
 the managed graphical launcher.
 
 - Pass exactly `{"application": "battle_net|world_of_warcraft|teamfight_tactics|microsoft_edge"}`
-  with one registered identifier and no additional fields.
+  with one registered identifier. For the registered web browser, an optional `url` opens an absolute HTTP/HTTPS address through the same managed desktop entry, even when that browser is already running. No other application accepts a URL.
 - Interpret `state: ready` only with the returned current window witness.
   An unfocused or minimized application can already be open; inspect the
   witness's `focused` and `visible` fields before claiming it is visible.

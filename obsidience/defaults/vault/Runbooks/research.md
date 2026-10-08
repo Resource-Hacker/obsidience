@@ -10,15 +10,15 @@ obsidience:
   - '[[Skills/source.ingest]]'
   - '[[Skills/source.read]]'
   - '[[Skills/source.handoff]]'
-  - '[[Skills/observations.temporary.append]]'
+  - '[[Skills/observations.retain]]'
+  - '[[Skills/observations.recall]]'
   subrunbooks:
   - '[[Runbooks/research/question]]'
   - '[[Runbooks/research/learn]]'
-  - '[[Runbooks/research/distill]]'
-  - '[[Runbooks/research/model]]'
 ---
 
-Procedures owned by Darwin. Question, Learn, Distill, and Model are the four
+
+Procedures owned by Darwin. Question and Learn are the two
 requested outcomes. Framing, discovery, collection, screening, assessment, extraction,
 analysis, and verification are steps inside these procedures rather than Task
 taxonomy. Generate is a peer family used after research establishes evidence.
@@ -39,4 +39,6 @@ stages the final wiki change for owner Review. Darwin never writes the vault or
 creates an intermediate Review object.
 
 
-When a useful nonredundant observation should survive this activation, optionally append one bounded unverified note to this Agent's own Temporary Observations. Do not record hidden reasoning or create a note merely to narrate routine work.
+When a useful nonredundant observation should survive this activation, optionally retain one bounded unverified note in this Agent's own Hindsight bank. Do not record hidden reasoning or create a note merely to narrate routine work.
+
+Operational Model characterization belongs to Heimdall and has no Research procedure dependency.

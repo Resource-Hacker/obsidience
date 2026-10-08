@@ -16,4 +16,6 @@ Retire one explicitly deprecated or demonstrably superseded ordinary Knowledge
 Article without deleting its content, immutable Source, or history. Success is
 one safe archive proposal or an evidence-grounded no-change result. Native OKF
 `status: deprecated` records retirement; an elapsed `stale_after` alone calls for
-revalidation through [Audit](/Tasks/audit.md), not archival by age.
+revalidation through [Improve](/Tasks/improve.md), not archival by age.
+Report the exact freshness blocker for Curate or owner routing; Archive does not
+activate another Task.

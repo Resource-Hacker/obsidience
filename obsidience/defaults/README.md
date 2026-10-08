@@ -2,8 +2,8 @@
 
 `vault/` is the reviewed starter graph distributed with Obsidience. It contains
 four Agent identities, the reusable Task/Runbook/Skill/Tool library, implementation
-and Cordis architecture knowledge, empty world subjects, and empty observation
-folders. It contains no previous owner's workstation inventory, preferences,
+and Cordis architecture knowledge under the root Architecture subject, and empty world
+subjects. It contains no previous owner's workstation inventory, preferences,
 conversations, news editions, Source captures, proposals or receipts.
 
 ## Start a fresh installation
@@ -23,8 +23,9 @@ explicit alternate destination, and set the same `vault_dir` in your local
 
 Configure models, device selections and local integrations separately. The
 starter Agent and Task models use `auto`; no model weights, GPU assignments,
-connections or enabled periodic schedules are copied. Durable Auto-curate is off;
-the existing runtime observation folders permit their own local projections.
+or enabled periodic schedules are copied. Durable Auto-curate is off;
+historical experience belongs to each Agent's separate Hindsight bank. Accepted
+lessons enter topic Articles through the ordinary publication boundary.
 The optional `session.unlock` Tool/Skill is documented but is not granted to the
 default Executive. Voice unlock requires an explicit choice by the local owner.
 

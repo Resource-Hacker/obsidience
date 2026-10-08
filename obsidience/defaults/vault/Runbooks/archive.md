@@ -11,8 +11,10 @@ obsidience:
   - '[[Skills/vault.read]]'
   - '[[Skills/source.read]]'
   - '[[Skills/vault.propose]]'
-  - '[[Skills/observations.temporary.append]]'
+  - '[[Skills/observations.retain]]'
+  - '[[Skills/observations.recall]]'
 ---
+
 
 1. Use the supplied exact maintenance candidate refs and signals. An ordinary
    Knowledge Article with native OKF `status: deprecated` is an explicit retirement
@@ -23,8 +25,10 @@ obsidience:
    successor for an explicitly deprecated Article.
 3. Distinguish freshness from truth: an elapsed timezone-aware `stale_after`
    means the Article is stale and needs revalidation. It does not prove a
-   contradiction or authorize removal. Use [Audit](/Tasks/audit.md) for unresolved
-   freshness; publication time or file age alone is insufficient.
+   contradiction or authorize removal. Unresolved wiki freshness belongs to
+   [Improve](/Tasks/improve.md). Report the exact blocker for Curate or owner
+   routing; this procedure does not activate another Task. Publication time or
+   file age alone is insufficient.
 4. Inspect the exact accepted inbound references returned by `vault.read`.
    Stage any necessary complete reference updates before archival; do not leave
    broken links or conceal an unresolved conflict. Duplicate consolidation belongs
@@ -41,16 +45,6 @@ obsidience:
    the exact observed grounds in `evidence`. Missing evidence and unresolved
    inbound references are not clean completion.
 
-Explicit Feed active-Article retention uses this same Review archival owner. Darwin's Feed handoff triggers Alexandria's Ingest
-to retire the oldest excess Articles from that exact Feed while publishing its
-incoming Article atomically. A Feed policy save can also reconcile the count,
-including quiet feeds, in bounded groups. The Feed compiler attests membership,
-current policy, exact bases, all affected Article permissions and surviving
-inbound references. Full content, Sources and history remain below `_archived/`;
-retention records retirement from the active collection without declaring an
-old report false. This is not general permission to archive arbitrary Knowledge,
-reclassify elapsed `stale_after`, or delete Source. No additional model Archive
-execution is required for this deterministic policy application.
 
 
-When a useful nonredundant observation should survive this activation, optionally append one bounded unverified note to this Agent's own Temporary Observations. Do not record hidden reasoning or create a note merely to narrate routine work.
+When a useful nonredundant observation should survive this activation, optionally retain one bounded unverified note in this Agent's own Hindsight bank. Do not record hidden reasoning or create a note merely to narrate routine work.

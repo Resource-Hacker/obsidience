@@ -6,7 +6,6 @@ obsidience:
   model: auto
   triggers:
   - task.assigned
-  - runbook.refine
   - task.create
   reasoning_effort: xhigh
   runbook: '[[Runbooks/create-a-runbook]]'
@@ -20,4 +19,4 @@ Skill set and stages the per-Agent procedure through ordinary Review. The
 assigned Task waits until that procedure is approved; assignment alone grants
 neither the entire catalog nor an unreviewed procedure.
 
-For an activation carrying `refinement_case`, Darwin investigates the supplied recorded failure and proposes one body-only improvement to the existing exact Runbook. The controller freezes its baseline, authority, model configuration and independent cases. The candidate enters Review and activates Heimdall Audit. Accepted behavior stays active until a passing independent evaluation and ordinary approval. This branch cannot add Tools or Skills, change models, author expectations or edit implementation Source.
+Improvements to an existing procedure are owned by Heimdall Audit through AutoSaddler. Generate retains creation of genuinely missing Runbooks.

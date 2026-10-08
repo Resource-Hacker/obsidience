@@ -11,8 +11,10 @@ obsidience:
   - '[[Skills/vault.read]]'
   - '[[Skills/source.read]]'
   - '[[Skills/vault.propose]]'
-  - '[[Skills/observations.temporary.append]]'
+  - '[[Skills/observations.retain]]'
+  - '[[Skills/observations.recall]]'
 ---
+
 
 1. Use the exact `candidate_refs` and `candidate_signals` when supplied; otherwise
    select one bounded weak Knowledge Article. Read it and relevant accepted
@@ -44,4 +46,6 @@ obsidience:
    is unresolved, not a clean verdict.
 
 
-When a useful nonredundant observation should survive this activation, optionally append one bounded unverified note to this Agent's own Temporary Observations. Do not record hidden reasoning or create a note merely to narrate routine work.
+When a useful nonredundant observation should survive this activation, optionally retain one bounded unverified note in this Agent's own Hindsight bank. Do not record hidden reasoning or create a note merely to narrate routine work.
+
+For `stale_after` or `review_due`, inspect the complete Article and its exact Sources. An elapsed deadline is a freshness lead, not proof of falsehood. Preserve documentary provenance and original dates; never extend freshness without new evidence. Report missing current evidence honestly or stage one grounded correction. This wiki evidence work belongs to Alexandria.

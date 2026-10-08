@@ -22,3 +22,5 @@ a bounded body preview. Results include provenance, exact target, review class,
 changed links, revision warnings and approval blockers. Truncation is explicit.
 An empty result means no matching pending proposal, not that any change was
 approved. This Tool does not expose an approval command or historical verdict.
+
+Health notifications also appear here with `review_class: health`. Their exact returned `file` identity can be used as the `proposal` selector, even though it is not a Markdown filename. They describe unresolved operational faults; acknowledging one in Review does not clear health or authorize another effect.

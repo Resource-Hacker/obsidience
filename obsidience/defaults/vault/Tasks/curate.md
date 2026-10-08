@@ -7,9 +7,12 @@ obsidience:
   reasoning_effort: xhigh
   runbook: '[[Runbooks/curate]]'
   taxonomy_path: wiki/curate
+  triggers:
+  - observations.memory.ready
 ---
 
-Inspect one bounded wiki-maintenance snapshot and activate at most one exact
-accepted maintenance Task named by the Curate Runbook. Success is one grounded
-activation or an honest clean result. Activation records causal provenance in
-the run ledger and never changes either Task's authored hierarchy.
+Curate newly added or materially changed Hindsight observations from their exact
+Source event, or inspect one bounded wiki-maintenance snapshot on the ordinary
+schedule. Compare accepted Knowledge, use the existing Link and maintenance
+Tasks, and keep durable wiki recommendations in owner Review. Activation records
+causal provenance in the run ledger without changing either Task's hierarchy.

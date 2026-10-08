@@ -9,11 +9,9 @@ obsidience:
 
 ## Runtime
 
-Submit one self-contained finding with exact source:// citations and the necessary dates, qualifications and unresolved limits. Required Source read receipts must be complete. Return the finding once; the controller owns deduplication and subsequent publication.
+Submit one self-contained finding with exact source:// citations and the necessary dates, qualifications and unresolved limits. Required Source read receipts must be complete. Copy complete source:// UUIDs from the Tool results without shortening them. A citation rejection identifies the malformed handle and lists exact inspected Sources; correct the handle without dropping the reporting citation or rewriting supported facts. Return the finding once; the controller owns deduplication and subsequent publication.
 
 ## Reference
-
-For Feed Distill, deliver the complete concise item summary once, preserving reporting dates and qualifications and citing the exact activating item plus any linked reporting actually used. The controller retains destination provenance. For Feed Distill, send exactly `title` and `content`; put all `source://` citations inside the Markdown content. There is no top-level `source_citations` argument. A successful handoff completes Distill; it does not claim Knowledge publication, and a changed second summary is rejected.
 
 Deliver one complete supported finding from an authorized Darwin Research execution. Identity and destination come from the runtime.
 
