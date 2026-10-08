@@ -364,7 +364,8 @@ class ConversationRuntime:
                 trace.latency(edge["stage"], monotonic_ns=edge["monotonic_ns"])
             async with foreground_admission("conversation"):
                 return await self._run_admitted_turn(text, generation, user_turn, source=source,
-                                                     speech_sequence=sequence)
+                                                     speech_sequence=sequence,
+                                                     memory_writeback=memory_writeback)
         finally:
             knowledge_activity.emit("admission_completed", [], turn_id=str(user_turn["id"]))
             trace.reset(scope)
@@ -372,7 +373,7 @@ class ConversationRuntime:
     async def _run_admitted_turn(
         self, text: str, generation: int, user_turn: dict, *,
         source: Literal["text", "realtime"],
-        speech_sequence: int | None = None,
+        speech_sequence: int | None = None, memory_writeback: bool = True,
     ) -> dict[str, Any]:
         from ..execution.executor import run_conversation
 
