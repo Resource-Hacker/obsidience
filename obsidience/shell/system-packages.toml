@@ -35,7 +35,6 @@ session = [
     "xorg-xwayland",
 ]
 shell = [
-    "gtk-layer-shell",
     "packagekit",
     "python-cairo",
     "python-gobject",
@@ -49,7 +48,6 @@ shell = [
     "qt6-websockets",
     "quickshell",
     "ttf-jetbrains-mono",
-    "webkit2gtk-4.1",
 ]
 services = [
     "bluez",

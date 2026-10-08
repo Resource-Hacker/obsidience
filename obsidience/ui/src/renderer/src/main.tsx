@@ -5,6 +5,7 @@ import "./styles/globals.css";
 async function render(): Promise<void> {
   const surface = new URLSearchParams(window.location.search).get("surface");
   if (surface) document.documentElement.dataset.obsidienceSurface = surface;
+  // Every Shell page names its surface; the retired Electron workspace is gone.
   const Component = surface === "knowledge"
     ? (await import("./surfaces/knowledge-desktop")).KnowledgeDesktopSurface
     : surface === "stage"
@@ -13,7 +14,11 @@ async function render(): Promise<void> {
     ? (await import("./surfaces/graph-viewer")).GraphPaneSurface
     : surface === "memory" || surface === "code"
     ? (await import("./surfaces/provider-graph")).ProviderGraphSurface
-    : (await import("./App")).default;
+    : null;
+  if (!Component) {
+    console.warn("Unknown Obsidience surface:", surface);
+    return;
+  }
 
   createRoot(document.getElementById("root")!).render(
     <React.StrictMode>

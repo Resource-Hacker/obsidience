@@ -88,13 +88,9 @@ assert.equal(requests.some(row=>row.path.includes('assignments')),false);
 
 def test_native_and_react_explorers_use_dependencies_not_manual_capability_lists():
     native = (PRODUCT / "shell/qml/panes/knowledge/KnowledgePane.qml").read_text()
-    react = (PRODUCT / "ui/src/renderer/src/panes/reader-pane.tsx").read_text()
-    functions = _functions(react, ("cleanLink", "graphProjectionNode", "graphProjectionRoots"), "")
     _node(f"""
 import {{strict as assert}} from 'node:assert';
-import {{createRequire}} from 'node:module';
 import vm from 'node:vm';
-const ts=createRequire({json.dumps(str(PRODUCT / 'ui/package.json'))})('typescript');
 const executive='Agents/Executive/Executive',tool='Tools/web.fetch',skill='Skills/web.fetch',task='Tasks/research/news';
 const alias='@library/Skills/web/fetch';
 const graphNodes=[{{id:executive,title:'Executive',kind:'agent',
@@ -125,20 +121,11 @@ assert.equal(refs.includes('Agents/Darwin/Tools/private'),false);
 assert.equal(refs.includes(alias),true);
 assert.equal(refs.includes(skill),false); // Physical dependency uses the one canonical display alias.
 assert.equal(refs.includes('@library/Tasks/research'),true);
-const reactState={{}};vm.createContext(reactState);
-vm.runInContext(ts.transpileModule({json.dumps(functions)},{{compilerOptions:{{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}}}).outputText,reactState);
-for(const [field,subjectRef] of [['tools','@branch/Tools'],['skills','@branch/Skills'],['tasks','@branch/Tasks']]){{
-  const projected=reactState.graphProjectionRoots(graphNodes[0].dependencies[field],graphNodes.filter(row=>members.includes(row.id)),field);
-  const nativeRows=state.groups[0].tree.find(row=>row.ref===subjectRef).children;
-  assert.deepEqual(Array.from(flatten(projected),row=>row.ref),Array.from(flatten(nativeRows),row=>row.ref));
-}}
 delete graphNodes[0].dependencies;
 state.buildGroups();
 assert.equal(flatten(state.groups[0].tree).some(row=>row.ref===tool),false); // Old checkouts are never fallback authority.
 """)
     assert "identity.checkouts" not in native
-    assert "identity?.checkouts" not in react
-    assert "sourceCheckouts" in react and "setSourceCheckout" in react
 
 
 def test_browser_assignment_api_uses_task_contract_and_keeps_source_scope_separate():
@@ -155,6 +142,3 @@ assert.deepEqual(JSON.parse(calls[1].options.body),{{agent:'executive',assigned:
 await api.setSourceCheckout('obsidience/evidence','researcher',true);
 assert.deepEqual(JSON.parse(calls[2].options.body),{{agent:'researcher',checked_out:true}});
 """)
-    library = (PRODUCT / "ui/src/renderer/src/panes/library-pane.tsx").read_text()
-    assert "toggleAssignment" not in library and "api.setAssignment" not in library
-    assert "openReader" in library

@@ -3,12 +3,11 @@
   "version": "0.1.0",
   "description": "Obsidience modular Hyprland shell and graph-native local-agent harness UI",
   "private": true,
-  "main": "./out/main/index.js",
   "scripts": {
-    "dev": "electron-vite dev",
-    "build": "electron-vite build",
+    "dev": "vite",
+    "build": "vite build",
     "typecheck": "tsc --noEmit -p tsconfig.web.json",
-    "start": "electron-vite preview"
+    "start": "vite preview"
   },
   "devDependencies": {
     "@radix-ui/react-dialog": "^1.1.17",
@@ -24,14 +23,10 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "d3-force-3d": "^3.0.6",
-    "electron": "^42.3.0",
-    "electron-vite": "^5.0.0",
     "lucide-react": "^1.21.0",
     "motion": "^12.42.2",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "react-markdown": "^10.1.0",
-    "remark-gfm": "^4.0.1",
     "tailwind-merge": "^3.6.0",
     "tailwindcss": "^4",
     "three": "^0.185.1",
@@ -42,7 +37,6 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
-      "electron",
       "onnxruntime-node"
     ]
   }

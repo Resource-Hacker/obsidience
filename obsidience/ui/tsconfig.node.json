@@ -4,5 +4,5 @@
     "target": "ES2022", "lib": ["ES2023"], "types": ["node"],
     "strict": false, "skipLibCheck": true, "noEmit": true
   },
-  "include": ["electron.vite.config.ts", "src/main/**/*", "src/preload/**/*", "src/shared/**/*"]
+  "include": ["vite.config.ts"]
 }

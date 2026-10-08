@@ -1497,26 +1497,6 @@ def test_workspace_tiler_reuses_only_attested_omarchy_geometry() -> None:
     assert (SHELL_ROOT / geometry["notice"]).is_file()
 
 
-def test_every_pane_uses_the_generic_surface_placement_contract() -> None:
-    workspace = (
-        PROJECT_ROOT
-        / "obsidience"
-        / "ui"
-        / "src"
-        / "renderer"
-        / "src"
-        / "components"
-        / "themes"
-        / "obsidience"
-        / "workspace"
-        / "workspace-state.ts"
-    ).read_text()
-    assert "surfaceId: SurfaceId" in workspace
-    assert "placePaneOnSurface" in workspace
-    assert "readerSurface" not in workspace
-    assert "ReaderSurface" not in workspace
-
-
 def test_native_qml_uses_the_supported_embedded_javascript_surface() -> None:
     qml_sources = "\n".join(
         path.read_text(encoding="utf-8")

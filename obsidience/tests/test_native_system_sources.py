@@ -61,10 +61,6 @@ assert(!state.visibleRows.some(row=>row.type==='file'));
 state.toggleFolder('@view/evidence');
 assert(!state.visibleRows.some(row=>row.node.name==='incoming'));
 """)
-    fallback = (ROOT / "ui/src/renderer/src/panes/reader-pane.tsx").read_text()
-    initial = re.search(r"const \[expanded, setExpanded\] = useState<Set<string>>\(\(\) => new Set\(\[(.*?)\]\)\);",
-                        fallback, re.S)[1]
-    assert re.findall(r"SOURCE_VIEW\.(\w+)", initial) == ["system", "knowledge"]
 
 
 def test_source_roots_and_manual_import_description_are_always_available():
@@ -232,37 +228,6 @@ assert.deepEqual(JSON.parse(requests.at(-1).body),{agent:'researcher',checked_ou
 """)
 
 
-def test_react_fallback_uses_the_same_physical_system_and_intake_roots():
-    reader = ROOT / "ui/src/renderer/src/panes/reader-pane.tsx"
-    source = reader.read_text()
-    start = source.index("interface SourceTreeNode {")
-    end = source.index("function SourceFolderGlyph(", start)
-    compiler = ROOT / "ui/node_modules/typescript/lib/typescript.js"
-    script = (
-        "import {strict as assert} from 'node:assert';\nimport vm from 'node:vm';\n"
-        + f"import ts from {json.dumps(compiler.as_uri())};\n"
-        + "const state={};vm.createContext(state);\n"
-        + f"vm.runInContext(ts.transpile({json.dumps(source[start:end])}),state);\n"
-        + TREE_SETUP.replace("const state=", "const unusedState=")
-        + "state.buildTree=state.buildSourceTree;\n"
-        + PHYSICAL_TREE_ASSERTIONS
-        + r"""
-assert.deepEqual(plain(state.buildTree([]).map(node=>node.name)),
- ['SYSTEM','KNOWLEDGE MARKDOWN','EVIDENCE','PROJECT FILES']);
-const selected=files.at(-2);
-assert.deepEqual(plain(state.sourcePresentationAncestors(selected)),
- ['@view/knowledge','obsidience/vault/News & Research']);
-assert(!state.sourcePresentationAncestors(files.at(-1)).includes('@view/system'));
-"""
-    )
-    result = subprocess.run(["node", "--input-type=module", "-e", script],
-                            capture_output=True, text=True, timeout=10)
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "const [showAll, setShowAll] = useState(true)" in source
-    assert 'Generated from System evidence · read only' in source
-    assert 'Generated from System evidence · read only' in READER.read_text()
-
-
 def test_native_citations_resolve_exact_source_and_reject_changed_identity_or_selection():
     run_native(READER, ("openArticleLink", "openSourceCitation"), REQUEST_SETUP + r"""
 const commands=[];
@@ -303,79 +268,3 @@ const count=requests.length;
 state.openArticleLink('source://not-a-uuid');state.openArticleLink(citation+'?redirect=other');
 state.openArticleLink('https://example.org');assert.equal(requests.length,count);
 """)
-
-
-def test_react_citation_resolver_retains_exact_source_and_stale_selection_guards():
-    source = (ROOT / "ui/src/renderer/src/panes/reader-pane.tsx").read_text()
-    method = re.search(r"^  async function openSourceCitation\([^\n]*\) \{.*?^  \}",
-                       source, re.M | re.S)[0]
-    compiler = ROOT / "ui/node_modules/typescript/lib/typescript.js"
-    script = (
-        "import {strict as assert} from 'node:assert';\nimport vm from 'node:vm';\n"
-        + f"import ts from {json.dumps(compiler.as_uri())};\n"
-        + r"""
-const requests=[],opened=[],errors=[];
-const state={API_BASE:'http://127.0.0.1:8765',sourceRequest:{current:1},citationRequest:{current:0},
- setError(error){errors.push(error);},openSourceFile(path){opened.push(path);},
- fetch(url){return new Promise(resolve=>requests.push({url,respond(data){resolve({ok:true,json:async()=>data});}}));}};
-vm.createContext(state);
-"""
-        + f"vm.runInContext(ts.transpile({json.dumps(method)}),state);\n"
-        + r"""
-const id='01234567-89ab-cdef-0123-456789abcdef',citation='source://'+id;
-const source={id,citation,immutable:true,source_path:'obsidience/state/system/snapshots/identity/2026-09-10/evidence--'+id+'.md'};
-let pending=state.openSourceCitation(citation);requests.at(-1).respond(source);await pending;
-assert.deepEqual(opened,[source.source_path]);
-assert.equal(requests[0].url,'http://127.0.0.1:8765/api/sources/'+id);
-for(const invalid of [{...source,id:'wrong'},{...source,citation:'wrong'},
- {...source,source_path:'obsidience/evidence/../vault/other.md'}]){
- pending=state.openSourceCitation(citation);requests.at(-1).respond(invalid);await pending;
- assert.equal(opened.length,1);assert.match(errors.at(-1),/identity/);
-}
-pending=state.openSourceCitation(citation);state.sourceRequest.current++;
-requests.at(-1).respond(source);await pending;assert.equal(opened.length,1);
-const old=state.openSourceCitation(citation),oldRequest=requests.at(-1);
-pending=state.openSourceCitation(citation);requests.at(-1).respond(source);await pending;
-oldRequest.respond(source);await old;assert.equal(opened.length,2);
-const count=requests.length;await state.openSourceCitation(citation+'?other');assert.equal(requests.length,count);
-"""
-    )
-    result = subprocess.run(["node", "--input-type=module", "-e", script],
-                            capture_output=True, text=True, timeout=10)
-    assert result.returncode == 0, result.stdout + result.stderr
-
-
-def test_markdown_citation_is_an_internal_button_and_remote_links_remain_inert():
-    markdown = ROOT / "ui/src/renderer/src/components/themes/obsidience/workspace/article-markdown.tsx"
-    packages = ROOT / "ui/node_modules"
-    script = (
-        "import {strict as assert} from 'node:assert';\n"
-        + f"import ts from {json.dumps((packages / 'typescript/lib/typescript.js').as_uri())};\n"
-        + f"import React from {json.dumps((packages / 'react/index.js').as_uri())};\n"
-        + f"import {{renderToStaticMarkup}} from {json.dumps((packages / 'react-dom/server.node.js').as_uri())};\n"
-        + f"let source={json.dumps(markdown.read_text())};\n"
-        + f"const packages={json.dumps(packages.as_uri())};\n"
-        + r"""
-let output=ts.transpileModule(source,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,
- module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
-for(const [name,path] of [['react/jsx-runtime','react/jsx-runtime.js'],
- ['react-markdown','react-markdown/index.js'],['remark-gfm','remark-gfm/index.js']]){
- output=output.replaceAll('"'+name+'"','"'+packages+'/'+path+'"');
-}
-const {ArticleMarkdown}=await import('data:text/javascript;base64,'+Buffer.from(output).toString('base64'));
-const citation='source://01234567-89ab-cdef-0123-456789abcdef',opened=[];
-const props={content:'[Immutable evidence]('+citation+') [Remote](https://example.org)',
- onSourceNavigate(value){opened.push(value);}};
-const markup=renderToStaticMarkup(React.createElement(ArticleMarkdown,props));
-assert.match(markup,/<button[^>]*>Immutable evidence<\/button>/);
-assert(!markup.includes('href='));assert.match(markup,/<span[^>]*>Remote<\/span>/);
-const markdownElement=ArticleMarkdown(props).props.children;
-const button=markdownElement.props.components.a({href:citation,children:'Immutable evidence'});
-button.props.onClick();assert.deepEqual(opened,[citation]);
-assert.equal(markdownElement.props.urlTransform('javascript:alert(1)'),'');
-assert.equal(markdownElement.props.urlTransform('source://not-an-id'),'');
-"""
-    )
-    result = subprocess.run(["node", "--input-type=module", "-e", script],
-                            capture_output=True, text=True, timeout=10)
-    assert result.returncode == 0, result.stdout + result.stderr
