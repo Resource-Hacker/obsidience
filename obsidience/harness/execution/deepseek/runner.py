@@ -110,6 +110,29 @@ def _recalled(row):
     return {**item, 'text': row['text']}
 
 
+def prefetch_recall(agent_ref, query):
+    """Start the Executive hook's exact Hindsight recall at admission.
+
+    The owner request is known before preparation and packet compile, so its
+    recall can overlap them. The agent hook still requests memory at the same
+    point and adopts this result only for the identical Agent and query; its
+    text, prompt position and the recall's own timeout are unchanged.
+    """
+    from ...memory.hindsight import MEMORY
+    return agent_ref, query, asyncio.create_task(
+        MEMORY.recall(agent_ref, query), name='obsidience-executive-recall')
+
+
+async def discard_recall(prefetch):
+    """Cancel and join an admission recall the activation did not adopt."""
+    if prefetch is None:
+        return
+    task = prefetch[2]
+    if not task.done():
+        task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+
+
 def native_schema(schema):
     """Project the code-owned schema to DeepSeek's documented supported vocabulary.
 
@@ -437,8 +460,15 @@ async def run_native_session(task, model, messages, allowed, ctx, agent_name, ef
             elif method == 'memory.recall':
                 from ...memory.hindsight import MEMORY
                 recall_started = time.perf_counter()
-                value = ({'status': 'disabled', 'memories': []} if evaluation is not None else
-                         await MEMORY.recall(ctx['_agent_ref'], message['params']['query']))
+                query = message['params']['query']
+                prefetched = ctx.pop('_memory_recall', None)
+                if evaluation is not None:
+                    value = {'status': 'disabled', 'memories': []}
+                elif prefetched is not None and prefetched[:2] == (ctx['_agent_ref'], query):
+                    # Started at admission; duration_ms below is the remaining wait.
+                    value = await prefetched[2]
+                else:
+                    value = await MEMORY.recall(ctx['_agent_ref'], query)
                 from .. import activity
                 refs = [row['ref'] for row in value.get('memories', [])]
                 if refs:

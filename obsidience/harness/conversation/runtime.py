@@ -382,10 +382,17 @@ class ConversationRuntime:
         self._publish_active_turn()
         activity_completion: dict = {}
         refresh_context = False
+        recall = None
         try:
             admission_started = time.monotonic()
             task, params, event = admit_executive(text, "voice" if source == "realtime" else "text")
             trace.latency("admission", duration_ms=(time.monotonic() - admission_started) * 1000)
+            from ..execution.deepseek.commands import recognize_command
+            from ..execution.deepseek.runner import discard_recall, prefetch_recall
+            if recognize_command(text, ["lights.set", "media.pause", "task.complete"]) is None:
+                # The native memory hook recalls for this exact request after the
+                # agent starts; begin it now so it overlaps preparation and compile.
+                recall = prefetch_recall(task.ref, text.strip())
             self._last_task_ref = task.ref
             preparation_started = time.monotonic()
             context = await self.prepare_conversation_context(user_turn, context_task_ref=task.ref)
@@ -416,6 +423,7 @@ class ConversationRuntime:
                 steering=inbox,
                 activity_completion=activity_completion,
                 verified_command=verified_command,
+                memory_recall=recall,
             )
             self.record_prompt_usage(result, request_text=text)
             if generation != self._generation:
@@ -464,6 +472,8 @@ class ConversationRuntime:
             )
             return {"status": "failed", "summary": message}
         finally:
+            if recall is not None:
+                await discard_recall(recall)
             if activity_completion:
                 knowledge_activity.emit(**activity_completion)
             if inbox is not None:

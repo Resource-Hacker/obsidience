@@ -1774,7 +1774,8 @@ async def _run_execution(task: Note, depth: int = 0, reasoning_effort: str | Non
                    interruption_event: asyncio.Event | None = None,
                    activity_completion: dict | None = None,
                    verified_command=None,
-                   steering=None) -> dict:
+                   steering=None,
+                   memory_recall=None) -> dict:
     if task.ref.startswith(("_", ".")) or task.meta.get("article_status") == "deprecated":
         return {"task_ref": task.ref, "status": "blocked",
                 "summary": "Only an accepted active Task definition may execute."}
@@ -2011,6 +2012,9 @@ async def _run_execution(task: Note, depth: int = 0, reasoning_effort: str | Non
         ctx["_receipt_covered"] = True
         if task.kind == "agent" and params.get("event") == "voice.activation":
             ctx["_verified_command"] = verified_command
+        if task.kind == "agent" and memory_recall is not None:
+            # The caller owns this admission recall; the native hook may adopt it.
+            ctx["_memory_recall"] = memory_recall
         if steering is not None:
             if not interactive or not params.get("reply_to_turn_id") or steering.turn_id != params["reply_to_turn_id"]:
                 raise ValueError("Steering requires the exact interactive conversation turn")
