@@ -217,7 +217,7 @@ let now=1000,out=[];
 const socket=id=>({id,status:1,active:true,sendTextMessage:message=>out.push({to:id,...JSON.parse(message)})});
 const owner=socket('owner'),other=socket('other'),adapter=socket('adapter'),guard=socket('guard');
 const context={WebSocket:{Open:1},Date:{now:()=>now},eventSchema:'obsidience.shell.event.v1',
-  clients:[owner,other,adapter,guard],windowAdapterSocket:adapter,sessionLocked:false,
+  clients:[owner,other,adapter,guard],windowAdapterSocket:adapter,adapterClients:[adapter],sessionLocked:false,
   lockGeneration:2,clickTokens:[],clickRequests:[],clickTokenLimit:4096,clickRequestLifetimeMs:6000,
   windowRefreshRequests:[],graphStreams:[],moduleRestorePending:null,moduleWindowBindings:{},
   surfaceLayout:{surface:id=>['samsung','usb-c','dp-4'].includes(id)},windowStates:{samsung:{
@@ -298,7 +298,7 @@ for(const change of ['revision','title','geometry','visibility','removed','sleep
  assert.equal(out.at(-1).delivery,'uncertain');
 }
 context.handleWindowCommand(owner,request('adapter-replaced'));
-const replacement=socket('replacement');context.clients.push(replacement);
+const replacement=socket('replacement');context.clients.push(replacement);context.adapterClients.push(replacement);
 context.handleWindowCommand(replacement,{type:'window.adapter.subscribe'});
 assert.equal(context.clickRequests.length,0);assert(!check('adapter-replaced'));
 assert.equal(adapter.active,false);

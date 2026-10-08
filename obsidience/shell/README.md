@@ -224,6 +224,14 @@ adapter translates Hyprland state into the bounded window model and accepts the
 single validated native command path; the bar and panes never call Hyprland
 directly.
 
+The Shell command socket (`127.0.0.1:8768`) admits only clients presenting the
+per-start `command.token` from `$XDG_RUNTIME_DIR/obsidience-shell`. The window
+adapter alone also reads `adapter.token`, which is never served over HTTP; only
+a socket authenticated with it may subscribe as the adapter, and so publish the
+Scene and acknowledge adapter commands. Malformed, unknown or refused commands
+receive an `error` event carrying the command's `token` and a `reason` instead
+of being dropped silently.
+
 ## Live development session
 
 Automatic QML file reload is disabled with Quickshell's supported `watchFiles`

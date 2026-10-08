@@ -27,6 +27,8 @@ QtObject {
     property var moduleRestorePending: null
     property int moduleRestoreSequence: 0
     property var windowAdapterSocket: null
+    // Sockets that presented the adapter credential; only these may subscribe.
+    property var adapterClients: []
     property int lockGeneration: 0
     property var clickTokens: []
     property var clickRequests: []
@@ -368,6 +370,15 @@ QtObject {
         }
     }
 
+    // Callers get an explicit refusal instead of waiting out a timeout.
+    function commandError(socket, command, reason) {
+        const valid = command && typeof command === "object"
+        send(socket, {"schema": eventSchema, "type": "error",
+            "token": valid ? cleanDragToken(command.token) : "",
+            "command_type": valid ? cleanWindowText(command.type, 64) : "",
+            "reason": reason})
+    }
+
     function windowRefreshResult(socket, command, success, reason, revisions) {
         send(socket, {"schema": eventSchema, "type": "window.state.refresh.result",
             "token": command.token, "surface_id": "", "window_id": "",
@@ -383,6 +394,7 @@ QtObject {
             pending.socket !== socket && pending.adapter !== socket)
         for (const peer of graphStreams.filter(peer => peer.socket === socket)) removeGraphStream(peer.id)
         clients = clients.filter(candidate => candidate !== socket)
+        adapterClients = adapterClients.filter(candidate => candidate !== socket)
         for (const pending of clickRequests) {
             if (pending.adapter === socket && pending.socket !== socket) {
                 windowClickResult(pending.socket, pending.command, false,
@@ -417,7 +429,11 @@ QtObject {
     }
 
     function handleGraphStream(socket, command) {
-        if (typeof command.id !== "string" || !/^[a-f0-9-]{36}$/.test(command.id)) return
+        if (typeof command.id !== "string" || !/^[a-f0-9-]{36}$/.test(command.id)
+                || !["join", "leave", "signal"].includes(command.action)) {
+            commandError(socket, command, "malformed_command")
+            return
+        }
         const current = graphStreams.find(peer => peer.id === command.id && peer.socket === socket)
         if (command.action === "leave") { if (current) removeGraphStream(current.id); return }
         if (command.action === "join") {
@@ -1115,6 +1131,10 @@ QtObject {
             return true
         }
         if (command.type === "window.adapter.subscribe") {
+            if (adapterClients.indexOf(socket) < 0) {
+                commandError(socket, command, "adapter_credential_required")
+                return true
+            }
             if (windowAdapterSocket && windowAdapterSocket !== socket) {
                 invalidateClickRequests("shell_scene_command_unavailable")
                 windowAdapterSocket.active = false
@@ -1126,10 +1146,12 @@ QtObject {
         }
         if (command.type === "window.state.publish") {
             if (socket !== windowAdapterSocket) {
+                commandError(socket, command, "not_window_adapter")
                 return true
             }
             const state = cleanWindowState(command)
             if (!state) {
+                commandError(socket, command, "invalid_window_state")
                 return true
             }
             windowStates = Object.assign(
@@ -1438,7 +1460,7 @@ QtObject {
         return profiles
     }
 
-    function handleGraphCommand(command) {
+    function handleGraphCommand(socket, command) {
         if (command.type === "graph.viewer.configure" && ["memory", "code"].includes(command.view)) {
             const supplied = command.settings || {}
             const settings = Object.assign({}, providerGraphViews[command.view])
@@ -1470,8 +1492,14 @@ QtObject {
             }
             return true
         }
+        if (["graph.selection.publish", "graph.state.request", "graph.thinking.test",
+                "graph.profile.select", "graph.profile.create", "graph.tuning.preview",
+                "graph.tuning.save", "graph.state.publish"].indexOf(command.type) < 0) {
+            return false
+        }
         const graphId = cleanGraphId(command.graph_id)
         if (!graphId) {
+            commandError(socket, command, "invalid_graph_id")
             return true
         }
         if (command.type === "graph.selection.publish") {
@@ -1610,15 +1638,23 @@ QtObject {
 
     function handleCommand(socket, text) {
         if (typeof text !== "string" || text.length < 2 || text.length > 65536) {
+            commandError(socket, null, "malformed_command")
             return
         }
         let command
         try {
             command = JSON.parse(text)
         } catch (error) {
+            commandError(socket, null, "malformed_command")
             return
         }
-        if (!command || command.schema !== commandSchema) {
+        if (!command || typeof command !== "object" || Array.isArray(command)
+                || typeof command.type !== "string") {
+            commandError(socket, null, "malformed_command")
+            return
+        }
+        if (command.schema !== commandSchema) {
+            commandError(socket, command, "unsupported_schema")
             return
         }
         if (command.type === "graph.stream") { handleGraphStream(socket, command); return }
@@ -1633,7 +1669,7 @@ QtObject {
             return
         }
         if (typeof command.type === "string" && command.type.startsWith("graph.")
-                && handleGraphCommand(command)) {
+                && handleGraphCommand(socket, command)) {
             return
         }
         if (typeof command.type === "string"
@@ -1646,11 +1682,16 @@ QtObject {
             const selection = command.selection
             const view = selection ? (selection.kind === "graph" ? selection.view : "")
                 : command.pane_id === "memory" || command.pane_id === "code" ? command.pane_id : graphViewerView
-            if (!["knowledge", "memory", "code"].includes(view)) return
+            if (!["knowledge", "memory", "code"].includes(view)) {
+                commandError(socket, command, "invalid_selection")
+                return
+            }
             const placement = placementFor("knowledge-graph")
-            if (!placement) return
-            if (command.type === "pane.present"
-                    && !presentPlacementOnSurface(placement, placement.surfaceId)) return
+            if (!placement || (command.type === "pane.present"
+                    && !presentPlacementOnSurface(placement, placement.surfaceId))) {
+                commandError(socket, command, "pane_unavailable")
+                return
+            }
             // Header selection changes only the existing viewer, not placement
             // or native focus. Old pane IDs remain aliases, never extra windows.
             graphViewerView = view
@@ -1665,10 +1706,13 @@ QtObject {
                 settingsSelection = {kind: "settings", section: command.selection.section}
                 settingsSelectionRevision += 1
                 broadcast(settingsState())
+            } else {
+                commandError(socket, command, "pane_unavailable")
             }
             return
         }
         if (command.pane_id !== "reader") {
+            commandError(socket, command, "unknown_command")
             return
         }
         if (command.type === "pane.dismiss") {
@@ -1676,35 +1720,49 @@ QtObject {
             broadcast(readerState())
             return
         }
-        if (command.type !== "pane.present") return
+        if (command.type !== "pane.present") {
+            commandError(socket, command, "unknown_command")
+            return
+        }
         const selection = cleanReaderSelection(command.selection)
-        if (!selection) return
+        if (!selection) {
+            commandError(socket, command, "invalid_selection")
+            return
+        }
         readerSelection = selection
         presentPlacementOnSurface(readerPlacement, readerPlacement.surfaceId)
         broadcast(readerState())
     }
 
     // Browsers can open this loopback socket with any subprotocol; only a
-    // client that read the user-only runtime token may observe or command.
-    function authenticated(socket) {
+    // client that read a user-only runtime token may observe or command. The
+    // separate adapter token (never served over HTTP) adds the adapter role.
+    function clientRole(socket) {
         const match = /[?&]token=([0-9a-f]{64})(?:&|$)/.exec(String(socket.url))
-        if (ShellCommandToken.value && match && match[1] === ShellCommandToken.value) {
-            return true
+        const token = match ? match[1] : ""
+        if (token && token === ShellCommandToken.adapterValue) {
+            return "adapter"
+        }
+        if (token && token === ShellCommandToken.value) {
+            return "command"
         }
         console.warn("Shell command server: refused a client without the current token")
-        return false
+        return ""
     }
 
     function acceptClient(socket) {
-        if (!socket || clients.length >= 32
-                || socket.negotiatedSubprotocol !== subprotocol
-                || !authenticated(socket)) {
+        const role = socket && clients.length < 32
+            && socket.negotiatedSubprotocol === subprotocol ? clientRole(socket) : ""
+        if (!role) {
             if (socket) {
                 socket.active = false
             }
             return
         }
         clients = clients.concat([socket])
+        if (role === "adapter") {
+            adapterClients = adapterClients.concat([socket])
+        }
         socket.textMessageReceived.connect(message => handleCommand(socket, message))
         socket.statusChanged.connect(status => {
             if (status === WebSocket.Closed || status === WebSocket.Error) {

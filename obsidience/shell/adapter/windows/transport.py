@@ -12,7 +12,7 @@ from collections.abc import Callable
 
 from websockets.sync.client import connect
 
-from ...command_token import command_url
+from ...command_token import adapter_url, command_url
 from .model import WindowStateStore
 
 LOGGER = logging.getLogger(__name__)
@@ -91,7 +91,7 @@ class ShellWindowTransport:
         while not self._stop.is_set():
             try:
                 with connect(
-                    command_url("ws://127.0.0.1:8768"),
+                    adapter_url("ws://127.0.0.1:8768"),
                     subprotocols=["obsidience.shell.v1"],
                     open_timeout=2,
                     close_timeout=1,
@@ -138,6 +138,10 @@ class ShellWindowTransport:
         ):
             return
         event_type = event.get("type")
+        if event_type == "error":
+            LOGGER.warning("Shell refused %.64s: %.64s",
+                           event.get("command_type"), event.get("reason"))
+            return
         if event_type == "window.state.refresh.request":
             self._handle_refresh(socket, event)
             return
