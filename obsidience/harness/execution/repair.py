@@ -352,9 +352,23 @@ def verified_retained_effects(note: Note, run_id: str) -> dict:
     return retained
 
 
+def retired_model_evidence(note: Note) -> dict | None:
+    """A model.added occurrence whose model left the catalog can never run."""
+    from ..models.runtime import MODELS
+
+    params = note.meta.get("params") or {}
+    model_id = params.get("model_id")
+    if (note.ref != "Tasks/research/model" or note.meta.get("status") not in {"pending", "failed"}
+            or params.get("event") != "model.added" or not isinstance(model_id, str) or model_id in MODELS):
+        return None
+    return {"disposition": "retired_model", "model_id": model_id,
+            "model_fingerprint": params.get("model_fingerprint"),
+            "reason": "The event model is no longer registered; no benchmark or configuration can apply. "
+                      "Earlier receipts and manifests are retained and no Tool was replayed."}
+
+
 def settlement_evidence(note: Note) -> dict | None:
     from . import scheduler
-    from ..models.runtime import MODELS
 
     if note.meta.get("status") != "failed":
         return None
@@ -378,8 +392,7 @@ def settlement_evidence(note: Note) -> dict | None:
                 and scheduler._retry_binding_matches(note, scheduler._retry_trace(run) or [])):
             return {**retained[0], "reason": "Distill delivered its verified Source Inbox before interruption; Ingest owns publication and no research or handoff is replayed."}
     elif note.ref == "Tasks/research/model":
-        if retained and params.get("model_id") not in MODELS:
-            return {**retained[0], "disposition": "retired_model", "reason": "The event model is no longer registered; its manifest is retained and no benchmark/configuration was applied."}
+        return retired_model_evidence(note)
     else:
         evidence = scheduler._maintenance_creator_evidence(note, params)
         if evidence and scheduler._maintenance_failure_clear(run, params, required=True):

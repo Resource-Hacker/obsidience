@@ -915,6 +915,20 @@ def settle_resolved_occurrence(note: Note) -> dict | None:
         return None
 
 
+def settle_retired_model_occurrence(note: Note) -> dict | None:
+    """Close model.added work for a model no longer in the catalog before admission."""
+    from .repair import retired_model_evidence
+
+    if retired_model_evidence(note) is None:
+        return None
+    try:
+        return _settle_occurrence(note, kind="repair_settlement",
+            classify=lambda params: retired_model_evidence(note),
+            summary_for=lambda evidence: evidence["reason"])
+    except (ValueError, TypeError, KeyError, AttributeError, OSError):
+        return None
+
+
 def foreground_pending() -> bool:
     """Controller demand, never a model-supplied Task parameter."""
     return _foreground_admissions > 0
@@ -1888,7 +1902,8 @@ def due_tasks(notes: list[Note] | None = None) -> list:
     for note in notes:
         if note.kind != "task" or note.ref in _running:
             continue
-        if settle_resolved_occurrence(note) or settle_maintenance_occurrence(note):
+        if (settle_resolved_occurrence(note) or settle_maintenance_occurrence(note)
+                or settle_retired_model_occurrence(note)):
             # Attest invalidated input before admitting an independent successor.
             continue
         if _promote_independent_event(note):
