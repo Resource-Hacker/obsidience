@@ -14,6 +14,7 @@ from obsidience.harness.computer.capture import (
 )
 from obsidience.harness.computer.grounding import GroundingError, process_start_time
 from obsidience.harness.host.scene import (
+    HANDLE,
     SCENE,
     SURFACE_IDS,
     SceneSnapshot,
@@ -27,7 +28,7 @@ from obsidience.harness.host.scene import (
 
 PRIVATE_IMAGE_FIELD = "_private_image_png"
 PRIVATE_OBSERVATION_FIELD = "_private_observation_lease"
-_TARGET_KINDS = {"focused", "application", "pane"}
+_TARGET_KINDS = {"focused", "attention", "application", "pane"}
 # Until a navigation commits its document title, the browser window title is
 # the bare URL (e.g. "youtube.com/results?search_query=..."). A capture then
 # shows a blank page and costs a second observation round. A new tab is
@@ -54,19 +55,28 @@ def _text(value: object, field: str, maximum: int) -> str:
 
 
 def _request(args: dict[str, Any]) -> tuple[str, str, str, str, str]:
-    if set(args) != {"target", "query"} or not isinstance(args["target"], dict):
+    # An omitted target is what the owner is looking at now.
+    target = args.get("target", {"kind": "attention"})
+    if "query" not in args or set(args) - {"target", "query"} or not isinstance(target, dict):
         raise _ObserveFailure(
-            "observation_failed", "computer.observe requires target and query."
+            "observation_failed", "computer.observe requires query and an optional target."
         )
-    target = args["target"]
-    if set(target) - {"kind", "name", "surface", "title"}:
+    if set(target) - {"kind", "name", "surface", "title", "handle"}:
         raise _ObserveFailure(
             "observation_failed", "computer.observe received an unknown target field."
         )
+    query = _text(args.get("query"), "query", 500)
+    if "handle" in target:
+        handle = target["handle"]
+        if set(target) != {"handle"} or not isinstance(handle, str) or HANDLE.fullmatch(handle) is None:
+            raise _ObserveFailure(
+                "observation_failed", "A handle target is exactly {handle: <w-number from the Scene>}."
+            )
+        return "handle", handle, "", query, ""
     kind = target.get("kind")
     if kind not in _TARGET_KINDS:
         raise _ObserveFailure(
-            "observation_failed", "target kind must be focused, application, or pane."
+            "observation_failed", "target kind must be attention, focused, application, or pane."
         )
     title = target.get("title", "")
     if "title" in target and (
@@ -80,10 +90,10 @@ def _request(args: dict[str, Any]) -> tuple[str, str, str, str, str]:
     if not isinstance(surface, str):
         raise _ObserveFailure("observation_failed", "target Surface is invalid.")
 
-    if kind == "focused":
+    if kind in {"focused", "attention"}:
         if "name" in target:
             raise _ObserveFailure(
-                "observation_failed", "a focused target must omit name."
+                "observation_failed", f"a {kind} target must omit name."
             )
         name = ""
     else:
@@ -96,7 +106,7 @@ def _request(args: dict[str, Any]) -> tuple[str, str, str, str, str]:
             raise _ObserveFailure(
                 "observation_failed", f"target name must contain 1-{limit} characters."
             )
-    return kind, name, surface, _text(args.get("query"), "query", 500), title
+    return kind, name, surface, query, title
 
 
 def _resolve(
@@ -105,15 +115,21 @@ def _resolve(
     try:
         target = SCENE.resolve_semantic(kind, name, surface_id, title=title, prefer_active=True)
     except SceneTargetNotFound as exc:
-        raise _ObserveFailure("target_missing", "No current Shell target matched.") from exc
+        raise _ObserveFailure(
+            "target_missing",
+            "That handle no longer exists; use a handle from the current Scene."
+            if kind == "handle" else
+            "No visible recently focused application window exists." if kind in {"focused", "attention"}
+            else "No current Shell target matched.",
+        ) from exc
     except SceneTargetAmbiguous as exc:
-        titles = getattr(exc, "titles", [])
+        candidates = getattr(exc, "candidates", [])
         raise _ObserveFailure(
             "target_ambiguous",
-            "The semantic target matched multiple Shell windows"
-            + (f": {titles}" if titles else "")
-            + ". For what the owner is viewing now, use target kind focused; to read one of these"
-            " windows, repeat with its exact title.",
+            "The target matched multiple Shell windows"
+            + (": " + "; ".join(candidates) if candidates else "")
+            + ". For what the owner is viewing now, omit the target; to read one of these"
+            " windows, repeat with target {handle: <its handle>}.",
         ) from exc
     except SceneUnavailable as exc:
         raise _ObserveFailure("stale_scene", "The Shell scene changed.") from exc
@@ -137,7 +153,7 @@ def _resolve(
 
 def _await_page_title(kind: str, name: str, surface_id: str, title: str, cancel=None) -> None:
     """Briefly let a browser commit its navigated page before capture."""
-    if kind != "application" or title:
+    if kind == "pane" or title:
         return
     deadline = time.monotonic() + PAGE_TITLE_WAIT_SECONDS
     token = SCENE.change_token()
@@ -263,7 +279,7 @@ def _failure(error: _ObserveFailure) -> dict[str, object]:
                     "scene_unavailable",
                     "stale_scene",
                     "capture_unavailable",
-                    # Its message names the corrected target (focused or an exact title).
+                    # Its message lists the candidate handles.
                     "target_ambiguous",
                 },
             },

@@ -9,7 +9,7 @@ from typing import Any
 from obsidience.harness.capabilities.window.command import (
     COMMAND_SCHEMA, EffectNotObserved, ShellCommandUnavailable, _send_command, activate,
 )
-from obsidience.harness.host.scene import SCENE, SceneTarget
+from obsidience.harness.host.scene import HANDLE, SCENE, SceneTarget
 from .applications import canonical_application_id, matches_application_window
 from .capture import ScreenCapture, _png_size, capture_screen
 from .grounding import process_start_time
@@ -86,10 +86,17 @@ def act_computer(args: dict[str, Any], context: dict[str, Any]) -> dict[str, Any
         raise ComputerError("This Task reached its bounded computer action limit.")
     context["_computer_act_attempts"] = attempts + 1
     context["_computer_act_step_observed"] = False
-    if set(args) - {"scope", "application", "action", "target", "point", "postcondition"} or args.get("action", "click") != "click":
-        raise ComputerError("computer.act accepts one click with scope, application, target, image point and optional postcondition.")
-    application = _text(args.get("application"), "application", 256)
-    application = canonical_application_id(application) or application
+    if set(args) - {"scope", "application", "handle", "action", "target", "point", "postcondition"} or args.get("action", "click") != "click":
+        raise ComputerError("computer.act accepts one click with scope, application or handle, target, image point and optional postcondition.")
+    handle = args.get("handle")
+    if handle is not None and (not isinstance(handle, str) or HANDLE.fullmatch(handle) is None):
+        raise ComputerError("handle must be the observed window's Scene handle.")
+    application = ""
+    if handle is None and "application" not in args:
+        raise ComputerError("computer.act requires the observed window's application or handle.")
+    if "application" in args:
+        application = _text(args.get("application"), "application", 256)
+        application = canonical_application_id(application) or application
     label = _text(args.get("target"), "target", 128)
     postcondition = _text(args.get("postcondition", label), "postcondition", 500)
     point = args.get("point")
@@ -111,9 +118,12 @@ def act_computer(args: dict[str, Any], context: dict[str, Any]) -> dict[str, Any
     if attempts and capture.captured_at_unix_ns <= context.get("_computer_act_post_capture_ns", 0):
         raise ComputerError("A new observation after the previous action is required for the next step.")
     _check_cancel(context)
-    if (application != target.window.app_id
+    if handle is not None and handle != target.window.handle:
+        raise ComputerError("The requested handle does not match the observed window.")
+    if (application and application != target.window.app_id
             and not matches_application_window(application, target.window.app_id, target.window.title)):
         raise ComputerError("The requested application does not match the observed window.")
+    application = application or target.window.semantic_name
     # The observation already selected one exact window. Resolving its app name
     # again loses that identity when another window of the same app exists.
     SCENE.refresh(cancel_event=context.get("_capability_cancel_event"))
@@ -138,7 +148,8 @@ def act_computer(args: dict[str, Any], context: dict[str, Any]) -> dict[str, Any
     activated = not target.active
     if not target.active:
         # Foreground delivery uses the existing exact activation command owner.
-        focused = activate({"target": {"kind": "application", "name": application}},
+        focused = activate({"target": {"handle": handle} if handle is not None
+                                       else {"kind": "application", "name": application}},
                            observed_target=target)
         if focused.get("status") != "completed":
             raise ComputerError("The exact application could not be activated; no click was sent.")

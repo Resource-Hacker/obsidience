@@ -190,9 +190,11 @@ def test_focused_and_named_pane_selectors_use_the_same_scene(monkeypatch):
         {},
     )
 
-    assert calls == ["1800000c", "1800000c"]
-    assert focused["observation"]["focused"] is True
-    assert focused["observation"]["target"] == pane["observation"]["target"]
+    # A focused Obsidience pane is not what the owner is looking at: focused
+    # resolves to the attention application, absent here, so only the named
+    # pane is captured.
+    assert calls == ["1800000c"]
+    assert focused["observation"]["failure"]["code"] == "target_missing"
     assert pane["observation"]["target"]["kind"] == "pane"
     assert observe.PRIVATE_OBSERVATION_FIELD not in focused
     assert observe.PRIVATE_OBSERVATION_FIELD not in pane

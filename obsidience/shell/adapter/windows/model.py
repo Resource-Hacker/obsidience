@@ -61,6 +61,9 @@ class ApplicationWindow:
     window_kind: str = "application"
     pane_id: str = ""
     stable_id: str = ""
+    # Recency among external application windows across all Surfaces:
+    # 0 is the most recently focused; -1 has none (module panes, no history).
+    focus_rank: int = -1
 
     def normalized(self) -> ApplicationWindow | None:
         window_id = clean_text(self.window_id, 128)
@@ -86,6 +89,14 @@ class ApplicationWindow:
             if isinstance(self.pid, int) and not isinstance(self.pid, bool)
             else 0
         )
+        focus_rank = (
+            self.focus_rank
+            if window_kind == "application"
+            and isinstance(self.focus_rank, int)
+            and not isinstance(self.focus_rank, bool)
+            and 0 <= self.focus_rank < MAX_WINDOWS
+            else -1
+        )
         return ApplicationWindow(
             window_id=window_id,
             app_id=app_id,
@@ -97,6 +108,7 @@ class ApplicationWindow:
             window_kind=window_kind,
             pane_id=pane_id,
             stable_id=stable_id,
+            focus_rank=focus_rank,
         )
 
 
@@ -114,6 +126,8 @@ class SurfaceWindowState:
             record = asdict(window)
             if not record["stable_id"]:
                 record.pop("stable_id")
+            if record["focus_rank"] < 0:
+                record.pop("focus_rank")
             windows.append(record)
         return {
             "schema": "obsidience.shell.command.v1",

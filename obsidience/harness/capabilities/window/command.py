@@ -10,6 +10,7 @@ from websockets.sync.client import connect
 
 from obsidience.harness.host.scene import (
     EVENT_SCHEMA,
+    HANDLE,
     SCENE,
     SHELL_SUBPROTOCOL,
     SHELL_URL,
@@ -49,7 +50,11 @@ def _failure(
     messages = {
         "scene_unavailable": "The current Shell scene is unavailable.",
         "target_missing": "No current Shell target matched that exact name.",
-        "target_ambiguous": "That name matches more than one current Shell target.",
+        "handle_missing": "That handle no longer exists; use a handle from the current Scene.",
+        "target_ambiguous": (
+            "That name matches more than one current Shell target. "
+            "Repeat with target {handle: <its handle>} from candidates."
+        ),
         "invalid_destination": "The destination Surface or tile is invalid.",
         "stale_scene": "The Shell scene changed before the result could be verified.",
         "effect_not_observed": (
@@ -76,6 +81,11 @@ def _failure(
 
 
 def _target(value: object) -> tuple[str, str, str]:
+    if isinstance(value, dict) and "handle" in value:
+        handle = value["handle"]
+        if set(value) != {"handle"} or not isinstance(handle, str) or HANDLE.fullmatch(handle) is None:
+            raise InvalidTarget("invalid target")
+        return "handle", handle, ""
     if not isinstance(value, dict) or set(value) - {"kind", "name", "surface"}:
         raise InvalidTarget("invalid target")
     kind = value.get("kind")
@@ -215,6 +225,25 @@ def _send_command(
     raise EffectNotObserved("command result was not observed")
 
 
+def _target_failure(kind: str, error: LookupError) -> dict[str, object]:
+    """Nothing was dispatched: a stale handle or an ambiguous name may be corrected."""
+    if isinstance(error, SceneTargetAmbiguous):
+        failure = _failure("target_ambiguous", correction_allowed=True)
+        failure["candidates"] = getattr(error, "candidates", [])
+        return failure
+    if kind == "handle":
+        return _failure("handle_missing", correction_allowed=True)
+    return _failure("target_missing")
+
+
+def _public_target(target: SceneTarget) -> dict[str, object]:
+    return {
+        "kind": target.window.semantic_kind,
+        "name": target.window.semantic_name,
+        "surface": target.surface_id,
+    }
+
+
 def _same_identity(before: SceneTarget, after: SceneTarget) -> bool:
     return (
         before.generation == after.generation
@@ -281,13 +310,15 @@ def _result_failure(result: dict[str, object]) -> dict[str, object] | None:
 
 def activate(args: dict[str, object], *, observed_target: SceneTarget | None = None) -> dict[str, object]:
     dispatched = False
+    kind = ""
     try:
         if set(args) != {"target"}:
             raise InvalidTarget("invalid target")
         kind, name, surface = _target(args["target"])
         if observed_target is not None:
-            if (kind != "application" or name not in {
-                    observed_target.window.semantic_name, observed_target.window.app_id}
+            if (name != observed_target.window.handle if kind == "handle" else
+                    kind != "application" or name not in {
+                        observed_target.window.semantic_name, observed_target.window.app_id}
                     or (surface and surface != observed_target.surface_id)):
                 raise InvalidTarget("selector does not match the observed window")
             target = _scene_target(SCENE.validate(observed_target))
@@ -319,19 +350,13 @@ def activate(args: dict[str, object], *, observed_target: SceneTarget | None = N
             "status": "completed",
             "effect_applied": not target.active,
             "must_not_replay": True,
-            "target": {
-                "kind": after.window.semantic_kind,
-                "name": after.window.semantic_name,
-                "surface": after.surface_id,
-            },
+            "target": _public_target(after),
             "active": True,
         }
     except InvalidTarget:
         return _failure("target_missing")
-    except SceneTargetNotFound:
-        return _failure("target_missing")
-    except SceneTargetAmbiguous:
-        return _failure("target_ambiguous")
+    except (SceneTargetNotFound, SceneTargetAmbiguous) as error:
+        return _target_failure(kind, error)
     except SceneTargetStale:
         return _failure(
             "stale_scene", delivery="uncertain" if dispatched else "not_dispatched"
@@ -348,6 +373,7 @@ def activate(args: dict[str, object], *, observed_target: SceneTarget | None = N
 
 def place(args: dict[str, object]) -> dict[str, object]:
     dispatched = False
+    kind = ""
     try:
         if set(args) != {"target", "destination"}:
             raise InvalidDestination("invalid destination")
@@ -404,11 +430,7 @@ def place(args: dict[str, object]) -> dict[str, object]:
                 or target.window.local_rect != after.window.local_rect
             ),
             "must_not_replay": True,
-            "target": {
-                "kind": after.window.semantic_kind,
-                "name": after.window.semantic_name,
-                "surface": after.surface_id,
-            },
+            "target": _public_target(after),
             "destination": destination,
             "previous": {"surface": target.surface_id},
             "observed": {
@@ -434,10 +456,8 @@ def place(args: dict[str, object]) -> dict[str, object]:
             "bounds": "0 <= left < right <= columns; 0 <= top < bottom <= rows",
         }
         return failure
-    except SceneTargetNotFound:
-        return _failure("target_missing")
-    except SceneTargetAmbiguous:
-        return _failure("target_ambiguous")
+    except (SceneTargetNotFound, SceneTargetAmbiguous) as error:
+        return _target_failure(kind, error)
     except SceneTargetStale:
         return _failure(
             "stale_scene", delivery="uncertain" if dispatched else "not_dispatched"

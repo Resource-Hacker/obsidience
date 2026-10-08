@@ -11,6 +11,7 @@ import subprocess
 import threading
 import time
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 from .model import ApplicationWindow, LocalRect, MODULE_APP_ID, PANE_ID
@@ -573,6 +574,8 @@ class HyprlandSurfaceWindows:
         windows_by_surface: dict[str, list[ApplicationWindow]] = {
             surface_id: [] for surface_id in _SURFACE_BY_OUTPUT.values()
         }
+        # Hyprland's global focus order (0 = focused), for application windows.
+        focus_history: list[tuple[int, str, int]] = []
         if isinstance(clients, list):
             for client in clients[:256]:
                 if not isinstance(client, dict) or client.get("mapped") is False:
@@ -598,6 +601,16 @@ class HyprlandSurfaceWindows:
                     continue
                 pid = client.get("pid", 0)
                 stable_id = str(client.get("stableId") or "")
+                history = client.get("focusHistoryID")
+                if (
+                    window_kind == "application"
+                    and isinstance(history, int)
+                    and not isinstance(history, bool)
+                    and history >= 0
+                ):
+                    focus_history.append(
+                        (history, surface_id, len(windows_by_surface[surface_id]))
+                    )
                 workspace = client.get("workspace")
                 workspace_id = (
                     workspace.get("id") if isinstance(workspace, dict) else None
@@ -621,6 +634,11 @@ class HyprlandSurfaceWindows:
                         stable_id=stable_id,
                     )
                 )
+        # Dense ranks over application windows only: focusing an Obsidience pane
+        # leaves them unchanged and republishes no unrelated Surface.
+        for rank, (_history, surface_id, index) in enumerate(sorted(focus_history)):
+            windows = windows_by_surface[surface_id]
+            windows[index] = replace(windows[index], focus_rank=rank)
         active_id = ""
         active_surface = ""
         if isinstance(active, dict):

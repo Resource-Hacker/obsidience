@@ -169,18 +169,25 @@ def _schema_array(item: dict, maximum: int, minimum: int = 0) -> dict:
 def _argument_schemas() -> dict[str, dict]:
     """The registry's decoder-facing interface; adapters still validate effects."""
     from ..computer.applications import APPLICATIONS
-    from ..host.scene import SURFACE_IDS
+    from ..host.scene import HANDLE_PATTERN, SURFACE_IDS
     text = _schema_text
     obj = _schema_object
     array = _schema_array
     integer = {"type": "integer", "minimum": 0}
     surface = {"type": "string", "enum": list(SURFACE_IDS)}
+    handle = {"type": "string", "pattern": HANDLE_PATTERN,
+              "description": "One window's handle, e.g. w3, from the current Scene or an ambiguity menu."}
     target = {"anyOf": [obj({"kind": {"const": kind}, "name": text(256 if kind == "application" else 48),
-                             "surface": surface}, ("kind", "name")) for kind in ("application", "pane")]}
+                             "surface": surface}, ("kind", "name")) for kind in ("application", "pane")]
+              + [obj({"handle": handle}, ("handle",))]}
     observe_target = {"anyOf": [
         obj({"kind": {"const": "application"}, "name": text(256), "surface": surface,
              "title": text(200)}, ("kind", "name")),
-        target["anyOf"][1], obj({"kind": {"const": "focused"}, "surface": surface}, ("kind",))]}
+        target["anyOf"][1], obj({"kind": {"enum": ["attention", "focused"]}, "surface": surface}, ("kind",)),
+        obj({"handle": {**handle, "description": (
+            "For what the owner is looking at now, omit target: it resolves as kind attention, the most "
+            "recently focused application (focused does too while an Obsidience pane has focus). Otherwise "
+            "use a handle, e.g. w3, from the current Scene or an ambiguity menu.")}}, ("handle",))]}
     tile = obj({key: integer for key in ("left", "top", "right", "bottom")}, ("left", "top", "right", "bottom"))
     bounded_scope = obj({"kind": {"enum": ["knowledge", "task", "runbook", "tool", "skill", "agent"]},
         "current_only": {"type": "boolean"}, "exclude_subtrees": array(text(300),10)})
@@ -189,11 +196,13 @@ def _argument_schemas() -> dict[str, dict]:
             "url":text(2000)},("application",)),
         "camera.observe": obj({"query":text(500), "wake":{"type":"boolean"}},("query",)),
         "media.pause": obj({"query":text(128, empty=True)}),
-        "computer.observe": obj({"target":observe_target,"query":text(500)},("target","query")),
-        "computer.act": obj({"scope":{"enum":["input","state"]},"application":text(256),"action":{"const":"click"},
+        "computer.observe": obj({"target":observe_target,"query":text(500)},("query",)),
+        # The adapter requires application or handle and checks both against the observation.
+        "computer.act": obj({"scope":{"enum":["input","state"]},"application":text(256),"handle":handle,
+            "action":{"const":"click"},
             "target":{**text(128),"description":"Short clicked-control label, 1-128 characters, e.g. Play/Pause button. Do not copy the browser window title."},
             "point":obj({axis:{"type":"integer","minimum":0,"maximum":999} for axis in ("x","y")},("x","y")),
-            "postcondition":text(500)},("scope","application","target","point")),
+            "postcondition":text(500)},("scope","target","point")),
         "window.activate": obj({"target":target},("target",)),
         "window.place": obj({"target":target,"destination":obj({"surface":surface,"tile":tile},("surface",))},("target","destination")),
         "vault.search": {"anyOf":[obj({"query":text(300),"scope":bounded_scope},("query",)),

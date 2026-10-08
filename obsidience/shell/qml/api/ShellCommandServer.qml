@@ -551,6 +551,10 @@ QtObject {
                 "window_kind": windowKind,
                 "pane_id": paneId,
                 "stable_id": stableId,
+                "focus_rank": windowKind === "application"
+                    && Number.isInteger(candidate.focus_rank)
+                    && candidate.focus_rank >= 0 && candidate.focus_rank < 256
+                    ? candidate.focus_rank : -1,
                 "local_rect": localRect
             })
         }

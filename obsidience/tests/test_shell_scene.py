@@ -156,7 +156,7 @@ def test_scene_resolves_unfocused_apps_and_module_panes() -> None:
     manifest = cache.semantic_manifest()
     assert manifest == {
         "available": True,
-        "fields": ["kind", "name", "title", "focused", "visible"],
+        "fields": ["kind", "name", "handle", "title", "focused", "visible"],
         "tile_units": "grid_edges",
         "tile_grids": {
             "samsung": {"columns": 8, "rows": 2},
@@ -165,8 +165,8 @@ def test_scene_resolves_unfocused_apps_and_module_panes() -> None:
         },
         "surface_awake": {"samsung": True, "usb-c": True, "dp-4": True},
         "surfaces": {
-            "samsung": [["application", "microsoft_edge", "Documentation", False, False]],
-            "usb-c": [["pane", "reader", "Reader", True, True]],
+            "samsung": [["application", "microsoft_edge", "w1", "Documentation", False, False]],
+            "usb-c": [["pane", "reader", "w2", "Reader", True, True]],
             "dp-4": [],
         },
     }

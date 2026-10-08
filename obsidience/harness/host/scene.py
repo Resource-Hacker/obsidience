@@ -6,11 +6,13 @@ import asyncio
 import copy
 import json
 import logging
+import os
 import re
 import secrets
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
+from pathlib import Path
 
 from websockets.asyncio.client import connect
 
@@ -18,6 +20,7 @@ from obsidience.harness.computer.applications import (
     application_window_name,
     matches_application_window,
 )
+from obsidience.harness.config import CONFIG
 from obsidience.shell.command_token import command_url
 
 
@@ -28,10 +31,15 @@ EVENT_SCHEMA = "obsidience.shell.event.v1"
 SURFACE_IDS = ("samsung", "usb-c", "dp-4")
 MAX_MESSAGE_BYTES = 131_072
 MAX_WINDOWS = 256
-# Preserve the existing scene budget plus a fixed allowance for the three grids.
-MAX_SEMANTIC_MANIFEST_CHARS = 1024
+# Preserve the existing scene budget plus a fixed allowance for the three grids,
+# and a handle allowance of eight characters for each of 16 windows.
+MAX_SEMANTIC_MANIFEST_CHARS = 1152
 MAX_SEMANTIC_TITLE_CHARS = 80
+MAX_CANDIDATES = 8
 _PANE_ID = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
+HANDLE_PATTERN = r"^w[1-9][0-9]{0,8}$"
+HANDLE = re.compile(HANDLE_PATTERN)
+TARGET_KINDS = frozenset({"application", "pane", "focused", "attention", "handle"})
 
 
 class SceneUnavailable(RuntimeError):
@@ -78,6 +86,11 @@ class SceneWindow:
     window_kind: str
     pane_id: str
     local_rect: SceneRect
+    # Neither is window identity: a focus change or handle binding never makes
+    # a captured target stale. Rank 0 is the most recently focused external
+    # application window across all Surfaces; -1 has no recency.
+    focus_rank: int = field(default=-1, compare=False)
+    handle: str = field(default="", compare=False)
 
     @property
     def semantic_kind(self) -> str:
@@ -195,8 +208,10 @@ def _window(value: object) -> SceneWindow | None:
     window_kind = value.get("window_kind")
     pid = _integer(value.get("pid"), 0, 2**31 - 1)
     local_rect = _rect(value.get("local_rect"))
+    focus_rank = _integer(value.get("focus_rank", -1), -1, MAX_WINDOWS - 1)
     if (
         window_id is None
+        or focus_rank is None
         or stable_id is None
         or app_id is None
         or title is None
@@ -209,7 +224,8 @@ def _window(value: object) -> SceneWindow | None:
     ):
         return None
     if window_kind == "module":
-        if app_id != "io.obsidience.shell" or _PANE_ID.fullmatch(pane_id) is None:
+        if (app_id != "io.obsidience.shell" or _PANE_ID.fullmatch(pane_id) is None
+                or focus_rank != -1):
             return None
     elif pane_id:
         return None
@@ -224,7 +240,21 @@ def _window(value: object) -> SceneWindow | None:
         window_kind=window_kind,
         pane_id=pane_id,
         local_rect=local_rect,
+        focus_rank=focus_rank,
     )
+
+
+def _identity(window: SceneWindow) -> tuple[object, ...]:
+    return (window.window_id, window.stable_id, window.pid, window.app_id,
+            window.window_kind, window.pane_id)
+
+
+def candidate_menu(targets: list[SceneTarget]) -> list[str]:
+    """Public ambiguity choices: handle, semantic name and Scene title."""
+    return [
+        f'{target.window.handle}: {target.window.semantic_name} "{_semantic_title(target.window.title)}"'
+        for target in targets[:MAX_CANDIDATES]
+    ]
 
 
 def _surface(event: dict[str, object]) -> SceneSurface | None:
@@ -263,7 +293,7 @@ def _surface(event: dict[str, object]) -> SceneSurface | None:
 class ShellSceneCache:
     """Own one complete, connection-bound shell scene and exact target leases."""
 
-    def __init__(self) -> None:
+    def __init__(self, handle_store: Path | None = None) -> None:
         self._lock = threading.RLock()
         self._changed = threading.Condition(self._lock)
         self._change_sequence = 0
@@ -271,6 +301,38 @@ class ShellSceneCache:
         self._connected = False
         self._workspace: dict[str, object] | None = None
         self._surfaces: dict[str, SceneSurface] = {}
+        # Handles are bound to one native window identity for its lifetime and
+        # never reused. The persisted high-water mark keeps a handle copied from
+        # an earlier Harness process from naming a different window.
+        self._handles: dict[tuple[object, ...], str] = {}
+        self._handle_store = handle_store
+        self._next_handle = 1
+        if handle_store is not None:
+            try:
+                self._next_handle = max(1, int(handle_store.read_text(encoding="ascii")) + 1)
+            except FileNotFoundError:
+                pass
+            except (OSError, ValueError) as error:
+                LOGGER.warning("Scene handle store unreadable: %s", error)
+
+    def _bind_handles(self, surface: SceneSurface) -> SceneSurface:
+        start = self._next_handle
+        windows = []
+        for window in surface.windows:
+            key = _identity(window)
+            handle = self._handles.get(key)
+            if handle is None:
+                handle = self._handles[key] = f"w{self._next_handle}"
+                self._next_handle += 1
+            windows.append(replace(window, handle=handle))
+        if self._next_handle != start and self._handle_store is not None:
+            temporary = self._handle_store.with_name(self._handle_store.name + ".tmp")
+            try:
+                temporary.write_text(str(self._next_handle - 1), encoding="ascii")
+                os.replace(temporary, self._handle_store)
+            except OSError as error:
+                LOGGER.warning("Scene handle store not updated: %s", error)
+        return replace(surface, windows=tuple(windows))
 
     def connect(self) -> int:
         with self._lock:
@@ -320,7 +382,13 @@ class ShellSceneCache:
             current = self._surfaces.get(surface.surface_id)
             if current is not None and surface.revision <= current.revision:
                 return False
-            self._surfaces[surface.surface_id] = surface
+            self._surfaces[surface.surface_id] = self._bind_handles(surface)
+            if len(self._handles) > 4 * MAX_WINDOWS:
+                # A closed window's handle stays unresolvable after pruning.
+                live = {_identity(window) for item in self._surfaces.values()
+                        for window in item.windows}
+                self._handles = {key: value for key, value in self._handles.items()
+                                 if key in live}
             self._notify_changed()
             return True
 
@@ -359,7 +427,7 @@ class ShellSceneCache:
             raise SceneLocked("shell scene is locked")
         manifest: dict[str, object] = {
             "available": True,
-            "fields": ["kind", "name", "title", "focused", "visible"],
+            "fields": ["kind", "name", "handle", "title", "focused", "visible"],
             "tile_units": "grid_edges",
             "tile_grids": scene.tile_grids,
             "surface_awake": {
@@ -370,6 +438,7 @@ class ShellSceneCache:
                     [
                         window.semantic_kind,
                         window.semantic_name,
+                        window.handle,
                         _semantic_title(window.title),
                         window.window_id == surface.active_window_id,
                         surface.awake
@@ -448,41 +517,76 @@ class ShellSceneCache:
     def resolve_semantic(
         self, kind: str, name: str = "", surface_id: str = "", *, title: str = "", prefer_active: bool = False
     ) -> SceneTarget:
-        """Resolve the same public selector for observation, activation and placement."""
-        if kind not in {"application", "pane", "focused"}:
+        """Resolve the same public selector for observation, activation and placement.
+
+        ``handle`` names one window bound by this cache. ``attention`` is the most
+        recently focused visible external application window on an awake
+        Surface. ``focused`` is the focused window, except that an Obsidience
+        pane or empty focus resolves as ``attention``.
+        """
+        if kind not in TARGET_KINDS:
             raise ValueError("unknown target kind")
         if surface_id and surface_id not in SURFACE_IDS:
             raise ValueError("unknown Surface")
         if title and kind != "application":
             raise ValueError("title disambiguation requires an application")
+        if kind == "handle" and (surface_id or HANDLE.fullmatch(name) is None):
+            raise ValueError("a handle target is exactly one Scene handle")
         scene = self.snapshot()
         if scene.workspace.get("session_locked") is True:
             raise SceneLocked("shell scene is locked")
-        matches = []
-        for surface in scene.surfaces:
-            if surface_id and surface.surface_id != surface_id:
-                continue
-            for window in surface.windows:
-                if kind == "focused":
-                    matched = window.window_id == surface.active_window_id
-                elif kind == "pane":
-                    matched = window.window_kind == "module" and window.pane_id == name
-                else:
-                    matched = window.window_kind == "application" and (
-                        window.app_id == name
-                        or matches_application_window(name, window.app_id, window.title)
-                    )
-                if matched and (not title or _semantic_title(window.title) == title):
-                    matches.append(
-                        SceneTarget(
-                            generation=scene.generation,
-                            surface_id=surface.surface_id,
-                            surface_revision=surface.revision,
-                            surface_awake=surface.awake,
-                            active=window.window_id == surface.active_window_id,
-                            window=window,
-                        )
-                    )
+        targets = [
+            SceneTarget(
+                generation=scene.generation,
+                surface_id=surface.surface_id,
+                surface_revision=surface.revision,
+                surface_awake=surface.awake,
+                active=window.window_id == surface.active_window_id,
+                window=window,
+            )
+            for surface in scene.surfaces
+            if not surface_id or surface.surface_id == surface_id
+            for window in surface.windows
+        ]
+        if kind == "handle":
+            matches = [target for target in targets if target.window.handle == name]
+            if not matches:
+                raise SceneTargetNotFound("that handle no longer exists")
+            return matches[0]
+        if kind == "focused":
+            focused = [target for target in targets if target.active]
+            if len(focused) == 1 and focused[0].window.window_kind == "module":
+                focused = []
+            if focused:
+                matches = focused
+            else:
+                kind = "attention"
+        if kind == "attention":
+            ranked = sorted(
+                (target for target in targets
+                 if target.window.window_kind == "application"
+                 and target.window.focus_rank >= 0 and target.surface_awake
+                 and target.window.visible_on_workspace and not target.window.minimized),
+                key=lambda target: target.window.focus_rank,
+            )
+            if not ranked:
+                raise SceneTargetNotFound("no recently focused visible application window")
+            matches = [target for target in ranked
+                       if target.window.focus_rank == ranked[0].window.focus_rank]
+        elif kind in {"application", "pane"}:
+            def matched(window: SceneWindow) -> bool:
+                if kind == "pane":
+                    return window.window_kind == "module" and window.pane_id == name
+                return window.window_kind == "application" and (
+                    window.app_id == name
+                    or matches_application_window(name, window.app_id, window.title)
+                )
+
+            matches = [
+                target for target in targets
+                if matched(target.window)
+                and (not title or _semantic_title(target.window.title) == title)
+            ]
         if not matches:
             raise SceneTargetNotFound("no semantic shell target matched")
         if len(matches) != 1:
@@ -490,8 +594,8 @@ class ShellSceneCache:
             if kind == "application" and prefer_active and len(active) == 1:
                 return active[0]
             ambiguous = SceneTargetAmbiguous("semantic target matched multiple windows")
-            # Exact Scene titles let a caller choose one window without guessing.
-            ambiguous.titles = [_semantic_title(target.window.title) for target in matches[:8]]
+            # Handles let a caller choose one window without copying a title.
+            ambiguous.candidates = candidate_menu(matches)
             raise ambiguous
         return matches[0]
 
@@ -530,9 +634,9 @@ class ShellSceneCache:
 class ShellSceneClient:
     """Keep the Harness's read-only scene cache synced to the one shell host."""
 
-    def __init__(self, url: str = SHELL_URL) -> None:
+    def __init__(self, url: str = SHELL_URL, handle_store: Path | None = None) -> None:
         self.url = url
-        self.cache = ShellSceneCache()
+        self.cache = ShellSceneCache(handle_store)
         self._task: asyncio.Task[None] | None = None
 
     def start(self) -> None:
@@ -654,4 +758,4 @@ class ShellSceneClient:
             await asyncio.sleep(0.5)
 
 
-SCENE = ShellSceneClient()
+SCENE = ShellSceneClient(handle_store=CONFIG.runtime_dir / "shell-scene-handles")
