@@ -13,7 +13,7 @@ obsidience:
 Control the one registered television with `action`:
 
 - `find` (read-only, nothing reaches the TV): `query` (1-120 characters) and optional `app` `pluto|youtube`. Returns numbered candidates: Pluto TV live channels from Pluto's public guide (cached six hours) and YouTube videos and live streams from the local SearXNG. Candidate ids stay valid for the rest of the run.
-- `open`: `id` from this run's `find`, or `url`, an https link of a registered app (YouTube video or live, `pluto.tv`, `tubitv.com`, `netflix.com`, `hulu.com`). The link must resolve to its own app before dispatch; it opens once and returns a fresh screen after about five seconds.
+- `open`: `id` from this run's `find`, or `url`, an https link of a registered app (YouTube video or live, `pluto.tv`, `tubitv.com`, `netflix.com`, `hulu.com`). The link must resolve to its own app before dispatch; it opens once, then waits up to 20 seconds for the app to start a new media player (the audio service's playback record; Pluto takes about ten seconds). `playback_started:true` with `foreground_media_playing:true` is the playback evidence and returns without a slow video screenshot; otherwise a full screen and its controls are returned to show why.
 - `on` / `off`: power with verified wakefulness and display readback; already-correct power is a verified no-op.
 - `observe`: installed apps, preferred app, power, foreground, media sessions, accessibility controls and one fresh screen image.
 - `launch`: a registered app alias, to its home screen.
