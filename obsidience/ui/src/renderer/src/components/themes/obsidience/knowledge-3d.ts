@@ -39,7 +39,8 @@ export const KNOWLEDGE_3D_WORLD_SPAN = 190;
  *  into the camera frustum. */
 export const KNOWLEDGE_3D_FRAME_MARGIN = 1.08;
 /** Render cadences (fps). Interaction runs at the 2D pipeline's 30 fps
- *  cap; idle ambient rotation renders at half cadence. The thinking
+ *  cap; idle ambient rotation renders at half cadence in every profile
+ *  (owner 2026-10-08: idle spin capped at 15 fps, timer-driven). The thinking
  *  sweep runs at 60 fps (owner 2026-08-02: "the line should feel like it
  *  is filling up the beam fluidly" — a 33 ms gate beats unevenly against
  *  the 120 Hz kiosk display and made the traveling fronts stutter). */
@@ -92,16 +93,16 @@ export function knowledge3dFrameIntervalMs(options: {
   interacting: boolean;
   animationProfile?: GraphicsAnimationProfile;
 }): number {
+  if (!options.focusActive && !options.interacting) return 1000 / KNOWLEDGE_3D_IDLE_FPS;
   if (options.animationProfile === "maximum") return 0;
-  if (options.focusActive) return 1000 / KNOWLEDGE_3D_SWEEP_FPS;
-  return options.interacting
-    ? 1000 / KNOWLEDGE_3D_ACTIVE_FPS
-    : 1000 / KNOWLEDGE_3D_IDLE_FPS;
+  return options.focusActive
+    ? 1000 / KNOWLEDGE_3D_SWEEP_FPS
+    : 1000 / KNOWLEDGE_3D_ACTIVE_FPS;
 }
 
 /** Advance a capped-frame deadline without discarding residual time. `null`
- *  means the frame is not due. Maximum/native-refresh mode uses interval 0 and
- *  therefore accepts every requestAnimationFrame callback. */
+ *  means the frame is not due. Maximum/native-refresh mode uses interval 0 for
+ *  active motion and therefore accepts every requestAnimationFrame callback. */
 export function advanceKnowledge3dFrameDeadline(
   previousDeadline: number,
   now: number,

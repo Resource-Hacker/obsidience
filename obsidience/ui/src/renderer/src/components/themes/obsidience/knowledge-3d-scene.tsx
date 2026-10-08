@@ -22,6 +22,7 @@ import {
   PARTICLE_VERTEX_SHADER, PARTICLE_FRAGMENT_SHADER,
 } from "./knowledge-3d-shaders";
 import {
+  KNOWLEDGE_3D_FRAME_EARLY_TOLERANCE_MS,
   KNOWLEDGE_3D_INITIAL_DOLLY,
   KNOWLEDGE_3D_INITIAL_POLAR,
   clampKnowledge3dDolly,
@@ -241,6 +242,7 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const propsRef = useRef(props);
   const syncPresentation = useRef<() => void>(() => {});
+  const wakeRef = useRef<() => void>(() => {});
   propsRef.current = props;
 
   useEffect(() => {
@@ -655,6 +657,7 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
             orbit.polar - (move.clientY - orbit.lastY) * 0.004,
           );
           orbit.interactingUntil = performance.now() + 1200;
+          wake();
         }
         orbit.lastX = move.clientX;
         orbit.lastY = move.clientY;
@@ -701,6 +704,7 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
         framed,
       );
       orbit.interactingUntil = performance.now() + 1200;
+      wake();
     }
 
     function onContextMenu(event: MouseEvent): void {
@@ -723,8 +727,27 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
     renderer.domElement.addEventListener("webglcontextlost", lostContext);
 
     let rafId = 0;
+    let wakeTimer = 0;
+    let paused = false;
     let frameDeadline = 0;
     let lastTick = performance.now();
+    /** Run on the coming display refresh. A pending deadline timer is
+     *  superseded, so props or input re-evaluate the cadence at once. */
+    function wake(): void {
+      if (wakeTimer) {
+        window.clearTimeout(wakeTimer);
+        wakeTimer = 0;
+      }
+      if (!disposed && !rafId) rafId = requestAnimationFrame(frame);
+    }
+    /** Sleep until a capped frame is due instead of polling every refresh. */
+    function sleepUntil(deadline: number, now: number): void {
+      if (rafId) return;
+      window.clearTimeout(wakeTimer);
+      wakeTimer = window.setTimeout(wake,
+        Math.max(1, deadline - now - KNOWLEDGE_3D_FRAME_EARLY_TOLERANCE_MS));
+    }
+    wakeRef.current = wake;
     const emptyProjection = new Map<string, { x: number; y: number }>();
 
     // Open viewers borrow the live clouds and this renderer. Their isolated
@@ -776,7 +799,8 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
         } else if (action === "leave") propsRef.current.onHover?.(null);
         else propsRef.current.onPresentationCommand?.(command);
         frameDeadline = 0;
-      }, () => { frameDeadline = 0; }, count => {
+        wake();
+      }, () => { frameDeadline = 0; wake(); }, count => {
         preview.count = count; const size = count ? 1024 : 1;
         if (canvas.width !== size) canvas.width = canvas.height = size;
         consumerCount();
@@ -827,8 +851,8 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
     }
 
     function frame(now: number): void {
+      rafId = 0;
       if (disposed) return;
-      rafId = requestAnimationFrame(frame);
       const current = propsRef.current;
       if (
         !knowledge3dAnimationEnabled({
@@ -836,8 +860,15 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
           reducedMotion: current.reducedMotion,
         })
       ) {
-        lastTick = now;
+        // Hidden: stop the loop; the render that shows it again wakes it.
+        paused = true;
         return;
+      }
+      if (paused) {
+        // Resume from rest without a catch-up step.
+        paused = false;
+        lastTick = now;
+        frameDeadline = 0;
       }
       const interacting = now < orbit.interactingUntil;
       const relationEffects = current.relationEffects ?? [];
@@ -874,10 +905,16 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
         now,
         interval,
       );
-      if (nextDeadline === null) return;
+      if (nextDeadline === null) {
+        sleepUntil(frameDeadline + interval, now);
+        return;
+      }
       const dt = Math.min(0.2, (now - lastTick) / 1000);
       frameDeadline = nextDeadline;
       lastTick = now;
+      // Schedule the next frame first; uncapped active motion follows the display.
+      if (interval > 0) sleepUntil(frameDeadline + interval, now);
+      else rafId = requestAnimationFrame(frame);
       // Active render time only: 30 seconds per turn, with the existing
       // visibility gate and bounded resume delta. Match Memory icons' motion preference.
       if (!current.reducedMotion)
@@ -1443,7 +1480,9 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
     return () => {
       disposed = true;
       syncPresentation.current = () => {};
+      wakeRef.current = () => {};
       cancelAnimationFrame(rafId);
+      window.clearTimeout(wakeTimer);
       observer.disconnect();
       for (const preview of previews.values()) { preview.unforward?.(); preview.publisher.dispose(); }
       previews.clear();
@@ -1475,6 +1514,8 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
   }, []);
 
   useEffect(() => syncPresentation.current(), [props.satellites]);
+  // Every prop change (visibility, focus, activity) re-evaluates the cadence.
+  useEffect(() => wakeRef.current());
 
   return (
     <div

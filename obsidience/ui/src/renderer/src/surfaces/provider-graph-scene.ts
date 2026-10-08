@@ -78,6 +78,7 @@ export class ProviderGraphScene {
   private hovered = "";
   private paintNodes = new Set<string>();
   private raf = 0;
+  private wakeTimer: ReturnType<typeof setTimeout> | 0 = 0;
   private visible = true;
   private disposed = false;
   private fitted = false;
@@ -658,6 +659,7 @@ export class ProviderGraphScene {
     this.visible = visible;
     if (!visible) {
       cancelAnimationFrame(this.raf); this.raf = 0; this.spinAt = 0;
+      clearTimeout(this.wakeTimer); this.wakeTimer = 0;
       this.pointerInside = this.remotePointerInside = this.interacting = false;
       this.setHover(""); this.onHover(null, 0, 0);
     }
@@ -669,17 +671,26 @@ export class ProviderGraphScene {
       && !this.selected && !this.hovered && !this.searchQuery.trim() && !this.memoryLens
       && !this.transition && !this.cameraFlight;
   }
+  /** Render on the coming display refresh; supersedes a pending idle wait. */
   private request = () => {
+    if (this.wakeTimer) { clearTimeout(this.wakeTimer); this.wakeTimer = 0; }
     if (!this.disposed && this.visible && !this.raf) this.raf = requestAnimationFrame(this.frame);
   };
+  /** Sleep until the next frame is due instead of polling every refresh. */
+  private sleep(ms: number) {
+    if (this.raf || this.disposed || !this.visible) return;
+    clearTimeout(this.wakeTimer);
+    this.wakeTimer = setTimeout(this.request, Math.max(1, ms));
+  }
   private frame = (time: number) => {
     this.raf = 0;
     if (this.disposed || !this.visible) return;
     // A 240-Hz desktop does not require 240 full graph/video frames per second.
-    // Idle spin needs only 30 Hz; retain 60 Hz for direct interaction/activity.
+    // Idle spin needs only 15 Hz; retain 60 Hz for direct interaction/activity.
     const spinning = this.canSpin();
-    const fps = spinning && !this.paintNodes.size && !this.layoutPending && this.layoutAlpha <= 0.006 ? 30 : 60;
-    if (time - this.lastPaint < 1000 / fps - 0.5) { this.request(); return; }
+    const fps = spinning && !this.paintNodes.size && !this.layoutPending && this.layoutAlpha <= 0.006 ? 15 : 60;
+    const wait = 1000 / fps - 0.5 - (time - this.lastPaint);
+    if (wait > 0) { this.sleep(wait); return; }
     this.lastPaint = time;
     let moving = false;
     if (this.layoutReady) {
@@ -800,7 +811,7 @@ export class ProviderGraphScene {
     this.labels.render(this.renderer);
     this.renderer.autoClear = true;
     this.presentation.frame();
-    if (moving) this.request();
+    if (moving) this.sleep(1000 / fps - 0.5 - (performance.now() - time));
   };
   private pick(event: {clientX: number; clientY: number}): ProviderNode | null {
     if (!this.points) return null;
@@ -834,7 +845,7 @@ export class ProviderGraphScene {
   };
   dispose() {
     this.presentation.dispose();
-    this.disposed = true; cancelAnimationFrame(this.raf); this.resize.disconnect();
+    this.disposed = true; cancelAnimationFrame(this.raf); clearTimeout(this.wakeTimer); this.resize.disconnect();
     this.layoutWorker?.terminate(); this.layoutWorker = null;
     this.motionPreference.removeEventListener("change", this.request);
     this.controls.dispose(); this.clearGhost(); this.clearGeometry(); this.labels.dispose(); this.renderer.dispose();
