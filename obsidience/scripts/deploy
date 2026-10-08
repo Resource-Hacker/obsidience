@@ -84,6 +84,28 @@ def wait_ready(limit: float = 300) -> None:
     sys.exit("The Harness did not report ready; inspect journalctl --user -u obsidience-harness-dev.")
 
 
+def check_voice(limit: float = 90) -> str | None:
+    """After a Harness restart, voice must come back in the owner's requested mode."""
+    try:
+        requested = json.loads(pathlib.Path("/run/user/1000/obsidience-realtime/requested.json").read_text())
+    except (OSError, ValueError):
+        return None
+    mode = requested.get("mode", "wake") if isinstance(requested, dict) else "wake"
+    if mode == "off":
+        return None
+    deadline = time.monotonic() + limit
+    state = {}
+    while time.monotonic() < deadline:
+        try:
+            state = get("/api/realtime")
+            if state.get("mode") == mode and state.get("ready") and state.get("phase") != "error":
+                return None
+        except OSError:
+            pass
+        time.sleep(3)
+    return f"voice did not return to {mode}: phase={state.get('phase')} last_error={state.get('last_error')}"
+
+
 def restart(owner: str) -> None:
     if owner == "harness":
         subprocess.run(["systemctl", "--user", "restart", "obsidience-harness-dev.service"], check=True)
@@ -142,6 +164,8 @@ def main() -> None:
             restart(owner)
         time.sleep(5)
     failures = failures_since(started)
+    if "harness" in owners and (voice := check_voice()):
+        failures.append(voice)
     for line in failures:
         print("trace failure:", line)
     entry = {"commit": head, "previous": last, "at": started, "owners": owners, "failures": len(failures)}
