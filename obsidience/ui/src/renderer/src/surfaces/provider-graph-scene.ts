@@ -18,7 +18,7 @@ export interface ProviderNode {
 export interface ProviderEdge { source: string; target: string; kind: string; color?: string; weight?: number }
 export interface ProviderGraph {
   provider: string; graph_id: string; nodes: ProviderNode[]; edges: ProviderEdge[];
-  total: number; limited: boolean; missed?: number; updated_at?: string; project?: string;
+  total: number; limited: boolean; missed?: number; updated_at?: string; project?: string; revision?: string;
   code_root?: string; code_file?: string; external_count?: number;
   index?: {state: string; updated_at?: string; error?: string};
 }

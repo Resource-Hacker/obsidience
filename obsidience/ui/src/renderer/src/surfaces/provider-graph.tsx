@@ -9,7 +9,12 @@ import { MemoryStagePresentation } from "./memory-stage-presentation";
 import "./provider-graph.css";
 
 const API = "http://127.0.0.1:8765";
+// A visible memory view replaces its incrementally patched graph at most hourly.
+const MEMORY_RECONCILE_MS = 3600_000;
 type Bank = { id: string; name: string; agent_ref: string; count: number };
+type MemoryDelta = Pick<ProviderGraph, "provider" | "graph_id" | "nodes" | "edges" | "total" | "limited" | "updated_at"> & {
+  delta: true; since: string; revision: string; removed: string[]; removed_edges: ProviderGraph["edges"];
+};
 const NO_BANKS: Bank[] = [];
 async function json<T>(path: string, signal?: AbortSignal): Promise<T> {
   const r = await fetch(API + path, { signal });
@@ -18,6 +23,28 @@ async function json<T>(path: string, signal?: AbortSignal): Promise<T> {
     throw new Error(body.detail || `Provider returned ${r.status}`);
   }
   return r.json();
+}
+const edgeKey = (e: ProviderGraph["edges"][number]) => `${e.source}\0${e.target}\0${e.kind}\0${e.weight}\0${e.color}`;
+/** Apply the Harness's changed records and edge multiset to the shown graph. */
+function applyMemoryDelta(current: ProviderGraph, delta: MemoryDelta): ProviderGraph {
+  if (!delta.nodes.length && !delta.removed.length && !delta.edges.length && !delta.removed_edges.length) return current;
+  const changed = new Map(delta.nodes.map(n => [n.id, n])), removed = new Set(delta.removed);
+  const nodes = current.nodes.filter(n => !removed.has(n.id)).map(n => {
+    const next = changed.get(n.id);
+    if (next) changed.delete(n.id);
+    return next || n;
+  });
+  const drops = new Map<string, number>(), sources = new Set<string>();
+  for (const e of delta.removed_edges) { const key = edgeKey(e); drops.set(key, (drops.get(key) || 0) + 1); sources.add(e.source); }
+  const edges = current.edges.filter(e => {
+    if (!sources.has(e.source)) return true;
+    const key = edgeKey(e), count = drops.get(key);
+    if (!count) return true;
+    drops.set(key, count - 1); return false;
+  });
+  // New records lead, matching the provider's newest-first order.
+  return {...current, nodes: [...changed.values(), ...nodes], edges: edges.concat(delta.edges),
+    total: delta.total, limited: delta.limited, updated_at: delta.updated_at, revision: delta.revision};
 }
 function aliases(data: ProviderGraph, refs: string[]): Set<string> {
   const wanted = new Set(refs), found = new Set<string>();
@@ -113,6 +140,8 @@ function ProviderGraphStage({fixedBank, availableBanks, memoryPresentation}: {
   const commandRef = useRef<(command: GraphControl) => void>(() => {});
   const followRef = useRef(follow), scope = useRef("");
   const lastFollow = useRef(""), refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Last complete or patched memory graph, its Harness revision and full-load time.
+  const memoryCursor = useRef<{graph: ProviderGraph; full: number} | null>(null);
   const pickRef = useRef<(n: ProviderNode | null) => void>(() => {});
   followRef.current = follow;
   scope.current = data?.graph_id || (code ? "" : "memory:" + bank);
@@ -120,7 +149,8 @@ function ProviderGraphStage({fixedBank, availableBanks, memoryPresentation}: {
     setCodeFileId(""); setFollowingFile(""); setSelected(null); setExpanded([]); lastFollow.current = "";
   };
   const refresh = () => {
-    if (!code) { setRevision(r => r + 1); return; }
+    // An explicit refresh reloads the complete memory graph.
+    if (!code) { memoryCursor.current = null; setRevision(r => r + 1); return; }
     setIndexState({state: "updating"});
     fetch(API + "/api/graphs/code/refresh", {method: "POST"}).then(async response => {
       if (!response.ok) throw new Error("Code index refresh could not start");
@@ -146,9 +176,24 @@ function ProviderGraphStage({fixedBank, availableBanks, memoryPresentation}: {
     if (!code && !bank) return;
     const controller = new AbortController();
     setLoading(true); setError("");
-    const path = code ? "/api/graphs/code" : "/api/graphs/memory?bank=" + encodeURIComponent(bank);
-    json<ProviderGraph>(path, controller.signal).then(result => {
+    // Memory refreshes continue from the shown revision; the Harness sends
+    // the complete graph on a cursor gap, a reset bank, or hourly reconciliation.
+    const cursor = memoryCursor.current;
+    const since = !code && cursor?.graph.revision && cursor.graph.graph_id === "memory:" + bank
+      && Date.now() - cursor.full < MEMORY_RECONCILE_MS ? cursor : null;
+    const path = code ? "/api/graphs/code" : "/api/graphs/memory?bank=" + encodeURIComponent(bank)
+      + (since ? "&since=" + encodeURIComponent(since.graph.revision!) : "");
+    json<ProviderGraph | MemoryDelta>(path, controller.signal).then(result => {
+      if ("delta" in result) {
+        if (since && result.since === since.graph.revision) {
+          const graph = applyMemoryDelta(since.graph, result);
+          memoryCursor.current = {graph, full: since.full};
+          if (graph !== since.graph) setData(graph);
+        } else { memoryCursor.current = null; setRevision(r => r + 1); }
+        setLoading(false); return;
+      }
       if (code) setIndexState(result.index);
+      else memoryCursor.current = {graph: result, full: Date.now()};
       setData(current => code && current && ["updating", "stale"].includes(result.index?.state || "") ? current : result);
       setLoading(false);
     }).catch(e => { if (!controller.signal.aborted) { setError(e.message); setLoading(false); } });
@@ -192,9 +237,18 @@ function ProviderGraphStage({fixedBank, availableBanks, memoryPresentation}: {
   const wasRendering = useRef(rendering);
   useEffect(() => scene.current?.setVisible(rendering), [rendering]);
   useEffect(() => {
-    if (code && rendering && !wasRendering.current) setRevision(r => r + 1);
+    // A shown memory view catches up on writes it missed while covered.
+    if (rendering && !wasRendering.current && (code || memoryCursor.current)) setRevision(r => r + 1);
     wasRendering.current = rendering;
   }, [code, rendering]);
+  useEffect(() => {
+    if (code || !rendering || !data) return;
+    // An overdue view reconciles on its catch-up fetch when shown again.
+    const due = (memoryCursor.current?.full || 0) + MEMORY_RECONCILE_MS - Date.now();
+    if (due <= 0) return;
+    const timer = setTimeout(() => setRevision(r => r + 1), due);
+    return () => clearTimeout(timer);
+  }, [code, rendering, data]);
 
   const coalesceRefresh = useCallback(() => {
     if (!refreshTimer.current) refreshTimer.current = setTimeout(() => {

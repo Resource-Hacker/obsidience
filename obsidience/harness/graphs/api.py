@@ -1,10 +1,15 @@
 """Presentation adapters for native Hindsight and codebase-memory-mcp graphs."""
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
+from array import array
+from collections import Counter, deque
+from contextlib import asynccontextmanager, nullcontext
 import hashlib
+import json
 import logging
+import threading
 from urllib.parse import quote
+import uuid
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query
@@ -18,6 +23,61 @@ router = APIRouter(prefix="/api/graphs")
 CODE_PROJECT = str(CONFIG.project_root).strip("/").replace("/", "-")
 CLIENT: httpx.Client | None = None
 CODE_REFRESH = None
+# Stats that move whenever Hindsight writes, links or consolidates a bank.
+MEMORY_PROBE = ("total_nodes", "total_links", "total_documents", "total_observations",
+                "last_memory_write_at", "last_consolidated_at")
+
+
+class MemoryView:
+    """Compact identities of a bank's recent complete graph projections.
+
+    Hindsight has no graph delta API, and its derived entity edges slide when a
+    memory is added, so a change still re-reads the provider once. The display
+    then receives only changed records and their changed edges. Each revision
+    is exactly what a client holding it shows; a few are kept so an aborted
+    client fetch can still continue by delta.
+    """
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.reset()
+
+    def reset(self):
+        self.revisions = deque(maxlen=4)
+        self.ids: dict[str, int] = {}
+        self.names: list[str] = []
+        self.styles: dict[tuple, int] = {}
+        self.style_list: list[tuple] = []
+
+    def edge_keys(self, edges) -> array:
+        keys = array("Q")
+        for edge in edges:
+            ends = []
+            for name in (edge["source"], edge["target"]):
+                index = self.ids.get(name)
+                if index is None:
+                    index = self.ids[name] = len(self.names)
+                    self.names.append(name)
+                ends.append(index)
+            style = (edge["kind"], edge["weight"], edge["color"])
+            code = self.styles.get(style)
+            if code is None:
+                code = self.styles[style] = len(self.style_list)
+                self.style_list.append(style)
+            keys.append(ends[0] << 36 | ends[1] << 16 | code)
+        if len(self.names) > 1 << 20 or len(self.style_list) > 1 << 16:
+            # Identities no longer fit their key fields; start a fresh cursor.
+            self.reset()
+            raise OverflowError("memory graph identities exceed the delta key space")
+        return keys
+
+    def edge(self, key: int) -> dict:
+        kind, weight, color = self.style_list[key & 0xFFFF]
+        return {"source": self.names[key >> 36], "target": self.names[key >> 16 & 0xFFFFF],
+                "kind": kind, "weight": weight, "color": color}
+
+
+MEMORY_VIEWS: dict[str, MemoryView] = {}
 
 
 @asynccontextmanager
@@ -59,11 +119,19 @@ def banks():
 
 
 @router.get("/memory")
-def memory_graph(bank: str, q: str = "", limit: int | None = Query(None, ge=1, le=5000)):
+def memory_graph(bank: str, q: str = "", limit: int | None = Query(None, ge=1, le=5000), since: str = ""):
     if bank not in MEMORY.banks:
         raise HTTPException(404, "Select an available Agent memory bank")
     if CLIENT is None:
         raise HTTPException(503, "Memory graph adapter is starting")
+    # Only the complete default view has a revision cursor; filtered views stay
+    # one-shot. One projection per bank at a time, so its revisions stay ordered.
+    view = MEMORY_VIEWS.setdefault(bank, MemoryView()) if not q and limit is None else None
+    with view.lock if view else nullcontext():
+        return _memory_graph(bank, q, limit, since, view)
+
+
+def _memory_graph(bank: str, q: str, limit: int | None, since: str, view: MemoryView | None):
     # Like Code, decode and serialize the full graph in FastAPI's worker pool.
     # Large historical banks must not block the conversational event loop.
     url = CONFIG.extras["memory"]["hindsight_url"].rstrip("/") + "/v1/default/banks/" + quote(bank, safe="")
@@ -84,6 +152,14 @@ def memory_graph(bank: str, q: str = "", limit: int | None = Query(None, ge=1, l
         if count is None:
             stats = read("/stats")
             count = stats["total_nodes"]
+            # Read before the graph: a write between them only causes a re-read.
+            probe = (tuple(stats.get(key) for key in MEMORY_PROBE), MEMORY.updated_at)
+            latest = view.revisions[-1] if view and view.revisions else None
+            if latest and since == latest["revision"] and probe == latest["probe"]:
+                return JSONResponse({"provider": "hindsight", "graph_id": "memory:" + bank, "delta": True,
+                                     "since": since, "revision": since, "nodes": [], "removed": [],
+                                     "edges": [], "removed_edges": [], "total": latest["total"],
+                                     "limited": latest["limited"], "updated_at": MEMORY.updated_at})
         doc = read("/graph", limit=count, q=q[:300])
         if limit is None and len(doc.get("nodes", [])) < doc.get("total_units", 0):
             doc = read("/graph", limit=doc["total_units"], q=q[:300])
@@ -140,10 +216,52 @@ def memory_graph(bank: str, q: str = "", limit: int | None = Query(None, ge=1, l
             if support in ids and support != node["id"]:
                 edges.append({"source": support, "target": node["id"], "kind": "supports",
                               "weight": 1, "color": "#a78bfa"})
-    return JSONResponse({"provider": "hindsight", "graph_id": "memory:" + bank, "nodes": nodes,
-            "edges": edges, "total": doc.get("total_units", len(nodes)),
-            "limited": len(nodes) < doc.get("total_units", len(nodes)),
-            "updated_at": MEMORY.updated_at})
+    result = {"provider": "hindsight", "graph_id": "memory:" + bank,
+              "total": doc.get("total_units", len(nodes)),
+              "limited": len(nodes) < doc.get("total_units", len(nodes)),
+              "updated_at": MEMORY.updated_at}
+    if view is None:
+        return JSONResponse({**result, "nodes": nodes, "edges": edges})
+    try:
+        keys = view.edge_keys(edges)
+    except OverflowError:
+        return JSONResponse({**result, "nodes": nodes, "edges": edges})
+    hashes = {node["id"]: hash(json.dumps(node, sort_keys=True, separators=(",", ":"))) for node in nodes}
+    base = next((entry for entry in view.revisions if since and entry["revision"] == since), None)
+    touched = set() if base is None else (base["nodes"].keys() - hashes.keys()) | {
+        name for name, value in hashes.items() if base["nodes"].get(name) != value}
+    if base is not None and not touched:
+        # Same records. Hindsight re-samples its capped direct links (equal
+        # weights, LIMIT 10000) and tied entity windows on every read; that
+        # churn is not a change, so the shown sample stays.
+        view.revisions.remove(base)
+        view.revisions.append(base)
+        base["probe"] = probe
+        return JSONResponse({**result, "delta": True, "since": since, "revision": since,
+                             "nodes": [], "removed": [], "edges": [], "removed_edges": []})
+    if base is not None and len(touched) <= len(nodes) // 2:
+        # Edges at changed, added or removed records come from this read; the
+        # rest keep the client's sample until the next complete load.
+        ends = {view.ids[name] for name in touched if name in view.ids}
+
+        def at(key):
+            return key >> 36 in ends or key >> 16 & 0xFFFFF in ends
+
+        before = Counter(key for key in base["edges"] if at(key))
+        after = Counter(key for key in keys if at(key))
+        state = array("Q", [key for key in base["edges"] if not at(key)])
+        state.extend(after.elements())
+        view.revisions.append({"revision": uuid.uuid4().hex, "probe": probe, "nodes": hashes, "edges": state,
+                               "total": result["total"], "limited": result["limited"]})
+        return JSONResponse({**result, "delta": True, "since": since, "revision": view.revisions[-1]["revision"],
+                             "nodes": [node for node in nodes if node["id"] in touched],
+                             "removed": [name for name in base["nodes"] if name not in hashes],
+                             "edges": [view.edge(key) for key in (after - before).elements()],
+                             "removed_edges": [view.edge(key) for key in (before - after).elements()]})
+    # First load, Harness restart, expired cursor or a reset bank: complete graph.
+    view.revisions.append({"revision": uuid.uuid4().hex, "probe": probe, "nodes": hashes, "edges": keys,
+                           "total": result["total"], "limited": result["limited"]})
+    return JSONResponse({**result, "revision": view.revisions[-1]["revision"], "nodes": nodes, "edges": edges})
 
 
 @router.get("/memory/record")
