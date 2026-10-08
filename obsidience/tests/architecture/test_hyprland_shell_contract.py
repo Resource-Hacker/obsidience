@@ -365,83 +365,14 @@ def test_hyprland_and_uwsm_are_declared_runtime_plumbing() -> None:
     assert "visible front-to-back order" in hyprland["adaptation"]
     assert "optional Lua layout callback" in hyprland["adaptation"]
     aquamarine = upstreams["Aquamarine"]
-    assert aquamarine["package"] == "aquamarine 0.14.0-2.4"
-    assert aquamarine["patches"] == [
-        "adapter/hyprland/patches/aquamarine/0001-crtc-pageflip-accounting.patch",
-        "adapter/hyprland/patches/aquamarine/0002-buffer-commit-plane-rotation.patch",
-        "adapter/hyprland/patches/aquamarine/0003-release-fb-reference.patch",
-        "adapter/hyprland/patches/aquamarine/0004-mgpu-blit-safeguards.patch",
-        "adapter/hyprland/patches/aquamarine/0005-pageflip-id-optional.patch",
-        "adapter/hyprland/patches/aquamarine/0006-preserve-multigpu-on-resize.patch",
+    # Stock 0.15.1 contains every former backport; no local patches remain.
+    assert aquamarine["package"] == "aquamarine 0.15.1-1.1"
+    assert "patches" not in aquamarine
+    assert [fix["commit"] for fix in aquamarine["upstream_fixes"]] == [
+        "cf454160f2e9432263e2a2a531ce546a07033d01",
+        "639ee4cdc1a44a05de4e50a9067f4b8a4f210666",
     ]
-    pageflip_patch = (SHELL_ROOT / aquamarine["patches"][0]).read_text(
-        encoding="utf-8"
-    )
-    buffer_commit_patch = (SHELL_ROOT / aquamarine["patches"][1]).read_text(
-        encoding="utf-8"
-    )
-    release_reference_patch = (
-        SHELL_ROOT / aquamarine["patches"][2]
-    ).read_text(encoding="utf-8")
-    mgpu_guard_patch = (SHELL_ROOT / aquamarine["patches"][3]).read_text(
-        encoding="utf-8"
-    )
-    optional_id_patch = (SHELL_ROOT / aquamarine["patches"][4]).read_text(
-        encoding="utf-8"
-    )
-    swapchain_patch = (SHELL_ROOT / aquamarine["patches"][5]).read_text(
-        encoding="utf-8"
-    )
-    assert pageflip_patch.startswith(
-        "From 3f33dd35e09bb6b155d8576563d6053aa4b898c6 "
-    )
-    assert "pending pageflips need to live in the crtc" in pageflip_patch
-    assert buffer_commit_patch.startswith(
-        "From 40cde956f4998e3853e32c0e3f3729fa5340c0ad "
-    )
-    assert "only rotate plane FBs on buffer commits" in buffer_commit_patch
-    assert "state->needsReconfig()" in buffer_commit_patch
-    assert release_reference_patch.startswith(
-        "From 9f05429c75bb4fee3501c040e457e7bd69b737c3 "
-    )
-    assert "[this](SP<CDRMFB>& fb)" in release_reference_patch
-    assert mgpu_guard_patch.startswith(
-        "From b65c12201b66ff344689a0093148ff8a38e644cd "
-    )
-    assert "mgpu swapchain has no buffer" in mgpu_guard_patch
-    assert optional_id_patch.startswith(
-        "From f66fb773b406e3a63970cce001c8b45e17fa075a "
-    )
-    assert "std::optional<uintptr_t>" in optional_id_patch
-    assert ".multigpu = options.multigpu" in swapchain_patch
-    assert aquamarine["upstream_backports"] == [
-        {
-            "commit": "3f33dd35e09bb6b155d8576563d6053aa4b898c6",
-            "subject": "drm: move pending pageflips to the crtc",
-        },
-        {
-            "commit": "40cde956f4998e3853e32c0e3f3729fa5340c0ad",
-            "subject": "drm: only rotate plane FBs on buffer commits",
-        },
-        {
-            "commit": "9f05429c75bb4fee3501c040e457e7bd69b737c3",
-            "subject": "drm: use reference in lambda",
-        },
-        {
-            "commit": "b65c12201b66ff344689a0093148ff8a38e644cd",
-            "subject": "drm: safeguard blit from releaseMgpuResources",
-        },
-        {
-            "commit": "f66fb773b406e3a63970cce001c8b45e17fa075a",
-            "subject": "drm: make pendingPageflip id std::optional",
-        },
-        {
-            "commit": "639ee4cdc1a44a05de4e50a9067f4b8a4f210666",
-            "subject": "swapchain: preserve multigpu flag in resize() (#356)",
-        },
-    ]
-    assert "complete five-commit upstream page-flip" in aquamarine["adaptation"]
-    assert "without any Obsidience watcher" in aquamarine["adaptation"]
+    assert not (SHELL_ROOT / "adapter/hyprland/patches/aquamarine").exists()
     assert upstreams["Universal Wayland Session Manager"]["package"] == (
         "uwsm 0.26.7-1"
     )

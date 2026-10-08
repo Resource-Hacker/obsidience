@@ -25,7 +25,6 @@ def test_shell_manifest_names_one_real_module() -> None:
             "obsidience/shell/lock/pam.d/obsidience",
             "obsidience/shell/adapter/quickshell/build-runtime",
             "obsidience/shell/adapter/quickshell/patches/0001-satisfy-qtwebengine-host-contract.patch",
-            "obsidience/shell/adapter/quickshell/patches/0002-guard-session-lock-reentrancy.patch",
             "obsidience/shell/adapter/quickshell/patches/0003-notify-session-unlock.patch",
             "obsidience/shell/adapter/hyprland/hyprland.lua",
             "obsidience/shell/adapter/hyprland/layout.lua",
@@ -1444,10 +1443,11 @@ def test_quickshell_runtime_pins_webengine_and_session_lock_fixes() -> None:
     manifest = json.loads((SHELL_ROOT / "REUSE_MANIFEST.json").read_text())
     upstreams = {item["name"]: item for item in manifest["upstreams"]}
     quickshell = upstreams["Quickshell"]
-    assert quickshell["commit"] == "1a4716cde794a59928d9d9fc15f2afc7a95de360"
+    # v0.3.2 contains the session-lock reentrancy fix (afb2c27); two patches remain.
+    assert quickshell["commit"] == "4f508be500dea6e5732cc3d50382a0048b17e7b1"
+    assert quickshell["upstream_version"] == "v0.3.2"
     assert quickshell["patches"] == [
         "adapter/quickshell/patches/0001-satisfy-qtwebengine-host-contract.patch",
-        "adapter/quickshell/patches/0002-guard-session-lock-reentrancy.patch",
         "adapter/quickshell/patches/0003-notify-session-unlock.patch",
     ]
     webengine_patch = (SHELL_ROOT / quickshell["patches"][0]).read_text()
@@ -1456,33 +1456,19 @@ def test_quickshell_runtime_pins_webengine_and_session_lock_fixes() -> None:
     assert "-\tauto qArgC = 0;" in webengine_patch
     assert "+\tauto qArgC = 1;" in webengine_patch
     assert "+\tQCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);" in webengine_patch
-    lock_patch = (SHELL_ROOT / quickshell["patches"][1]).read_text()
-    assert lock_patch.count("diff --git") == 3
-    assert "if (this->realizing || !this->manager)" in lock_patch
-    assert "if (this->isLocked() && !this->realizing)" in lock_patch
-    unlock_patch = (SHELL_ROOT / quickshell["patches"][2]).read_text()
+    unlock_patch = (SHELL_ROOT / quickshell["patches"][1]).read_text()
     assert unlock_patch.count("diff --git") == 1
     assert "const auto wasLocked = this->isLocked();" in unlock_patch
     assert "if (wasLocked) emit this->lockStateChanged();" in unlock_patch
-    assert quickshell["upstream_backports"] == [
-        {
-            "commit": "afb2c27cd6d600d221d9379a332ee1b321a68487",
-            "subject": "wayland/lock: guard against reentrancy during surface creation",
-        }
-    ]
     assert quickshell["runtime"] == {
         "path": "/home/wissenschafter/.local/opt/obsidience-quickshell/"
-        "quickshell-0.3.1-webengine-lock-5f4d2585/quickshell",
-        "sha256": "5f4d25850c0112fbc7fd718bbdc859e85db888120aecd010a051f5b51b50de05",
+        "quickshell-0.3.2-webengine-lock-5cd6026d/quickshell",
+        "sha256": "5cd6026d4ba8dde8e5b54351c7c9c97403a535e1be072eadbf582709a73e5ff4",
     }
     recipe = (SHELL_ROOT / "adapter/quickshell/build-runtime").read_text()
-    assert 'lock_patch_file="$script_dir/patches/0002-guard-session-lock-reentrancy.patch"' in recipe
-    assert 'git -C "$source_dir" apply --check "$lock_patch_file"' in recipe
-    assert 'git -C "$source_dir" apply "$lock_patch_file"' in recipe
+    assert "0002-guard-session-lock-reentrancy" not in recipe
     assert 'unlock_patch_file="$script_dir/patches/0003-notify-session-unlock.patch"' in recipe
     assert 'git -C "$source_dir" apply "$unlock_patch_file"' in recipe
-    assert "readonly source_date_epoch=1787279335" in recipe
-    assert 'git ls-files -z | xargs -0 touch -d "@$SOURCE_DATE_EPOCH" --' in recipe
 
 
 def test_workspace_tiler_reuses_only_attested_omarchy_geometry() -> None:
