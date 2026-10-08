@@ -41,8 +41,8 @@ for context and prewarming and reconciles accepted replies. The pinned native
 `dsh-compaction-basic` and `dsh-token-meter` plugins own automatic pressure,
 confirmed-overflow recovery and manual compaction. Summary inference borrows the
 existing model reservation and cannot execute Tools or become a public reply.
-Native checkpoints shadow balanced spans while retaining the original JSONL log;
-there is no Compact Task or Temporary Observation store. The configured threshold
+Native checkpoints shadow balanced spans while retaining the original JSONL log.
+The configured threshold
 is kept in the existing settings ledger (60–90%, default 80%); automatic compaction
 retains a recent tail of 16% of the model window and summary output is capped at
 2,048 tokens within the model's output allowance. Manual compaction occupies the

@@ -24,8 +24,7 @@ documents how that vault Knowledge is captured, retrieved, and published.
 The Harness owns the API, Task admission and execution, model leases, retrieval,
 conversation and speech subsystems. The [Shell](/Architecture/Shell/Shell.md) owns desktop
 presentation and explicit commands. Hyprland owns composition and native window
-behavior; Quickshell owns shell panes; the knowledge desktop has its own
-GTK/WebKit presenter. Linux services and drivers remain upstream plumbing.
+behavior; Quickshell owns shell panes and the QtWebEngine graph stage. Linux services and drivers remain upstream plumbing.
 Real component changes across these owned surfaces follow the [Cordis composition](/Architecture/Harness/cordis-composition.md) project-wide dependency and lifecycle rules.
 
 Source is broader than immutable captures: It also exposes actual project

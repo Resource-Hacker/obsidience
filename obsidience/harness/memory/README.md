@@ -46,11 +46,8 @@ history importer and separate coding wiki are deliberately not mounted.
    explicit scoped `observations.recall` Tool permits six seconds. Neither
    path calls generative Reflect or treats memory as current screen evidence.
 
-The former Connections/Feeds collector and Darwin Distill workflow are retired.
-Historical reports remain in Hindsight for recall and inspection. The mental
-models ask about owner preferences, workstation changes and decisions, not
-news; the retired Feed stack must not be reconstructed from historical news
-memories.
+The mental models ask about owner preferences, workstation changes and
+decisions.
 
 Hindsight's native configuration selects the extraction/consolidation provider;
 inspect the installation's selected environment rather than assuming a model.
@@ -248,7 +245,6 @@ Before maintenance, preserve the Harness ledger, PostgreSQL database, immutable
 Source blobs and private token/config together. To disable the provider, remove
 only the local `[memory]` URL and restart the idle Harness. Preserve its database
 and outbox for re-enabling; do not delete memories to clear a health warning.
-There is no legacy Temporary/Immediate observation store or Compact/Promote Task.
 Disabling Hindsight preserves its database and queued handoffs; it does not enable
 an alternate memory implementation.
 

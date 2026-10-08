@@ -7,7 +7,7 @@ work follows explicit Task, Runbook, Skill and Tool dependencies.
 
 The Harness owns conversation, knowledge, model resources, capability validation,
 Review and execution receipts. Hyprland owns composition and desktop input;
-Quickshell presents native controls and panes, and a WebKit presenter displays
+Quickshell presents native controls and panes, and its QtWebEngine stage displays
 the shared React/Three.js knowledge graph. Cordis's explicit dependency and
 lifecycle principles govern integration across these boundaries.
 
@@ -54,9 +54,9 @@ inside the separate local Vault repository.
 ## Configure this installation
 
 Create an ignored `obsidience/obsidience.toml` from
-[`obsidience.example.toml`](obsidience/obsidience.example.toml). Configure the
-model endpoint/catalog, model storage and hardware selections for this machine
-before running inference. Default Agent and Task Articles select `auto`; the
+[`obsidience.example.toml`](obsidience/obsidience.example.toml). Review the
+model catalog (`obsidience/harness/models/runtime.py`), model storage and hardware
+selections for this machine before running inference. Default Agent and Task Articles select `auto`; the
 repository supplies no model weights or saved device assignments.
 
 ```toml
@@ -86,7 +86,7 @@ pnpm --dir obsidience/ui build
 ```
 
 The API defaults to loopback port 8765. The native UI is started by the configured
-desktop session; do not launch the retired Electron interface beside it. Backend
+desktop session. Backend
 changes require only the Harness reload; graph changes require rebuilding and
 reloading the graph presenter. Preserve the secure locker and compositor.
 Instruction-only changes need no restart.

@@ -4,7 +4,7 @@
 four Agent identities, the reusable Task/Runbook/Skill/Tool library, implementation
 and Cordis architecture knowledge under the root Architecture subject, and empty world
 subjects. It contains no previous owner's workstation inventory, preferences,
-conversations, news editions, Source captures, proposals or receipts.
+conversations, Source captures, proposals or receipts.
 
 ## Start a fresh installation
 

@@ -37,10 +37,6 @@ is explicit when accepted Knowledge is required.
 through the registered model owner, measured artifacts and configuration receipts.
 It is a Harness operation, not Darwin web research.
 
-Connections, automatic Feeds and Feed Distill are retired. Retained news-processing
-history is not a request to recreate news Articles. A replacement integration
-requires a future explicit decision.
-
 Framing, collection and verification are Runbook steps. Idle voice listening does
 not pause background work; real resource conflicts and accepted foreground input
 govern admission. See [Task activation](/Architecture/Harness/task-activation--b30a4642.md).

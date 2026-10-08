@@ -21,9 +21,6 @@ obsidience:
 
 Curate maintains ordinary wiki Knowledge only. Agent branches and executable definitions belong to Heimdall.
 
-Connections and Feeds are retired. News-processing reports in Hindsight are
-historical workflow evidence, not direct reporting. Do not reconstruct news
-Articles, revive Top Stories or recreate Feed work from those observations.
 Current-event claims require fresh direct-source research requested by the owner.
 
 When activated by `observations.memory.ready`, curate only the exact bound

@@ -65,9 +65,8 @@ views. Its application source is private; the public repository is an issue
 tracker. The pane uses the maintained psutil dependency and Qt Quick components,
 with no TMOG executable, branding, skin, or source dependency.
 
-There is no Hyprland edition of the panes, no second graph renderer, no
-Electron wrapper, and no compositor logic inside a pane. The archived Electron
-implementation remains only on `archive/electron-20260828`.
+There is no Hyprland edition of the panes, no second graph renderer and no
+compositor logic inside a pane.
 
 Reader stays the only Article and Source document viewer. Knowledge and Source
 can dock left or right, stack top or bottom, collapse to a rail, or detach as
@@ -271,8 +270,7 @@ each Hyprland output plus the one global `PaneWorkspace`; that workspace maps
 each open, undocked module as its own `FloatingWindow`. Hyprland is an adapter
 boundary, not a second product or runtime namespace.
 
-greetd launches this session as the default. KWin, Plasma Shell, Plasma Login
-Manager, KScreenLocker, and SDDM are removed from the live installation. The
+greetd launches this session as the default. The
 Quickshell session-lock path covers every Hyprland output and authenticates
 through PAM; greetd remains responsible for fresh login. A native Polkit UI,
 HDR, fullscreen VRR, and Samsung WoW behavior remain explicit acceptance gates.

@@ -55,7 +55,7 @@ nor a draft Runbook grants the catalog or permits execution.
 
 Task categories stay shallow. Chat and voice create Agent-owned runs rather than an Executive Task.
 The shared Query definition remains for existing specialist question procedures. Wiki exposes Ingest, Curate, Merge, Link, Improve,
-Archive, Audit, and Repair. Research exposes Question, Learn, Distill, and Model.
+Archive, Audit, and Repair. Research exposes Question, Learn, and Model.
 Generate exposes Tool, Skill, Task, and Runbook. The Executive family remains a Knowledge grouping for independently queueable
 Query work. The universal Executive Task is retired. The [Memory and knowledge lifecycle](/Architecture/Harness/observations.md)
 describes native DeepSeek context compaction and native Hindsight memory.
