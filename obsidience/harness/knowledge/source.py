@@ -52,7 +52,7 @@ PROJECT_SOURCE_FILES = (
     Path("obsidience/shell/session/install-session"),
     Path("obsidience/shell/session/obsidience-shell-login"),
     Path("obsidience/shell/session/obsidience.desktop"),
-    Path("obsidience/ui/electron.vite.config.ts"),
+    Path("obsidience/ui/vite.config.ts"),
     Path("obsidience/ui/package.json"),
     Path("obsidience/ui/pnpm-lock.yaml"),
     Path("obsidience/ui/tsconfig.json"),
