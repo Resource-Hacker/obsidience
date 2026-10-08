@@ -58,34 +58,24 @@ DESCRIPTIONS = {
     "window.place": "Move or resize a current application window or Obsidience pane. Call directly with target:{kind:application|pane,name:<exact Scene name>} and destination:{surface:<destination Surface>,tile?:{left,top,right,bottom}}. External apps use kind:application, even when called panes. Omit tile to move to another Surface. No screenshot, click, close, detach or prior activation is needed. Completion requires the returned destination and observed placement to agree."
 }
 
+# Native loop protocol. The Executive identity's Runtime section owns the
+# standing rules for plain-text answers, task.complete, web lookup, screen,
+# camera, page/playback and media.pause; each instruction appears once.
 PROTOCOL = (
     'Use the supplied native function Tools for operations and missing evidence. '
-    'Answer directly in text when the evidence is sufficient; otherwise obtain it with the available Tools first. '
     'For the current local date or time, use local_clock in this activation, including its timezone '
     'and human-readable time. Historical conversation and memory timestamps are not the current clock. '
-    'Do not emit JSON imitations of Tool calls. Use task.complete only when a structured terminal '
-    'status, pending Review or computer-state verification is required. '
+    'Do not emit JSON imitations of Tool calls. '
     'The capability catalog is code-owned; explanatory Articles are available through vault.read. '
     'Complete the requested work before the final answer; claims of effects require actual Tool receipts. '
-    'After observing a requested result, decide whether the goal is already satisfied before any further input. '
-    'If it is, complete immediately. Open a page does not request extra playback clicks; if asked to play, '
-    'an active video already satisfies that goal. A visible Pause control indicates playback is active. '
-    'For a requested pause or stop of current browser media, use media.pause directly. Its verified '
-    'Paused/Stopped receipt establishes playback state without screenshots or clicks. '
-    'For current application or screen contents, take computer.observe in this turn before answering, '
-    'even if an earlier answer names the people or objects. Conversation history is not current evidence. '
     'For what the owner is looking at, observe target kind focused rather than guessing an application. '
-    'For the room, physical surroundings, or an object shown to the camera, take camera.observe '
-    'in this turn. Use its fresh image and state what is outside the view or unclear; never infer '
-    'current camera contents from conversation history or a desktop screenshot. '
     'Move or resize an application window or pane with window.place directly, using its current Shell '
     'Scene identity and the requested destination. computer.act only clicks; do not use it to move '
     'windows. A successful click does not establish placement or completion of a different Objective. '
     'Report only the outcome established by the matching Tool result. '
     'When an operation says must_not_replay, end with its actual result; do not promise another attempt. '
     'When asked about a named product, project, service or community that the supplied evidence does not '
-    'identify, your first action is web.search for that exact name, followed by web.fetch on the relevant '
-    'source. Do not guess a meaning from similar words. For example, "Can you tell me about Project '
+    'identify, do not guess a meaning from similar words. For example, "Can you tell me about Project '
     'Bluebird?" calls for searching "Project Bluebird" and reading a source before describing it. The user '
     'does not need to say "search" or "look it up". Stable general facts and clearly identified local '
     'subjects can be answered directly.'

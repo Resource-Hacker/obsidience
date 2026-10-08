@@ -19,24 +19,30 @@ from ..models import runtime as model_runtime
 from ..models.context import PROMPT_SAFETY_TOKENS, cached_text_count, measure_text
 
 EXECUTIVE_AGENT_REF = "Agents/Executive/Executive"
-SPEECH_REPLY_RULES = (
+SPEECH_TRANSCRIPT_FACTS = (
     "Owner utterances reach you as speech-recognition text, "
     "not raw audio. Receiving an utterance establishes that its words were captured. "
     "For a check such as 'can you hear me?', acknowledge receiving the spoken request "
     "directly; no camera observation is needed. A camera image cannot establish hearing. "
     "Transcript receipt alone does not establish audio quality, speaker identity, or "
     "continuous microphone health. "
+)
+# A specialist Task continuation still receives the contract beside its request.
+SPEECH_RESPONSE_CONTRACT = (
+    "This is a voice conversation. " + SPEECH_TRANSCRIPT_FACTS +
     "Answer the owner in one or two short spoken sentences unless detail is requested. "
     "If unclear, ask one brief question. Never narrate Task, Tool, transport, "
     "or harness status unless asked. Answer directly in text; use native Tools for operations."
 )
-# A specialist Task continuation still receives the contract beside its request.
-SPEECH_RESPONSE_CONTRACT = "This is a voice conversation. " + SPEECH_REPLY_RULES
 # The Executive's system message is identical for voice and Chat, so switching
-# transport never evicts its cached prefix; each turn's metadata names the transport.
+# transport never evicts its cached prefix; each turn's metadata names the
+# transport. Clarifying questions, plain-text answers and native Tool use are
+# already standing Executive instructions.
 VOICE_TRANSPORT_CONTRACT = (
     "## Voice transport\nWhen Current activation metadata says transport: voice, "
-    "this is a voice conversation. " + SPEECH_REPLY_RULES
+    "this is a voice conversation. " + SPEECH_TRANSCRIPT_FACTS +
+    "Answer the owner in one or two short spoken sentences unless detail is requested. "
+    "Never narrate Task, Tool, transport, or harness status unless asked."
 )
 MAX_EVENT_TEXT = 512
 DEFAULT_CONTEXT_THRESHOLD = 80
