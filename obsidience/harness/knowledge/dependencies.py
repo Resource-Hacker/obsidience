@@ -190,7 +190,7 @@ def agent_dependencies(agent: Note, res: Resolver) -> dict:
     fields = {name: set() for name in ("tasks", "runbooks", "skills", "tools")}
     errors: list[str] = []
 
-    # Direct Agent Skills supply the router catalog without an intermediate hub.
+    # Direct Agent Skills supply the conversational catalog without an intermediate hub.
     if agent.meta.get("skills"):
         dependency = resolve_dependencies(agent, res, agent_ref=agent.ref)
         if dependency.get("error"):

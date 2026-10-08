@@ -4,7 +4,7 @@ export interface TracePacketSection {
   key: string; title: string; text: string; chars: number; sha256: string; truncated: boolean;
 }
 export const LATENCY_STAGES = {
-  input_final: "Input accepted", preparation: "Conversation preparation", selection: "Task selection",
+  input_final: "Input accepted", preparation: "Conversation preparation",
   activation: "Task activation", model_wait: "Model availability", model_preflight: "Model request preparation",
   model_first_public: "First model text", model_complete: "Model response complete", answer_committed: "Answer saved",
   speech_received: "Speech request received", aec_ready: "Echo cancellation ready", first_pcm: "First audio generated",

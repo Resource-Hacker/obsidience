@@ -1,4 +1,4 @@
-"""Admit owner conversation to the Executive identity before packet routing."""
+"""Admit owner conversation to the Executive identity."""
 from __future__ import annotations
 
 from ..knowledge.dependencies import resolve_dependencies

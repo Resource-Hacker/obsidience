@@ -72,7 +72,7 @@ def test_parallel_turn_and_tool_workers_keep_exact_correlation(latency_stream):
     {"duration_ms": float("inf")}, {"duration_ms": 86_400_001},
 ])
 def test_invalid_timing_does_not_create_plausible_public_measurement(latency_stream, kwargs):
-    trace.latency(**{"stage": "selection", "monotonic_ns": 123_000_000, **kwargs})
+    trace.latency(**{"stage": "activation", "monotonic_ns": 123_000_000, **kwargs})
     assert trace.history() == []
 
 

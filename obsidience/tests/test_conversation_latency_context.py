@@ -137,7 +137,7 @@ def test_uncommitted_outcome_never_emits_answer_commit_or_leaks_turn_scope(lane,
 
     async def exercise():
         result = await lane.runtime.submit("Hello", source="text")
-        trace.latency("selection", monotonic_ns=1_000_000)
+        trace.latency("activation", monotonic_ns=1_000_000)
         return result
 
     result = asyncio.run(exercise())

@@ -27,7 +27,7 @@ _LOCK = threading.RLock()
 _JOURNAL_AVAILABLE = True
 _CONTEXT: ContextVar[dict] = ContextVar("public_action_trace", default={})
 LATENCY_STAGES = frozenset({
-    "input_final", "preparation", "admission", "selection", "activation", "model_wait",
+    "input_final", "preparation", "admission", "activation", "model_wait",
     "model_preflight", "model_first_public", "model_complete", "model_release", "answer_committed",
     "command_verified",
     "speech_sent", "speech_received", "aec_ready", "first_pcm", "first_output_write",

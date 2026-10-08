@@ -39,7 +39,7 @@ COMMON_FIELDS = frozenset({
 # namespace. Unknown fields retain their original root/namespace placement.
 OBSIDIENCE_FIELDS = frozenset({
     "knowledge", "exclude_knowledge", "required_context", "relations", "context_role",
-    "operation_tools", "runtime_sections", "requires", "router_model",
+    "operation_tools", "runtime_sections", "requires",
     "acceptance", "action", "agent", "approved_at", "archive_reason", "archived_at", "articles", "assignee",
     "authored_fields", "optimization_auto_apply", "auto_curate", "auto_done", "base_sha256", "binding", "compacted_through",
     "compaction", "compaction_committed", "context_threshold", "conversation_id",
