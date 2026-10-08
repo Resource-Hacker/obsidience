@@ -11,7 +11,7 @@ import "./provider-graph.css";
 
 const CENTERED_HUB = { x: 0.5, y: 0.5 } as const;
 
-/** The exact Three.js knowledge desktop without the Electron application. */
+/** The Three.js knowledge desktop surface. */
 export function KnowledgeDesktopSurface() {
   return new URLSearchParams(location.search).get("viewer") === "1" ? <GraphViewer view="knowledge"/> : <KnowledgeStage />;
 }

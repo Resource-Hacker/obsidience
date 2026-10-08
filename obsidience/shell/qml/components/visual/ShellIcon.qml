@@ -219,7 +219,7 @@ Item {
         }
     }
 
-    // Match the Electron Models pane's Lucide BrainCircuit icon natively.
+    // Lucide BrainCircuit icon, drawn natively.
     Shape {
         anchors.centerIn: parent
         width: 24

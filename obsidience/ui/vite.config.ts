@@ -3,8 +3,7 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { resolve } from "path";
 
-// The Harness serves out/renderer at /shell/knowledge/. These are the
-// renderer settings electron-vite applied before the Electron app retired.
+// The Harness serves out/renderer at /shell/knowledge/.
 export default defineConfig({
   root: resolve(__dirname, "src/renderer"),
   base: "./",

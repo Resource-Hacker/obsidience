@@ -1,4 +1,4 @@
-"""The existing Source consumers assemble pages before replacing a listing."""
+"""The native Source pane assembles pages before replacing a listing."""
 import json
 from pathlib import Path
 import re
@@ -25,14 +25,6 @@ const issue={path:'obsidience/missing',status:'missing',detail:'Missing file'};
 const page=(files,next=null,issues=[])=>({files,issues,coverage:{scope:null,limit:2000,
  returned:files.length,complete:next===null,next_cursor:next,consistency:'live'}});
 """
-
-
-def api_check(script):
-    node_check(
-        "import {strict as assert} from 'node:assert';\n"
-        f"import {{api}} from {json.dumps((ROOT / 'ui/src/renderer/src/lib/api.ts').as_uri())};\n"
-        + FIXTURES + script
-    )
 
 
 def native_check(script):
@@ -67,68 +59,6 @@ const finishOther=()=>{
 const plain=value=>JSON.parse(JSON.stringify(value));
 """ + script
     )
-
-
-def test_api_follows_exact_cursors_deduplicates_and_retains_case_distinctions():
-    api_check(r"""
-const cursor='obsidience/Source folder/Stage.qml';
-const calls=[];
-const pages=[page([file(cursor)],cursor,[issue]),
- page([file(cursor,2),file('obsidience/Source folder/stage.qml')],null,[issue])];
-globalThis.fetch=async(url,options)=>{calls.push([url,options]);return {ok:true,json:async()=>pages.shift()};};
-const result=await api.sourceFiles();
-assert.deepEqual(result.files.map(f=>[f.key,f.size]),[[cursor,2],['obsidience/Source folder/stage.qml',1]]);
-assert.deepEqual(result.issues,[issue]);
-assert.equal(calls.length,2);
-assert(calls[1][0].endsWith('?after='+encodeURIComponent(cursor)));
-assert(calls.every(c=>c[1].cache==='no-store'));
-// The existing consumer DTO is still a complete assembled files/issues pair.
-assert.deepEqual(Object.keys(result),['files','issues']);
-""")
-
-
-def test_api_failure_on_later_page_never_resolves_partial_listing():
-    api_check(r"""
-let calls=0;
-globalThis.fetch=async()=>++calls===1?{ok:true,json:async()=>page([file('obsidience/a')],'obsidience/a')}
- :{ok:false,status:503,text:async()=>JSON.stringify({detail:'Source refresh failed'})};
-await assert.rejects(api.sourceFiles(),/Source refresh failed/);
-assert.equal(calls,2);
-""")
-
-
-@pytest.mark.parametrize("mutation", [
-    "reply.coverage.returned=2",
-    "reply.coverage.limit=0",
-    "reply.coverage.consistency='snapshot'",
-    "reply.coverage.scope='obsidience/another'",
-    "reply.coverage.next_cursor='obsidience/not-last'",
-    "reply.coverage.complete='yes'",
-    "delete reply.coverage",
-])
-def test_api_rejects_inconsistent_continuation_metadata(mutation):
-    api_check(r"""
-const reply=page([file('obsidience/b')],'obsidience/b');
-""" + mutation + r""";
-let calls=0;
-globalThis.fetch=async()=>({ok:true,json:async()=>++calls===1
- ?page([file('obsidience/a')],'obsidience/a'):reply});
-await assert.rejects(api.sourceFiles(),/Source hierarchy/);
-assert.equal(calls,2);
-""")
-
-
-def test_api_rejects_cyclic_cursors_and_preserves_legacy_single_response():
-    api_check(r"""
-let calls=0;
-globalThis.fetch=async()=>({ok:true,json:async()=>{
- const key=++calls%2?'obsidience/b':'obsidience/a';return page([file(key)],key);
-}});
-await assert.rejects(api.sourceFiles(),/did not advance/);
-assert.equal(calls,3);
-globalThis.fetch=async()=>({ok:true,json:async()=>({files:[file('obsidience/legacy')],issues:[]})});
-assert.deepEqual((await api.sourceFiles()).files.map(f=>f.key),['obsidience/legacy']);
-""")
 
 
 def test_native_commits_only_complete_page_assembly_and_exact_key_deduplication():

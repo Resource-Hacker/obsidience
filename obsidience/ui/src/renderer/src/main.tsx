@@ -5,7 +5,7 @@ import "./styles/globals.css";
 async function render(): Promise<void> {
   const surface = new URLSearchParams(window.location.search).get("surface");
   if (surface) document.documentElement.dataset.obsidienceSurface = surface;
-  // Every Shell page names its surface; the retired Electron workspace is gone.
+  // Every Shell page names its surface.
   const Component = surface === "knowledge"
     ? (await import("./surfaces/knowledge-desktop")).KnowledgeDesktopSurface
     : surface === "stage"

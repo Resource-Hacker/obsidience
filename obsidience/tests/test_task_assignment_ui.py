@@ -126,19 +126,3 @@ state.buildGroups();
 assert.equal(flatten(state.groups[0].tree).some(row=>row.ref===tool),false); // Old checkouts are never fallback authority.
 """)
     assert "identity.checkouts" not in native
-
-
-def test_browser_assignment_api_uses_task_contract_and_keeps_source_scope_separate():
-    _node(f"""
-import {{strict as assert}} from 'node:assert';
-const calls=[];
-globalThis.fetch=async(path,options)=>{{calls.push({{path,options}});return {{ok:true,json:async()=>({{assignments:[],dependencies:[]}})}};}};
-const {{api}}=await import({json.dumps((PRODUCT / 'ui/src/renderer/src/lib/api.ts').as_uri())});
-await api.assignments();
-assert.equal(calls[0].path,'http://127.0.0.1:8765/api/library/assignments');
-await api.setAssignment('Tasks/query','executive',true);
-assert.equal(calls[1].path,'http://127.0.0.1:8765/api/library/assignments/Tasks/query');
-assert.deepEqual(JSON.parse(calls[1].options.body),{{agent:'executive',assigned:true}});
-await api.setSourceCheckout('obsidience/evidence','researcher',true);
-assert.deepEqual(JSON.parse(calls[2].options.body),{{agent:'researcher',checked_out:true}});
-""")
