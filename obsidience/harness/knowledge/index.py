@@ -822,8 +822,6 @@ class Index:
                 if taxonomy_node.triggers:
                     existing["triggers"] = list(taxonomy_node.triggers)
                     existing["tags"] = [*existing.get("tags", []), "event-triggered"]
-                if taxonomy_node.routing:
-                    existing["routing"] = taxonomy_node.routing
                 continue
             projected = {
                 "id": projected_id,
@@ -839,8 +837,6 @@ class Index:
             if taxonomy_node.triggers:
                 projected["triggers"] = list(taxonomy_node.triggers)
                 projected["tags"].append("event-triggered")
-            if taxonomy_node.routing:
-                projected["routing"] = taxonomy_node.routing
             nodes.append(projected)
             by_id[projected_id] = projected
 
@@ -2263,12 +2259,6 @@ class Index:
         ).fetchone()
         return self._source_row(row)
 
-    def source_by_event_key(self, event_key: str) -> dict | None:
-        row = self.db.execute(
-            f"SELECT {','.join(self._SOURCE_COLUMNS)} FROM source_evidence WHERE event_key=?",
-            (event_key,),
-        ).fetchone()
-        return self._source_row(row)
 
     def source_by_fingerprint(
         self, lane: str, source_type: str, source_ref: str,

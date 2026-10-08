@@ -113,8 +113,6 @@ TASK_SUMMARIES = {
     ),
 }
 
-TASK_TITLES = {}
-
 
 # Existing persisted Tasks absorb their closest semantic Task Article.
 # Knowledge roots remain navigation-only while descendant Tasks stay checkoutable.
@@ -145,7 +143,6 @@ class TaskTaxonomyNode:
     kind: str
     children: tuple[str, ...]
     triggers: tuple[str, ...] = ()
-    routing: str | None = None
     summary: str | None = None
 
 
@@ -155,7 +152,7 @@ def _flatten(tree: Tree, parent: str = "") -> tuple[TaskTaxonomyNode, ...]:
         path = f"{parent}/{segment}" if parent else segment
         rows.append(TaskTaxonomyNode(
             path=path,
-            title=TASK_TITLES.get(path, segment.title()),
+            title=segment.title(),
             kind="knowledge" if path in TASK_KNOWLEDGE_PATHS else "task",
             children=tuple(f"{path}/{child}" for child in children),
             triggers=TASK_TRIGGERS.get(path, ()),
@@ -176,14 +173,6 @@ def node_id(path: str, known_refs: set[str]) -> str:
 
 def child_ids(path: str, known_refs: set[str]) -> list[str]:
     return [node_id(child, known_refs) for child in TASK_TAXONOMY_BY_PATH[path].children]
-
-
-def canonical_members(path: str, known_refs: set[str]) -> list[str]:
-    prefix = path + "/"
-    return sorted({
-        ref for member_path, ref in CANONICAL_TASK_BY_PATH.items()
-        if ref in known_refs and (member_path == path or member_path.startswith(prefix))
-    })
 
 
 def descendant_count(path: str) -> int:

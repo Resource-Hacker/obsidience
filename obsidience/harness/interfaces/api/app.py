@@ -419,12 +419,6 @@ def _task_taxonomy_article(ref: str, path: str | None = None) -> dict:
         body += "\n\n## Triggers\n\n" + "\n".join(
             f"- `{trigger}`" for trigger in triggers
         )
-    if path is not None and TASK_TAXONOMY_BY_PATH[path].routing:
-        meta["routing"] = TASK_TAXONOMY_BY_PATH[path].routing
-        body += (
-            "\n\n## Routing\n\nSelect and activate only the relevant child task families "
-            "for the current request."
-        )
     return {
         "ref": ref,
         "title": title,

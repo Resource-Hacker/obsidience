@@ -15,7 +15,6 @@ from obsidience.harness.knowledge.index import Index
 from obsidience.harness.knowledge.tasks import (
     CANONICAL_TASK_BY_PATH,
     TASK_TAXONOMY_BY_PATH,
-    canonical_members,
 )
 from obsidience.harness.knowledge.vault import iter_notes, load_note, resolver, write_note
 from obsidience.harness.models.runtime import EXECUTIVE_MODEL
@@ -179,10 +178,8 @@ def test_executive_taxonomy_contains_only_real_executable_outcomes() -> None:
     assert "executive/operate" not in TASK_TAXONOMY_BY_PATH
     assert TASK_TAXONOMY_BY_PATH["executive"].kind == "knowledge"
     assert TASK_TAXONOMY_BY_PATH["executive"].triggers == ()
-    assert TASK_TAXONOMY_BY_PATH["executive"].routing is None
     assert CANONICAL_TASK_BY_PATH["executive/query"] == "Tasks/query"
     assert "wiki/query" not in TASK_TAXONOMY_BY_PATH
-    assert canonical_members("executive", {"Tasks/query"}) == ["Tasks/query"]
     for fake_leaf in (
         "realtime", "respond", "recall", "delegate", "plan", "schedule", "monitor",
     ):

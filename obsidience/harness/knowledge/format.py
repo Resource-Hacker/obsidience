@@ -50,7 +50,7 @@ OBSIDIENCE_FIELDS = frozenset({
     "parent", "promotion_key", "promotion_pending", "proposal", "proposal_body_sha256",
     "proposed_at", "provenance", "purpose", "reader_ref", "reason", "reasoning_effort",
     "rejected_at", "rejected_reason", "related_refs", "research_task", "retrieval",
-    "review_class", "review_due", "role", "routing", "run_id", "runbook", "runbooks",
+    "review_class", "review_due", "role", "run_id", "runbook", "runbooks",
     "schedule", "skills", "source", "source_archive", "source_archive_sha256",
     "source_archived_at", "source_article_sha256", "source_conversation_id",
     "source_trees", "source_turn_id", "subrunbooks", "subskills", "subtasks",

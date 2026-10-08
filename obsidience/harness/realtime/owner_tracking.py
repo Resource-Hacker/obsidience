@@ -85,7 +85,7 @@ class Tracker:
             self._stop = threading.Event()
             self._config = config
             self._identity = identity
-            self._home, self._limits = home, limits
+            self._home = home
             self._max_age = min(.75, max(.1, float(config.get("frame_max_age_s", .75))))
             self._frame_mono = None
             self._observed_mono = None
@@ -566,7 +566,6 @@ class _Vision:
         self._match_times = []
         self._last_match = 0.
         self._owner_confirmed = False
-        self._owner_resume_until = 0.
         self._body_id = None
         self._framing_anchor = None
         self._started_mono = time.monotonic()
@@ -703,7 +702,6 @@ class _Vision:
                 self._enrollment_started = time.monotonic()
                 self._match_times = []
                 self._owner_confirmed = False
-                self._owner_resume_until = 0.
                 self._body_id = None
                 self._framing_anchor = None
                 self._observed = None
@@ -922,7 +920,6 @@ class _Vision:
                     self._body_id = None
                     self._framing_anchor = None
                     self._owner_confirmed = False
-                    self._owner_resume_until = 0.
                     label = "ambiguous"
                 else:
                     self._match_times = []
@@ -939,7 +936,6 @@ class _Vision:
                         self._body_id = None
                         self._framing_anchor = None
                         self._owner_confirmed = False
-                        self._owner_resume_until = 0.
                 # Person framing and owner identification are separate outcomes.
                 # A single repeated anonymous person may bring their face into view.
                 if target is None and not enrolling and len(matches) <= 1 and len(bodies) == 1:

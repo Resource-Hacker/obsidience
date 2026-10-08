@@ -32,7 +32,6 @@ export interface GraphNode {
   synthetic?: boolean;
   order?: number;
   triggers?: string[];
-  routing?: string;
   dependencies?: Partial<Record<"tools" | "skills" | "runbooks" | "tasks", string[]>>;
   source_scopes?: string[];
   source_scope_refs?: string[];
