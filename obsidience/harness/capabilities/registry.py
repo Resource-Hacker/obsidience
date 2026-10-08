@@ -232,7 +232,7 @@ def _argument_schemas() -> dict[str, dict]:
             obj({"action":{"const":"key"},"key":{"enum":["up","down","left","right","select","back","home","menu","play","pause","rewind","fast_forward","volume_up","volume_down","mute","enter","delete"]}},("action","key")),
             obj({"action":{"const":"keys"},"keys":{"type":"array","minItems":1,"maxItems":8,"items":{"enum":["up","down","left","right","select","back","home","menu","enter","delete"]}}},("action","keys")),
             obj({"action":{"const":"text"},"text":text(120)},("action","text")),
-            obj({"action":{"const":"find"},"query":text(120),"app":{"enum":["pluto","youtube"]}},("action","query")),
+            obj({"action":{"const":"find"},"query":text(120),"app":text(32)},("action","query")),
             obj({"action":{"const":"open"},"id":text(8)},("action","id")),
             obj({"action":{"const":"open"},"url":text(300)},("action","url"))]},
         "lights.set":obj({"target":{"enum":["all", "window_lamp", "woven_pendant", "north_lamp",
