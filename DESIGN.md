@@ -972,11 +972,12 @@ native QML overlay, authentication cannot begin before the compositor reports
 the lock secure. PAM success or the owner's explicitly authorized native
 `session.unlock` operation releases it. The web graph never receives
 credentials or decides unlock. PAM policy is installed root-owned at
-`/etc/pam.d/obsidience`. The pinned Quickshell host carries the two source lines
+`/etc/pam.d/obsidience`. The pinned Quickshell 0.3.2 host carries the two source lines
 required to satisfy Qt WebEngine's application-argument and shared-context
-preconditions plus the three-file upstream `afb2c27` backport that guards
-session-lock surface realization against reentrant screen activity. Both
-patches and the deterministic build recipe live beneath `adapter/quickshell`.
+preconditions plus a two-line fix that emits the `locked` false transition on
+unlock; v0.3.2 already contains upstream `afb2c27`, which guards session-lock
+surface realization against reentrant screen activity. Both patches and the
+hash-asserting build recipe live beneath `adapter/quickshell`.
 Hyprlock, gtklock, and a second lock process are not part of this architecture;
 greetd remains responsible only for fresh-login authentication. A native Polkit
 agent remains a separate acceptance gate.

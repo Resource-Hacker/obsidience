@@ -112,51 +112,35 @@
       "name": "Quickshell",
       "package": "quickshell 0.3.1-1.1",
       "repository": "https://git.outfoxxed.me/quickshell/quickshell",
-      "commit": "1a4716cde794a59928d9d9fc15f2afc7a95de360",
+      "commit": "4f508be500dea6e5732cc3d50382a0048b17e7b1",
+      "upstream_version": "v0.3.2",
       "license": "LGPL-3.0-only",
       "selected_sources": [
         {
           "path": "src/launch/launch.cpp",
-          "sha256": "60812ec93022a8bcd0831a0dbb24a4ac81373d34cdf60b251764fed977ba2a93",
-          "patched_sha256": "66c96eb12ead4d1f7414c735d4ae52975f8c9ad210982b0631cf243d67e37d2d"
+          "sha256": "500c272de02d6dd0d9f93b636055ee5a74585f17cf23aab018458a57c5c06972",
+          "patched_sha256": "03f4501963424ab3ff8df73da665478a2c076a186b374df1d941b04585693cee"
         },
         {
           "path": "src/launch/main.cpp",
-          "sha256": "0d05ea9be6728dfd4075895c2717435183f658696c1d95be08e117a14df2901d",
-          "patched_sha256": "e05136d4e0733589c8f0fd4c9b732efaca4ae8921ef79749e3181310014d1c95"
+          "sha256": "2a80b0dab46642809db3a3e8e63245f5cf8dbba049d2dbe22b42a4bc6f8a4ffe",
+          "patched_sha256": "43f1d7af99dd68a870d11a1bcce5ad2ff7f0ed6143e7a7828f1d56f59fbe85cc"
         },
         {
           "path": "src/wayland/session_lock.cpp",
-          "sha256": "fb38f903c7b25f2b64a1a1a15c9ae8e9fc7dfff78a04c70e5c01fc6488e71904",
-          "patched_sha256": "4c415d435d040a320a361ad3fb8ac7ef71ccfafa552d48bc7136bef3f01dbaf1"
-        },
-        {
-          "path": "src/wayland/session_lock.hpp",
-          "sha256": "bd32bbb44b1c401b789eacad42723ceb304e9e8cdc289c41dbe9b1f1da56436f",
-          "patched_sha256": "d6bd008f895b40c0ec49a1ddc9cf80b3fc1d7521feb5a8909714ba306d9fe5d5"
-        },
-        {
-          "path": "src/wayland/session_lock/session_lock.cpp",
-          "sha256": "4d0a09e665ce55e0086e101e99eab2bebc79f994c8fc275e38723412f2bd3c15",
-          "patched_sha256": "c820c9e4481449b798eb001fbe32b7cf8c380aac2eaeb4a581e602d2843fe6a6"
+          "sha256": "f54148fa063cd0f8838e5c6b4dd58f2e5661323d8b785b48db1ce8d81e082e72",
+          "patched_sha256": "50d16ba1a5fb5fd71b91dfe24b6834aed63da9f0a0260ab4e903aedbc5ab635b"
         }
       ],
       "patches": [
         "adapter/quickshell/patches/0001-satisfy-qtwebengine-host-contract.patch",
-        "adapter/quickshell/patches/0002-guard-session-lock-reentrancy.patch",
         "adapter/quickshell/patches/0003-notify-session-unlock.patch"
       ],
-      "upstream_backports": [
-        {
-          "commit": "afb2c27cd6d600d221d9379a332ee1b321a68487",
-          "subject": "wayland/lock: guard against reentrancy during surface creation"
-        }
-      ],
       "runtime": {
-        "path": "/home/wissenschafter/.local/opt/obsidience-quickshell/quickshell-0.3.1-webengine-lock-5f4d2585/quickshell",
-        "sha256": "5f4d25850c0112fbc7fd718bbdc859e85db888120aecd010a051f5b51b50de05"
+        "path": "/home/wissenschafter/.local/opt/obsidience-quickshell/quickshell-0.3.2-webengine-lock-5cd6026d/quickshell",
+        "sha256": "5cd6026d4ba8dde8e5b54351c7c9c97403a535e1be072eadbf582709a73e5ff4"
       },
-      "adaptation": "Used as the Qt Quick and Wayland shell runtime. Its WlSessionLock and WlSessionLockSurface types own the secure ext-session-lock surfaces, while PamContext delegates authentication to the system PAM stack. One two-line compatibility patch supplies Qt WebEngine's documented host preconditions: a valid argv[0] for Chromium and shared graphics contexts selected before the first application object. The exact upstream afb2c27 session-lock fix serializes lock-surface realization and prevents screen changes from reentering it. A two-line follow-up preserves the pre-unlock state so the existing locked property emits its false transition after release. The fixed-path build recipe makes the selected content hash reproducible. Obsidience owns the QML presentation and lock policy; no upstream visual design was copied."
+      "adaptation": "Used as the Qt Quick and Wayland shell runtime. Its WlSessionLock and WlSessionLockSurface types own the secure ext-session-lock surfaces, while PamContext delegates authentication to the system PAM stack. One two-line compatibility patch supplies Qt WebEngine's documented host preconditions: a valid argv[0] for Chromium and shared graphics contexts selected before the first application object. v0.3.2 contains the upstream afb2c27 session-lock reentrancy fix that was previously backported. A two-line follow-up preserves the pre-unlock state so the existing locked property emits its false transition after release. The recipe asserts the upstream commit, the touched source files and both patches by hash, and records the produced binary hash in the runtime directory name and BUILDINFO; a Qt update is a plain rebuild. The distro quickshell package remains the IPC client (/usr/bin/qs); its IPC protocol is unchanged between 0.3.1 and 0.3.2. Obsidience owns the QML presentation and lock policy; no upstream visual design was copied."
     },
     {
       "name": "Qt WebEngine",

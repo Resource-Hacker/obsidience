@@ -2,13 +2,15 @@ From: Obsidience <local@obsidience>
 Subject: [PATCH] launch: satisfy the QtWebEngine host contract
 
 QtWebEngine initializes Chromium from QCoreApplication::arguments() and
-rejects an empty argument list. Quickshell reconstructs its GUI application
-after parsing its own command line, so retain the executable name while
-continuing to hide all consumed arguments from Qt.
+rejects an empty argument list. Quickshell creates its GUI application with
+an argument count of zero to hide the arguments it has already consumed, so
+retain only the executable name.
 
 QtWebEngine Quick also requires shared graphics contexts to be selected before
-the first application object exists. Set Qt's documented equivalent attribute
-before Quickshell creates its temporary QCoreApplication.
+the application object exists. Set Qt's documented equivalent attribute,
+Qt::AA_ShareOpenGLContexts, at the start of main().
+
+Rebased onto Quickshell v0.3.2 (4f508be).
 
 ---
  src/launch/launch.cpp | 2 +-
@@ -16,11 +18,11 @@ before Quickshell creates its temporary QCoreApplication.
  2 files changed, 2 insertions(+), 1 deletion(-)
 
 diff --git a/src/launch/launch.cpp b/src/launch/launch.cpp
-index 71d9983..fa41f88 100644
+index 1edd60c..e1de94b 100644
 --- a/src/launch/launch.cpp
 +++ b/src/launch/launch.cpp
-@@ -282,7 +282,7 @@ int launch(const LaunchArgs& args, char** argv, QCoreApplication* coreApplicatio
- 	delete coreApplication;
+@@ -280,7 +280,7 @@ int launch(const LaunchArgs& args, char** argv) {
+ 	QGuiApplication::setDesktopSettingsAware(pragmas.desktopSettingsAware);
  
  	QGuiApplication* app = nullptr;
 -	auto qArgC = 0;
@@ -29,7 +31,7 @@ index 71d9983..fa41f88 100644
  	if (pragmas.useQApplication) {
  		app = new QApplication(qArgC, argv);
 diff --git a/src/launch/main.cpp b/src/launch/main.cpp
-index ab08a5e..441304d 100644
+index 24969d8..ff6627a 100644
 --- a/src/launch/main.cpp
 +++ b/src/launch/main.cpp
 @@ -117,6 +117,7 @@ void exitDaemon(int code) {
@@ -40,5 +42,3 @@ index ab08a5e..441304d 100644
  	QCoreApplication::setApplicationName("quickshell");
  
  #if CRASH_HANDLER
--- 
-2.51.0

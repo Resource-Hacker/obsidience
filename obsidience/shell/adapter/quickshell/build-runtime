@@ -1,30 +1,36 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Builds the patched Quickshell runtime from pinned inputs. The upstream commit,
+# the touched source files and the patches are asserted by hash; the produced
+# binary depends on the installed Qt and compiler, so its hash is recorded
+# (directory name and BUILDINFO) rather than required. A Qt update is therefore
+# a plain rerun. Selecting the new runtime remains an explicit unit change.
+
 readonly upstream=https://git.outfoxxed.me/quickshell/quickshell
-readonly commit=1a4716cde794a59928d9d9fc15f2afc7a95de360
-readonly source_date_epoch=1787279335
-readonly launch_before=60812ec93022a8bcd0831a0dbb24a4ac81373d34cdf60b251764fed977ba2a93
-readonly launch_after=66c96eb12ead4d1f7414c735d4ae52975f8c9ad210982b0631cf243d67e37d2d
-readonly main_before=0d05ea9be6728dfd4075895c2717435183f658696c1d95be08e117a14df2901d
-readonly main_after=e05136d4e0733589c8f0fd4c9b732efaca4ae8921ef79749e3181310014d1c95
-readonly lock_cpp_before=fb38f903c7b25f2b64a1a1a15c9ae8e9fc7dfff78a04c70e5c01fc6488e71904
-readonly lock_cpp_after=a2657bb8b2f9179eaad982ee07a5694f6a7995b2b07f3fedc0e500b678609180
-readonly lock_cpp_final=4c415d435d040a320a361ad3fb8ac7ef71ccfafa552d48bc7136bef3f01dbaf1
-readonly lock_hpp_before=bd32bbb44b1c401b789eacad42723ceb304e9e8cdc289c41dbe9b1f1da56436f
-readonly lock_hpp_after=d6bd008f895b40c0ec49a1ddc9cf80b3fc1d7521feb5a8909714ba306d9fe5d5
-readonly lock_manager_before=4d0a09e665ce55e0086e101e99eab2bebc79f994c8fc275e38723412f2bd3c15
-readonly lock_manager_after=c820c9e4481449b798eb001fbe32b7cf8c380aac2eaeb4a581e602d2843fe6a6
-readonly binary_sha256=5f4d25850c0112fbc7fd718bbdc859e85db888120aecd010a051f5b51b50de05
-readonly destination=/home/wissenschafter/.local/opt/obsidience-quickshell/quickshell-0.3.1-webengine-lock-5f4d2585
-readonly work_root=/var/tmp/obsidience-quickshell-0.3.1-webengine-lock
+readonly version=0.3.2
+readonly commit=4f508be500dea6e5732cc3d50382a0048b17e7b1
+readonly webengine_patch_sha256=90c03ff01615a2e2745be073ce5bd1b76bf6e89b2ed28ebc57747423bbe75054
+readonly unlock_patch_sha256=5ec0b786645dd378981cd85d5ad5a43ad45021f5427459d3a996c1dfcfe97299
+readonly launch_before=500c272de02d6dd0d9f93b636055ee5a74585f17cf23aab018458a57c5c06972
+readonly launch_after=03f4501963424ab3ff8df73da665478a2c076a186b374df1d941b04585693cee
+readonly main_before=2a80b0dab46642809db3a3e8e63245f5cf8dbba049d2dbe22b42a4bc6f8a4ffe
+readonly main_after=43f1d7af99dd68a870d11a1bcce5ad2ff7f0ed6143e7a7828f1d56f59fbe85cc
+readonly lock_cpp_before=f54148fa063cd0f8838e5c6b4dd58f2e5661323d8b785b48db1ce8d81e082e72
+readonly lock_cpp_after=50d16ba1a5fb5fd71b91dfe24b6834aed63da9f0a0260ab4e903aedbc5ab635b
+readonly runtime_root=/home/wissenschafter/.local/opt/obsidience-quickshell
+readonly work_root=/var/lib/ai/build/obsidience-quickshell-$version-webengine-lock
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 webengine_patch_file="$script_dir/patches/0001-satisfy-qtwebengine-host-contract.patch"
-lock_patch_file="$script_dir/patches/0002-guard-session-lock-reentrancy.patch"
 unlock_patch_file="$script_dir/patches/0003-notify-session-unlock.patch"
 source_dir="$work_root/source"
 build_dir="$work_root/build"
+
+check() { printf '%s  %s\n' "$1" "$2" | sha256sum --check --status; }
+
+check "$webengine_patch_sha256" "$webengine_patch_file"
+check "$unlock_patch_sha256" "$unlock_patch_file"
 
 if [[ -e "$work_root" ]]; then
     find "$work_root" -xdev -depth -delete
@@ -32,24 +38,18 @@ fi
 install -d -m 0755 "$work_root"
 git clone --quiet --filter=blob:none --no-checkout "$upstream" "$source_dir"
 git -C "$source_dir" checkout --quiet --detach "$commit"
-printf '%s  %s\n' "$launch_before" "$source_dir/src/launch/launch.cpp" | sha256sum --check --status
-printf '%s  %s\n' "$main_before" "$source_dir/src/launch/main.cpp" | sha256sum --check --status
-printf '%s  %s\n' "$lock_cpp_before" "$source_dir/src/wayland/session_lock.cpp" | sha256sum --check --status
-printf '%s  %s\n' "$lock_hpp_before" "$source_dir/src/wayland/session_lock.hpp" | sha256sum --check --status
-printf '%s  %s\n' "$lock_manager_before" "$source_dir/src/wayland/session_lock/session_lock.cpp" | sha256sum --check --status
+check "$launch_before" "$source_dir/src/launch/launch.cpp"
+check "$main_before" "$source_dir/src/launch/main.cpp"
+check "$lock_cpp_before" "$source_dir/src/wayland/session_lock.cpp"
 git -C "$source_dir" apply --check "$webengine_patch_file"
 git -C "$source_dir" apply "$webengine_patch_file"
-git -C "$source_dir" apply --check "$lock_patch_file"
-git -C "$source_dir" apply "$lock_patch_file"
-printf '%s  %s\n' "$launch_after" "$source_dir/src/launch/launch.cpp" | sha256sum --check --status
-printf '%s  %s\n' "$main_after" "$source_dir/src/launch/main.cpp" | sha256sum --check --status
-printf '%s  %s\n' "$lock_cpp_after" "$source_dir/src/wayland/session_lock.cpp" | sha256sum --check --status
-printf '%s  %s\n' "$lock_hpp_after" "$source_dir/src/wayland/session_lock.hpp" | sha256sum --check --status
-printf '%s  %s\n' "$lock_manager_after" "$source_dir/src/wayland/session_lock/session_lock.cpp" | sha256sum --check --status
 git -C "$source_dir" apply --check "$unlock_patch_file"
 git -C "$source_dir" apply "$unlock_patch_file"
-printf '%s  %s\n' "$lock_cpp_final" "$source_dir/src/wayland/session_lock.cpp" | sha256sum --check --status
-export SOURCE_DATE_EPOCH="$source_date_epoch"
+check "$launch_after" "$source_dir/src/launch/launch.cpp"
+check "$main_after" "$source_dir/src/launch/main.cpp"
+check "$lock_cpp_after" "$source_dir/src/wayland/session_lock.cpp"
+SOURCE_DATE_EPOCH=$(git -C "$source_dir" log -1 --format=%ct "$commit")
+export SOURCE_DATE_EPOCH
 (
     cd "$source_dir"
     git ls-files -z | xargs -0 touch -d "@$SOURCE_DATE_EPOCH" --
@@ -64,9 +64,22 @@ cmake -S "$source_dir" -B "$build_dir" -GNinja \
     -DWAYLAND_SESSION_LOCK=ON \
     -DDISTRIBUTOR='Obsidience local compatibility build'
 cmake --build "$build_dir" --parallel
-printf '%s  %s\n' "$binary_sha256" "$build_dir/src/quickshell" | sha256sum --check --status
 
-install -d -m 0755 "$destination"
-install -m 0755 "$build_dir/src/quickshell" "$destination/quickshell"
+binary_sha256=$(sha256sum "$build_dir/src/quickshell" | cut -d' ' -f1)
+destination="$runtime_root/quickshell-$version-webengine-lock-${binary_sha256:0:8}"
+if [[ -e "$destination/quickshell" ]]; then
+    # An identical build is already installed; never replace a selected runtime.
+    check "$binary_sha256" "$destination/quickshell"
+else
+    install -d -m 0755 "$destination"
+    install -m 0755 "$build_dir/src/quickshell" "$destination/quickshell"
+    {
+        printf 'upstream=%s\ncommit=%s\nversion=%s\n' "$upstream" "$commit" "$version"
+        printf 'patch=%s %s\n' "$webengine_patch_sha256" "${webengine_patch_file##*/}"
+        printf 'patch=%s %s\n' "$unlock_patch_sha256" "${unlock_patch_file##*/}"
+        "$build_dir/src/quickshell" --version --verbose | sed -n 's/^Qt: */qt=/p; s/^Compiler: */compiler=/p'
+        printf 'binary_sha256=%s\n' "$binary_sha256"
+    } > "$destination/BUILDINFO"
+fi
 find "$work_root" -xdev -depth -delete
 printf '%s\n' "$destination/quickshell"

@@ -166,14 +166,16 @@ The stage host binds its native layers to canonical Surface identities. Samsung
 has Memory, Library and Code in thirds; USB-C keeps Computer and its orbiting
 subagents. Viewer selection never replaces or removes those desktop graphs.
 
-The selected Quickshell 0.3.1 runtime carries two narrow patches. The first
+The selected Quickshell 0.3.2 runtime carries two narrow patches. The first
 preserves `argv[0]` when creating the GUI application and selects shared Qt
-graphics contexts before the first application object. The second is the exact
-three-file functional backport from upstream commit `afb2c27`; it serializes
-session-lock surface realization and prevents screen changes from reentering
-that operation. The patches, upstream hashes, runtime hash, and deterministic
-build recipe live under `adapter/quickshell` and in `REUSE_MANIFEST.json`; the
-distro-owned executable remains untouched.
+graphics contexts before the first application object. The second keeps the
+pre-unlock state so `WlSessionLock.locked` emits its false transition on
+release. v0.3.2 already contains upstream `afb2c27`, which serializes
+session-lock surface realization. The build recipe under `adapter/quickshell`
+asserts the upstream commit, touched sources and patches by hash and records
+the produced binary hash (runtime directory name and `BUILDINFO`); a Qt update
+is a plain rebuild. `REUSE_MANIFEST.json` names the selected runtime; the
+distro-owned executable remains untouched and serves only as the IPC client.
 
 Hyprland keeps a secure `ext-session-lock` after its client dies. Obsidience
 therefore enables Hyprland's supported `allow_session_lock_restore` option and
