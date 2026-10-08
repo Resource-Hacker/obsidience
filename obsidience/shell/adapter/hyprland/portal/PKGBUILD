@@ -1,15 +1,18 @@
+# Obsidience patch-bearing build; keep its own package identity across distro updates.
 # Maintainer: Caleb Maclennan <caleb@alerque.com>
 # Contributor: Aaron Blasko <blaskoazzolaaaron [at] gmail.com>
 
-pkgname=xdg-desktop-portal-hyprland
+pkgname=xdg-desktop-portal-hyprland-obsidience
+_upstream=xdg-desktop-portal-hyprland
 pkgver=1.4.1
 _protocolver=4d29e48433270a2af06b8bc711ca1fe5109746cd
-pkgrel=2.2
+pkgrel=2.3
 pkgdesc='xdg-desktop-portal backend for hyprland'
-url="https://github.com/hyprwm/$pkgname"
+url="https://github.com/hyprwm/$_upstream"
 arch=(x86_64)
 license=(MIT)
-provides=(xdg-desktop-portal-impl)
+provides=("$_upstream=$pkgver" xdg-desktop-portal-impl)
+conflicts=("$_upstream")
 depends=(
          libgcc
          libstdc++
@@ -30,7 +33,7 @@ makedepends=(cmake
              wayland-protocols)
 optdepends=('grim: required for the screenshot portal to function'
             'slurp: support for interactive mode for the screenshot portal')
-_archive="$pkgname-$pkgver"
+_archive="$_upstream-$pkgver"
 source=("$url/archive/v$pkgver/$_archive.tar.gz"
         "https://github.com/hyprwm/hyprland-protocols/archive/$_protocolver.tar.gz")
 sha256sums=('3652c14f63a9666acea2c841e196782dbc0f74ea5b4783622dd04a32f08b709f'

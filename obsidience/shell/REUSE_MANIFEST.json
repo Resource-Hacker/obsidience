@@ -388,7 +388,7 @@
     },
     {
       "name": "xdg-desktop-portal-hyprland",
-      "package": "xdg-desktop-portal-hyprland 1.4.1-2.2",
+      "package": "xdg-desktop-portal-hyprland-obsidience 1.4.1-2.3",
       "repository": "https://github.com/hyprwm/xdg-desktop-portal-hyprland",
       "license": "MIT",
       "upstream_version": "v1.4.1",
@@ -404,9 +404,10 @@
         "adapter/hyprland/patches/xdg-desktop-portal-hyprland/0003-correct-dmabuf-buffer-layout.patch"
       ],
       "packaging": "adapter/hyprland/portal/PKGBUILD",
+      "packaging_policy": "Provides xdg-desktop-portal-hyprland under the distinct xdg-desktop-portal-hyprland-obsidience package identity so a distribution rebuild cannot silently replace the backported capture fixes. Retire it once a distribution release contains all three fixes.",
       "packaging_reference": "https://gitlab.archlinux.org/archlinux/packaging/packages/xdg-desktop-portal-hyprland/-/commit/58bf407",
       "adaptation": "Backport three merged upstream capture fixes onto the installed 1.4.1 base: preserve capture callbacks across buffer starvation and format renegotiation, and advertise the actual DMA-BUF plane layout with DMA-specific buffer parameters. The ordinary portal remains the sole Discord screen-share backend; no replacement capture service or restart loop.",
-      "notice": "/usr/share/licenses/xdg-desktop-portal-hyprland/LICENSE"
+      "notice": "/usr/share/licenses/xdg-desktop-portal-hyprland-obsidience/LICENSE"
     }
   ]
 }
