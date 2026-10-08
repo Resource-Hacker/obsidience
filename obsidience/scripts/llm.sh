@@ -3,8 +3,9 @@
 # GPU/context launch profile before systemd starts this service.
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PRODUCT_ROOT=$(dirname -- "$SCRIPT_DIR")
-# Pinned b10078 with Jinja scope correction and exact input-budget admission.
-LLAMA=/var/lib/ai/opt/llama.cpp-b10078-obsidience-admission-20261005
+# Pinned b11509 with exact input-budget admission (the Jinja scope fix is upstream).
+# Rollback: LLAMA=/var/lib/ai/opt/llama.cpp-b10078-obsidience-admission-20261005
+LLAMA=/var/lib/ai/opt/llama.cpp-b11509-obsidience-admission-20261008
 MODEL=${OBSIDIENCE_MODEL:-"$PRODUCT_ROOT/state/models/executive.gguf"}
 LAUNCH="$PRODUCT_ROOT/state/model-launch/obsidience-gemma.json"
 GPU_UUIDS=$(jq -er '.gpu_uuids | join(",")' "$LAUNCH") || exit 64
@@ -29,9 +30,9 @@ fi
 if [ -n "${CREDENTIALS_DIRECTORY:-}" ] && [ -r "$CREDENTIALS_DIRECTORY/obsidience-model-api-key" ]; then
   set -- "$@" --api-key-file "$CREDENTIALS_DIRECTORY/obsidience-model-api-key"
 fi
-# Keep the compiler's fixed-prefix message checkpoint across Tool follow-ups.
-# b10078's 8192-token spacing evicts that boundary from ordinary ~6K packets.
-# The upstream 32-checkpoint bound remains unchanged; this does not expand KV.
+# Checkpoints every >=1024 tokens: since #28302 (b11xxx) spacing-based eviction
+# only applies when the 32-checkpoint list is full, so fewer batch splits cut
+# cold prefill ~42% (26.9 -> 15.6 s at 39.7K) with no warm-turn penalty (2026-10-08).
 # Retain the selector and several Task prefixes across ordinary work changes.
 # Their SWA snapshots exceed the server's default 8 GiB RAM cache together.
 exec env CUDA_DEVICE_ORDER=PCI_BUS_ID \
@@ -42,4 +43,5 @@ exec env CUDA_DEVICE_ORDER=PCI_BUS_ID \
   --mmproj "$MMPROJ" --mmproj-offload --image-max-tokens 512 \
   --host 127.0.0.1 --port 8089 -ngl 99 -c "$CTX" --parallel "$PARALLEL" \
   --batch-size 4096 --ubatch-size 1024 --flash-attn on \
-  --checkpoint-min-step 0 --cache-ram 16384 --jinja "$@"
+  --checkpoint-min-step 1024 --cache-ram 16384 --no-reasoning-preserve \
+  --jinja "$@"

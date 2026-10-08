@@ -327,14 +327,14 @@
     },
     "llama_cpp_executive_admission": {
       "repository": "https://github.com/ggml-org/llama.cpp",
-      "revision": "f0480101800d33a72ed58fa86a8a6be01b54bd52",
-      "version": "b10078+obsidience-jinja-scope+exact-input-admission",
+      "revision": "1167d3f42c2b4dc5469bf4e696cb8c678ca79110",
+      "version": "b11509+obsidience-exact-input-admission",
       "license": "MIT",
-      "path": "/var/lib/ai/opt/llama.cpp-b10078-obsidience-admission-20261005",
-      "patch": "obsidience/scripts/patches/llama-cpp-exact-input-admission.patch",
-      "patch_sha256": "8adb1422cd51bd4ffff4b48da4f828ad0ce3e5546c646e759f146163917e5fb2",
-      "server_library_sha256": "0feceeec8b48e92c703815418be932f217be122cd07210ad6c8c032573d3074b",
-      "integration": "Builds on the separately recorded Jinja scope correction. Adds an optional exact input_token_limit check after complete native tokenization and media expansion but before task creation or queue admission. Explicit pre_enqueue overflow and accepted count/limit headers let the native Executive avoid duplicate preflight rendering/tokenization. Only a verified pre-enqueue refusal can project earlier recoverable read pages and retry once; no retry after admitted inference. Only the server implementation library differs from the Jinja-scope runtime. CUDA kernels, common library, model, template, F16 KV, 65536-token saved profile, MTP3 and vision settings remain unchanged. Experimental MTP-cap, ExLlamaV3 and BeeLlama changes are not installed."
+      "path": "/var/lib/ai/opt/llama.cpp-b11509-obsidience-admission-20261008",
+      "manifest": "/var/lib/ai/opt/llama.cpp-b11509-obsidience-admission-20261008/MANIFEST.json",
+      "patch": "obsidience/scripts/patches/llama-cpp-exact-input-admission-b11509.patch",
+      "patch_sha256": "27cf3b20af1ed46e657fe4b263f4d69eb32a51639a07b77ab45352c91b6dc71d",
+      "integration": "Selected 2026-10-08. Only the exact-input admission patch is carried (rebased, behaviour unchanged); the Jinja filter-scope fix is upstream (#29776). Launcher adds --no-reasoning-preserve (keeps b10078 prompt bytes) and --checkpoint-min-step 1024 (#28302 fixed the eviction behind the old 0 setting). Measured live: cold 39.7K-token prefill 26.9 s at min-step 0 vs 15.6 s at 1024 (b10078: 28.0 s); warm simple turns 1.56-1.66 s vs 1.79-2.01 s on b10078; VRAM 17,716 MiB. /v1/models now requires the API key (#26347); the Harness health probe sends it."
     },
     "strata_dualgpu_ada": {
       "repository": "https://github.com/Hardin22/Strata-DualGPU",
@@ -398,6 +398,17 @@
       "revision": "6671d89bede8c9fc108b17bb98916170f5657650",
       "license": "AGPL-3.0-or-later",
       "integration": "Unmodified upstream container run as the rootless Podman Quadlet user service obsidience-searxng (~/.config/containers/systemd/obsidience-searxng.container), published only on 127.0.0.1:8888 with a read-only local settings.yml enabling the JSON API. The existing web.search Capability queries it over HTTP and keeps DDGS as fallback; no SearXNG code is copied or linked."
+    },
+    "llama_cpp_executive_admission_b10078_rollback": {
+      "repository": "https://github.com/ggml-org/llama.cpp",
+      "revision": "f0480101800d33a72ed58fa86a8a6be01b54bd52",
+      "version": "b10078+obsidience-jinja-scope+exact-input-admission",
+      "license": "MIT",
+      "path": "/var/lib/ai/opt/llama.cpp-b10078-obsidience-admission-20261005",
+      "patch": "obsidience/scripts/patches/llama-cpp-exact-input-admission.patch",
+      "patch_sha256": "8adb1422cd51bd4ffff4b48da4f828ad0ce3e5546c646e759f146163917e5fb2",
+      "server_library_sha256": "0feceeec8b48e92c703815418be932f217be122cd07210ad6c8c032573d3074b",
+      "integration": "Rollback engine (selected until 2026-10-08). Builds on the separately recorded Jinja scope correction. Adds an optional exact input_token_limit check after complete native tokenization and media expansion but before task creation or queue admission. Explicit pre_enqueue overflow and accepted count/limit headers let the native Executive avoid duplicate preflight rendering/tokenization. Only a verified pre-enqueue refusal can project earlier recoverable read pages and retry once; no retry after admitted inference. Only the server implementation library differs from the Jinja-scope runtime. CUDA kernels, common library, model, template, F16 KV, 65536-token saved profile, MTP3 and vision settings remain unchanged. Experimental MTP-cap, ExLlamaV3 and BeeLlama changes are not installed."
     }
   }
 }

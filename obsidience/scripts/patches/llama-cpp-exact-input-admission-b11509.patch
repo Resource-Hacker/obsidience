@@ -1,0 +1,57 @@
+--- a/tools/server/server-context.cpp
++++ b/tools/server/server-context.cpp
+@@ -4799,6 +4799,19 @@ std::unique_ptr<server_res_generator> server_routes::handle_completions_impl(
+         // process prompt
+         std::vector<server_tokens> inputs;
+ 
++        // Optional application-owned input ceiling; never increase the slot capacity.
++        int64_t input_token_limit = 0;
++        if (data.contains("input_token_limit")) {
++            const auto & value = data.at("input_token_limit");
++            if (!value.is_number_integer()) {
++                throw std::invalid_argument("input_token_limit must be a positive integer");
++            }
++            input_token_limit = value.get<int64_t>();
++            if (input_token_limit <= 0 || input_token_limit > meta->slot_n_ctx) {
++                throw std::invalid_argument("input_token_limit must be within the slot context capacity");
++            }
++        }
++
+         if (res_type != TASK_RESPONSE_TYPE_NONE && ctx_server.mctx != nullptr) {
+             // This is the case used by OAI compatible chat path with MTMD. TODO It can be moved to the path below.
+             inputs.push_back(process_mtmd_prompt(ctx_server.mctx, prompt.get<std::string>(), files, ctx_server.init_opt));
+@@ -4807,6 +4820,26 @@ std::unique_ptr<server_res_generator> server_routes::handle_completions_impl(
+             inputs = tokenize_input_prompts(ctx_server.vocab, ctx_server.mctx, prompt, true, true, ctx_server.init_opt);
+         }
+ 
++        if (input_token_limit > 0) {
++            if (inputs.size() != 1) {
++                throw std::invalid_argument("input_token_limit requires exactly one input prompt");
++            }
++            const int64_t input_tokens = inputs[0].size();
++            if (input_tokens > input_token_limit) {
++                auto error = format_error_response("input prompt exceeds input_token_limit",
++                                                   ERROR_TYPE_EXCEED_CONTEXT_SIZE);
++                error["reason"] = "input_token_limit_exceeded";
++                error["pre_enqueue"] = true;
++                error["input_tokens"] = input_tokens;
++                error["input_token_limit"] = input_token_limit;
++                res->error(error);
++                return res;
++            }
++            // Positive acknowledgement of this exact request's enforced ceiling.
++            res->headers["X-LLAMA-Input-Tokens"] = std::to_string(input_tokens);
++            res->headers["X-LLAMA-Input-Token-Limit"] = std::to_string(input_token_limit);
++        }
++
+         // tasks.reserve(inputs.size()); // TODO: this is inaccurate due to child tasks
+ 
+         // message delimiters for checkpointing
+@@ -5125,6 +5158,7 @@ static json get_res_props(const server_context_meta & meta, const common_params
+     json props = {
+         { "default_generation_settings", default_generation_settings_for_props },
+         { "total_slots",                 params.n_parallel },
++        { "supports_input_token_limit",  true },
+         { "model_alias",                 meta.model_name },
+         { "model_ftype",                 meta.model_ftype },
+         { "model_path",                  meta.model_path },
