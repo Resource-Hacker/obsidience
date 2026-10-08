@@ -671,21 +671,25 @@ def activation_messages(task: Note, activation: dict, *, agent_name: str,
          if task.kind == "agent" and not activation["params"].get("conversation_id") else ""),
     ]))
     messages = [{"role": "system", "content": system}]
-    if reference := str(activation.get("provider_reference") or ""):
+    reference = str(activation.get("provider_reference") or "")
+    if native_session:
+        # One runtime-context message with the same sections in the same order.
+        # Each user-message start forces a prompt batch split and an SWA
+        # checkpoint copy. Preparation renders the identical text up to the
+        # fixed reply/decision instructions, so its warm prefix still matches;
+        # query-dependent Knowledge, the live Scene and activation metadata
+        # follow only in the real request.
+        sections = [reference, user]
+        if not preparation_prefix:
+            sections += [activation["provider_user"], activation.get("provider_activation", "")]
+        messages.append({"role": "user", "content": "\n\n".join(filter(None, sections))})
+        return messages
+    if reference:
         messages.append({"role": "user", "content": reference})
-    if not native_session:
-        messages.extend(_conversation_messages(str(activation.get("provider_conversation") or "")))
-        if preparation_prefix:
-            return messages
+    messages.extend(_conversation_messages(str(activation.get("provider_conversation") or "")))
+    if preparation_prefix:
+        return messages
     messages.append({"role": "user", "content": user})
-    if native_session and not preparation_prefix:
-        # Query-dependent Knowledge and the live Scene must not invalidate
-        # the fixed reply/decision instructions during speech preparation.
-        messages.append({"role": "user", "content": activation["provider_user"]})
-    if native_session and not preparation_prefix and activation.get("provider_activation"):
-        # A real message boundary preserves the preceding stable context's SWA
-        # checkpoint when admission replaces provisional activation metadata.
-        messages.append({"role": "user", "content": activation["provider_activation"]})
     return messages
 
 

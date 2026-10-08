@@ -274,8 +274,8 @@ export function apply(ctx) {
         if (config.session_id) {
           excludeInterruptedReplies(handle.agent.session);
           supersedeContext(handle.agent.session);
-          // Preserve the compiler's catalog/context boundaries for native
-          // prompt checkpoints; all sections still supersede together.
+          // The compiler supplies one runtime-context message; it supersedes
+          // together with any recalled memory at the next owner turn.
           for (const message of config.messages) handle.agent.inject(contextMessage(message.content));
           handle.agent.followup(config.continuation
             ? contextMessage(config.objective, 'continuation') : ownerMessage(config.turn_id, config.objective));

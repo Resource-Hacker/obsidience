@@ -226,7 +226,7 @@ def prefill_messages(conversation_id: str, compiled: list[dict], text: str, *,
         if message_producer(message) in {'obsidience.context', 'obsidience.memory'}:
             continue
         history.append(message)
-    # Match native injection without collapsing the compiler's prompt boundaries.
+    # Match native injection: the compiler's one runtime-context message.
     history.extend({'role': 'user', 'source': {'kind': 'plugin:obsidience.context'},
                     'content': [{'type': 'text', 'text': row['content']}]} for row in compiled[1:])
     history.append({'role': 'user', 'source': {'kind': 'user'},
