@@ -147,8 +147,14 @@ async def set_compaction_threshold(value: int) -> None:
     await BRIDGE.close()
 
 
-async def compact(conversation_id: str, spec) -> dict:
-    """Use native idle-session maintenance and the existing model reservation."""
+async def compact(conversation_id: str, spec, *, idle_threshold: float | None = None) -> dict:
+    """Use native idle-session maintenance and the existing model reservation.
+
+    Without idle_threshold, the manual Compact summarizes now (upstream
+    compactNow). With it (a fraction of the model context), idle maintenance
+    runs inside one upstream turn: Tool-result pruning, then a summary of the
+    older span only while pressure stays at or above that fraction.
+    """
     from ...config import CONFIG
     from ...models import runtime as model_runtime
     from . import model
@@ -166,7 +172,8 @@ async def compact(conversation_id: str, spec) -> dict:
         await lease.__aenter__()
         acquired = True
         await BRIDGE.send({'method': 'start', 'params': {
-            'run': run, 'session_id': conversation_id, 'compact': True,
+            'run': run, 'session_id': conversation_id,
+            **({'compact': True} if idle_threshold is None else {'maintain': {'threshold': idle_threshold}}),
             'cwd': str(CONFIG.project_root), 'effort': native.get('reasoning_effort', 'none'),
             'system': '\n'.join(block['text'] for message in native['messages']
                                 if message['role'] == 'system' for block in message['content']
@@ -182,7 +189,9 @@ async def compact(conversation_id: str, spec) -> dict:
                 publish(message.get('session'))
                 if message.get('error'):
                     raise RuntimeError(message['error'])
-                return {'status': 'completed' if message.get('compacted') else 'nothing_to_compact',
+                status = ('completed' if message.get('compacted')
+                          else 'pruned' if message.get('pruned') else 'nothing_to_compact')
+                return {'status': status, 'pruned': message.get('pruned', 0),
                         'backend': 'deepseek', 'conversation_id': conversation_id}
             if message.get('method') != 'model' or message['params'].get('purpose') != 'compaction':
                 await BRIDGE.send({'id': message['id'], 'error': 'Compaction permits summary inference only'})

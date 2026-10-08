@@ -5,6 +5,7 @@ import { createInterface } from 'node:readline';
 import { randomUUID } from 'node:crypto';
 import { LlmAdapter, LlmError, createUserMessage, createAssistantMessage, createSystemMessage, freezeMessage, attributionHeaders } from '@deepseek-ai/dsh-llm';
 import { Session, interruptedTurnClosers } from '@deepseek-ai/dsh-session';
+import { toolPairingBalancedBefore } from '@deepseek-ai/dsh-compaction';
 
 export const inject = ['agents', 'llm', 'tools', 'systemPrompt', 'sessions', 'sessionPersistence', 'sessionProjections', 'obsidienceMemory', 'tokenMeter', 'compaction'];
 
@@ -172,6 +173,28 @@ export function apply(ctx) {
       { surfaceOp: { op: 'replace', startSeq: seq, endSeq: seq }, sourceEventSeqs: [seq] });
     }
   }
+  // Idle maintenance at an upstream step boundary, inside the open turn that a
+  // tool/result replacement requires. The mounted upstream pruner trims large
+  // Tool results; a summary of the older span follows only while pressure stays
+  // at or above the limit, through compaction-basic's own region transaction,
+  // keeping its recent tail (retainRatio of W - O) verbatim.
+  async function maintainContext(agent, config, signal) {
+    signal.throwIfAborted();
+    const limit = config.maintain.threshold * config.model.context_tokens;
+    const measure = () => ctx.tokenMeter.measure(agent.session);
+    const pruner = ctx.get('toolResultPruner');
+    const pruned = pruner && measure().totalTokens >= limit ? pruner.pruneSession(agent.session).pruned.length : 0;
+    const { totalTokens, nodes } = measure();
+    if (totalTokens < limit) return { pruned, compacted: false };
+    const retain = (config.model.context_tokens - config.model.max_output_tokens) * ctx.compaction.config.retainRatio;
+    // Node 0 is the system prompt and is never summarized.
+    let keep = nodes.length, kept = 0;
+    while (keep > 1 && kept < retain) kept += nodes[--keep].tokens;
+    while (keep > 1 && !toolPairingBalancedBefore(agent.session, nodes[keep].seq)) keep--;
+    if (keep <= 1) return { pruned, compacted: false };
+    await ctx.compaction.compactRegion(nodes[1].seq, nodes[keep - 1].seq, agent, signal);
+    return { pruned, compacted: true };
+  }
   async function inspectStored(id) {
     const live = sessions.get(id);
     if (live) {
@@ -193,7 +216,8 @@ export function apply(ctx) {
     const run = config.run;
     if (runs.has(run)) throw new Error('Executive activation already exists');
     const id = config.session_id || run;
-    const state = { run, handle: undefined, cancelled: false, error: undefined, compact: config.compact, maintenance: new AbortController() };
+    const state = { run, handle: undefined, cancelled: false, error: undefined, compact: config.compact,
+      maintain: config.maintain, maintenance: new AbortController() };
     runs.set(run, state);
     models.set(config.model.id, config.model);
     try {
@@ -225,7 +249,7 @@ export function apply(ctx) {
               output: { schema: { type: 'string' }, render: (_args, value) => JSON.parse(value) },
               async execute(args, exec) {
                 if (!entry.active) throw new Error('No admitted turn owns this Tool call');
-                if (entry.active.compact) throw new Error('Compaction cannot dispatch Tools');
+                if (entry.active.compact || entry.active.maintain) throw new Error('Compaction cannot dispatch Tools');
                 await ctx.sessions.flush(agent.session);
                 return JSON.stringify(await call(entry.active.run, 'tool', { name: tool.name, args }, exec.signal));
               },
@@ -233,6 +257,12 @@ export function apply(ctx) {
           }
           scope.on('agent/pre-step', async ({ signal, step }, next) => {
             if (!entry.active) return { kind: 'reject' };
+            if (entry.active.maintain) {
+              // Idle maintenance owns this turn: it works at the first step
+              // boundary, then closes the turn without a step or model reply.
+              entry.active.maintained = await maintainContext(agent, entry.config, signal);
+              return { kind: 'reject' };
+            }
             const boundary = await call(entry.active.run, 'boundary', { step }, signal);
             if (boundary.done) return { kind: 'reject' };
             const decision = await next();
@@ -306,6 +336,14 @@ export function apply(ctx) {
         });
       } else if (config.compact) {
         state.compaction = await ctx.compaction.compactNow(handle.agent, state.maintenance.signal);
+      } else if (config.maintain) {
+        // Upstream opens one turn for this wake; maintainContext runs at its
+        // first step boundary. Below the limit nothing is appended.
+        const limit = config.maintain.threshold * config.model.context_tokens;
+        if (ctx.tokenMeter.measure(handle.agent.session).totalTokens >= limit) {
+          handle.agent.followup(contextMessage('[Idle context maintenance; not an owner request.]', 'maintenance'));
+          await handle.agent.whenIdle();
+        }
       } else {
         if (config.session_id) {
           excludeInterruptedReplies(handle.agent.session);
@@ -346,7 +384,8 @@ export function apply(ctx) {
         if (!config.session_id || !entry.handle) { await entry.handle?.dispose(); sessions.delete(id); }
       }
       runs.delete(run);
-      send({ run, method: 'end', error: state.error, cancelled: state.cancelled, compacted: Boolean(state.compaction), session });
+      send({ run, method: 'end', error: state.error, cancelled: state.cancelled,
+        compacted: Boolean(state.compaction || state.maintained?.compacted), pruned: state.maintained?.pruned ?? 0, session });
     }
   }
   const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
