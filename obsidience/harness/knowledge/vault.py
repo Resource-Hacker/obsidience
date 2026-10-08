@@ -7,7 +7,6 @@ basename via wikilinks ([[create-a-runbook]] / [[Runbooks/create-a-runbook|alias
 
 from __future__ import annotations
 
-import hashlib
 import os
 import re
 import tempfile
@@ -508,8 +507,7 @@ def _atomic_write(path: Path, text: str) -> None:
         raise
 
 
-def move_vault_item(source: str, destination_parent: str, new_name: str | None = None,
-                    *, _system_migration: tuple[str, str] | None = None) -> dict:
+def move_vault_item(source: str, destination_parent: str, new_name: str | None = None) -> dict:
     """Move or rename one owner-managed article/folder and repair exact refs.
 
     Raw source bytes remain outside this owner-managed tree. All article
@@ -519,8 +517,7 @@ def move_vault_item(source: str, destination_parent: str, new_name: str | None =
     from .system import assert_system_move_allowed, assert_system_article_writable
 
     source_rel = _vault_relative(source)
-    if _system_migration is None:
-        assert_system_move_allowed(str(source_rel))
+    assert_system_move_allowed(str(source_rel))
     parent_rel = _vault_relative(destination_parent, allow_root=True)
     source_path = CONFIG.vault_dir / source_rel
     parent_path = CONFIG.vault_dir / parent_rel
@@ -536,18 +533,6 @@ def move_vault_item(source: str, destination_parent: str, new_name: str | None =
         raise ValueError("items cannot be moved into a system or raw source folder")
 
     is_article = source_path.is_file()
-    migration_destination = None
-    if _system_migration is not None:
-        # Private schema migration: pin one exact existing Article and its
-        # destination. API/Tool callers never receive this override. Ordinary
-        # path, history, runtime and rollback checks below remain in force.
-        expected_hash, destination = _system_migration
-        migration_destination = _vault_relative(destination)
-        if (not is_article or new_name is not None or source_path.suffix != ".md"
-                or hashlib.sha256(source_path.read_bytes()).hexdigest() != expected_hash
-                or migration_destination.parent != parent_rel
-                or migration_destination.suffix != ".md"):
-            raise ValueError("System migration Article or destination changed")
     if is_article and source_path.suffix.lower() != ".md":
         raise ValueError("only Markdown articles can be moved")
     if is_article and source_path.name.casefold() in {"index.md", "log.md"}:
@@ -563,7 +548,7 @@ def move_vault_item(source: str, destination_parent: str, new_name: str | None =
         else:
             destination_name = requested_name
     else:
-        destination_name = migration_destination.name if migration_destination is not None else source_rel.name
+        destination_name = source_rel.name
     if destination_name.startswith(".") or (
         is_article and destination_name.casefold() in {"index.md", "log.md"}
     ):
@@ -603,8 +588,7 @@ def move_vault_item(source: str, destination_parent: str, new_name: str | None =
         if hub_renamed and old_path == hub_source:
             relative = Path(destination_name + ".md")
         new_rel = destination_rel if is_article else destination_rel / relative
-        if _system_migration is None:
-            assert_system_article_writable(str(new_rel))
+        assert_system_article_writable(str(new_rel))
         mapping[str(old_rel.with_suffix(""))] = str(new_rel.with_suffix(""))
         moved_file_paths[old_path] = CONFIG.vault_dir / new_rel
 

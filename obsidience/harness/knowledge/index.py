@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS runs(
   id TEXT PRIMARY KEY, task_ref TEXT, objective TEXT NOT NULL DEFAULT '',
   agent TEXT, started REAL, finished REAL,
   status TEXT, summary TEXT, trace TEXT,
-  runbook_ref TEXT, runbook_sha256 TEXT, reasoning_effort TEXT, model TEXT
+  runbook_ref TEXT, runbook_sha256 TEXT, reasoning_effort TEXT, model TEXT, activation_id TEXT
 );
 CREATE INDEX IF NOT EXISTS runs_started_order ON runs(started DESC,id DESC);
 CREATE TABLE IF NOT EXISTS review_notifications(
@@ -120,6 +120,7 @@ CREATE TABLE IF NOT EXISTS source_evidence(
   event_key TEXT, event_dispatched_at REAL,
   origin_source_id TEXT NOT NULL DEFAULT ''
 );
+CREATE INDEX IF NOT EXISTS source_event_receipts ON source_evidence(event_key,event_dispatched_at);
 CREATE TABLE IF NOT EXISTS conversations(
   id TEXT PRIMARY KEY, created_at REAL NOT NULL
 );
@@ -158,6 +159,7 @@ CREATE TABLE IF NOT EXISTS task_continuations(
   resumed_run_id TEXT NOT NULL DEFAULT '',
   created_at REAL NOT NULL,
   updated_at REAL NOT NULL,
+  await_publication INTEGER NOT NULL DEFAULT 1,
   UNIQUE(target_task_ref, target_activation_key)
 );
 CREATE INDEX IF NOT EXISTS task_continuations_ready
@@ -442,7 +444,6 @@ class Index:
             raise RuntimeError("The shared ledger requires SQLite WAL support")
         self.db.execute("PRAGMA synchronous=FULL")
         self.db.executescript(_SCHEMA)
-        self._migrate()
         self.lock = threading.RLock()
         self._vector_revision = 0
         self._vector_cache: dict[
@@ -454,66 +455,6 @@ class Index:
         self._vector_revision += 1
         self._vector_cache.clear()
 
-    def _migrate(self) -> None:
-        """Keep the development ledger forward-compatible without a framework."""
-        if "chunk" not in {row[1] for row in self.db.execute("PRAGMA table_info(embeddings)")}:
-            # One vector per Article becomes chunk 0. A short Article's single
-            # chunk embeds the same text, so its stored hash stays valid.
-            self.db.executescript(
-                "BEGIN; ALTER TABLE embeddings RENAME TO embeddings_article; "
-                + _SCHEMA  # idempotent; recreates only the chunked embeddings table
-                + "INSERT INTO embeddings(ref,chunk,hash,dim,vec) "
-                "SELECT ref,0,hash,dim,vec FROM embeddings_article; "
-                "DROP TABLE embeddings_article; COMMIT;"
-            )
-        continuation_columns = {row[1] for row in self.db.execute("PRAGMA table_info(task_continuations)")}
-        if "await_publication" not in continuation_columns:
-            # Existing waits retain their reviewed publication contract. New
-            # caller requests choose evidence-first explicitly at creation.
-            self.db.execute("ALTER TABLE task_continuations ADD COLUMN await_publication INTEGER NOT NULL DEFAULT 1")
-        run_columns = {row[1] for row in self.db.execute("PRAGMA table_info(runs)")}
-        if "objective" not in run_columns:
-            self.db.execute(
-                "ALTER TABLE runs ADD COLUMN objective TEXT NOT NULL DEFAULT ''"
-            )
-        for name in (
-            "runbook_ref",
-            "runbook_sha256",
-            "reasoning_effort",
-            "model",
-            "activation_id",
-        ):
-            if name not in run_columns:
-                self.db.execute(f"ALTER TABLE runs ADD COLUMN {name} TEXT")
-        turn_columns = {
-            row[1] for row in self.db.execute("PRAGMA table_info(conversation_turns)")
-        }
-        if turn_columns and "reply_to" not in turn_columns:
-            self.db.execute("ALTER TABLE conversation_turns ADD COLUMN reply_to TEXT")
-        source_columns = {
-            row[1] for row in self.db.execute("PRAGMA table_info(source_evidence)")
-        }
-        if "event_key" not in source_columns:
-            self.db.execute("ALTER TABLE source_evidence ADD COLUMN event_key TEXT")
-        if "event_dispatched_at" not in source_columns:
-            self.db.execute(
-                "ALTER TABLE source_evidence ADD COLUMN event_dispatched_at REAL"
-            )
-        if "origin_source_id" not in source_columns:
-            self.db.execute("ALTER TABLE source_evidence ADD COLUMN origin_source_id TEXT NOT NULL DEFAULT ''")
-        self.db.execute(
-            "CREATE INDEX IF NOT EXISTS source_event_receipts "
-            "ON source_evidence(event_key,event_dispatched_at)"
-        )
-        # Materialize legacy active/FIFO occurrences once without admitting or
-        # replaying any work. task_runtime remains only their compatibility head.
-        for ref, raw in self.db.execute("SELECT task_ref,state FROM task_runtime").fetchall():
-            state = json.loads(raw)
-            if not state.get("activation_id"):
-                state = self._persist_occurrences(ref, state)
-                self.db.execute("UPDATE task_runtime SET state=? WHERE task_ref=?",
-                    (json.dumps(state, sort_keys=True, default=str), ref))
-        self.db.commit()
 
     # ---------- sync ----------
 

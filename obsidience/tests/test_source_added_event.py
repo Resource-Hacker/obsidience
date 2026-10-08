@@ -328,46 +328,6 @@ def test_source_ledger_failure_leaves_no_orphan_file(monkeypatch, tmp_path) -> N
     assert not (tmp_path / "obsidience" / "evidence").exists()
 
 
-def test_source_event_columns_migrate_from_legacy_ledger(monkeypatch, tmp_path) -> None:
-    database = tmp_path / "legacy-source.sqlite3"
-    legacy = sqlite3.connect(database)
-    legacy.execute(
-        "CREATE TABLE source_evidence("
-        "id TEXT PRIMARY KEY, path TEXT UNIQUE NOT NULL, source_type TEXT NOT NULL, "
-        "source_ref TEXT NOT NULL, media_type TEXT NOT NULL, captured_at TEXT NOT NULL, "
-        "content_sha256 TEXT NOT NULL, material_sha256 TEXT UNIQUE NOT NULL, "
-        "material BLOB NOT NULL, created_at REAL NOT NULL)"
-    )
-    legacy.execute(
-        "INSERT INTO source_evidence VALUES(?,?,?,?,?,?,?,?,?,?)",
-        ("old", "raw/old.md", "document", "old", "text/plain", "2026-08-01T00:00:00Z",
-         "sha256:content", "sha256:material", b"legacy", 1.0),
-    )
-    legacy.commit()
-    legacy.close()
-    monkeypatch.setattr(source_index.CONFIG, "db_path", database)
-
-    migrated = source_index.Index()
-    columns = {
-        row[1] for row in migrated.db.execute("PRAGMA table_info(source_evidence)")
-    }
-    old_row = migrated.db.execute(
-        "SELECT event_key,event_dispatched_at FROM source_evidence WHERE id='old'"
-    ).fetchone()
-
-    assert {"event_key", "event_dispatched_at"} <= columns
-    assert old_row == (None, None)
-    migrated.record_source(
-        id="new", path="raw/new.md", source_type="document", source_ref="new",
-        media_type="text/plain", captured_at="2026-08-27T20:00:00Z",
-        content_sha256="sha256:new-content", material_sha256="sha256:new-material",
-        material=b"new", created_at=2.0, event_key="source.added:new",
-        event_dispatched_at=None,
-    )
-    assert migrated.source("new")["event_key"] == "source.added:new"
-    migrated.db.close()
-
-
 def test_one_task_subscribes_to_multiple_events(monkeypatch) -> None:
     from obsidience.harness.execution import assignments
     monkeypatch.setattr(assignments, "ensure_task_runbook", lambda *_args: {"status": "ready"})

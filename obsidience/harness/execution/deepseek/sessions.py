@@ -1,4 +1,4 @@
-"""Projections and migration for DeepSeek-owned Executive conversations."""
+"""Projections for DeepSeek-owned Executive conversations."""
 from __future__ import annotations
 
 import asyncio

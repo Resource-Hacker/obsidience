@@ -413,7 +413,7 @@ def test_model_proposals_cannot_claim_reserved_paths_even_without_marker(invento
                                "title": "Fake", "body": "Invented facts", "metadata": {"generated": {"by": "owner"}}}, {})
 
 
-def test_single_and_group_approval_cannot_bypass_reserved_path(inventory):
+def test_approval_cannot_bypass_reserved_path(inventory):
     path = CONFIG.staging_dir / "forged.md"
     meta = {"title": "Invented", "kind": "knowledge", "action": "create", "task": "", "agent": "model",
             "run_id": "forged", "target": system.system_articles()["hardware/compute/cpu"]["ref"] + ".md", "review_class": "article", "authored_fields": []}
@@ -422,8 +422,6 @@ def test_single_and_group_approval_cannot_bypass_reserved_path(inventory):
     assert not row["approvable"] and "System inventory" in row["blocked_reason"]
     with pytest.raises(ValueError, match="System inventory"):
         review.approve(path.name)
-    with pytest.raises(ValueError, match="System inventory"):
-        review._validate_group([(path, meta, "Invented facts.")])
     assert not _article("hardware/compute/cpu").exists()
 
 
@@ -502,82 +500,3 @@ def test_shallow_system_and_application_details_are_persistent_and_cited(invento
     unavailable = system.refresh_system_knowledge()
     assert _row(unavailable, "applications/obsidience")["status"] == "unavailable"
     assert vault.load_note(app["ref"] + ".md").body == before
-
-
-def _legacy_system_publication(monkeypatch):
-    from obsidience.harness.knowledge.system_schema import system_schema
-    with monkeypatch.context() as old:
-        old.setattr(system, "system_articles", lambda: {row["key"]: row for row in system_schema()})
-        assert system.refresh_system_knowledge()["article_count"] == 22
-
-
-def test_flatten_migration_repairs_refs_archives_wrappers_and_survives_refresh(inventory, monkeypatch):
-    from obsidience.scripts import migrate_system_schema as migration
-    _legacy_system_publication(monkeypatch)
-    mapping, catalog = migration._flatten_mapping()
-    vault.write_note("Guides/System links.md", {"title": "System links"},
-        "\n".join("[[" + ref + "]]" for ref in mapping))
-    receipt = json.loads(system._state_path().read_text())
-    originals = {key: source.get_source(row["published"]["source_id"])["content"]
-                 for key, row in receipt["categories"].items()}
-    plan = migration.prepare_flatten()
-    assert plan["status"] == "ready" and len(plan["archives"]) == 3
-    assert migration.apply_flatten(plan["plan_sha256"])["applied"]
-    note = vault.load_note("Guides/System links.md")
-    assert set(note.links) == set(mapping.values())
-    assert not (CONFIG.vault_dir / "ADMECH Workstation/Hardware").exists()
-    assert not (CONFIG.vault_dir / "ADMECH Workstation/Applications/Obsidience").exists()
-    for item in plan["archives"]:
-        archived = vault.load_note(item["destination"])
-        assert archived.meta["article_status"] == "deprecated"
-        assert archived.meta["superseded_by"] == "[[" + item["successor"] + "]]"
-        assert archived.meta["sources"]
-    for key, original in originals.items():
-        assert source.get_source(receipt["categories"][key]["published"]["source_id"])["content"] == original
-    repeated = migration.prepare_flatten()
-    assert repeated["status"] == "already_migrated"
-    assert not migration.apply_flatten(repeated["plan_sha256"])["applied"]
-    assert system.refresh_system_knowledge()["status"] == "ready"
-    assert system.refresh_system_knowledge()["changed"] == 0
-    accepted = vault.iter_notes()
-    res = vault.Resolver(accepted)
-    assert all(res.resolve(link) for item in accepted for link in item.links)
-    assert len([item for item in accepted if "system-inventory" in item.meta.get("tags", [])]) == 19
-
-
-@pytest.mark.parametrize("change", ["edited", "extra", "stale"])
-def test_flatten_migration_rejects_unattested_or_changed_inputs(inventory, monkeypatch, change):
-    from obsidience.scripts import migrate_system_schema as migration
-    _legacy_system_publication(monkeypatch)
-    plan = migration.prepare_flatten()
-    if change == "edited":
-        path = CONFIG.vault_dir / "ADMECH Workstation/Hardware/Hardware.md"
-        path.write_text(path.read_text() + "Owner correction.\n")
-    elif change == "extra":
-        vault.write_note("ADMECH Workstation/Hardware/Unexpected.md", {"title": "Unexpected"}, "Keep.")
-    else:
-        vault.write_note("Guides/New note.md", {"title": "New note"}, "Keep.")
-    before = migration._snapshot(), system._state_path().read_bytes()
-    with pytest.raises(ValueError):
-        migration.apply_flatten(plan["plan_sha256"])
-    assert (migration._snapshot(), system._state_path().read_bytes()) == before
-
-
-def test_flatten_migration_rolls_back_the_entire_batch(inventory, monkeypatch):
-    from obsidience.scripts import migrate_system_schema as migration
-    _legacy_system_publication(monkeypatch)
-    plan = migration.prepare_flatten()
-    before = migration._snapshot(), system._state_path().read_bytes()
-    directories = {p for p in CONFIG.vault_dir.rglob("*") if p.is_dir()}
-    original = vault._atomic_write
-    failures = []
-    def fail_receipt_once(path, text):
-        if path == system._state_path() and not failures:
-            failures.append(True)
-            raise OSError("Injected receipt write failure")
-        return original(path, text)
-    monkeypatch.setattr(vault, "_atomic_write", fail_receipt_once)
-    with pytest.raises(OSError, match="Injected"):
-        migration.apply_flatten(plan["plan_sha256"])
-    assert (migration._snapshot(), system._state_path().read_bytes()) == before
-    assert {p for p in CONFIG.vault_dir.rglob("*") if p.is_dir()} == directories

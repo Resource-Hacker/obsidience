@@ -36,22 +36,6 @@ def test_exact_turn_cannot_be_replayed_or_change_objective(isolated_task_ledger)
         ledger.begin_activation('Tasks/query',{'request':'Changed','reply_to_turn_id':'turn-a'},'run-b')
 
 
-def test_legacy_fifo_migration_is_idempotent_and_preserves_failed_head(isolated_task_ledger):
-    ledger=isolated_task_ledger
-    old={'status':'failed','last_run':'old-run','params':{'event':'test','activation_key':'old','request':'Old'},
-         'event_queue':[{'event':'test','activation_key':'new','request':'New'}]}
-    with ledger.db:
-        ledger.db.execute('INSERT INTO task_runtime VALUES(?,?,?)',('Tasks/example',json.dumps(old),1.))
-    ledger._migrate()
-    head=ledger.task_runtime('Tasks/example')
-    assert head['status']=='failed' and head['params']==old['params']
-    assert head['event_queue']==old['event_queue']
-    identifiers=[row['id'] for row in ledger.activations('Tasks/example')]
-    ledger._migrate()
-    assert [row['id'] for row in ledger.activations('Tasks/example')]==identifiers
-    assert len(identifiers)==2
-
-
 def test_late_attempt_completion_cannot_overwrite_newer_head(isolated_task_ledger):
     ledger=isolated_task_ledger
     first,first_token=ledger.begin_activation('Tasks/query',{'request':'A','reply_to_turn_id':'a'},'a')

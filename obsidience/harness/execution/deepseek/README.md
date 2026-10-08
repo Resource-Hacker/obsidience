@@ -75,25 +75,6 @@ owns historical observations while the existing Vault and Alexandria/Review
 own durable Knowledge. Deployment and the complete retention/promotion flow
 are documented in [the memory port](../../memory/README.md).
 
-An existing V3 installation must migrate its copied native store before cutover.
-Stop the Harness, preserve its complete native store and SQLite ledger, then run
-this offline utility against that copy and a **new, separate** destination:
-
-```sh
-node migrate_v3.mjs ./node_modules /absolute/saved-v3-store /absolute/new-v4-store /absolute/migration-report.json
-```
-
-The utility uses upstream codecs and persistence APIs, rejects unsupported child
-or fork histories, and verifies the persisted result and original file hashes.
-For the historical Obsidience bootstrap system message only, it normalizes the
-producer to `system-prompt` and retains the exact original attribution as metadata;
-message text, identity and event coordinates are preserved. Publish the verified
-V4 successor files alongside the original V3 files while the Harness is stopped.
-Do not import a predecessor where a V4 successor already exists. Rollback must
-restore the coordinated adapter/dependency/native-store preimages before new
-work is admitted; an old Harness cannot read V4-only post-upgrade turns. SQLite
-receipts remain authoritative and must never be rewound after external effects.
-
 Versions, npm integrity records and licensing are recorded in `package-lock.json`
 and the repository's `artifacts.lock.json`. Upstream remains a developer preview;
 update the lock and adapter together, then exercise real Chat, voice, a native
