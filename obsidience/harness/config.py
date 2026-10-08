@@ -18,12 +18,10 @@ class Config:
     host: str = "127.0.0.1"
     port: int = 8765
 
-    # LLM (OpenAI-compatible llama.cpp server)
-    llm_base_url: str = "http://127.0.0.1:8089/v1"
+    # LLM (the model catalog owns endpoints; this selects the default model)
     llm_model: str = "obsidience-gemma"
     task_reasoning_effort: str = "medium"
     llm_temperature: float = 0.4
-    llm_max_tokens: int = 3584
     max_steps: int = 24  # tool-loop cap per session
 
     # Embeddings (fastembed; project alias points at the installed offline cache)
@@ -37,10 +35,6 @@ class Config:
     # Scheduler
     tick_seconds: int = 20
     concurrency: int = 1
-
-    # Voice (STT)
-    whisper_model: str = "small"
-    voice_enabled: bool = True
 
     # Git audit trail
     git_commit: bool = True
@@ -63,10 +57,6 @@ class Config:
     def source_dir(self) -> Path:
         """Backing blob filesystem; deliberately outside graph indexing."""
         return self.product_root / "evidence"
-
-    @property
-    def raw_source_dir(self) -> Path:
-        return self.source_dir / "raw"
 
     @property
     def system_dir(self) -> Path:

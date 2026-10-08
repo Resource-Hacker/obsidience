@@ -60,7 +60,6 @@ before running inference. Default Agent and Task Articles select `auto`; the
 repository supplies no model weights or saved device assignments.
 
 ```toml
-llm_base_url = "http://127.0.0.1:8089/v1"
 llm_model = "obsidience-gemma"
 ```
 
