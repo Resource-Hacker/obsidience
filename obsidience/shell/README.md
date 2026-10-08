@@ -3,7 +3,8 @@
 Obsidience Shell is the visible desktop and interaction layer. Hyprland owns
 composition, outputs, windows, input routing, VRR, fullscreen behavior, and
 XWayland. Quickshell owns the Obsidience stage, launcher, panes, and shell API.
-WebKitGTK renders the one canonical Three.js knowledge graph behind them.
+The graph presenter uses the installed QtWebEngine runtime for the canonical
+Three.js stages; viewer panes receive their frames without another graph scene.
 
 ```text
 Linux + systemd + PipeWire + NetworkManager
@@ -32,9 +33,9 @@ The Hyprland session has one native implementation:
   `FloatingWindow` per undocked module, the launcher, and the 10-pixel grid
   definition;
 - `qml/panes/` supplies Chat, Library, Tasks, Reviews, Reader, Knowledge,
-  Source, Models, Hardware, Camera, Settings, Feeds, Applications, Terminal, and
+  Source, Models, Hardware, Camera, Settings, Applications, Terminal, and
   Displays;
-- `surfaces/knowledge/host.py` presents the canonical React/Three.js graph;
+- `qml/graph-stage.qml` presents the canonical React/Three.js stages;
 - `theme/palette.json` remains the visual authority;
 - the native Terminal remains one QMLTermWidget view of the persistent
   `obsidience-ui` tmux session.
@@ -57,8 +58,8 @@ sensors are omitted instead of being presented as failed readings.
 
 Model residency, Realtime devices, camera choice, and Pocket voice remain under
 **Settings → AI & Voice**. Their existing hardware/media APIs remain
-authoritative, and opening Settings never changes their values. Input,
-Workspace, and Connections retain their existing settings sections. Installed
+authoritative, and opening Settings never changes their values. Input and
+Workspace retain their existing settings sections. Installed
 software remains in Applications. TMOG informed the separation of monitoring
 views. Its application source is private; the public repository is an issue
 tracker. The pane uses the maintained psutil dependency and Qt Quick components,
@@ -161,9 +162,9 @@ Open pane windows, their loaded content, every Surface launcher, and the
 ordinary selected Three.js scene stay resident beneath those secure surfaces.
 The ordinary graph is hidden and paused rather than destroyed; lock/unlock does
 not unmap and reconstruct the desktop clients it securely covers.
-A transient monitor removal or geometry mismatch also preserves the resident
-WebKit graph. Rebinding the same logical Surface shows its existing page without
-HTTP navigation; changing the logical Surface still issues one bound request.
+The stage host binds its native layers to canonical Surface identities. Samsung
+has Memory, Library and Code in thirds; USB-C keeps Computer and its orbiting
+subagents. Viewer selection never replaces or removes those desktop graphs.
 
 The selected Quickshell 0.3.1 runtime carries two narrow patches. The first
 preserves `argv[0]` when creating the GUI application and selects shared Qt
@@ -299,7 +300,7 @@ The optional active-session unlock command is
 LockController IPC, dispatches once and verifies both Quickshell and compositor
 state. The Executive can expose it as `session.unlock` after an explicit local
 owner grant; the starter identity does not grant it. With Voice mode on,
-“JARVIS, unlock the computer” follows the ordinary voice/Executive Tool path.
+“Computer, unlock the computer” follows the ordinary voice/Executive Tool path.
 This command does not identify the speaker. Password/PAM unlock remains the
 manual alternative. The web graph has no unlock command or credentials.
 

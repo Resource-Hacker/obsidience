@@ -6,6 +6,7 @@ import QtWebSockets
 import "../../components/visual"
 import "../../components/knowledge"
 import "../../workspace"
+import "../../api"
 
 Rectangle {
     id: root
@@ -161,7 +162,8 @@ Rectangle {
         const refs = {}
         function visit(rows) {
             for (const node of rows) {
-                if (node.ref && !String(node.ref).startsWith("@")) refs[node.ref] = true
+                if (node.ref && (!String(node.ref).startsWith("@")
+                        || String(node.ref).startsWith("@memory/"))) refs[node.ref] = true
                 visit(node.children || [])
             }
         }
@@ -198,9 +200,10 @@ Rectangle {
                 const subject = spec.subjects[declared.id]
                 subject.ref = declared.article_ref || declared.id
                 subject.children = subject.children.concat(selected.filter(node =>
-                    node.kind === "knowledge" && !node.id.startsWith("@")
+                    node.kind === "knowledge" && (node.id.startsWith("@memory/")
+                        ? node.parent_id === declared.id : !node.id.startsWith("@")
                     && node.id !== declared.article_ref
-                    && node.id.slice(0, node.id.lastIndexOf("/")) === declared.path)
+                    && node.id.slice(0, node.id.lastIndexOf("/")) === declared.path))
                     .map(node => ({key: "file:" + group.id + ":" + node.id,
                         name: node.title, path: node.id + ".md", folder: false,
                         ref: node.id, kind: node.kind, children: []})))
@@ -425,7 +428,7 @@ Rectangle {
 
     WebSocket {
         id: shellSocket
-        url: "ws://127.0.0.1:8768"
+        url: "ws://127.0.0.1:8768" + ShellCommandToken.query
         requestedSubprotocols: ["obsidience.shell.v1"]
         active: true
         onTextMessageReceived: message => root.applyShellEvent(message)

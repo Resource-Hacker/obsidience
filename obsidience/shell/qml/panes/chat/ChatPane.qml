@@ -8,6 +8,18 @@ import "../../components/visual"
 Rectangle {
     id: root
 
+    required property var realtime
+    property bool voiceRequestPending: false
+    property string voiceError: ""
+    readonly property var voice: realtime.state
+    readonly property string wakeWord: voice.wake_word || "Computer"
+    readonly property string voiceMode: voice.mode || "off"
+    readonly property bool voiceReady: voice.ready === true && realtime.connected
+    readonly property bool recognizing: voiceReady && voice.command_open === true
+        && (voice.capture_active === true || voice.user_speaking === true
+            || (voice.live_transcript && voice.live_transcript.final !== true))
+    readonly property string recognizedText: voice.live_transcript && voice.live_transcript.final !== true
+        ? String(voice.live_transcript.text || "") : ""
     property var turns: []
     property string draft: ""
     property string conversationId: ""
@@ -22,6 +34,39 @@ Rectangle {
 
     color: "#b302080e"
     clip: true
+
+    function changeVoice(payload) {
+        if (voiceRequestPending || !realtime.connected) return
+        voiceRequestPending = true
+        voiceError = ""
+        const xhr = new XMLHttpRequest()
+        xhr.open("PATCH", "http://127.0.0.1:8765/api/realtime/mode")
+        xhr.setRequestHeader("Content-Type", "application/json")
+        xhr.onreadystatechange = function() {
+            if (!root || xhr.readyState !== XMLHttpRequest.DONE) return
+            root.voiceRequestPending = false
+            if (xhr.status < 200 || xhr.status >= 300) {
+                root.voiceError = "Voice could not change mode."
+                try { root.voiceError = JSON.parse(xhr.responseText).detail || root.voiceError } catch (error) {}
+            }
+        }
+        xhr.send(JSON.stringify(payload))
+    }
+
+    function voiceStatus() {
+        if (voiceError || voice.last_error) return voiceError || voice.last_error
+        if (!realtime.connected) return "Voice reconnecting…"
+        if (voiceMode === "off") return "Microphone off"
+        if (voice.phase === "suspended") return "Voice paused while another agent finishes"
+        if (!voiceReady) return "Preparing voice…"
+        if (recognizing) return "Listening to your command"
+        if (busy) return "Executive is working"
+        if (voice.executive && voice.executive.state === "busy") return "An agent is working · voice available"
+        if (voice.executive && voice.executive.state === "unavailable")
+            return "Listening · Executive will prepare on your next command"
+        if (!voice.executive || !voice.executive.warm) return "Warming Executive…"
+        return voiceMode === "wake" ? "Ready · say " + wakeWord + ", then your command" : "Ready · speak naturally"
+    }
 
     function mergeTurn(turn) {
         if (!turn || typeof turn.id !== "string") {
@@ -83,6 +128,8 @@ Rectangle {
             contextUsage = {
                 "conversation_id": message.conversation_id,
                 "used_tokens": Number(message.used_tokens ?? 0),
+                "count_method": String(message.count_method || "unavailable"),
+                "measurement_scope": String(message.measurement_scope || ""),
                 "capacity_tokens": Number(message.capacity_tokens ?? 0),
                 "percent": Number(message.percent ?? 0),
                 "compact_at": Number(message.compact_at ?? 80),
@@ -175,7 +222,7 @@ Rectangle {
             anchors.left: parent.left
             anchors.leftMargin: 16
             anchors.verticalCenter: parent.verticalCenter
-            text: root.connected ? "EXECUTIVE CHAT" : "CHAT RECONNECTING"
+            text: root.connected ? "EXECUTIVE · VOICE & CHAT" : "CHAT RECONNECTING"
             color: root.connected ? "#8067e8f9" : "#99fcd34d"
             font.family: "JetBrains Mono"
             font.pixelSize: 9
@@ -210,12 +257,81 @@ Rectangle {
         }
     }
 
+    Rectangle {
+        id: voicePanel
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: header.bottom
+        height: 86
+        color: "#4d071119"
+
+        Row {
+            id: voiceModes
+            x: 12
+            y: 10
+            width: parent.width - 24
+            height: 30
+            spacing: 6
+
+            Repeater {
+                model: [{mode: "wake", label: "WAKE WORD"},
+                        {mode: "realtime", label: "REALTIME"}, {mode: "off", label: "MUTE"}]
+                delegate: GlowButton {
+                    required property var modelData
+                    width: (voiceModes.width - 12) / 3
+                    height: 30
+                    text: modelData.label
+                    selected: root.voiceMode === modelData.mode
+                    enabled: root.realtime.connected && !root.voiceRequestPending
+                        && root.voice.phase !== "stopping" && root.voice.phase !== "starting"
+                    foreground: modelData.mode === "off" ? "#fcd34d" : "#a5f3fc"
+                    textPixelSize: 10
+                    textLetterSpacing: 1
+                    idleBorderOpacity: 0.22
+                    idleTextOpacity: 0.60
+                    selectedFillOpacity: 0.16
+                    onClicked: root.changeVoice({mode: modelData.mode})
+                }
+            }
+        }
+
+        Text {
+            anchors.left: parent.left
+            anchors.leftMargin: 14
+            anchors.right: proactive.visible ? proactive.left : parent.right
+            anchors.rightMargin: 12
+            y: 49
+            text: root.voiceStatus()
+            color: root.voiceError || root.voice.last_error ? "#fcd34d" : "#99a5f3fc"
+            font.family: "JetBrains Mono"
+            font.pixelSize: 10
+            wrapMode: Text.Wrap
+        }
+
+        GlowButton {
+            id: proactive
+            anchors.right: parent.right
+            anchors.rightMargin: 12
+            y: 46
+            width: 100
+            height: 25
+            visible: root.voiceMode === "realtime"
+            text: "PROACTIVE"
+            selected: root.voice.proactive === true
+            enabled: root.voiceReady && !root.voiceRequestPending
+            textPixelSize: 8
+            foreground: "#fcd34d"
+            idleTextOpacity: 0.5
+            onClicked: root.changeVoice({proactive: !root.voice.proactive})
+        }
+    }
+
     ListView {
         id: transcript
 
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.top: header.bottom
+        anchors.top: voicePanel.bottom
         anchors.bottom: composer.top
         anchors.margins: 8
         clip: true
@@ -276,7 +392,7 @@ Rectangle {
             anchors.margins: 10
             visible: root.turns.length === 0
             text: root.connected
-                ? "Executive answers from the vault. Realtime speech appears here automatically."
+                ? "Say " + root.wakeWord + " followed by your command, or type below. Realtime keeps the conversation open without repeating the name."
                 : (root.socketError || "Connecting to Executive chat…")
             color: "#667dd3fc"
             wrapMode: Text.Wrap
@@ -285,6 +401,38 @@ Rectangle {
             lineHeight: 1.4
             lineHeightMode: Text.ProportionalHeight
         }
+
+        footer: Item {
+            width: transcript.width
+            height: root.recognizing ? liveCommand.implicitHeight + 18 : 0
+            visible: root.recognizing
+            Column {
+                id: liveCommand
+                x: 12
+                width: parent.width - 24
+                spacing: 8
+                InputWaveform {
+                    width: parent.width
+                    height: 22
+                    levels: root.realtime.levels
+                    capturing: root.recognizing
+                }
+                Text {
+                    width: parent.width
+                    text: root.recognizedText || "Listening…"
+                    textFormat: Text.PlainText
+                    wrapMode: Text.Wrap
+                    color: "#e6faff"
+                    font.family: "JetBrains Mono"
+                    font.pixelSize: 12
+                }
+            }
+        }
+    }
+
+    Connections {
+        target: root.realtime
+        function onTranscriptUpdated() { transcript.positionViewAtEnd() }
     }
 
     Text {
@@ -318,7 +466,7 @@ Rectangle {
             anchors.leftMargin: 10
             anchors.top: parent.top
             anchors.topMargin: 9
-            text: "IMMEDIATE"
+            text: "CONTEXT"
             color: "#667dd3fc"
             font.family: "JetBrains Mono"
             font.pixelSize: 8
@@ -340,7 +488,8 @@ Rectangle {
             Rectangle {
                 width: parent.width * Math.max(0, Math.min(
                     100,
-                    root.contextUsage ? Number(root.contextUsage.percent) : 0
+                    root.contextUsage && root.contextUsage.count_method === "runtime"
+                        ? Number(root.contextUsage.percent) : 0
                 )) / 100
                 height: parent.height
                 radius: 2
@@ -355,7 +504,9 @@ Rectangle {
             anchors.rightMargin: 12
             anchors.verticalCenter: immediateLabel.verticalCenter
             width: 34
-            text: Math.round(root.contextUsage ? Number(root.contextUsage.percent) : 0) + "%"
+            text: !root.contextUsage || root.contextUsage.count_method !== "runtime" ? "—"
+                : (root.contextUsage.measurement_scope === "native_session" ? "" : "~")
+                    + Math.round(Number(root.contextUsage.percent)) + "%"
             color: "#667dd3fc"
             font.family: "JetBrains Mono"
             font.pixelSize: 8
@@ -407,7 +558,7 @@ Rectangle {
             anchors.topMargin: 9
             anchors.bottomMargin: 10
             text: root.draft
-            placeholderText: root.acceptingClarification ? "Clarify the current task" : root.busy || root.resetting ? "…" : "Speak to the vault"
+            placeholderText: root.acceptingClarification ? "Clarify the current request" : root.busy || root.resetting ? "…" : "Type a message…"
             color: "#e6faff"
             placeholderTextColor: "#4d7dd3fc"
             wrapMode: TextEdit.Wrap

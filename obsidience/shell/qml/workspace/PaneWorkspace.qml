@@ -6,10 +6,10 @@ import "../api"
 import "../panes/applications"
 import "../panes/camera"
 import "../panes/chat"
-import "../panes/feeds"
 import "../panes/displays"
 import "../panes/hardware"
 import "../panes/knowledge"
+import "../panes/graphs"
 import "../panes/library"
 import "../panes/reader"
 import "../panes/reviews"
@@ -18,6 +18,7 @@ import "../panes/status"
 import "../panes/tasks"
 import "../panes/terminal"
 import "../panes/settings"
+import "../panes/tft"
 
 Scope {
     id: root
@@ -111,6 +112,18 @@ Scope {
         defaultOpen: false
         defaultZOrder: 32
     }
+    // Keep the existing placement identity and geometry for the unified pane.
+    property PanePlacement knowledgeGraphPlacement: PanePlacement {
+        paneId: "knowledge-graph"
+        authoritative: true
+        defaultSurfaceId: "samsung"
+        defaultX: 2740
+        defaultY: 100
+        defaultWidth: 1160
+        defaultHeight: 960
+        defaultOpen: false
+        defaultZOrder: 43
+    }
     property PanePlacement statusPlacement: PanePlacement {
         paneId: "status"
         authoritative: true
@@ -155,17 +168,6 @@ Scope {
         defaultOpen: false
         defaultZOrder: 36
     }
-    property PanePlacement feedsPlacement: PanePlacement {
-        paneId: "feeds"
-        authoritative: true
-        defaultSurfaceId: "usb-c"
-        defaultX: 240
-        defaultY: 100
-        defaultWidth: 1040
-        defaultHeight: 760
-        defaultOpen: false
-        defaultZOrder: 38
-    }
     property PanePlacement applicationsPlacement: PanePlacement {
         paneId: "applications"
         authoritative: true
@@ -187,11 +189,22 @@ Scope {
         defaultOpen: true
         defaultZOrder: 40
     }
+    property PanePlacement tftCompanionPlacement: PanePlacement {
+        paneId: "tft-companion"
+        authoritative: true
+        defaultSurfaceId: "samsung"
+        defaultX: 3200
+        defaultY: 6
+        defaultWidth: 1900
+        defaultHeight: 1428
+        defaultOpen: true
+        defaultZOrder: 44
+    }
 
     property Component displaysComponent: Component {
         DisplaysPane { surfaceLayout: root.shellApi.surfaceLayout }
     }
-    property Component chatComponent: Component { ChatPane {} }
+    property Component chatComponent: Component { ChatPane { realtime: root.shellApi.realtime } }
     property Component libraryComponent: Component { LibraryPane {} }
     property Component tasksComponent: Component { TasksPane {} }
     property Component reviewsComponent: Component { ReviewsPane {} }
@@ -212,6 +225,9 @@ Scope {
                 : root.sourcePlacement.surfaceId
         }
     }
+    property Component knowledgeGraphComponent: Component {
+        GraphViewerPane { surfaceId: root.knowledgeGraphPlacement.surfaceId; monitoringAllowed: root.monitoringAllowed }
+    }
     property Component statusComponent: Component { StatusPane {} }
     property Component hardwareComponent: Component {
         HardwarePane {
@@ -221,15 +237,9 @@ Scope {
     }
     property Component cameraComponent: Component { CameraPane {} }
     property Component settingsComponent: Component { SettingsPane {} }
-    property Component feedsComponent: Component {
-        FeedsPane {
-            dockLayout: root.dockLayout
-            surfaceId: root.dockLayout.isDocked("feeds")
-                ? root.readerPlacement.surfaceId : root.feedsPlacement.surfaceId
-        }
-    }
     property Component applicationsComponent: Component { ApplicationsPane {} }
     property Component terminalComponent: Component { TerminalPane {} }
+    property Component tftCompanionComponent: Component { TftCompanionPane {} }
 
     function placementFor(paneId) {
         const definition = definitionFor(paneId)
@@ -352,6 +362,9 @@ Scope {
         {"label": "Knowledge", "title": "Knowledge", "icon": "knowledge", "accent": "#93c5fd",
             "placement": knowledgePlacement,
             "component": knowledgeComponent, "minWidth": 320, "minHeight": 320},
+        {"label": "Graph", "title": "Graph", "icon": "graph", "accent": "#93c5fd",
+            "placement": knowledgeGraphPlacement,
+            "component": knowledgeGraphComponent, "minWidth": 620, "minHeight": 420},
         {"label": "Source", "title": "Source", "icon": "source", "accent": "#c4b5fd",
             "placement": sourcePlacement,
             "component": sourceComponent, "minWidth": 340, "minHeight": 280},
@@ -367,15 +380,15 @@ Scope {
         {"label": "Settings", "title": "Settings", "icon": "settings", "accent": "#fb923c",
             "placement": settingsPlacement,
             "component": settingsComponent, "minWidth": 680, "minHeight": 440},
-        {"label": "Feeds", "title": "Feeds", "icon": "feeds", "accent": "#7dd3fc",
-            "placement": feedsPlacement,
-            "component": feedsComponent, "minWidth": 340, "minHeight": 320},
         {"label": "Applications", "title": "Applications", "icon": "applications", "accent": "#2dd4bf",
             "placement": applicationsPlacement,
             "component": applicationsComponent, "minWidth": 620, "minHeight": 420},
         {"label": "Terminal", "title": "Terminal", "icon": "terminal", "accent": "#4ade80",
             "placement": terminalPlacement,
             "component": terminalComponent, "minWidth": 660, "minHeight": 400},
+        {"label": "TFT", "title": "TFT Ledger Companion", "icon": "applications", "accent": "#7ae8d4",
+            "placement": tftCompanionPlacement,
+            "component": tftCompanionComponent, "minWidth": 520, "minHeight": 400},
         {"label": "Displays", "title": "Displays", "icon": "displays", "accent": "#60a5fa",
             "placement": displaysPlacement,
             "component": displaysComponent, "minWidth": 520, "minHeight": 340}

@@ -6,6 +6,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import QtWebSockets
 import "../../components/visual"
+import "../../api"
 
 Rectangle {
     id: root
@@ -181,7 +182,7 @@ Rectangle {
     }
     WebSocket {
         id: shellSocket
-        url: "ws://127.0.0.1:8768"
+        url: "ws://127.0.0.1:8768" + ShellCommandToken.query
         requestedSubprotocols: ["obsidience.shell.v1"]
         active: root.visible
         onStatusChanged: status => { if (root.visible && (status === WebSocket.Error || status === WebSocket.Closed)) reconnect.restart() }

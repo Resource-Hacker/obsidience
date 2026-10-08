@@ -5,6 +5,7 @@ import QtQuick.Controls
 import QtWebSockets
 import "../../components/visual"
 import "../../workspace"
+import "../../api"
 
 Rectangle {
     id: root
@@ -450,7 +451,7 @@ Rectangle {
 
     WebSocket {
         id: shellSocket
-        url: "ws://127.0.0.1:8768"
+        url: "ws://127.0.0.1:8768" + ShellCommandToken.query
         requestedSubprotocols: ["obsidience.shell.v1"]
         active: true
         onTextMessageReceived: message => root.applyShellEvent(message)

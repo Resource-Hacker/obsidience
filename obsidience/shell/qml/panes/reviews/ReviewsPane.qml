@@ -4,6 +4,7 @@ import QtQuick
 import QtQuick.Controls
 import QtWebSockets
 import "../../components/visual"
+import "../../api"
 
 Rectangle {
     id: root
@@ -95,7 +96,8 @@ Rectangle {
         decidingFile = file
         // A poll already in flight belongs to the queue before this decision.
         ++refreshGeneration
-        const action = approve ? "approve" : "reject?reason="
+        const action = current.review_class === "health" ? "acknowledge"
+            : approve ? "approve" : "reject?reason="
             + encodeURIComponent("rejected from review pane")
         requestJson("POST", "/api/reviews/" + encodeURIComponent(file)
             + "/" + action, (ok, payload, error) => {
@@ -274,13 +276,14 @@ Rectangle {
 
                     required property var modelData
                     readonly property bool isLink: modelData.review_class === "link"
+                    readonly property bool isHealth: modelData.review_class === "health"
                     readonly property bool expanded: root.expandedFile === modelData.file
                     width: cards.width
                     height: cardColumn.implicitHeight
                     radius: 8
                     color: "#c4020a12"
                     border.width: 1
-                    border.color: isLink ? "#45c4b5fd" : "#2867e8f9"
+                    border.color: isHealth ? "#66fbbf24" : isLink ? "#45c4b5fd" : "#2867e8f9"
 
                     Column {
                         id: cardColumn
@@ -335,7 +338,7 @@ Rectangle {
 
                                 Text {
                                     width: parent.width
-                                    text: card.isLink ? "LINK PROPOSAL"
+                                    text: card.isHealth ? "RECOVERY NEEDS ATTENTION" : card.isLink ? "LINK PROPOSAL"
                                         : String(card.modelData.action).toUpperCase() + " ARTICLE PROPOSAL"
                                     color: card.isLink ? "#c4b5fd" : "#d7b96f"
                                     elide: Text.ElideRight
@@ -399,6 +402,7 @@ Rectangle {
                                 GlowButton {
                                     id: approveButton
 
+                                    visible: !card.isHealth
                                     width: 30
                                     height: 30
                                     text: "✓"
@@ -418,15 +422,15 @@ Rectangle {
                                 GlowButton {
                                     id: rejectButton
 
-                                    width: 30
+                                    width: card.isHealth ? 100 : 30
                                     height: 30
-                                    text: "×"
-                                    accent: "#fb7185"
-                                    foreground: "#fb7185"
+                                    text: card.isHealth ? "ACKNOWLEDGE" : "×"
+                                    accent: card.isHealth ? "#fbbf24" : "#fb7185"
+                                    foreground: accent
                                     idleBorderOpacity: 0.35
                                     idleTextOpacity: 1.0
                                     hoverFillOpacity: 0.10
-                                    textPixelSize: 15
+                                    textPixelSize: card.isHealth ? 8 : 15
                                     textLetterSpacing: 0
                                     contentHorizontalPadding: 0
                                     disabledOpacity: 0.30
@@ -565,7 +569,7 @@ Rectangle {
                                 anchors.top: parent.top
                                 anchors.leftMargin: 12
                                 anchors.topMargin: 10
-                                text: card.isLink ? "ARTICLE AFTER LINK" : "PROPOSED ARTICLE"
+                                text: card.isHealth ? "RECOVERY DETAILS" : card.isLink ? "ARTICLE AFTER LINK" : "PROPOSED ARTICLE"
                                 color: card.isLink ? "#80c4b5fd" : "#6667e8f9"
                                 font.family: "JetBrains Mono"
                                 font.pixelSize: 8
@@ -634,7 +638,7 @@ Rectangle {
 
                     Text {
                         width: Math.min(420, reviewScroll.width - 50)
-                        text: "Agent proposals will appear here for owner approval or rejection."
+                        text: "Article proposals and recovery problems needing your attention appear here."
                         color: "#527dd3fc"
                         horizontalAlignment: Text.AlignHCenter
                         wrapMode: Text.Wrap
@@ -649,7 +653,7 @@ Rectangle {
     WebSocket {
         id: shellSocket
 
-        url: "ws://127.0.0.1:8768"
+        url: "ws://127.0.0.1:8768" + ShellCommandToken.query
         requestedSubprotocols: ["obsidience.shell.v1"]
         active: true
         onStatusChanged: status => {

@@ -95,9 +95,16 @@ def click(owner, surface_id, target, witness, *, guard) -> dict:
         width, height = round(output["width"]/scale), round(output["height"]/scale)
         x, y = round(local_x), round(local_y)
         _require(0 <= x < width and 0 <= y < height, "point_outside_surface")
+        drag = witness.get("drag")
+        extra = []
+        if drag is not None:
+            end_x = round(rect.x + drag["x"] * rect.width / image_width)
+            end_y = round(rect.y + drag["y"] * rect.height / image_height)
+            _require(0 <= end_x < width and 0 <= end_y < height, "destination_outside_surface")
+            extra = ["drag", str(end_x), str(end_y)]
         _require(guard(), "request_cancelled_or_locked")
         process = subprocess.Popen(
-            [POINTER_BINARY, output["name"], str(x), str(y), str(width), str(height)],
+            [POINTER_BINARY, output["name"], str(x), str(y), str(width), str(height), *extra],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
         )
         _read_status(process, "positioned", 2.0)
@@ -119,11 +126,32 @@ def click(owner, surface_id, target, witness, *, guard) -> dict:
         committed = True
         process.stdin.write(b"commit\n")
         process.stdin.flush()
+        if drag is not None:
+            _read_status(process, "pressed", 1.0)
+            current_point = global_point
+            for step in range(1, 11):
+                time.sleep(drag["duration_ms"] / 10000)
+                _require(guard(), "request_cancelled_or_locked")
+                _attest(owner, surface_id, target, witness, point=current_point)
+                process.stdin.write(b"commit\n")
+                process.stdin.flush()
+                _read_status(process, "moved", 1.0)
+                # Match the helper's integer interpolation, including negative deltas.
+                current_point = (output["x"] + x + int((end_x-x)*step/10),
+                                 output["y"] + y + int((end_y-y)*step/10))
+            _require(guard(), "request_cancelled_or_locked")
+            _attest(owner, surface_id, target, witness, point=current_point)
+            process.stdin.write(b"commit\n")
+            process.stdin.flush()
         _read_status(process, "acknowledged", 1.0)
         _require(process.wait(timeout=0.5) == 0, "pointer_transport_failed")
         return {"ok": True, "reason": "", "delivery": "acknowledged"}
     except Exception as exc:
         reason = str(exc) if isinstance(exc, ClickRejected) else "click_precondition_or_transport_failed"
+        if reason == "geometry_changed" and process is None:
+            # Attest that even pointer positioning has not started. The Harness
+            # may discard its image and ask for one fresh grounded proposal.
+            reason = "geometry_changed_before_input"
         return {"ok": False, "reason": reason[:160], "delivery": "uncertain" if committed else "not_dispatched"}
     finally:
         if process is not None:

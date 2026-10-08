@@ -17,29 +17,40 @@
     },
     {
       "name": "Hyprland",
-      "package": "hyprland 0.56.2-2.4",
+      "package": "hyprland-obsidience 0.56.2-3.2",
       "repository": "https://github.com/hyprwm/Hyprland",
       "commit": "efb50993780079460b0cbed1363e2166a2de1d9f",
       "license": "BSD-3-Clause",
       "selected_sources": [
         {
           "path": "src/desktop/state/ViewHitTester.cpp",
-          "sha256": "1bcc02a03db80b0519e516b41b3e0d0e70df08d6aa50b006b6a4362854524a09"
+          "sha256": "1bcc02a03db80b0519e516b41b3e0d0e70df08d6aa50b006b6a4362854524a09",
+          "patched_sha256": "6cfd24a6c68c06e62b4391578b2de74a21ebda49328f9176049cf4b5bd489182"
         },
         {
           "path": "src/config/lua/layout/LuaLayoutProvider.cpp",
-          "sha256": "e8a0977e7cd1604d0e86b0b85681eb5b6941b2109294f5e5aae8d20cf7dbb4ba"
+          "sha256": "e8a0977e7cd1604d0e86b0b85681eb5b6941b2109294f5e5aae8d20cf7dbb4ba",
+          "patched_sha256": "b9128e7dd16615cdf4c769bc5da661fa0d1a14bb1525af5651652ff051b29e63"
         },
         {
           "path": "meta/generateLuaStubs.py",
-          "sha256": "da2cdb373e6ba757369495f4087216c29fdda142af852aaa79e3590d7c0a29ed"
+          "sha256": "da2cdb373e6ba757369495f4087216c29fdda142af852aaa79e3590d7c0a29ed",
+          "patched_sha256": "b4a9503cdfd5923e0ea6b1459a061aaa888a83942c50e40dfd0c07b82fa8e924"
+        },
+        {
+          "path": "src/managers/input/InputManager.cpp",
+          "sha256": "feedf32e2e3d23aeaed7a02ef4ab94be2d66f4b22873b3166026da1e9ece4765",
+          "patched_sha256": "9ebec0d39c7e3a7a9423e3869d774ab93213f612d4c5f202c95a512bc0fe3937"
         }
       ],
       "patches": [
         "adapter/hyprland/patches/0001-hit-test-overlapping-tiled-windows.patch",
-        "adapter/hyprland/patches/0002-forward-lua-layout-resize.patch"
+        "adapter/hyprland/patches/0002-forward-lua-layout-resize.patch",
+        "adapter/hyprland/patches/0003-restore-keyboard-focus-after-desktop-click.patch"
       ],
-      "adaptation": "Used as the live Wayland compositor for Samsung, USB-C, and logical DP-4. Obsidience supplies its own minimal Lua configuration, supported custom layout provider, and shell surfaces. Native CSS gaps retain compositor-owned pointer hit-testing and native inner glow renders the low-rate OLED border treatment. One downstream source patch makes tiled pointer hit-testing follow the visible front-to-back order required when custom-layout tile bounds overlap. A second forwards native tiled-resize deltas and the grabbed corner to an optional Lua layout callback while preserving the existing recalculate-only fallback. No Hyprland visual design is copied."
+      "packaging": "adapter/hyprland/packaging/PKGBUILD",
+      "packaging_policy": "Provides hyprland under the distinct hyprland-obsidience package identity so repository updates cannot silently erase the reviewed patches. Rebuild against changed shared-library ABIs; do not bypass dependency checks.",
+      "adaptation": "Used as the live Wayland compositor for Samsung, USB-C, and logical DP-4. Obsidience supplies its own minimal Lua configuration, supported custom layout provider, and shell surfaces. Native CSS gaps retain compositor-owned pointer hit-testing and native inner glow renders the low-rate OLED border treatment. One downstream source patch makes tiled pointer hit-testing follow the visible front-to-back order required when custom-layout tile bounds overlap. A second forwards native tiled-resize deltas and the grabbed corner to an optional Lua layout callback while preserving the existing recalculate-only fallback. A third restores native click-to-focus when a layer surface owns the keyboard, or keyboard focus is empty, while the clicked window remains the remembered active window. It retains pointer constraints, held-button handling, popup focus and session-lock enforcement in the existing compositor input path. No Hyprland visual design is copied."
     },
     {
       "name": "Aquamarine",
@@ -152,28 +163,7 @@
       "package": "qt6-webengine 6.11.2-1",
       "repository": "https://code.qt.io/cgit/qt/qtwebengine.git",
       "license": "LGPL-3.0-only or GPL-3.0-only or commercial license, with bundled component licenses",
-      "adaptation": "Used as the installed QML WebEngineView runtime for the existing loopback-only Three.js graph renderer on the selected secure lock Surface. The web view is presentation-only and receives no credentials; password input remains native QML and authentication remains exclusively in Quickshell PamContext through the system PAM stack. No Qt WebEngine source was copied."
-    },
-    {
-      "name": "gtk-layer-shell",
-      "package": "gtk-layer-shell 0.10.1-1.1",
-      "repository": "https://github.com/wmww/gtk-layer-shell",
-      "license": "LGPL-3.0-or-later",
-      "adaptation": "Used as the installed GTK Wayland layer-shell binding for the knowledge background on the selected Surface. Native ON_DEMAND keyboard focus admits user-selected Action Trace disclosures without reserving exclusive focus. No upstream source or visual design was copied."
-    },
-    {
-      "name": "WebKitGTK",
-      "package": "webkit2gtk-4.1 2.52.6-1",
-      "repository": "https://webkitgtk.org",
-      "license": "LGPL-2.1-or-later and bundled component licenses",
-      "adaptation": "Used as the installed hardware-accelerated web runtime for the one canonical Three.js graph bundle. No WebKit source was copied."
-    },
-    {
-      "name": "PyGObject",
-      "package": "python-gobject 3.56.3-1",
-      "repository": "https://pygobject.gnome.org",
-      "license": "LGPL-2.1-or-later",
-      "adaptation": "Used as the installed Python binding for GTK, GDK, WebKitGTK and gtk-layer-shell. No upstream source was copied."
+      "adaptation": "Used as the installed QML WebEngineView runtime for the existing loopback-only Three.js graph renderer on the selected secure lock Surface. The web view is presentation-only and receives no credentials; password input remains native QML and authentication remains exclusively in Quickshell PamContext through the system PAM stack. No Qt WebEngine source was copied. The same installed runtime now hosts the ordinary desktop graph stages and native graph viewers. Local canvas capture/WebRTC streams transfer stage frames without a second viewer graph or simulation. Individual Knowledge views borrow the stage renderer and live clouds for an isolated camera pass. The presenter disables only GpuMemoryBufferReadbackFromTexture because this Qt Vulkan path cannot allocate its optional buffer; native capture remained functional with no failed-buffer errors. No upstream implementation was copied."
     },
     {
       "name": "QMLTermWidget",
@@ -287,7 +277,7 @@
         }
       ],
       "notice": "adapter/hyprland/pointer.c",
-      "adaptation": "The existing Shell adapter privately invokes one bounded native client. The upstream button/frame sequence and real Wayland sync-callback pattern are adapted to exact output-name binding, output-local absolute motion, a positioned receipt followed by one controller commit, and a final acknowledged receipt. Disconnect, malformed or missing commit, output changes, and deadlines fail nonzero without replay. The helper owns no target identity, observation, permission, Task, Tool, daemon, or semantic success authority. The existing Shell Scene and Computer Use owner retain fresh identity, geometry, visibility, lock, grounding, cancellation, and postcondition checks. Callback acknowledgement means compositor protocol processing, never application acceptance. No wlrctl CLI, window matching, keyboard, relative pointer, or generic action surface is imported."
+      "adaptation": "The existing Shell adapter privately invokes one bounded native client. The upstream button/frame sequence and real Wayland sync-callback pattern are adapted to exact output-name binding, output-local absolute motion, a positioned receipt followed by one controller commit, and a final acknowledged receipt. Disconnect, malformed or missing commit, output changes, and deadlines fail nonzero without replay. The helper owns no target identity, observation, permission, Task, Tool, daemon, or semantic success authority. The existing Shell Scene and Computer Use owner retain fresh identity, geometry, visibility, lock, grounding, cancellation, and postcondition checks. Callback acknowledgement means compositor protocol processing, never application acceptance. No wlrctl CLI, window matching, keyboard, relative pointer, or generic action surface is imported. The 2026-09-21 bounded drag extension uses the same native pointer and adds ten acknowledged motion steps between press and release. Every step requires a fresh controller commit after existing target, focus, lock and cancellation guards. EOF, cancellation, deadline and termination release a held button before destroying the pointer. The Shell admits only one pending input operation, without a queue."
     },
     {
       "name": "wlr virtual pointer protocol",
@@ -351,7 +341,9 @@
         "path": "shell/shell.qml",
         "adaptation": "Read-only reference for one warm shell host and independent service/presentation ownership; no code or visual design adopted."
       },
-      "preview_adaptation": "2026-09-09: explicit read-only draft preview reuses existing HTTPX acquisition and one feedparser document/item parser shared with collection. Transient bounded plain-text projection only; no imported service, Source capture, cursor update or additional package."
+      "preview_adaptation": "2026-09-09: explicit read-only draft preview reuses existing HTTPX acquisition and one feedparser document/item parser shared with collection. Transient bounded plain-text projection only; no imported service, Source capture, cursor update or additional package.",
+      "status": "retired",
+      "retired_reason": "Owner retired Connections and Feeds intake and presentation on 2026-10-07. Prior adaptation and license records below are historical provenance; immutable Source and receipt interpretation remain available."
     },
     {
       "name": "Tide feed reader reference",
@@ -379,7 +371,9 @@
           "https://learn.microsoft.com/en-us/windows/apps/design/basics/navigation-basics"
         ],
         "navigation_adaptation": "Settings owns Connections; standalone Feeds opens items in the shared Reader and uses the existing four dock slots. Keep one editable amount beside preview, distinguish navigation from actions, avoid duplicate pane/record headings, and reuse the connection address for new feed drafts. Guidance only; no upstream implementation copied."
-      }
+      },
+      "status": "retired",
+      "retired_reason": "Owner retired Connections and Feeds intake and presentation on 2026-10-07. Prior adaptation and license records below are historical provenance; immutable Source and receipt interpretation remain available."
     },
     {
       "name": "Matcha feed reader reference",
@@ -401,7 +395,9 @@
         }
       ],
       "adaptation": "Reviewed incremental per-feed item processing, limits, seen-item accounting, and reading from stored material. Obsidience applies these patterns through its existing Source fingerprint and Index receipts, preserving content versions rather than URL-only suppression. Summarization remains Darwin and Alexandria; no Matcha executable, Go code, independent LLM, scheduler, or Markdown vault writer is adopted. OPML remains a possible future interchange extension.",
-      "notice": "LICENSES/Matcha-MIT.txt"
+      "notice": "LICENSES/Matcha-MIT.txt",
+      "status": "retired",
+      "retired_reason": "Owner retired Connections and Feeds intake and presentation on 2026-10-07. Prior adaptation and license records below are historical provenance; immutable Source and receipt interpretation remain available."
     },
     {
       "name": "psutil",
@@ -436,6 +432,28 @@
       "license": "GPL-2.0-or-later",
       "adaptation": "The installed unmodified lsblk executable supplies read-only physical-drive and partition inventory via bounded explicit-column JSON. Harness system_evidence projects exact serial/model/WWN identities into existing deterministic System Articles; partitions and mount points are Article details. No upstream source is copied, no drive is mounted or modified, and no second monitor or service is introduced.",
       "documentation": "https://kernel.googlesource.com/pub/scm/utils/util-linux/util-linux/+/refs/tags/v2.41.1/misc-utils/lsblk.8.adoc"
+    },
+    {
+      "name": "xdg-desktop-portal-hyprland",
+      "package": "xdg-desktop-portal-hyprland 1.4.1-2.2",
+      "repository": "https://github.com/hyprwm/xdg-desktop-portal-hyprland",
+      "license": "MIT",
+      "upstream_version": "v1.4.1",
+      "source_sha256": "3652c14f63a9666acea2c841e196782dbc0f74ea5b4783622dd04a32f08b709f",
+      "upstream_fixes": [
+        "688feb3d88404598f12440a668136e74044391de",
+        "59d429bf45aed4e2209043c0c36565ad8e2859a5",
+        "ba31964ee42b56bcb0d3b78a64ead5d8a1c3c6f6"
+      ],
+      "patches": [
+        "adapter/hyprland/patches/xdg-desktop-portal-hyprland/0001-keep-capture-after-buffer-exhaustion.patch",
+        "adapter/hyprland/patches/xdg-desktop-portal-hyprland/0002-preserve-renegotiated-frame-callback.patch",
+        "adapter/hyprland/patches/xdg-desktop-portal-hyprland/0003-correct-dmabuf-buffer-layout.patch"
+      ],
+      "packaging": "adapter/hyprland/portal/PKGBUILD",
+      "packaging_reference": "https://gitlab.archlinux.org/archlinux/packaging/packages/xdg-desktop-portal-hyprland/-/commit/58bf407",
+      "adaptation": "Backport three merged upstream capture fixes onto the installed 1.4.1 base: preserve capture callbacks across buffer starvation and format renegotiation, and advertise the actual DMA-BUF plane layout with DMA-specific buffer parameters. The ordinary portal remains the sole Discord screen-share backend; no replacement capture service or restart loop.",
+      "notice": "/usr/share/licenses/xdg-desktop-portal-hyprland/LICENSE"
     }
   ]
 }

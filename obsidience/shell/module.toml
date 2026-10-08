@@ -18,7 +18,7 @@ entrypoints = [
     "obsidience/shell/session/obsidience-shell-login",
     "obsidience/shell/session/restart-shell",
     "obsidience/shell/session/session-lock",
-    "obsidience/shell/surfaces/knowledge/host.py",
+    "obsidience/shell/qml/graph-stage.qml",
     "obsidience/shell/adapter/windows/host.py",
     "obsidience/shell/theme/apply.py",
 ]

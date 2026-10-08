@@ -11,6 +11,13 @@ PanelWindow {
     required property ShellApi shellApi
     required property string surfaceId
     required property bool locked
+    property var windowState: null
+    property bool motionAllowed: false
+    readonly property bool stageExposed: !!windowState && windowState.surface_awake !== false
+        && !(windowState.windows || []).some(window => !window.minimized
+            && window.visible_on_workspace !== false
+            && window.local_rect && window.local_rect.width >= stage.width - 12
+            && window.local_rect.height >= stage.height - 12)
 
     color: "transparent"
     focusable: false
@@ -36,5 +43,9 @@ PanelWindow {
         width: stage.screen ? stage.screen.width : 0
         height: stage.screen ? stage.screen.height : 0
         locked: stage.locked
+        oledEnabled: stage.surfaceId === "samsung" && stage.shellApi.surfaceLayout.oledModeEnabled
+        motionActive: stage.motionAllowed && stage.stageExposed && !stage.locked
+        driftDistance: stage.shellApi.surfaceLayout.oledShiftDistancePx
+        travelSeconds: stage.shellApi.surfaceLayout.oledTravelDurationSeconds
     }
 }

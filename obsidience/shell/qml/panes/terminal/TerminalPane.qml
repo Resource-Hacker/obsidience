@@ -2,8 +2,10 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Controls
+import QtWebEngine
 import QtWebSockets
 import QMLTermWidget 2.0
+import Quickshell.Io
 
 Rectangle {
     id: root
@@ -12,10 +14,69 @@ Rectangle {
     property bool terminalConnected: true
     property bool traceConnected: false
     property bool followTrace: true
+    // The agent canvas is created on first use and then kept, so switching
+    // tabs never reloads it. nodeterm owns the canvas and its tmux sessions.
+    property bool canvasOpened: false
+    readonly property string canvasOrigin: "http://127.0.0.1:8770"
     property var traceEntries: []
 
     color: "#020609"
     clip: true
+
+    Action {
+        id: copyAction
+
+        text: "Copy"
+        shortcut: "Ctrl+Shift+C"
+        enabled: root.visible && root.activeTab === 0 && root.terminalConnected
+        onTriggered: terminal.copyClipboard()
+    }
+
+    Action {
+        id: pasteAction
+
+        text: "Paste"
+        shortcut: "Ctrl+Shift+V"
+        enabled: copyAction.enabled
+        onTriggered: {
+            terminal.forceActiveFocus(Qt.ShortcutFocusReason)
+            terminal.pasteClipboard()
+        }
+    }
+
+    Shortcut {
+        sequences: ["Ctrl+V", "Shift+Insert"]
+        context: Qt.WindowShortcut
+        enabled: pasteAction.enabled
+        onActivated: pasteAction.trigger()
+    }
+
+    Menu {
+        id: clipboardMenu
+
+        parent: terminal
+        font.family: "JetBrains Mono"
+        font.pixelSize: 12
+        palette.window: "#07151d"
+        palette.base: "#07151d"
+        palette.button: "#07151d"
+        palette.text: "#b8f7ff"
+        palette.buttonText: "#b8f7ff"
+        palette.highlight: "#102a36"
+        palette.highlightedText: "#cffafe"
+        background: Rectangle {
+            color: clipboardMenu.palette.window
+            border.color: "#3367e8f9"
+            radius: 4
+        }
+        onClosed: {
+            if (terminal.visible) {
+                terminal.forceActiveFocus(Qt.PopupFocusReason)
+            }
+        }
+        MenuItem { action: copyAction }
+        MenuItem { action: pasteAction }
+    }
 
     function applyTrace(message) {
         if (typeof message !== "string" || message.length > 262144) {
@@ -58,7 +119,7 @@ Rectangle {
             anchors.bottom: parent.bottom
 
             Repeater {
-                model: ["LOCAL CONSOLE", "ACTION TRACE"]
+                model: ["LOCAL CONSOLE", "ACTION TRACE", "AGENT CANVAS"]
 
                 delegate: Rectangle {
                     required property string modelData
@@ -90,10 +151,35 @@ Rectangle {
                     MouseArea {
                         anchors.fill: parent
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: root.activeTab = parent.index
+                        onClicked: {
+                            root.activeTab = parent.index
+                            if (root.activeTab === 0) {
+                                terminal.forceActiveFocus(Qt.MouseFocusReason)
+                            } else if (root.activeTab === 2) {
+                                root.canvasOpened = true
+                                if (canvasLoader.item)
+                                    canvasLoader.item.forceActiveFocus(Qt.MouseFocusReason)
+                            }
+                        }
                     }
                 }
             }
+        }
+
+        ToolButton {
+            anchors.right: parent.right
+            anchors.rightMargin: 8
+            anchors.verticalCenter: parent.verticalCenter
+            visible: root.activeTab === 0
+            enabled: pasteAction.enabled
+            text: "CLIPBOARD"
+            font.family: "JetBrains Mono"
+            font.pixelSize: 9
+            palette.buttonText: "#b8f7ff"
+            background: Rectangle {
+                color: parent.hovered ? "#1822d3ee" : "transparent"
+            }
+            onClicked: clipboardMenu.popup()
         }
 
         Text {
@@ -104,6 +190,18 @@ Rectangle {
             text: (root.traceConnected ? "LIVE" : "RECONNECTING")
                 + "  ·  " + root.traceEntries.length + " ACTIONS"
             color: root.traceConnected ? "#805eead4" : "#80fcd34d"
+            font.family: "JetBrainsMono Nerd Font Mono"
+            font.pixelSize: 8
+            font.letterSpacing: 1
+        }
+
+        Text {
+            anchors.right: parent.right
+            anchors.rightMargin: 12
+            anchors.verticalCenter: parent.verticalCenter
+            visible: root.activeTab === 2
+            text: "NODETERM  ·  TMUX -L NODE-TERMINAL"
+            color: "#667dd3fc"
             font.family: "JetBrainsMono Nerd Font Mono"
             font.pixelSize: 8
             font.letterSpacing: 1
@@ -140,6 +238,20 @@ Rectangle {
             blinkingCursor: true
             fullCursorHeight: true
             lineSpacing: 0
+            onConfigureRequest: position => clipboardMenu.popup(position.x, position.y)
+
+            // A terminal widget handles mouse selection itself; give keyboard
+            // focus on press without consuming its selection or tmux mouse input.
+            TapHandler {
+                acceptedButtons: Qt.LeftButton
+                gesturePolicy: TapHandler.DragThreshold
+                onPressedChanged: {
+                    if (pressed) {
+                        terminal.forceActiveFocus(Qt.MouseFocusReason)
+                    }
+                }
+            }
+
             session: QMLTermSession {
                 id: terminalSession
 
@@ -164,6 +276,85 @@ Rectangle {
             font.family: "JetBrainsMono Nerd Font Mono"
             font.pixelSize: 11
             font.letterSpacing: 2
+        }
+
+        Loader {
+            id: canvasLoader
+
+            // Optional provider: obsidience-shell-agent-canvas.service serves
+            // nodeterm on loopback. Its login stays on (it rejects DNS-rebinding
+            // pages); the pane answers it itself, and the named profile keeps
+            // the session cookie across pane and Shell reloads.
+            anchors.fill: parent
+            active: root.canvasOpened
+            visible: root.activeTab === 2
+            onLoaded: item.forceActiveFocus(Qt.OtherFocusReason)
+
+            sourceComponent: WebEngineView {
+                id: canvasView
+
+                property bool loadFailed: false
+
+                url: root.canvasOrigin + "/"
+                backgroundColor: "#020609"
+                settings.errorPageEnabled: false
+                settings.javascriptCanAccessClipboard: true
+                settings.javascriptCanPaste: true
+                profile: WebEngineProfile {
+                    storageName: "obsidience-agent-canvas"
+                    offTheRecord: false
+                    persistentCookiesPolicy: WebEngineProfile.ForcePersistentCookies
+                }
+
+                onLoadingChanged: info => {
+                    loadFailed = info.status === WebEngineView.LoadFailedStatus
+                    // A rejected secret lands on /login?error=1 and is never retried.
+                    if (info.status === WebEngineView.LoadSucceededStatus
+                            && info.url.toString() === root.canvasOrigin + "/login"
+                            && !canvasSignIn.running) {
+                        canvasSignIn.view = canvasView
+                        canvasSignIn.running = true
+                    }
+                }
+                onNavigationRequested: request => {
+                    if (!request.url.toString().startsWith(root.canvasOrigin + "/"))
+                        request.action = WebEngineNavigationRequest.IgnoreRequest
+                }
+                onNewWindowRequested: request => {}
+                onPermissionRequested: permission => {
+                    // xterm.js copy/paste only; every other permission stays denied.
+                    if (permission.origin.toString().startsWith(root.canvasOrigin)
+                            && permission.permissionType === WebEnginePermission.PermissionType.ClipboardReadWrite)
+                        permission.grant()
+                    else
+                        permission.deny()
+                }
+            }
+        }
+
+        Process {
+            id: canvasSignIn
+
+            // Machine secret seeded into nodeterm at install; never shown to the owner.
+            property var view: null
+            command: ["/usr/bin/systemd-creds", "decrypt", "--user", "--name=password",
+                "/home/wissenschafter/.config/credentials/obsidience-agent-canvas-password.cred", "-"]
+            stdout: StdioCollector {
+                onStreamFinished: {
+                    if (canvasSignIn.view && text.length > 0)
+                        canvasSignIn.view.runJavaScript("(function(s){var f=document.querySelector('form[action=\"/auth/login\"]');"
+                            + "var i=f&&f.querySelector('input[name=password]');if(i){i.value=s;f.submit();}})("
+                            + JSON.stringify(text) + ")")
+                    canvasSignIn.view = null
+                }
+            }
+        }
+
+        Button {
+            anchors.centerIn: parent
+            visible: root.activeTab === 2 && canvasLoader.item !== null && canvasLoader.item.loadFailed
+            text: "Reconnect agent canvas"
+            onClicked: canvasLoader.item.reload()
         }
 
         Rectangle {

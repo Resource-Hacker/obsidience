@@ -1,0 +1,69 @@
+From 59d429bf45aed4e2209043c0c36565ad8e2859a5 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Umut=20Cevdet=20Ko=C3=A7ak?= <umutcevdetkocak@gmail.com>
+Date: Mon, 17 Aug 2026 20:37:09 +0300
+Subject: [PATCH] screencopy: don't destroy the frame callback installed while
+ renegotiating (#425)
+
+The format-mismatch branch of buffer_done renegotiated the stream and then
+unconditionally reset the frame callback and queued a timer.
+
+pw_stream_update_params() re-enters PW_STREAM_STATE_STREAMING synchronously.
+Because the branch set status to FRAME_RENEG first, pwStreamStateChange() took
+the path that calls removeSessionFrameCallbacks() and then startFrameCopy(), so
+a fresh frame callback was installed before the call returned. The reset() that
+followed destroyed that new callback rather than the spent one, and the queued
+timer scheduled a second frame on top of it.
+
+Depending on whether pipewire re-enters synchronously or defers to the next loop
+iteration, the session either logs "tried scheduling on already scheduled cb"
+and drops a frame, freezes with no callback and nothing queued, or has a wayland
+object the compositor is still driving torn down underneath it.
+
+Detach the spent callback before renegotiating so the re-entrant install sees an
+empty slot, keep it alive until the handler returns so the object currently
+dispatching is never destroyed, and only queue a frame if renegotiation did not
+already install one.
+
+This is the same re-entrancy #424 fixed in the out-of-buffers branches. The
+renegotiation branches, which are the ones that actually need
+updateStreamParam(), were left with it.
+---
+ src/portals/Screencopy.cpp | 16 ++++++++--------
+ 1 file changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/src/portals/Screencopy.cpp b/src/portals/Screencopy.cpp
+index cc232e9..80b860d 100644
+--- a/src/portals/Screencopy.cpp
++++ b/src/portals/Screencopy.cpp
+@@ -488,11 +488,11 @@ void CScreencopyPortal::SSession::initCallbacks() {
+             if ((PSTREAM->pwVideoInfo.format != pwFromDrmFourcc(FMT) && PSTREAM->pwVideoInfo.format != pwStripAlpha(pwFromDrmFourcc(FMT))) ||
+                 (PSTREAM->pwVideoInfo.size.width != sharingData.frameInfoDMA.w || PSTREAM->pwVideoInfo.size.height != sharingData.frameInfoDMA.h)) {
+                 Debug::log(LOG, "[sc] Incompatible formats, renegotiate stream");
+-                sharingData.status = FRAME_RENEG;
+-                g_pPortalManager->m_sPortals.screencopy->m_pPipewire->updateStreamParam(PSTREAM);
+-                g_pPortalManager->m_sPortals.screencopy->queueNextShareFrame(this);
++                const auto EXPIRED = std::move(sharingData.frameCallback);
+                 sharingData.status = FRAME_NONE;
+-                sharingData.frameCallback.reset();
++                g_pPortalManager->m_sPortals.screencopy->m_pPipewire->updateStreamParam(PSTREAM);
++                if (!sharingData.frameCallback)
++                    g_pPortalManager->m_sPortals.screencopy->queueNextShareFrame(this);
+                 return;
+             }
+ 
+@@ -606,11 +606,11 @@ void CScreencopyPortal::SSession::initCallbacks() {
+             if ((PSTREAM->pwVideoInfo.format != pwFromDrmFourcc(FMT) && PSTREAM->pwVideoInfo.format != pwStripAlpha(pwFromDrmFourcc(FMT))) ||
+                 (PSTREAM->pwVideoInfo.size.width != sharingData.frameInfoDMA.w || PSTREAM->pwVideoInfo.size.height != sharingData.frameInfoDMA.h)) {
+                 Debug::log(LOG, "[sc] Incompatible formats, renegotiate stream");
+-                sharingData.status = FRAME_RENEG;
+-                g_pPortalManager->m_sPortals.screencopy->m_pPipewire->updateStreamParam(PSTREAM);
+-                g_pPortalManager->m_sPortals.screencopy->queueNextShareFrame(this);
++                const auto EXPIRED = std::move(sharingData.windowFrameCallback);
+                 sharingData.status = FRAME_NONE;
+-                sharingData.windowFrameCallback.reset();
++                g_pPortalManager->m_sPortals.screencopy->m_pPipewire->updateStreamParam(PSTREAM);
++                if (!sharingData.windowFrameCallback)
++                    g_pPortalManager->m_sPortals.screencopy->queueNextShareFrame(this);
+                 return;
+             }
+ 

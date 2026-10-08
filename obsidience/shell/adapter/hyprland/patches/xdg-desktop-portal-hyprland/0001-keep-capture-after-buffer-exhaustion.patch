@@ -1,0 +1,82 @@
+From 688feb3d88404598f12440a668136e74044391de Mon Sep 17 00:00:00 2001
+From: Caesar <82340152+caesarakalaeii@users.noreply.github.com>
+Date: Thu, 6 Aug 2026 18:12:47 +0200
+Subject: [PATCH] screencopy: fix permanent freeze after running out of buffers
+ (#424)
+
+* screencopy: don't renegotiate the stream when out of buffers
+
+pw_stream_dequeue_buffer() returning nothing only means the consumer has not
+recycled a buffer yet. Calling updateStreamParam() there does not help, and it
+freezes the session.
+
+pw_stream_update_params() re-enters PW_STREAM_STATE_STREAMING synchronously, so
+pwStreamStateChange() sees status == FRAME_NONE and calls startFrameCopy(),
+which installs a fresh frame callback. Control returns to the out-of-buffers
+branch, which queues a timer. That timer later finds the new callback already in
+place and aborts with "tried scheduling on already scheduled cb". The branch
+then calls frameCallback.reset() and destroys the callback pipewire had just
+installed. Whichever of the two wins the race decides whether the session limps
+on for another round or is left with no frame callback and nothing queued, so
+the stream stays up but never receives another frame.
+
+Renegotiating also reallocated the whole buffer pool on every retry, so one late
+buffer snowballed into continuous renegotiation.
+
+Wait for the next frame slot and retry instead.
+
+* screencopy: keep requeueing frames past MAX_RETRIES
+
+Once copyRetries exceeded MAX_RETRIES the out-of-buffers path stopped queueing
+the next frame. That ends the session's frame loop for good: no callback is
+pending and no timer will fire again, so the client keeps a live stream that
+never receives another frame.
+
+A consumer that is slow for eleven consecutive frames is not a reason to end the
+capture. Always requeue, and keep the counter only to bound the logging.
+---
+ src/portals/Screencopy.cpp | 22 ++++++++++++++--------
+ 1 file changed, 14 insertions(+), 8 deletions(-)
+
+diff --git a/src/portals/Screencopy.cpp b/src/portals/Screencopy.cpp
+index 372b62b..cc232e9 100644
+--- a/src/portals/Screencopy.cpp
++++ b/src/portals/Screencopy.cpp
+@@ -504,11 +504,14 @@ void CScreencopyPortal::SSession::initCallbacks() {
+             if (!PSTREAM->currentPWBuffer) {
+                 Debug::log(LOG, "[screencopy/pipewire] Out of buffers");
+                 sharingData.status = FRAME_NONE;
+-                if (sharingData.copyRetries++ < MAX_RETRIES) {
++                // Renegotiating cannot produce a buffer and breaks the session:
++                // pw_stream_update_params() re-enters STREAMING synchronously, so
++                // pwStreamStateChange() calls startFrameCopy() and installs a new frame
++                // callback. The reset() below then destroys it, leaving the session with
++                // no callback and nothing queued.
++                if (sharingData.copyRetries++ < MAX_RETRIES)
+                     Debug::log(LOG, "[sc] Retrying screencopy ({}/{})", sharingData.copyRetries, MAX_RETRIES);
+-                    g_pPortalManager->m_sPortals.screencopy->m_pPipewire->updateStreamParam(PSTREAM);
+-                    g_pPortalManager->m_sPortals.screencopy->queueNextShareFrame(this);
+-                }
++                g_pPortalManager->m_sPortals.screencopy->queueNextShareFrame(this);
+                 sharingData.frameCallback.reset();
+                 return;
+             }
+@@ -619,11 +622,14 @@ void CScreencopyPortal::SSession::initCallbacks() {
+             if (!PSTREAM->currentPWBuffer) {
+                 Debug::log(LOG, "[screencopy/pipewire] Out of buffers");
+                 sharingData.status = FRAME_NONE;
+-                if (sharingData.copyRetries++ < MAX_RETRIES) {
++                // Renegotiating cannot produce a buffer and breaks the session:
++                // pw_stream_update_params() re-enters STREAMING synchronously, so
++                // pwStreamStateChange() calls startFrameCopy() and installs a new frame
++                // callback. The reset() below then destroys it, leaving the session with
++                // no callback and nothing queued.
++                if (sharingData.copyRetries++ < MAX_RETRIES)
+                     Debug::log(LOG, "[sc] Retrying screencopy ({}/{})", sharingData.copyRetries, MAX_RETRIES);
+-                    g_pPortalManager->m_sPortals.screencopy->m_pPipewire->updateStreamParam(PSTREAM);
+-                    g_pPortalManager->m_sPortals.screencopy->queueNextShareFrame(this);
+-                }
++                g_pPortalManager->m_sPortals.screencopy->queueNextShareFrame(this);
+                 sharingData.windowFrameCallback.reset();
+                 return;
+             }

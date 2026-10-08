@@ -3,6 +3,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtWebSockets
+import "../../../api"
 
 Item {
     id: root
@@ -203,7 +204,7 @@ Item {
     WebSocket {
         id: shellSocket
 
-        url: "ws://127.0.0.1:8768"
+        url: "ws://127.0.0.1:8768" + ShellCommandToken.query
         requestedSubprotocols: ["obsidience.shell.v1"]
         active: true
 

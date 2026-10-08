@@ -4,6 +4,7 @@ import QtQuick
 import QtQuick.Controls
 import QtWebSockets
 import "../../components/visual"
+import "../../api"
 
 Rectangle {
     id: root
@@ -20,6 +21,7 @@ Rectangle {
     property int acceptedCount: 0
     property int taskCount: 0
     property int toolCount: 0
+    property int agentCount: 0
 
     color: "#b302080e"
     clip: true
@@ -75,7 +77,7 @@ Rectangle {
             const library = groups.find(group => group.id === "library")
             const members = new Set(library ? library.article_refs || [] : [])
             nodes = payload.nodes.filter(node => node && members.has(node.id)
-                && (node.kind === "tool" || node.kind === "task"
+                && (node.kind === "tool" || node.kind === "task" || node.kind === "agent"
                     || (Array.isArray(node.tags) && node.tags.includes("task-taxonomy"))))
             navigationAgents = groups.filter(group => group && group.role !== "library")
             updateCounts()
@@ -98,6 +100,7 @@ Rectangle {
     function updateCounts() {
         taskCount = nodes.filter(node => node.kind === "task" && !node.synthetic).length
         toolCount = nodes.filter(node => node.kind === "tool" && !node.synthetic).length
+        agentCount = nodes.filter(node => node.kind === "agent" && !node.synthetic).length
         acceptedCount = nodes.filter(node => !node.synthetic).length
     }
 
@@ -369,14 +372,15 @@ Rectangle {
         Repeater {
             model: [
                 {"id": "task", "label": "TASKS"},
-                {"id": "tool", "label": "TOOLS + SKILLS"}
+                {"id": "tool", "label": "TOOLS + SKILLS"},
+                {"id": "agent", "label": "AGENTS"}
             ]
 
             delegate: Rectangle {
                 id: shelfButton
 
                 required property var modelData
-                width: shelves.width / 2
+                width: shelves.width / 3
                 height: shelves.height
                 color: root.shelf === modelData.id ? "#175eead4" : "#4002080e"
                 border.width: 1
@@ -385,7 +389,8 @@ Rectangle {
                 Text {
                     anchors.centerIn: parent
                     text: shelfButton.modelData.label + "  "
-                        + (shelfButton.modelData.id === "task" ? root.taskCount : root.toolCount)
+                        + (shelfButton.modelData.id === "task" ? root.taskCount
+                            : shelfButton.modelData.id === "agent" ? root.agentCount : root.toolCount)
                     color: root.shelf === shelfButton.modelData.id ? "#a7f3d0" : "#665eead4"
                     font.family: "JetBrains Mono"
                     font.pixelSize: 9
@@ -412,7 +417,8 @@ Rectangle {
         anchors.topMargin: 8
         height: 32
         text: root.query
-        placeholderText: "Search " + (root.shelf === "task" ? "tasks" : "tools + skills")
+        placeholderText: "Search " + (root.shelf === "task" ? "tasks"
+            : root.shelf === "agent" ? "agents" : "tools + skills")
         color: "#d1fae5"
         placeholderTextColor: "#3d5eead4"
         font.family: "JetBrains Mono"
@@ -445,7 +451,7 @@ Rectangle {
             anchors.left: parent.left
             anchors.leftMargin: 8
             anchors.verticalCenter: parent.verticalCenter
-            text: "CHECK OUT IN READER"
+            text: root.shelf === "agent" ? "OPEN AGENT IN READER" : "CHECK OUT IN READER"
             color: "#405eead4"
             font.family: "JetBrains Mono"
             font.pixelSize: 8
@@ -459,7 +465,7 @@ Rectangle {
             spacing: 8
 
             Repeater {
-                model: root.navigationAgents
+                model: root.shelf === "agent" ? [] : root.navigationAgents
 
                 delegate: Row {
                     id: legendRole
@@ -598,7 +604,9 @@ Rectangle {
                     text: libraryRow.modelData.children.length > 0
                         ? libraryRow.modelData.children.length + " "
                             + (root.shelf === "task" ? "SUBTASKS" : "SUBTOOLS")
-                        : (libraryRow.modelData.task
+                        : (root.shelf === "agent"
+                            ? String((root.navigationAgents.find(agent => agent.root_ref === libraryRow.modelData.node.id) || {}).subtitle || "Agent")
+                            : libraryRow.modelData.task
                             ? String(libraryRow.modelData.task.status).toUpperCase()
                             : (libraryRow.modelData.node.synthetic ? "ARTICLE" : libraryRow.modelData.node.id))
                     color: "#525eead4"
@@ -615,6 +623,22 @@ Rectangle {
                 anchors.rightMargin: 8
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: 5
+
+                GlowButton {
+                    visible: root.shelf === "agent"
+                    width: visible ? 50 : 0
+                    height: 24
+                    text: "READ"
+                    accent: "#34d399"
+                    foreground: "#a7f3d0"
+                    idleBorderOpacity: 0.20
+                    hoverBorderOpacity: 0.45
+                    idleTextOpacity: 0.60
+                    textPixelSize: 7
+                    textLetterSpacing: 0.8
+                    contentHorizontalPadding: 6
+                    onClicked: root.presentArticle(libraryRow.modelData.node.id)
+                }
 
                 GlowButton {
                     id: skillButton
@@ -642,7 +666,8 @@ Rectangle {
         Text {
             anchors.centerIn: parent
             visible: root.rows.length === 0
-            text: "NO MATCHING " + (root.shelf === "task" ? "TASKS" : "TOOLS + SKILLS")
+            text: "NO MATCHING " + (root.shelf === "task" ? "TASKS"
+                : root.shelf === "agent" ? "AGENTS" : "TOOLS + SKILLS")
             color: "#525eead4"
             font.family: "JetBrains Mono"
             font.pixelSize: 10
@@ -653,7 +678,7 @@ Rectangle {
     WebSocket {
         id: shellSocket
 
-        url: "ws://127.0.0.1:8768"
+        url: "ws://127.0.0.1:8768" + ShellCommandToken.query
         requestedSubprotocols: ["obsidience.shell.v1"]
         active: true
         onStatusChanged: status => {

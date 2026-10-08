@@ -11,7 +11,7 @@ hl.monitor({
     bitdepth = 10,
     cm = "hdr",
     sdr_max_luminance = 225,
-    vrr = 2,
+    max_luminance = 1000,
 })
 
 hl.monitor({
@@ -92,6 +92,8 @@ hl.config({
     input = {
         kb_layout = "us",
         follow_mouse = 0,
+        -- Floating/tiled transitions must obey the same click-to-focus policy.
+        float_switch_override_focus = 0,
         sensitivity = 0,
     },
     misc = {
@@ -100,6 +102,8 @@ hl.config({
         disable_splash_rendering = true,
         force_default_wallpaper = 0,
         focus_on_activate = true,
+        -- Samsung follows this default; side displays explicitly disable VRR.
+        vrr = 2,
         -- Keep Hyprland fail-secure while allowing the one shell host to
         -- reclaim a lock whose previous client died.
         allow_session_lock_restore = true,
@@ -109,6 +113,8 @@ hl.config({
     },
     render = {
         direct_scanout = 0,
+        -- Preserve the explicitly configured HDR output for fullscreen SDR games.
+        cm_auto_hdr = 0,
     },
     xwayland = {
         enabled = true,
@@ -127,6 +133,30 @@ hl.window_rule({
     tile = true,
 })
 
+-- Native Wayland games can drop their fullscreen request on focus loss.
+-- Keep Samsung adaptive while Retail or Forever is mapped there; restore fullscreen-only
+-- desktop policy when it closes or moves away. Side outputs retain vrr = 0.
+local function updateWoWVrr(closedAddress)
+    local active = false
+    for _, window in ipairs(hl.get_windows()) do
+        if window.address ~= closedAddress and window.mapped
+            and (string.lower(window.class or "") == "wow.exe"
+                or string.lower(window.class or "") == "wowb.exe")
+            and window.monitor and window.monitor.name == "HDMI-A-1" then
+            active = true
+            break
+        end
+    end
+    local requested = active and 1 or 2
+    if hl.get_config("misc.vrr") ~= requested then
+        hl.config({ misc = { vrr = requested } })
+    end
+end
+hl.on("window.open", function() updateWoWVrr(nil) end)
+hl.on("window.close", function(window) updateWoWVrr(window.address) end)
+hl.on("window.move_to_workspace", function() updateWoWVrr(nil) end)
+updateWoWVrr(nil)
+
 -- The classic M.M.O.7 is physically verified at its 6400-DPI top stage.
 -- This linear custom curve maps every motion delta to exactly one eighth.
 hl.device({
@@ -135,11 +165,28 @@ hl.device({
     sensitivity = 0,
 })
 
+-- M.M.O. 7+: hardware readback confirms 26000 DPI on both axes.
+-- Match the classic mouse's 800-DPI feel: 26000 * (800 / 26000) = 800.
+-- A linear custom curve avoids speed-dependent acceleration and slider limits.
+-- Hyprland suffixes duplicate names in enumeration order, so after a replug the
+-- pointer can be either name below; both carry the same curve.
+hl.device({
+    name = "mad-catz-mad-catz-m.m.o.-7+",
+    accel_profile = "custom 1 0 0.03076923076923077",
+    sensitivity = 0,
+})
+hl.device({
+    name = "mad-catz-mad-catz-m.m.o.-7+-1",
+    accel_profile = "custom 1 0 0.03076923076923077",
+    sensitivity = 0,
+})
+
 hl.on("hyprland.start", function()
     hl.exec_cmd("systemctl --user start --no-block obsidience-shell-session.target")
 end)
 
-hl.bind("SUPER + RETURN", hl.dsp.exec_cmd("uwsm app -- kitty"))
+hl.bind("SUPER + RETURN", hl.dsp.window.fullscreen({ mode = "fullscreen", action = "toggle" }))
+hl.bind("SUPER + SHIFT + RETURN", hl.dsp.exec_cmd("uwsm app -- kitty"))
 hl.bind("SUPER + Q", hl.dsp.exec_cmd("/usr/bin/python /home/wissenschafter/Projects/obsidience/obsidience/shell/input/move_pane.py focused close"))
 hl.bind("ALT + TAB", hl.dsp.window.cycle_next())
 hl.bind("ALT + SHIFT + TAB", hl.dsp.window.cycle_next({ next = false }))

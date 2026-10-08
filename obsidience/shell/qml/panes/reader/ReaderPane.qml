@@ -4,6 +4,7 @@ import QtQuick
 import QtQuick.Controls
 import QtWebSockets
 import "../../components/knowledge"
+import "../../api"
 
 Item {
     id: root
@@ -11,17 +12,14 @@ Item {
     ArticleCheckouts {
         id: checkouts
         nodes: root.articleGraph.nodes
-        active: root.visible && !root.sourceMode && root.articleRef !== ""
+        active: root.visible && !root.sourceMode && root.articleRef !== "" && root.articleManagedBy !== "hindsight"
         onChanged: root.loadArticleTitles(root.requestGeneration)
     }
 
     property string articleRef: ""
     property string graphId: ""
     property string sourceKey: ""
-    property string feedItemId: ""
-    property var previewItem: ({})
     property bool followShellSelection: true
-    property var feedProvenance: ({})
     property string selectionKind: "article"
     property string articleTitle: ""
     property string articleKind: ""
@@ -42,18 +40,19 @@ Item {
     property string noticeMessage: ""
     property bool loading: false
     property int requestGeneration: 0
+    property bool receivedShellSelection: false
+    property bool pendingReadIntent: false
     property int citationRequestGeneration: 0
     property bool editing: false
     property bool saving: false
     property bool autoCurateSupported: false
     property bool autoCurateEnabled: false
     property bool curationBusy: false
+    property bool memoryBusy: false
     property string draftTitle: ""
     property string draftBody: ""
 
-    readonly property bool previewMode: selectionKind === "feed_preview"
-    readonly property bool sourceMode: selectionKind === "source" || previewMode
-    readonly property bool feedItemMode: selectionKind === "source" && feedItemId.length > 0
+    readonly property bool sourceMode: selectionKind === "source"
     readonly property bool indexArticle: !sourceMode && articleChildren.length > 0
     readonly property var articleLinks: articleConnections(false)
     readonly property var articleBacklinks: articleConnections(true)
@@ -62,9 +61,7 @@ Item {
             || articleTitle.toLowerCase().endsWith(".py"))
     readonly property bool codeSource: sourceMode && sourceReadable
         && (sourceStorage === "code" || pythonSource)
-    readonly property string sourceClass: previewMode ? "Publisher preview · not collected"
-        : feedItemMode ? "Captured provider content"
-        : sourceStorage === "knowledge"
+    readonly property string sourceClass: sourceStorage === "knowledge"
         ? "Knowledge Article file"
         : sourceStorage === "code"
             ? articleChildren.length ? "Article-linked application code" : "Application code"
@@ -79,43 +76,29 @@ Item {
         const selection = event ? event.selection : null
         if (!event || event.schema !== "obsidience.shell.event.v1"
                 || event.type !== "pane.state" || !event.pane
-                || event.pane.pane_id !== "reader" || !selection) return
+                || event.pane.pane_id !== "reader") return
+        const intentional = receivedShellSelection
+        receivedShellSelection = true
+        if (!selection) return
         if (selection.kind === "article" && typeof selection.ref === "string"
                 && selection.ref.trim()) {
             const selectedGraph = typeof selection.graph_id === "string" ? selection.graph_id : ""
             if (selectionKind === "article" && articleRef === selection.ref.trim()
                     && graphId === selectedGraph) return
             requestGeneration += 1
+            pendingReadIntent = intentional
             graphId = selectedGraph
             selectionKind = "article"
-            feedItemId = ""
-            previewItem = ({})
             sourceKey = ""
             articleRef = selection.ref.trim()
         } else if (selection.kind === "source" && typeof selection.key === "string"
                 && selection.key.trim()) {
-            const selectedFeedItem = typeof selection.feed_item_id === "string" ? selection.feed_item_id : ""
-            if (selectionKind === "source" && sourceKey === selection.key.trim()
-                    && feedItemId === selectedFeedItem) return
+            if (selectionKind === "source" && sourceKey === selection.key.trim()) return
             requestGeneration += 1
             graphId = ""
             selectionKind = "source"
             articleRef = ""
-            feedItemId = selectedFeedItem
-            previewItem = ({})
             sourceKey = selection.key.trim()
-        } else if (selection.kind === "feed_preview" && selection.item
-                && typeof selection.item.title === "string"
-                && typeof selection.item.summary === "string") {
-            const fields = ["title", "summary", "reporting_url", "published", "feed_title", "feed_url"]
-            if (previewMode && fields.every(field => previewItem[field] === selection.item[field])) return
-            requestGeneration += 1
-            graphId = ""
-            selectionKind = "feed_preview"
-            articleRef = ""
-            sourceKey = ""
-            feedItemId = ""
-            previewItem = selection.item
         } else return
         Qt.callLater(root.loadDocument)
     }
@@ -129,6 +112,49 @@ Item {
             "pane_id": "reader",
             "selection": {"kind": "article", "ref": ref.trim(), "graph_id": graphId}
         }))
+    }
+
+    function presentAgentMemory() {
+        if (sourceMode || articleKind !== "agent" || memoryBusy || loading
+                || shellSocket.status !== WebSocket.Open) return
+        const agentRef = documentPath || articleRef
+        const generation = requestGeneration
+        memoryBusy = true
+        errorMessage = ""
+        const request = new XMLHttpRequest()
+        request.open("GET", "http://127.0.0.1:8765/api/graphs/memory/banks")
+        request.onreadystatechange = function() {
+            if (request.readyState !== XMLHttpRequest.DONE || generation !== root.requestGeneration) return
+            root.memoryBusy = false
+            if (request.status < 200 || request.status >= 300) {
+                root.errorMessage = "Agent memory banks are unavailable."
+                return
+            }
+            try {
+                const data = JSON.parse(request.responseText)
+                const bank = (Array.isArray(data.banks) ? data.banks : [])
+                    .find(item => item.agent_ref === agentRef)
+                if (!bank || typeof bank.id !== "string" || !/^obsidience-[a-f0-9]{32}$/.test(bank.id)) {
+                    root.errorMessage = "This Agent's memory bank is unavailable."
+                    return
+                }
+                if (shellSocket.status !== WebSocket.Open) {
+                    root.errorMessage = "The graph viewer connection is unavailable."
+                    return
+                }
+                shellSocket.sendTextMessage(JSON.stringify({
+                    "schema": "obsidience.shell.command.v1", "type": "graph.viewer.configure",
+                    "view": "memory", "settings": {"bank": bank.id}
+                }))
+                shellSocket.sendTextMessage(JSON.stringify({
+                    "schema": "obsidience.shell.command.v1", "type": "pane.present",
+                    "pane_id": "knowledge-graph", "selection": {"kind": "graph", "view": "memory"}
+                }))
+            } catch (error) {
+                root.errorMessage = "The Agent memory bank response was invalid."
+            }
+        }
+        request.send()
     }
 
     function readableBytes(bytes) {
@@ -151,13 +177,13 @@ Item {
         autoCurateSupported = false
         autoCurateEnabled = false
         curationBusy = false
+        memoryBusy = false
         documentPath = ""
         sourceStorage = ""
         sourceMediaType = ""
         sourceSize = 0
         sourceReadable = true
         sourceTruncated = false
-        feedProvenance = ({})
         errorMessage = ""
         noticeMessage = ""
         editing = false
@@ -227,29 +253,21 @@ Item {
     }
 
     function loadDocument() {
-        const ref = feedItemMode ? feedItemId : sourceMode ? sourceKey.trim() : articleRef.trim()
+        const ref = sourceMode ? sourceKey.trim() : articleRef.trim()
+        const animateRead = pendingReadIntent && !sourceMode
+        pendingReadIntent = false
         requestGeneration += 1
         const generation = requestGeneration
         resetDocument()
-        if (previewMode) {
-            loading = false
-            articleTitle = previewItem.title || "Untitled item"
-            articleBody = previewItem.summary || "The publisher did not include a text summary in this feed."
-            articleKind = "feed_preview"
-            sourceMediaType = "text/plain"
-            feedProvenance = previewItem
-            return
-        }
         if (!ref) { loading = false; return }
-        const expectedSourceKey = sourceKey
         loading = true
-        if (!feedItemMode) loadArticleTitles(generation)
+        loadArticleTitles(generation)
         const request = new XMLHttpRequest()
         request.open("GET", "http://127.0.0.1:8765/"
-            + (feedItemMode ? "api/feeds/items/" : sourceMode ? "api/source-files/" : "api/articles/")
-            + (feedItemMode ? encodeURIComponent(ref) : encodeURI(ref))
-            + (!root.sourceMode && root.graphId && root.graphId !== "library"
-                ? "?graph_id=" + encodeURIComponent(root.graphId) : ""))
+            + (sourceMode ? "api/source-files/" : "api/articles/")
+            + encodeURI(ref)
+            + (!root.sourceMode ? "?graph_id=" + encodeURIComponent(root.graphId)
+                + (animateRead ? "&activity=true" : "") : animateRead ? "?activity=true" : ""))
         request.onreadystatechange = function() {
             if (request.readyState !== XMLHttpRequest.DONE
                     || generation !== root.requestGeneration) return
@@ -260,17 +278,7 @@ Item {
             }
             try {
                 const document = JSON.parse(request.responseText)
-                if (root.feedItemMode) {
-                    if (document.source_id !== ref || typeof document.content_text !== "string"
-                            || document.source_path !== expectedSourceKey) throw new Error("Invalid feed item")
-                    root.articleTitle = typeof document.title === "string" ? document.title : ref
-                    root.articleKind = "source"
-                    root.articleBody = document.content_text
-                    root.documentPath = document.source_path
-                    root.sourceStorage = "raw"
-                    root.sourceMediaType = "text/plain"
-                    root.feedProvenance = document
-                } else if (root.sourceMode) {
+                if (root.sourceMode) {
                     root.articleTitle = typeof document.name === "string" ? document.name : ref
                     root.articleKind = typeof document.storage === "string"
                         ? document.storage : "source"
@@ -500,12 +508,11 @@ Item {
 
     onArticleRefChanged: { if (selectionKind === "article") Qt.callLater(root.loadDocument) }
     onSourceKeyChanged: { if (selectionKind === "source") Qt.callLater(root.loadDocument) }
-    onFeedItemIdChanged: { if (sourceMode) Qt.callLater(root.loadDocument) }
     Component.onCompleted: loadDocument()
 
     WebSocket {
         id: shellSocket
-        url: "ws://127.0.0.1:8768"
+        url: "ws://127.0.0.1:8768" + ShellCommandToken.query
         requestedSubprotocols: ["obsidience.shell.v1"]
         active: root.followShellSelection
         onTextMessageReceived: message => root.applyShellEvent(message)
@@ -546,7 +553,7 @@ Item {
                 width: parent.width
                 visible: !root.articleTitle && !root.loading && !root.errorMessage
                 text: !root.followShellSelection && root.sourceMode ? "Select a captured item to read it here."
-                    : "Select an article in Knowledge, a file in Source, or an item in Feeds to read it here."
+                    : "Select an article in Knowledge or a file in Source to read it here."
                 color: "#59cffafe"
                 wrapMode: Text.Wrap
                 font.family: "JetBrains Mono"
@@ -580,11 +587,13 @@ Item {
                     spacing: 5
 
                     Text {
-                        visible: root.sourceMode || root.articleReadOnly || root.indexArticle
+                        visible: root.sourceMode || root.articleReadOnly || root.indexArticle || root.articleKind === "agent"
                         width: parent.width
                         text: root.sourceMode ? root.sourceClass
                             : root.articleManagedBy === "system" ? "Generated from System evidence · read only"
-                            : root.articleReadOnly ? "Read only" : "Knowledge index"
+                            : root.articleManagedBy === "hindsight" ? "Hindsight memory · read only"
+                            : root.articleReadOnly ? "Read only" : root.articleKind === "agent"
+                                ? "Agent · " + (root.articleMeta.role || "Agent") : "Knowledge index"
                         color: root.sourceMode ? "#80c4b5fd" : "#7367e8f9"
                         font.family: "JetBrains Mono"
                         font.pixelSize: 8
@@ -621,7 +630,7 @@ Item {
                         lineHeight: root.indexArticle ? 1.1 : 1.25
                     }
                     AgentCheckoutButtons {
-                        visible: !root.sourceMode && !root.editing && root.articleRef !== ""
+                        visible: !root.sourceMode && !root.editing && root.articleRef !== "" && root.articleManagedBy !== "hindsight"
                         controller: checkouts
                         node: ({ref: root.documentPath || root.articleRef, kind: root.articleKind})
                         agents: (root.articleGraph.navigation || {}).groups || []
@@ -640,11 +649,7 @@ Item {
                     Text {
                         visible: root.sourceMode
                         width: parent.width
-                        text: root.previewMode ? [root.feedProvenance.feed_title, root.feedProvenance.published,
-                            root.feedProvenance.reporting_url].filter(value => !!value).join(" · ")
-                            : root.feedItemMode ? [root.feedProvenance.feed_name, root.feedProvenance.published,
-                            root.feedProvenance.reporting_url].filter(value => !!value).join(" · ")
-                            + "\n" + root.documentPath : root.documentPath
+                        text: root.documentPath
                         textFormat: Text.PlainText
                         color: "#59ede9fe"
                         wrapMode: Text.WrapAnywhere
@@ -659,10 +664,39 @@ Item {
                     anchors.top: parent.top
                     spacing: 6
 
+                    Button {
+                        id: memoryButton
+                        visible: !root.sourceMode && root.articleKind === "agent"
+                        enabled: !root.loading && !root.memoryBusy && !root.editing
+                            && shellSocket.status === WebSocket.Open
+                        height: 23
+                        text: root.memoryBusy ? "OPENING…" : "MEMORY"
+                        Accessible.name: "Open " + root.articleTitle + " memory"
+                        onClicked: root.presentAgentMemory()
+                        contentItem: Text {
+                            text: memoryButton.text
+                            color: memoryButton.enabled ? "#b3a5f3fc" : "#5967e8f9"
+                            font.family: "JetBrains Mono"
+                            font.pixelSize: 8
+                            font.letterSpacing: 0.72
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        background: Rectangle {
+                            radius: 4
+                            color: memoryButton.hovered ? "#1267e8f9" : "transparent"
+                            border.width: 1
+                            border.color: memoryButton.hovered ? "#8067e8f9" : "#4067e8f9"
+                        }
+                        ToolTip.visible: hovered
+                        ToolTip.text: "Open this Agent's historical Hindsight memory."
+                    }
+
                     CheckBox {
                         id: autoCurateControl
-                        visible: !root.sourceMode && !root.articleReadOnly && root.autoCurateSupported && !root.editing
-                        enabled: !root.loading && !root.curationBusy
+                        visible: !root.sourceMode && !root.editing && (root.autoCurateSupported
+                            || (root.articleManagedBy === "hindsight" && root.autoCurateEnabled))
+                        enabled: root.autoCurateSupported && !root.loading && !root.curationBusy
                         height: 23
                         checked: root.autoCurateEnabled
                         nextCheckState: function() { return checkState }
@@ -684,7 +718,8 @@ Item {
                         }
                         contentItem: Text {
                             leftPadding: 19
-                            text: root.curationBusy ? "SAVING…" : "AUTO-CURATE"
+                            text: root.curationBusy ? "SAVING…" : root.articleManagedBy === "hindsight"
+                                ? "AUTO-CURATE · HINDSIGHT" : "AUTO-CURATE"
                             color: "#b3a5f3fc"; font.family: "JetBrains Mono"
                             font.pixelSize: 8; font.letterSpacing: 0.72
                             verticalAlignment: Text.AlignVCenter
@@ -694,7 +729,7 @@ Item {
                     }
 
                     Repeater {
-                        model: root.sourceMode && !root.feedItemMode && !root.previewMode ? [
+                        model: root.sourceMode ? [
                             root.sourceMediaType || "file",
                             root.readableBytes(root.sourceSize)
                         ] : []
@@ -856,7 +891,7 @@ Item {
             }
 
             Rectangle {
-                visible: !root.editing && (!root.sourceMode || root.feedItemMode || root.previewMode) && root.articleTitle !== ""
+                visible: !root.editing && !root.sourceMode && root.articleTitle !== ""
                 width: parent.width
                 height: articleText.implicitHeight + (root.indexArticle ? 30 : 0)
                 radius: root.indexArticle ? 7 : 0
@@ -879,8 +914,8 @@ Item {
                     anchors.right: parent.right
                     anchors.top: parent.top
                     anchors.margins: root.indexArticle ? 15 : 0
-                    textFormat: root.feedItemMode || root.previewMode ? Text.PlainText : Text.MarkdownText
-                    text: root.feedItemMode || root.previewMode ? root.articleBody : root.wikiMarkdown(root.articleBody)
+                    textFormat: Text.MarkdownText
+                    text: root.wikiMarkdown(root.articleBody)
                     color: "#d1ecfeff"
                     linkColor: "#a5f3fc"
                     wrapMode: Text.Wrap
@@ -893,7 +928,7 @@ Item {
             }
 
             Rectangle {
-                visible: root.sourceMode && !root.feedItemMode && !root.previewMode && root.articleTitle !== ""
+                visible: root.sourceMode && root.articleTitle !== ""
                 width: parent.width
                 height: !root.sourceReadable ? 84
                     : Math.max(90, Math.min(900, sourceText.implicitHeight + 28))

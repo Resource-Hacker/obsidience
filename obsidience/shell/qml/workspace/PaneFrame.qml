@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import QtQuick.Window
 import Quickshell.Widgets
 import "../api"
 
@@ -9,6 +10,7 @@ Item {
 
     required property string title
     required property ShellTheme theme
+    readonly property bool keyboardActive: root.Window.active
     property bool defaultWidthReached: false
     property bool defaultHeightReached: false
     property string verticalDefaultGuideEdge: ""
@@ -84,14 +86,14 @@ Item {
             anchors.right: parent.right
             anchors.top: parent.top
             height: root.theme.titleHeight
-            color: "transparent"
+            color: root.keyboardActive ? root.theme.selection : "transparent"
 
             Rectangle {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
                 height: 1
-                color: root.theme.separator
+                color: root.keyboardActive ? root.theme.strongAccent : root.theme.separator
             }
 
             Text {
@@ -99,7 +101,7 @@ Item {
                 anchors.leftMargin: 13
                 anchors.verticalCenter: parent.verticalCenter
                 text: root.title
-                color: root.theme.text
+                color: root.keyboardActive ? root.theme.text : root.theme.inactiveText
                 font.family: root.theme.titleFont
                 font.pixelSize: root.theme.titleFontSize
                 font.capitalization: Font.AllUppercase

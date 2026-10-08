@@ -1,5 +1,5 @@
 [Unit]
-Description=Obsidience Three.js knowledge desktop
+Description=Obsidience shared graph stage
 Requires=obsidience-shell-host.service
 # The resident graph reconnects when its data provider restarts.
 Wants=obsidience-harness-dev.service
@@ -11,12 +11,15 @@ StartLimitBurst=3
 [Service]
 Type=simple
 WorkingDirectory=/home/wissenschafter/Projects/obsidience
-Environment=GDK_BACKEND=wayland
-Environment=WEBKIT_DMABUF_RENDERER_FORCE_SHM=1
+Environment=QT_QPA_PLATFORM=wayland
+Environment=QS_NO_RELOAD_POPUP=1
+# Qt's Vulkan canvas path cannot allocate Chromium's optional readback buffer.
+# Use its supported texture readback; retain WebGL and native video encoding.
+Environment=QTWEBENGINE_CHROMIUM_FLAGS=--disable-features=GpuMemoryBufferReadbackFromTexture
 Environment=OBSIDIENCE_KNOWLEDGE_ORIGIN=http://127.0.0.1:8765/shell/knowledge/
 Environment=OBSIDIENCE_SURFACE_LAYOUT=%h/.config/obsidience-shell/surface-layout.json
 ExecStartPre=/usr/bin/curl --fail --silent --show-error --output /dev/null --retry 30 --retry-delay 1 --retry-connrefused http://127.0.0.1:8765/shell/knowledge/
-ExecStart=/usr/bin/python3 /home/wissenschafter/Projects/obsidience/obsidience/shell/surfaces/knowledge/host.py
+ExecStart=/home/wissenschafter/.local/opt/obsidience-quickshell/quickshell-0.3.1-webengine-lock-5f4d2585/quickshell --no-duplicate --path /home/wissenschafter/Projects/obsidience/obsidience/shell/qml/graph-stage.qml
 Restart=on-failure
 RestartSec=2
 TimeoutStopSec=5

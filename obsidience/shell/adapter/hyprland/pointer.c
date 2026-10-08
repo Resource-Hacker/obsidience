@@ -42,6 +42,7 @@
 #define MAX_EXTENT 65536
 
 struct state;
+static volatile sig_atomic_t interrupted = 0;
 struct output {
     struct state *owner;
     struct wl_output *proxy;
@@ -70,7 +71,7 @@ static int64_t now_ms(void) {
 
 static void deadline_signal(int signal_number) {
     (void)signal_number;
-    _exit(124); /* Final backstop, including connect and blocked stdout. */
+    interrupted = 1; /* Leave the protocol loop through held-button cleanup. */
 }
 
 static void output_changed(struct output *output) {
@@ -154,6 +155,7 @@ static const struct wl_registry_listener registry_listener = {
 /* One libwayland owner: prepare/read/cancel remains paired on every exit.
  * Poll also services compositor removal/error events while awaiting commit. */
 static int pump(struct state *state, int64_t deadline, bool watch_stdin) {
+    if (interrupted) return -1;
     if (wl_display_dispatch_pending(state->display) < 0 || state->invalid) return -1;
     while (wl_display_prepare_read(state->display) < 0) {
         if (wl_display_dispatch_pending(state->display) < 0 || state->invalid) return -1;
@@ -171,7 +173,7 @@ static int pump(struct state *state, int64_t deadline, bool watch_stdin) {
     int ready = remaining > 0 ? poll(fds, 2, (int)remaining) : 0;
     if (ready <= 0) {
         wl_display_cancel_read(state->display);
-        return ready < 0 && errno == EINTR ? 0 : -1;
+        return ready < 0 && errno == EINTR && !interrupted ? 0 : -1;
     }
     if (fds[0].revents & POLLIN) {
         if (wl_display_read_events(state->display) < 0) return -1;
@@ -228,13 +230,18 @@ static bool receipt(const char *status) {
 int main(int argc, char **argv) {
     signal(SIGPIPE, SIG_IGN);
     signal(SIGALRM, deadline_signal);
+    signal(SIGTERM, deadline_signal);
+    signal(SIGINT, deadline_signal);
     alarm(5);
     struct state state = {.deadline = now_ms() + 5000};
-    uint32_t x, y, width, height;
-    if (argc != 6 || !argv[1][0] || strlen(argv[1]) > 255 ||
+    uint32_t x, y, width, height, end_x = 0, end_y = 0;
+    bool drag = argc == 9, held = false;
+    if ((argc != 6 && !drag) || !argv[1][0] || strlen(argv[1]) > 255 ||
             !number(argv[2], &x) || !number(argv[3], &y) ||
             !number(argv[4], &width) || !number(argv[5], &height) ||
-            !width || !height || x >= width || y >= height) {
+            !width || !height || x >= width || y >= height ||
+            (drag && (strcmp(argv[6], "drag") || !number(argv[7], &end_x) ||
+                !number(argv[8], &end_y) || end_x >= width || end_y >= height))) {
         fputs("invalid output or output-local logical coordinates\n", stderr);
         return 2;
     }
@@ -262,11 +269,32 @@ int main(int argc, char **argv) {
     /* One commit, one down/up pair, both complete frames on the same device.
      * Never retry after entering this block, including a missing callback. */
     zwlr_virtual_pointer_v1_button(state.pointer, (uint32_t)now_ms(), BTN_LEFT, WL_POINTER_BUTTON_STATE_PRESSED);
+    held = true;
     zwlr_virtual_pointer_v1_frame(state.pointer);
+    if (drag) {
+        if (!roundtrip(&state) || !receipt("pressed")) goto finished;
+        for (int step = 1; step <= 10; ++step) {
+            if (!await_commit(&state)) goto finished;
+            uint32_t next_x = (uint32_t)((int64_t)x + ((int64_t)end_x - x) * step / 10);
+            uint32_t next_y = (uint32_t)((int64_t)y + ((int64_t)end_y - y) * step / 10);
+            zwlr_virtual_pointer_v1_motion_absolute(state.pointer, (uint32_t)now_ms(),
+                next_x, next_y, width, height);
+            zwlr_virtual_pointer_v1_frame(state.pointer);
+            if (!roundtrip(&state) || !receipt("moved")) goto finished;
+        }
+        if (!await_commit(&state)) goto finished;
+    }
     zwlr_virtual_pointer_v1_button(state.pointer, (uint32_t)now_ms(), BTN_LEFT, WL_POINTER_BUTTON_STATE_RELEASED);
+    held = false;
     zwlr_virtual_pointer_v1_frame(state.pointer);
     if (roundtrip(&state) && receipt("acknowledged")) result = 0;
 finished:
+    if (held && state.pointer && state.display && !wl_display_get_error(state.display)) {
+        zwlr_virtual_pointer_v1_button(state.pointer, (uint32_t)now_ms(), BTN_LEFT,
+            WL_POINTER_BUTTON_STATE_RELEASED);
+        zwlr_virtual_pointer_v1_frame(state.pointer);
+        wl_display_flush(state.display);
+    }
     if (state.pointer) zwlr_virtual_pointer_v1_destroy(state.pointer);
     if (state.manager) zwlr_virtual_pointer_manager_v1_destroy(state.manager);
     for (size_t i = 0; i < state.count; ++i) wl_output_destroy(state.outputs[i].proxy);

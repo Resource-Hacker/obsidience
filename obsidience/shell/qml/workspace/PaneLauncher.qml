@@ -22,19 +22,6 @@ PanelWindow {
     signal presentRequested(var placement, string surfaceId, real x, real y)
     signal launcherRequested()
 
-    property bool realtimeEnabled: false
-    property bool realtimeReady: false
-    property bool realtimeProactive: false
-    property string realtimePhase: "off"
-    property string realtimeAction: ""
-    property string realtimeError: ""
-    property bool captureActive: false
-    property bool userSpeaking: false
-    property string liveTranscriptText: ""
-    property bool liveTranscriptFinal: false
-    readonly property bool realtimeBusy: realtimeAction !== "" || !shellApi.realtime.connected
-    readonly property bool inputCapturing: realtimeEnabled && (captureActive || userSpeaking)
-    readonly property bool recognitionVisible: inputCapturing || recognitionLinger.running
     property var runningApplications: []
     property string activeWindowId: ""
     property int windowRevision: 0
@@ -70,7 +57,7 @@ PanelWindow {
     }
 
     function scheduleShelfHide() {
-        if (!launcherOpen && !shelfHover.hovered && !recognitionVisible) {
+        if (!launcherOpen && !shelfHover.hovered) {
             shelfHideTimer.restart()
         }
     }
@@ -82,19 +69,6 @@ PanelWindow {
         } else {
             scheduleShelfHide()
         }
-    }
-
-    onRecognitionVisibleChanged: {
-        if (recognitionVisible) {
-            shelfHideTimer.stop()
-            shelfOpen = true
-        } else {
-            scheduleShelfHide()
-        }
-    }
-
-    onRealtimeEnabledChanged: {
-        if (!realtimeEnabled) recognitionLinger.stop()
     }
 
     ApplicationLauncher {
@@ -216,98 +190,14 @@ PanelWindow {
         return null
     }
 
-    function applyRealtime(payload) {
-        if (!payload) {
-            return
-        }
-        realtimeEnabled = payload.enabled === true
-        realtimeReady = payload.ready === true
-        realtimeProactive = payload.proactive === true
-        realtimePhase = typeof payload.phase === "string"
-            ? payload.phase : (realtimeEnabled ? "running" : "off")
-        realtimeError = typeof payload.last_error === "string"
-            ? payload.last_error : ""
-        captureActive = payload.capture_active === true
-        userSpeaking = payload.user_speaking === true
-        const transcript = payload.live_transcript
-        liveTranscriptText = transcript
-                && typeof transcript.text === "string"
-            ? transcript.text : ""
-        liveTranscriptFinal = !!transcript && transcript.final === true
-        if (realtimePhase === "disconnected") recognitionLinger.stop()
-    }
-
-    function realtimeRequest(method, path, action, body) {
-        const xhr = new XMLHttpRequest()
-        xhr.open(method, "http://127.0.0.1:8765" + path)
-        if (body !== undefined && body !== null) {
-            xhr.setRequestHeader("content-type", "application/json")
-        }
-        xhr.onreadystatechange = function() {
-            if (xhr.readyState !== XMLHttpRequest.DONE) {
-                return
-            }
-            if (action && root.realtimeAction === action) {
-                root.realtimeAction = ""
-            }
-            if (xhr.status < 200 || xhr.status >= 300) {
-                root.realtimeError = xhr.responseText
-                    || "Realtime request failed (" + xhr.status + ")"
-                return
-            }
-            try {
-                // The shared stream owns live state; HTTP only acknowledges
-                // this explicit control request and cannot overwrite newer events.
-                JSON.parse(xhr.responseText)
-            } catch (error) {
-                root.realtimeError = "Realtime returned invalid state."
-            }
-        }
-        xhr.send(body === undefined || body === null ? null : JSON.stringify(body))
-    }
-
-    function toggleRealtime() {
-        if (realtimeBusy || realtimePhase === "starting"
-                || realtimePhase === "stopping") {
-            return
-        }
-        realtimeAction = "power"
-        realtimeError = ""
-        realtimeRequest(
-            "POST",
-            realtimeEnabled ? "/api/realtime/stop" : "/api/realtime/start",
-            "power",
-            null
-        )
-    }
-
     function toggleCamera() {
         togglePane(cameraEntry())
-    }
-
-    function toggleProactive() {
-        if (!realtimeReady || realtimeBusy) {
-            return
-        }
-        realtimeAction = "mode"
-        realtimeError = ""
-        realtimeRequest("PATCH", "/api/realtime/mode", "mode", {
-            "proactive": !realtimeProactive
-        })
-    }
-
-    Component.onCompleted: applyRealtime(shellApi.realtime.state)
-
-    Connections {
-        target: root.shellApi.realtime
-        function onStateChanged() { root.applyRealtime(root.shellApi.realtime.state) }
-        function onTranscriptUpdated() { recognitionLinger.restart() }
     }
 
     WebSocket {
         id: shellSocket
 
-        url: "ws://127.0.0.1:8768"
+        url: "ws://127.0.0.1:8768" + ShellCommandToken.query
         requestedSubprotocols: ["obsidience.shell.v1"]
         active: true
 
@@ -377,17 +267,13 @@ PanelWindow {
         interval: 250
         repeat: false
         onTriggered: {
-            if (!root.launcherOpen && !shelfHover.hovered && !root.recognitionVisible) {
+            if (!root.launcherOpen && !shelfHover.hovered) {
                 root.shelfOpen = false
             }
         }
     }
 
-    Timer {
-        id: recognitionLinger
-        interval: 2000
-        repeat: false
-    }
+
 
     SystemClock {
         id: shellClock
@@ -475,282 +361,28 @@ PanelWindow {
             Accessible.name: ToolTip.text
         }
 
-        Rectangle {
-            id: realtimeContainer
-
-            Layout.preferredWidth: 352
-            Layout.preferredHeight: height
+        GlowButton {
+            id: cameraButton
+            readonly property var entry: root.cameraEntry()
+            Layout.preferredWidth: 32
+            Layout.preferredHeight: 28
             Layout.alignment: Qt.AlignTop
-            width: 352
-            height: realtimeColumn.implicitHeight + 8
-            radius: 4
-            color: "#cc020b14"
-            border.width: 1
-            border.color: "#2667e8f9"
-
-            Column {
-                id: realtimeColumn
-
-                x: 4
-                y: 4
-                width: parent.width - 8
-                spacing: 4
-
-                Row {
-                    id: realtimeControls
-
-                    width: parent.width
-                    height: 28
-                    spacing: 4
-
-                    GlowButton {
-                        id: realtimeButton
-
-                        width: 32
-                        height: 28
-                        text: ""
-                        padding: 1
-                        contentHorizontalPadding: 0
-                        selected: root.realtimeEnabled
-                        emphasized: !root.realtimeEnabled
-                            && root.realtimePhase === "error"
-                        enabled: !root.realtimeBusy
-                            && root.realtimePhase !== "starting"
-                            && root.realtimePhase !== "stopping"
-                        accent: emphasized ? "#f87171" : "#67e8f9"
-                        foreground: emphasized ? "#fecaca" : "#cffafe"
-                        idleBorderOpacity: emphasized ? 0.45 : 0.15
-                        selectedBorderOpacity: 0.55
-                        selectedFillOpacity: 0.15
-                        idleTextOpacity: emphasized ? 1.0 : 0.55
-                        disabledOpacity: 0.60
-                        onClicked: root.toggleRealtime()
-
-                        contentItem: ControlIcon {
-                            glyph: root.realtimeAction === "power"
-                                    || root.realtimePhase === "starting"
-                                    || root.realtimePhase === "stopping"
-                                ? "loader"
-                                : (root.realtimeEnabled ? "mic" : "mic-off")
-                            iconColor: realtimeButton.selected
-                                    || realtimeButton.hovered
-                                    || realtimeButton.emphasized
-                                ? realtimeButton.foreground : realtimeButton.accent
-                            strokeOpacity: realtimeButton.selected
-                                    || realtimeButton.hovered
-                                    || realtimeButton.emphasized ? 1.0 : 0.55
-                            width: 25
-                            height: 25
-                        }
-
-                        ToolTip.visible: false
-                        ToolTip.delay: 400
-                        ToolTip.text: root.realtimeReady ? "Realtime mode active"
-                            : root.realtimeEnabled
-                                ? "Realtime " + root.realtimePhase
-                                : "Enable realtime mode"
-                    }
-
-                    GlowButton {
-                        id: cameraButton
-
-                        readonly property var entry: root.cameraEntry()
-                        width: 32
-                        height: 28
-                        text: ""
-                        padding: 1
-                        contentHorizontalPadding: 0
-                        selected: root.paneIsLocal(entry)
-                        emphasized: !selected && root.realtimeEnabled
-                        accent: !selected && root.realtimeEnabled
-                            ? "#fcd34d" : "#67e8f9"
-                        foreground: !selected && root.realtimeEnabled
-                            ? "#fef3c7" : "#cffafe"
-                        idleBorderOpacity: !selected && root.realtimeEnabled
-                            ? 0.40 : 0.15
-                        idleTextOpacity: !selected && root.realtimeEnabled
-                            ? 0.80 : 0.55
-                        selectedBorderOpacity: 0.55
-                        selectedFillOpacity: 0.15
-                        enabled: entry !== null
-                        disabledOpacity: 0.60
-                        onClicked: root.toggleCamera()
-
-                        contentItem: ControlIcon {
-                            glyph: cameraButton.selected ? "eye" : "eye-off"
-                            iconColor: cameraButton.selected
-                                    || cameraButton.hovered
-                                    || root.realtimeEnabled
-                                ? cameraButton.foreground : cameraButton.accent
-                            strokeOpacity: cameraButton.selected
-                                    || cameraButton.hovered
-                                    || root.realtimeEnabled ? 1.0 : 0.55
-                            width: 25
-                            height: 25
-                        }
-
-                        ToolTip.visible: false
-                        ToolTip.delay: 400
-                        ToolTip.text: selected ? "Close camera video"
-                            : root.realtimeEnabled
-                                ? "Camera active for Realtime; open video view"
-                                : "Open camera video"
-                    }
-
-                    GlowButton {
-                        id: proactiveButton
-
-                        width: 32
-                        height: 28
-                        text: ""
-                        padding: 1
-                        contentHorizontalPadding: 0
-                        selected: root.realtimeProactive
-                        enabled: root.realtimeReady && !root.realtimeBusy
-                        accent: selected ? "#fcd34d" : "#67e8f9"
-                        foreground: selected ? "#fef3c7" : "#cffafe"
-                        selectedBorderOpacity: 0.60
-                        selectedFillOpacity: 0.15
-                        idleTextOpacity: 0.55
-                        disabledOpacity: 0.25
-                        onClicked: root.toggleProactive()
-
-                        contentItem: ControlIcon {
-                            glyph: root.realtimeAction === "mode" ? "loader"
-                                : (root.realtimeProactive ? "pause" : "play")
-                            iconColor: proactiveButton.selected
-                                    || proactiveButton.hovered
-                                ? proactiveButton.foreground
-                                : proactiveButton.accent
-                            strokeOpacity: proactiveButton.selected
-                                    || proactiveButton.hovered ? 1.0 : 0.55
-                            width: 24
-                            height: 24
-                        }
-
-                        ToolTip.visible: false
-                        ToolTip.delay: 400
-                        ToolTip.text: root.realtimeReady
-                            ? root.realtimeProactive
-                                ? "Return to command-only mode"
-                                : "Enable proactive observation"
-                            : "Realtime mode must finish loading first"
-                    }
-
-                    Text {
-                        anchors.verticalCenter: parent.verticalCenter
-                        leftPadding: 4
-                        rightPadding: 4
-                        text: root.realtimeProactive ? "PROACTIVE"
-                            : root.realtimeReady ? "REALTIME"
-                            : root.realtimePhase.toUpperCase()
-                        color: root.realtimeProactive ? "#ccfde68a"
-                            : root.realtimeReady ? "#b3a5f3fc" : "#5967e8f9"
-                        font.family: "JetBrains Mono"
-                        font.pixelSize: 9
-                        font.capitalization: Font.AllUppercase
-                        font.letterSpacing: 1.62
-                    }
-                }
-
-                Item {
-                    id: realtimeLive
-
-                    visible: root.realtimeEnabled
-                    width: parent.width
-                    height: visible ? liveColumn.implicitHeight + 2 : 0
-
-                    Column {
-                        id: liveColumn
-
-                        x: 2
-                        width: parent.width - 4
-                        spacing: 4
-
-                        Row {
-                            id: inputMeter
-
-                            width: parent.width
-                            height: 24
-                            spacing: 4
-
-                            Text {
-                                id: inputLabel
-
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: "INPUT"
-                                color: "#7367e8f9"
-                                font.family: "JetBrains Mono"
-                                font.pixelSize: 7
-                                font.capitalization: Font.AllUppercase
-                                font.letterSpacing: 1.12
-                            }
-
-                            InputWaveform {
-                                anchors.verticalCenter: parent.verticalCenter
-                                width: parent.width - inputLabel.implicitWidth - parent.spacing
-                                height: 24
-                                levels: root.shellApi.realtime.levels
-                                capturing: root.inputCapturing
-                            }
-                        }
-
-                        Item {
-                            id: transcriptRow
-
-                            width: parent.width
-                            height: Math.max(
-                                transcriptPrefix.implicitHeight,
-                                transcriptViewport.height
-                            )
-
-                            Text {
-                                id: transcriptPrefix
-
-                                anchors.left: parent.left
-                                anchors.top: parent.top
-                                text: root.inputCapturing ? "HEARING"
-                                    : root.liveTranscriptFinal
-                                        ? "HEARD" : "LISTENING"
-                                color: "#7367e8f9"
-                                font.family: "JetBrains Mono"
-                                font.pixelSize: 9
-                                font.capitalization: Font.AllUppercase
-                                font.letterSpacing: 1.26
-                                lineHeightMode: Text.FixedHeight
-                                lineHeight: 16
-                            }
-
-                            Flickable {
-                                id: transcriptViewport
-                                anchors.left: transcriptPrefix.right
-                                anchors.leftMargin: 4
-                                anchors.right: parent.right
-                                anchors.top: parent.top
-                                height: Math.min(48, contentHeight)
-                                contentHeight: transcriptText.implicitHeight
-                                contentWidth: width
-                                contentY: Math.max(0, contentHeight - height)
-                                interactive: false
-                                clip: true
-
-                                Text {
-                                    id: transcriptText
-                                    width: transcriptViewport.width
-                                    text: root.liveTranscriptText !== ""
-                                        ? root.liveTranscriptText : "Listening…"
-                                    color: "#d9cffafe"
-                                    wrapMode: Text.WrapAtWordBoundaryOrAnywhere
-                                    font.family: "JetBrains Mono"
-                                    font.pixelSize: 11
-                                    lineHeightMode: Text.FixedHeight
-                                    lineHeight: 16
-                                }
-                            }
-                        }
-                    }
-                }
+            Layout.topMargin: 4
+            text: ""
+            selected: root.paneIsLocal(entry)
+            enabled: entry !== null
+            foreground: "#cffafe"
+            idleBorderOpacity: 0.15
+            idleTextOpacity: 0.55
+            onClicked: root.toggleCamera()
+            contentItem: ControlIcon {
+                glyph: cameraButton.selected ? "eye" : "eye-off"
+                iconColor: cameraButton.foreground
+                strokeOpacity: cameraButton.selected || cameraButton.hovered ? 1.0 : 0.55
+                width: 25
+                height: 25
             }
+            Accessible.name: selected ? "Close camera video" : "Open camera video"
         }
 
         Item {

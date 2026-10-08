@@ -30,6 +30,7 @@ class WindowAdapterHost:
             self.hyprland.configure_grid,
             self.hyprland.configure_policy,
             click=self._click,
+            refresh=self.hyprland.refresh,
         )
         self.loop = GLib.MainLoop()
 

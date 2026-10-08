@@ -4,10 +4,13 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 import secrets
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 from websockets.sync.client import connect
 
@@ -21,6 +24,17 @@ SURFACE_BY_OUTPUT = {
     "DP-8": "usb-c",
     "HDMI-A-2": "dp-4",
 }
+
+
+def command_url() -> str:
+    """Authenticated Shell URL; this standalone script mirrors shell/command_token.py."""
+
+    runtime = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+    path = Path(runtime) / "obsidience-shell" / "command.token"
+    token = path.read_text(encoding="ascii", errors="replace").strip()
+    if re.fullmatch(r"[0-9a-f]{64}", token) is None:
+        raise OSError(f"Shell command token is invalid: {path}")
+    return f"{SHELL_URL}/?token={token}"
 
 
 def focused_surface() -> str | None:
@@ -59,7 +73,7 @@ def apply_active_window_action(
     result_type = "window.close.result" if action == "close" else "window.layout.result"
     try:
         with connect(
-            SHELL_URL,
+            command_url(),
             subprotocols=[SUBPROTOCOL],
             compression=None,
             proxy=None,

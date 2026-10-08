@@ -12,6 +12,7 @@ from collections.abc import Callable
 
 from websockets.sync.client import connect
 
+from ...command_token import command_url
 from .model import WindowStateStore
 
 LOGGER = logging.getLogger(__name__)
@@ -57,6 +58,7 @@ class ShellWindowTransport:
             [int, bool, int, int, int, bool], tuple[bool, str]
         ],
         click: Callable[[str, str, int, dict, str, int], dict] | None = None,
+        refresh: Callable[[], None] | None = None,
     ) -> None:
         self.store = store
         self.activate = activate
@@ -67,6 +69,7 @@ class ShellWindowTransport:
         self.configure_grid = configure_grid
         self.configure_policy = configure_policy
         self.click = click
+        self.refresh = refresh
         # Never evict a consumed mutation token: reconnect cannot replay a click.
         self._click_tokens: set[str] = set()
         self._applied_grids: dict[str, tuple[int, int]] = {}
@@ -88,7 +91,7 @@ class ShellWindowTransport:
         while not self._stop.is_set():
             try:
                 with connect(
-                    "ws://127.0.0.1:8768",
+                    command_url("ws://127.0.0.1:8768"),
                     subprotocols=["obsidience.shell.v1"],
                     open_timeout=2,
                     close_timeout=1,
@@ -135,6 +138,9 @@ class ShellWindowTransport:
         ):
             return
         event_type = event.get("type")
+        if event_type == "window.state.refresh.request":
+            self._handle_refresh(socket, event)
+            return
         if event_type == "window.click.request":
             self._handle_click(socket, event)
             return
@@ -294,6 +300,35 @@ class ShellWindowTransport:
             )
         )
 
+    def _handle_refresh(self, socket, event: dict) -> None:
+        token = event.get("token")
+        if (not isinstance(token, str) or _TOKEN.fullmatch(token) is None
+                or set(event) != {"schema", "type", "token", "surface_id", "window_id"}
+                or event.get("surface_id") != "" or event.get("window_id") != ""):
+            return
+        revisions = {}
+        reason = "refresh_unavailable"
+        if self.refresh is not None:
+            try:
+                self.refresh()
+                states = self.store.snapshots()
+                if {state.surface_id for state in states} != _SURFACES:
+                    raise ValueError("incomplete native snapshot")
+                # Publish on the same adapter connection before its receipt,
+                # including unchanged revisions, so the Shell sees this read.
+                for state in states:
+                    socket.send(json.dumps(state.command(), separators=(",", ":")))
+                    revisions[state.surface_id] = state.revision
+                reason = ""
+            except Exception:
+                reason = "refresh_unavailable"
+                revisions = {}
+        socket.send(json.dumps({
+            "schema": "obsidience.shell.command.v1", "type": "window.state.refresh.result",
+            "token": token, "surface_id": "", "window_id": "",
+            "success": not reason, "reason": reason, "revisions": revisions,
+        }, separators=(",", ":")))
+
     def _handle_click(self, socket, event: dict) -> None:
         token = event.get("token")
         if not isinstance(token, str) or _TOKEN.fullmatch(token) is None:
@@ -338,7 +373,9 @@ class ShellWindowTransport:
         ):
             result = {"ok": False, "reason": "invalid_click_result", "delivery": "uncertain"}
         socket.send(json.dumps({
-            "schema": "obsidience.shell.command.v1", "type": "window.click.result",
+            "schema": "obsidience.shell.command.v1", "type": "window.drag.result"
+            if isinstance(event.get("witness"), dict) and "drag" in event["witness"]
+            else "window.click.result",
             "token": token, "surface_id": surface_id if isinstance(surface_id, str) else "",
             "window_id": window_id if isinstance(window_id, str) else "",
             "success": result["ok"], "reason": result["reason"][:96],
@@ -347,7 +384,10 @@ class ShellWindowTransport:
 
     @staticmethod
     def _click_witness(value: object) -> dict | None:
-        if not isinstance(value, dict) or set(value) != _CLICK_WITNESS_FIELDS:
+        if not isinstance(value, dict):
+            return None
+        fields = _CLICK_WITNESS_FIELDS | ({"drag"} if "drag" in value else set())
+        if set(value) != fields:
             return None
         if (
             not isinstance(value["stable_id"], str)
@@ -376,6 +416,15 @@ class ShellWindowTransport:
             or not 1 <= rect["height"] <= 65_536
         ):
             return None
+        if "drag" in value:
+            drag = value["drag"]
+            if (not isinstance(drag, dict) or set(drag) != {"x", "y", "duration_ms"}
+                    or type(drag["duration_ms"]) is not int
+                    or not 200 <= drag["duration_ms"] <= 1000
+                    or any(type(drag[key]) not in (int, float) or not math.isfinite(drag[key])
+                           or not 0 <= drag[key] < value[extent]
+                           for key, extent in (("x", "image_width"), ("y", "image_height")))):
+                return None
         return {**value, "local_rect": dict(rect)}
 
     @staticmethod
@@ -385,7 +434,7 @@ class ShellWindowTransport:
         deadline = time.monotonic() + 0.5
         try:
             with connect(
-                "ws://127.0.0.1:8768", subprotocols=["obsidience.shell.v1"],
+                command_url("ws://127.0.0.1:8768"), subprotocols=["obsidience.shell.v1"],
                 open_timeout=0.25, close_timeout=0.01, max_size=65536,
             ) as socket:
                 socket.send(json.dumps({

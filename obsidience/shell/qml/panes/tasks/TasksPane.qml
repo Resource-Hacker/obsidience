@@ -4,6 +4,7 @@ import QtQuick
 import QtQuick.Controls
 import QtWebSockets
 import "../../components/visual"
+import "../../api"
 
 Rectangle {
     id: root
@@ -31,6 +32,7 @@ Rectangle {
     property bool tasksRequestActive: false
     property bool graphRequestActive: false
     property bool modelsRequestActive: false
+    property string hierarchySignature: ""
 
     color: "#b302080e"
     clip: true
@@ -98,6 +100,13 @@ Rectangle {
             root.tasks = payload
             root.taskCatalog = payload.slice().sort((left, right) =>
                 String(left.title).localeCompare(String(right.title)))
+            const signature = JSON.stringify(payload.map(task => [
+                task.ref, task.taxonomy_path, task.assignee, task.subtask_refs
+            ]).sort((left, right) => String(left[0]).localeCompare(String(right[0]))))
+            if (signature !== root.hierarchySignature) {
+                root.hierarchySignature = signature
+                root.refreshReferenceData()
+            }
             root.rebuildRows()
         })
     }
@@ -1230,7 +1239,7 @@ Rectangle {
     WebSocket {
         id: shellSocket
 
-        url: "ws://127.0.0.1:8768"
+        url: "ws://127.0.0.1:8768" + ShellCommandToken.query
         requestedSubprotocols: ["obsidience.shell.v1"]
         active: true
         onStatusChanged: status => {

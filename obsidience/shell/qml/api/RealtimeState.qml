@@ -20,6 +20,12 @@ QtObject {
         const transcript = payload.live_transcript
         state = {
             enabled: enabled,
+            wake_word: typeof payload.wake_word === "string" ? payload.wake_word : "Computer",
+            mode: typeof payload.mode === "string" ? payload.mode : (enabled ? "realtime" : "off"),
+            command_open: payload.command_open === true,
+            executive: payload.executive && typeof payload.executive.state === "string"
+                ? {state: payload.executive.state, warm: payload.executive.warm === true}
+                : {state: "waiting", warm: false},
             ready: payload.ready === true,
             proactive: payload.proactive === true,
             phase: typeof payload.phase === "string" ? payload.phase : "off",
@@ -30,7 +36,7 @@ QtObject {
             live_transcript: enabled && transcript && typeof transcript.text === "string"
                 ? {text: transcript.text.slice(-4096), final: transcript.final === true} : null
         }
-        if (!enabled || !state.ready) levels = []
+        if (!enabled || !state.ready || !state.command_open) levels = []
         else if (levelSample) levels = levels.concat([level]).slice(-levelLimit)
     }
 
@@ -52,6 +58,7 @@ QtObject {
         levels = []
         state = Object.assign({}, state, {
             ready: false, phase: "disconnected", input_level: 0,
+            command_open: false, executive: {state: "waiting", warm: false},
             capture_active: false, user_speaking: false, live_transcript: null,
             last_error: "Realtime connection unavailable."
         })

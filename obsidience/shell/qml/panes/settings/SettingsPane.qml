@@ -5,8 +5,8 @@ import QtWebSockets
 import "graph"
 import "input"
 import "workspace"
-import "connections"
 import "ai_voice"
+import "../../api"
 
 Item {
     id: root
@@ -17,7 +17,6 @@ Item {
         {"id": "graph", "label": "Graph", "accent": "#fb923c"},
         {"id": "input", "label": "Input", "accent": "#a3e635"},
         {"id": "workspace", "label": "Workspace", "accent": "#67e8f9"},
-        {"id": "connections", "label": "Connections", "accent": "#38bdf8"},
         {"id": "ai-voice", "label": "AI & Voice", "accent": "#c4b5fd"}
     ]
 
@@ -46,7 +45,7 @@ Item {
 
     WebSocket {
         id: settingsSocket
-        url: "ws://127.0.0.1:8768"
+        url: "ws://127.0.0.1:8768" + ShellCommandToken.query
         requestedSubprotocols: ["obsidience.shell.v1"]
         active: true
         onTextMessageReceived: message => root.applyShellEvent(message)
@@ -139,7 +138,6 @@ Item {
         anchors.leftMargin: 8
         sourceComponent: root.activeSection === "ai-voice"
             ? aiVoiceSettingsComponent
-            : root.activeSection === "connections" ? connectionsSettingsComponent
             : root.activeSection === "workspace" ? workspaceSettingsComponent
             : root.activeSection === "input"
                 ? inputSettingsComponent : graphSettingsComponent
@@ -149,12 +147,6 @@ Item {
         id: aiVoiceSettingsComponent
 
         AiVoiceSettings {}
-    }
-
-    Component {
-        id: connectionsSettingsComponent
-
-        ConnectionsSettings {}
     }
 
     Component {

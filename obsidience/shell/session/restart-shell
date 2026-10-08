@@ -4,8 +4,12 @@ set -euo pipefail
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 shell_path=/home/wissenschafter/Projects/obsidience/obsidience/shell/qml
 
-if "$script_dir/session-lock" status; then
-    state="$(/usr/bin/qs ipc --path "$shell_path" --any-display \
+# Only a positive compositor "unlocked" reading skips the owner check; an
+# unknown reading must not bypass it. A hung host cannot hang this guard.
+compositor_state=0
+"$script_dir/session-lock" status || compositor_state=$?
+if [[ "$compositor_state" != "1" ]]; then
+    state="$(/usr/bin/timeout 2 /usr/bin/qs ipc --path "$shell_path" --any-display \
         call lock status 2>/dev/null || true)"
     if [[ "$state" == "secure" || "$state" == "locking" ]]; then
         printf '%s\n' 'Refusing to restart Obsidience while its session lock is active.' >&2

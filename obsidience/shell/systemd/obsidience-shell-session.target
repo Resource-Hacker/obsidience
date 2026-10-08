@@ -6,5 +6,6 @@ BindsTo=wayland-session@Hyprland.target
 PartOf=wayland-session@Hyprland.target
 Wants=obsidience-harness-dev.service
 Wants=obsidience-shell-knowledge.service
+Wants=obsidience-shell-agent-canvas.service
 Wants=obsidience-shell-notifications.service
 Wants=obsidience-shell-window-adapter.service

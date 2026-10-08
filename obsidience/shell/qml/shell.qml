@@ -65,6 +65,8 @@ ShellRoot {
             surfaceId: "samsung"
             shellApi: root.shellApi
             locked: root.lockController.active
+            windowState: commandServer.windowStates.samsung || null
+            motionAllowed: root.knowledgeVisible
         }
     }
 

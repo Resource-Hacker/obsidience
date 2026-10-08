@@ -30,9 +30,13 @@ QtObject {
     property int lockGeneration: 0
     property var clickTokens: []
     property var clickRequests: []
+    property var windowRefreshRequests: []
     readonly property int clickTokenLimit: 4096
     readonly property int clickRequestLifetimeMs: 6000
     property string selectedGraphId: "main"
+    property string graphViewerView: "knowledge"
+    property var providerGraphViews: ({memory: {}, code: {}})
+    property var graphStreams: []
     property var activeDockDrag: null
 
     function readerState() {
@@ -49,21 +53,13 @@ QtObject {
             "revision": settingsSelectionRevision, "selection": settingsSelection}
     }
 
+    function graphViewerState() {
+        return {schema: eventSchema, type: "pane.selection", pane_id: "knowledge-graph",
+            selection: {kind: "graph", view: graphViewerView}}
+    }
+
     function cleanReaderSelection(selection) {
         if (!selection || typeof selection !== "object") return null
-        if (selection.kind === "feed_preview") {
-            const item = selection.item
-            if (!item || typeof item !== "object" || Array.isArray(item)) return null
-            const limits = {title: 300, summary: 4000, reporting_url: 2048,
-                published: 100, feed_title: 300, feed_url: 2048}
-            const preview = {}
-            for (const field of Object.keys(limits)) {
-                if (typeof item[field] !== "string" || Array.from(item[field]).length > limits[field]
-                        || /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(item[field])) return null
-                preview[field] = item[field]
-            }
-            return {kind: "feed_preview", item: preview}
-        }
         if (selection.kind !== "article" && selection.kind !== "source") return null
         const field = selection.kind === "article" ? "ref" : "key"
         if (typeof selection[field] !== "string") return null
@@ -72,11 +68,6 @@ QtObject {
         const result = {kind: selection.kind, [field]: value,
             graph_id: selection.kind === "article" && typeof selection.graph_id === "string"
                 && /^[A-Za-z0-9_-]{0,128}$/.test(selection.graph_id) ? selection.graph_id : ""}
-        if (selection.kind === "source" && selection.feed_item_id !== undefined) {
-            if (typeof selection.feed_item_id !== "string"
-                    || !/^[A-Za-z0-9_-]{1,128}$/.test(selection.feed_item_id)) return null
-            result.feed_item_id = selection.feed_item_id
-        }
         return result
     }
 
@@ -377,7 +368,20 @@ QtObject {
         }
     }
 
+    function windowRefreshResult(socket, command, success, reason, revisions) {
+        send(socket, {"schema": eventSchema, "type": "window.state.refresh.result",
+            "token": command.token, "surface_id": "", "window_id": "",
+            "success": success, "reason": reason, "revisions": revisions || {}})
+    }
+
     function removeClient(socket) {
+        for (const pending of windowRefreshRequests) {
+            if (pending.adapter === socket && pending.socket !== socket)
+                windowRefreshResult(pending.socket, pending.command, false, "refresh_unavailable", {})
+        }
+        windowRefreshRequests = windowRefreshRequests.filter(pending =>
+            pending.socket !== socket && pending.adapter !== socket)
+        for (const peer of graphStreams.filter(peer => peer.socket === socket)) removeGraphStream(peer.id)
         clients = clients.filter(candidate => candidate !== socket)
         for (const pending of clickRequests) {
             if (pending.adapter === socket && pending.socket !== socket) {
@@ -389,6 +393,7 @@ QtObject {
             pending.socket !== socket && pending.adapter !== socket)
         if (windowAdapterSocket === socket) {
             windowAdapterSocket = null
+            abandonModuleRestore()
         }
     }
 
@@ -399,6 +404,48 @@ QtObject {
         const text = value.replace(/[\u0000-\u001f]/g, " ")
             .replace(/\s+/g, " ").trim()
         return text.slice(0, maximum)
+    }
+
+    // Only signaling crosses the Shell. Canvas video and presentation controls
+    // travel directly between a stage and its viewers; no desktop capture/input.
+    function removeGraphStream(id) {
+        const removed = graphStreams.find(peer => peer.id === id)
+        if (!removed) return
+        graphStreams = graphStreams.filter(peer => peer.id !== id)
+        for (const peer of graphStreams.filter(peer => peer.view === removed.view && peer.role !== removed.role))
+            send(peer.socket, {schema: eventSchema, type: "graph.stream", action: "left", to: peer.id, id: id})
+    }
+
+    function handleGraphStream(socket, command) {
+        if (typeof command.id !== "string" || !/^[a-f0-9-]{36}$/.test(command.id)) return
+        const current = graphStreams.find(peer => peer.id === command.id && peer.socket === socket)
+        if (command.action === "leave") { if (current) removeGraphStream(current.id); return }
+        if (command.action === "join") {
+            if (current || graphStreams.length >= 24 || !["knowledge", "library", "memory", "code", "knowledge:Darwin", "knowledge:Alexandria", "knowledge:Heimdall"].includes(command.view)
+                    || !["stage", "viewer"].includes(command.role)) return
+            if (graphStreams.some(peer => peer.id === command.id)) return
+            if (command.role === "stage" && graphStreams.some(peer => peer.view === command.view && peer.role === "stage")) {
+                send(socket, {schema: eventSchema, type: "graph.stream", action: "rejected", to: command.id, reason: "A stage already owns this graph"})
+                return
+            }
+            const joined = {id: command.id, view: command.view, role: command.role, socket: socket}
+            graphStreams = graphStreams.concat([joined])
+            for (const peer of graphStreams.filter(peer => peer.view === joined.view && peer.role !== joined.role)) {
+                send(peer.socket, {schema: eventSchema, type: "graph.stream", action: "peer", to: peer.id, id: joined.id, role: joined.role})
+                send(socket, {schema: eventSchema, type: "graph.stream", action: "peer", to: joined.id, id: peer.id, role: peer.role})
+            }
+            return
+        }
+        if (command.action !== "signal" || !current) return
+        const target = graphStreams.find(peer => peer.id === command.to && peer.view === current.view && peer.role !== current.role)
+        const signal = command.signal
+        if (!target || !signal || typeof signal !== "object" || Array.isArray(signal)) return
+        const sdp = ["offer", "answer"].includes(signal.type) && typeof signal.sdp === "string" && signal.sdp.length <= 48000
+        const ice = typeof signal.candidate === "string" && signal.candidate.length <= 4096
+        if (!sdp && !ice) return
+        send(target.socket, {schema: eventSchema, type: "graph.stream", action: "signal", to: target.id, id: current.id,
+            signal: sdp ? {type: signal.type, sdp: signal.sdp}
+                : {candidate: signal.candidate, sdpMid: signal.sdpMid, sdpMLineIndex: signal.sdpMLineIndex}})
     }
 
     function cleanPaneId(value) {
@@ -572,6 +619,20 @@ QtObject {
         }
         send(windowAdapterSocket, request)
         return true
+    }
+
+    // Only the adapter connection that received a restore can return its
+    // receipt. Without that connection, retry once against fresh revisions
+    // instead of leaving every later pane observation blocked.
+    function abandonModuleRestore() {
+        const pending = moduleRestorePending
+        if (!pending) {
+            return
+        }
+        const bindings = Object.assign({}, moduleWindowBindings)
+        delete bindings[pending.pane_id]
+        moduleWindowBindings = bindings
+        moduleRestorePending = null
     }
 
     function finishModuleRestore(token, success) {
@@ -800,10 +861,11 @@ QtObject {
             && fields.every(key => Object.prototype.hasOwnProperty.call(value, key))
     }
 
-    function cleanClickWitness(value) {
+    function cleanClickWitness(value, drag) {
         const fields = ["stable_id", "pid", "process_start_time", "local_rect",
             "image_width", "image_height", "x", "y", "captured_at_unix_ns",
             "label"]
+        if (drag) fields.push("drag")
         if (!hasExactFields(value, fields)
                 || typeof value.stable_id !== "string"
                 || !/^[0-9a-f]{1,32}$/.test(value.stable_id)
@@ -824,6 +886,14 @@ QtObject {
             return null
         }
         const rect = value.local_rect
+        if (drag && (!hasExactFields(value.drag, ["x", "y", "duration_ms"])
+                || !Number.isFinite(value.drag.x) || !Number.isFinite(value.drag.y)
+                || value.drag.x < 0 || value.drag.x >= value.image_width
+                || value.drag.y < 0 || value.drag.y >= value.image_height
+                || !Number.isInteger(value.drag.duration_ms)
+                || value.drag.duration_ms < 200 || value.drag.duration_ms > 1000)) {
+            return null
+        }
         const rectFields = ["x", "y", "width", "height"]
         if (!hasExactFields(rect, rectFields)
                 || !rectFields.every(key => Number.isInteger(rect[key]))
@@ -842,7 +912,8 @@ QtObject {
 
     function windowClickResult(socket, command, success, reason, delivery) {
         send(socket, {
-            "schema": eventSchema, "type": "window.click.result",
+            "schema": eventSchema, "type": command.type === "window.drag"
+                ? "window.drag.result" : "window.click.result",
             "token": cleanClickToken(command.token),
             "surface_id": cleanWindowText(command.surface_id, 32),
             "window_id": cleanWindowText(command.window_id, 128),
@@ -887,8 +958,8 @@ QtObject {
 
     function handleClickCommand(socket, command) {
         const type = command.type
-        if (["window.click", "window.click.guard", "window.click.cancel",
-                "window.click.result"].indexOf(type) < 0) {
+        if (["window.click", "window.drag", "window.click.guard", "window.click.cancel",
+                "window.drag.cancel", "window.click.result", "window.drag.result"].indexOf(type) < 0) {
             return false
         }
         const token = cleanClickToken(command.token)
@@ -906,16 +977,16 @@ QtObject {
                 "token": token, "allowed": allowed === true})
             return true
         }
-        if (type === "window.click.cancel") {
+        if (type === "window.click.cancel" || type === "window.drag.cancel") {
             if (pending && pending.socket === socket) {
                 clickRequests = clickRequests.filter(item => item !== pending)
                 windowClickResult(socket, pending.command, false, "cancelled", "uncertain")
             }
             return true
         }
-        if (type === "window.click.result") {
+        if (type === "window.click.result" || type === "window.drag.result") {
             if (!pending || socket !== windowAdapterSocket || socket !== pending.adapter
-                    || command.token !== token
+                    || command.token !== token || type !== pending.command.type + ".result"
                     || command.surface_id !== pending.command.surface_id
                     || command.window_id !== pending.command.window_id) {
                 return true
@@ -951,7 +1022,7 @@ QtObject {
             return true
         }
         clickTokens = clickTokens.concat([token])
-        const witness = cleanClickWitness(command.witness)
+        const witness = cleanClickWitness(command.witness, type === "window.drag")
         if (!hasExactFields(command, ["schema", "type", "token", "surface_id",
                     "window_id", "expected_revision", "witness"])
                 || !witness || typeof command.surface_id !== "string"
@@ -978,7 +1049,7 @@ QtObject {
             windowClickResult(item.socket, item.command, false, "click_expired", "uncertain")
             return false
         })
-        if (clickRequests.length >= 32) {
+        if (clickRequests.length >= 1) {
             windowClickResult(socket, command, false, "click_busy", "not_dispatched")
             return true
         }
@@ -992,7 +1063,54 @@ QtObject {
         return true
     }
 
+    function handleWindowRefresh(socket, command) {
+        if (command.type !== "window.state.refresh" && command.type !== "window.state.refresh.result")
+            return false
+        if (command.type === "window.state.refresh.result") {
+            const pending = windowRefreshRequests.find(item => item.command.token === command.token)
+            if (!pending || socket !== windowAdapterSocket || pending.adapter !== socket)
+                return true
+            windowRefreshRequests = windowRefreshRequests.filter(item => item !== pending)
+            const revisions = command.revisions
+            const surfaces = ["samsung", "usb-c", "dp-4"]
+            const valid = hasExactFields(command, ["schema", "type", "token", "surface_id", "window_id",
+                    "success", "reason", "revisions"])
+                && command.surface_id === "" && command.window_id === ""
+                && command.success === true && typeof command.reason === "string"
+                && revisions && typeof revisions === "object" && !Array.isArray(revisions)
+                && hasExactFields(revisions, surfaces)
+                && surfaces.every(id => Number.isSafeInteger(revisions[id]) && revisions[id] > 0
+                    && windowStates[id] && windowStates[id].revision >= revisions[id])
+                && Date.now() >= pending.createdAt && Date.now() - pending.createdAt <= 5000
+                && pending.generation === lockGeneration && !sessionLocked
+            windowRefreshResult(pending.socket, pending.command, valid,
+                valid ? "" : "refresh_unavailable", valid ? revisions : {})
+            return true
+        }
+        const token = cleanDragToken(command.token)
+        if (!token || !hasExactFields(command, ["schema", "type", "token", "surface_id", "window_id"])
+                || command.surface_id !== "" || command.window_id !== "") {
+            windowRefreshResult(socket, command, false, "invalid_refresh", {})
+            return true
+        }
+        windowRefreshRequests = windowRefreshRequests.filter(item =>
+            Date.now() - item.createdAt <= 5000)
+        if (sessionLocked || !windowAdapterSocket || windowAdapterSocket.status !== WebSocket.Open
+                || windowRefreshRequests.length >= 32
+                || windowRefreshRequests.some(item => item.command.token === token)) {
+            windowRefreshResult(socket, command, false, "refresh_unavailable", {})
+            return true
+        }
+        windowRefreshRequests = windowRefreshRequests.concat([{
+            "socket": socket, "adapter": windowAdapterSocket, "command": command,
+            "generation": lockGeneration, "createdAt": Date.now()}])
+        send(windowAdapterSocket, {"schema": eventSchema, "type": "window.state.refresh.request",
+            "token": token, "surface_id": "", "window_id": ""})
+        return true
+    }
+
     function handleWindowCommand(socket, command) {
+        if (handleWindowRefresh(socket, command)) return true
         if (handleClickCommand(socket, command)) {
             return true
         }
@@ -1000,6 +1118,7 @@ QtObject {
             if (windowAdapterSocket && windowAdapterSocket !== socket) {
                 invalidateClickRequests("shell_scene_command_unavailable")
                 windowAdapterSocket.active = false
+                abandonModuleRestore()
             }
             windowAdapterSocket = socket
             windowStates = ({})
@@ -1108,6 +1227,10 @@ QtObject {
                 windowCloseResult(socket, command, false, "invalid")
                 return true
             }
+            if (sessionLocked) {
+                windowCloseResult(socket, command, false, "scene_unavailable")
+                return true
+            }
             const current = state && windowId
                 && state.windows.find(window => window.window_id === windowId)
             if (!current || !windowAdapterSocket
@@ -1153,6 +1276,10 @@ QtObject {
             if (!token || !surfaceLayout.surface(surfaceId)
                     || !validAction || !validDirection) {
                 windowLayoutResult(socket, command, false, "invalid")
+                return true
+            }
+            if (sessionLocked) {
+                windowLayoutResult(socket, command, false, "scene_unavailable")
                 return true
             }
             const current = state && windowId
@@ -1312,6 +1439,27 @@ QtObject {
     }
 
     function handleGraphCommand(command) {
+        if (command.type === "graph.viewer.configure" && ["memory", "code"].includes(command.view)) {
+            const supplied = command.settings || {}
+            const settings = Object.assign({}, providerGraphViews[command.view])
+            if (typeof supplied.follow === "boolean") settings.follow = supplied.follow
+            if (command.view === "code" && typeof supplied.allSymbols === "boolean")
+                settings.allSymbols = supplied.allSymbols
+            if (command.view === "memory") {
+                if (typeof supplied.bank === "string" && /^obsidience-[a-f0-9]{32}$/.test(supplied.bank))
+                    settings.bank = supplied.bank
+                if (["all", "world", "experience", "observation"].includes(supplied.memoryType))
+                    settings.memoryType = supplied.memoryType
+            }
+            const next = Object.assign({}, providerGraphViews)
+            next[command.view] = settings
+            providerGraphViews = next
+            const eventSettings = Object.assign({}, settings)
+            if (supplied.refresh === true) eventSettings.refresh = true
+            if (supplied.fit === true) eventSettings.fit = true
+            broadcast({schema: eventSchema, type: "graph.viewer.state", view: command.view, settings: eventSettings})
+            return true
+        }
         if (command.type === "graph.display.request") {
             broadcast(graphDisplayState())
             return true
@@ -1473,6 +1621,7 @@ QtObject {
         if (!command || command.schema !== commandSchema) {
             return
         }
+        if (command.type === "graph.stream") { handleGraphStream(socket, command); return }
         if (typeof command.type === "string"
                 && command.type.startsWith("window.")
                 && handleWindowCommand(socket, command)) {
@@ -1492,9 +1641,25 @@ QtObject {
                 && handlePaneCommand(socket, command)) {
             return
         }
+        if (["pane.present", "pane.select"].includes(command.type)
+                && ["graph", "knowledge-graph", "memory", "code"].includes(command.pane_id)) {
+            const selection = command.selection
+            const view = selection ? (selection.kind === "graph" ? selection.view : "")
+                : command.pane_id === "memory" || command.pane_id === "code" ? command.pane_id : graphViewerView
+            if (!["knowledge", "memory", "code"].includes(view)) return
+            const placement = placementFor("knowledge-graph")
+            if (!placement) return
+            if (command.type === "pane.present"
+                    && !presentPlacementOnSurface(placement, placement.surfaceId)) return
+            // Header selection changes only the existing viewer, not placement
+            // or native focus. Old pane IDs remain aliases, never extra windows.
+            graphViewerView = view
+            broadcast(graphViewerState())
+            return
+        }
         if (command.pane_id === "settings" && command.type === "pane.present"
                 && command.selection && command.selection.kind === "settings"
-                && ["graph", "input", "workspace", "connections", "ai-voice"].includes(command.selection.section)) {
+                && ["graph", "input", "workspace", "ai-voice"].includes(command.selection.section)) {
             const placement = placementFor("settings")
             if (placement && presentPlacementOnSurface(placement, placement.surfaceId)) {
                 settingsSelection = {kind: "settings", section: command.selection.section}
@@ -1519,9 +1684,21 @@ QtObject {
         broadcast(readerState())
     }
 
+    // Browsers can open this loopback socket with any subprotocol; only a
+    // client that read the user-only runtime token may observe or command.
+    function authenticated(socket) {
+        const match = /[?&]token=([0-9a-f]{64})(?:&|$)/.exec(String(socket.url))
+        if (ShellCommandToken.value && match && match[1] === ShellCommandToken.value) {
+            return true
+        }
+        console.warn("Shell command server: refused a client without the current token")
+        return false
+    }
+
     function acceptClient(socket) {
         if (!socket || clients.length >= 32
-                || socket.negotiatedSubprotocol !== subprotocol) {
+                || socket.negotiatedSubprotocol !== subprotocol
+                || !authenticated(socket)) {
             if (socket) {
                 socket.active = false
             }
@@ -1536,8 +1713,11 @@ QtObject {
         })
         send(socket, readerState())
         send(socket, settingsState())
+        send(socket, graphViewerState())
         send(socket, knowledgeState())
         send(socket, graphDisplayState())
+        for (const view of ["memory", "code"])
+            send(socket, {schema: eventSchema, type: "graph.viewer.state", view: view, settings: providerGraphViews[view]})
         send(socket, workspaceState())
         send(socket, dockState())
         send(socket, {

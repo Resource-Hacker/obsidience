@@ -198,6 +198,7 @@ class HyprlandSurfaceWindows:
     ) -> None:
         self.on_change = on_change
         self._stop = threading.Event()
+        self._publish_lock = threading.Lock()
         self._thread: threading.Thread | None = None
 
     def start(self) -> None:
@@ -514,10 +515,21 @@ class HyprlandSurfaceWindows:
                         pending = lines.pop()
                         if lines:
                             self._publish()
-            except (OSError, RuntimeError, ValueError, json.JSONDecodeError):
+            except (OSError, RuntimeError, ValueError, json.JSONDecodeError,
+                    subprocess.SubprocessError):
+                # A hyprctl timeout must not end event-driven observation.
                 self._stop.wait(0.5)
 
     def _publish(self) -> None:
+        # Event updates and demand-driven reads share one publication order.
+        # An older in-flight read must not overwrite a refreshed snapshot.
+        with self._publish_lock:
+            self._publish_current()
+
+    def refresh(self) -> None:
+        self._publish()
+
+    def _publish_current(self) -> None:
         monitors = self._json("monitors", "all")
         clients = self._json("clients")
         active = self._json("activewindow")
