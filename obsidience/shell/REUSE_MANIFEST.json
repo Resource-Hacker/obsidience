@@ -54,52 +54,21 @@
     },
     {
       "name": "Aquamarine",
-      "package": "aquamarine 0.14.0-2.4",
+      "package": "aquamarine 0.15.1-1.1",
       "repository": "https://github.com/hyprwm/aquamarine",
-      "commit": "a79fb21b2e2a82dd061a6d071802bcf38bd5c383",
+      "commit": "f31c47a1b9d300847d8fc3108ad959448103dfc1",
       "license": "BSD-3-Clause",
-      "selected_sources": [
+      "upstream_fixes": [
         {
-          "path": "src/allocator/Swapchain.cpp",
-          "sha256": "aef19dac12f57da0de08874bd0cdfaf77f8e91e6f6f0757699a26cb90d908f71",
-          "patched_sha256": "bf11ebd3ed8ddad7166a8c07c5a38e2bcc1aad045ecaeb8b89271717363b1cfb"
-        }
-      ],
-      "patches": [
-        "adapter/hyprland/patches/aquamarine/0001-crtc-pageflip-accounting.patch",
-        "adapter/hyprland/patches/aquamarine/0002-buffer-commit-plane-rotation.patch",
-        "adapter/hyprland/patches/aquamarine/0003-release-fb-reference.patch",
-        "adapter/hyprland/patches/aquamarine/0004-mgpu-blit-safeguards.patch",
-        "adapter/hyprland/patches/aquamarine/0005-pageflip-id-optional.patch",
-        "adapter/hyprland/patches/aquamarine/0006-preserve-multigpu-on-resize.patch"
-      ],
-      "upstream_backports": [
-        {
-          "commit": "3f33dd35e09bb6b155d8576563d6053aa4b898c6",
-          "subject": "drm: move pending pageflips to the crtc"
-        },
-        {
-          "commit": "40cde956f4998e3853e32c0e3f3729fa5340c0ad",
-          "subject": "drm: only rotate plane FBs on buffer commits"
-        },
-        {
-          "commit": "9f05429c75bb4fee3501c040e457e7bd69b737c3",
-          "subject": "drm: use reference in lambda"
-        },
-        {
-          "commit": "b65c12201b66ff344689a0093148ff8a38e644cd",
-          "subject": "drm: safeguard blit from releaseMgpuResources"
-        },
-        {
-          "commit": "f66fb773b406e3a63970cce001c8b45e17fa075a",
-          "subject": "drm: make pendingPageflip id std::optional"
+          "commit": "cf454160f2e9432263e2a2a531ce546a07033d01",
+          "subject": "drm: drop unaccounted pageflip, dont present tearing twice (#342)"
         },
         {
           "commit": "639ee4cdc1a44a05de4e50a9067f4b8a4f210666",
           "subject": "swapchain: preserve multigpu flag in resize() (#356)"
         }
       ],
-      "adaptation": "Used as Hyprland's DRM and rendering backend with the complete five-commit upstream page-flip and framebuffer-ownership series plus the upstream multi-GPU swapchain-resize fix. The backports retain Aquamarine 0.14's SONAME 13, keep state-only commits on the current AMD-local framebuffer, rotate planes only for a newly committed buffer, guard released multi-GPU swapchains, preserve the multi-GPU flag after resize, and reject stale cross-output page-flip ownership without any Obsidience watcher, retry loop, delay, or output-cycle workaround."
+      "adaptation": "Used unchanged from the distribution package as Hyprland's DRM and rendering backend. The page-flip and framebuffer-ownership series formerly backported locally (#342, squash-merged as cf45416 with identical changes) and the multi-GPU swapchain-resize fix (#356) are both contained in v0.15.1, so the local patch set was retired. No Obsidience watcher, retry loop, delay, or output-cycle workaround."
     },
     {
       "name": "Universal Wayland Session Manager",
