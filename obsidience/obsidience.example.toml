@@ -13,6 +13,6 @@ git_commit = true  # Local Vault audit only; never the application repository.
 # model's verdict even when it scores them incomplete; false waits as usual.
 # realtime_short_replies = true
 # Executive voice turns speak claim-checked sentences before completion
-# acceptance, appended gaplessly to one worker reply; false speaks only the
-# accepted reply.
+# acceptance, appended to one worker reply with a short pause between sentences;
+# false speaks only the accepted reply.
 # realtime_early_speech = true
