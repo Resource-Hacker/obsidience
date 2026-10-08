@@ -110,7 +110,30 @@ def memory_message(recalled: dict) -> str:
     return json.dumps(recalled, ensure_ascii=False, separators=(',', ':')) if recalled['memories'] else ''
 
 
-def prefetch_recall(agent_ref, query):
+def recall_query(text, conversation_id=None, before_sequence=None):
+    """The automatic recall query: the owner request plus the exchange it follows.
+
+    A follow-up ("do that again", "what about it") names its subject only in
+    the preceding exchange. Admission, the memory hook and speech preparation
+    build the same bounded query from the same public ledger rows.
+    """
+    text = text.strip()
+    if not conversation_id:
+        return text
+    from ...knowledge.index import INDEX
+    turns = INDEX.conversation_turns(conversation_id, before_sequence=before_sequence, limit=8)
+    owner = next((turn for turn in reversed(turns) if turn['role'] == 'user'), None)
+    if owner is None:
+        return text
+    previous = 'Owner: ' + ' '.join(owner['text'].split())[:200]
+    reply = next((turn for turn in turns if turn['role'] == 'assistant'
+                  and turn['reply_to'] == owner['id'] and turn['state'] == 'final'), None)
+    if reply is not None:
+        previous += '\nAssistant: ' + ' '.join(reply['text'].split())[:500 - len(previous)]
+    return text + '\n\nPrevious exchange:\n' + previous
+
+
+def prefetch_recall(agent_ref, text, turn=None):
     """Start the Executive hook's exact Hindsight recall at admission.
 
     The owner request is known before preparation and packet compile, so its
@@ -119,6 +142,7 @@ def prefetch_recall(agent_ref, query):
     text, prompt position and the recall's own timeout are unchanged.
     """
     from ...memory.hindsight import MEMORY
+    query = recall_query(text, *((str(turn['conversation_id']), int(turn['sequence'])) if turn else ()))
     return agent_ref, query, asyncio.create_task(
         MEMORY.recall(agent_ref, query), name='obsidience-executive-recall')
 
@@ -473,6 +497,11 @@ async def run_native_session(task, model, messages, allowed, ctx, agent_name, ef
                 from ...memory.hindsight import MEMORY
                 recall_started = time.perf_counter()
                 query = message['params']['query']
+                params = ctx.get('params') or {}
+                if evaluation is None and params.get('conversation_id'):
+                    from ...knowledge.index import INDEX
+                    turn = INDEX.conversation_turn(params['reply_to_turn_id']) or {}
+                    query = recall_query(query, params['conversation_id'], turn.get('sequence'))
                 prefetched = ctx.pop('_memory_recall', None)
                 if evaluation is not None:
                     value = {'status': 'disabled', 'memories': []}

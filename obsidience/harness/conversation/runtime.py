@@ -465,7 +465,7 @@ class ConversationRuntime:
             if recognize_command(text, ["lights.set", "media.pause", "task.complete"]) is None:
                 # The native memory hook recalls for this exact request after the
                 # agent starts; begin it now so it overlaps preparation and compile.
-                recall = prefetch_recall(task.ref, text.strip())
+                recall = prefetch_recall(task.ref, text, user_turn)
             self._last_task_ref = task.ref
             preparation_started = time.monotonic()
             context = await self.prepare_conversation_context(user_turn, context_task_ref=task.ref)

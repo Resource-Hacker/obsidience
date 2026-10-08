@@ -6,7 +6,7 @@ import hashlib
 import json
 
 from .model import admitted_events, request_payload
-from .runner import memory_message, recall_reply, tool_schemas
+from .runner import memory_message, recall_query, recall_reply, tool_schemas
 from .. import trace as action_trace
 from ..executor import activation_messages, compile_activation
 from ...conversation.evidence import historical_evidence
@@ -89,7 +89,9 @@ async def prepare(conversation, text: str, response_contract: str, *, idle: bool
             recall = None
             if native and not idle:
                 from ...memory.hindsight import MEMORY
-                recall = asyncio.create_task(MEMORY.recall(agent.ref, text.strip(), speculative=True),
+                # The final transcript's turn follows the same latest exchange.
+                recall = asyncio.create_task(MEMORY.recall(agent.ref, recall_query(text, conversation_id),
+                                                           speculative=True),
                                              name="obsidience-speech-recall")
             try:
                 if stable_only:
