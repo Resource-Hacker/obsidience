@@ -11,8 +11,8 @@ obsidience:
   - observations.memory.ready
 ---
 
-Curate newly added or materially changed Hindsight observations from their exact
-Source event, or inspect one bounded wiki-maintenance snapshot on the ordinary
-schedule. Compare accepted Knowledge, use the existing Link and maintenance
-Tasks, and keep durable wiki recommendations in owner Review. Activation records
+Compare one changed Hindsight mental-model page from its exact Source event with
+accepted Knowledge, or inspect one bounded wiki-maintenance snapshot on the
+ordinary schedule. Use the existing maintenance Tasks for scheduled work, and
+keep durable wiki recommendations in owner Review. Activation records
 causal provenance in the run ledger without changing either Task's hierarchy.

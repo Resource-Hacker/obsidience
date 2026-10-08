@@ -403,9 +403,9 @@ def _maintenance_candidates(context: dict | None = None) -> dict:
 def execute(args: dict, context: dict) -> str:
     del args
     if context.get("event") == "observations.memory.ready":
-        return ("Maintenance rejected: this Curate activation is bound to one Hindsight Source. "
-                "Search and read ordinary Knowledge for that Source, then recommend content, "
-                "link one exact observation, or report an evidenced no-change result. "
+        return ("Maintenance rejected: this Curate activation is bound to one Hindsight mental-model page. "
+                "Search and read ordinary Knowledge for that page, then recommend content "
+                "or report an evidenced no-change result. "
                 "General maintenance belongs to a manual or scheduled activation.")
     try:
         return json.dumps(_maintenance_candidates(context), sort_keys=True)

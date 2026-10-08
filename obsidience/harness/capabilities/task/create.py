@@ -115,13 +115,8 @@ def execute(args: dict, context: dict) -> str:
     if not str(context.get("task", "")) or not str(context.get("run_id", "")):
         return "Task activation rejected: active Task execution context is incomplete."
     if context.get("event") == "observations.memory.ready":
-        if (target.ref != "Tasks/link"
-                or set(raw_params) != {"article_ref", "observation_source"}):
-            return ("Task activation rejected: memory-triggered Curate may delegate only Link "
-                    "with article_ref and one observation_source from its bound Source. "
-                    "General maintenance cannot replace this curation outcome.")
-        if context.get("_created_tasks"):
-            return "Task activation rejected: this Curate run already delegated its observation Link."
+        return ("Task activation rejected: memory-triggered Curate compares its bound mental-model "
+                "page with Knowledge and stages proposals itself; it delegates no Task.")
     continuation_binding = None
     if wait_for_result:
         # A waited continuation starts a new execution from the original owner
@@ -166,34 +161,8 @@ def execute(args: dict, context: dict) -> str:
         }
     }
     if target.ref == "Tasks/link" and "observation_source" in raw_params:
-        from obsidience.harness.memory.hindsight import promotion_observation, promotion_source
-        try:
-            bound = promotion_source({**(context.get("params") or {}),
-                                      "origin_task_ref": context["task"], "event": context.get("event")})
-            read = context.get("_source_reads", {}).get(bound["citation"], {})
-            if (read.get("content_sha256") != bound["content_sha256"]
-                    or [0, len(bound["content"])] not in read.get("ranges", [])):
-                raise ValueError("Read the complete bound Hindsight Source before delegating Link")
-            citation = raw_params["observation_source"]
-            evidence = promotion_observation(bound, citation)
-            if set(raw_params) != {"article_ref", "observation_source"}:
-                raise ValueError("Observation Link takes only article_ref and observation_source")
-            from obsidience.harness.knowledge.scope import execution_scope
-            res = resolver()
-            _agent, allowed = execution_scope(context, res)
-            article = res.resolve(str(raw_params["article_ref"]))
-            if not article or article.kind != "knowledge" or article.runtime_observation or article.ref not in allowed:
-                raise ValueError("Observation Link requires an accepted Knowledge Article in scope")
-            if article.ref.startswith("Agents/"):
-                raise ValueError("Observation Link requires ordinary Knowledge, not an Agent branch")
-            article_read = context.get("_article_reads", {}).get(article.ref, {})
-            if (article_read.get("complete") is not True
-                    or article_read.get("article_sha256") != hashlib.sha256(article.text().encode()).hexdigest()):
-                raise ValueError("Read the complete current Knowledge Article before delegating its observation Link")
-            raw_params = {"article_ref": article.ref, "observation_source": citation,
-                          "observation_source_sha256": evidence["endpoint_sha256"]}
-        except (ValueError, PermissionError) as exc:
-            return f"Task activation rejected: {exc}."
+        # Per-observation Sources are retired; mental-model pages are evidence, not Link endpoints.
+        return "Task activation rejected: observation Links are retired."
     candidate_key = str(raw_params.get("candidate_key", "")).strip().lower()
     if candidate_key and not re.fullmatch(r"[a-f0-9]{12,64}", candidate_key):
         return "Task activation rejected: candidate_key is invalid."

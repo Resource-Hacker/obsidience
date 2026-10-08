@@ -235,7 +235,7 @@ def build_activation_binding(
     }
     if task.ref == "Tasks/curate" and params.get("event") == "observations.memory.ready":
         objective = (
-            f"Curate the exact Hindsight Source {params['source_citation']} into "
+            f"Compare the exact Hindsight mental-model page {params['source_citation']} with "
             "ordinary Knowledge within the executing Agent's current checkout."
         )
         # The Source bank's owner is provenance, not the executing Agent or a
@@ -522,7 +522,7 @@ async def compile_activation(
     if bound_params.get("event") == "observations.memory.ready":
         # The event narrows this same Curate Task before prompt, trace and
         # capability projection, so all three describe its actual scope.
-        excluded_tools = {"vault.maintenance", "observations.retain"}
+        excluded_tools = {"vault.maintenance", "observations.retain", "task.create"}
     elif (task.ref == "Tasks/link" and bound_params.get("observation_source")
           and bound_params.get("article_ref")):
         # Observation Link has two exact endpoints; searching or retaining

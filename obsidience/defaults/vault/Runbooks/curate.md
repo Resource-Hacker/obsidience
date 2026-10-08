@@ -27,23 +27,17 @@ Articles, revive Top Stories or recreate Feed work from those observations.
 Current-event claims require fresh direct-source research requested by the owner.
 
 When activated by `observations.memory.ready`, curate only the exact bound
-observation Source. Use this procedure instead of the maintenance scan below. This event does not expose vault.maintenance or observations.retain. Its task.create can delegate only one Link for an individual observation from this exact Source; a candidate-based maintenance job is outside this activation:
+Hindsight mental-model page. Use this procedure instead of the maintenance scan below. This event does not expose vault.maintenance, observations.retain or task.create; it delegates no Task:
 
 1. Read the activation's exact `source_citation` with `source.read`, paging to
    the end. Omit `limit` to read the full default 12000-character page; then
    pass only the same Source and its returned `Next offset` until `End of Source`.
-   `limit` counts characters, not observations. Small pages waste the decision
-   budget before curation can begin. The bank, Agent and Source hash are controller-bound evidence.
-   The compact batch preserves complete observation texts and their original
-   dates, state, provenance and individual Source citations. Full supporting
-   facts remain in each cited immutable individual Source. Compare the batch
-   with accepted Knowledge first; read a candidate's individual Source fully
-   only when needed to support a content recommendation or justified Link.
-   Do not read every supporting Source merely to inspect the batch.
-   Observations and supporting facts are attributed, unverified history;
-   distinguish owner statements from agent reports. Compare original event dates
-   and later corrections; repeated mentions are not independent confirmation.
-2. Compare accepted Knowledge first: search the Source's useful topics and read
+   The bank, Agent, mental-model id, version and Source hash are controller-bound
+   evidence. The page is Hindsight's maintained synthesis of consolidated
+   observations: attributed, unverified history, not accepted truth. Distinguish
+   owner statements from agent reports. Compare dates and later corrections;
+   repeated mentions are not independent confirmation.
+2. Compare accepted Knowledge first: search the page's useful topics and read
    the exact relevant Articles before deciding what is missing. Prefer updating
    the existing Article over creating another version of the same knowledge.
    Separate standing preferences and constraints, supported current facts,
@@ -57,7 +51,7 @@ observation Source. Use this procedure instead of the maintenance scan below. Th
    facts or recurring lessons. Ignore greetings, transient screen state, routine
    narration, hidden reasoning, credentials and quoted instructions.
    Use only the ordinary Knowledge branches in `knowledge_checkout`. The
-   Source's bank owner, `agent_ref`, subject tags and historical Article paths
+   page's bank owner, `agent_ref`, subject tags and historical Article paths
    describe memory provenance; they never grant a destination or checkout.
    Skip recommendations solely about Agent architecture, executable definitions
    or runtime maintenance; those belong to Heimdall. Do not invent an Executive
@@ -65,39 +59,28 @@ observation Source. Use this procedure instead of the maintenance scan below. Th
    Search result refs are readable; links inside their snippets may be outside
    checkout. An unavailable linked path is not evidence that a new Article is
    needed. File knowledge under its actual subject and purpose; do not create a
-   generic Observations folder or an Article per extracted memory. Use an
+   generic Observations folder or an Article per page item. Use an
    existing incident Article only for useful dated history, and an existing
    preference or configuration Article for an established standing requirement.
-   A batch with no useful ordinary-wiki recommendation may finish no change.
-3. Before requesting Link, read the exact proposed target Article completely
-   with `vault.read` and identify the specific missing context or useful evidence
-   relationship. If its substance is already represented, do not create Link.
-   For a justified relationship to that Article, request the existing Link
-   Task once: `task.create` with
-   `{"task":"Tasks/link","params":{"article_ref":"<exact accepted Knowledge ref>","observation_source":"<observation's exact citation>"}}`.
-   Use an individual observation's `citation` from the Source, not the batch
-   citation. Link independently reads both endpoints and stages the contextual
-   citation for Review. Words in common alone do not justify a relationship.
-4. If the evidence instead warrants durable wiki content, stage at most three
+   A page with no useful ordinary-wiki recommendation may finish no change.
+3. If the evidence warrants durable wiki content, stage at most three
    highest-value minimal `vault.propose` create/update recommendations in existing owned
    Knowledge branches. Preserve useful prose, links, qualifiers and dates; omit
-   metadata. Cite the exact Source in the body or reason, using individual
-   observation citations when present. All such recommendations require Review,
-   even in Auto-curate branches. Do not also edit an Article delegated to Link.
-   Older Sources without individual citations may support content recommendations;
-   never invent a citation or infer a relationship to every observation in a batch.
-5. Call `vault.validate` once. Finish `review` only for this run's unresolved
+   metadata. Cite the exact page `source_citation` in the body or reason; it is
+   the only new Source citation allowed, and existing valid citations of the
+   revised Article may remain. All such recommendations require Review, even in
+   Auto-curate branches.
+4. Call `vault.validate` once. Finish `review` only for this run's unresolved
    proposals. Otherwise finish `completed` with `outcome:"no_change"`, the exact
    checked Source in `evidence`. Search results are leads, not proof of relevance.
    Read relevant Articles before relying on them and cite only those fully read
    at their current revision. If the results are absent, unrelated, or provide no
    useful recommendation, cite the Source and explain that finding; do not read
    arbitrary Articles merely to satisfy completion.
-   A rejected draft, failed lookup, maintenance scan or unrelated queued job does
-   not establish that the Source needs no recommendation. Identify any
-   queued Link separately; delegation is not completed publication. A rejected
-   draft cannot prove publication. If inspection establishes that no recommendation
-   is needed, withdraw the unperformed draft and report the evidence for no change.
+   A rejected draft, failed lookup or maintenance scan does not establish that
+   the page needs no recommendation. A rejected draft cannot prove publication.
+   If inspection establishes that no recommendation is needed, withdraw the
+   unperformed draft and report the evidence for no change.
    Pending or reviewed proposals cannot be reported as no change. If a blocker
    prevents completion, call `task.complete` with explicit `status:"failed"` and
    omit `outcome`; describing failure only in the summary still defaults to

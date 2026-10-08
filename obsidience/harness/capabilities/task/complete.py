@@ -593,9 +593,7 @@ def _completion_error(
                     result = json.loads(item.get("obs", ""))
                 except (TypeError, ValueError):
                     continue
-                if (isinstance(result, dict) and result.get("state") in {"started", "queued", "processed"}
-                        and (item.get("args", {}).get("task") != "Tasks/link"
-                             or not item.get("args", {}).get("params", {}).get("observation_source"))):
+                if isinstance(result, dict) and result.get("state") in {"started", "queued", "processed"}:
                     return "An unrelated maintenance delegation cannot complete this Hindsight curation; report the scope failure"
     if status != "failed":
         if error := bound_read_error(context):

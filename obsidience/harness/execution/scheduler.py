@@ -81,6 +81,8 @@ _PROPOSAL_ARGUMENT_REJECTIONS = frozenset({
     "Proposal rejected: Merge retained Article must belong to its exact bound duplicate candidates.",
     "Proposal rejected: Memory recommendation must cite its bound batch or observation Source.",
     "Proposal rejected: New memory recommendation citations must exactly match its bound batch or observation Sources.",
+    "Proposal rejected: Memory recommendation must cite its bound mental-model Source.",
+    "Proposal rejected: New memory recommendation citations must exactly match its bound mental-model Source.",
     # System ownership is asserted before staging; keep the pre-2026-10-07 wording for old runs.
     "Proposal rejected: System inventory is read-only and follows its schema; write authored workstation "
     "configuration and incidents under Architecture/Shell and procedures under Runbooks/Operations.",
@@ -190,7 +192,8 @@ def _preflight_rejection(call: dict, note: Note) -> str | None:
                 return None
         except OSError:
             return None
-        candidates = {"Task activation rejected: Link observation must come from this exact curation handoff."}
+        candidates = {"Task activation rejected: memory-triggered Curate compares its bound mental-model "
+                      "page with Knowledge and stages proposals itself; it delegates no Task."}
     elif tool == "source.handoff" and note.ref in {LEARN_TASK_REF, "Tasks/research/distill"}:
         from ..knowledge.source import research_source_binding
 
@@ -377,8 +380,8 @@ def _retry_binding_matches(note: Note, entries: list[dict]) -> bool:
         )
     if event == "observations.memory.ready":
         from ..memory.hindsight import promotion_source
-        promotion_source({**params, "origin_task_ref": note.ref})
-        return params["activation_key"] == "memory:" + params["promotion_key"]
+        promotion_source({**params, "origin_task_ref": note.ref})  # Also binds activation_key.
+        return True
     if event == "model.added" and note.ref == "Tasks/research/model":
         activation = INDEX.activation(str(entries[0].get("activation_id", "")))
         model_id = params.get("model_id")
@@ -448,8 +451,6 @@ def retry_blocked_reason(note: Note, run: dict | None = None, *, allow_source_ca
         if entries is None:
             return "The previous execution trace is incomplete or unreadable."
         coverage = INDEX.tool_run_receipts(last_run)
-        from ..memory.hindsight import legacy_archive_reads
-        memory_reads = legacy_archive_reads(note, coverage)
         from .repair import verified_source_captures, verified_retained_effects
         captures = verified_source_captures(note, last_run) if allow_source_captures else {}
         retained = verified_retained_effects(note, last_run) if allow_retained_effects else {}
@@ -476,9 +477,6 @@ def retry_blocked_reason(note: Note, run: dict | None = None, *, allow_source_ca
                     continue
                 if (entry.get("tool") == "task.complete" and entry.get("completion_rejected") is True
                         and entry.get("obs") in {text for (tool, _sig), text in rejected.items() if tool == "task.complete"}):
-                    continue
-                if (entry.get("tool") == "observations.temporary.archive"
-                        and entry.get("args") == {} and entry.get("sig") in memory_reads):
                     continue
                 if entry.get("tool") == "web.fetch" and entry.get("sig") in captures:
                     continue
@@ -1223,8 +1221,6 @@ def _receipt_retry_blocked_reason(note: Note, run_id: str, *, allow_source_captu
     if coverage["task_ref"] != note.ref or not same_params:
         return "The Tool receipt does not attest these exact Task inputs."
     run = INDEX.run(run_id) or {}
-    from ..memory.hindsight import legacy_archive_reads
-    memory_reads = legacy_archive_reads(note, coverage)
     from .repair import verified_source_captures, verified_retained_effects
     captures = verified_source_captures(note, run_id) if allow_source_captures else {}
     retained = verified_retained_effects(note, run_id) if allow_retained_effects else {}
@@ -1240,8 +1236,6 @@ def _receipt_retry_blocked_reason(note: Note, run_id: str, *, allow_source_captu
                 and call["tool_sha256"] and run.get("summary") == "Execution failed: " + dispatch_error
                 and call.get("result_chars") == len(encoded_error)
                 and call.get("result_sha256") == hashlib.sha256(encoded_error).hexdigest()):
-            continue
-        if call["signature"] in memory_reads:
             continue
         if _preflight_rejection(call, note) is not None:
             continue

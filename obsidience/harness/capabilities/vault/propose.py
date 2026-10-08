@@ -408,8 +408,7 @@ def stage_proposal(args: dict, context: dict, *, validate_only: bool = False) ->
             "then submit the corrected body"
         )
     if context.get("event") == "observations.memory.ready":
-        from obsidience.harness.memory.hindsight import (
-            feed_processing_handoff, promotion_observation, promotion_source)
+        from obsidience.harness.memory.hindsight import promotion_source
         if target.startswith("Agents/"):
             raise ValueError("Memory promotion recommends ordinary Knowledge, not Agent branches or Observations")
         source = promotion_source({**(context.get("params") or {}),
@@ -422,14 +421,11 @@ def stage_proposal(args: dict, context: dict, *, validate_only: bool = False) ->
             raise ValueError("Memory promotion creates or updates Knowledge recommendations; it cannot archive or change executable definitions")
         if args.get("metadata"):
             raise ValueError("Memory promotion authors documentary bodies, not Agent or capability metadata")
-        bundle = json.loads(source["content"].split("\n\n", 2)[2])
-        members = {row.get("citation") for row in bundle.get("observations", [])}
-        # A valid batch citation in the reason cannot mask a new foreign URI.
+        # A valid page citation in the reason cannot mask a new foreign URI.
         citations = _memory_source_citations(
             str(args.get("body", "")) + "\n" + str(args.get("reason", "")))
-        bound = members | {source["citation"]}
-        if not citations & bound:
-            raise ValueError("Memory recommendation must cite its bound batch or observation Source")
+        if source["citation"] not in citations:
+            raise ValueError("Memory recommendation must cite its bound mental-model Source")
         preserved = set()
         if existing_target:
             from obsidience.harness.knowledge.source import get_source
@@ -437,16 +433,8 @@ def stage_proposal(args: dict, context: dict, *, validate_only: bool = False) ->
             for citation in citations & old_citations:
                 get_source(citation, restore=False)
                 preserved.add(citation)
-        if not citations - preserved <= bound:
-            raise ValueError("New memory recommendation citations must exactly match its bound batch or observation Sources")
-        if source["citation"] in citations and feed_processing_handoff(source):
-            raise ValueError("Feed processing history is retained in Memory, not automatic wiki recommendations")
-        for citation in (citations & members) - preserved:
-            evidence = promotion_observation(source, citation)
-            read = context.get("_source_reads", {}).get(citation, {})
-            if (read.get("content_sha256") != evidence["endpoint_sha256"]
-                    or [0, evidence["source_characters"]] not in read.get("ranges", [])):
-                raise ValueError("Read the complete cited observation Source before recommending Knowledge")
+        if not citations - preserved <= {source["citation"]}:
+            raise ValueError("New memory recommendation citations must exactly match its bound mental-model Source")
     if existing_target and existing_target.runtime_observation:
         raise ValueError("runtime Observations are maintained by Compact and Promote, not wiki proposals")
 

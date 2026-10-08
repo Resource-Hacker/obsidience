@@ -163,18 +163,6 @@ def _private_source_allowed(result: dict, context: dict) -> bool:
         if (bound and bound["citation"] == result.get("citation")
                 and bound["content_sha256"] == result.get("content_sha256")):
             return True
-        if (context.get("task") == "Tasks/curate"
-                and context.get("event") == "observations.memory.ready"
-                and bound_read_error(context) is None):
-            from obsidience.harness.memory.hindsight import promotion_source, promotion_observation
-            try:
-                manifest = promotion_source({**context.get("params", {}),
-                    "origin_task_ref": context["task"], "event": context["event"]})
-                member = promotion_observation(manifest, result.get("citation"))
-                if member["endpoint_sha256"] == result.get("content_sha256"):
-                    return True  # Exact batch member, never a grant to browse its bank.
-            except ValueError:
-                pass
         receipt = context.get("_observation_archive", {})
         if (isinstance(receipt, dict) and receipt.get("citation") == result.get("citation")
                 and receipt.get("content_sha256") == result.get("content_sha256")):

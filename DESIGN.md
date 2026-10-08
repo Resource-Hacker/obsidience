@@ -493,11 +493,14 @@ full current reads, unrelated hits do not.
   Conversation requests and Task objectives carry distinct provenance labels; original
   dates, order and journals are preserved. Diagnostic turns set
   `memory_writeback: false` and are never delivered later.
-- `observations.memory.ready` narrows Curate to the exact complete bound Source, scoped
-  ordinary-Knowledge search and full reads of cited Articles: one outstanding batch, ≤8
-  changes offered, ≤3 recommendations, always owner Review, no archives or Agent-branch
-  edits, outputs never re-enter Hindsight. Bank ownership, tags and links grant nothing.
-  Memory wholly attested to retired Feed processing is excluded from handoffs.
+- Hindsight keeps three Executive mental models current after consolidation (owner
+  preferences and permissions, workstation changes, recent decisions). A changed page
+  version becomes one attested Source and one `observations.memory.ready` occurrence
+  bound to the exact model id and version; Curate reads the complete page, searches
+  ordinary Knowledge, fully reads cited Articles and stages ≤3 recommendations, always
+  owner Review, no archives, Agent-branch edits or delegated Tasks; one outstanding page
+  handoff; outputs never re-enter Hindsight. Observations are not copied into Sources.
+  Bank ownership, tags and links grant nothing.
 - A maintenance hold pauses delivery, memory Curate (including delegated Links) and
   recovery while the outbox keeps turns and recall stays available; completion is proven
   only by verified acceptance. Quota deadlines defer delivery and repair. Failed

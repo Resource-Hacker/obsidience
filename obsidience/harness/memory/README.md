@@ -20,49 +20,37 @@ history importer and separate coding wiki are deliberately not mounted.
    `@memory/<bank>/<id>` references remain readable in the existing Reader for
    evidence inspection. No raw memory nodes or native provider edges enter the
    accepted Article graph. Inspection never grants another Agent bank access.
-4. New or materially changed observations create immutable, hash-attested Sources
-   and the existing `observations.memory.ready` event. Alexandria's existing Curate Task
-   receives this event alongside its ordinary maintenance schedule. It compares accepted Knowledge and
-   stages durable recommendations or delegates an exact Article/observation Source
-   pair to the existing Link Task. Individual observation Sources disambiguate a
-   batch. Accepted Markdown Source citations are the wiki evidence links; ordinary Link Review owns proposal previews and acceptance.
-   All wiki recommendations and observation links require owner Review, including
-   in Auto-curate branches. Native consolidation remains automatic. Timestamp or
-   proof-count changes alone do not requeue work. Each bank refresh offers one
-   batch of at most eight material changes, newest updates first with stable ID
-   tie-breaking. Compact manifests retain complete observation records and their
-   individual Source citations without repeating the supporting facts. The batch
-   targets 32 KiB by selecting whole records; an oversized first record remains
-   an intact singleton instead of being truncated or starved. Full supporting
-   evidence stays in the original individual Sources. Curate may read an exact
-   member only after fully reading its attested activating manifest.
-   The existing Curate/Link runtime, FIFO and unresolved Review
-   occurrences permit only one outstanding memory batch across all banks.
-   Unselected or blocked records keep their original dedup state; the existing
-   health tick revisits dirty banks after work settles. Startup reconstructs the
-   backlog from native records and admitted hashes, without a separate queue.
-   Curate compares accepted Knowledge first and offers at most three useful
-   recommendations, preferring corrections or updates to existing subject Articles.
-   The proposal writer enforces that limit per activation across retry runs and
-   pending or decided Reviews. Every supplied Source citation must resolve;
-   new memory citations must belong to the bound batch or one of its members,
-   and a cited member needs a complete attested read receipt. Existing valid
-   Article citations remain available when revising an Article.
-   Routine confirmations need no wiki copy, and curation reports do not feed
-   memory recursively. Task reasoning/model, FIFO and Review use existing owners.
+4. The Executive bank carries three native mental models: "Owner preferences
+   and standing permissions", "Workstation state changes" and "Recent decisions
+   and commitments". The adapter creates any missing one from the existing
+   delivery task; an existing model, including owner refinements, is never
+   overwritten. Hindsight refreshes them after consolidation with delta edits
+   over consolidated observations, at most once per six hours per model, using
+   its own configured provider chain. Mental-model refreshes have no webhook,
+   so the existing 30-second health tick lists model metadata. A changed page
+   (content hash) becomes one immutable, attested Source and one
+   `observations.memory.ready` occurrence for Alexandria's Curate Task, bound to
+   the exact mental-model id and version. A refresh that kept the page, or a
+   page that returns to an already curated version, starts no run. Only one
+   page handoff is outstanding at a time: its Curate occurrence is queued,
+   running or awaiting Review. Curate reads the complete page, compares accepted
+   Knowledge and stages at most three create/update recommendations that cite
+   the page Source, always through owner Review, including in Auto-curate
+   branches. It delegates no Task. Curation reports do not feed memory
+   recursively. Observations are no longer copied into Sources; earlier
+   observation Sources, batch manifests and their Article citations remain
+   readable history, and already queued observation Link occurrences keep
+   their existing execution path.
 5. DeepSeek retains ownership of the continuous conversation and active context.
    Its native `dsh-compaction-basic` backend manages that context. Automatic recall has a 750 ms deadline; the
    explicit scoped `observations.recall` Tool permits six seconds. Neither
    path calls generative Reflect or treats memory as current screen evidence.
 
 The former Connections/Feeds collector and Darwin Distill workflow are retired.
-Historical reports remain in Hindsight for recall and inspection. An observation
-whose complete supporting provenance resolves to original Feed Distill runs or
-their exact Feed-bound Ingest continuations is excluded from automatic wiki
-handoffs. Already captured batches and individual members use the same lineage
-check at admission/proposal time. Unknown or mixed provenance remains eligible;
-this is neither a bank-wide filter nor a text-keyword filter. The retired Feed
-stack must not be reconstructed from historical news memories.
+Historical reports remain in Hindsight for recall and inspection. The mental
+models ask about owner preferences, workstation changes and decisions, not
+news; the retired Feed stack must not be reconstructed from historical news
+memories.
 
 Hindsight's native configuration selects the extraction/consolidation provider;
 inspect the installation's selected environment rather than assuming a model.
@@ -77,7 +65,7 @@ labels. A scheduled or triggered Task objective does not establish a direct
 owner request; its accepted public report remains an unverified agent report.
 
 An owner maintenance marker at `state/hindsight-maintenance.json` pauses outbox
-delivery, observation handoffs, admission of memory-event Curate occurrences,
+delivery, mental-model handoffs, admission of memory-event Curate occurrences,
 and automatic native-operation repair. New completed turns still enter the
 durable outbox; read-only recall and graph inspection remain available. Remove
 the marker after native validation and wake the port with a registered bank's
@@ -89,27 +77,24 @@ replaces their reviewed extraction/consolidation missions with defaults.
 An explicit OpenRouter daily free-quota reset in native failure evidence also
 defers new outbox delivery and automatic recovery until that provider deadline.
 Only the reset timestamp is projected, never raw provider error/account data.
-The existing health tick resumes pending delivery after reset; recall and the
-independent owner curation hold are unchanged. Failed operation receipts remain
+The existing health tick resumes pending delivery after reset; recall is
+unchanged. Failed operation receipts remain
 visible and retain their once-per-operation recovery limits.
 An independent `state/hindsight-delivery-paused.json` marker keeps new turns in
 the durable outbox after maintenance without blocking read-only memory use or
-independently enabled Curate handoffs. Native extraction and
-consolidation model selection belongs to Hindsight; a one-off provider override
-must not silently become the ongoing provider.
+mental-model Curate handoffs. Native extraction and consolidation model
+selection belongs to Hindsight; a one-off provider override must not silently
+become the ongoing provider.
 The private local model endpoint rejects inference while either pause is set,
 including native jobs restored after reboot. One-off cloud rebuild credentials
 and provider configuration must survive reboot for the duration of that work;
 keep credentials encrypted and remove the override when maintenance completes.
-An independent `state/hindsight-curation-paused.json` marker stops new observation
-Sources/handoffs and admission of queued `observations.memory.ready` occurrences.
-It survives maintenance completion and restarts without stopping recall, native
-memory inspection, or ordinary scheduled/manual Curate. The owner controls when
-this ingestion route resumes; delivery and curation holds are separate choices.
+The maintenance marker also pauses mental-model provisioning and page handoffs;
+there is no separate curation marker.
 After a one-off rebuild, an installation may keep the native API available with
 `HINDSIGHT_API_WORKER_ENABLED=false` until the owner selects the ongoing model.
 Retire the completed controller and provider override before removing the rebuild
-marker; preserve any independent delivery and curation holds.
+marker; preserve any independent delivery hold.
 
 ## Health and curation controls
 
@@ -118,13 +103,15 @@ from its content-free `recall` telemetry. A retained failed operation can make t
 aggregate degraded while recent recall remains healthy. `not_observed` means no
 recent completed recall evidence, not verified failure or verified success.
 
-`processing_paused`, `delivery_paused` and `curation_paused` describe different
-owner controls. A curation hold prevents memory-to-wiki recommendations and their
-observation Link admission; it does not disable capture, recall, or ordinary wiki
-maintenance. Accepted Knowledge and unverified Memory remain distinct owners.
-Backpressure from pending execution, FIFO or Review is not a provider fault and
-never authorizes bypassing a hold, replaying uncertain effects or approving wiki
-changes. Resumption retains original Source, activation and memory identities.
+`processing_paused` and `delivery_paused` describe different owner controls;
+`curation_paused` mirrors the maintenance hold. `mental_models` reports each
+page's last refresh, failed refresh and staleness; `mental_model_error` reports
+a failed listing, provisioning or handoff without blocking delivery or recall.
+A failed native refresh is an ordinary failed operation for the existing
+Heimdall repair path. Accepted Knowledge and unverified Memory remain distinct
+owners. Backpressure from pending execution, FIFO or Review is not a provider
+fault and never authorizes bypassing a hold, replaying uncertain effects or
+approving wiki changes.
 
 ## Deployment contract
 
@@ -235,9 +222,9 @@ hindsight_url = "http://127.0.0.1:8790"
 ```
 
 Restart only the Harness when idle. Check `/api/memory/status`, an actual retained
-transaction and its upstream operations, then Memory/Reader and the existing
-Curate handoff. Service liveness alone is insufficient. Fresh installs leave
-this optional provider disabled until its dependencies are configured.
+transaction and its upstream operations, then Memory/Reader, the three Executive
+mental models and the Curate page handoff. Service liveness alone is
+insufficient. Fresh installs leave this optional provider disabled until its dependencies are configured.
 
 ## Recovery and rollback
 
