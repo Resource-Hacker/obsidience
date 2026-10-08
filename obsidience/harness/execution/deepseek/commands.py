@@ -93,6 +93,24 @@ def _media_command(text):
     return {'name': 'media.pause', 'args': {'query': choices.pop()}}
 
 
+@lru_cache(maxsize=1)
+def _tv_intents():
+    return Intents.from_dict({
+        'language': 'en',
+        'lists': {'state': {'values': ['on', 'off']}},
+        'intents': {'TVPower': {'data': [{'sentences': [
+            '[please] [the] (tv|television) {state} [please]',
+            '[please] (turn|switch) {state} [the] (tv|television) [please]',
+            '[please] (turn|switch) [the] (tv|television) {state} [please]',
+        ]}]}},
+    })
+
+
+def _tv_command(text):
+    choices = {result.entities['state'].value for result in recognize_all(text, _tv_intents())}
+    return {'name': 'tv.control', 'args': {'action': choices.pop()}} if len(choices) == 1 else None
+
+
 def recognize_command(objective, allowed):
     """Return one complete registered call, or ordinary native generation.
 
@@ -108,6 +126,8 @@ def recognize_command(objective, allowed):
         return clock
     if not re.fullmatch(r'[a-z_ ]+', text):
         return None
+    if 'tv.control' in allowed and (tv := _tv_command(text)) is not None:
+        return tv
     if 'media.pause' in allowed and (media := _media_command(text)) is not None:
         return media
     if 'lights.set' not in allowed:

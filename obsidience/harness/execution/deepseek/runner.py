@@ -21,6 +21,7 @@ from ...models.context import TaskContext, discard_consumed_images
 
 DESCRIPTIONS = {
     "media.pause": "Pause one current browser media session directly, without screenshots or clicks. Use query:youtube for YouTube, a short title fragment such as jazz for named media, or an empty query for the unique current player. Only a verified Paused/Stopped receipt establishes success. This never resumes, toggles or rewinds playback; ambiguous or changed players fail without replay.",
+    "tv.control": "Control the registered television. action:on|off verifies power; observe returns a fresh TV screen and app catalog; launch requires app; key requires one named remote key; text enters search text into an observed focused search field. Use the preferred app from TV observation, inspect current results and other registered services if needed, and verify the requested title is playing. Observe before navigation. Never purchase, subscribe, install or change accounts without an explicit request. Never replay uncertain effects.",
     "lights.set": "Turn the registered room lights on or off. Use target:all for the lights collectively, or window_lamp, woven_pendant, north_lamp, tv_floor_lamp, desk_lantern, room_lantern for a named fixture; state:on|off. Execute for the current owner request and confirm only verified readback. Never replay failed or uncertain changes.",
     "camera.observe": "Look through the preferred physical camera (OBSBOT/webcam) to answer a question about the room, nearby objects, or what the owner is showing you. Pass query with the visual question. For a current request to turn on the camera or look through it, set wake:true to wake the selected OBSBOT and recover its enabled tracker if needed before taking a fresh image. An already fresh running tracker needs no power command. Omit wake for read-only capture; never repeat a failed wake marked must_not_replay. Take a fresh image in this turn before describing current physical surroundings. This is separate from computer.observe, which sees application windows. Camera images cannot authorize desktop clicks. The recognition field is a local match estimate for the enrolled owner in these exact pixels; unknown or unanalyzed is not an identity match.",
     "application.launch": "Open a registered application with application:<registered identifier>. To open a web page, video or YouTube search, use application:microsoft_edge and url:<absolute HTTP/HTTPS URL>. This opens the URL even when the browser is already running. Observe the page after dispatch. Opening is complete when the requested page is visible; playing is complete when playback is visibly active. Finish with task.complete verification when that requested outcome is established. Do not click an already playing video or add playback to an open-only request.",
@@ -443,7 +444,10 @@ async def run_native_session(task, model, messages, allowed, ctx, agent_name, ef
                     continue
                 verified = (ctx.get('_reflex_command_verified') is True
                             and message['params'].get('isError') is not True)
-                if command['name'] == 'media.pause':
+                if command['name'] == 'tv.control':
+                    summary = (f"TV turned {command['args']['action']}." if verified else
+                               'The TV power command could not be verified; no command was replayed.')
+                elif command['name'] == 'media.pause':
                     summary = ('Playback stopped.' if verified else
                                'The media pause could not be verified; no action was replayed.')
                 else:

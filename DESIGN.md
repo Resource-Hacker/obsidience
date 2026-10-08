@@ -242,7 +242,7 @@ neighbours); (9) history projected from the native conversation (no conversation
   speech connection. Every activation gets an explicit local clock; historical timestamps
   are not current-time evidence.
 - **Finite lanes** (provider modes, never a router): a HassIL lane executes complete simple
-  light on/off, pause/stop and literal local-time commands as one exact ordinary dispatch
+  light and TV on/off, pause/stop and literal local-time commands as one exact ordinary dispatch
   with no model call or recall and no fabricated model span (quoted, negated, conditional,
   compound and question forms go to the model). A one-token scorer chooses among
   schema-valid complete proposals plus native generation for registered launch, unlock,
@@ -339,6 +339,11 @@ neighbours); (9) history projected from the native conversation (no conversation
   tracking keeps one stream, local face embeddings (never photos/video) and the sole motor
   connection; recognition is personalization, never authentication. Agent video feeds are
   never cameras.
+- `tv.control`: one private identity-bound LAN television through upstream ADB;
+  discrete power with display/wake readback, registered app launch, fresh screen
+  observation and one remote key/text action per observation. Bounded commands,
+  cancellation and no uncertain replay. Navigation delivery is not playback proof;
+  app results and player evidence determine availability. No arbitrary shell or address.
 - `lights.set`: precheck every fixture, durably save appearance before OFF and restore on
   ON, one write per fixture with bounded readback (ACK is not status), never replay,
   per-fixture receipts, group success only when all verify; occupancy schedules nothing.

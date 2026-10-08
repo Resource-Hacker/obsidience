@@ -506,7 +506,7 @@ class ConversationRuntime:
             trace.latency("admission", duration_ms=(time.monotonic() - admission_started) * 1000)
             from ..execution.deepseek.commands import recognize_command
             from ..execution.deepseek.runner import discard_recall, prefetch_recall
-            if recognize_command(text, ["lights.set", "media.pause", "task.complete"]) is None:
+            if recognize_command(text, ["lights.set", "tv.control", "media.pause", "task.complete"]) is None:
                 # The native memory hook recalls for this exact request after the
                 # agent starts; begin it now so it overlaps preparation and compile.
                 recall = prefetch_recall(task.ref, text, user_turn)

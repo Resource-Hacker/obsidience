@@ -1153,7 +1153,8 @@ class CapabilityDispatch:
                 "correction_allowed": True,
             }
             observation = json.dumps(result_object, sort_keys=True)
-        elif name in {"camera.observe", "computer.observe", "computer.act"} and "vision" not in self.model.capabilities:
+        elif (name in {"camera.observe", "computer.observe", "computer.act"}
+              or name == "tv.control" and args.get("action") not in {"on", "off"}) and "vision" not in self.model.capabilities:
             observation = json.dumps({
                 "observation": {
                     "status": "unavailable",
@@ -1282,7 +1283,7 @@ class CapabilityDispatch:
             verified = (
                 isinstance(result_object, dict) and result_object.get("status") == "completed"
                 and result_object.get("delivery") == "verified"
-                if name == "lights.set" else
+                if name in {"lights.set", "tv.control"} else
                 name in {"media.pause", "application.launch", "session.unlock"}
                 and (completion_evidence or {}).get("verified") is True
             )

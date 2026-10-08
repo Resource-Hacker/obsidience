@@ -310,7 +310,7 @@ export function apply(ctx) {
       state.handle = handle;
       if (state.cancelled) handle.agent.cancel({ kind: 'user' });
       else if (config.command) {
-        if (!config.session_id || config.continuation || !['lights.set', 'media.pause', 'task.complete'].includes(config.command.name)) {
+        if (!config.session_id || config.continuation || !['lights.set', 'tv.control', 'media.pause', 'task.complete'].includes(config.command.name)) {
           throw new Error('Explicit command requires its exact Executive owner turn');
         }
         state.command = config.command;

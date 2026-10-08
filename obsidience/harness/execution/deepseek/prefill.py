@@ -66,7 +66,7 @@ async def prepare(conversation, text: str, response_contract: str, *, idle: bool
     effort = llm.normalize_reasoning_effort(agent.meta.get("reasoning_effort", "none"))
     if not idle and effort == 'none':
         from .commands import recognize_command
-        command = recognize_command(text, ['lights.set', 'media.pause', 'task.complete'])
+        command = recognize_command(text, ['lights.set', 'tv.control', 'media.pause', 'task.complete'])
         if command is not None:
             from ..executor import resolve_spine
             from ...knowledge.vault import resolver
