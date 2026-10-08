@@ -43,7 +43,8 @@ def report_reuse(conversation_id: str, context: str, memory: str) -> None:
     ])
 
 
-async def prepare(conversation, text: str, response_contract: str, *, idle: bool = False) -> dict:
+async def prepare(conversation, text: str, response_contract: str, *, idle: bool = False,
+                  interruption: str = "") -> dict:
     """Warm the canonical prompt using provisional text; discard all generation.
 
     Standby warms the stable prefix. A speech partial also warms the runtime
@@ -56,6 +57,9 @@ async def prepare(conversation, text: str, response_contract: str, *, idle: bool
     if idle:
         params["request"] = ""
         _PREPARED.pop(conversation.conversation_id, None)
+    elif interruption:
+        # Final admission renders the same cue into the same runtime context.
+        params["speech_interruption"] = interruption
     spec = model_runtime.resolve_model(agent.meta.get("model"), agent.ref)
     if not spec.runtime.startswith("llama.cpp"):
         return {"status": "unsupported"}

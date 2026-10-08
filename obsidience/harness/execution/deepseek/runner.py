@@ -125,7 +125,7 @@ def recall_query(text, conversation_id=None, before_sequence=None):
         return text
     previous = 'Owner: ' + ' '.join(owner['text'].split())[:200]
     reply = next((turn for turn in turns if turn['role'] == 'assistant'
-                  and turn['reply_to'] == owner['id'] and turn['state'] == 'final'), None)
+                  and turn['reply_to'] == owner['id'] and turn['state'] in {'final', 'interrupted'}), None)
     if reply is not None:
         previous += '\nAssistant: ' + ' '.join(reply['text'].split())[:500 - len(previous)]
     return text + '\n\nPrevious exchange:\n' + previous

@@ -190,7 +190,8 @@ class Hindsight:
         for identifier, conversation, user, answer in self._sql(
                 "SELECT u.id,u.conversation_id,u.text,a.text FROM conversation_turns a "
                 "JOIN conversation_turns u ON a.reply_to=u.id WHERE a.role='assistant' "
-                "AND a.state='final' AND u.state='final' AND a.created_at>=? ORDER BY a.created_at", (since,)):
+                "AND a.state IN ('final','interrupted') AND u.state='final' AND a.created_at>=? "
+                "ORDER BY a.created_at", (since,)):
             self.completed("Agents/Executive/Executive", user, answer,
                            source="conversation:" + conversation, identifier=identifier)
         self.writer = ThreadPoolExecutor(max_workers=1, thread_name_prefix="hindsight-outbox")

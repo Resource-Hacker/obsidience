@@ -145,7 +145,8 @@ def historical_evidence(
                 user.get("conversation_id") != conversation_id
                 or assistant.get("conversation_id") != conversation_id
                 or user.get("role") != "user" or assistant.get("role") != "assistant"
-                or user.get("state") != "final" or assistant.get("state") not in {"final", "failed"}
+                or user.get("state") != "final"
+                or assistant.get("state") not in {"final", "interrupted", "failed"}
                 or assistant.get("reply_to") != user.get("id")
                 or not isinstance(run_id, str) or not _OPAQUE_ID.fullmatch(run_id)
             ):
@@ -227,7 +228,7 @@ def historical_public_replies(
         # when the originating request was admitted.
         turns = [turn for turn in turns if turn["created_at"] <= cutoff]
         replied = {turn.get("reply_to") for turn in turns
-                   if turn.get("role") == "assistant" and turn.get("state") == "final"}
+                   if turn.get("role") == "assistant" and turn.get("state") in {"final", "interrupted"}}
         unanswered = {
             turn["id"]: turn for turn in turns
             if turn.get("role") == "user" and turn.get("state") == "final"

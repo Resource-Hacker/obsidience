@@ -524,6 +524,7 @@ class SpeechTimingAudioOutput(LocalAudioOutputTransport):
         if written and not self._first_write and self._playback is not None:
             self._first_write = True
             self._playback.record_timing("first_output_write", timing, since="first_pcm_ns")
+            self._playback.chunk_audible(binding)
         if written and isinstance(frame, TTSAudioRawFrame):
             # The existing transport writes 40 ms PCM chunks at playback pace.
             # RMS follows the spoken syllables without another capture stream,
@@ -1101,6 +1102,10 @@ class PlaybackCommands:
         self._output = None
         self._turn_taking = None
         self._reply_active = False
+        # The latest reply's playback id and how many of its chunks had begun
+        # audible output; owner barge-in reports them before invalidation.
+        self._playing: str | None = None
+        self._audible = 0
 
     def cancel_cues(self) -> None:
         self._ready_cue_binding = None
@@ -1152,6 +1157,7 @@ class PlaybackCommands:
         self.epoch += 1
         self._queued = []
         self._reply, self._chunks, self._closing = None, 0, None
+        self._playing, self._audible = None, 0
         if generation is not None:
             self._controller_ready.set()
         return True
@@ -1201,6 +1207,8 @@ class PlaybackCommands:
         playback_id = command.get("playback_id", "startup")
         opened = command.get("open") is True and isinstance(playback_id, str)
         self._reply = (generation, self.epoch, playback_id) if opened else None
+        self._playing = playback_id if isinstance(playback_id, str) else None
+        self._audible = 0
         self._chunks, self._closing, self._chunk_failed = 1, None, False
         self._queued = [(generation, self.epoch, text, timing, playback_id,
                          None if opened else command.get("outcome"), opened)]
@@ -1245,6 +1253,22 @@ class PlaybackCommands:
     def _closing_cue(self, outcome) -> str | None:
         return ("error" if self._chunk_failed or outcome == "failed"
                 else "complete" if outcome == "completed" else None)
+
+    def chunk_audible(self, binding) -> None:
+        """Count one chunk of the current reply whose first PCM was written."""
+        if (isinstance(binding, dict)
+                and (binding.get("generation"), binding.get("epoch")) == (self.generation, self.epoch)):
+            self._audible += 1
+
+    def interrupted_reply(self) -> dict:
+        """The unfinished reply that owner speech is cutting off, if any.
+
+        ``heard_chunks`` counts its chunks (``speak`` then each ``speak_append``)
+        whose audio had started; the rest was never played.
+        """
+        if self._playing is None or (self._reply is None and not self._chunks):
+            return {}
+        return {"playback_id": self._playing, "heard_chunks": self._audible}
 
     def reply_continues(self, binding) -> bool:
         """True while another chunk of this reply is queued behind it."""
@@ -1317,7 +1341,10 @@ class ObsidienceTaskBridge(FrameProcessor):
         self.playback = playback or PlaybackCommands()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        interrupted = {}
         if isinstance(frame, StartInterruptionFrame) and not frame.metadata.get("obsidience_playback_cancel"):
+            # What owner speech cut off; invalidation forgets the reply.
+            interrupted = self.playback.interrupted_reply()
             self.playback.invalidate(preserve_ready=True)
         await super().process_frame(frame, direction)
         sequence = frame.metadata.get("obsidience_speech_sequence")
@@ -1333,7 +1360,7 @@ class ObsidienceTaskBridge(FrameProcessor):
                      **({"speech_timing": timing} if timing else {}))
         elif isinstance(frame, StartInterruptionFrame):
             if not frame.metadata.get("obsidience_playback_cancel"):
-                emit("interruption", **correlation)
+                emit("interruption", **correlation, **interrupted)
         elif isinstance(frame, TTSSpeakFrame) and not self.playback.accepts(frame):
             return
         elif isinstance(frame, UserStartedSpeakingFrame):

@@ -239,6 +239,9 @@ class RealtimeSessionManager:
         self._playback_timing_stages: set[str] = set()
         self._playback_id: str | None = None
         self._playback_run_id = ""
+        # The current playback's id and the text of each chunk the worker
+        # received (``speak`` then each ``speak_append``), as it counts them.
+        self._spoken: tuple[str, list[str]] | None = None
         self._provisional: ProvisionalReply | None = None
         self.conversation = conversation or conversation_runtime.RUNTIME
 
@@ -688,10 +691,31 @@ class RealtimeSessionManager:
         except Exception:
             self._clear_playback()
             raise
+        # The worker voices a chunk only when its normalized text is nonempty.
+        text = " ".join(str(payload.get("text", "")).split())
+        if payload.get("type") == "speak":
+            self._spoken = (str(payload.get("playback_id") or ""), [text] if text else [])
+        elif (payload.get("type") == "speak_append" and text and self._spoken is not None
+              and self._spoken[0] == payload.get("playback_id")):
+            self._spoken[1].append(text)
+
+    def _heard_reply(self, event: dict[str, Any]) -> list[str] | None:
+        """Chunks of the playing reply whose audio had started at owner barge-in.
+
+        Realtime-mode speech only: a wake-word address starts a new request.
+        """
+        spoken, heard = self._spoken, event.get("heard_chunks")
+        if (self._mode != "realtime" or spoken is None or not self._playback_run_id
+                or not spoken[0] or spoken[0] != self._playback_id
+                or event.get("playback_id") != spoken[0]
+                or type(heard) is not int or not 0 <= heard <= len(spoken[1])):
+            return None
+        return spoken[1][:heard]
 
     def _clear_playback(self) -> None:
         self._playback_id = None
         self._playback_run_id = ""
+        self._spoken = None
         if activity.playback()["status"] != "idle":
             activity.emit_playback("idle")
 
@@ -1361,9 +1385,14 @@ class RealtimeSessionManager:
                                 or self._phase not in READY_PHASES):
                             continue
                         self._trace_speech_boundary(event_type)
+                        # Read before cancellation clears the playback record.
+                        heard, run_id = self._heard_reply(worker_event), self._playback_run_id
                         await self.conversation.cancel(
                             reason="speech.interruption", stop_playback=False,
                         )
+                        if heard is not None:
+                            # Before preparation, which renders the same cue.
+                            await self.conversation.note_speech_interruption(run_id, heard)
                         # Pipecat queues the interruption frames independently
                         # of partial text. Admit the exact pending prefix only
                         # after its own interruption has drained previous work.

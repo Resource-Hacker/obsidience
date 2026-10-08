@@ -46,6 +46,7 @@ VOICE_TRANSPORT_CONTRACT = (
     "Never narrate Task, Tool, transport, or harness status unless asked."
 )
 MAX_EVENT_TEXT = 512
+MAX_INTERRUPTED_QUOTE = 300
 # Optional idle-edge compaction: at this fraction of the model context it prunes
 # large Tool results, then summarizes older history while pressure stays at or
 # above it. Off by default since the provider window (sessions.rebase_window)
@@ -103,6 +104,8 @@ class ConversationRuntime:
         self._warm_state = "waiting"
         self._context_refresh_task: asyncio.Task | None = None
         self._context_refresh_requested: tuple[int, str] | None = None
+        # The spoken reply owner speech last cut off and its audible chunks.
+        self._interrupted_reply: dict | None = None
 
     def readiness(self) -> dict:
         return {"state": self._warm_state, "warm": self._warm_state == "ready"}
@@ -226,7 +229,8 @@ class ConversationRuntime:
                 trace.latency("speech_prefill_started", speech_sequence=sequence)
                 try:
                     result = await prepare(self._conversation, text, SPEECH_RESPONSE_CONTRACT,
-                                           idle=sequence == 0)
+                                           idle=sequence == 0,
+                                           interruption="" if sequence == 0 else self._interruption_cue())
                     if sequence == 0:
                         self._warm_state = "ready" if result["status"] == "prepared" else "unavailable"
                     trace.latency("speech_prefill_completed", speech_sequence=sequence,
@@ -321,6 +325,46 @@ class ConversationRuntime:
             await self._publish_speech("runtime", line=message)
         else:
             self.speech._last_error = None
+
+    async def note_speech_interruption(self, run_id: str, heard: list[str]) -> None:
+        """Owner speech cut off the latest reply while it was being spoken.
+
+        The accepted reply keeps its text and is marked interrupted; the next
+        owner turn learns where it was cut off (see _interruption_cue). A reply
+        not yet accepted has no turn here; its run was cancelled instead.
+        """
+        latest = self._conversation.history(limit=1)
+        turn = latest[-1] if latest else None
+        if (not run_id or turn is None or turn.get("role") != "assistant"
+                or turn.get("state") != "final" or turn.get("run_id") != run_id):
+            return
+        self._interrupted_reply = {"turn_id": turn["id"], "heard": list(heard)}
+        trace.emit("speech", "Spoken reply interrupted by the owner", [json.dumps({
+            "event": "speech.reply_interrupted", "run_id": run_id, "heard_chunks": len(heard),
+        }, sort_keys=True)], {"run_id": run_id})
+        await self._conversation.mark_interrupted(turn["id"])
+
+    def _interruption_cue(self, before_sequence: int | None = None) -> str:
+        """Runtime context for the owner turn directly after an interrupted reply.
+
+        Speech preparation and final admission render the same text, so the
+        prepared prefix still matches; it never enters the cached system prefix.
+        """
+        pending = self._interrupted_reply
+        if pending is None:
+            return ""
+        latest = self._ledger().conversation_turns(
+            self._conversation.conversation_id, before_sequence=before_sequence, limit=1)
+        if not latest or latest[-1]["id"] != pending["turn_id"]:
+            return ""
+        if not pending["heard"]:
+            return "[You were interrupted: the owner started speaking before hearing any of your previous reply.]"
+        # The chunk playing at barge-in; earlier ones were heard, later ones were not.
+        part = pending["heard"][-1]
+        if len(part) > MAX_INTERRUPTED_QUOTE:
+            part = part[:MAX_INTERRUPTED_QUOTE].rstrip() + "…"
+        return (f'[You were interrupted: the owner started speaking while you were saying "{part}" '
+                'and did not hear the rest of your previous reply. Their message may respond to what they heard.]')
 
     async def cancel(self, *, stop_playback: bool = True, reason: str = "requested") -> None:
         await self._cancel_context_refresh()
@@ -481,6 +525,8 @@ class ConversationRuntime:
             })
             if source == "realtime":
                 params["response_contract"] = SPEECH_RESPONSE_CONTRACT
+                if interruption := self._interruption_cue(int(user_turn["sequence"])):
+                    params["speech_interruption"] = interruption
             async def verified_command(name: str, run_id: str) -> None:
                 if source == "realtime" and generation == self._generation and self.speech is not None:
                     # The command's receipt and fresh state are settled now;

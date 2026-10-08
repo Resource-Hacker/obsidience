@@ -61,6 +61,7 @@ _NON_BINDING_PARAMETERS = {
     "source",
     "runtime_context",
     "historical_execution",
+    "speech_interruption",
 }
 
 LAWS = """\
@@ -741,6 +742,8 @@ def activation_messages(task: Note, activation: dict, *, agent_name: str,
     metadata = "\n".join(filter(None, [
         activation.get("provider_activation") or "## Current activation metadata",
         "transport: " + ("voice" if response_contract else "text"),
+        # Owner speech cut off the previous spoken reply (per-turn, never cached).
+        str(activation["params"].get("speech_interruption") or ""),
     ])) if agent else ""
     request = "\n\n".join(filter(None, [
         response_contract if not agent else "",

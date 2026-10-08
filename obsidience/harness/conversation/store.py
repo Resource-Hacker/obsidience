@@ -92,6 +92,23 @@ class ConversationStore:
                 })
             return dict(turn)
 
+    async def mark_interrupted(self, turn_id: str) -> dict | None:
+        """Mark an accepted reply whose speech the owner cut off."""
+        async with self._lock:
+            turn = self.index.mark_conversation_turn_interrupted(turn_id)
+            if turn is None:
+                return None
+            if turn["conversation_id"] == self._conversation_id:
+                for position, current in enumerate(self._turns):
+                    if current["id"] == turn_id:
+                        self._turns[position] = turn
+                self._publish({
+                    "type": "turn",
+                    "conversation_id": turn["conversation_id"],
+                    "turn": dict(turn),
+                })
+            return dict(turn)
+
     async def new_conversation(self) -> dict:
         async with self._lock:
             self._conversation_id = self.index.new_conversation()
@@ -108,7 +125,10 @@ class ConversationStore:
         before_sequence: int | None = None,
         after_sequence: int = 0,
     ) -> list[tuple[dict, dict]]:
-        """Return exact final user/reply pairs from SQLite in user order."""
+        """Return exact final user/reply pairs from SQLite in user order.
+
+        An interrupted reply is still the accepted reply to its request.
+        """
         target_id = conversation_id or self._conversation_id
         turns = self.index.conversation_turns(target_id)
         if before_sequence is not None:
@@ -123,7 +143,7 @@ class ConversationStore:
             (users[turn["reply_to"]], turn)
             for turn in turns
             if turn["role"] == "assistant"
-            and turn["state"] == "final"
+            and turn["state"] in {"final", "interrupted"}
             and turn["reply_to"] in users
         ]
         pairs.sort(key=lambda pair: pair[0]["sequence"])

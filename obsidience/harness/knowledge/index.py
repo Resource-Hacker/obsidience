@@ -2139,7 +2139,7 @@ class Index:
                         raise ValueError("reply_to must name a user turn in this conversation")
                     if state == "final" and self.db.execute(
                         "SELECT 1 FROM conversation_turns WHERE reply_to=? "
-                        "AND role='assistant' AND state='final'",
+                        "AND role='assistant' AND state IN ('final','interrupted')",
                         (reply_to,),
                     ).fetchone():
                         raise ValueError("user turn already has a final assistant reply")
@@ -2214,10 +2214,24 @@ class Index:
             row = self.db.execute(
                 "SELECT " + ",".join(self._CONVERSATION_TURN_COLUMNS)
                 + " FROM conversation_turns WHERE reply_to=? AND role='assistant' "
-                "AND state='final' ORDER BY sequence LIMIT 1",
+                "AND state IN ('final','interrupted') ORDER BY sequence LIMIT 1",
                 (user_turn_id,),
             ).fetchone()
         return dict(zip(self._CONVERSATION_TURN_COLUMNS, row)) if row else None
+
+    def mark_conversation_turn_interrupted(self, turn_id: str) -> dict | None:
+        """Owner speech cut off this accepted spoken reply; its text stays.
+
+        An interrupted reply is still the turn's one accepted reply for every
+        reader; only its delivery was partial.
+        """
+        with self.lock, self.db:
+            changed = self.db.execute(
+                "UPDATE conversation_turns SET state='interrupted' "
+                "WHERE id=? AND role='assistant' AND state='final'",
+                (turn_id,),
+            ).rowcount
+        return self.conversation_turn(turn_id) if changed else None
 
 
     _SOURCE_COLUMNS = (
