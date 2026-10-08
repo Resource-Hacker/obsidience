@@ -344,13 +344,11 @@ def notifications() -> list[dict]:
             reason = row.get('reason', '')
             evidence_gap = ('no complete decision evidence' in reason or 'no complete text-only provider prompt' in reason
                             or 'dependency changed:' in reason or 'original operational outcome is not an instruction grade' in reason)
-            rows.append({**row, 'title': 'Implementation review' if evidence_gap else 'AutoSaddler',
-                         'task': row.get('task', refinement.AUDITOR),
-                         **({'recovery_guidance':
-                             'This historical incident lacks an unchanged, complete decision case. '
-                             'Its original receipts are retained for implementation review. '
-                             'AutoSaddler cannot reconstruct missing observations or replay desktop actions; '
-                             'future eligible decisions are captured automatically.'} if evidence_gap else {})})
+            if evidence_gap or reason.startswith('Awaiting independent accepted decisions'):
+                # No owner action can repair these; they stay in the attention
+                # record and health status instead of Review.
+                continue
+            rows.append({**row, 'title': 'AutoSaddler', 'task': row.get('task', refinement.AUDITOR)})
     return rows
 
 
