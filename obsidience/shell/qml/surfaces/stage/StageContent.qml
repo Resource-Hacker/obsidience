@@ -11,8 +11,15 @@ Item {
     property bool motionActive: false
     property int driftDistance: 32
     property int travelSeconds: 3600
+    // Margins, the inward OLED drift and room for the glow's 12 px blur.
+    readonly property int driftExtent: oledEnabled ? driftDistance : 0
+    readonly property real extentWidth: Math.ceil(identity.anchors.leftMargin
+        + identity.implicitWidth + driftExtent + 24)
+    readonly property real extentHeight: Math.ceil(identity.anchors.topMargin
+        + identity.implicitHeight + driftExtent + 24)
 
     Identity {
+        id: identity
         visible: !content.locked
         oledEnabled: content.oledEnabled
         motionActive: content.motionActive && visible

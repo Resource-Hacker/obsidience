@@ -13,23 +13,24 @@ PanelWindow {
     required property bool locked
     property var windowState: null
     property bool motionAllowed: false
-    readonly property bool stageExposed: !!windowState && windowState.surface_awake !== false
+    readonly property bool stageExposed: !!windowState && !!screen
+        && windowState.surface_awake !== false
         && !(windowState.windows || []).some(window => !window.minimized
             && window.visible_on_workspace !== false
-            && window.local_rect && window.local_rect.width >= stage.width - 12
-            && window.local_rect.height >= stage.height - 12)
+            && window.local_rect && window.local_rect.width >= stage.screen.width - 12
+            && window.local_rect.height >= stage.screen.height - 12)
 
     color: "transparent"
     focusable: false
     exclusiveZone: 0
     aboveWindows: false
-    implicitWidth: screen ? screen.width : 0
-    implicitHeight: screen ? screen.height : 0
+    // Only the wordmark draws here. A layer sized to it and its OLED drift
+    // keeps the compositor from blending a full-output buffer every frame.
+    implicitWidth: content.extentWidth
+    implicitHeight: content.extentHeight
 
     anchors {
         top: true
-        right: true
-        bottom: true
         left: true
     }
 
@@ -40,8 +41,8 @@ PanelWindow {
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
 
     StageContent {
-        width: stage.screen ? stage.screen.width : 0
-        height: stage.screen ? stage.screen.height : 0
+        id: content
+        anchors.fill: parent
         locked: stage.locked
         oledEnabled: stage.surfaceId === "samsung" && stage.shellApi.surfaceLayout.oledModeEnabled
         motionActive: stage.motionAllowed && stage.stageExposed && !stage.locked
