@@ -318,6 +318,10 @@ def public_claim_error(summary: str, context: dict) -> str | None:
             r"\b(?:I(?:['’]ll| will)|we(?:['’]ll| will))\s+(?:try|retry|reconnect|check|keep trying).*\b(?:again|later|moment|shortly|soon|now|find)\b",
             summary, re.I):
         return "TV control failed and no retry is scheduled. Report the current blocker without promising a later action."
+    if context.get("_tv_control_failed") and re.search(
+            r"\b(?:successfully|started playing|is (?:now )?playing)\b", summary, re.I) and not re.search(
+            r"\b(?:cannot|can't|couldn't|unable|unverified|uncertain|not verified)\b", summary, re.I):
+        return "TV verification failed. State that the requested outcome could not be verified; do not report unqualified playback success."
     return _unlock_claim_error(summary, context) or _effect_claim_error(summary, context)
 
 

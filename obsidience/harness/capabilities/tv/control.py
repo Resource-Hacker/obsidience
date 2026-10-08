@@ -115,7 +115,11 @@ def _observe(row, cancel, context):
     output = None
     for _ in range(3):
         before = _focus(row, cancel)
-        png = _adb(row, cancel, 'exec-out', _guard(row) + 'screencap -p')
+        try:
+            png = _adb(row, cancel, 'exec-out', _guard(row) + 'screencap -p')
+        except TimeoutError:
+            after = _focus(row, cancel)
+            break  # Use accessible controls if the screenshot transport stalls.
         after = _focus(row, cancel)
         if before != after:
             continue
