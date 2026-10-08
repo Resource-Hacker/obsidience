@@ -100,6 +100,16 @@ def _recalled(row):
     return {**item, 'text': row['text']}
 
 
+def recall_reply(value) -> dict:
+    """The model-facing reply to the native memory hook's recall request."""
+    return {'notice': value.get('notice'), 'memories': [_recalled(row) for row in value.get('memories', [])]}
+
+
+def memory_message(recalled: dict) -> str:
+    """Exact text of the hook's memory message (JSON.stringify of the reply), or '' when it adds none."""
+    return json.dumps(recalled, ensure_ascii=False, separators=(',', ':')) if recalled['memories'] else ''
+
+
 def prefetch_recall(agent_ref, query):
     """Start the Executive hook's exact Hindsight recall at admission.
 
@@ -468,8 +478,12 @@ async def run_native_session(task, model, messages, allowed, ctx, agent_name, ef
                     'duration_ms': round((time.perf_counter() - recall_started) * 1000, 3)}})
                 # Refs, status and timing stay with graph activity and the trace.
                 # The prompt needs only the notice and each memory's text and date.
-                await reply(message, {'notice': value.get('notice'),
-                                      'memories': [_recalled(row) for row in value.get('memories', [])]})
+                recalled = recall_reply(value)
+                if evaluation is None and (ctx.get('params') or {}).get('conversation_id'):
+                    from .prefill import report_reuse
+                    report_reuse(ctx['params']['conversation_id'],
+                                 messages[1]['content'] if len(messages) > 1 else '', memory_message(recalled))
+                await reply(message, recalled)
             elif method == 'tool':
                 params = message['params']
                 try:

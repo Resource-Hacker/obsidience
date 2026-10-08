@@ -215,7 +215,7 @@ async def compact(conversation_id: str, spec) -> dict:
 
 
 def prefill_messages(conversation_id: str, compiled: list[dict], text: str, *,
-                     preparation_prefix: bool = False) -> list[dict]:
+                     memory: str = '', preparation_prefix: bool = False) -> list[dict]:
     value = view(conversation_id)
     if value is None:
         return compiled
@@ -231,4 +231,8 @@ def prefill_messages(conversation_id: str, compiled: list[dict], text: str, *,
                     'content': [{'type': 'text', 'text': row['content']}]} for row in compiled[1:])
     history.append({'role': 'user', 'source': {'kind': 'user'},
                     'content': [{'type': 'text', 'text': text}]})
+    if memory:
+        # The memory hook appends its message after the owner request.
+        history.append({'role': 'user', 'source': {'kind': 'plugin:obsidience.memory'},
+                        'content': [{'type': 'text', 'text': memory}]})
     return [compiled[0], *wire_messages(history, {}, preparation_prefix=preparation_prefix)]

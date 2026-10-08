@@ -91,7 +91,6 @@ class ConversationRuntime:
         self._steering: TurnSteering | None = None
         self._prefill_task: asyncio.Task | None = None
         self._prefill_latest: tuple[int, str] | None = None
-        self._prepared_native: tuple[str, int] | None = None
         self._warm_state = "waiting"
         self._context_refresh_task: asyncio.Task | None = None
         self._context_refresh_requested: tuple[int, str] | None = None
@@ -115,30 +114,20 @@ class ConversationRuntime:
         if self._prefill_task is None or self._prefill_task.done():
             self._prefill_task = asyncio.create_task(self._prepare_speech(), name="obsidience-executive-standby")
 
-    def _stable_prefix_current(self) -> bool:
-        """Ready standby already warmed the exact prefix a partial would prepare.
-
-        Native preparation stops before request text, Scene and Knowledge. Model
-        work invalidates readiness; any native turn advances the revision.
-        """
-        if self._warm_state != "ready" or self._prepared_native is None:
-            return False
-        from ..execution.deepseek.sessions import view
-        conversation_id, revision = self._prepared_native
-        current = view(conversation_id)
-        return (conversation_id == self._conversation.conversation_id
-                and current is not None and current.get("revision") == revision)
-
     def prepare_speech_prefix(self, text: str, sequence: int) -> None:
-        """Coalesce partials into one cancellable, non-persistent model warmup."""
+        """Coalesce partials into one cancellable, non-persistent model warmup.
+
+        Each warms the runtime context and memory for its own provisional text,
+        beyond the standby prefix, so a partial is never skipped as redundant.
+        """
         if (not text.strip() or len(text) > MAX_EVENT_TEXT
                 or type(sequence) is not int or sequence <= 0
                 or self._lock.locked()
                 or self.speech is None or not self.speech.snapshot()["ready"]
-                or (self._turn_task is not None and not self._turn_task.done())
-                or self._stable_prefix_current()):
+                or (self._turn_task is not None and not self._turn_task.done())):
             return
-        latest = (sequence, text)
+        # The same normalization as the final realtime transcript in submit().
+        latest = (sequence, " ".join(text.split()))
         if latest == self._prefill_latest:
             return
         self._prefill_latest = latest
@@ -151,15 +140,9 @@ class ConversationRuntime:
         try:
             while self._prefill_latest is not None:
                 sequence, text = latest = self._prefill_latest
-                if sequence and self._stable_prefix_current():
-                    # A partial queued behind standby would repeat its exact prefix.
-                    self._prefill_latest = (0, "")
-                    break
                 started = time.monotonic()
-                conversation_id = self._conversation.conversation_id
                 if sequence == 0:
                     self._warm_state = "warming"
-                    self._prepared_native = None
                     if self.speech is not None:
                         await self.speech.publish_readiness()
                 trace.latency("speech_prefill_started", speech_sequence=sequence)
@@ -168,8 +151,6 @@ class ConversationRuntime:
                                            idle=sequence == 0)
                     if sequence == 0:
                         self._warm_state = "ready" if result["status"] == "prepared" else "unavailable"
-                        if self._warm_state == "ready" and result.get("native_revision") is not None:
-                            self._prepared_native = (conversation_id, result["native_revision"])
                     trace.latency("speech_prefill_completed", speech_sequence=sequence,
                                   duration_ms=(time.monotonic() - started) * 1000)
                     trace.emit("measurement", "Executive standby preparation" if sequence == 0 else "Speech prefix preparation", [

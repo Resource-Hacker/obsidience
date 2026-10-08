@@ -586,14 +586,19 @@ class Hindsight:
                   (bank, key, version))
         return True
 
-    async def recall(self, agent_ref, query, *, timeout=0.75, budget="low"):
+    async def recall(self, agent_ref, query, *, timeout=0.75, budget="low", speculative=False):
+        """speculative: a provisional speech-preparation recall. Its result is
+        never supplied to a model turn, so it lights no graph activity and stays
+        out of the recall health statistics."""
         if not self.enabled:
             return {"status": "disabled", "memories": []}
         bank = bank_for(agent_ref)
         started = time.monotonic()
+        def record(result):
+            return result if speculative else self._record_recall(budget, started, result)
         if not self.records.get(bank):
             result = {"status": "empty" if bank in self.records else "unavailable", "memories": []}
-            return self._record_recall(budget, started, result)
+            return record(result)
         # Automatic per-turn recall (Executive hook and Task executor, low budget)
         # supplies at most three memories: in the 2026-10-07 hand labels 20 of 27
         # useful memories ranked in the top three, and a 600-token text cap kept a
@@ -610,15 +615,16 @@ class Hindsight:
                          "type": r.get("fact_type", r.get("type", "")),
                          "occurred_start": r.get("occurred_start"), "mentioned_at": r.get("mentioned_at")}
                         for r in data.get("results", [])[:limit]]
-            from ..execution import activity
-            activity.emit_operation("search", "returned", [r["ref"] for r in memories],
-                                    label="Memories recalled", graph_id="memory:" + bank)
-            return self._record_recall(budget, started, {"status": "returned", "notice": NOTICE, "memories": memories})
+            if not speculative:
+                from ..execution import activity
+                activity.emit_operation("search", "returned", [r["ref"] for r in memories],
+                                        label="Memories recalled", graph_id="memory:" + bank)
+            return record({"status": "returned", "notice": NOTICE, "memories": memories})
         except asyncio.CancelledError:
-            self._record_recall(budget, started, {"status": "interrupted"})
+            record({"status": "interrupted"})
             raise
         except (httpx.HTTPError, TimeoutError, RuntimeError) as exc:
-            return self._record_recall(budget, started, {
+            return record({
                 "status": "unavailable", "notice": "Memory recall unavailable; no historical memory supplied.",
                 "memories": [], "reason": "timeout" if isinstance(exc, (TimeoutError, httpx.TimeoutException)) else "provider_error"})
 
