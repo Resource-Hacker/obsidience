@@ -87,6 +87,8 @@ WAKE_PAUSE_SECS = 0.4
 WAKE_CONFIRM_SECS = 0.35
 WAKE_STRIP = " ,.!?:;—-'’\t\n"
 _WAKE_LEAD = re.compile(r"[\W_]*(?:(?:hey|ok|okay)\b[\W_]*)?", re.IGNORECASE)
+# Short acknowledgements that must not interrupt a playing Realtime reply.
+BACKCHANNEL_PHRASES = ("okay", "uh-huh", "mm-hmm", "yeah", "right")
 # Speech PCM needs level correction independently of the selected device volume.
 # A fixed gain preserves pauses and syllable dynamics across streaming chunks.
 TTS_GAIN = 10.0 ** (9.0 / 20.0)
@@ -489,6 +491,7 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
         self._wake_timeout: asyncio.Task[None] | None = None
         self._mode_waiting_for_stop = False
         self._wake_cue_eligible = False
+        self._completed_pushed = False
 
     async def _reset_wake_scan(self, *, segment_start: bool) -> None:
         confirm, self._wake_confirm = self._wake_confirm, None
@@ -580,6 +583,18 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
             self._wake_confirm = self.create_task(self._confirm_wake(), name="wake-confirm")
         return command
 
+    def _reply_playing(self) -> bool:
+        return self._bot_speaking or bool(self._playback is not None and self._playback._reply_active)
+
+    def is_backchannel(self, text: str) -> bool:
+        # Realtime only, and only over a reply: an addressed wake command and
+        # an answer to a finished reply stay ordinary speech.
+        return self.mode == "realtime" and self._reply_playing() and super().is_backchannel(text)
+
+    def _backchannel_prefix(self, text: str) -> bool:
+        cleaned = self.clean_text(text)
+        return bool(cleaned) and any(phrase.startswith(cleaned) for phrase in self.backchannel_phrases_nopc)
+
     async def _close_wake(self) -> None:
         timeout, self._wake_timeout = self._wake_timeout, None
         if timeout is not None and timeout is not asyncio.current_task():
@@ -625,6 +640,7 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
     async def _handle_completed_text(self, completed_text, direction, is_final=True):
         if not any(character.isalnum() for character in completed_text):
             return
+        self._completed_pushed = True
         await super()._handle_completed_text(completed_text, direction, is_final)
         if is_final and self.mode == "wake":
             await self._close_wake()
@@ -723,17 +739,32 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
             (VADUserStartedSpeakingFrame, VADUserStoppedSpeakingFrame, EndFrame, CancelFrame),
         ):
             await self._cancel_transcript_timeout()
+        had_words = any(character.isalnum() for character in self._user_speaking_buffer)
+        had_sent = self._have_sent_user_started_speaking
+        self._completed_pushed = False
 
         await super().process_frame(frame, direction)
 
         if empty_vad_stop and self._have_sent_user_started_speaking:
             await self._handle_user_interruption(UserStoppedSpeakingFrame())
             self._have_sent_user_started_speaking = False
+        if had_words and not self._user_speaking_buffer.strip() and not self._completed_pushed:
+            # NeMo dropped a backchannel over the reply. It clears its started
+            # flag without a stop edge, which would latch user speech.
+            if self._timing is not None:
+                self._timing.discard()
+            if had_sent and not self._have_sent_user_started_speaking:
+                await self._handle_user_interruption(UserStoppedSpeakingFrame())
 
         if not isinstance(frame, (InterimTranscriptionFrame, TranscriptionFrame)):
             return
         transcript = " ".join(self._user_speaking_buffer.split())
         if not transcript or not any(character.isalnum() for character in transcript):
+            return
+        if (not self._have_sent_user_started_speaking and self._reply_playing()
+                and self.mode == "realtime" and self._backchannel_prefix(transcript)):
+            # A short acknowledgement must not interrupt the reply. NeMo drops
+            # it at the VAD stop; any further word makes it ordinary speech.
             return
         if self._timing is not None:
             self._timing.partial()
@@ -1164,7 +1195,8 @@ async def run(args: argparse.Namespace) -> None:
         use_diar=False,
         max_buffer_size=2,
         bot_stop_delay=0.5,
-        backchannel_phrases=None,
+        # Wake mode ignores them: is_backchannel() is Realtime-only.
+        backchannel_phrases=list(BACKCHANNEL_PHRASES),
     )
     playback._turn_taking = turn_taking
     bridge = ObsidienceTaskBridge(playback)
