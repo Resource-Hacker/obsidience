@@ -407,21 +407,34 @@ def _activation_packet(task: Note, agent: Note | None, spine: dict,
         catalog = runtime_context.pop("assigned_task_catalog", None)
         reference = ""
         if catalog is not None:
-            reference = "## Bindings\n" + json.dumps(
-                {"runtime_context": {"assigned_task_catalog": catalog}},
-                default=str, sort_keys=True,
-            )
+            # An empty catalog tells the model nothing; the trace keeps it.
+            if catalog.get("tasks") or catalog.get("omitted_task_count"):
+                reference = "## Bindings\n" + json.dumps(
+                    {"runtime_context": {"assigned_task_catalog": catalog}},
+                    default=str, sort_keys=True,
+                )
             provider_bindings["runtime_context"] = runtime_context
         volatile_bindings = {}
         if task.kind == "agent":
-            for key in ("conversation_id", "reply_to_turn_id", "working_context"):
-                if key in provider_bindings:
-                    volatile_bindings[key] = provider_bindings.pop(key)
+            # Opaque conversation/turn/activation IDs and the fixed working-context
+            # sentences carry no information for the model; the trace keeps
+            # them. observed_at repeats the local_clock instant.
+            for key in ("conversation_id", "reply_to_turn_id"):
+                provider_bindings.pop(key, None)
+            working = provider_bindings.pop("working_context", None)
+            if isinstance(working, dict):
+                informative = {key: working[key] for key in ("entities", "evidence", "finding")
+                               if working.get(key)}
+                if informative:
+                    volatile_bindings["working_context"] = informative
             if "runtime_context" in provider_bindings:
                 native_context = dict(provider_bindings["runtime_context"])
                 if "local_clock" in native_context:
                     volatile_bindings["local_clock"] = native_context.pop("local_clock")
-                provider_bindings["runtime_context"] = native_context
+                if native_context:
+                    provider_bindings["runtime_context"] = native_context
+                else:
+                    del provider_bindings["runtime_context"]
         provider_sections.update({
             # A real user-message boundary after the stable spine lets the
             # runtime retain an SWA checkpoint across changing Objectives.
@@ -433,8 +446,11 @@ def _activation_packet(task: Note, agent: Note | None, spine: dict,
                 sections["objective"] if task.kind != "agent" else "", observations if identity else "",
                 ("## Bindings\n" + json.dumps(provider_bindings, default=str, sort_keys=True)
                  if catalog is not None or task.kind == "agent" else sections["bindings"]), sections["knowledge"],
-                sections["begin"],
+                sections["begin"] if task.kind != "agent" else "",
             ) if section),
+            # The Executive's fixed closing instruction belongs to its cached
+            # system message rather than every turn's runtime context.
+            "provider_begin": sections["begin"] if task.kind == "agent" else "",
             "provider_activation": (
                 "## Current activation metadata\n" + json.dumps(volatile_bindings, default=str, sort_keys=True)
                 if volatile_bindings else ""
@@ -635,21 +651,30 @@ def activation_messages(task: Note, activation: dict, *, agent_name: str,
                         preparation_prefix: bool = False) -> list[dict]:
     """Render one canonical provider prompt for execution or disposable prefill."""
     from .deepseek.runner import PROTOCOL as NATIVE_PROTOCOL
-    native_session = task.kind == "agent" and bool(activation["params"].get("conversation_id"))
+    from ..conversation.runtime import VOICE_TRANSPORT_CONTRACT
+    agent = task.kind == "agent"
+    native_session = agent and bool(activation["params"].get("conversation_id"))
+    # The Executive's fixed decision protocol, voice reply rules and closing
+    # instruction are identical for every turn and both transports, so they
+    # stay in the cached system message ahead of the native Tool schemas.
     system = "\n\n".join(filter(None, [
         (f"You are {agent_name}, resolving the current owner request in Obsidience."
-         if task.kind == "agent" else
+         if agent else
          f"You are {agent_name}, executing one graph-selected Task in Obsidience."),
         LAWS,
-        llm.PROTOCOL if task.kind != "agent" else "",
+        llm.PROTOCOL if not agent else "",
         activation["provider_system"],
+        "## Decision protocol\n" + NATIVE_PROTOCOL if agent else "",
+        activation.get("provider_begin", "") if agent else "",
+        VOICE_TRANSPORT_CONTRACT if agent else "",
     ]))
-    user = "\n\n".join(filter(None, [
-        activation["provider_user"] if not native_session else "",
-        # Transport-specific reply formatting belongs after the shared prompt.
-        # Gemma places native Tool schemas after its system message; changing
-        # that early prefix for voice would evict Chat's entire Tool cache.
-        response_contract,
+    # Each Executive turn names only its transport; the rules it selects are fixed.
+    metadata = "\n".join(filter(None, [
+        activation.get("provider_activation") or "## Current activation metadata",
+        "transport: " + ("voice" if response_contract else "text"),
+    ])) if agent else ""
+    request = "\n\n".join(filter(None, [
+        response_contract if not agent else "",
         (
             "This is the one continuation of an earlier explicit research wait. "
             "Use the bound controller result, do not repeat task.create, and do not "
@@ -659,30 +684,29 @@ def activation_messages(task: Note, activation: dict, *, agent_name: str,
         ("Excluded Task scopes: " + ", ".join(sorted(active_exclusions))
          + ". Do not perform these Tasks or anything beneath them."
          if active_exclusions else ""),
-        # Keep the native decision instructions beside the current request;
-        # long historical dialogue must not teach the Executive to stop early.
-        NATIVE_PROTOCOL if task.kind == "agent" else "",
-        # Keep fresh activation IDs and clock values after the reusable response
-        # instructions in both disposable preparation and final admission.
-        activation.get("provider_activation", "") if not native_session else "",
+    ]))
+    user = "\n\n".join(filter(None, [
+        activation["provider_user"] if not native_session else "",
+        request,
+        metadata if not native_session else "",
         # The current request follows all historical/contextual data and native
         # guidance. A persistent session appends the native owner message itself.
         ("## Current owner request\n" + activation["objective"]
-         if task.kind == "agent" and not activation["params"].get("conversation_id") else ""),
+         if agent and not activation["params"].get("conversation_id") else ""),
     ]))
     messages = [{"role": "system", "content": system}]
     reference = str(activation.get("provider_reference") or "")
     if native_session:
-        # One runtime-context message with the same sections in the same order.
-        # Each user-message start forces a prompt batch split and an SWA
-        # checkpoint copy. Preparation renders the identical text up to the
-        # fixed reply/decision instructions, so its warm prefix still matches;
+        # One runtime-context message. Each user-message start forces a prompt
+        # batch split and an SWA checkpoint copy. Preparation renders only its
+        # stable leading text (often none), so its warm prefix still matches;
         # query-dependent Knowledge, the live Scene and activation metadata
         # follow only in the real request.
-        sections = [reference, user]
+        sections = [reference, request]
         if not preparation_prefix:
-            sections += [activation["provider_user"], activation.get("provider_activation", "")]
-        messages.append({"role": "user", "content": "\n\n".join(filter(None, sections))})
+            sections += [activation["provider_user"], metadata]
+        if content := "\n\n".join(filter(None, sections)):
+            messages.append({"role": "user", "content": content})
         return messages
     if reference:
         messages.append({"role": "user", "content": reference})

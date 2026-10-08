@@ -172,16 +172,16 @@ def wire_messages(messages: list[dict], images: dict, objective: str = '', *,
     messages = _settled_commands(messages)
     current = [message for message in messages
                if message_producer(message) in {'obsidience.context', 'obsidience.memory'}]
-    preparation_end = None
     if current:
         messages = [message for message in messages if message not in current]
-        owner_turns = [i for i, message in enumerate(messages)
-                       if message.get('source', {}).get('kind') == 'user'
-                       or message_producer(message) == 'obsidience.continuation']
-        position = owner_turns[-2] if len(owner_turns) > 1 else owner_turns[-1] if owner_turns else len(messages)
-        messages[position:position] = current
-        if preparation_prefix:
-            preparation_end = position + len(current)
+    owner_turns = [i for i, message in enumerate(messages)
+                   if message.get('source', {}).get('kind') == 'user'
+                   or message_producer(message) == 'obsidience.continuation']
+    position = owner_turns[-2] if len(owner_turns) > 1 else owner_turns[-1] if owner_turns else len(messages)
+    messages[position:position] = current
+    # Preparation warms through the stable context text, which can be empty;
+    # the pending owner message marks the boundary either way.
+    preparation_end = position + len(current) if preparation_prefix and owner_turns else None
     if preparation_prefix and preparation_end is None:
         raise ValueError('Native preparation requires a compiler-owned context boundary')
     owner_turns = [i for i, message in enumerate(messages)
