@@ -48,7 +48,6 @@ class DeepSeekBridge:
                 ('agent', '@deepseek-ai/dsh-agent'),
                 ('agent-loop', '@deepseek-ai/dsh-agent-loop'),
                 ('token-meter', '@deepseek-ai/dsh-token-meter'),
-                ('tool-result-pruner', '@deepseek-ai/dsh-compaction-tool-result-pruner'),
                 ('compaction', '@deepseek-ai/dsh-compaction-basic'),
                 ('hindsight', str(ROOT / 'hindsight.mjs')),
                 ('obsidience', str(ROOT / 'plugin.mjs')),
@@ -63,10 +62,6 @@ class DeepSeekBridge:
                     entry['config'] = {'includeHarnessIdentity': False, 'includeRuntimeContext': False}
                 elif entry['id'] == 'agent-loop':
                     entry['config'] = {'agents': [], 'maxParallelToolCalls': 1}
-                elif entry['id'] == 'tool-result-pruner':
-                    # Upstream defaults (8,192 characters) never fire on these
-                    # results; a pruned result keeps its head and tail.
-                    entry['config'] = {'thresholdChars': 1500, 'headChars': 600, 'tailChars': 300}
                 elif entry['id'] == 'compaction':
                     from .sessions import compaction_threshold
                     entry['config'] = {'thresholdRatio': compaction_threshold() / 100,
