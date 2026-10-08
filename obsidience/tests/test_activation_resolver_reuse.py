@@ -61,14 +61,14 @@ def test_run_task_passes_its_exact_resolver_to_compiler(execution, monkeypatch):
 def test_context_model_loads_current_canonical_task_without_vault_scan(monkeypatch, reference):
     runtime = ConversationRuntime(NS())
     exact = reference or runtime._last_task_ref
-    task = Note(exact + ".md", "Selected", {"kind": "task", "model": models.QWEN_Q8_MODEL,
+    task = Note(exact + ".md", "Selected", {"kind": "task", "model": "task-selected-model",
                 "assignee": "[[Agents/Research/Research]]"}, "")
     reads = []
     monkeypatch.setattr(vault, "load_note", lambda path: reads.append(path) or task)
     monkeypatch.setattr(vault, "resolver", lambda: pytest.fail("canonical lookup scanned the Vault"))
     selections = []
     monkeypatch.setattr(models, "resolve_model", lambda model, agent: selections.append((model, agent)) or model)
-    assert runtime._context_model(reference) == models.QWEN_Q8_MODEL
+    assert runtime._context_model(reference) == "task-selected-model"
     task.meta["model"] = models.EXECUTIVE_MODEL
     assert runtime._context_model(reference) == models.EXECUTIVE_MODEL
     assert reads == [exact + ".md", exact + ".md"]
@@ -81,12 +81,12 @@ def test_context_model_loads_current_canonical_task_without_vault_scan(monkeypat
 ])
 def test_context_model_preserves_alias_and_missing_fallback(monkeypatch, reference, matched):
     runtime = ConversationRuntime(NS())
-    task = Note("Tasks/query.md", "Query", {"kind": "task", "model": models.QWEN_Q8_MODEL}, "")
+    task = Note("Tasks/query.md", "Query", {"kind": "task", "model": "task-selected-model"}, "")
     reads, resolutions = [], []
     monkeypatch.setattr(vault, "load_note", lambda path: reads.append(path))
     monkeypatch.setattr(vault, "resolver", lambda: NS(resolve=lambda ref: resolutions.append(ref) or (task if matched else None)))
     monkeypatch.setattr(models, "resolve_model", lambda model, _agent: model)
     monkeypatch.setattr(models, "configured_spec", lambda model: model)
-    assert runtime._context_model(reference) == (models.QWEN_Q8_MODEL if matched else models.EXECUTIVE_MODEL)
+    assert runtime._context_model(reference) == ("task-selected-model" if matched else models.EXECUTIVE_MODEL)
     assert resolutions == [reference]
     assert reads == (["Tasks/missing.md"] if reference == "Tasks/missing" else [])

@@ -678,8 +678,6 @@ class RealtimeSessionManager:
                 await model_runtime.reserve_devices(
                     RUNTIME_LEASE_OWNER, (model_runtime.RTX_4080_DEVICE,),
                     yield_when_needed=self._yield_for_model if mode == "wake" else None,
-                    memory_mib={model_runtime.RTX_4080_DEVICE: 6000},
-                    shared_model_ids=(model_runtime.FLASH_NEXT_MODEL,),
                 )
                 self._hardware_leased = True
                 RUNTIME_ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)

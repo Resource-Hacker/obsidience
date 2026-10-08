@@ -545,7 +545,7 @@ Rectangle {
     function modelOptions(task) {
         const options = [{
             "id": "auto",
-            "label": "Auto · " + shortModel(task ? task.resolved_model : "")
+            "label": "Auto · Gemma"
         }]
         for (const model of models) {
             if (model.available) {
@@ -561,17 +561,6 @@ Rectangle {
     function optionIndex(options, id) {
         const index = options.findIndex(option => option.id === id)
         return index >= 0 ? index : 0
-    }
-
-    function shortModel(value) {
-        const lower = String(value || "").toLowerCase()
-        if (lower.includes("qwen")) {
-            return "Qwen"
-        }
-        if (lower.includes("muse")) {
-            return "Muse"
-        }
-        return "Gemma"
     }
 
     function taskDetail(row) {

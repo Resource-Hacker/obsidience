@@ -28,7 +28,6 @@ def allocation(monkeypatch):
     monkeypatch.setattr(models, "_active", AsyncMock(return_value=False))
     monkeypatch.setattr(runtime, "_start", AsyncMock())
     monkeypatch.setattr(runtime, "_stop", AsyncMock())
-    monkeypatch.setattr(runtime, "_perception", AsyncMock())
     monkeypatch.setattr(runtime, "_reconcile_defaults", AsyncMock())
     # VRAM admission measures the live GPUs (NVML); these tests cover reservations
     # and layouts, so every measured profile fits.
@@ -47,25 +46,26 @@ def test_pure_admission_reports_exact_reserved_layout_without_probing(allocation
     monkeypatch.setattr(models, "_healthy", forbidden)
     monkeypatch.setattr(models, "_service_state", forbidden)
     monkeypatch.setattr(models, "gpu_snapshot", forbidden)
+    models.check_resources(models.MODELS[models.EXECUTIVE_MODEL])
+    runtime.device_reservations["gpu-owner"] = (models.RTX_4000_DEVICE,)
     with pytest.raises(models.ModelResourceUnavailable) as failure:
-        models.check_resources(models.MODELS[models.QWEN_Q8_MODEL])
+        models.check_resources(models.MODELS[models.EXECUTIVE_MODEL])
     assert failure.value.as_dict() == {
         "code": "model_resources_reserved",
-        "model_id": models.QWEN_Q8_MODEL,
-        "candidate_layouts": [list(models.GPU_DEVICES)],
-        "reservations": {"realtime-speech": [models.RTX_4080_DEVICE]},
+        "model_id": models.EXECUTIVE_MODEL,
+        "candidate_layouts": [[models.RTX_4000_DEVICE]],
+        "reservations": {"gpu-owner": [models.RTX_4000_DEVICE]},
     }
-    assert "realtime-speech" in str(failure.value)
-    models.check_resources(models.MODELS[models.EXECUTIVE_MODEL])
+    assert "gpu-owner" in str(failure.value)
 
 
 def test_healthy_current_layout_cannot_bypass_reservation(allocation, monkeypatch):
     runtime, _settings = allocation
-    runtime.device_reservations["realtime-speech"] = (models.RTX_4080_DEVICE,)
+    runtime.device_reservations["realtime-speech"] = (models.RTX_4000_DEVICE,)
     monkeypatch.setattr(models, "_healthy", lambda *_args, **_kwargs: True)
-    monkeypatch.setattr(models, "_read_launch", lambda _model: models.GPU_DEVICES)
+    monkeypatch.setattr(models, "_read_launch", lambda _model: (models.RTX_4000_DEVICE,))
     with pytest.raises(models.ModelResourceUnavailable):
-        runtime._pick_devices(models.MODELS[models.QWEN_Q8_MODEL])
+        runtime._pick_devices(models.MODELS[models.EXECUTIVE_MODEL])
 
 
 def test_same_model_uses_only_another_configured_valid_layout(allocation, monkeypatch):
@@ -90,18 +90,18 @@ def test_explicit_device_request_is_not_silently_filtered(allocation, devices):
 
 def test_valid_explicit_but_reserved_layout_has_typed_resource_failure(allocation):
     runtime, _settings = allocation
-    runtime.device_reservations["realtime-speech"] = (models.RTX_4080_DEVICE,)
+    runtime.device_reservations["realtime-speech"] = (models.RTX_4000_DEVICE,)
     with pytest.raises(models.ModelResourceUnavailable):
-        runtime.check_resources(models.MODELS[models.QWEN_Q8_MODEL], list(models.GPU_DEVICES))
+        runtime.check_resources(models.MODELS[models.EXECUTIVE_MODEL], [models.RTX_4000_DEVICE])
 
 
 def test_denied_lease_never_mutates_or_reconciles_hardware(allocation):
     runtime, _settings = allocation
-    runtime.device_reservations["realtime-speech"] = (models.RTX_4080_DEVICE,)
+    runtime.device_reservations["realtime-speech"] = (models.RTX_4000_DEVICE,)
 
     async def exercise():
         with pytest.raises(models.ModelResourceUnavailable):
-            async with runtime.lease(models.MODELS[models.QWEN_Q8_MODEL]):
+            async with runtime.lease(models.MODELS[models.EXECUTIVE_MODEL]):
                 pytest.fail("reserved layout cannot enter the lease")
         assert not runtime.lock.locked()
         assert not runtime.switching and runtime.running_model is None
@@ -109,26 +109,25 @@ def test_denied_lease_never_mutates_or_reconciles_hardware(allocation):
     asyncio.run(exercise())
     runtime._start.assert_not_awaited()
     runtime._stop.assert_not_awaited()
-    runtime._perception.assert_not_awaited()
     runtime._reconcile_defaults.assert_not_awaited()
 
 
 def test_reservation_release_admits_exact_selected_model_and_preserves_profile(allocation):
     runtime, settings = allocation
-    spec = models.configured_spec(models.QWEN_Q8_MODEL)
+    spec = models.configured_spec(models.EXECUTIVE_MODEL)
     before = json.dumps(settings, sort_keys=True)
 
     async def exercise():
-        await runtime.reserve_devices("realtime-speech", (models.RTX_4080_DEVICE,))
+        await runtime.reserve_devices("realtime-speech", (models.RTX_4000_DEVICE,))
         with pytest.raises(models.ModelResourceUnavailable):
             runtime.check_resources(spec)
         await runtime.release_devices("realtime-speech")
         async with runtime.lease(spec) as active:
             assert active == spec
-            assert runtime.running_model == models.QWEN_Q8_MODEL
+            assert runtime.running_model == models.EXECUTIVE_MODEL
 
     asyncio.run(exercise())
-    runtime._start.assert_awaited_once_with(spec, models.GPU_DEVICES)
+    runtime._start.assert_awaited_once_with(spec, (models.RTX_4000_DEVICE,))
     assert json.dumps(settings, sort_keys=True) == before
 
 
@@ -142,9 +141,9 @@ def test_duplicate_reservation_rejected_without_hardware_changes(allocation):
 
 def test_user_delegation_waits_visibly_without_claim_and_resumes_same_fifo(ledger, allocation, monkeypatch):
     runtime, _settings = allocation
-    runtime.device_reservations["realtime-speech"] = (models.RTX_4080_DEVICE,)
+    runtime.device_reservations["realtime-speech"] = (models.RTX_4000_DEVICE,)
     target = vault.load_note("Tasks/research/question.md")
-    vault.mutate_note_metadata(target, lambda meta: meta.update(model=models.QWEN_Q8_MODEL))
+    vault.mutate_note_metadata(target, lambda meta: meta.update(model=models.EXECUTIVE_MODEL))
     target = vault.load_note(target.path)
     before_article = (config.CONFIG.vault_dir / target.path).read_bytes()
     conversation_id = ledger.active_conversation_id()
@@ -180,7 +179,7 @@ def test_user_delegation_waits_visibly_without_claim_and_resumes_same_fifo(ledge
     assert [note.ref for note in due] == [target.ref]
     current = vault.load_note(target.path)
     assert "blocked_reason" not in current.meta
-    assert current.meta["model"] == models.QWEN_Q8_MODEL
+    assert current.meta["model"] == models.EXECUTIVE_MODEL
     assert current.meta["params"] == original and current.meta["event_queue"] == [later]
     assert (config.CONFIG.vault_dir / target.path).read_bytes() == before_article
 
@@ -189,11 +188,11 @@ def test_claim_rechecks_resources_before_starting_or_consuming_occurrence(ledger
     runtime, _settings = allocation
     monkeypatch.setattr(scheduler, "_realtime_allows", lambda _note, _res=None: True)
     target = vault.load_note("Tasks/research/question.md")
-    vault.mutate_note_metadata(target, lambda meta: meta.update(model=models.QWEN_Q8_MODEL))
+    vault.mutate_note_metadata(target, lambda meta: meta.update(model=models.EXECUTIVE_MODEL))
     scheduler.enqueue_event(target, {"event": "task.create", "activation_key": "exact"})
     target = vault.load_note(target.path)
     scheduler._claim(target)
-    runtime.device_reservations["realtime-speech"] = (models.RTX_4080_DEVICE,)
+    runtime.device_reservations["realtime-speech"] = (models.RTX_4000_DEVICE,)
     run = AsyncMock()
     monkeypatch.setattr(scheduler, "run_task", run)
     asyncio.run(scheduler._run_claimed(target))
@@ -207,18 +206,18 @@ def test_due_schedule_stays_pending_until_same_model_layout_is_released(ledger, 
     monkeypatch.setattr(scheduler, "_realtime_allows", lambda _note, _res=None: True)
     target = vault.load_note("Tasks/research/question.md")
     vault.mutate_note_metadata(target, lambda meta: meta.update(
-        model=models.QWEN_Q8_MODEL, schedule="* * * * *", status="completed", last_run="previous",
+        model=models.EXECUTIVE_MODEL, schedule="* * * * *", status="completed", last_run="previous",
     ))
     scheduler._last_fired[target.ref] = 60.0
     monkeypatch.setattr(scheduler.time, "time", lambda: 121.0)
-    runtime.device_reservations["realtime-speech"] = (models.RTX_4080_DEVICE,)
+    runtime.device_reservations["realtime-speech"] = (models.RTX_4000_DEVICE,)
     assert scheduler.due_tasks() == []
     current = vault.load_note(target.path)
     # A resource-blocked cron firing is skipped without rewriting the Task;
     # the unchanged _last_fired keeps it due for the next tick.
     assert current.meta["status"] == "completed" and current.meta["last_run"] == "previous"
     assert scheduler._last_fired[target.ref] == 60.0
-    assert current.meta["model"] == models.QWEN_Q8_MODEL
+    assert current.meta["model"] == models.EXECUTIVE_MODEL
     asyncio.run(runtime.release_devices("realtime-speech"))
     assert [note.ref for note in scheduler.due_tasks()] == [target.ref]
     assert scheduler._last_fired[target.ref] == 60.0
@@ -241,12 +240,12 @@ def test_executor_resource_race_does_not_consume_scheduled_firing(ledger, alloca
 
 def test_direct_unavailable_model_override_is_rejected_without_changing_saved_task(ledger, allocation, monkeypatch):
     runtime, _settings = allocation
-    runtime.device_reservations["realtime-speech"] = (models.RTX_4080_DEVICE,)
+    runtime.device_reservations["realtime-speech"] = (models.RTX_4000_DEVICE,)
     monkeypatch.setattr(scheduler, "_realtime_allows", lambda _note, _res=None: True)
     target = vault.load_note("Tasks/query.md")
     before = dict(target.meta)
     with pytest.raises(models.ModelResourceUnavailable):
-        scheduler.launch(target, model=models.QWEN_Q8_MODEL)
+        scheduler.launch(target, model=models.EXECUTIVE_MODEL)
     assert scheduler._running == set()
     assert vault.load_note(target.path).meta == before
     assert ledger.runs() == []
@@ -261,12 +260,12 @@ def test_late_conflict_does_not_requeue_ephemeral_launch_as_saved_model(ledger, 
     monkeypatch.setattr(scheduler, "run_task", run)
 
     async def exercise():
-        pending = scheduler.launch(target, model=models.QWEN_Q8_MODEL)
-        runtime.device_reservations["realtime-speech"] = (models.RTX_4080_DEVICE,)
+        pending = scheduler.launch(target, model=models.EXECUTIVE_MODEL)
+        runtime.device_reservations["realtime-speech"] = (models.RTX_4000_DEVICE,)
         await pending
 
     asyncio.run(exercise())
-    run.assert_awaited_once_with(target, model=models.QWEN_Q8_MODEL)
+    run.assert_awaited_once_with(target, model=models.EXECUTIVE_MODEL)
     assert vault.load_note(target.path).meta == before
     assert scheduler._running == set()
     assert target.ref not in scheduler._last_fired
@@ -284,7 +283,7 @@ def test_resource_failure_after_effect_does_not_replay_bound_occurrence_at_next_
         id="after-effect", task_ref=target.ref, agent="test", started=1, finished=2,
         status="failed", summary="Resource conflict after a committed effect.", trace=json.dumps([
             {"tool": "source.handoff", "obs": "Returned committed effect."},
-            {"resource_blocked_after_effect": {"model_id": models.QWEN_Q8_MODEL}, "must_not_replay": True},
+            {"resource_blocked_after_effect": {"model_id": models.EXECUTIVE_MODEL}, "must_not_replay": True},
         ]),
     )
     scheduler._last_fired[target.ref] = 1

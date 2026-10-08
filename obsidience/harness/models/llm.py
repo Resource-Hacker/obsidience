@@ -19,7 +19,7 @@ from httpx_sse import aconnect_sse
 
 from ..config import CONFIG
 from . import runtime as model_runtime
-from .runtime import FLASH_NEXT_MODEL, MODELS, MUSE_MODEL, QWEN_MODELS, ModelSpec
+from .runtime import ModelSpec
 
 ACTION_RE = re.compile(r"```(?:action|json)?\s*(\{.*?\})\s*```", re.DOTALL)
 
@@ -147,19 +147,11 @@ def _chat_payload(messages: list[dict], spec: ModelSpec, *, max_tokens: int | No
             messages[0]["content"] += "\n\n" + guidance
         else:
             messages.insert(0, {"role": "system", "content": guidance})
-    if spec.id == MUSE_MODEL:
-        # Muse always reasons. The Task's None setting intentionally selects
-        # its lowest supported strength instead of claiming reasoning is off.
-        template_kwargs = {
-            "reasoning_strength": "low" if reasoning_effort == "none" else reasoning_effort
-        }
     payload = {
         "model": spec.id,
         "messages": messages,
         "max_tokens": max_tokens or spec.max_output_tokens,
-        "temperature": (
-            1.0 if spec.id in QWEN_MODELS and temperature is None else selected_temperature
-        ),
+        "temperature": selected_temperature,
         "stream": True,
         "stream_options": {"include_usage": True},
         # Reasoning remains Task-selected and private. Constrain only the public
@@ -167,18 +159,6 @@ def _chat_payload(messages: list[dict], spec: ModelSpec, *, max_tokens: int | No
         "response_format": {"type": "json_object"},
         "chat_template_kwargs": template_kwargs,
     }
-    if spec.id in QWEN_MODELS:
-        payload.update({
-            "top_p": 0.95,
-            "top_k": 20,
-            "min_p": 0.0,
-            "presence_penalty": 0.0,
-        })
-    if spec.id == FLASH_NEXT_MODEL:
-        payload.update(temperature=1.0 if temperature is None else selected_temperature,
-                       top_p=0.95, top_k=20, min_p=0.0, presence_penalty=0.0,
-                       reasoning_effort={"none": "none", "low": "low", "medium": "medium",
-                                         "high": "high", "xhigh": "high"}[reasoning_effort])
     if response_schema is not None:
         payload["response_format"] = {
             "type": "json_schema",
@@ -197,15 +177,9 @@ def _chat_payload(messages: list[dict], spec: ModelSpec, *, max_tokens: int | No
                                                                 completion_blocked=completion_blocked,
                                                                 proposal_mode=proposal_mode)},
             }
-    if reasoning_effort != "none" or spec.id == MUSE_MODEL:
+    if reasoning_effort != "none":
         payload["reasoning_format"] = "auto"
         payload["reasoning_budget_tokens"] = spec.reasoning_budgets[reasoning_effort]
-        if spec.id in QWEN_MODELS:
-            # Qwen3.8 natively defines low, medium, and xhigh. Keep High as a
-            # smaller-budget xhigh mode while XHigh grants the full Task budget.
-            payload["reasoning_effort"] = {
-                "low": "low", "medium": "medium", "high": "xhigh", "xhigh": "xhigh",
-            }[reasoning_effort]
     return payload
 
 

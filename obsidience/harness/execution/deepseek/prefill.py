@@ -23,8 +23,7 @@ async def prepare(conversation, text: str, response_contract: str, *, idle: bool
     if idle:
         params["request"] = ""
     spec = model_runtime.resolve_model(agent.meta.get("model"), agent.ref)
-    if not (spec.runtime.startswith("llama.cpp")
-            or (spec.id == model_runtime.FLASH_NEXT_MODEL and spec.supports_input_token_limit)):
+    if not spec.runtime.startswith("llama.cpp"):
         return {"status": "unsupported"}
     effort = llm.normalize_reasoning_effort(agent.meta.get("reasoning_effort", "none"))
     if not idle and effort == 'none':
@@ -45,8 +44,7 @@ async def prepare(conversation, text: str, response_contract: str, *, idle: bool
         # A cold persisted conversation can exceed the short speculative-speech
         # budget. Idle preparation still yields immediately to foreground work;
         # allow its full prefix to finish instead of repeatedly discarding it.
-        idle_timeout = 300 if spec.id == model_runtime.FLASH_NEXT_MODEL else 60
-        async with asyncio.timeout(idle_timeout if idle else 10):
+        async with asyncio.timeout(60 if idle else 10):
             conversation_id = conversation.conversation_id
             from .sessions import refresh, prefill_messages
             native = await refresh(conversation_id)
@@ -72,7 +70,7 @@ async def prepare(conversation, text: str, response_contract: str, *, idle: bool
             # past the shared prefix evicts the checkpoint needed when final
             # admission replaces query-dependent context and adds fresh memory.
             # Stop at the compiler boundary; the real request keeps every block.
-            preparation_prefix = bool(native) or spec.id == model_runtime.FLASH_NEXT_MODEL
+            preparation_prefix = bool(native)
             messages = activation_messages(
                 agent, activation, agent_name=agent.title, response_contract=response_contract,
                 preparation_prefix=preparation_prefix,

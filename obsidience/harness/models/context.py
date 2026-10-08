@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 
 import httpx
 
-from .runtime import FLASH_NEXT_MODEL, ModelSpec, model_auth_headers
+from .runtime import ModelSpec, model_auth_headers
 
 PROMPT_SAFETY_TOKENS = 256
 _TEXT_COUNTS: OrderedDict[tuple, int] = OrderedDict()
@@ -140,18 +140,8 @@ class ContextBudgetExceeded(ValueError):
 
 async def measure_payload(payload: dict, spec: ModelSpec, client: httpx.AsyncClient) -> PayloadCount:
     """Count exactly the same request that will be sent to chat/completions."""
-    if spec.runtime.startswith("llama.cpp") or spec.id == FLASH_NEXT_MODEL:
-        url = spec.base_url + "/chat/completions/input_tokens"
-        body = payload
-    else:
-        url = spec.base_url.removesuffix("/v1") + "/tokenize"
-        body = {"model": spec.id, "messages": payload["messages"],
-                "add_generation_prompt": True,
-                "chat_template_kwargs": payload.get("chat_template_kwargs", {})}
-        if payload.get("tools"):
-            body["tools"] = payload["tools"]
     try:
-        response = await client.post(url, json=body, timeout=3)
+        response = await client.post(spec.base_url + "/chat/completions/input_tokens", json=payload, timeout=3)
         response.raise_for_status()
         data = response.json()
         if not isinstance(data, dict):

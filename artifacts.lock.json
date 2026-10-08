@@ -158,7 +158,7 @@
       "repository": "https://github.com/ggml-org/llama.cpp",
       "revision": "b21e4de74567f5eef213765c9476a843c2e43f0d",
       "license": "MIT",
-      "integration": "Installed llama-fit-params --fit-print on estimates full GPU model/context/compute memory from the exact configured profile; cached by artifact/profile/launcher identity. Does not fit down context, change precision, run inference or offload layers. Existing vLLM profiles retain their configured GPU utilization budgets."
+      "integration": "Installed llama-fit-params --fit-print on estimates full GPU model/context/compute memory from the exact configured profile; cached by artifact/profile/launcher identity. Does not fit down context, change precision, run inference or offload layers."
     },
     "autosaddler_v2": {
       "repository": "https://github.com/microsoft/AutoSaddler",
@@ -335,54 +335,6 @@
       "patch": "obsidience/scripts/patches/llama-cpp-exact-input-admission-b11509.patch",
       "patch_sha256": "27cf3b20af1ed46e657fe4b263f4d69eb32a51639a07b77ab45352c91b6dc71d",
       "integration": "Selected 2026-10-08. Only the exact-input admission patch is carried (rebased, behaviour unchanged); the Jinja filter-scope fix is upstream (#29776). Launcher adds --no-reasoning-preserve (keeps b10078 prompt bytes) and --checkpoint-min-step 1024 (#28302 fixed the eviction behind the old 0 setting). Measured live: cold 39.7K-token prefill 26.9 s at min-step 0 vs 15.6 s at 1024 (b10078: 28.0 s); warm simple turns 1.56-1.66 s vs 1.79-2.01 s on b10078; VRAM 17,716 MiB. /v1/models now requires the API key (#26347); the Harness health probe sends it."
-    },
-    "strata_dualgpu_ada": {
-      "repository": "https://github.com/Hardin22/Strata-DualGPU",
-      "revision": "03a5ec955ba152a5f499a18a0f2f2ac192309c28",
-      "version": "0.1.38",
-      "license": "MIT",
-      "source_path": "/var/lib/ai/src/obsidience-strata-evaluation-20261005/dualgpu",
-      "path": "/var/lib/ai/src/obsidience-strata-evaluation-20261005/dualgpu/build-sm89-latency-final/strata",
-      "sha256": "dcca93e271b362a999dce1bccb13b5fa38005ac27fe23a772bb9aaeb71597d65",
-      "build": "Release GCC15.3/CUDA13.4, compute_89/sm_89; 57 Ada cubins. Primary prefill ring reservation, bounded/coalesced tail-message checkpoints and ownership-aware prompt chunk sizing patches; upstream AVX512 CPU dispatch.",
-      "integration": "Existing ModelRuntime supervises loopback8096 with exact manifest receipts, dual UUID ordering and speech reservation. Patched upstream server implements exact whole-request input_tokens and pre-enqueue input_token_limit including images, plus disconnect cancellation checked during prefill every100ms with the existing STOP/DONE drain. No second agent/session/tool owner.",
-      "patch_evidence": "/home/wissenschafter/backups/obsidience-strata-dualgpu-20261005T190856Z/strata-admission.patch",
-      "memory_patch_evidence": "/home/wissenschafter/backups/obsidience-strata-dualgpu-20261005T190856Z/engine-memory-stage/primary-prefill-ring.patch",
-      "latency_patch_evidence": [
-        "/home/wissenschafter/backups/obsidience-flash-latency-20261005T205352Z/engine-stage/tail-message-checkpoints.patch",
-        "/home/wissenschafter/backups/obsidience-flash-latency-20261005T205352Z/coalesce-checkpoints.patch",
-        "/home/wissenschafter/backups/obsidience-flash-latency-20261005T205352Z/own-buffers-stage/own-buffers.patch",
-        "/home/wissenschafter/backups/obsidience-flash-latency-20261005T205352Z/prompt-cancellation.patch",
-        "/home/wissenschafter/backups/obsidience-flash-latency-20261005T205352Z/launcher-reserve.patch"
-      ]
-    },
-    "obsidience_flash_next_swift15": {
-      "repository": "https://huggingface.co/ukisai/Swift-1.5-Qwen3.8-Flash-Next-GSQ-RCO-GGUF",
-      "revision": "b22d729eae29b5796f76fb70f91aef549b9fc52c",
-      "license": "Swift Open License v1.0; Qwen Community License1.0 base",
-      "quantization": "IQ3_XXS",
-      "manifest": "/var/lib/ai/models/obsidience-flash-next-20261005/strata-manifest.json",
-      "files": {
-        "Swift-Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00001-of-00002.gguf": "3bddaa667c750f63baca766df9433e1afd35a139f401c5ca5e7ff560ceff3d23",
-        "Swift-Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00002-of-00002.gguf": "b0b15f782af71eb471909d2f3313b2927c324962f86c084325c247cd411a0160",
-        "mmproj-Qwen3.8-Flash-Next-BF16.gguf": "cd1140f4abba943ce8d9fa92fed8407e389954d26907efde7b72153c75bd8a60"
-      },
-      "integration": "Owner-selected nongaming Executive profile on both Ada GPUs. Full512-expert model, original verified MTP proposals,64Kcontext/int8KV; GPU experts plus full pinned CPU complement; PLE memory mapped. Saved Gemma remains separate gaming rollback."
-    },
-    "obsidience_flash_next_original_candidate": {
-      "repository": "https://huggingface.co/ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF",
-      "revision": "ed59f92082b1e93c0e96d60a8b11aab089b52f09",
-      "license": "Qwen Community License1.0 base; preserve publisher notices",
-      "quantization": "IQ3_S",
-      "path": "/var/lib/ai/models/obsidience-flash-next-20261005/original-iq3-s",
-      "integration": "Downloaded, packed and qualified comparison alternative; inactive. Exact file receipts and benchmark evidence in /home/wissenschafter/backups/obsidience-strata-dualgpu-20261005T190856Z"
-    },
-    "obsidience_flash_next_stock_mtp": {
-      "repository": "https://huggingface.co/Qwen/Qwen3.8-Flash-Next",
-      "revision": "de4b8e4d43b917e7706784d8bb445c9af86a3540",
-      "license": "Qwen Community License1.0",
-      "path": "/var/lib/ai/models/obsidience-flash-next-20261005/mtp/rt",
-      "integration": "Range-verified official MTP tensors packed to native Q2 expert/dense artifacts;40525-token English proposal subset. Target verifies proposals against its complete vocabulary."
     },
     "hassil": {
       "repository": "https://github.com/OHF-Voice/hassil",
