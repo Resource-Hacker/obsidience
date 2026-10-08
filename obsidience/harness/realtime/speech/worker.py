@@ -1220,6 +1220,12 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    from loguru import logger
+
+    # NeMo/Pipecat DEBUG lines carry recognized words. Stderr is the Harness's
+    # crash diagnostic tail, so keep only warnings and errors there.
+    logger.remove()
+    logger.add(sys.stderr, level="WARNING")
     try:
         asyncio.run(run(parser().parse_args()))
     except KeyboardInterrupt:

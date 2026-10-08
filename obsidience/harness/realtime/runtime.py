@@ -37,9 +37,23 @@ MAX_EVENTS = 80
 MAX_WORKER_EVENT_BYTES = 16_384
 RUNTIME_LEASE_OWNER = "obsidience-realtime"
 REALTIME_CONFIRMATION = "Realtime active."
+STDERR_TAIL_LINES = 40
+# One automatic recovery per crash window; a repeat within it stays in error.
+CRASH_RESTART_DELAY_SECS = 2.0
+CRASH_RESTART_WINDOW_SECS = 300.0
+AUDIO_MONITOR_BACKOFF_SECS = (1.0, 2.0, 4.0, 8.0, 16.0, 30.0)
+PULSE_SOCKET = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "pulse" / "native"
 
 
 _input_speech_timing = trace.input_speech_timing
+
+
+def _exit_description(returncode: int) -> str:
+    if returncode < 0:
+        with contextlib.suppress(ValueError):
+            return f"signal {signal.Signals(-returncode).name}"
+        return f"signal {-returncode}"
+    return f"code {returncode}"
 
 
 class RealtimeSessionManager:
@@ -48,6 +62,10 @@ class RealtimeSessionManager:
         self._lock = asyncio.Lock()
         self._process: asyncio.subprocess.Process | None = None
         self._monitor: asyncio.Task[None] | None = None
+        self._stderr_drain: asyncio.Task[None] | None = None
+        self._restart_task: asyncio.Task[None] | None = None
+        self._crash_restart_at: float | None = None
+        self._last_exit: dict[str, Any] | None = None
         self._audio_monitor: asyncio.Task[None] | None = None
         self._audio_reconnect_pending = False
         self._audio_reconnect_attempt: tuple | None = None
@@ -133,6 +151,7 @@ class RealtimeSessionManager:
             "pid": None if process is None or process.returncode is not None else process.pid,
             "started_monotonic_ns": self._started_ns,
             "last_error": self._last_error,
+            "last_exit": self._last_exit,
             "vision_source": self._vision_source,
             "audio_source": self._audio_source,
             "audio_sink": self._audio_sink,
@@ -164,10 +183,15 @@ class RealtimeSessionManager:
         queued_reply = self._deferred_reply and self._phase in {"suspended", "starting"}
         if kind == "state" and self._phase not in READY_PHASES and not queued_reply:
             self._clear_playback()
+        state = self.snapshot()
+        if state["last_exit"] is not None:
+            # Streamed state stays small; GET /api/realtime keeps the tail.
+            state["last_exit"] = {key: value for key, value in state["last_exit"].items()
+                                  if key != "stderr_tail"}
         event = {
             "type": kind,
             "monotonic_ns": time.monotonic_ns(),
-            "state": self.snapshot(),
+            "state": state,
             **payload,
         }
         self._events.append(event)
@@ -245,7 +269,32 @@ class RealtimeSessionManager:
             self._last_error = f"Audio reconnection failed: {exc}"[:MAX_EVENT_TEXT]
             await self._publish("state", reason="audio_reconnect_failed")
 
+    def _ensure_audio_monitor(self) -> None:
+        if self._audio_monitor is None or self._audio_monitor.done():
+            self._audio_monitor = asyncio.create_task(
+                self._watch_audio_devices(), name="obsidience-audio-hotplug",
+            )
+
     async def _watch_audio_devices(self) -> None:
+        """One device subscription while voice is wanted, recreated after Pulse restarts."""
+        attempt = 0
+        while not self._closed:
+            started = time.monotonic()
+            await self._subscribe_audio_devices(restored=attempt > 0)
+            if time.monotonic() - started >= 60:
+                attempt = 0
+            # Bounded backoff, never a tight loop. While voice is off, start()
+            # recreates this watcher instead.
+            while not self._closed and self._desired_mode != "off":
+                await asyncio.sleep(AUDIO_MONITOR_BACKOFF_SECS[
+                    min(attempt, len(AUDIO_MONITOR_BACKOFF_SECS) - 1)])
+                attempt += 1
+                if PULSE_SOCKET.exists():
+                    break
+            if self._closed or self._desired_mode == "off":
+                return
+
+    async def _subscribe_audio_devices(self, *, restored: bool = False) -> None:
         subscription = None
         try:
             subscription = await asyncio.create_subprocess_exec(
@@ -253,6 +302,9 @@ class RealtimeSessionManager:
                 stderr=asyncio.subprocess.DEVNULL, env={**os.environ, "LC_ALL": "C"},
             )
             assert subscription.stdout is not None
+            if restored and (self._last_error or "").startswith("Audio hotplug monitor failed"):
+                self._last_error = None
+                await self._publish("state", reason="audio_monitor_restored")
             await self._audio_devices_changed()
             while line := await subscription.stdout.readline():
                 if self._closed:
@@ -464,6 +516,9 @@ class RealtimeSessionManager:
 
         if self._process is not None:
             return await self.set_listening_mode(mode)
+        if self._unsubscribe_activity is not None:
+            # restore() owns the device watcher; it ends while voice is off.
+            self._ensure_audio_monitor()
         if mode == "wake":
             # Arming passive listening is not foreground work. If another
             # agent owns the model, its release event starts this same worker.
@@ -492,10 +547,7 @@ class RealtimeSessionManager:
         if path is None:
             return self.snapshot()
         self._closed = False
-        if self._audio_monitor is None or self._audio_monitor.done():
-            self._audio_monitor = asyncio.create_task(
-                self._watch_audio_devices(), name="obsidience-audio-hotplug",
-            )
+        self._ensure_audio_monitor()
         if self._unsubscribe_activity is None:
             self._unsubscribe_activity = model_runtime.RUNTIME.subscribe_activity(self._model_activity)
             self._standby_task = asyncio.create_task(self._standby(), name="obsidience-voice-standby")
@@ -616,7 +668,8 @@ class RealtimeSessionManager:
                     },
                     stdin=asyncio.subprocess.PIPE,
                     stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.STDOUT,
+                    # Its own pipe: stdout carries only bounded JSON events.
+                    stderr=asyncio.subprocess.PIPE,
                     start_new_session=True,
                 )
                 model_runtime.RUNTIME.set_reservation_process(RUNTIME_LEASE_OWNER, self._process.pid)
@@ -823,6 +876,13 @@ class RealtimeSessionManager:
         assert process.stdout is not None
         pending_partial: tuple[int, str] | None = None
         prepared_sequence = 0
+        stderr_tail: deque[str] = deque(maxlen=STDERR_TAIL_LINES)
+        stderr = getattr(process, "stderr", None)
+        if stderr is not None:
+            # Drain until EOF so a chatty worker can never block on its pipe.
+            self._stderr_drain = asyncio.create_task(
+                self._drain_stderr(stderr, stderr_tail), name="obsidience-speech-stderr",
+            )
         try:
             while True:
                 raw = await process.stdout.readline()
@@ -1085,6 +1145,11 @@ class RealtimeSessionManager:
                 }:
                     await self._publish("runtime", line=display_line)
             returncode = await process.wait()
+            drain = self._stderr_drain
+            if stderr is not None and drain is not None and not drain.done():
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(asyncio.shield(drain), timeout=1)
+            restart = False
             async with self._lock:
                 if operation != self._operation or self._process is not process:
                     return
@@ -1120,8 +1185,32 @@ class RealtimeSessionManager:
                 else:
                     self._phase = "error"
                     self._transport_ready = False
-                    self._last_error = self._last_error or f"live runtime exited {returncode}"
+                    exited = f"Speech worker exited with {_exit_description(returncode)}"
+                    self._last_error = (self._last_error or (
+                        exited + (f": {stderr_tail[-1]}" if stderr_tail else "")
+                    ))[:MAX_EVENT_TEXT]
+                    now = time.monotonic()
+                    # One automatic recovery; a second exit within the window
+                    # stays in error. Stops and audio loss never reach here.
+                    restart = (not self._closed and self._desired_mode in {"wake", "realtime"}
+                               and (self._crash_restart_at is None
+                                    or now - self._crash_restart_at > CRASH_RESTART_WINDOW_SECS))
+                    self._last_exit = {
+                        "returncode": returncode,
+                        "description": _exit_description(returncode),
+                        "monotonic_ns": time.monotonic_ns(),
+                        "stderr_tail": list(stderr_tail),
+                        "automatic_restart": restart,
+                    }
+                    trace.emit("error", exited, [json.dumps({
+                        "event": "speech.worker_exited", "returncode": returncode,
+                        "automatic_restart": restart,
+                    }, sort_keys=True)])
                 await self._publish("state", reason="process_exited", returncode=returncode)
+                if restart:
+                    self._restart_task = asyncio.create_task(
+                        self._restart_after_exit(operation), name="obsidience-speech-restart",
+                    )
             await self.conversation.finalize_pending(
                 "",
                 session_boundary="realtime.runtime_exited",
@@ -1140,8 +1229,47 @@ class RealtimeSessionManager:
                     # A failed monitor cannot release a live worker's GPU or
                     # another operation's lease. Stop retains exact ownership.
 
+    @staticmethod
+    async def _drain_stderr(stream: asyncio.StreamReader, tail: deque[str]) -> None:
+        while True:
+            try:
+                line = await stream.readline()
+            except ValueError:
+                tail.append("[stderr line exceeded the pipe buffer]")
+                continue
+            except Exception:
+                return
+            if not line:
+                return
+            text = line.decode("utf-8", errors="replace").rstrip()
+            if text:
+                tail.append(text[:300])
+
+    async def _restart_after_exit(self, operation: int) -> None:
+        try:
+            await asyncio.sleep(CRASH_RESTART_DELAY_SECS)
+            if (self._closed or self._process is not None or self._operation != operation
+                    or self._phase != "error" or self._audio_reconnect_pending
+                    or self._desired_mode not in {"wake", "realtime"}):
+                return
+            self._crash_restart_at = time.monotonic()
+            trace.emit("speech", "Speech worker restarting after an unexpected exit")
+            await self.start(mode=self._desired_mode)
+        except Exception as exc:  # noqa: BLE001 - the failure stays visible, never retried
+            self._phase = "error"
+            self._last_error = f"Automatic speech restart failed: {type(exc).__name__}: {exc}"[:MAX_EVENT_TEXT]
+            await self._publish("state", reason="restart_failed")
+        finally:
+            if self._restart_task is asyncio.current_task():
+                self._restart_task = None
+
     async def shutdown(self) -> None:
         self._closed = True
+        if self._restart_task is not None:
+            self._restart_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._restart_task
+            self._restart_task = None
         if self._audio_monitor is not None:
             self._audio_monitor.cancel()
             with contextlib.suppress(asyncio.CancelledError):
