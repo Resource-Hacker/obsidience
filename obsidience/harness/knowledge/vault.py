@@ -163,20 +163,71 @@ def load_note(rel_path: str | Path) -> Note | None:
         )
 
 
+# One parsed snapshot per scope. A file's parse is reused only while its exact
+# stat identity (mtime, ctime, size, inode) is unchanged, so every writer and
+# external edit is seen on the next scan. Each call still returns private
+# metadata copies and projects current Task runtime state.
+_SNAPSHOTS: dict[bool, tuple[Path, dict[str, tuple]]] = {}
+
+
+def _article_files(include_system: bool) -> list[tuple[tuple[str, ...], os.stat_result]]:
+    """Article files in Path order, never walking trees iter_notes excludes."""
+    found = []
+
+    def walk(directory: str, parts: tuple[str, ...]) -> None:
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                name = entry.name
+                if name.startswith("."):
+                    continue
+                rel = (*parts, name)
+                if entry.is_dir(follow_symlinks=False):
+                    if not parts and (name in SOURCE_DIRS
+                                      or (not include_system and name in SYSTEM_DIRS)):
+                        continue
+                    walk(entry.path, rel)
+                elif name.endswith(".md") and name.lower() not in {"index.md", "log.md"}:
+                    try:
+                        if entry.is_file():
+                            found.append((rel, entry.stat()))
+                    except FileNotFoundError:
+                        continue
+
+    walk(str(CONFIG.vault_dir), ())
+    found.sort(key=lambda row: row[0])
+    return found
+
+
 def iter_notes(include_system: bool = False) -> list[Note]:
     with _NOTE_WRITE_LOCK:
+        root = CONFIG.vault_dir
+        cached_root, previous = _SNAPSHOTS.get(include_system, (None, {}))
+        if cached_root != root:
+            previous = {}
+        current: dict[str, tuple] = {}
         notes = []
-        for p in sorted(CONFIG.vault_dir.rglob("*.md")):
-            rel = p.relative_to(CONFIG.vault_dir)
-            if rel.parts and rel.parts[0] in SOURCE_DIRS:
-                continue
-            if not include_system and rel.parts and rel.parts[0] in SYSTEM_DIRS:
-                continue
-            if any(part.startswith(".") for part in rel.parts):
-                continue
-            note = load_note(rel)
-            if note:
-                notes.append(note)
+        for parts, stat in _article_files(include_system):
+            rel = "/".join(parts)
+            identity = (stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size, stat.st_ino)
+            entry = previous.get(rel)
+            if entry is None or entry[0] != identity:
+                try:
+                    text = (root / rel).read_text(encoding="utf-8")
+                except FileNotFoundError:
+                    continue
+                parse = _parsed_note if len(text) <= 128 * 1024 else _parsed_note.__wrapped__
+                entry = (identity, *parse(text, rel))
+            current[rel] = entry
+            _identity, authored, body, links = entry
+            meta = deepcopy(authored)
+            if meta.get("kind") == "task" and not rel.startswith(("_", ".")):
+                from .index import INDEX
+                meta = INDEX.project_task_runtime(rel[:-3], meta)
+            notes.append(Note(
+                path=rel, title=str(meta.get("title") or parts[-1][:-3]), meta=meta, body=body,
+                mtime=stat.st_mtime, links=list(links),
+            ))
+        _SNAPSHOTS[include_system] = (root, current)
         return notes
 
 
