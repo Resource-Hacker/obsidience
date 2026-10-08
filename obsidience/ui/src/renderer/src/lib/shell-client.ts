@@ -359,10 +359,6 @@ export function onShellGraphView(listener: (view: GraphView) => void): () => voi
   return () => { graphViewerListeners.delete(listener); };
 }
 
-/** Viewer controls drive the provider's stage through the existing Shell owner. */
-export function configureShellGraph(view: "knowledge" | "memory" | "code", settings: ProviderGraphSettings): void {
-  sendCommand({ type: "graph.viewer.configure", view, settings });
-}
 export function onShellProviderGraph(view: "knowledge" | "memory" | "code", listener: (settings: ProviderGraphSettings) => void): () => void {
   const listeners = providerViewListeners.get(view) || new Set();
   listeners.add(listener); providerViewListeners.set(view, listeners);

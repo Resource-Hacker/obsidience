@@ -191,9 +191,6 @@ const LIBRARY_TUNING: Knowledge3dTuning = clampKnowledge3dTuning({
   ballScale: 0.45, orbitLine: 0, orbitLineWidth: 2.5, orbitLineOpacity: 0.35,
 });
 
-/** Compatibility export for the main/Executive reset surface. */
-export const OWNER_GRAPH_TUNING = EXECUTIVE_TUNING;
-
 export function defaultGraphTuning(graphId: string): Knowledge3dTuning {
   const normalized = graphId.trim().toLowerCase();
   const record = normalized === "heimdall" || normalized === "guardian"

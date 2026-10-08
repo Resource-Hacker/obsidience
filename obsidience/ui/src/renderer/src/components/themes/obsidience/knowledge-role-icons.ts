@@ -23,10 +23,6 @@ const ROLE_TINTS: Record<KnowledgeRole, string> = {
   library: "#34d399",
 };
 
-export function knowledgeRoleTint(role: KnowledgeRole): string {
-  return ROLE_TINTS[role];
-}
-
 function neonStroke(
   ctx: CanvasRenderingContext2D,
   tint: string,
@@ -77,33 +73,6 @@ function paintExecutive(ctx: CanvasRenderingContext2D, s: number): void {
   ctx.beginPath();
   ctx.arc(s / 2, y - s * 0.15, s * 0.03, 0, Math.PI * 2);
   ctx.stroke();
-}
-
-function paintGear(
-  ctx: CanvasRenderingContext2D,
-  cx: number,
-  cy: number,
-  radius: number,
-  tint: string,
-): void {
-  ctx.save();
-  ctx.globalAlpha = 0.45;
-  neonStroke(ctx, tint, radius * 0.18);
-  const teeth = 8;
-  for (let i = 0; i < teeth; i += 1) {
-    const angle = (i / teeth) * Math.PI * 2;
-    ctx.beginPath();
-    ctx.moveTo(cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius);
-    ctx.lineTo(
-      cx + Math.cos(angle) * radius * 1.3,
-      cy + Math.sin(angle) * radius * 1.3,
-    );
-    ctx.stroke();
-  }
-  ctx.beginPath();
-  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.restore();
 }
 
 function paintCurator(ctx: CanvasRenderingContext2D, s: number): void {

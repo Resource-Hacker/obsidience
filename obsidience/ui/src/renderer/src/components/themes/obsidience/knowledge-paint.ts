@@ -44,15 +44,6 @@ export const BRAIN_PALETTE: KnowledgeBranchPalette = {
   edgeInspect: "rgba(224,242,254,0.34)",
   edgeActive: "rgba(240,249,255,0.96)",
 };
-export const NEUTRAL_PALETTE: KnowledgeBranchPalette = {
-  core: "#67e8f9",
-  dark: "rgba(8,47,73,0.96)",
-  glow: "rgba(34,211,238,0.18)",
-  ring: "rgba(103,232,249,0.3)",
-  edge: "rgba(34,211,238,0.15)",
-  edgeInspect: "rgba(34,211,238,0.24)",
-  edgeActive: "rgba(165,243,252,0.92)",
-};
 
 /** Every direct child of the Executive Brain owns one unique, stable hue. The
  *  thirteen known first-level branches are spaced around the whole wheel so

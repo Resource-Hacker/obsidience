@@ -53,33 +53,6 @@ export interface KnowledgeLayoutInput {
 
 }
 
-/**
- * Keep established nodes anchored when a refreshed knowledge snapshot arrives.
- * The force layout still places new nodes, but existing claims do not jump
- * around merely because a relationship was reviewed or promoted.
- */
-export function stabilizeKnowledgeLayout(
-  previous: KnowledgeLayout | null,
-  next: KnowledgeLayout,
-): KnowledgeLayout {
-  if (!previous || previous.nodes.length === 0 || next.nodes.length === 0) {
-    return next;
-  }
-
-  const previousById = new Map(
-    previous.nodes.map((node) => [node.id, node] as const),
-  );
-  let retained = 0;
-  const nodes = next.nodes.map((node) => {
-    const established = previousById.get(node.id);
-    if (!established) return node;
-    retained += 1;
-    return established;
-  });
-
-  return retained === 0 ? next : { nodes };
-}
-
 function hashUnit(value: string): number {
   let hash = 2_166_136_261;
   for (let index = 0; index < value.length; index += 1) {
@@ -124,7 +97,6 @@ export function knowledgeHierarchyPeerInnerRingProgress(
   return directPeerCount > 2 ? Math.max(0.58, base) : base;
 }
 
-const DEGREES_TO_RADIANS = Math.PI / 180;
 const KNOWLEDGE_RING_SPREAD_EXPONENT = 0.72;
 function compareHierarchyNodes(
   left: KnowledgeLayoutInput["nodes"][number],

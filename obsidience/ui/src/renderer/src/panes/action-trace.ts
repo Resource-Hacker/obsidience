@@ -1,8 +1,5 @@
 /** Disposable presentation of the Harness's single public Action Trace. */
 export type TraceValue = null | boolean | number | string | TraceValue[] | { [key: string]: TraceValue };
-export interface TracePacketSection {
-  key: string; title: string; text: string; chars: number; sha256: string; truncated: boolean;
-}
 export const LATENCY_STAGES = {
   input_final: "Input accepted", preparation: "Conversation preparation",
   activation: "Task activation", model_wait: "Model availability", model_preflight: "Model request preparation",
