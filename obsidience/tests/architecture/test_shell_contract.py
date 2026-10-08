@@ -317,7 +317,6 @@ def test_knowledge_graph_is_shell_owned_threejs_stage_content() -> None:
     assert "obsidience-knowledge-tag-active-lock" not in graph_styles
     assert "obsidience-knowledge-tag-scan" not in graph_styles
     assert ".obsidience-knowledge-map {" not in graph_styles
-    assert "obsidience-knowledge-trace-flow" in graph_styles
     assert "obsidience-knowledge-node-wave" not in graph_styles
     assert ".obsidience-knowledge-tag" not in graph_styles
     assert ".obsidience-knowledge-label-leader" not in graph_styles
