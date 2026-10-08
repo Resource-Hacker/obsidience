@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { LlmAdapter, LlmError, createUserMessage, createAssistantMessage, createSystemMessage, freezeMessage, attributionHeaders } from '@deepseek-ai/dsh-llm';
 import { Session, interruptedTurnClosers } from '@deepseek-ai/dsh-session';
 
-export const inject = ['agents', 'llm', 'tools', 'systemPrompt', 'sessions', 'sessionPersistence', 'obsidienceMemory', 'tokenMeter', 'compaction'];
+export const inject = ['agents', 'llm', 'tools', 'systemPrompt', 'sessions', 'sessionPersistence', 'sessionProjections', 'obsidienceMemory', 'tokenMeter', 'compaction'];
 
 export function apply(ctx) {
   const runs = new Map();
@@ -73,43 +73,79 @@ export function apply(ctx) {
   });
   const formOf = event => event?.type === 'user/message' && event.data.source?.kind?.startsWith('plugin:obsidience.')
     ? event.data.source.kind.slice('plugin:obsidience.'.length) : undefined;
+  // Host-only projection of the log state this port reads, maintained from
+  // committed events (and folded on demand for restored sessions) instead of
+  // dsh's deprecated synchronous eventAt/snapshotEvents reads: the latest 80
+  // settlement records, the summary count, and the seqs of runtime context,
+  // recalled memory and interrupted text replies not yet replaced.
+  const NATIVE_STATE = 'obsidience.native';
+  const without = (seqs, cited) => seqs.filter(seq => !cited.includes(seq));
+  ctx.sessionProjections.register({
+    key: NATIVE_STATE,
+    stateVersion: 1,
+    stateSchema: { parse(value) {
+      if (!Array.isArray(value?.outcomes) || !Number.isSafeInteger(value.compactions)
+          || !Array.isArray(value.context) || !Array.isArray(value.interrupted)) {
+        throw new Error('Invalid Obsidience native session projection');
+      }
+      return value;
+    } },
+    init: () => ({ outcomes: [], compactions: 0, context: [], interrupted: [] }),
+    apply(state, event) {
+      const form = formOf(event);
+      if (form === 'outcome' || form === 'command-outcome') {
+        return { ...state, outcomes: [...state.outcomes, JSON.parse(event.data.content[0].text)].slice(-80) };
+      }
+      if (form === 'context' || form === 'memory') return { ...state, context: [...state.context, event.seq] };
+      if (event.type === 'compaction/summary') return { ...state, compactions: state.compactions + 1 };
+      if (event.type === 'assistant/message' && event.data.interrupted
+          && !event.data.message.content.some(block => block.type === 'tool-call')) {
+        return { ...state, interrupted: [...state.interrupted, event.seq] };
+      }
+      const cited = event.sourceEventSeqs ?? [];
+      if (cited.some(seq => state.context.includes(seq) || state.interrupted.includes(seq))) {
+        return { ...state, context: without(state.context, cited), interrupted: without(state.interrupted, cited) };
+      }
+      return state;
+    },
+  });
+  const nativeState = session => ctx.sessionProjections.stateOf(session, NATIVE_STATE);
   function snapshot(session) {
-    const outcomes = [];
-    for (let seq = session.seq - 1; seq >= 0 && outcomes.length < 80; seq--) {
-      const event = session.eventAt(seq);
-      if (['outcome', 'command-outcome'].includes(formOf(event))) outcomes.push(JSON.parse(event.data.content[0].text));
-    }
+    const state = nativeState(session);
     return { id: session.id, revision: session.seq, messages: session.deriveMessages(),
       pressure: ctx.tokenMeter.measure(session),
-      compaction_count: session.snapshotEvents().filter(event => event.type === 'compaction/summary').length,
+      compaction_count: state.compactions,
       tools: session.requestHeader()?.tools ?? [],
       reasoning_effort: session.requestHeader()?.config.reasoningEffort ?? 'none',
-      outcomes: outcomes.reverse() };
+      outcomes: [...state.outcomes] };
   }
   function seedHistory(config) {
     if (!config.bootstrap?.length) return [];
     const seed = Session.create(config.session_id);
-    seed.append('turn/start', { turn: 1 });
-    seed.append('step/start', { turn: 1, step: 1 });
-    seed.append('system/message', { turn: 1, step: 1,
+    // The logged events are the seed; collect each one as it is appended.
+    const events = [];
+    const append = (...args) => events.push(seed.append(...args));
+    append('turn/start', { turn: 1 });
+    append('step/start', { turn: 1, step: 1 });
+    append('system/message', { turn: 1, step: 1,
       message: createSystemMessage(config.system) }, { surfaceOp: 'append' });
-    seed.append('step/end', { turn: 1, step: 1 });
-    seed.append('turn/end', { turn: 1, reason: { kind: 'completed' } });
+    append('step/end', { turn: 1, step: 1 });
+    append('turn/end', { turn: 1, reason: { kind: 'completed' } });
     let turn = 1, open = false;
     const close = completed => {
       if (!open) return;
-      seed.append('step/end', { turn, step: 1 });
-      seed.append('turn/end', { turn, reason: { kind: completed ? 'completed' : 'interrupted' } });
+      append('step/end', { turn, step: 1 });
+      append('turn/end', { turn, reason: { kind: completed ? 'completed' : 'interrupted' } });
       open = false;
     };
     for (const row of config.bootstrap || []) {
       if (row.role === 'user') {
         close(false); turn++; open = true;
-        seed.append('turn/start', { turn });
-        seed.append('step/start', { turn, step: 1 });
-        seed.append('user/message', ownerMessage(row.id, row.text), { surfaceOp: 'append' });
+        append('turn/start', { turn });
+        append('step/start', { turn, step: 1 });
+        append('user/message', ownerMessage(row.id, row.text), { surfaceOp: 'append' });
       } else if (row.role === 'assistant' && open) {
-        seed.append('assistant/message', { turn, step: 1,
+        append('assistant/message', { turn, step: 1,
           message: createAssistantMessage({ source: { provider: 'obsidience', model: config.model.id },
             content: [{ type: 'text', text: row.text }] }), stream: [] },
         { surfaceOp: 'append' });
@@ -117,20 +153,20 @@ export function apply(ctx) {
       }
     }
     close(false);
-    return seed.snapshotEvents();
+    return events;
   }
   function supersedeContext(session) {
+    const current = new Set(nativeState(session).context);
     for (const seq of [...session.surface.nodes]) {
-      if (!['context', 'memory'].includes(formOf(session.eventAt(seq)))) continue;
+      if (!current.has(seq)) continue;
       session.append('user/message', contextMessage('[Earlier request context superseded.]', 'expired-context'),
         { surfaceOp: { op: 'replace', startSeq: seq, endSeq: seq }, sourceEventSeqs: [seq] });
     }
   }
   function excludeInterruptedReplies(session) {
+    const interrupted = new Set(nativeState(session).interrupted);
     for (const seq of [...session.surface.nodes]) {
-      const event = session.eventAt(seq);
-      if (event.type !== 'assistant/message' || !event.data.interrupted
-          || event.data.message.content.some(block => block.type === 'tool-call')) continue;
+      if (!interrupted.has(seq)) continue;
       session.append('user/message', contextMessage(
         '[The preceding reply was interrupted. Its partial text is not an accepted answer.]', 'interrupted'),
       { surfaceOp: { op: 'replace', startSeq: seq, endSeq: seq }, sourceEventSeqs: [seq] });
