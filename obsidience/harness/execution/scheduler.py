@@ -2058,7 +2058,7 @@ def due_tasks(notes: list[Note] | None = None) -> list:
                         -1 if note.ref == "Tasks/audit" and params.get("optimization_case") else
                         0 if params["event"] == "source.inbox" else 1)
             due.append((priority, since, note.ref, note))
-        elif schedule and status in ("pending", "completed", "review", "failed"):
+        elif schedule and status in ("pending", "completed", "review", "failed", "cancelled"):
             if (
                 status == "failed" and isinstance(params, dict)
                 and params.get("event") and params.get("activation_key")
