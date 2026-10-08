@@ -64,7 +64,7 @@ def test_saved_parallelism_reaches_server_without_changing_context_or_vision(lau
     assert args.count("--parallel") == 1
     assert args[args.index("--parallel") + 1] == str(parallel)
     assert args[args.index("-c") + 1] == "65536"
-    assert args[args.index("--checkpoint-min-step") + 1] == "0"
+    assert args[args.index("--checkpoint-min-step") + 1] == "1024"
     assert "--swa-full" not in args
     assert args[args.index("--mmproj") + 1] == "/read-only model/mmproj F16.gguf"
     assert "--mmproj-offload" in args
