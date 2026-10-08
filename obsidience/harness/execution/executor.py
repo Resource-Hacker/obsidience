@@ -19,7 +19,7 @@ import re
 import time
 import threading
 import uuid
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 
 from . import activity as knowledge_activity
@@ -1399,6 +1399,110 @@ class CapabilityDispatch:
             })
 
 
+@dataclass
+class TurnState:
+    """Decision mechanics shared by the native Executive and specialist loops.
+
+    Each loop keeps one CapabilityDispatch for its activation, so the model
+    lease and single-response visual witnesses persist there between decisions.
+    Each loop keeps its own protocol: native imitation/empty-response recovery
+    and early speech; specialist JSON actions and per-step Tool narrowing.
+    """
+
+    dispatch: CapabilityDispatch
+    strikes: dict[str, int] = field(default_factory=dict)
+
+    @staticmethod
+    def budget(evaluation) -> int:
+        if evaluation is None:
+            return CONFIG.max_steps
+        if type(evaluation.max_steps) is not int or not 1 <= evaluation.max_steps <= CONFIG.max_steps:
+            raise ValueError("Evaluation decision budget must be a positive integer within the executor limit")
+        return evaluation.max_steps
+
+    @staticmethod
+    def emitter(evaluation):
+        """Public trace emission; every evaluation trial event is marked simulated."""
+        def emit(channel: str, line: str, detail=None, fields=None) -> None:
+            if evaluation is not None:
+                fields = {**(fields or {}), "payload": {
+                    **((fields or {}).get("payload") or {}), "simulated": True,
+                }}
+                line = "Simulation · " + line
+            action_trace.emit(channel, line, detail, fields)
+        return emit
+
+    @staticmethod
+    async def acquire_model(model):
+        spec = model_runtime.configured_spec(model.id)
+        lease = model_runtime.lease(spec)
+        await lease.__aenter__()
+        return spec, lease
+
+    def fail(self, summary: str) -> None:
+        self.dispatch.done, self.dispatch.status, self.dispatch.summary = True, "failed", summary
+
+    def strike(self, kind: str, failure: str, limit: int = 3) -> bool:
+        """Count one invalid decision of this kind; reaching the limit fails the activation."""
+        self.strikes[kind] = self.strikes.get(kind, 0) + 1
+        if self.strikes[kind] < limit:
+            return False
+        self.fail(failure)
+        return True
+
+    @property
+    def steering_pending(self):
+        return self.dispatch.steering is not None and self.dispatch.steering.pending
+
+    def take_steering(self) -> list[dict] | None:
+        """Owner clarifications void every visual witness not yet consumed."""
+        if not self.steering_pending:
+            return None
+        clarifications = self.dispatch.steering.take()
+        self.dispatch.pending_observation_lease = self.dispatch.pending_response_observation = None
+        discard_consumed_images(self.dispatch.messages)
+        return clarifications
+
+    def rotate(self) -> None:
+        """Bind pending visual witnesses to exactly the next model response."""
+        d = self.dispatch
+        d.response_observation_lease, d.pending_observation_lease = d.pending_observation_lease, None
+        d.response_completion_observation, d.pending_response_observation = d.pending_response_observation, None
+        d.ctx.pop("_computer_response_observation", None)
+
+    def discard_witnesses(self) -> None:
+        d = self.dispatch
+        d.response_observation_lease = d.response_completion_observation = None
+        d.pending_observation_lease = d.pending_response_observation = None
+        discard_consumed_images(d.messages)
+
+    async def hold_model(self, acquire=None) -> None:
+        """Hold the model lease for the next decision, measuring any wait."""
+        if self.dispatch.active_lease is None:
+            started = time.monotonic()
+            self.dispatch.model, self.dispatch.active_lease = await (
+                acquire() if acquire is not None else self.acquire_model(self.dispatch.model))
+            action_trace.latency("model_wait", duration_ms=(time.monotonic() - started) * 1000)
+
+    def emit_model(self, line: str, phase: str, fields: dict, detail=None, **payload) -> None:
+        self.dispatch.emit("model", line, detail, {**fields, "payload": {
+            "kind": "model", "phase": phase, "model": self.dispatch.model.id, **payload}})
+
+    async def close(self, *, measure_release: bool) -> None:
+        """End the activation: drop its context and witnesses, then release the model."""
+        d = self.dispatch
+        for key in ("_foreground_interruption_event", _OBSERVATION_CONTEXT_FIELD, "_computer_response_observation"):
+            d.ctx.pop(key, None)
+        d.latest_action_evidence = None
+        self.discard_witnesses()
+        lease, d.active_lease = d.active_lease, None
+        if lease is not None:
+            started = time.monotonic()
+            await lease.__aexit__(None, None, None)
+            if measure_release:
+                action_trace.latency("model_release", duration_ms=(time.monotonic() - started) * 1000)
+
+
 async def _execute_session(
     task: Note,
     model: model_runtime.ModelSpec,
@@ -1416,55 +1520,41 @@ async def _execute_session(
         computer_completion_evidence, computer_request_target_error,
     )
 
-    max_steps = CONFIG.max_steps
-    if evaluation is not None:
-        if (set(ctx) - {"trace"}
-                or ("trace" in ctx and (not isinstance(ctx["trace"], list) or ctx["trace"]))):
-            raise ValueError("Evaluation requires a fresh context without live Task or receipt bindings")
-        max_steps = evaluation.max_steps
-        if type(max_steps) is not int or not 1 <= max_steps <= CONFIG.max_steps:
-            raise ValueError("Evaluation decision budget must be a positive integer within the executor limit")
-    elif interruption_event is not None:
+    if evaluation is not None and (
+            set(ctx) - {"trace"}
+            or ("trace" in ctx and (not isinstance(ctx["trace"], list) or ctx["trace"]))):
+        raise ValueError("Evaluation requires a fresh context without live Task or receipt bindings")
+    max_steps = TurnState.budget(evaluation)
+    if evaluation is None and interruption_event is not None:
         ctx["_foreground_interruption_event"] = interruption_event
-
-    def emit(channel: str, line: str, detail=None, fields=None) -> None:
-        if evaluation is not None:
-            fields = {**(fields or {}), "payload": {
-                **((fields or {}).get("payload") or {}), "simulated": True,
-            }}
-            line = "Simulation · " + line
-        action_trace.emit(channel, line, detail, fields)
-
+    emit = TurnState.emitter(evaluation)
     trace: list[dict] = ctx.setdefault("trace", [])
-    status, summary = "failed", "session ended without task.complete"
-    if evaluation is not None:
-        summary = "simulation exhausted its decision budget without a terminal result"
-    active_lease = initial_lease
     task_context = TaskContext()
-    invalid_action_streak = 0
-    pending_observation_lease = None
-    response_observation_lease = None
-    pending_response_observation = None
-    response_completion_observation = None
-    latest_action_evidence = None
-    visual_context_seen = any(
-        isinstance(message.get("content"), list)
-        and any(isinstance(part, dict) and part.get("type") == "image_url"
-                for part in message["content"])
-        for message in messages
-    )
+    state = TurnState(CapabilityDispatch(
+        task=task, model=model, messages=messages, allowed=allowed, ctx=ctx, agent_name=agent_name,
+        step=0, trace=trace, emit=emit, task_context=task_context, max_steps=max_steps,
+        interruption_event=interruption_event, steering=ctx.get("_steering"), active_lease=initial_lease,
+        visual_context_seen=any(
+            isinstance(message.get("content"), list)
+            and any(isinstance(part, dict) and part.get("type") == "image_url"
+                    for part in message["content"])
+            for message in messages
+        ),
+        summary=("simulation exhausted its decision budget without a terminal result"
+                 if evaluation is not None else "session ended without task.complete"),
+    ))
+    dispatch = state.dispatch
     from ..capabilities.task.complete import completion_prerequisite_error, completion_requires_no_change
 
     ctx.pop(_OBSERVATION_CONTEXT_FIELD, None)
-    steering = ctx.get("_steering")
     # Keep the first notice in actual history so subsequent requests extend
     # the prefix used by the previous model decision.
     messages.append({"role": "user", "content": _step_budget_notice(max_steps)})
     try:
         for step in range(max_steps):
+            dispatch.step = step
             _scope_checkpoint(ctx)
-            if steering is not None and steering.pending:
-                clarifications = steering.take()
+            if (clarifications := state.take_steering()) is not None:
                 messages.append({"role": "user", "content": (
                     "Owner clarifications for the current activation (in order):\n"
                     + "\n".join(json.dumps(turn["text"], ensure_ascii=False) for turn in clarifications)
@@ -1472,43 +1562,30 @@ async def _execute_session(
                     "They do not attest an effect or authorize replay. If they require a different "
                     "Task or broaden the bound computer outcome, report that a new request is needed."
                 )})
-                pending_observation_lease = pending_response_observation = None
-                discard_consumed_images(messages)
                 emit("context", "Owner clarification applied before the next decision",
                                   [turn["text"] for turn in clarifications])
             # A capture is bound to exactly this next model response. It never
             # lives in shared context while a provider request is in flight.
-            response_observation_lease = pending_observation_lease
-            pending_observation_lease = None
-            ctx.pop("_computer_response_observation", None)
-            response_completion_observation = pending_response_observation
-            pending_response_observation = None
+            state.rotate()
             _foreground_checkpoint(interruption_event, ctx)
             model_fields = {"step": step + 1}
             if ctx.get("run_id"):
                 model_fields["call_id"] = f"{ctx['run_id']}:model:{step + 1}"
 
             def emit_model(phase: str, detail: list[str] | None = None, **fields) -> None:
-                emit("model", f"{task.title} model {phase}", detail, {
-                    **model_fields, "payload": {"kind": "model", "phase": phase,
-                        "model": model.id, "model_label": getattr(model, "label", model.id), **fields},
-                })
+                state.emit_model(f"{task.title} model {phase}", phase, model_fields, detail,
+                                model_label=getattr(dispatch.model, "label", dispatch.model.id), **fields)
 
-            if active_lease is None:
+            if dispatch.active_lease is None:
                 emit_model("waiting", ["Waiting to acquire the Task-selected model lease."])
-                lease_started = time.monotonic()
                 try:
-                    model = model_runtime.configured_spec(model.id)
-                    lease = model_runtime.lease(model)
-                    await lease.__aenter__()
+                    await state.hold_model()
                 except asyncio.CancelledError:
                     emit_model("interrupted", ["Model lease wait interrupted."])
                     raise
                 except Exception as exc:
                     emit_model("error", [str(exc)], error=str(exc))
                     raise
-                active_lease = lease
-                action_trace.latency("model_wait", duration_ms=(time.monotonic() - lease_started) * 1000)
             emit_model("started", ["Model lease acquired; starting the provider request."])
             try:
                 from ..capabilities.source.read import available_tools
@@ -1516,7 +1593,7 @@ async def _execute_session(
                 from .repair import available_tools as repair_tools
 
                 decision_context = getattr(evaluation, 'schema_context', ctx)
-                decision_tools = completion_tools(repair_tools(available_tools(allowed, decision_context), decision_context), decision_context)
+                decision_tools = completion_tools(repair_tools(available_tools(dispatch.allowed, decision_context), decision_context), decision_context)
                 if decision_context.get('task') == 'Tasks/audit' and (decision_context.get('params') or {}).get('optimization_case'):
                     required = 'task.complete' if decision_context.get('_harness_optimization_attempted') else 'harness.optimize'
                     decision_tools = [name for name in decision_tools if name == required]
@@ -1525,7 +1602,7 @@ async def _execute_session(
                     interruption_event, ctx,
                     messages,
                     reasoning_effort=effort,
-                    model=model,
+                    model=dispatch.model,
                     allowed_tools=decision_tools,
                     task_context=task_context,
                     **({"proposal_mode": "ingest"} if decision_context.get("event") == "observations.memory.ready" or decision_context.get("task") in {
@@ -1539,7 +1616,7 @@ async def _execute_session(
                 emit_model("interrupted", ["Provider request interrupted."])
                 raise
             except Exception as exc:  # noqa: BLE001 — preserve transport failures in the run ledger
-                status, summary = "failed", f"LLM error: {exc}"
+                state.fail(f"LLM error: {exc}")
                 emit_model("error", [str(exc)], error=str(exc))
                 emit("error", f"{task.title} LLM error", [str(exc)])
                 break
@@ -1583,21 +1660,19 @@ async def _execute_session(
                     json.dumps(projection, sort_keys=True),
                 ], {"step": step + 1, "payload": {"kind": "context", "projection": projection}})
             reply = completion.content
-            if steering is not None and steering.pending:
+            if state.steering_pending:
                 # No Tool from the now-outdated response may dispatch. This
                 # consumes the ordinary decision budget rather than extending it.
                 emit("context", "Response superseded by an owner clarification")
-                pending_observation_lease = pending_response_observation = None
+                dispatch.pending_observation_lease = dispatch.pending_response_observation = None
                 continue
             if step == 0 and completion.prompt_tokens is not None:
                 ctx["prompt_tokens"] = completion.prompt_tokens
             action = llm.parse_action(reply)
             if not action:
-                response_observation_lease = None
-                response_completion_observation = None
-                invalid_action_streak += 1
+                dispatch.response_observation_lease = dispatch.response_completion_observation = None
                 parse_error = llm.action_parse_error(reply)
-                public_invalid = "Invalid visual response; private output omitted." if visual_context_seen else reply
+                public_invalid = "Invalid visual response; private output omitted." if dispatch.visual_context_seen else reply
                 messages.append({"role": "assistant", "content": public_invalid})
                 trace.append({
                     "invalid": public_invalid[:400],
@@ -1607,14 +1682,10 @@ async def _execute_session(
                     "reply_chars": len(reply),
                     "reply_sha256": hashlib.sha256(reply.encode()).hexdigest(),
                 })
-                if invalid_action_streak >= 3:
-                    status, summary = (
-                        "failed",
-                        "three consecutive replies without a valid action block",
-                    )
+                if state.strike("action", "three consecutive replies without a valid action block"):
                     emit(
                         "error", f"{agent_name} produced no valid action",
-                        [summary, parse_error, f"finish: {completion.finish_reason}"],
+                        [dispatch.summary, parse_error, f"finish: {completion.finish_reason}"],
                     )
                     break
                 messages.append({
@@ -1626,7 +1697,7 @@ async def _execute_session(
                     ),
                 })
                 continue
-            invalid_action_streak = 0
+            state.strikes["action"] = 0
             name, args = action.get("tool"), action.get("args") or {}
             _scope_checkpoint(ctx, str(name))
             # The model's normalized image point is an ephemeral input, not a
@@ -1637,10 +1708,10 @@ async def _execute_session(
                 # live preconditions, Capability dispatch and durable Tool receipts.
                 entry = {"tool": name, "args": json.loads(json.dumps(args)), "simulated": True}
                 trace.append(entry)
-                if name not in allowed:
-                    status, summary = "failed", f"Tool '{name}' is not authorized for this evaluation."
-                    entry.update(obs=summary, not_dispatched=True)
-                    emit("error", summary)
+                if name not in dispatch.allowed:
+                    state.fail(f"Tool '{name}' is not authorized for this evaluation.")
+                    entry.update(obs=dispatch.summary, not_dispatched=True)
+                    emit("error", dispatch.summary)
                     break
                 emit("tool", f"{agent_name} → {name}", [json.dumps(public_args)], {
                     "step": step + 1, "payload": {
@@ -1673,69 +1744,27 @@ async def _execute_session(
                 })
                 _foreground_checkpoint(interruption_event, ctx)
                 if result["done"]:
-                    status = result.get("status", "completed")
-                    summary = result.get("summary", observation)
+                    dispatch.status = result.get("status", "completed")
+                    dispatch.summary = result.get("summary", observation)
                     break
                 nudge = "\n\n" + _step_budget_notice(max_steps - step - 1)
                 task_context.latest_result_index = len(messages)
                 task_context.remember_source_page(
                     len(messages), str(name), observation, nudge,
-                    source_read_allowed="source.read" in allowed,
+                    source_read_allowed="source.read" in dispatch.allowed,
                 )
                 task_context.remember_article_page(
                     len(messages), str(name), observation, nudge,
-                    vault_read_allowed="vault.read" in allowed,
+                    vault_read_allowed="vault.read" in dispatch.allowed,
                 )
                 messages.append({"role": "user", "content": f"Observation:\n{observation}{nudge}"})
                 continue
-            dispatch = CapabilityDispatch(
-                task=task,
-                model=model,
-                messages=messages,
-                allowed=allowed,
-                ctx=ctx,
-                agent_name=agent_name,
-                step=step,
-                trace=trace,
-                emit=emit,
-                task_context=task_context,
-                max_steps=max_steps,
-                interruption_event=interruption_event,
-                steering=steering,
-                active_lease=active_lease,
-                visual_context_seen=visual_context_seen,
-                response_observation_lease=response_observation_lease,
-                response_completion_observation=response_completion_observation,
-                pending_observation_lease=pending_observation_lease,
-                pending_response_observation=pending_response_observation,
-                latest_action_evidence=latest_action_evidence,
-            )
-            try:
-                await dispatch.dispatch(name, args, reply)
-            finally:
-                active_lease = dispatch.active_lease
-                allowed = dispatch.allowed
-                visual_context_seen = dispatch.visual_context_seen
-                response_observation_lease = dispatch.response_observation_lease
-                response_completion_observation = dispatch.response_completion_observation
-                pending_observation_lease = dispatch.pending_observation_lease
-                pending_response_observation = dispatch.pending_response_observation
-                latest_action_evidence = dispatch.latest_action_evidence
+            await dispatch.dispatch(name, args, reply)
             if dispatch.done:
-                status, summary = dispatch.status, dispatch.summary
                 break
-
     finally:
-        ctx.pop("_foreground_interruption_event", None)
-        ctx.pop(_OBSERVATION_CONTEXT_FIELD, None)
-        ctx.pop("_computer_response_observation", None)
-        pending_response_observation = response_completion_observation = None
-        latest_action_evidence = None
-        pending_observation_lease = response_observation_lease = None
-        discard_consumed_images(messages)
-        if active_lease is not None:
-            await active_lease.__aexit__(None, None, None)
-    return trace, status, summary
+        await state.close(measure_release=False)
+    return trace, dispatch.status, dispatch.summary
 
 
 def _fail_claimed_run(task: Note, run_id: str, summary: str) -> None:
