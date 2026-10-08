@@ -167,6 +167,7 @@ def test_live_packet_uses_one_objective_and_canonical_ontology_order(monkeypatch
         "## Tools",
         "## Skills",
         "## Runbook",
+        "## Required Context",
         "## Bindings",
         "## Relevant Knowledge",
         "## Native conversation context",

@@ -311,6 +311,11 @@ def _instruction_text(note: Note, operation: str = "") -> str:
     return "\n\n".join(note.body[start:end].strip() for start, end in _instruction_ranges(note, operation))
 
 
+def _nested_headings(body: str) -> str:
+    """Demote an Article's own headings below its ### entry so they never read as packet sections."""
+    return re.sub(r"(?m)^(#{1,4}) ", lambda m: "#" * (len(m.group(1)) + 2) + " ", body)
+
+
 def _required_context(task: Note, agent: Note | None, spine: dict, res: Resolver,
                       allowed: set[str]) -> list[Note]:
     """Exact accepted constraints must not compete with similarity retrieval."""
@@ -391,7 +396,7 @@ def _activation_packet(task: Note, agent: Note | None, spine: dict,
             for runbook in runbooks
         ) if runbooks else "",
         "pinned": "## Required Context\nRequired accepted context (no capability grants):\n\n" + "\n\n".join(
-            f"### [[{note.ref}]] — {note.title}\n{note.body.strip()}" for note in pinned
+            f"### [[{note.ref}]] — {note.title}\n{_nested_headings(note.body.strip())}" for note in pinned
         ) if pinned else "",
         "bindings": "## Bindings\n" + (bindings if activation.bindings else "None."),
         "knowledge": "## Relevant Knowledge\n" + (brief or "None."),
