@@ -120,6 +120,11 @@ BACKCHANNEL_PHRASES = ("okay", "uh-huh", "mm-hmm", "yeah", "right")
 TTS_GAIN = 10.0 ** (9.0 / 20.0)
 TTS_PEAK_KNEE = 0.85
 TTS_PEAK_CEILING = 0.95
+# Silence before the next sentence of one streamed reply (owner, 2026-10-08:
+# gapless sentences ran together). Whole 40 ms output chunks.
+SENTENCE_PAUSE_SECS = 0.2
+_SENTENCE_PAUSE_PCM = b"\0" * (round(SENTENCE_PAUSE_SECS * TTS_SAMPLE_RATE * 2 / CHUNK_BYTES) * CHUNK_BYTES)
+_SENTENCE_END = re.compile(r"[.!?…][\"'”’)\]*_]*$")
 
 
 def _speech_pcm(samples: np.ndarray) -> bytes:
@@ -521,7 +526,8 @@ class SpeechTimingAudioOutput(LocalAudioOutputTransport):
                 self._cue_wrote = True
                 emit("cue_started", name=marker.cue_name, generation=marker.generation, epoch=marker.epoch)
             return written
-        if written and not self._first_write and self._playback is not None:
+        if (written and not self._first_write and self._playback is not None
+                and not isinstance(frame, SentencePauseFrame)):
             self._first_write = True
             self._playback.record_timing("first_output_write", timing, since="first_pcm_ns")
             self._playback.chunk_audible(binding)
@@ -957,6 +963,10 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
         )
 
 
+class SentencePauseFrame(TTSAudioRawFrame):
+    """Silence between two sentences of one reply; discarded like its reply's audio."""
+
+
 class PocketTTSService(TTSService):
     """Pocket TTS as a normal Pipecat streaming TTS service."""
 
@@ -965,6 +975,8 @@ class PocketTTSService(TTSService):
         self._playback = playback
         self._timing = None
         self._output_binding = None
+        # The previous chunk's reply identity and whether it ended a sentence.
+        self._previous_chunk: tuple | None = None
         config = root / "english.yaml"
         voice_path = root / "voices" / f"{voice}.safetensors"
         if not config.is_file() or not voice_path.is_file():
@@ -998,6 +1010,12 @@ class PocketTTSService(TTSService):
         output_binding = dict(self._output_binding) if isinstance(self._output_binding, dict) else None
         if timing is not None:
             timing["tts_started_ns"] = time.monotonic_ns()
+        # Chunks are synthesized in order, so the previous run is the previous
+        # chunk; a reply's first chunk never waits.
+        reply = (tuple(output_binding.get(key) for key in ("generation", "epoch", "playback_id"))
+                 if output_binding is not None else None)
+        pause = reply is not None and self._previous_chunk == (reply, True)
+        self._previous_chunk = (reply, _SENTENCE_END.search(clean) is not None)
         first_pcm = True
         successful = True
         pcm_bytes = 0
@@ -1046,6 +1064,10 @@ class PocketTTSService(TTSService):
         started.metadata["obsidience_output"] = output_binding
         try:
             yield started
+            if pause:
+                # Queued behind the previous sentence's audio while this one
+                # synthesizes; interruption discards it with the reply.
+                yield SentencePauseFrame(_SENTENCE_PAUSE_PCM, TTS_SAMPLE_RATE, 1)
             while True:
                 item = await queue.get()
                 if item is None:
