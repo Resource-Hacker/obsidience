@@ -109,11 +109,4 @@ assert.equal(JSON.stringify(state.record()),normalized);
 assert(!state.applyRecord({schema:state.schema,revision:3,modules:[]}));
 assert(!state.applyRecord({schema:state.schema,revision:5,modules:[module('tasks','left',0)]}));
 assert.equal(JSON.stringify(state.record()),normalized);
-assert(state.applyRecord({schema:state.schema,revision:5,modules:[
- module('knowledge','left',-3),module('source','left',-2),module('feeds','left',-1)
-]}));
-// A saved record from before the Feed retirement drops only that module.
-assert.equal(Object.keys(state.modules).length,2);assert(distinct());
-assert.equal(location('knowledge'),'left:0');assert.equal(location('source'),'left:1');
-assert.equal(state.modules.feeds,undefined);
 """)

@@ -77,8 +77,6 @@ QtObject {
         }
         const next = {}
         for (const value of record.modules) {
-            // Retire the removed Feed module without discarding the other saved docks.
-            if (value && value.pane_id === "feeds") continue
             const module = normalizeModule(value)
             if (!module || next[module.pane_id]) {
                 return false

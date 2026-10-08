@@ -30,13 +30,6 @@ def execute(args: dict, context: dict) -> str:
             if not any(item["citation"] == bound["citation"]
                        and item["content_sha256"] == bound["content_sha256"] for item in citations):
                 raise SourceError("handoff must cite its exact activating Source: " + bound["citation"])
-            if context.get("task") == "Tasks/research/distill":
-                cited = {item["citation"]: item["content_sha256"] for item in citations}
-                missing = [citation for citation, receipt in context.get("_fetched_sources", {}).items()
-                           if cited.get(citation) != receipt["content_sha256"]]
-                if missing:
-                    raise SourceError("handoff must retain the fetched reporting Source citations: "
-                                      + ", ".join(missing))
         result = handoff_source(
             title=args["title"],
             content=content,

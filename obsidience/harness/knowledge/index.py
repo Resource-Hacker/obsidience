@@ -505,16 +505,6 @@ class Index:
             "CREATE INDEX IF NOT EXISTS source_event_receipts "
             "ON source_evidence(event_key,event_dispatched_at)"
         )
-        # Upgrade only retained Feed receipts; fresh ledgers have no Feed tables.
-        feed_columns = {row[1] for row in self.db.execute("PRAGMA table_info(feed_items)")}
-        if feed_columns:
-            for name, definition in (
-                ("last_seen_at", "REAL NOT NULL DEFAULT 0"),
-                ("destination_ref", "TEXT NOT NULL DEFAULT ''"),
-                ("distill_instructions", "TEXT NOT NULL DEFAULT ''"),
-            ):
-                if name not in feed_columns:
-                    self.db.execute(f"ALTER TABLE feed_items ADD COLUMN {name} {definition}")
         # Materialize legacy active/FIFO occurrences once without admitting or
         # replaying any work. task_runtime remains only their compatibility head.
         for ref, raw in self.db.execute("SELECT task_ref,state FROM task_runtime").fetchall():
@@ -2291,51 +2281,6 @@ class Index:
                 (user_turn_id,),
             ).fetchone()
         return dict(zip(self._CONVERSATION_TURN_COLUMNS, row)) if row else None
-
-    # Historical Feed provenance remains readable; no collector writes these receipts.
-    def feed_source_binding(self, source_id: str) -> dict | None:
-        """Read controller-written provenance, never provider-authored routing."""
-        with self.lock:
-            if not self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='feed_items'").fetchone():
-                return None
-            rows = self.db.execute(
-                "SELECT f.feed_id,f.item_key,f.destination_ref,f.source_id,f.content_sha256,f.distill_instructions "
-                "FROM feed_items f JOIN source_evidence s ON s.id=f.source_id "
-                "WHERE f.source_id=? AND f.content_sha256=s.content_sha256 AND f.source_path=s.path",
-                (source_id,),
-            ).fetchall()
-        if not rows:
-            return None
-        if len(rows) != 1:
-            raise ValueError("Feed Source has ambiguous controller receipts")
-        return dict(zip(("feed_id", "item_key", "destination_ref", "source_id", "source_sha256", "distill_instructions"), rows[0]))
-
-
-    def feed_item_sources(self, *, feed_id: str | None = None, source_id: str | None = None,
-                          limit: int = 100) -> list[dict]:
-        """Read existing Source material; list only the latest native-item versions."""
-        conditions, arguments = [], []
-        if feed_id is not None:
-            conditions.append("f.feed_id=?")
-            arguments.append(feed_id)
-        if source_id is not None:
-            conditions.append("f.source_id=?")
-            arguments.append(source_id)
-        else:
-            conditions.append("NOT EXISTS (SELECT 1 FROM feed_items newer WHERE "
-                              "newer.feed_id=f.feed_id AND newer.item_key=f.item_key AND "
-                              "(newer.last_seen_at>f.last_seen_at OR "
-                              "(newer.last_seen_at=f.last_seen_at AND newer.rowid>f.rowid)))")
-        columns = ("feed_id", "item_key", *self._SOURCE_COLUMNS)
-        with self.lock:
-            if not self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='feed_items'").fetchone():
-                return []
-            rows = self.db.execute(
-                "SELECT f.feed_id,f.item_key," + ",".join("s." + name for name in self._SOURCE_COLUMNS)
-                + " FROM feed_items f JOIN source_evidence s ON s.id=f.source_id WHERE "
-                + " AND ".join(conditions) + " ORDER BY f.last_seen_at DESC,f.rowid DESC LIMIT ?", (*arguments, limit),
-            ).fetchall()
-        return [dict(zip(columns, row)) for row in rows]
 
 
     _SOURCE_COLUMNS = (

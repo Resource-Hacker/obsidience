@@ -284,33 +284,6 @@ def verified_retained_effects(note: Note, run_id: str) -> dict:
                 continue
             evidence = {"disposition": "handoff_retained", "activation_id": activation["id"],
                         "child_task": activation["task_ref"], "child_status": activation["status"]}
-        elif note.ref == "Tasks/research/distill" and call["tool"] == "source.handoff":
-            from ..knowledge.source import _row_doc
-
-            source_id = params.get("source_id")
-            if (params.get("event") != "source.added" or not isinstance(source_id, str)
-                    or not _result_matches(call, str(entry.get("obs")))):
-                continue
-            identity = hashlib.sha256(source_id.encode()).hexdigest()[:20]
-            row = INDEX.source_by_event_key(f"source.inbox:research:{run_id}:{note.ref}:{identity}")
-            if (not row or row.get("origin_source_id") != source_id
-                    or row.get("source_type") != "research" or not row["path"].startswith("inbox/")
-                    or not row.get("event_dispatched_at")
-                    or row["material_sha256"] != "sha256:" + hashlib.sha256(bytes(row["material"])).hexdigest()):
-                continue
-            try:
-                handoff = _row_doc(row, include_content=True)
-            except (ValueError, TypeError, KeyError):
-                continue
-            if (handoff["content_sha256"] != row["content_sha256"]
-                    or handoff["citation"] not in str(entry.get("obs"))
-                    or handoff["content_sha256"] not in str(entry.get("obs"))):
-                continue
-            # The immutable Inbox reconstructs long arguments that the display
-            # trace may truncate. Its exact digest must still match the intent.
-            args = {"title": handoff["source_ref"], "content": handoff["content"]}
-            evidence = {"disposition": "research_handoff_retained", "source": handoff["citation"],
-                        "source_sha256": handoff["content_sha256"]}
         elif note.ref == "Tasks/research/model" and call["tool"] in {"model.inspect", "model.source", "model.benchmark"}:
             model_id = params.get("model_id")
             fingerprint = params.get("model_fingerprint")
@@ -377,8 +350,7 @@ def settlement_evidence(note: Note) -> dict | None:
     params = note.meta.get("params") or {}
     if (run.get("task_ref") != note.ref or run.get("status") not in {"failed", "interrupted"}
             or not run.get("finished") or scheduler._receipt_retry_blocked_reason(
-                note, run_id, allow_retained_effects=True,
-                allow_source_captures=note.ref == "Tasks/research/distill")):
+                note, run_id, allow_retained_effects=True)):
         return None
     retained = list(verified_retained_effects(note, run_id).values())
     if note.ref == "Tasks/audit":
@@ -387,10 +359,6 @@ def settlement_evidence(note: Note) -> dict | None:
         if (len(retained) == 1 and retained[0]["disposition"] == "handoff_retained"
                 and scheduler._retry_binding_matches(note, scheduler._retry_trace(run) or [])):
             return {**retained[0], "reason": "Curate already handed off its one child; its outcome remains separate."}
-    elif note.ref == "Tasks/research/distill":
-        if (len(retained) == 1 and retained[0]["disposition"] == "research_handoff_retained"
-                and scheduler._retry_binding_matches(note, scheduler._retry_trace(run) or [])):
-            return {**retained[0], "reason": "Distill delivered its verified Source Inbox before interruption; Ingest owns publication and no research or handoff is replayed."}
     elif note.ref == "Tasks/research/model":
         return retired_model_evidence(note)
     else:
@@ -421,7 +389,7 @@ def _retry_correction(note: Note) -> str:
     params = note.meta.get("params") or {}
     if note.ref == "Tasks/curate" and params.get("event") == "observations.memory.ready":
         correction = "memory-curate-scope-v1"
-    elif note.ref == "Tasks/ingest" and params.get("event") == "source.inbox" and not params.get("feed_binding"):
+    elif note.ref == "Tasks/ingest" and params.get("event") == "source.inbox":
         correction = "ingest-create-update-v1"
     else:
         return ""
@@ -453,7 +421,7 @@ def verified_source_captures(note: Note, run_id: str) -> dict:
     from ..knowledge.source import _row_doc
     from .scheduler import _retry_trace
 
-    if note.ref not in {"Tasks/research/learn", "Tasks/research/distill"}:
+    if note.ref != "Tasks/research/learn":
         return {}
     params = note.meta.get("params") or {}
     if params.get("event") != "source.added":
@@ -480,8 +448,6 @@ def verified_source_captures(note: Note, run_id: str) -> dict:
                 or not urls[0].startswith(("https://", "http://"))
                 or call["signature"] != "web.fetch:sha256:" + hashlib.sha256(
                     json.dumps(args, sort_keys=True).encode()).hexdigest()):
-            continue
-        if params.get("feed_binding") and urls[0] != params["feed_binding"].get("reporting_url"):
             continue
         found = re.search(r"source://([0-9a-f-]{36})", str(entry.get("obs", "")))
         row = INDEX.source(found[1]) if found else None

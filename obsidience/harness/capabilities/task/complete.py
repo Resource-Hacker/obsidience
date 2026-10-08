@@ -608,10 +608,8 @@ def _completion_error(
         if error := bound_read_error(context):
             return error
         bound = required_source(context)
-        if (bound and task.ref in {"Tasks/research/learn", "Tasks/research/distill"}
+        if (bound and task.ref == "Tasks/research/learn"
                 and status == "completed" and not context.get("handoff_source_id")):
-            if task.ref == "Tasks/research/distill":
-                return "Distill completion requires its successful source.handoff; otherwise finish failed with the actual blocker"
             citation = bound["citation"]
             from obsidience.harness.knowledge.source import SourceError, validate_source_citations
 

@@ -226,8 +226,6 @@ def build_activation_binding(
     """Preserve a live request verbatim or derive one deterministic Task objective."""
 
     request = str(params.get("request") or "").strip()
-    if params.get("feed_binding"):
-        raise source.SourceError("Feed intake is retired; this occurrence requires owner disposition")
     objective = request or " ".join([task.title, *(part.title for part in runbooks)])
     bindings = {
         str(key): value
@@ -242,7 +240,7 @@ def build_activation_binding(
         # The Source bank's owner is provenance, not the executing Agent or a
         # publication destination. Preserve the original admission params.
         bindings["memory_owner_ref"] = bindings.pop("agent_ref", "")
-    if task.ref in {"Tasks/research/learn", "Tasks/research/distill"} and (bound := source.research_source_binding(params)):
+    if task.ref == "Tasks/research/learn" and (bound := source.research_source_binding(params)):
         objective = (
             f"Research the exact activating Source {bound['citation']}. "
             f"Read its complete contents first, then follow the {task.title} Runbook. "

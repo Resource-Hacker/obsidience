@@ -28,7 +28,7 @@ def required_source(context: dict) -> dict | None:
         if not evidence or evidence["endpoint_sha256"] != params.get("observation_source_sha256"):
             raise SourceError("Link observation Source does not match its activation")
         return {"citation": evidence["source_citation"], "content_sha256": evidence["endpoint_sha256"]}
-    if context.get("task") not in {"Tasks/research/learn", "Tasks/research/distill"}:
+    if context.get("task") != "Tasks/research/learn":
         return None
     return research_source_binding({**params, "event": context.get("event") or params.get("event")})
 

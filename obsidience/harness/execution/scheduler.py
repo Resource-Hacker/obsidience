@@ -65,7 +65,6 @@ _RETRY_READ_ONLY_TOOLS = READ_ONLY_CAPABILITIES
 RESTART_DISPOSITION_REASON = "Restart requires disposition; Tool effects are unknown or retained."
 _PROPOSAL_ARGUMENT_REJECTIONS = frozenset({
     "Proposal rejected: create and update proposals require a nonempty body.",
-    "Proposal rejected: Feed publication accepts exact source and target, without body or authored metadata.",
     "Proposal rejected: archive target must be an accepted Knowledge Article.",
     "Proposal rejected: New Knowledge must be inside an owned or checked-out branch.",
     "Proposal rejected: Proposal target is not checked out to this Agent.",
@@ -192,7 +191,7 @@ def _preflight_rejection(call: dict, note: Note) -> str | None:
             return None
         candidates = {"Task activation rejected: memory-triggered Curate compares its bound mental-model "
                       "page with Knowledge and stages proposals itself; it delegates no Task."}
-    elif tool == "source.handoff" and note.ref in {LEARN_TASK_REF, "Tasks/research/distill"}:
+    elif tool == "source.handoff" and note.ref == LEARN_TASK_REF:
         from ..knowledge.source import research_source_binding
 
         try:
@@ -274,7 +273,7 @@ def _retry_binding_matches(note: Note, entries: list[dict]) -> bool:
         activation = INDEX.activation(str(entries[0].get("activation_id", "")))
         source = INDEX.source(str(params.get("source_id", "")))
         binding = research_source_binding(params)
-        if (note.ref not in {LEARN_TASK_REF, "Tasks/research/distill"}
+        if (note.ref != LEARN_TASK_REF
                 or not activation or activation["task_ref"] != note.ref
                 or activation.get("params") != params or not source or not binding
                 or source.get("event_key") != params["activation_key"]
@@ -284,7 +283,7 @@ def _retry_binding_matches(note: Note, entries: list[dict]) -> bool:
         if (doc["citation"] != binding["citation"] or doc["content_sha256"] != binding["content_sha256"]
                 or doc["source_ref"] != params.get("source_ref")):
             return False
-        return not params.get("feed_binding")
+        return True
     if event == "schedule":
         if not _scheduled_binding_matches(note, params):
             return False
@@ -897,9 +896,7 @@ def _resolved_input_evidence(note: Note, params: dict) -> dict | None:
 
 def settle_resolved_occurrence(note: Note) -> dict | None:
     """Close an obsolete failed commitment and retain every prior effect."""
-    if note.meta.get("status") != "failed" or note.ref not in {
-        "Tasks/audit", "Tasks/ingest", "Tasks/research/distill",
-    }:
+    if note.meta.get("status") != "failed" or note.ref != "Tasks/audit":
         return None
     try:
         return _settle_occurrence(note, kind="resolved_input",
@@ -1690,10 +1687,6 @@ def enqueue_named_event(
             continue
         declared_subscribers.append(note)
     if expected_task is not None and [note.ref for note in declared_subscribers] != [expected_task]:
-        if (event == "source.added" and expected_task in {LEARN_TASK_REF, "Tasks/research/distill"}
-                and all(note.ref in {LEARN_TASK_REF, "Tasks/research/distill"} for note in declared_subscribers)):
-            declared_subscribers = [note for note in declared_subscribers if note.ref == expected_task]
-    if expected_task is not None and [note.ref for note in declared_subscribers] != [expected_task]:
         found = ", ".join(note.ref for note in declared_subscribers) or "none"
         raise ValueError(
             f"{event} must resolve exactly to {expected_task}; got {found}"
@@ -1713,7 +1706,7 @@ def enqueue_named_event(
         for note in declared_subscribers
         if not (
             event == "source.added"
-            and note.ref in {LEARN_TASK_REF, "Tasks/research/distill"}
+            and note.ref == LEARN_TASK_REF
             and (
                 params.get("source_class") == OBSERVATION_ARCHIVE_SOURCE_CLASS
                 or handled_research

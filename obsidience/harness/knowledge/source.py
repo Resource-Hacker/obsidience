@@ -28,7 +28,6 @@ import yaml
 from ..config import CONFIG
 
 MAX_SOURCE_CHARS = 500_000
-MAX_DISTILL_INSTRUCTIONS_CHARS = 500
 MAX_SOURCE_FILES = 2_000
 MAX_SOURCE_PREVIEW_BYTES = 1_000_000
 MAX_SOURCE_TREE_SCOPES = 16
@@ -112,10 +111,6 @@ class SourceError(ValueError):
     """A source failed the bounded evidence contract."""
 
 
-
-
-
-
 def research_source_binding(params: dict) -> dict | None:
     """Keep a Source event's admitted identity distinct from external metadata."""
     if params.get("event") != "source.added":
@@ -132,79 +127,6 @@ def research_source_binding(params: dict) -> dict | None:
             or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest)):
         raise SourceError("source.added identity, event key, citation and content hash must agree")
     return {"citation": citation, "content_sha256": digest}
-
-
-
-
-def normalize_distill_instructions(value: object) -> str:
-    """Bound owner Feed preferences without interpreting provider content."""
-    if not isinstance(value, str):
-        raise SourceError("distill_instructions must be text")
-    normalized = value.replace("\r\n", "\n")
-    if (len(normalized) > MAX_DISTILL_INSTRUCTIONS_CHARS
-            or any((ord(char) < 32 and char not in "\n\t") or 127 <= ord(char) <= 159
-                   for char in normalized)):
-        raise SourceError("distill_instructions must contain at most 500 characters without control characters")
-    return normalized.strip()
-
-
-def feed_binding_matches(admitted: object, current: dict) -> bool:
-    """Old empty snapshots remain valid; no configured value rewrites a Task."""
-    if not isinstance(admitted, dict):
-        return False
-    return {**admitted, "distill_instructions": admitted.get("distill_instructions", "")} == current
-
-
-def feed_source_binding(source_id: str, *, index=None, restore: bool = True) -> dict | None:
-    """Attest a Feed origin; read-only projections never restore Source files."""
-    from .index import INDEX
-
-    ledger = INDEX if index is None else index
-    row = ledger.source(source_id)
-    if not row:
-        raise SourceError("Feed Source is missing")
-    origin_id = str(row.get("origin_source_id") or source_id)
-    receipt = ledger.feed_source_binding(origin_id)
-    if receipt is None:
-        if row.get("origin_source_id"):
-            raise SourceError("Inbox Feed origin receipt is missing")
-        return None
-    if not receipt.get("destination_ref"):
-        raise SourceError("Feed Source has no selected graph destination")
-    instructions = receipt.get("distill_instructions", "")
-    if normalize_distill_instructions(instructions) != instructions:
-        raise SourceError("Feed Source instruction receipt is not normalized")
-    original_row = row if origin_id == source_id else ledger.source(origin_id)
-    if original_row is None:
-        raise SourceError("Original Feed Source is missing")
-    original = None
-    evidence_rows = [(original_row, origin_id)]
-    if origin_id != source_id:
-        evidence_rows.append((row, source_id))
-    for evidence_row, expected_id in evidence_rows:
-        if _material_sha256(bytes(evidence_row["material"])) != evidence_row["material_sha256"]:
-            raise SourceError("Feed Source ledger material failed attestation")
-        doc = _row_doc(evidence_row, include_content=True)
-        if doc["id"] != expected_id or doc["content_sha256"] != evidence_row["content_sha256"]:
-            raise SourceError("Feed Source ledger identity failed attestation")
-        if expected_id == origin_id:
-            original = doc
-    if restore:
-        _restore(original_row)
-    if (original["content_sha256"] != receipt["source_sha256"]
-            or original["source_ref"] != f"feed://{receipt['feed_id']}/{receipt['item_key']}"):
-        raise SourceError("Feed Source controller identity does not match its bytes")
-    try:
-        item = json.loads(original["content"])
-        if (item.get("record_type") != "parsed_rss_item"
-                or hashlib.sha256(item["native_id"].encode()).hexdigest() != receipt["item_key"]):
-            raise ValueError("invalid item identity")
-    except (KeyError, TypeError, ValueError, AttributeError) as exc:
-        raise SourceError("Feed Source item is malformed") from exc
-    return {**receipt, "distill_instructions": instructions,
-            "reporting_url": str(item.get("reporting_url") or ""),
-            "published": item.get("published")}
-
 
 
 class _StrictLoader(getattr(yaml, "CSafeLoader", yaml.SafeLoader)):
@@ -272,8 +194,8 @@ class RawSource:
         if media_type not in RAW_MEDIA_TYPES:
             raise SourceError("unsupported source media type")
         if media_type in {"application/xml", "application/rss+xml", "application/atom+xml", "text/xml"}:
-            # Feedparser consumes original XML. Preserve whitespace/newlines
-            # exactly so Source's UTF-8 content hash also attests the feed bytes.
+            # Preserve original XML whitespace/newlines exactly so Source's
+            # UTF-8 content hash also attests the document bytes.
             if (not isinstance(content, str) or not content.strip() or "\x00" in content
                     or len(content.encode("utf-8")) > MAX_SOURCE_CHARS):
                 raise SourceError("XML content must be nonempty UTF-8 within the Source bound")
@@ -529,8 +451,6 @@ def _source_event(row: dict) -> dict:
                 raise SourceError("Inbox research provenance does not match its execution")
             params.update(research_task=parts[3], research_run_id=parts[2])
     expected = SOURCE_EVENT_TASKS[event]
-    if row.get("origin_source_id") or source.source_ref.startswith("feed://"):
-        raise SourceError("Feed intake is retired; retain this Source without dispatch")
     handled_by = {}
     if event_key.startswith("source.added:research:"):
         parts = event_key.split(":", 3)
@@ -554,14 +474,13 @@ def _source_event(row: dict) -> dict:
 def _capture_source(
     *, lane: str, source_type: str, source_ref: str, media_type: str,
     captured_at: str | None, content: str, activation_key: str | None = None,
-    origin_source_id: str = "",
 ) -> dict:
     if lane not in {*SOURCE_LANE_EVENTS, "system"}:
         raise SourceError("unsupported source lane")
     if lane == "system" and (
         source_type != "tool" or media_type != "application/json"
         or not _system_evidence_ref(source_ref)
-        or activation_key is not None or origin_source_id
+        or activation_key is not None
     ):
         raise SourceError("System capture requires the fixed controller identity")
     from .index import INDEX
@@ -611,7 +530,6 @@ def _capture_source(
         created_at=datetime.now(UTC).timestamp(),
         event_key=durable_event_key,
         event_dispatched_at=None,
-        **({"origin_source_id": origin_source_id} if origin_source_id else {}),
     )
     row = INDEX.source(source.source_id)
     if not row:
@@ -653,8 +571,6 @@ def ingest_source(
     captured_at: str | None, content: str, activation_key: str | None = None,
 ) -> dict:
     """Preserve raw evidence and emit its ordinary ``source.added`` trigger."""
-    if source_ref.startswith("feed://"):
-        raise SourceError("Feed intake is retired; historical Sources remain readable")
     with _SOURCE_LOCK:
         return _capture_source(
             lane="raw",

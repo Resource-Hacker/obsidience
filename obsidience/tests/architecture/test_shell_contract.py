@@ -1557,7 +1557,7 @@ def test_native_terminal_is_one_tmux_view_inside_the_generic_pane() -> None:
     assert ".local/state/obsidience-shell/placements" in host
     assert len(list((SHELL_ROOT / "state" / "placements").glob(
         "*-placement.json"
-    ))) == 15
+    ))) == 14
     assert not (
         PROJECT_ROOT / "obsidience" / "ui" / "src" / "main" / "terminal"
         / "local-terminal.ts"
