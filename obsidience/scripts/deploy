@@ -55,7 +55,7 @@ def targets(changed: list[str]) -> list[str]:
     return owners
 
 
-def wait_idle(limit: float = 300) -> None:
+def wait_idle(limit: float = 900) -> None:
     deadline = time.monotonic() + limit
     while time.monotonic() < deadline:
         try:
@@ -64,8 +64,8 @@ def wait_idle(limit: float = 300) -> None:
                     or realtime.get("phase") in {"thinking", "speaking"})
         except OSError:
             busy = False  # The Harness is down; nothing to interrupt.
-        busy = busy or ledger("SELECT count(*) FROM runs WHERE status='running' "
-                              "AND task_ref LIKE 'Agents/Executive/%'")[0][0] > 0
+        # Any running run: an interrupted background Task needs a manual retry.
+        busy = busy or ledger("SELECT count(*) FROM runs WHERE status='running'")[0][0] > 0
         if not busy:
             return
         time.sleep(3)
