@@ -246,6 +246,16 @@ async def run_native_session(task, model, messages, allowed, ctx, agent_name, ef
             trace.append({'command_route': 'hassil', 'proposal': deepcopy(command),
                           'model_requests': 0, 'memory_recalls': 0})
 
+    # Executive voice turns may voice claim-checked sentences before completion
+    # acceptance (owner decision 2026-10-08); the speech owner binds the turn.
+    voice = None
+    if (evaluation is None and command is None and task.kind == 'agent'
+            and task.ref == 'Agents/Executive/Executive' and params.get('event') == 'voice.activation'):
+        from ...capabilities.task.complete import public_claim_error
+        from ...conversation.runtime import RUNTIME as conversation
+        if conversation.speech is not None:
+            voice = conversation.speech.provisional_reply(run, lambda text: public_claim_error(text, ctx))
+
     async def reply(message, value=None, *, error=None, code=None, done=False):
         await BRIDGE.send({'id': message['id'], 'result': value, 'error': error, 'code': code, 'done': done})
 
@@ -536,10 +546,15 @@ async def run_native_session(task, model, messages, allowed, ctx, agent_name, ef
                     'kind': 'model', 'phase': 'started', 'model': dispatch.model.id, 'engine': 'deepseek'}})
                 metrics = {}
                 terminal = None
+                if voice is not None:
+                    # A verified reflex command keeps cue-only confirmation.
+                    voice.begin_step(eligible=ctx.get('_reflex_command_verified') is not True)
                 async def chunk(value):
                     nonlocal terminal
                     if value['type'] == 'finish': terminal = value
                     else: await reply(message, value)
+                    if voice is not None:
+                        await voice.feed(value)
                 try:
                     from .fast_lane import candidates
                     menu = (candidates(ctx['objective'], dispatch.allowed,
@@ -597,6 +612,8 @@ async def run_native_session(task, model, messages, allowed, ctx, agent_name, ef
                     else:
                         from ...capabilities.task.complete import native_text_arguments
                         result = await operate('task.complete', native_text_arguments(text.strip(), ctx))
+                    if not dispatch.done and voice is not None:
+                        await voice.retract(halt=True)  # Never voice a rejected reply further.
                     if not dispatch.done:
                         # The upstream inbox owns the next decision after a rejected completion.
                         await BRIDGE.send({'method': 'context', 'run': run, 'text': '\n'.join(

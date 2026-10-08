@@ -306,6 +306,15 @@ def _effect_claim_error(summary: str, context: dict) -> str | None:
     return None
 
 
+def public_claim_error(summary: str, context: dict) -> str | None:
+    """The Executive completion's unsupported unlock/effect claim check.
+
+    Early voice playback applies the same check to each sentence before it
+    is spoken; it inspects text only and never routes or acts.
+    """
+    return _unlock_claim_error(summary, context) or _effect_claim_error(summary, context)
+
+
 def _computer_completion_error(task, status: str, context: dict, verification=None) -> str | None:
     """Attest actual computer operations for every Task with these Tools.
 
@@ -859,7 +868,7 @@ def execute(args: dict, context: dict) -> dict:
         verification = dict(verification) if valid_verification else None
         error = _completion_error(task, requested_status, outcome, evidence, context, verification)
         if not error and conversational and requested_status == "completed":
-            error = _unlock_claim_error(summary, context) or _effect_claim_error(summary, context)
+            error = public_claim_error(summary, context)
     if error:
         return {
             "accepted": False,

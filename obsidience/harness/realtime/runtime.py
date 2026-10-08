@@ -90,6 +90,97 @@ def speakable_text(text: str) -> str:
     return spoken if spoken.strip() else text
 
 
+# A spoken phrase ends at terminal punctuation (and closing marks) followed by
+# whitespace, or at a line end; a Markdown item or heading is its own phrase.
+_SPOKEN_BOUNDARY = re.compile(r"[.!?…][\"'”’)\]*_]*(?=\s)|\n")
+_TOOL_TEXT = re.compile(r"\s*(?:\{|[\w.]+\{)")
+MAX_PROVISIONAL_CHARS = 2000  # The completion authority's public summary bound.
+
+
+class ProvisionalReply:
+    """Owner-approved early speech for one Executive voice run (2026-10-08).
+
+    A complete sentence from a model step that has emitted no Tool call is
+    voiced before completion acceptance, but only after the completion
+    authority's own unsupported-claim check passes for it. A later Tool call
+    or rejected completion stops the audio through the ordinary playback
+    cancellation; acceptance then voices only the unspoken remainder.
+    Nothing here is persisted, published as Chat text or used as evidence.
+    """
+
+    def __init__(self, speech: "RealtimeSessionManager", generation: int,
+                 timing: dict[str, Any], claim_error) -> None:
+        self._speech = speech
+        self.generation = generation
+        self.timing = timing
+        self._claim_error = claim_error
+        self.halted = False  # Set for the turn by a failed claim or rejection.
+        self._live = False
+        self._text = ""
+        self._offered = 0
+        # Raw text handed to the worker, verified text waiting for the chunk
+        # in flight, that chunk's playback, and the accepted reply's outcome.
+        self.sent = ""
+        self.pending = ""
+        self.playback_id: str | None = None
+        self.final: dict[str, str] | None = None
+
+    def begin_step(self, *, eligible: bool) -> None:
+        self._live = eligible and not self.halted
+        self._text, self._offered = "", 0
+
+    async def feed(self, event: dict) -> None:
+        """Observe one native model stream event of the current step."""
+        if not self._live:
+            return
+        try:
+            kind = event.get("type")
+            if kind == "tool-call-delta" or (kind == "block-start" and event.get("blockType") == "tool-call"):
+                await self.retract()
+            elif kind == "text-delta":
+                delta = str(event.get("text") or "")
+                self._text += delta if self._text else delta.lstrip()
+                await self._offer(final=False)
+            elif kind == "finish":
+                if event.get("reason") == "stop":
+                    await self._offer(final=True)
+                self._live = False
+        except Exception as exc:  # Early speech never fails the model step.
+            self.halted, self._live = True, False
+            trace.emit("error", f"Early reply speech stopped: {type(exc).__name__}")
+
+    async def retract(self, *, halt: bool = False) -> None:
+        """Stop early audio; an accepted reply is then voiced in full."""
+        self.halted |= halt
+        self._live = False
+        await self._speech._provisional_retract(self)
+
+    async def _offer(self, *, final: bool) -> None:
+        text, position = self._text, self._offered
+        if not position and _TOOL_TEXT.match(text):
+            self._live = False  # A textual Tool imitation is never voiced.
+            return
+        ends = [match.start() if match.group() == "\n" else match.end()
+                for match in _SPOKEN_BOUNDARY.finditer(text, position)]
+        if final:
+            ends.append(len(text))
+        for end in ends:
+            chunk = text[position:end].rstrip()
+            if not any(character.isalpha() for character in chunk):
+                continue  # Join list numbers and blank lines to the next phrase.
+            if position + len(chunk) > MAX_PROVISIONAL_CHARS:
+                self._live = False
+                return
+            if self._claim_error(chunk.strip()):
+                # The full completion check decides; nothing more is early.
+                self.halted, self._live = True, False
+                return
+            if not await self._speech._provisional_say(self, chunk):
+                self._live = False
+                return
+            position = self._offered = position + len(chunk)
+
+
 def _exit_description(returncode: int) -> str:
     if returncode < 0:
         with contextlib.suppress(ValueError):
@@ -149,6 +240,7 @@ class RealtimeSessionManager:
         self._playback_timing_stages: set[str] = set()
         self._playback_id: str | None = None
         self._playback_run_id = ""
+        self._provisional: ProvisionalReply | None = None
         self.conversation = conversation or conversation_runtime.RUNTIME
 
     def scheduler_paused(self) -> bool:
@@ -414,6 +506,21 @@ class RealtimeSessionManager:
                 raise asyncio.CancelledError
 
     async def speak(self, payload: dict) -> None:
+        reply, self._provisional = self._provisional, None
+        if reply is not None and (reply.sent or reply.pending):
+            text, heard = str(payload.get("text", "")), reply.sent + reply.pending
+            if (payload.get("generation") == reply.generation == self.conversation._generation
+                    and payload.get("run_id") == reply.timing["run_id"]
+                    and text.startswith(heard) and self._phase in READY_PHASES):
+                # The accepted reply continues the early audio: voice only the
+                # unspoken remainder, then its ordinary outcome cue.
+                reply.pending += text[len(heard):]
+                reply.final = {"outcome": str(payload.get("outcome") or "")}
+                self._provisional = reply
+                if reply.playback_id is None:
+                    await self._provisional_flush(reply)
+                return
+            # Different public text supersedes the early audio (new worker epoch).
         payload = {**payload, "text": speakable_text(str(payload.get("text", "")))}
         if self._paused_for_work and self._desired_mode == "wake" and self._phase not in READY_PHASES:
             # One accepted public reply may wait for the same speech owner to
@@ -433,6 +540,76 @@ class RealtimeSessionManager:
                 })
             except (OSError, RuntimeError):
                 trace.emit("error", f"Computer cue delivery failed: {name}")
+
+    def provisional_reply(self, run_id: str, claim_error) -> ProvisionalReply | None:
+        """Bind early reply speech to the current turn's exact generation."""
+        identity = trace.turn_identity()
+        process = self._process
+        if (identity.get("generation") != self.conversation._generation
+                or type(identity.get("generation")) is not int or not identity.get("turn_id")
+                or self._phase not in READY_PHASES or process is None or process.returncode is not None):
+            return None
+        timing = {"turn_id": identity["turn_id"], "run_id": run_id}
+        if type(identity.get("speech_sequence")) is int:
+            timing["speech_sequence"] = identity["speech_sequence"]
+        self._provisional = ProvisionalReply(self, identity["generation"], timing, claim_error)
+        return self._provisional
+
+    async def _provisional_say(self, reply: ProvisionalReply, chunk: str) -> bool:
+        if (reply is not self._provisional or reply.generation != self.conversation._generation
+                or self._phase not in READY_PHASES):
+            return False
+        reply.pending += chunk
+        if reply.playback_id is None:
+            await self._provisional_flush(reply)
+        return reply is self._provisional
+
+    async def _provisional_flush(self, reply: ProvisionalReply) -> None:
+        """Hand waiting text to the worker once the previous chunk has played.
+
+        A worker `speak` supersedes any reply still playing, so early chunks
+        are chained on the worker's own end-of-playback signal.
+        """
+        if reply is not self._provisional or reply.generation != self.conversation._generation:
+            return
+        text, reply.pending = reply.pending, ""
+        final = reply.final
+        if final is not None:
+            self._provisional = None  # The worker's ordinary completion owns the rest.
+        if not text.strip():
+            cue = {"completed": "complete", "failed": "error"}.get(final["outcome"]) if final else None
+            if cue:
+                await self.cue(cue)
+            return
+        first = not reply.sent
+        payload = self._prepare_playback({
+            "type": "speak", "generation": reply.generation, "text": speakable_text(text),
+            "outcome": final["outcome"] if final else "",
+            # Only the first chunk carries the turn's speech timing identity.
+            **(reply.timing if first else {"run_id": reply.timing["run_id"]}),
+        })
+        reply.sent += text
+        reply.playback_id = payload["playback_id"]
+        try:
+            await self._send_worker(payload, provisional=True)
+        except Exception as exc:
+            if self._provisional is reply:
+                self._provisional = None
+            message = f"Speech playback failed: {type(exc).__name__}"
+            self._last_error = message
+            trace.emit("error", message, [str(exc)[:MAX_EVENT_TEXT]])
+
+    async def _provisional_retract(self, reply: ProvisionalReply) -> None:
+        playing = reply.playback_id is not None
+        reply.sent = reply.pending = ""
+        reply.final = reply.playback_id = None
+        if playing and reply is self._provisional and reply.generation == self.conversation._generation:
+            try:
+                await self._send_worker({"type": "cancel", "generation": reply.generation,
+                                         "stop_playback": True}, provisional=True)
+            except Exception as exc:
+                trace.emit("error", f"Speech cancellation delivery failed: {type(exc).__name__}",
+                           [str(exc)[:MAX_EVENT_TEXT]])
 
     def _prepare_playback(self, payload: dict) -> dict:
         """Publish queued speech at acceptance, including a deferred worker handoff."""
@@ -483,16 +660,21 @@ class RealtimeSessionManager:
             REALTIME_CONFIRMATION if self._mode == "realtime" else "",
         )
 
-    async def _send_worker(self, payload: dict[str, Any]) -> None:
+    async def _send_worker(self, payload: dict[str, Any], *, provisional: bool = False) -> None:
+        # provisional: early reply speech; its cancel retracts only that audio.
         if payload.get("type") in {"cancel", "stop"}:
-            if payload.get("type") == "stop" or payload.get("stop_playback", True):
-                self._wake_open = self._capture_active = self._user_speaking = False
+            if not provisional:
+                if payload.get("type") == "stop" or payload.get("stop_playback", True):
+                    self._wake_open = self._capture_active = self._user_speaking = False
+                self._provisional = None
             self._deferred_reply = None
             self._clear_playback()
         process = self._process
         if process is None or process.returncode is not None or process.stdin is None:
             return
-        if payload.get("type") in {"speak", "cancel", "stop"}:
+        # A later chunk of early speech keeps the first chunk's timing edges.
+        continuation = provisional and payload.get("type") == "speak" and "turn_id" not in payload
+        if payload.get("type") in {"speak", "cancel", "stop"} and not continuation:
             if payload["type"] == "speak":
                 if not payload.get("playback_id") or payload["playback_id"] != self._playback_id:
                     payload = self._prepare_playback(payload)
@@ -1017,6 +1199,18 @@ class RealtimeSessionManager:
                     self._record_playback_timing(worker_event)
                     continue
                 if event_type == "output_audio":
+                    reply = self._provisional
+                    if (reply is not None and reply.playback_id is not None
+                            and worker_event.get("status") == "idle"
+                            and worker_event.get("playback_id") == reply.playback_id
+                            and worker_event.get("generation") == reply.generation):
+                        # The early chunk has played; the next one may start.
+                        # Continuing speech publishes no idle gap to the graph.
+                        reply.playback_id = None
+                        if not reply.pending.strip():
+                            self._record_output_audio(worker_event)
+                        await self._provisional_flush(reply)
+                        continue
                     self._record_output_audio(worker_event)
                     continue
                 if event_type == "playback_error":
@@ -1038,6 +1232,9 @@ class RealtimeSessionManager:
                         "run_id": self._playback_run_id,
                         "code": "pocket_tts_failed",
                     }, sort_keys=True)], {"run_id": self._playback_run_id})
+                    if (self._provisional is not None
+                            and self._provisional.playback_id == worker_event.get("playback_id")):
+                        self._provisional = None  # An accepted reply is then voiced in full.
                     self._clear_playback()
                     await self._publish("runtime", reason="playback_error", line=message)
                     continue

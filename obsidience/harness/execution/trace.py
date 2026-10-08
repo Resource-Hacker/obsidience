@@ -92,6 +92,12 @@ def bind_turn(turn_id: str, *, speech_sequence: int | None = None, generation: i
     return _CONTEXT.set(context)
 
 
+def turn_identity() -> dict:
+    """The conversation turn bound to this scope, or an empty mapping."""
+    return {key: value for key, value in _CONTEXT.get().items()
+            if key in {"turn_id", "speech_sequence", "generation"}}
+
+
 def latency(stage: str, *, monotonic_ns: int | None = None,
             duration_ms: float | None = None, **correlation) -> None:
     """Bounded phase measurements, never execution authority or private content.

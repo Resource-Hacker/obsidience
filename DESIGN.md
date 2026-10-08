@@ -579,6 +579,11 @@ full current reads, unrelated hits do not.
   started ready chirp finishes; STOP, mute, mode change and shutdown cancel. Code, not model
   wording, replaces spoken confirmation with a completion chirp for receipt-verified
   reflex effects; failures and uncertain effects never chirp success.
+- Executive voice turns may speak each complete sentence of a model step that has emitted
+  no Tool call before completion acceptance, once it passes the completion's own
+  unsupported-claim check (owner decision 2026-10-08). A later Tool call or rejected
+  completion stops that audio; acceptance speaks only the unspoken remainder. Chat text,
+  persistence and cue rules are unchanged.
 - The PCM envelope drives only the Executive orb; one `ShellApi` subscribes to
   `/ws/realtime`; no polling.
 
