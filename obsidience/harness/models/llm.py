@@ -75,13 +75,19 @@ async def close_provider_client() -> None:
 async def provider_client():
     """Reuse the API pool; standalone callers own and close their local client."""
     owned = _PROVIDER_CLIENT
-    if owned is not None and owned[0] is asyncio.get_running_loop():
-        yield owned[1]
-    else:
-        # Benchmarks and tests can use separate asyncio.run loops. Never share
-        # HTTP connections across those loops or leave a standalone pool open.
-        async with _new_provider_client() as client:
-            yield client
+    try:
+        if owned is not None and owned[0] is asyncio.get_running_loop():
+            yield owned[1]
+        else:
+            # Benchmarks and tests can use separate asyncio.run loops. Never share
+            # HTTP connections across those loops or leave a standalone pool open.
+            async with _new_provider_client() as client:
+                yield client
+    except (httpx.NetworkError, httpx.RemoteProtocolError, httpx.ConnectTimeout):
+        # The served model may have stopped without a residency action; the
+        # next lease must verify and restore residency through the full path.
+        model_runtime.invalidate_residency()
+        raise
 
 
 @dataclass(frozen=True)

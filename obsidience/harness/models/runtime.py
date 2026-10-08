@@ -636,6 +636,11 @@ def _healthy(spec: ModelSpec, timeout: float = 0.35) -> bool:
         return False
 
 
+async def _probe(spec: ModelSpec, timeout: float = 0.75) -> bool:
+    """Run the synchronous health probe off the event loop."""
+    return await asyncio.to_thread(_healthy, spec, timeout)
+
+
 def _service_state(service: str | None) -> str:
     if not service:
         return "external"
@@ -1175,24 +1180,34 @@ class _HardwareModelRuntime:
             with contextlib.suppress(Exception):
                 listener(self.work_requested)
 
-    async def _begin_work(self, spec: ModelSpec, devices: object = None) -> None:
+    async def _admit_memory(self, spec: ModelSpec, devices: object = None) -> tuple[str, ...]:
         await self.refresh_memory_plans([spec])
-        selected = self._pick_devices(spec, devices)
+        selected = await asyncio.to_thread(self._pick_devices, spec, devices)
         # Reclaim Edge and verify the projected capacity before interrupting
         # Wake. A rejected admission never drains the speech worker.
         await self._prepare_memory(spec, selected)
+        return selected
+
+    async def _yield_reservations(self, spec: ModelSpec, selected: tuple[str, ...]) -> None:
+        await self.cancel_prefill()
+        if self._reservation_yielders:
+            selected = set(selected)
+            for owner, release in tuple(self._reservation_yielders.items()):
+                if (selected.intersection(self.device_reservations.get(owner, ()))
+                        and not self._reservation_compatible(owner, spec.id)):
+                    # The speech owner drains its worker before releasing
+                    # its GPU. Never invoke it under the model lock.
+                    await release()
+
+    async def _begin_work(self, spec: ModelSpec, devices: object = None, *,
+                          resident: tuple[str, ...] | None = None) -> None:
+        # The settled resident default already holds its memory; it needs no
+        # admission estimate, fresh measurement or Edge reclamation.
+        selected = resident if resident is not None else await self._admit_memory(spec, devices)
         self._work_requests += 1
         self._notify_activity()
         try:
-            await self.cancel_prefill()
-            if self._reservation_yielders:
-                selected = set(selected)
-                for owner, release in tuple(self._reservation_yielders.items()):
-                    if (selected.intersection(self.device_reservations.get(owner, ()))
-                            and not self._reservation_compatible(owner, spec.id)):
-                        # The speech owner drains its worker before releasing
-                        # its GPU. Never invoke it under the model lock.
-                        await release()
+            await self._yield_reservations(spec, selected)
         except BaseException:
             self._end_work()
             raise
@@ -1355,19 +1370,23 @@ class _HardwareModelRuntime:
 
     async def _prepare_memory(self, spec: ModelSpec, devices: tuple[str, ...], *,
                               managed: bool = True) -> None:
-        error = self._memory_error(spec, devices, managed=managed, edge=False, fresh=True)
+        def measure(edge: bool):
+            # NVML and the health probe stay off the event loop.
+            return asyncio.to_thread(self._memory_error, spec, devices,
+                                     managed=managed, edge=edge, fresh=True)
+        error = await measure(False)
         if error is None:
             return
         # Only attempt Edge reclamation if that bounded release can make this
         # exact profile fit. Other desktop applications are never terminated.
-        if self._memory_error(spec, devices, managed=managed, fresh=True) is not None:
+        if await measure(True) is not None:
             raise error
         pids = await self._memory_operation(self.gpu_memory.reclaim_edge, devices)
         if pids:
             from ..execution import trace as action_trace
             action_trace.emit("status", "Recycled Edge GPU helper for model admission",
                               [spec.label, f"GPU helper processes: {', '.join(map(str, pids))}"])
-        error = self._memory_error(spec, devices, managed=managed, edge=False, fresh=True)
+        error = await measure(False)
         if error is not None:
             raise error
 
@@ -1389,12 +1408,13 @@ class _HardwareModelRuntime:
                     await self._perception(False)
                 try:
                     response = await client.get(spec.base_url.removesuffix("/v1") + "/health")
-                    if response.status_code == 200 and (spec.id != FLASH_NEXT_MODEL or _healthy(spec, timeout=0.75)):
+                    if response.status_code == 200 and (spec.id != FLASH_NEXT_MODEL or await _probe(spec)):
                         return
                 except httpx.HTTPError:
                     pass
                 if spec.service and not await _active(spec.service):
-                    error = self._memory_error(spec, devices, managed=False, edge=False, fresh=True)
+                    error = await asyncio.to_thread(self._memory_error, spec, devices,
+                                                    managed=False, edge=False, fresh=True)
                     if error is not None:
                         raise error
                     raise RuntimeError(f"{spec.service} stopped before the model became ready")
@@ -1408,16 +1428,16 @@ class _HardwareModelRuntime:
             raise RuntimeError(f"{spec.id} is not installed")
 
     async def _stop(self, spec: ModelSpec) -> None:
-        if spec.service and (await _active(spec.service) or _healthy(spec, timeout=0.75)):
+        if spec.service and (await _active(spec.service) or await _probe(spec)):
             self.residency_generation += 1
             await _systemctl("stop", spec.service, timeout=120)
-        if _healthy(spec, timeout=0.75):
+        if await _probe(spec):
             raise RuntimeError(f"unmanaged {spec.id} process remained after stopping {spec.service}")
 
     async def _start(self, spec: ModelSpec, devices: tuple[str, ...]) -> None:
         self._verify_install(spec)
         current = _read_launch(spec.id)
-        if _healthy(spec, timeout=0.75) and current == devices:
+        if current == devices and await _probe(spec):
             if spec.service and not await _active(spec.service):
                 raise RuntimeError(f"{spec.id} is running outside {spec.service}")
             return
@@ -1425,7 +1445,7 @@ class _HardwareModelRuntime:
         # Refresh the exact profile before stopping or loading its service.
         self.residency_generation += 1
         await self.refresh_memory_plans([spec])
-        if _healthy(spec, timeout=0.75) or (spec.service and await _active(spec.service)):
+        if await _probe(spec) or (spec.service and await _active(spec.service)):
             await self._stop(spec)
         profile = _read_settings()["models"][spec.id]
         await self._prepare_memory(spec, devices, managed=False)
@@ -1486,7 +1506,7 @@ class _HardwareModelRuntime:
         desired, perception_wanted = self._default_target(settings)
         for model_id, base_spec in MODELS.items():
             service_active = bool(base_spec.service and await _active(base_spec.service))
-            if not service_active and not _healthy(base_spec, timeout=0.75):
+            if not service_active and not await _probe(base_spec):
                 continue
             if model_id not in desired or _read_launch(model_id) != desired[model_id]:
                 await self._stop(base_spec)
@@ -1511,7 +1531,7 @@ class _HardwareModelRuntime:
         if perception_wanted:
             conflicts = [
                 model_id for model_id, devices in desired.items()
-                if RTX_4080_DEVICE in devices and _healthy(MODELS[model_id], timeout=0.75)
+                if RTX_4080_DEVICE in devices and await _probe(MODELS[model_id])
             ]
             if not conflicts:
                 await self._perception(True)
@@ -1525,6 +1545,26 @@ class _HardwareModelRuntime:
                 self.residency_generation, *self._default_target(_read_settings()))
         except Exception:
             return False
+
+    def _resident_layout(self, spec: ModelSpec, devices: object = None) -> tuple[str, ...] | None:
+        """The settled default layout already serving this exact model, if any.
+
+        Only an unchanged reconciliation qualifies. The 4080 keeps the full
+        path because an external session edge can reactivate perception there.
+        """
+        if devices is not None or not self._settled_since_reconciliation():
+            return None
+        layout = self._reconciled_state[1].get(spec.id)
+        try:
+            if not layout or RTX_4080_DEVICE in layout or _read_launch(spec.id) != layout:
+                return None
+        except Exception:
+            return None
+        return layout
+
+    def invalidate_residency(self) -> None:
+        """A failed provider connection voids the settled resident fast path."""
+        self._reconciled_state = None
 
     def _unreserved_layouts(
         self, spec: ModelSpec, override: object = None,
@@ -1602,14 +1642,14 @@ class _HardwareModelRuntime:
         )[1]
 
     async def _activate_task_model(self, spec: ModelSpec, devices: tuple[str, ...]) -> None:
-        self.check_resources(spec, list(devices))
+        await asyncio.to_thread(self.check_resources, spec, list(devices))
         if self._reserved_devices(model_id=spec.id).intersection(devices):
             raise ModelResourceUnavailable(spec, [devices], self.device_reservations.copy())
         for model_id, candidate in MODELS.items():
             if model_id == spec.id:
                 continue
             service_active = bool(candidate.service and await _active(candidate.service))
-            healthy = _healthy(candidate, timeout=0.75)
+            healthy = await _probe(candidate)
             if not service_active and not healthy:
                 continue
             candidate_devices = _read_launch(model_id)
@@ -1636,7 +1676,7 @@ class _HardwareModelRuntime:
 
         for candidate in MODELS.values():
             service_active = bool(candidate.service and await _active(candidate.service))
-            healthy = _healthy(candidate, timeout=0.75)
+            healthy = await _probe(candidate)
             if not service_active and not healthy:
                 continue
             candidate_devices = _read_launch(candidate.id)
@@ -1651,7 +1691,8 @@ class _HardwareModelRuntime:
             or await _active(PERCEPTION_UNITS[1])
         ):
             await self._perception(False)
-        error = self._memory_error(spec, devices, managed=False, edge=False, fresh=True)
+        error = await asyncio.to_thread(self._memory_error, spec, devices,
+                                        managed=False, edge=False, fresh=True)
         if error is not None:
             raise error
 
@@ -1680,7 +1721,7 @@ class _HardwareModelRuntime:
             healthy = resident and await asyncio.to_thread(_healthy, spec)
             if not healthy and load_if_idle:
                 try:
-                    selected = self._pick_devices(spec)
+                    selected = await asyncio.to_thread(self._pick_devices, spec)
                     self.switching = True
                     await self._activate_task_model(spec, selected)
                     healthy = True
@@ -1702,20 +1743,36 @@ class _HardwareModelRuntime:
 
     @asynccontextmanager
     async def lease(self, spec: ModelSpec, devices: object = None):
-        await self._begin_work(spec, devices)
+        # Steady state: the reconciled default model already serves this lease.
+        # One off-loop health probe replaces memory admission, device selection
+        # and the per-model service scan; any change takes the complete path.
+        resident = self._resident_layout(spec, devices)
+        if resident is not None and not await _probe(spec):
+            resident = None
+        await self._begin_work(spec, devices, resident=resident)
         try:
             await self.lock.acquire()
+            if resident is not None and self._resident_layout(spec, devices) != resident:
+                # Residency changed while this lease waited. Complete ordinary
+                # admission outside the model lock, keeping this work request.
+                self.lock.release()
+                resident = None
+                await self._yield_reservations(spec, await self._admit_memory(spec, devices))
+                await self.lock.acquire()
         except BaseException:
             self._end_work()
             raise
         activation_attempted = False
         cancelled = False
         try:
-            selected = self._pick_devices(spec, devices)
-            self.switching = True
-            activation_attempted = True
-            self.reconciliation_pending = True
-            await self._activate_task_model(spec, selected)
+            if resident is None:
+                selected = await asyncio.to_thread(self._pick_devices, spec, devices)
+                self.switching = True
+                activation_attempted = True
+                self.reconciliation_pending = True
+                await self._activate_task_model(spec, selected)
+            else:
+                activation_attempted = True
             self.running_model = spec.id
             self.switching = False
             yield configured_spec(spec.id)
@@ -1857,7 +1914,7 @@ class _HardwareModelRuntime:
             self.switching = True
             try:
                 self.reconciliation_pending = True
-                if _healthy(spec, timeout=0.75):
+                if await _probe(spec):
                     await self._stop(spec)
                 _write_settings(settings)
                 configuration_source = record_model_source(model_id, "configuration", {
@@ -1983,7 +2040,7 @@ class _HardwareModelRuntime:
             try:
                 for candidate in MODELS.values():
                     active = bool(candidate.service and await _active(candidate.service))
-                    if not active and not _healthy(candidate, timeout=0.75):
+                    if not active and not await _probe(candidate):
                         continue
                     layout = _read_launch(candidate.id)
                     if not layout or set(layout) & set(selected):
@@ -2057,7 +2114,7 @@ class _HardwareModelRuntime:
             raise
         self.switching = True
         try:
-            selected = self._pick_devices(spec)
+            selected = await asyncio.to_thread(self._pick_devices, spec)
             await self._prepare_external_model(spec, selected)
             self.running_model = owner
             self.external_models.clear()
@@ -2122,6 +2179,10 @@ RUNTIME = _HardwareModelRuntime()
 
 def check_resources(spec: ModelSpec, devices: object = None) -> None:
     RUNTIME.check_resources(spec, devices)
+
+
+def invalidate_residency() -> None:
+    RUNTIME.invalidate_residency()
 
 
 @asynccontextmanager
