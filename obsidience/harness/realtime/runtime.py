@@ -7,6 +7,7 @@ import contextlib
 import json
 import math
 import os
+import re
 import signal
 import time
 import uuid
@@ -46,6 +47,47 @@ PULSE_SOCKET = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"
 
 
 _input_speech_timing = trace.input_speech_timing
+
+_MD_FENCE = re.compile(r"^[ \t]*(?:```|~~~)[^\n]*(?:\n|$)", re.MULTILINE)
+_MD_HEADING = re.compile(r"^[ \t]{0,3}#{1,6}[ \t]+(.*?)[ \t#]*$", re.MULTILINE)
+_MD_BULLET = re.compile(r"^[ \t]*[-*+•][ \t]+(.*?)[ \t]*$", re.MULTILINE)
+_MD_LINK = re.compile(r"!?\[([^\]\n]*)\]\(([^()\s]+)(?:[ \t]+\"[^\"\n]*\")?\)")
+_MD_AUTOLINK = re.compile(r"<((?:https?://|www\.)[^>\s]+)>", re.IGNORECASE)
+_MD_EMPHASIS = re.compile(
+    r"(\*\*|__|~~)(?=\S)(.+?)(?<=\S)\1"
+    r"|(?<![\w*])\*(?=[^\s*])([^*\n]*?[^\s*])\*(?![\w*])"
+    r"|(?<![\w_])_(?=[^\s_])([^_\n]*?[^\s_])_(?![\w_])"
+)
+_MD_CODE = re.compile(r"`+([^`\n]*?)`+")
+_URL = re.compile(r"\b(?:https?://|www\.)[^\s<>()\[\]{}\"]+", re.IGNORECASE)
+
+
+def _sentence(match: re.Match) -> str:
+    text = match.group(1)
+    # A list item or heading ends a spoken phrase once newlines collapse.
+    return text if not text or text[-1] in ".!?:;," else text + "."
+
+
+def _url_host(match: re.Match) -> str:
+    url, trail = match.group(0), ""
+    while url and url[-1] in ".,;:!?'":
+        url, trail = url[:-1], url[-1] + trail
+    host = re.sub(r"^(?:https?://)?(?:www\.)?", "", url, flags=re.IGNORECASE)
+    host = re.split(r"[/?#]", host, maxsplit=1)[0].rsplit("@", 1)[-1].split(":", 1)[0]
+    return (host or url) + trail
+
+
+def speakable_text(text: str) -> str:
+    """Speak Markdown replies as prose; ordinary text passes through unchanged."""
+    spoken = _MD_FENCE.sub("", text)
+    spoken = _MD_HEADING.sub(_sentence, spoken)
+    spoken = _MD_BULLET.sub(_sentence, spoken)
+    spoken = _MD_LINK.sub(lambda match: match.group(1) or match.group(2), spoken)
+    spoken = _MD_AUTOLINK.sub(r"\1", spoken)
+    spoken = _URL.sub(_url_host, spoken)
+    spoken = _MD_EMPHASIS.sub(lambda match: match.group(2) or match.group(3) or match.group(4), spoken)
+    spoken = _MD_CODE.sub(r"\1", spoken)
+    return spoken if spoken.strip() else text
 
 
 def _exit_description(returncode: int) -> str:
@@ -372,6 +414,7 @@ class RealtimeSessionManager:
                 raise asyncio.CancelledError
 
     async def speak(self, payload: dict) -> None:
+        payload = {**payload, "text": speakable_text(str(payload.get("text", "")))}
         if self._paused_for_work and self._desired_mode == "wake" and self._phase not in READY_PHASES:
             # One accepted public reply may wait for the same speech owner to
             # regain hardware. Generation changes and Stop discard it.
