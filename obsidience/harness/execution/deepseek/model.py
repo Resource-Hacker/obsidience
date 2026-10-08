@@ -85,6 +85,23 @@ CONSUMED_IMAGE = '[Earlier image consumed; observe again for current pixels.]'
 def _targeted(name: str) -> bool:
     """Tools whose arguments name a window target, click point or placement."""
     return name in {'computer.observe', 'computer.act'} or name.startswith('window.')
+
+
+_TARGET_KEYS = {'target', 'point', 'x', 'y'}
+
+
+def _without_targets(arguments: str) -> str:
+    """Keep a call's valid shape (e.g. its query) but drop window targets and points.
+
+    An empty object is itself copied by a small model and fails validation.
+    """
+    try:
+        parsed = json.loads(arguments)
+    except (TypeError, ValueError):
+        return '{}'
+    if not isinstance(parsed, dict):
+        return '{}'
+    return json.dumps({k: v for k, v in parsed.items() if k not in _TARGET_KEYS}, separators=(',', ':'))
 # A consumed image's placeholder follows the notice in an image result's text.
 _BUDGET_NOTICE = re.compile(r'\n\nExecution budget: [^\n]*(?=(?:\n' + re.escape(CONSUMED_IMAGE) + r')?\Z)')
 
@@ -287,7 +304,8 @@ def wire_messages(messages: list[dict], images: dict, objective: str = '', *,
                 # current turn's calls keep theirs.
                 row['tool_calls'] = [{'id': b['id'], 'type': 'function', 'function': {
                     'name': b['name'],
-                    'arguments': '{}' if index < owner_index and _targeted(b['name']) else b['arguments']}}
+                    'arguments': (_without_targets(b['arguments'])
+                                  if index < owner_index and _targeted(b['name']) else b['arguments'])}}
                     for b in calls]
             result.append(row)
     return result
