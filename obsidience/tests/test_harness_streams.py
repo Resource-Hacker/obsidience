@@ -129,7 +129,7 @@ def test_chat_accepts_and_steers_same_live_turn_without_waiting_for_completion(m
 
     async def submit(text, **kwargs):
         submissions.append((text, kwargs))
-        assert kwargs == {"source": "text", "wait": False}
+        assert kwargs == {"source": "text", "wait": False, "memory_writeback": True}
         return await original_submit(text, **kwargs)
 
     async def run(_text, _generation, _turn, **_kwargs):

@@ -437,10 +437,13 @@ class ConversationRuntime:
                 reply_to=str(user_turn["id"]),
             )
             trace.latency("answer_committed", run_id=str(result.get("run_id") or ""))
+            from ..memory.hindsight import MEMORY
             if memory_writeback:
-                from ..memory.hindsight import MEMORY
                 MEMORY.completed("Agents/Executive/Executive", text, reply,
                                  source="conversation:" + str(user_turn["conversation_id"]), identifier=str(user_turn["id"]))
+            else:
+                MEMORY.withhold("Agents/Executive/Executive",
+                                source="conversation:" + str(user_turn["conversation_id"]), identifier=str(user_turn["id"]))
             if source == "realtime" and result.get("voice_confirmation") != "cue_only":
                 await self._speak_public(reply, generation, turn_id=str(user_turn["id"]),
                                          run_id=str(result.get("run_id") or ""),

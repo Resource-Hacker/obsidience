@@ -214,6 +214,8 @@ class Hindsight:
         digest = hashlib.sha256(json.dumps([content, metadata], sort_keys=True).encode()).hexdigest()
         existing = self._sql("SELECT content_hash,payload,state FROM memory_deliveries WHERE id=?", (operation,))
         if existing:
+            if existing[0][2] == "withheld":
+                return False
             if existing[0][0] != digest:
                 previous_digest = hashlib.sha256(json.dumps(
                     [_redact(previous_text, 16000), metadata], sort_keys=True).encode()).hexdigest() if previous_text else ""
@@ -273,6 +275,16 @@ class Hindsight:
                 pass  # Writer already shut down: record synchronously instead.
         return self._completed(agent_ref, user, assistant, source=source,
                                identifier=identifier, timestamp=timestamp)
+
+    def withhold(self, agent_ref, *, source, identifier):
+        """Reserve a turn's delivery identity without delivering it.
+
+        Diagnostic turns (memory_writeback=False) must also survive the
+        startup re-offer of recent turns, so their identity is recorded.
+        """
+        operation = str(uuid.uuid5(uuid.NAMESPACE_URL, f"obsidience:{agent_ref}:{source}:{identifier}"))
+        self._sql("INSERT OR IGNORE INTO memory_deliveries(id,bank,content_hash,payload,state,created_at) "
+                  "VALUES(?,?,?,?,?,?)", (operation, bank_for(agent_ref), "", "", "withheld", time.time()))
 
     def _completed(self, agent_ref, user, assistant, *, source, identifier, timestamp=None):
         try:
