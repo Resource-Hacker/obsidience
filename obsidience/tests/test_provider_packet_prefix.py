@@ -5,7 +5,7 @@ from types import SimpleNamespace as NS
 from obsidience.harness.execution import executor
 from obsidience.harness.knowledge.vault import Note
 from obsidience.harness.models import llm
-from obsidience.harness.models.runtime import EXECUTIVE_MODEL, MODELS, SPECIALIST_MODEL
+from obsidience.harness.models.runtime import EXECUTIVE_MODEL, MODELS
 
 
 def test_request_pair_keeps_complete_fixed_spine_before_user_checkpoint(monkeypatch):
@@ -35,9 +35,7 @@ def test_request_pair_keeps_complete_fixed_spine_before_user_checkpoint(monkeypa
         messages = [{"role": "system", "content": "Interpreter contract\n\n" + provider["provider_system"]},
                     {"role": "user", "content": provider["provider_conversation"]},
                     {"role": "user", "content": provider["provider_user"]}]
-        # SPECIALIST_MODEL is now a legacy alias of the Executive model.
-        for spec in {MODELS[EXECUTIVE_MODEL].id: MODELS[EXECUTIVE_MODEL],
-                     MODELS[SPECIALIST_MODEL].id: MODELS[SPECIALIST_MODEL]}.values():
+        for spec in (MODELS[EXECUTIVE_MODEL],):
             payload = llm._chat_payload(messages, spec, max_tokens=None, temperature=0,
                                         reasoning_effort="none", allowed_tools=["vault.read", "task.complete"])
             assert [m["role"] for m in payload["messages"]] == ["system", "user", "user"]

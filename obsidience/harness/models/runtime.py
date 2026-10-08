@@ -9,14 +9,11 @@ loaded and every displaced default is restored after the Task.
 from __future__ import annotations
 
 import asyncio
-import base64
 import contextlib
 import hashlib
 import itertools
 import json
 import os
-import statistics
-import struct
 import subprocess
 import tempfile
 import time
@@ -34,7 +31,6 @@ from ..config import CONFIG
 from ..host.gpu_memory import GpuMemory, process_identity
 
 from .benchmark import (
-    MODEL_COMPARISON_CONTRACT,
     MODEL_COMPARISON_MAX_TOKENS,
     MODEL_COMPARISON_PROMPT,
     MODEL_COMPARISON_SAMPLES,
@@ -57,7 +53,6 @@ from ..host.inventory import (
 
 
 EXECUTIVE_MODEL = "obsidience-gemma"
-SPECIALIST_MODEL = EXECUTIVE_MODEL  # Legacy profile ID; auto selection uses CONFIG.
 AUTO_MODEL = "auto"
 NONE_COMPONENT = "none"
 DISPLAY_COMPONENT = "display-media"

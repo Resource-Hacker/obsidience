@@ -28,36 +28,6 @@ _TASK_REF = re.compile(r"Tasks/[A-Za-z0-9][A-Za-z0-9_ /.-]{0,150}\Z")
 _STATUSES = {"completed", "failed", "interrupted", "waiting", "pending", "blocked", "running"}
 
 
-def historical_steered_turns(conversation, *, conversation_id: str, before_sequence: int | None = None) -> set[str]:
-    """Applied clarification IDs from exact completed runs, not assistant prose."""
-    turns = conversation.index.conversation_turns(conversation_id)
-    if before_sequence is not None:
-        turns = [turn for turn in turns if turn["sequence"] < before_sequence]
-    replies = {turn["run_id"]: turn for turn in turns
-               if turn["role"] == "assistant" and turn.get("run_id") and turn["state"] == "final"}
-    users = [turn for turn in turns if turn["role"] == "user" and turn.get("run_id") in replies][-64:]
-    applied = set()
-    for run_id in {turn["run_id"] for turn in users}:
-        with conversation.index.lock:
-            row = conversation.index.db.execute("SELECT trace FROM runs WHERE id=? AND status='completed'", (run_id,)).fetchone()
-        if not row or not isinstance(row[0], str) or len(row[0]) > MAX_TRACE_BYTES:
-            continue
-        entries = _trace(row[0])
-        if not entries:
-            continue
-        packet = entries[0]
-        if not isinstance(packet, dict) or not isinstance(packet.get("steering_turn_ids"), list):
-            continue
-        admitted = packet.get("interactive_turn", {})
-        if (not isinstance(admitted, dict) or admitted.get("conversation_id") != conversation_id
-                or admitted.get("reply_to_turn_id") != replies[run_id].get("reply_to")):
-            continue
-        applied.update(turn["id"] for turn in users if turn["run_id"] == run_id
-                       and turn["id"] in packet["steering_turn_ids"][:8]
-                       and turn["sequence"] < replies[run_id]["sequence"])
-    return applied
-
-
 def _target(value: object) -> dict | None:
     if not isinstance(value, dict):
         return None

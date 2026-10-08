@@ -13,7 +13,7 @@ from obsidience.tests.test_execution_cancellation import execution  # noqa: F401
 
 
 def unavailable():
-    spec = runtime.MODELS[runtime.SPECIALIST_MODEL]
+    spec = runtime.MODELS[runtime.EXECUTIVE_MODEL]
     device = next(iter(runtime.DEVICE_LABELS))
     return runtime.ModelResourceUnavailable(spec, [(device,)], {"speech": (device,)})
 

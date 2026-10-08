@@ -294,7 +294,6 @@ def packet_payload(sections: dict[str, str], refs: list[str], retrieval_ms: floa
 
 
 def emit(channel: str, line: str, detail: list[str] | None = None, metadata: dict | None = None) -> None:
-    global _HISTORY_CHARS
     if channel in {"reasoning", "analysis", "private"}:
         return
     metadata = metadata or {}

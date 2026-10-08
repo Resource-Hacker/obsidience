@@ -18,7 +18,7 @@ from obsidience.harness.knowledge.tasks import (
     canonical_members,
 )
 from obsidience.harness.knowledge.vault import iter_notes, load_note, resolver, write_note
-from obsidience.harness.models.runtime import SPECIALIST_MODEL
+from obsidience.harness.models.runtime import EXECUTIVE_MODEL
 
 
 VAULT = Path(__file__).parents[1] / "vault"
@@ -100,7 +100,7 @@ def _task_args(target: str = "Tasks/generated-example.md", **metadata: object) -
         "kind": "task",
         "assignee": "[[Agents/Darwin/Darwin]]",
         "taxonomy_path": "research",
-        "model": SPECIALIST_MODEL,
+        "model": EXECUTIVE_MODEL,
         "reasoning_effort": "high",
         "triggers": ["task.create"],
         "runbook": "[[Runbooks/generated-example]]",

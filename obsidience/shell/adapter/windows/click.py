@@ -5,7 +5,6 @@ window, capture, or input service. The native helper owns only protocol I/O.
 """
 from __future__ import annotations
 
-import json
 import math
 import selectors
 import subprocess

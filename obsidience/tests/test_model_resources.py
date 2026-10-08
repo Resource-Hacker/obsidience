@@ -70,12 +70,12 @@ def test_healthy_current_layout_cannot_bypass_reservation(allocation, monkeypatc
 
 def test_same_model_uses_only_another_configured_valid_layout(allocation, monkeypatch):
     runtime, settings = allocation
-    settings["models"][models.SPECIALIST_MODEL]["allowed_devices"] = list(models.GPU_DEVICES)
+    settings["models"][models.EXECUTIVE_MODEL]["allowed_devices"] = list(models.GPU_DEVICES)
     runtime.device_reservations["realtime-speech"] = (models.RTX_4080_DEVICE,)
     monkeypatch.setattr(models, "_healthy", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(models, "_read_launch", lambda _model: (models.RTX_4080_DEVICE,))
-    assert runtime._pick_devices(models.MODELS[models.SPECIALIST_MODEL]) == (models.RTX_4000_DEVICE,)
-    assert settings["models"][models.SPECIALIST_MODEL]["allowed_devices"] == list(models.GPU_DEVICES)
+    assert runtime._pick_devices(models.MODELS[models.EXECUTIVE_MODEL]) == (models.RTX_4000_DEVICE,)
+    assert settings["models"][models.EXECUTIVE_MODEL]["allowed_devices"] == list(models.GPU_DEVICES)
 
 
 @pytest.mark.parametrize("devices", [

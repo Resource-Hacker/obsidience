@@ -100,35 +100,6 @@ class ConversationStore:
             self._publish(snapshot)
             return snapshot
 
-    def prompt_context(
-        self,
-        *,
-        conversation_id: str | None = None,
-        before_sequence: int | None = None,
-        after_sequence: int = 0,
-        max_chars: int,
-    ) -> str:
-        """Pack newest complete public pairs, then return them chronologically."""
-        if max_chars <= 0:
-            return ""
-        pairs = self.complete_pairs(
-            conversation_id=conversation_id,
-            before_sequence=before_sequence,
-            after_sequence=after_sequence,
-        )
-        rendered = [
-            f"User: {user['text']}\nExecutive: {assistant['text']}"
-            for user, assistant in pairs
-        ]
-        selected: list[str] = []
-        used = 0
-        for pair in reversed(rendered):
-            size = len(pair) + (2 if selected else 0)
-            if used + size > max_chars:
-                break
-            selected.append(pair)
-            used += size
-        return "\n\n".join(reversed(selected))
 
     def complete_pairs(
         self,

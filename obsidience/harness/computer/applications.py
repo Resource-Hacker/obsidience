@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-
 APPLICATIONS = {
     "battle_net": {
         "label": "Battle.net",
@@ -51,29 +49,6 @@ def canonical_application_id(value: object) -> str | None:
         if requested in {_normalized(name) for name in names}:
             return application
     return None
-
-
-def application_aliases() -> Iterator[tuple[str, str]]:
-    """Yield public names longest-first for bounded request mention matching."""
-
-    aliases = (
-        (_normalized(name), application)
-        for application, spec in APPLICATIONS.items()
-        for name in (application, spec["label"], *spec.get("aliases", ()))
-    )
-    yield from sorted(set(aliases), key=lambda item: (-len(item[0]), item[0]))
-
-
-def application_window_needles(value: object) -> tuple[str, ...]:
-    """Return registered window identity fragments, preserving unknown exact names."""
-
-    application = canonical_application_id(value)
-    if application is None:
-        requested = _normalized(value)
-        return (requested,) if requested else ()
-    return tuple(
-        _normalized(needle) for needle in APPLICATIONS[application]["window_needles"]
-    )
 
 
 def matches_application_window(value: object, app_id: str, title: str) -> bool:

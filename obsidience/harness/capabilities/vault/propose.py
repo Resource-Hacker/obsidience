@@ -392,7 +392,6 @@ def stage_proposal(args: dict, context: dict, *, validate_only: bool = False) ->
     action = str(args.get("action", "create")).strip().lower()
     if action not in {"create", "update", "archive"}:
         raise ValueError("action must be create, update, or archive")
-    params = context.get("params")
     if "source" in args:
         raise ValueError("proposal source is not an authored field; cite immutable Sources in the body")
     if "contextual_links" in args:

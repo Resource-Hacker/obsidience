@@ -64,11 +64,3 @@ def test_native_metadata_refs_project_identically_in_api_and_graph(tmp_path, mon
                             "direct": True, "inherited": False}]
     assert {path: path.read_bytes() for path in before} == before
     assert vault.load_note("Tasks/x.md").meta["runbook"] == "/Runbooks/x.md#Procedure"
-
-
-def test_api_child_closure_uses_normalized_exact_refs():
-    parent = vault.Note(path="Tools/x.md", title="x", body="", meta={
-        "kind": "tool", "subtools": ["/Tools/Child%20Tool.md#Usage"],
-    })
-    child = vault.Note(path="Tools/Child Tool.md", title="Child Tool", body="", meta={"kind": "tool"})
-    assert api_app._primitive_closure([parent], [parent, child]) == [parent, child]

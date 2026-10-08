@@ -12,7 +12,7 @@ from PIL import Image
 
 from obsidience.harness.capabilities.computer import act
 from obsidience.harness.computer import runtime as computer
-from obsidience.harness.computer.applications import canonical_application_id, application_window_needles
+from obsidience.harness.computer.applications import canonical_application_id
 from obsidience.harness.computer.capture import ScreenCapture, ScreenCaptureError
 from obsidience.harness.execution.executor import resolve_spine
 from obsidience.harness.capabilities.registry import REGISTRY, resolve
@@ -36,9 +36,6 @@ def native_scene_matches_cache(monkeypatch):
 def test_application_names_share_the_central_registry() -> None:
     assert canonical_application_id("TFT") == "teamfight_tactics"
     assert canonical_application_id("teamfight_tactics") == "teamfight_tactics"
-    assert application_window_needles("TFT") == application_window_needles(
-        "teamfight_tactics"
-    )
 
 
 def test_computer_contracts_resolve_canonical_tool_skill_pairs() -> None:

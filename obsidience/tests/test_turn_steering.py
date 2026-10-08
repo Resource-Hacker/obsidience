@@ -335,39 +335,6 @@ def test_task_closing_during_append_saves_message_but_never_queues_it(scene, end
     asyncio.run(run())
 
 
-@pytest.mark.parametrize("change", [
-    "none", "wrong_conversation", "wrong_reply", "missing_applied_id",
-    "different_run", "failed", "no_reply", "later_clarification", "malformed_trace",
-])
-def test_history_marks_only_exact_applied_clarifications_with_a_completed_reply(scene, change):
-    from obsidience.harness.conversation.evidence import historical_steered_turns
-
-    async def record():
-        owner = await scene.initialize()
-        if change == "later_clarification":
-            await scene.store.append(role="assistant", source="text", text="Original Task reply",
-                                     reply_to=owner["id"], run_id="fixture-run")
-        clarification = await scene.store.append(role="user", source="text", text="Keep the current size",
-                                                 run_id="different" if change == "different_run" else "fixture-run")
-        if change not in {"no_reply", "later_clarification"}:
-            await scene.store.append(role="assistant", source="text", text="Original Task reply",
-                                     reply_to=owner["id"], run_id="fixture-run")
-        packet = {"interactive_turn": {
-            "conversation_id": "other" if change == "wrong_conversation" else scene.store.conversation_id,
-            "reply_to_turn_id": "other" if change == "wrong_reply" else owner["id"],
-        }, "steering_turn_ids": [] if change == "missing_applied_id" else [clarification["id"]]}
-        scene.store.index.record_run(id="fixture-run", task_ref="Tasks/query", agent="Executive",
-                                     started=1, finished=2, status="failed" if change == "failed" else "completed",
-                                     summary="Original Task reply", trace=json.dumps({} if change == "malformed_trace" else [packet]))
-        return clarification
-
-    clarification = asyncio.run(record())
-    expected = {clarification["id"]} if change == "none" else set()
-    assert historical_steered_turns(scene.store, conversation_id=scene.store.conversation_id) == expected
-    assert historical_steered_turns(scene.store, conversation_id=scene.store.conversation_id,
-                                    before_sequence=clarification["sequence"]) == set()
-
-
 def test_full_run_persists_applied_ids_with_the_original_activation(execution, monkeypatch):
     async def run():
         inbox = TurnSteering("original-owner-turn", lambda: None)

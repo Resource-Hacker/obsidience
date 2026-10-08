@@ -18,7 +18,6 @@ import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
-from html.parser import HTMLParser
 from urllib.parse import quote, urljoin, urlsplit, urlunsplit
 
 import httpx
@@ -46,61 +45,11 @@ _ALLOWED_CONTENT_TYPES = {
     "text/plain",
     "text/xml",
 }
-_BLOCK_TAGS = {
-    "article", "aside", "blockquote", "br", "dd", "div", "dl", "dt",
-    "figcaption", "figure", "footer", "h1", "h2", "h3", "h4", "h5", "h6",
-    "header", "hr", "li", "main", "nav", "ol", "p", "pre", "section", "table",
-    "td", "th", "tr", "ul",
-}
 _SKIP_TAGS = {"canvas", "noscript", "script", "style", "svg", "template"}
 
 
 class WebError(ValueError):
     """A web acquisition failed its bounded contract."""
-
-
-class _ReadableHTML(HTMLParser):
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self.parts: list[str] = []
-        self.title_parts: list[str] = []
-        self._skip_depth = 0
-        self._in_title = False
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        tag = tag.lower()
-        if tag in _SKIP_TAGS:
-            self._skip_depth += 1
-        if tag == "title" and not self._skip_depth:
-            self._in_title = True
-        if tag in _BLOCK_TAGS and not self._skip_depth:
-            self.parts.append("\n")
-
-    def handle_endtag(self, tag: str) -> None:
-        tag = tag.lower()
-        if tag == "title":
-            self._in_title = False
-        if tag in _SKIP_TAGS and self._skip_depth:
-            self._skip_depth -= 1
-        if tag in _BLOCK_TAGS and not self._skip_depth:
-            self.parts.append("\n")
-
-    def handle_data(self, data: str) -> None:
-        if self._skip_depth:
-            return
-        if self._in_title:
-            self.title_parts.append(data)
-        self.parts.append(data)
-
-    def markdown(self) -> str:
-        title = re.sub(r"\s+", " ", " ".join(self.title_parts)).strip()
-        lines: list[str] = []
-        for raw in "".join(self.parts).splitlines():
-            line = re.sub(r"[\t \f\v]+", " ", raw).strip()
-            if line and (not lines or line != lines[-1]):
-                lines.append(line)
-        body = "\n\n".join(lines)
-        return f"# {title}\n\n{body}" if title and not body.startswith(f"# {title}") else body
 
 
 class _ResearchMarkdown(MarkdownConverter):

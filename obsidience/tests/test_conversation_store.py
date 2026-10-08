@@ -84,48 +84,6 @@ def test_new_conversation_preserves_old_rows_and_ignores_late_reply(
     asyncio.run(scenario())
 
 
-def test_prompt_context_uses_only_complete_final_pairs_within_budget(
-    monkeypatch, tmp_path,
-) -> None:
-    async def scenario() -> None:
-        test_index = _index(monkeypatch, tmp_path)
-        store = ConversationStore(test_index)
-        first = await store.append(role="user", source="text", text="First question")
-        await store.append(
-            role="assistant", source="text", text="First answer", reply_to=first["id"]
-        )
-        await store.append(role="user", source="realtime", text="Failed question")
-        second = await store.append(role="user", source="realtime", text="Second question")
-        await store.append(
-            role="assistant",
-            source="realtime",
-            text="Second answer",
-            reply_to=second["id"],
-        )
-        current = await store.append(role="user", source="realtime", text="Current question")
-
-        expected = (
-            "User: First question\nExecutive: First answer\n\n"
-            "User: Second question\nExecutive: Second answer"
-        )
-        assert store.prompt_context(
-            conversation_id=store.conversation_id,
-            before_sequence=current["sequence"],
-            max_chars=len(expected),
-        ) == expected
-
-        newest_pair = "User: Second question\nExecutive: Second answer"
-        assert store.prompt_context(
-            before_sequence=current["sequence"], max_chars=len(newest_pair)
-        ) == newest_pair
-        assert store.prompt_context(
-            before_sequence=current["sequence"], max_chars=len(newest_pair) - 1
-        ) == ""
-        test_index.db.close()
-
-    asyncio.run(scenario())
-
-
 def test_conversation_values_are_closed(monkeypatch, tmp_path) -> None:
     async def scenario() -> None:
         test_index = _index(monkeypatch, tmp_path)
@@ -144,31 +102,6 @@ def test_conversation_values_are_closed(monkeypatch, tmp_path) -> None:
             else:
                 raise AssertionError(f"accepted invalid conversation values: {fields}")
         assert store.history() == []
-        test_index.db.close()
-
-    asyncio.run(scenario())
-
-
-def test_prompt_pairs_interleaved_replies_by_exact_user_turn(monkeypatch, tmp_path) -> None:
-    async def scenario() -> None:
-        test_index = _index(monkeypatch, tmp_path)
-        store = ConversationStore(test_index)
-        first = await store.append(role="user", source="realtime", text="First")
-        second = await store.append(role="user", source="text", text="Second")
-        await store.append(
-            role="assistant", source="text", text="Second reply", reply_to=second["id"]
-        )
-        await store.append(
-            role="assistant",
-            source="realtime",
-            text="First reply",
-            reply_to=first["id"],
-        )
-
-        assert store.prompt_context(max_chars=200) == (
-            "User: First\nExecutive: First reply\n\n"
-            "User: Second\nExecutive: Second reply"
-        )
         test_index.db.close()
 
     asyncio.run(scenario())

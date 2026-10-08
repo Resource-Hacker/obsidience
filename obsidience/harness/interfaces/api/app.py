@@ -5,11 +5,9 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import re
 import threading
 from pathlib import Path
 import time
-import uuid
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import replace
 
@@ -28,7 +26,7 @@ from ...execution import scheduler, trace
 from ...execution.assignments import ensure_task_runbook
 from ...execution.ledger import current_task_issue
 from ...knowledge.dependencies import agent_dependencies, dependency_resolver
-from ...execution.executor import compile_activation, run_task, task_descendants
+from ...execution.executor import task_descendants
 from ...host import inventory, monitor, scene as shell_scene
 from ...knowledge import retrieval, review, source, system as system_knowledge
 from ...knowledge.index import INDEX
@@ -37,8 +35,6 @@ from ...knowledge.tasks import (
     CANONICAL_TASK_BY_PATH,
     TASK_TAXONOMY_BY_PATH,
     TASK_TAXONOMY_NODES,
-    canonical_members as task_taxonomy_members,
-    child_ids as task_taxonomy_child_ids,
     descendant_count as task_taxonomy_descendant_count,
     node_id as task_taxonomy_node_id,
     task_triggers,
@@ -97,7 +93,6 @@ EXECUTIVE_AGENT_SUBJECTS = {
     "Specialists": "The named specialist agents coordinated by the executive.",
     "Observations": "Distilled notes about the executive, its preferences, and its own runs.",
 }
-EXECUTIVE_SYSTEM_ROOTS = frozenset({"Agents", "Tools", "Skills", "Runbooks", "Tasks"})
 SATELLITE_AGENT_SUBJECTS = {
     "architecture": ("Architecture", "How this agent is wired into Obsidience."),
     "knowledge": ("Knowledge", "Knowledge branches related to checked-out Source trees."),
@@ -173,24 +168,6 @@ def _executive_folder_ref(folder: str) -> str:
         "Agents/Executive/Observations": "@agent/Observations",
     }
     return roots.get(folder, f"@branch/{folder}")
-
-
-def _executive_folder_paths(notes: list[Note] | None = None) -> list[str]:
-    folders = set()
-    for note in iter_notes() if notes is None else notes:
-        parts = Path(note.path).parts[:-1]
-        if note.kind != "knowledge" or not parts:
-            continue
-        if parts[0] == "Agents":
-            if parts[:2] != ("Agents", "Executive"):
-                continue
-            start = 3
-        elif parts[0] in EXECUTIVE_SYSTEM_ROOTS:
-            continue
-        else:
-            start = 1
-        folders.update("/".join(parts[:depth]) for depth in range(start, len(parts) + 1))
-    return sorted(folders)
 
 
 def _folder_article(folder: str, ref: str, notes: list[Note] | None = None) -> dict:
@@ -524,24 +501,6 @@ def _skill_mirror_article(ref: str, path: str | None = None) -> dict:
     }
 
 
-def _primitive_closure(roots, catalog) -> list:
-    """Project a checked-out/assigned primitive with all same-kind descendants."""
-    by_ref = {note.ref.lower(): note for note in catalog}
-    by_leaf = {note.ref.rsplit("/", 1)[-1].lower(): note for note in catalog}
-    closure = {note.ref: note for note in roots}
-    queue = list(closure.values())
-    while queue:
-        parent = queue.pop(0)
-        for raw in parent.children:
-            target = _link_ref(str(raw))
-            child = by_ref.get(target.lower()) or by_leaf.get(target.rsplit("/", 1)[-1].lower())
-            if not child or child.kind != parent.kind or child.ref in closure:
-                continue
-            closure[child.ref] = child
-            queue.append(child)
-    return list(closure.values())
-
-
 def _virtual_index(ref: str, title: str, summary: str, children, *, kind: str = "knowledge") -> dict:
     unique = {note.ref: note for note in children}
     ordered = sorted(unique.values(), key=lambda note: (note.title.lower(), note.ref.lower()))
@@ -681,7 +640,6 @@ def _navigation_subject(ref: str, parent_ref: str | None, overrides: dict[str, N
         "parent_id": parent_ref,
         **({"path": folder, "article_ref": authored.ref} if authored else {}),
     }
-
 
 
 def _scoped_knowledge_subjects(identity: Note | None, notes: list[Note], base: list[dict], overrides: dict) -> list[dict]:
@@ -831,7 +789,6 @@ async def lifespan(app: FastAPI):
         for params in model_events:
             scheduler.enqueue_named_event("model.added", params)
         yield
-
 
 
 app = FastAPI(title="Obsidience", lifespan=lifespan)
@@ -1532,7 +1489,6 @@ def _get_article(ref: str, graph_id: str = ""):
     # Evidence records remain readable in their owner's bank even though they
     # are not nodes in the Article graph. Presentation never grants bank access.
     memory_owned = ref.startswith("@memory/") and MEMORY.owns(ref, group["root_ref"])
-    display_ref = subject["id"] if subject else doc["ref"]
     if selected_graph == "library":
         return doc
     if subject and subject.get("scope_proxy"):
@@ -1853,7 +1809,6 @@ def library_assignments():
                     assignments.append(row)
     return {"assignments": assignments, "dependencies": dependencies,
             "knowledge": knowledge, "revisions": revisions}
-
 
 
 def _set_knowledge_assignment(agent: str, identity: Note, note: Note, checked: bool, res) -> dict:

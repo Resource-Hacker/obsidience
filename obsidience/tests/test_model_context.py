@@ -8,7 +8,7 @@ import httpx
 import pytest
 
 from obsidience.harness.models import context, llm
-from obsidience.harness.models.runtime import EXECUTIVE_MODEL, MODELS, SPECIALIST_MODEL
+from obsidience.harness.models.runtime import EXECUTIVE_MODEL, MODELS
 
 
 def test_text_count_uses_runtime_and_caches_only_success(monkeypatch):
@@ -81,8 +81,8 @@ def test_gemma_projection_is_selected_by_family_and_does_not_mutate_packet():
     assert branches[1]["properties"]["args"]["required"] == ["target", "destination"]
 
 
-    # SPECIALIST_MODEL is now a legacy alias of Gemma; use an explicit non-Gemma family.
-    other = llm._chat_payload(messages, replace(MODELS[SPECIALIST_MODEL], family="qwen38"), max_tokens=None,
+    # Use an explicit non-Gemma family.
+    other = llm._chat_payload(messages, replace(MODELS[EXECUTIVE_MODEL], family="qwen38"), max_tokens=None,
                               temperature=0, reasoning_effort="none",
                               allowed_tools=["window.place", "task.complete"])
     assert other["messages"] == messages
@@ -90,7 +90,7 @@ def test_gemma_projection_is_selected_by_family_and_does_not_mutate_packet():
 
     unsupported = llm._chat_payload(
         messages,
-        replace(MODELS[SPECIALIST_MODEL], supports_json_schema=False),
+        replace(MODELS[EXECUTIVE_MODEL], supports_json_schema=False),
         max_tokens=None,
         temperature=0,
         reasoning_effort="none",
@@ -152,12 +152,12 @@ def test_generation_timeout_reports_model_and_phase_without_response_text(monkey
     monkeypatch.setattr(llm.httpx, "AsyncClient", lambda **kwargs: client_type(
         **kwargs, transport=httpx.MockTransport(handler)))
     with pytest.raises(TimeoutError, match=(
-        rf"{SPECIALIST_MODEL} generation timed out after "
+        rf"{EXECUTIVE_MODEL} generation timed out after "
         rf"{llm.CHAT_TIMEOUT_SECONDS:g} seconds"
     )) as failure:
         asyncio.run(llm.chat(
             [{"role": "user", "content": "test"}],
-            model=MODELS[SPECIALIST_MODEL],
+            model=MODELS[EXECUTIVE_MODEL],
         ))
     assert "private transport detail" not in str(failure.value)
 

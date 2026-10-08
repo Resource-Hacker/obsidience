@@ -10,7 +10,7 @@ import pytest
 from obsidience.harness.execution import executor, trace
 from obsidience.harness.knowledge import retrieval, vault
 from obsidience.harness.models import llm
-from obsidience.harness.models.runtime import EXECUTIVE_MODEL, MODELS, SPECIALIST_MODEL
+from obsidience.harness.models.runtime import EXECUTIVE_MODEL, MODELS
 from obsidience.tests.test_action_trace_details import stream  # noqa: F401
 from obsidience.tests.test_conversation_context_bindings import graph
 from obsidience.tests.test_source_retrieval_scope import _note
@@ -208,7 +208,7 @@ def test_compiler_accounting_is_visible_but_provider_payloads_are_identical(monk
     assert baseline["knowledge_accounting"] == {}
     for key in ("packet", "brief", "refs", "provider_system", "provider_user", "provider_conversation"):
         assert activation[key] == baseline[key]
-    for model in (EXECUTIVE_MODEL, SPECIALIST_MODEL):
+    for model in (EXECUTIVE_MODEL,):
         requests = []
         for compiled in (baseline, activation):
             messages = [{"role": role, "content": compiled[key]} for role, key in (

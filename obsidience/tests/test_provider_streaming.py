@@ -9,7 +9,7 @@ import httpx
 import pytest
 
 from obsidience.harness.models import llm
-from obsidience.harness.models.runtime import MODELS, SPECIALIST_MODEL
+from obsidience.harness.models.runtime import MODELS, EXECUTIVE_MODEL
 
 
 ACTION = '{"tool":"task.complete","args":{"status":"completed","summary":"Done 日本語"}}'
@@ -54,7 +54,7 @@ def wire(monkeypatch, stream):
 
 
 def request():
-    return llm.chat([{"role": "user", "content": "Bounded request"}], model=MODELS[SPECIALIST_MODEL])
+    return llm.chat([{"role": "user", "content": "Bounded request"}], model=MODELS[EXECUTIVE_MODEL])
 
 
 def test_progressing_reasoning_can_exceed_former_total_deadline(monkeypatch):
@@ -159,7 +159,7 @@ def test_controller_response_schema_uses_existing_stream_and_token_accounting(mo
               "required": ["task_ref"], "additionalProperties": False}
     reply = asyncio.run(llm.chat(
         [{"role": "user", "content": "Choose an existing outcome"}],
-        model=MODELS[SPECIALIST_MODEL], reasoning_effort="none", temperature=0,
+        model=MODELS[EXECUTIVE_MODEL], reasoning_effort="none", temperature=0,
         max_tokens=192, response_schema=schema,
     ))
     assert reply.content == response and reply.prompt_tokens == 30
@@ -177,14 +177,14 @@ def test_controller_response_schema_uses_existing_stream_and_token_accounting(mo
 @pytest.mark.parametrize("allowed_tools", [[], ["task.complete"]])
 def test_controller_schema_cannot_share_tool_response_authority(allowed_tools):
     with pytest.raises(ValueError, match="mutually exclusive"):
-        llm._chat_payload([], MODELS[SPECIALIST_MODEL], max_tokens=192,
+        llm._chat_payload([], MODELS[EXECUTIVE_MODEL], max_tokens=192,
                           temperature=0, reasoning_effort="none",
                           allowed_tools=allowed_tools, response_schema={"type": "object"})
 
 
 def test_controller_schema_fails_closed_without_provider_support():
     with pytest.raises(ValueError, match="does not support"):
-        llm._chat_payload([], replace(MODELS[SPECIALIST_MODEL], supports_json_schema=False),
+        llm._chat_payload([], replace(MODELS[EXECUTIVE_MODEL], supports_json_schema=False),
                           max_tokens=192, temperature=0, reasoning_effort="none",
                           response_schema={"type": "object"})
 

@@ -75,9 +75,8 @@ def test_body_links_never_become_binding_shortcuts(binding_vault):
 
 
 def test_ancestor_runbook_skills_are_inherited_without_sibling_bindings(binding_vault):
-    from obsidience.harness.execution.executor import _expand_primitive, resolve_spine
+    from obsidience.harness.execution.executor import resolve_spine
 
-    assert _expand_primitive is expand_primitive
     for name in ("vault.read", "vault.search", "web.fetch", "task.complete"):
         pair(name)
     note("Runbooks/family", "runbook", subrunbooks=["[[Runbooks/child]]", "[[Runbooks/sibling]]"],

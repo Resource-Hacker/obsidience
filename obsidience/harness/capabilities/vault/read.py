@@ -28,7 +28,7 @@ def editable_proposal_body(body: str, note, context: dict) -> str:
 
 def execute(args: dict, context: dict) -> str:
     from obsidience.harness.knowledge.vault import (
-        SYSTEM_DIRS, Resolver, _NOTE_WRITE_LOCK, iter_notes, load_note,
+        SYSTEM_DIRS, Resolver, _NOTE_WRITE_LOCK, iter_notes,
     )
 
     args = args or {}

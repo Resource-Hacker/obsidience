@@ -12,7 +12,7 @@ from obsidience.harness.capabilities.vault import read
 from obsidience.harness.config import CONFIG
 from obsidience.harness.knowledge.vault import load_note, write_note
 from obsidience.harness.models import context
-from obsidience.harness.models.runtime import MODELS, SPECIALIST_MODEL
+from obsidience.harness.models.runtime import MODELS, EXECUTIVE_MODEL
 
 
 @pytest.fixture
@@ -121,7 +121,7 @@ def test_pressure_projects_older_attested_article_pages_only(article_vault):
 
     async def fit():
         async with httpx.AsyncClient(transport=httpx.MockTransport(count)) as client:
-            result = await projection.fit_payload(payload, MODELS[SPECIALIST_MODEL], client, capacity)
+            result = await projection.fit_payload(payload, MODELS[EXECUTIVE_MODEL], client, capacity)
             assert result.tokens <= capacity
             assert result.method == "runtime"
 

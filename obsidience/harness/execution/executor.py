@@ -32,10 +32,8 @@ from ..knowledge.tasks import task_triggers
 from ..knowledge.dependencies import (
     dependency_resolver, resolve_dependencies,
     task_descendants, task_exclusions as _task_exclusions,
-    task_is_excluded as _task_is_excluded,
 )
 from ..knowledge.vault import Note, Resolver, mutate_note_metadata, resolver, update_status
-from ..knowledge.vault import expand_primitive as _expand_primitive
 from ..models import llm
 from ..models import runtime as model_runtime
 from ..models.context import (
@@ -796,14 +794,8 @@ def _links(value) -> list[str]:
     return [str(v) for v in (value if isinstance(value, list) else [value])]
 
 
-def _link_name(value: str) -> str:
-    return value.strip().strip("[]").split("|", 1)[0].split("#", 1)[0].rsplit("/", 1)[-1]
-
-
 def _link_ref(value: str) -> str:
     return value.strip().strip("[]").split("|", 1)[0].split("#", 1)[0]
-
-
 
 
 def resolve_spine(task: Note, res: Resolver) -> dict:
@@ -1514,10 +1506,6 @@ async def _execute_session(
     evaluation=None,
     initial_lease=None,
 ) -> tuple[list[dict], str, str]:
-    from obsidience.harness.capabilities.task.complete import (
-        computer_completion_evidence, computer_request_target_error,
-    )
-
     if evaluation is not None and (
             set(ctx) - {"trace"}
             or ("trace" in ctx and (not isinstance(ctx["trace"], list) or ctx["trace"]))):
@@ -2024,7 +2012,6 @@ async def _run_execution(task: Note, depth: int = 0, reasoning_effort: str | Non
         instruction_owner: Note = task if task.kind == "agent" else spine["runbook"]
         runbooks: list[Note] = spine["runbooks"]
         instruction_sha256 = runbook_tree_hash(runbooks or [instruction_owner])
-        skills: list[Note] = spine["skills"]
         allowed: list[str] = spine["tools"]
         if active_exclusions:
             params["excluded_subtasks"] = sorted(active_exclusions)
@@ -2070,7 +2057,6 @@ async def _run_execution(task: Note, depth: int = 0, reasoning_effort: str | Non
         )
         action_trace.latency("activation", duration_ms=(time.monotonic() - activation_started) * 1000)
         allowed = list(activation["spine"]["tools"])
-        packet = str(activation["packet"])
         if params.get("event") == "task.continue":
             # A resumed objective may use its ordinary Tools, but it cannot
             # create the same research wait again.

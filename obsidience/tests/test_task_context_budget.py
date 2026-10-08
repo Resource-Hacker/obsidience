@@ -10,7 +10,7 @@ import httpx
 import pytest
 
 from obsidience.harness.models import context, llm
-from obsidience.harness.models.runtime import MODELS, SPECIALIST_MODEL
+from obsidience.harness.models.runtime import MODELS, EXECUTIVE_MODEL
 
 
 def source_page(number, body):
@@ -43,7 +43,7 @@ def test_pressure_projects_only_earlier_recoverable_pages_before_one_generation(
     original = copy.deepcopy(messages)
     requests = []
     capacity = 15000
-    spec = replace(MODELS[SPECIALIST_MODEL], context_tokens=capacity + 128 + context.PROMPT_SAFETY_TOKENS,
+    spec = replace(MODELS[EXECUTIVE_MODEL], context_tokens=capacity + 128 + context.PROMPT_SAFETY_TOKENS,
                    max_output_tokens=128)
 
     def handler(request):
@@ -106,7 +106,7 @@ def test_fixed_and_unrecoverable_context_never_gets_silently_dropped(change):
     async def run():
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             with pytest.raises(context.ContextBudgetExceeded, match="Objective has not been truncated"):
-                await projection.fit_payload({"messages": messages}, MODELS[SPECIALIST_MODEL], client, 15000)
+                await projection.fit_payload({"messages": messages}, MODELS[EXECUTIVE_MODEL], client, 15000)
 
     asyncio.run(run())
     assert messages == original
@@ -156,7 +156,7 @@ def test_pressure_preserves_individual_batch_identities_failures_and_latest_resu
             lambda request: httpx.Response(200, json={"input_tokens": len(json.dumps(
                 json.loads(request.content)["messages"]))}),
         )) as client:
-            await projection.fit_payload(payload, MODELS[SPECIALIST_MODEL], client, 6500)
+            await projection.fit_payload(payload, MODELS[EXECUTIVE_MODEL], client, 6500)
 
     asyncio.run(run())
     assert messages == original
@@ -194,7 +194,7 @@ def test_protocol_correction_does_not_make_latest_tool_result_discardable():
 
     async def run():
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            await projection.fit_payload(payload, MODELS[SPECIALIST_MODEL], client, 15000)
+            await projection.fit_payload(payload, MODELS[EXECUTIVE_MODEL], client, 15000)
 
     asyncio.run(run())
     assert payload["messages"][latest_index]["content"] == original_latest
@@ -209,7 +209,7 @@ def test_failed_count_is_explicit_upper_bound_not_exact_tokens(envelope):
     async def run():
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             count = await context.measure_payload({"messages": [{"role": "user", "content": "日本"}]},
-                                                   MODELS[SPECIALIST_MODEL], client)
+                                                   MODELS[EXECUTIVE_MODEL], client)
             assert count.method == "utf8_upper_bound"
             assert count.tokens > len("日本")
 
@@ -223,7 +223,7 @@ def test_exact_tokens_can_fit_even_when_utf8_upper_bound_does_not():
         )) as client:
             result = await context.TaskContext().fit_payload(
                 {"messages": [{"role": "user", "content": "large " * 10000}]},
-                MODELS[SPECIALIST_MODEL], client, 100,
+                MODELS[EXECUTIVE_MODEL], client, 100,
             )
             assert result == context.PayloadCount(3, "runtime")
 
@@ -239,7 +239,7 @@ def test_multimodal_accounting_failure_stays_closed_and_consumption_is_explicit(
     async def run():
         async with httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(503))) as client:
             with pytest.raises(ValueError, match="multimodal"):
-                await context.measure_payload({"messages": messages}, MODELS[SPECIALIST_MODEL], client)
+                await context.measure_payload({"messages": messages}, MODELS[EXECUTIVE_MODEL], client)
 
     asyncio.run(run())
     assert isinstance(messages[0]["content"], list)

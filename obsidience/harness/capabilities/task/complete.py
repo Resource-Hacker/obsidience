@@ -422,10 +422,6 @@ def _pending_staged_proposals(context: dict) -> list[dict]:
     return _staged_proposal_states(context)[0]
 
 
-def _approved_staged_proposals(context: dict) -> list[dict]:
-    return _staged_proposal_states(context)[1]
-
-
 def _generated_runbook_completion_error(status: str, context: dict) -> str | None:
     from obsidience.harness.execution.refinement import proposal_context
 
@@ -672,7 +668,6 @@ def _completion_error(
             "A rejected draft does not establish that the Articles are already linked"
         )
 
-    params = context.get("params") if isinstance(context.get("params"), dict) else {}
     evidence_bound_completion = _evidence_bound_completion(task.ref, context)
     if (
         status == "completed"
