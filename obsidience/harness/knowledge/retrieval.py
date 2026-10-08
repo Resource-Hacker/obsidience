@@ -23,12 +23,12 @@ FAST_CONTEXT_DIRECT_FLOOR = 3
 FAST_CONTEXT_GRAPH_LIMIT = 2
 FAST_CONTEXT_ACCOUNTING_LIMIT = 32
 # RRF is rank-only, so it nominates Articles even when nothing is relevant.
-# Fast context admits a lane hit only with raw evidence: strong dense cosine,
-# or an FTS5 bm25 match that dense cosine also supports. Calibrated 2026-10-07
-# for BAAI/bge-small-en-v1.5 on owner utterances; retune if the embedder changes.
-FAST_CONTEXT_MIN_SIMILARITY = 0.60
-FAST_CONTEXT_LEXICAL_MIN_BM25 = 3.0
-FAST_CONTEXT_LEXICAL_MIN_SIMILARITY = 0.55
+# Interactive fast context admits a direct hit only with strong dense cosine.
+# Lexical-only evidence and folder-index Articles (hubs that resemble most
+# requests) are not admitted directly. Calibrated 2026-10-08 for
+# BAAI/bge-small-en-v1.5 on 599 owner utterances and 15 knowledge questions;
+# retune if the embedder changes.
+FAST_CONTEXT_MIN_SIMILARITY = 0.70
 PREWARM_QUERY = "Obsidience activation knowledge"
 
 # ---------- fusion ----------
@@ -56,15 +56,17 @@ def _lanes_for(
     lexical = INDEX.fts(query, k, kind, **filters)
     dense = INDEX.vector(query, k, kind, **filters)
     if relevant_only:
-        similarity = dict(dense)
-        keep = {ref for ref, score in dense if score >= FAST_CONTEXT_MIN_SIMILARITY} | {
-            ref for ref, score in lexical
-            if score >= FAST_CONTEXT_LEXICAL_MIN_BM25
-            and similarity.get(ref, -1.0) >= FAST_CONTEXT_LEXICAL_MIN_SIMILARITY
-        }
+        keep = {ref for ref, score in dense
+                if score >= FAST_CONTEXT_MIN_SIMILARITY and not _folder_index(ref)}
         lexical = [hit for hit in lexical if hit[0] in keep]
         dense = [hit for hit in dense if hit[0] in keep]
     return [(weight, lexical), (weight, dense)]
+
+
+def _folder_index(ref: str) -> bool:
+    """A folder's own Article, e.g. ``Websites/Reddit/Reddit``."""
+    parts = ref.split("/")
+    return len(parts) >= 2 and parts[-1] == parts[-2]
 
 
 def normalize_search_scope(value: object) -> dict:
