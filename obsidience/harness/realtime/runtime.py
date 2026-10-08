@@ -79,6 +79,7 @@ class RealtimeSessionManager:
         self._aec_active = False
         self._tts_voice = media_runtime.DEFAULT_TTS_VOICE
         self._cue_names: list[str] = []
+        self._wake_rejected = {"mid_sentence": 0, "possessive": 0}
         self._events: deque[dict[str, Any]] = deque(maxlen=MAX_EVENTS)
         self._recent_log: deque[str] = deque(maxlen=8)
         self._subscribers: set[asyncio.Queue[dict[str, Any]]] = set()
@@ -153,6 +154,7 @@ class RealtimeSessionManager:
                 "tts_device": "CPU",
                 "voice": self._tts_voice,
                 "cues": list(self._cue_names),
+                "wake_rejected": dict(self._wake_rejected),
             },
             "scheduler_paused": self.scheduler_paused(),
             "recent_log": list(self._recent_log),
@@ -861,6 +863,17 @@ class RealtimeSessionManager:
                     self._live_transcript = None
                     await self._prioritize_speech_capture()
                     await self._publish("runtime", reason="wake_detected")
+                    continue
+                if event_type == "wake_rejected":
+                    reason = worker_event.get("reason")
+                    if (reason in self._wake_rejected
+                            and worker_event.get("mode_revision", 0) == self._mode_revision):
+                        # Counts only; the rejected words never leave the worker.
+                        self._wake_rejected[reason] += 1
+                        trace.emit("speech", "Wake word heard, not as an address", [json.dumps({
+                            "event": "speech.wake_rejected", "reason": reason,
+                            "count": self._wake_rejected[reason],
+                        }, sort_keys=True)])
                     continue
                 if event_type == "wake_idle":
                     if worker_event.get("mode_revision", 0) == self._mode_revision:

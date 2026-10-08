@@ -79,6 +79,14 @@ SAMPLE_RATE = 16_000
 TTS_SAMPLE_RATE = 24_000
 TRANSCRIPT_IDLE_SECS = 0.7
 WAKE_COMMAND_WAIT_SECS = 8
+# The wake word is an address, not any mention: it must start the speech
+# segment or follow a pause in recognized words, optionally after hey/ok/okay.
+WAKE_PAUSE_SECS = 0.4
+# A name ending the recognized text may still become "computer's"; the next
+# ASR delta normally arrives within one or two 80-160 ms steps.
+WAKE_CONFIRM_SECS = 0.35
+WAKE_STRIP = " ,.!?:;—-'’\t\n"
+_WAKE_LEAD = re.compile(r"[\W_]*(?:(?:hey|ok|okay)\b[\W_]*)?", re.IGNORECASE)
 # Speech PCM needs level correction independently of the selected device volume.
 # A fixed gain preserves pauses and syllable dynamics across streaming chunks.
 TTS_GAIN = 10.0 ** (9.0 / 20.0)
@@ -97,6 +105,33 @@ def _speech_pcm(samples: np.ndarray) -> bytes:
     )
     boosted = np.where(magnitude > TTS_PEAK_KNEE, protected, boosted)
     return np.rint(boosted * 32767.0).astype("<i2").tobytes()
+
+
+def classify_wake(text: str, address: int | None, scanned: int, pattern: re.Pattern,
+                  *, final: bool = False) -> tuple[str, int, int, list[str]]:
+    """Classify unaddressed wake-word mentions in one speech segment's text.
+
+    ``address`` is where an address may begin (segment start or after a pause);
+    only hey/ok/okay may precede the name there. Possessives and contractions
+    ("computer's") are never addresses. A name ending the text stays pending
+    until more text arrives, unless ``final``. Returns (decision, end, scanned,
+    rejected): accept/pending/none, the end of the name, the index up to which
+    mentions were classified, and the reasons for newly rejected mentions.
+    """
+    rejected: list[str] = []
+    for match in pattern.finditer(text, scanned):
+        after = text[match.end():]
+        if not final and after in ("", "'", "’"):
+            return "pending", match.end(), scanned, rejected
+        if after[:1] in ("'", "’") and after[1:2].isalnum():
+            rejected.append("possessive")
+        elif (address is not None and match.start() >= address
+              and _WAKE_LEAD.fullmatch(text, address, match.start())):
+            return "accept", match.end(), match.end(), rejected
+        else:
+            rejected.append("mid_sentence")
+        scanned = match.end()
+    return "none", len(text), scanned, rejected
 
 
 @dataclass
@@ -420,16 +455,111 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
             rf"(?<!\w){re.escape(wake_word.strip() or 'Computer')}(?!\w)", re.IGNORECASE,
         )
         self._wake_prefix = ""
+        self._wake_address: int | None = 0
+        self._wake_scanned = 0
+        self._wake_pending = False
+        self._wake_heard_at: float | None = None
+        self._wake_confirm: asyncio.Task[None] | None = None
         self._wake_open = False
         self._wake_timeout: asyncio.Task[None] | None = None
         self._mode_waiting_for_stop = False
         self._wake_cue_eligible = False
 
+    async def _reset_wake_scan(self, *, segment_start: bool) -> None:
+        confirm, self._wake_confirm = self._wake_confirm, None
+        if confirm is not None and confirm is not asyncio.current_task():
+            await self.cancel_task(confirm)
+        self._wake_prefix = ""
+        self._wake_scanned = 0
+        self._wake_pending = False
+        if segment_start or self._wake_heard_at is None:
+            self._wake_address, self._wake_heard_at = 0, None
+        else:
+            # Ongoing speech: only a later pause can start an address.
+            self._wake_address = None
+
+    def _classify_wake(self, *, final: bool = False) -> str | None:
+        """Return command text after an accepted address, else None."""
+        decision, end, self._wake_scanned, rejected = classify_wake(
+            self._wake_prefix, self._wake_address, self._wake_scanned,
+            self._wake_pattern, final=final,
+        )
+        for reason in rejected:
+            # Counts only: rejected speech never leaves the worker.
+            emit("wake_rejected", reason=reason, mode_revision=self.mode_revision)
+        self._wake_pending = decision == "pending"
+        return self._wake_prefix[end:] if decision == "accept" else None
+
+    async def _confirm_wake(self) -> None:
+        try:
+            await asyncio.sleep(WAKE_CONFIRM_SECS)
+            self._wake_confirm = None
+            if (self.mode == "wake" and not self._wake_open and self._wake_pending
+                    and not self._mode_waiting_for_stop):
+                text = self._classify_wake(final=True)
+                if text is not None:
+                    await self._open_wake(text)
+        finally:
+            if self._wake_confirm is asyncio.current_task():
+                self._wake_confirm = None
+
+    async def _open_wake(self, text: str) -> str:
+        text = text.lstrip(WAKE_STRIP)
+        self._wake_open = True
+        await self._reset_wake_scan(segment_start=False)
+        if self._timing is not None:
+            self._timing.onset()
+        emit("wake_detected", mode_revision=self.mode_revision,
+             speech_sequence=self._timing.sequence if self._timing else 0)
+        self._wake_timeout = self.create_task(self._expire_wake(), name="wake-command-window")
+        # NeMo's bot flag includes the output queue's idle delay plus its
+        # own stop grace. A completed reply's closing cue extends that tail.
+        # Snapshot the actual reply owner before interruption invalidates
+        # it, so immediate follow-ups chirp and true speech barge-in stays quiet.
+        reply_active = (self._playback._reply_active if self._playback is not None
+                        else self._bot_speaking)
+        self._wake_cue_eligible = not any(c.isalnum() for c in text) and not reply_active
+        if not self._have_sent_user_started_speaking:
+            await self._handle_user_interruption(UserStartedSpeakingFrame())
+            self._have_sent_user_started_speaking = True
+        return text
+
+    async def _wake_delta(self, text: str) -> str | None:
+        """Track one unaddressed ASR delta; return command text once addressed."""
+        now = time.monotonic()
+        words = any(c.isalnum() for c in text)
+        if self._wake_pending:
+            confirm, self._wake_confirm = self._wake_confirm, None
+            if confirm is not None:
+                await self.cancel_task(confirm)
+        if (words and self._wake_heard_at is not None
+                and now - self._wake_heard_at >= WAKE_PAUSE_SECS):
+            # A pause confirms a trailing name and opens a possible address.
+            if self._wake_pending:
+                command = self._classify_wake(final=True)
+                if command is not None:
+                    return command + text
+            self._wake_address = len(self._wake_prefix)
+        if words:
+            self._wake_heard_at = now
+        self._wake_prefix += text
+        if len(self._wake_prefix) > 512:
+            dropped = len(self._wake_prefix) - 512
+            self._wake_prefix = self._wake_prefix[dropped:]
+            self._wake_scanned = max(0, self._wake_scanned - dropped)
+            if self._wake_address is not None:
+                self._wake_address = (self._wake_address - dropped
+                                      if self._wake_address >= dropped else None)
+        command = self._classify_wake()
+        if self._wake_pending:
+            self._wake_confirm = self.create_task(self._confirm_wake(), name="wake-confirm")
+        return command
+
     async def _close_wake(self) -> None:
         timeout, self._wake_timeout = self._wake_timeout, None
         if timeout is not None and timeout is not asyncio.current_task():
             await self.cancel_task(timeout)
-        self._wake_prefix = ""
+        await self._reset_wake_scan(segment_start=not self._vad_user_speaking)
         self._wake_open = False
         self._wake_cue_eligible = False
 
@@ -452,32 +582,13 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
         if self._mode_waiting_for_stop:
             return
         if self.mode == "wake" and not self._wake_open:
-            self._wake_prefix = (self._wake_prefix + frame.text)[-512:]
-            match = self._wake_pattern.search(self._wake_prefix)
-            if match is None:
+            command = await self._wake_delta(frame.text)
+            if command is None:
                 return
-            frame.text = self._wake_prefix[match.end():].lstrip(" ,.!?:;—-")
-            self._wake_prefix = ""
-            self._wake_open = True
-            if self._timing is not None:
-                self._timing.onset()
-            emit("wake_detected", mode_revision=self.mode_revision,
-                 speech_sequence=self._timing.sequence if self._timing else 0)
-            self._wake_timeout = self.create_task(self._expire_wake(), name="wake-command-window")
-            # NeMo's bot flag includes the output queue's idle delay plus its
-            # own stop grace. A completed reply's closing cue extends that tail.
-            # Snapshot the actual reply owner before interruption invalidates
-            # it, so immediate follow-ups chirp and true speech barge-in stays quiet.
-            reply_active = (self._playback._reply_active if self._playback is not None
-                            else self._bot_speaking)
-            wake_only = not any(c.isalnum() for c in frame.text) and not reply_active
-            self._wake_cue_eligible = wake_only
-            if not self._have_sent_user_started_speaking:
-                await self._handle_user_interruption(UserStartedSpeakingFrame())
-                self._have_sent_user_started_speaking = True
+            frame.text = await self._open_wake(command)
         if self._wake_open and not self._user_speaking_buffer.strip():
             # NeMo may return punctuation after the name in a later delta.
-            frame.text = frame.text.lstrip(" ,.!?:;—-\t\n")
+            frame.text = frame.text.lstrip(WAKE_STRIP)
         if self._wake_open and any(character.isalnum() for character in frame.text):
             self._wake_cue_eligible = False
             timeout, self._wake_timeout = self._wake_timeout, None
@@ -560,7 +671,12 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
         if isinstance(frame, (EndFrame, CancelFrame)):
             await self._close_wake()
         if isinstance(frame, VADUserStoppedSpeakingFrame):
-            self._wake_prefix = ""
+            if self.mode == "wake" and not self._wake_open and self._wake_pending:
+                # Silence after a trailing name confirms it as an address.
+                command = self._classify_wake(final=True)
+                if command is not None:
+                    await self._open_wake(command)
+            await self._reset_wake_scan(segment_start=True)
             self._mode_waiting_for_stop = False
         if (self._timing is not None and (
                 isinstance(frame, (EndFrame, CancelFrame)) or (
