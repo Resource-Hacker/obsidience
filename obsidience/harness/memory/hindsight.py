@@ -570,16 +570,22 @@ class Hindsight:
         if not self.records.get(bank):
             result = {"status": "empty" if bank in self.records else "unavailable", "memories": []}
             return self._record_recall(budget, started, result)
+        # Automatic per-turn recall (Executive hook and Task executor, low budget)
+        # supplies at most three memories: in the 2026-10-07 hand labels 20 of 27
+        # useful memories ranked in the top three, and a 600-token text cap kept a
+        # useful memory in 18 of the 19 recalls that had one (400 kept 16).
+        # Explicit observations.recall (mid budget) keeps 6 results/800 tokens.
+        limit, max_tokens = (3, 600) if budget == "low" else (6, 800)
         try:
             async with asyncio.timeout(timeout):
                 data = await self.api("POST", bank + "/memories/recall", json={
-                    "query": query[:3000], "budget": budget, "max_tokens": 800,
+                    "query": query[:3000], "budget": budget, "max_tokens": max_tokens,
                     "prefer_observations": True, "include": {"entities": None,
                     "source_facts": {"max_tokens": 300, "max_tokens_per_observation": 150}}})
             memories = [{"ref": memory_ref(bank, str(r["id"])), "text": r.get("text", ""),
                          "type": r.get("fact_type", r.get("type", "")),
                          "occurred_start": r.get("occurred_start"), "mentioned_at": r.get("mentioned_at")}
-                        for r in data.get("results", [])[:6]]
+                        for r in data.get("results", [])[:limit]]
             from ..execution import activity
             activity.emit_operation("search", "returned", [r["ref"] for r in memories],
                                     label="Memories recalled", graph_id="memory:" + bank)
