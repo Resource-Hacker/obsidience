@@ -16,6 +16,7 @@ import re
 import time
 import uuid
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from datetime import datetime, timezone
 from urllib.parse import quote
@@ -126,6 +127,9 @@ class Hindsight:
         self.health_checked = 0.0
         # Process-local, content-free telemetry; Hindsight remains the memory owner.
         self.recalls = {}
+        # One FIFO outbox writer for Executive conversation completions, owned
+        # by start()/close(), keeps their SQLite insert off the event loop.
+        self.writer = None
 
     @property
     def enabled(self):
@@ -178,10 +182,15 @@ class Hindsight:
                 "AND a.state='final' AND u.state='final' AND a.created_at>=? ORDER BY a.created_at", (since,)):
             self.completed("Agents/Executive/Executive", user, answer,
                            source="conversation:" + conversation, identifier=identifier)
+        self.writer = ThreadPoolExecutor(max_workers=1, thread_name_prefix="hindsight-outbox")
         self.task = asyncio.create_task(self._run(), name="hindsight-delivery")
         self.wake.set()
 
     async def close(self):
+        writer, self.writer = self.writer, None
+        if writer is not None:
+            # Drain queued outbox inserts while the loop and ledger still exist.
+            await asyncio.to_thread(writer.shutdown, wait=True)
         if self.task:
             self.task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -249,6 +258,23 @@ class Hindsight:
         # into extraction. Only the accepted public transaction enters here.
         if source.startswith("task:Tasks/observations/"):
             return False
+        # Executive conversation turns call this on the event loop between the
+        # committed answer and speech, and ignore the result. Their outbox insert
+        # runs on the single FIFO writer (per-conversation order, same uuid5
+        # identity; start() re-offers any turn a crash lost). Returns None then.
+        # Other callers keep the synchronous inserted/duplicate result.
+        writer = self.writer
+        if writer is not None and source.startswith("conversation:"):
+            try:
+                writer.submit(self._completed, agent_ref, user, assistant, source=source,
+                              identifier=identifier, timestamp=timestamp)
+                return None
+            except RuntimeError:
+                pass  # Writer already shut down: record synchronously instead.
+        return self._completed(agent_ref, user, assistant, source=source,
+                               identifier=identifier, timestamp=timestamp)
+
+    def _completed(self, agent_ref, user, assistant, *, source, identifier, timestamp=None):
         try:
             label = ("Harness Task objective (not a direct owner message)"
                      if source.startswith("task:") else "Owner request")
