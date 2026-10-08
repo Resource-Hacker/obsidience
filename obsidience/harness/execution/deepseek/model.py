@@ -80,6 +80,11 @@ def message_producer(message: dict) -> str:
 
 
 CONSUMED_IMAGE = '[Earlier image consumed; observe again for current pixels.]'
+
+
+def _targeted(name: str) -> bool:
+    """Tools whose arguments name a window target, click point or placement."""
+    return name in {'computer.observe', 'computer.act'} or name.startswith('window.')
 # A consumed image's placeholder follows the notice in an image result's text.
 _BUDGET_NOTICE = re.compile(r'\n\nExecution budget: [^\n]*(?=(?:\n' + re.escape(CONSUMED_IMAGE) + r')?\Z)')
 
@@ -275,9 +280,15 @@ def wire_messages(messages: list[dict], images: dict, objective: str = '', *,
                                   + '\n\nContinue the current owner request:\n' + owner_text)
             calls = [b for b in blocks if b['type'] == 'tool-call']
             if calls:
-                row['tool_calls'] = [{'id': b['id'], 'type': 'function',
-                                     'function': {'name': b['name'], 'arguments': b['arguments']}}
-                                    for b in calls]
+                # Earlier turns' window targets and points are not current
+                # evidence, and a small model copies them as exemplars. Like a
+                # settled command, the call keeps its name and its result keeps
+                # the outcome; only the literal arguments are withheld. The
+                # current turn's calls keep theirs.
+                row['tool_calls'] = [{'id': b['id'], 'type': 'function', 'function': {
+                    'name': b['name'],
+                    'arguments': '{}' if index < owner_index and _targeted(b['name']) else b['arguments']}}
+                    for b in calls]
             result.append(row)
     return result
 
