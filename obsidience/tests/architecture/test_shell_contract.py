@@ -52,9 +52,8 @@ def test_one_quickshell_host_owns_all_three_logical_surfaces() -> None:
     identity = (
         SHELL_ROOT / "qml" / "components" / "identity" / "Identity.qml"
     ).read_text()
-    assert 'primaryOutputName: "HDMI-A-1"' in shell_api
-    assert 'usbOutputName: "DP-8"' in shell_api
-    assert 'dp4OutputName: "HDMI-A-2"' in shell_api
+    assert "function surfaceIdForScreen(screen)" in shell_api
+    assert "surfaceLayout.surfaceIdForOutput(" in shell_api
     assert "property ShellApi shellApi: ShellApi {}" in shell
     assert shell.count("Quickshell.screens.filter") == 3
     assert shell.count("PaneWorkspace {") == 1
@@ -597,15 +596,15 @@ def test_one_shell_host_shares_displays_pane_and_surface_layout() -> None:
         'command.type === "window.adapter.subscribe"', 1
     )[1].split('command.type === "window.state.publish"', 1)[0]
     assert "moduleWindowBindings = ({})" not in subscribe_window_block
-    for workspace_id, monitor in (
-        ("1", "HDMI-A-1"),
-        ("2", "HDMI-A-2"),
-        ("3", "DP-8"),
+    for workspace_id, surface in (
+        ("1", "samsung"),
+        ("2", "dp-4"),
+        ("3", "usb-c"),
     ):
         rule = compositor.split(
             f'workspace = "{workspace_id}"', 1
         )[1].split("})", 1)[0]
-        assert f'monitor = "{monitor}"' in rule
+        assert f'monitor = surfaces.selector("{surface}")' in rule
         assert "persistent = true" in rule
         assert "default = true" in rule
     assert "function broadcastToPaneClients(message)" not in command_server
@@ -1312,9 +1311,7 @@ def test_pane_shortcut_move_is_atomic_and_has_one_owner_per_display_path() -> No
     assert "move_pane.py focused surface top" in compositor
     assert "move_pane.py focused surface bottom" in compositor
     assert "move_pane.py focused close" in compositor
-    assert '"HDMI-A-1": "samsung"' in move_client
-    assert '"DP-8": "usb-c"' in move_client
-    assert '"HDMI-A-2": "dp-4"' in move_client
+    assert "surface_outputs(monitors)" in move_client
     assert '["/usr/bin/hyprctl", "monitors", "-j"]' in move_client
     assert 'surface_argument == "focused"' in move_client
     assert not (SHELL_ROOT / "input" / "router.py").exists()

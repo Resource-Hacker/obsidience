@@ -14,18 +14,13 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
+from ...surface_identity import SURFACE_IDS, surface_outputs
 from .model import ApplicationWindow, LocalRect, MODULE_APP_ID, PANE_ID
 
 _ADDRESS = re.compile(r"^0x[0-9a-fA-F]+$")
 _OUTPUT = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 _RUNTIME_DIR = Path(os.environ.get("XDG_RUNTIME_DIR", "/run/user/1000"))
 _FULLSCREEN_STATE = _RUNTIME_DIR / "obsidience-shell-fullscreen.state"
-_SURFACE_BY_OUTPUT = {
-    "HDMI-A-1": "samsung",
-    "DP-8": "usb-c",
-    "HDMI-A-2": "dp-4",
-}
-_OUTPUT_BY_SURFACE = {surface: output for output, surface in _SURFACE_BY_OUTPUT.items()}
 _ACTIONS = frozenset(("resize", "tile", "surface"))
 _DIRECTIONS = frozenset(("left", "right", "top", "bottom"))
 _MODULE_TITLE_PREFIX = "obsidience-pane:"
@@ -101,12 +96,13 @@ def _monitor_route(
     ):
         return None
     rectangles: dict[int, tuple[str, str, float, float, float, float]] = {}
+    surface_by_output = surface_outputs(monitors)
     for monitor in monitors:
         if not isinstance(monitor, dict):
             continue
         monitor_id = monitor.get("id")
         output = str(monitor.get("name", ""))
-        surface = _SURFACE_BY_OUTPUT.get(output)
+        surface = surface_by_output.get(output)
         x = _number(monitor.get("x"))
         y = _number(monitor.get("y"))
         width = _number(monitor.get("width"))
@@ -201,6 +197,8 @@ class HyprlandSurfaceWindows:
         self._stop = threading.Event()
         self._publish_lock = threading.Lock()
         self._thread: threading.Thread | None = None
+        # Surface -> current connector, resolved from the Surface identity map.
+        self.outputs: dict[str, str] = {}
 
     def start(self) -> None:
         self._thread = threading.Thread(
@@ -244,7 +242,7 @@ class HyprlandSurfaceWindows:
         self, surface_id: str, columns: int, rows: int
     ) -> tuple[bool, str]:
         if (
-            surface_id not in _OUTPUT_BY_SURFACE
+            surface_id not in SURFACE_IDS
             or isinstance(columns, bool)
             or not isinstance(columns, int)
             or isinstance(rows, bool)
@@ -303,7 +301,7 @@ class HyprlandSurfaceWindows:
         fields = ("columns", "rows", "left", "top", "right", "bottom")
         values = [tile_bounds.get(field) for field in fields]
         if (
-            surface_id not in _OUTPUT_BY_SURFACE
+            surface_id not in SURFACE_IDS
             or _ADDRESS.fullmatch(window_id) is None
             or tile_bounds.get("surface_id") != surface_id
             or any(
@@ -338,8 +336,8 @@ class HyprlandSurfaceWindows:
         tile_bounds: dict[str, object] | None,
     ) -> tuple[bool, str]:
         if (
-            source_surface_id not in _OUTPUT_BY_SURFACE
-            or destination_surface_id not in _OUTPUT_BY_SURFACE
+            source_surface_id not in SURFACE_IDS
+            or destination_surface_id not in SURFACE_IDS
             or _ADDRESS.fullmatch(window_id) is None
             or destination_surface_id not in grids
         ):
@@ -381,8 +379,15 @@ class HyprlandSurfaceWindows:
             self._publish()
             return (True, "") if verified else (False, "placement_not_observed")
 
-        output = _OUTPUT_BY_SURFACE[destination_surface_id]
         monitors = self._json("monitors", "all")
+        output = next(
+            (
+                name
+                for name, surface in surface_outputs(monitors).items()
+                if surface == destination_surface_id
+            ),
+            "",
+        )
         destination_ids = {
             monitor.get("id")
             for monitor in monitors
@@ -436,7 +441,7 @@ class HyprlandSurfaceWindows:
         grids: dict[str, tuple[int, int]],
     ) -> tuple[bool, str]:
         if (
-            surface_id not in _OUTPUT_BY_SURFACE
+            surface_id not in SURFACE_IDS
             or _ADDRESS.fullmatch(window_id) is None
             or action not in _ACTIONS
             or direction not in _DIRECTIONS
@@ -537,12 +542,17 @@ class HyprlandSurfaceWindows:
         monitor_surfaces: dict[
             int, tuple[str, float, float, int | None, bool]
         ] = {}
+        surface_by_output = surface_outputs(monitors)
+        # The Shell records each Surface's current connector from this.
+        self.outputs = {
+            surface_id: output for output, surface_id in surface_by_output.items()
+        }
         if isinstance(monitors, list):
             for monitor in monitors:
                 if not isinstance(monitor, dict):
                     continue
                 monitor_id = monitor.get("id")
-                surface_id = _SURFACE_BY_OUTPUT.get(str(monitor.get("name", "")))
+                surface_id = surface_by_output.get(str(monitor.get("name", "")))
                 x = _number(monitor.get("x"))
                 y = _number(monitor.get("y"))
                 active_workspace = monitor.get("activeWorkspace")
@@ -572,7 +582,7 @@ class HyprlandSurfaceWindows:
                     )
 
         windows_by_surface: dict[str, list[ApplicationWindow]] = {
-            surface_id: [] for surface_id in _SURFACE_BY_OUTPUT.values()
+            surface_id: [] for surface_id in SURFACE_IDS
         }
         # Hyprland's global focus order (0 = focused), for application windows.
         focus_history: list[tuple[int, str, int]] = []

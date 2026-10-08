@@ -3,51 +3,70 @@
 
 dofile("/home/wissenschafter/Projects/obsidience/obsidience/shell/adapter/hyprland/layout.lua")
 
-hl.monitor({
-    output = "HDMI-A-1",
-    mode = "5120x1440@240",
-    position = "0x0",
-    scale = 1,
-    bitdepth = 10,
-    cm = "hdr",
-    sdr_max_luminance = 225,
-    max_luminance = 1000,
-})
+-- surface-layout.json identifies each Surface's monitor; this file owns only
+-- its output settings.
+local surfaces = dofile("/home/wissenschafter/Projects/obsidience/obsidience/shell/adapter/hyprland/surfaces.lua")
 
-hl.monitor({
-    output = "HDMI-A-2",
-    mode = "3840x1100@60",
-    position = "0x1440",
-    scale = 2,
-    vrr = 0,
-})
+local SURFACE_OUTPUTS = {
+    samsung = {
+        mode = "5120x1440@240",
+        position = "0x0",
+        scale = 1,
+        bitdepth = 10,
+        cm = "hdr",
+        sdr_max_luminance = 225,
+        max_luminance = 1000,
+    },
+    ["dp-4"] = {
+        mode = "3840x1100@60",
+        position = "0x1440",
+        scale = 2,
+        vrr = 0,
+    },
+    ["usb-c"] = {
+        mode = "3840x2400@60",
+        position = "1920x1440",
+        scale = 2,
+        vrr = 0,
+    },
+}
 
-hl.monitor({
-    output = "DP-8",
-    mode = "3840x2400@60",
-    position = "1920x1440",
-    scale = 2,
-    vrr = 0,
-})
+-- Hyprland applies the last matching rule. Add every connector fallback
+-- before any description rule, so a renumbered monitor keeps its settings.
+for _, by_description in ipairs({ false, true }) do
+    for _, identity in ipairs(surfaces.identities) do
+        local selector = identity.output
+        if by_description then
+            selector = identity.description ~= "" and "desc:" .. identity.description or ""
+        end
+        if selector ~= "" then
+            local rule = { output = selector }
+            for key, value in pairs(SURFACE_OUTPUTS[identity.id]) do
+                rule[key] = value
+            end
+            hl.monitor(rule)
+        end
+    end
+end
 
 -- Keep each Surface's native workspace bound through output sleep and wake.
 hl.workspace_rule({
     workspace = "1",
-    monitor = "HDMI-A-1",
+    monitor = surfaces.selector("samsung"),
     persistent = true,
     default = true,
 })
 
 hl.workspace_rule({
     workspace = "2",
-    monitor = "HDMI-A-2",
+    monitor = surfaces.selector("dp-4"),
     persistent = true,
     default = true,
 })
 
 hl.workspace_rule({
     workspace = "3",
-    monitor = "DP-8",
+    monitor = surfaces.selector("usb-c"),
     persistent = true,
     default = true,
 })
@@ -142,7 +161,7 @@ local function updateWoWVrr(closedAddress)
         if window.address ~= closedAddress and window.mapped
             and (string.lower(window.class or "") == "wow.exe"
                 or string.lower(window.class or "") == "wowb.exe")
-            and window.monitor and window.monitor.name == "HDMI-A-1" then
+            and surfaces.surface_for(window.monitor) == "samsung" then
             active = true
             break
         end

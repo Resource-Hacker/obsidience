@@ -22,13 +22,13 @@ ShellRoot {
         shellApi: root.shellApi
     }
     readonly property var samsungScreens: Quickshell.screens.filter(
-        screen => screen.name === shellApi.primaryOutputName
+        screen => shellApi.surfaceIdForScreen(screen) === "samsung"
     )
     readonly property var usbScreens: Quickshell.screens.filter(
-        screen => screen.name === shellApi.usbOutputName
+        screen => shellApi.surfaceIdForScreen(screen) === "usb-c"
     )
     readonly property var dp4Screens: Quickshell.screens.filter(
-        screen => screen.name === shellApi.dp4OutputName
+        screen => shellApi.surfaceIdForScreen(screen) === "dp-4"
     )
     readonly property var workspaceScreens: samsungScreens.concat(
         usbScreens

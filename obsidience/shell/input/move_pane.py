@@ -14,16 +14,15 @@ from pathlib import Path
 
 from websockets.sync.client import connect
 
+# Hyprland runs this file directly; share the package's Surface identity map.
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from obsidience.shell.surface_identity import surface_outputs  # noqa: E402
+
 SHELL_URL = "ws://127.0.0.1:8768"
 SUBPROTOCOL = "obsidience.shell.v1"
 SURFACES = frozenset(("samsung", "usb-c", "dp-4"))
 DIRECTIONS = frozenset(("left", "right", "top", "bottom"))
 ACTIONS = frozenset(("close", "surface", "resize", "tile"))
-SURFACE_BY_OUTPUT = {
-    "HDMI-A-1": "samsung",
-    "DP-8": "usb-c",
-    "HDMI-A-2": "dp-4",
-}
 
 
 def command_url() -> str:
@@ -51,9 +50,10 @@ def focused_surface() -> str | None:
         monitors = json.loads(result.stdout)
     except (OSError, subprocess.SubprocessError, ValueError, TypeError):
         return None
+    surface_by_output = surface_outputs(monitors)
     for monitor in monitors if isinstance(monitors, list) else ():
         if isinstance(monitor, dict) and monitor.get("focused") is True:
-            return SURFACE_BY_OUTPUT.get(str(monitor.get("name", "")))
+            return surface_by_output.get(str(monitor.get("name", "")))
     return None
 
 

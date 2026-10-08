@@ -52,7 +52,13 @@ class WindowAdapterHost:
         windows: tuple[ApplicationWindow, ...],
         surface_awake: bool,
     ) -> None:
-        self.store.update(surface_id, active_window_id, windows, surface_awake)
+        self.store.update(
+            surface_id,
+            active_window_id,
+            windows,
+            surface_awake,
+            self.hyprland.outputs.get(surface_id, ""),
+        )
 
     def _activate(
         self, surface_id: str, window_id: str, expected_revision: int

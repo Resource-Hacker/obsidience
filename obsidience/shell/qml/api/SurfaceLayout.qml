@@ -69,7 +69,7 @@ QtObject {
                 || !isNumber(rect.height) || rect.height <= 0) {
             return null
         }
-        return {
+        const result = {
             "id": value.id,
             "label": value.label,
             "backend": value.backend,
@@ -88,6 +88,13 @@ QtObject {
                 "height": Math.round(rect.height)
             }
         }
+        // Stable monitor identity: Hyprland's EDID description, matched as a
+        // prefix like `desc:`. `output` is the connector it last resolved to.
+        if (typeof value.description === "string" && value.description.length > 0
+                && value.description.length <= 256) {
+            result.description = value.description
+        }
+        return result
     }
 
     function normalizePaneGridSize(value) {
@@ -208,6 +215,55 @@ QtObject {
             }
         }
         return null
+    }
+
+    function surfaceIdForOutput(output) {
+        if (typeof output !== "string" || output.length === 0) {
+            return ""
+        }
+        for (const candidate of surfaces) {
+            if (candidate.output === output) {
+                return candidate.id
+            }
+        }
+        return ""
+    }
+
+    // The window adapter resolves each Surface's monitor description to its
+    // current connector ("" while absent). Record those connectors so every
+    // reader matching screens by `output` follows a renumbered monitor. An
+    // absent Surface keeps its last connector unless a present one now owns it.
+    function commitSurfaceOutputs(outputs) {
+        const owners = {}
+        for (const candidate of surfaces) {
+            const output = outputs ? outputs[candidate.id] : undefined
+            if (typeof output !== "string"
+                    || (output && !/^[A-Za-z0-9._-]{1,64}$/.test(output))) {
+                return false
+            }
+            if (output) {
+                if (owners[output]) {
+                    return false
+                }
+                owners[output] = candidate.id
+            }
+        }
+        let changed = false
+        const next = []
+        for (const candidate of surfaces) {
+            const resolved = outputs[candidate.id]
+            const output = resolved
+                || (owners[candidate.output] ? "" : candidate.output)
+            changed = changed || output !== candidate.output
+            next.push(output === candidate.output ? candidate
+                : Object.assign({}, candidate, {"output": output}))
+        }
+        if (changed) {
+            surfaces = next
+            revision += 1
+            writeState()
+        }
+        return true
     }
 
     function snapPaneValue(value) {

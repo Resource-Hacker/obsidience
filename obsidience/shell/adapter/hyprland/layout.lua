@@ -1,5 +1,8 @@
 -- Project the Obsidience workspace grid onto native Hyprland windows.
 
+local surfaces = dofile(
+    (debug.getinfo(1, "S").source:match("^@(.*/)") or "./") .. "surfaces.lua"
+)
 local GAP = 5
 -- Matches general.gaps_in. Each internal logical cut belongs to a window,
 -- while Hyprland renders 2 px after the cut and 3 px before it as empty space.
@@ -53,9 +56,9 @@ local OLED_BORDER_INACTIVE = {
     "rgba(102a3510)",
 }
 local DEFAULT_GRIDS = {
-    ["HDMI-A-1"] = { surface = "samsung", columns = 8, rows = 2 },
-    ["DP-8"] = { surface = "usb-c", columns = 3, rows = 2 },
-    ["HDMI-A-2"] = { surface = "dp-4", columns = 4, rows = 1 },
+    samsung = { surface = "samsung", columns = 8, rows = 2 },
+    ["usb-c"] = { surface = "usb-c", columns = 3, rows = 2 },
+    ["dp-4"] = { surface = "dp-4", columns = 4, rows = 1 },
 }
 
 local grid_overrides = {}
@@ -125,8 +128,8 @@ end
 
 local function target_grid(target)
     local window = target.window
-    local monitor = window and window.monitor
-    local defaults = monitor and DEFAULT_GRIDS[monitor.name]
+    local surface = window and surfaces.surface_for(window.monitor)
+    local defaults = surface and DEFAULT_GRIDS[surface]
     if not defaults then
         return nil
     end

@@ -23,6 +23,8 @@ QtObject {
     property var clients: []
     property var graphStates: ({})
     property var windowStates: ({})
+    // Surface -> connector its monitor currently uses, as the adapter resolved it.
+    property var resolvedOutputs: ({})
     property var moduleWindowBindings: ({})
     property var moduleRestorePending: null
     property int moduleRestoreSequence: 0
@@ -562,6 +564,7 @@ QtObject {
         if (!ids[activeWindowId]) {
             activeWindowId = ""
         }
+        const surfaceRecord = surfaceLayout.surface(surfaceId)
         return {
             "schema": eventSchema,
             "type": "application.state",
@@ -569,7 +572,19 @@ QtObject {
             "revision": command.revision,
             "active_window_id": activeWindowId,
             "surface_awake": command.surface_awake,
+            "logical_width": surfaceRecord.logical_width,
+            "logical_height": surfaceRecord.logical_height,
             "windows": windows
+        }
+    }
+
+    // Commit once every Surface has reported, so a renumbering is one record.
+    function recordResolvedOutput(surfaceId, output) {
+        resolvedOutputs = Object.assign({}, resolvedOutputs, {
+            [surfaceId]: typeof output === "string" ? output : ""
+        })
+        if (surfaceLayout.surfaces.every(surface => surface.id in resolvedOutputs)) {
+            surfaceLayout.commitSurfaceOutputs(resolvedOutputs)
         }
     }
 
@@ -1146,6 +1161,7 @@ QtObject {
             }
             windowAdapterSocket = socket
             windowStates = ({})
+            resolvedOutputs = ({})
             return true
         }
         if (command.type === "window.state.publish") {
@@ -1161,6 +1177,7 @@ QtObject {
             windowStates = Object.assign(
                 {}, windowStates, {[state.surface_id]: state}
             )
+            recordResolvedOutput(state.surface_id, command.output)
             settlePendingModuleRestore()
             observeModuleWindows()
             broadcast(state)

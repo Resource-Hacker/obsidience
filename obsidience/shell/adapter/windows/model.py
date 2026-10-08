@@ -7,6 +7,8 @@ import threading
 import time
 from dataclasses import asdict, dataclass
 
+from ...surface_identity import OUTPUT
+
 MAX_WINDOWS = 256
 MAX_TEXT = 512
 MAX_COORDINATE = 131_072
@@ -119,6 +121,8 @@ class SurfaceWindowState:
     active_window_id: str
     surface_awake: bool
     windows: tuple[ApplicationWindow, ...]
+    # The connector this Surface's monitor currently uses ("" when absent).
+    output: str = ""
 
     def command(self) -> dict:
         windows = []
@@ -129,7 +133,7 @@ class SurfaceWindowState:
             if record["focus_rank"] < 0:
                 record.pop("focus_rank")
             windows.append(record)
-        return {
+        command = {
             "schema": "obsidience.shell.command.v1",
             "type": "window.state.publish",
             "surface_id": self.surface_id,
@@ -138,6 +142,9 @@ class SurfaceWindowState:
             "surface_awake": self.surface_awake,
             "windows": windows,
         }
+        if self.output:
+            command["output"] = self.output
+        return command
 
 
 class WindowStateStore:
@@ -154,6 +161,7 @@ class WindowStateStore:
         active_window_id: object,
         windows: object,
         surface_awake: bool = True,
+        output: str = "",
     ) -> SurfaceWindowState | None:
         if (
             surface_id not in SURFACES
@@ -161,6 +169,7 @@ class WindowStateStore:
             or not isinstance(surface_awake, bool)
         ):
             return None
+        output = output if isinstance(output, str) and OUTPUT.fullmatch(output) else ""
         normalized: list[ApplicationWindow] = []
         seen: set[str] = set()
         for candidate in windows[:MAX_WINDOWS]:
@@ -189,6 +198,7 @@ class WindowStateStore:
                 and previous.active_window_id == active
                 and previous.surface_awake is surface_awake
                 and previous.windows == window_tuple
+                and previous.output == output
             ):
                 return previous
             state = SurfaceWindowState(
@@ -197,6 +207,7 @@ class WindowStateStore:
                 active_window_id=active,
                 surface_awake=surface_awake,
                 windows=window_tuple,
+                output=output,
             )
             self._states[surface_id] = state
             self.changed.set()

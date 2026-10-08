@@ -28,7 +28,8 @@ def _require(condition: bool, reason: str) -> None:
 
 
 def _attest(owner, surface_id, target, witness, *, point=None):
-    from .hyprland import _OUTPUT_BY_SURFACE, _local_rect
+    from ...surface_identity import surface_outputs
+    from .hyprland import _local_rect
 
     _require(target.window_kind == "application", "application_required")
     _require(witness["stable_id"] == target.stable_id and witness["pid"] == target.pid
@@ -44,7 +45,8 @@ def _attest(owner, surface_id, target, witness, *, point=None):
              and client.get("class") == target.app_id and client.get("mapped") is True
              and client.get("hidden") is False and client.get("visible") is True
              and client.get("acceptsInput") is True, "target_not_visible")
-    outputs = [m for m in monitors if m.get("name") == _OUTPUT_BY_SURFACE[surface_id]
+    surface_by_output = surface_outputs(monitors)
+    outputs = [m for m in monitors if surface_by_output.get(m.get("name")) == surface_id
                and m.get("id") == client.get("monitor")]
     _require(len(outputs) == 1, "surface_changed")
     output = outputs[0]

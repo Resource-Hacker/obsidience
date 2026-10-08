@@ -208,9 +208,11 @@ already represent those windows.
 `adapter/hyprland/hyprland.lua` is the compositor configuration. It is
 intentionally small:
 
-- Samsung `HDMI-A-1` is admitted through the RTX 4080 at `5120x1440@240`,
-  scale 1, 10-bit, and fullscreen-only VRR;
-- USB-C `DP-8` and logical DP-4 `HDMI-A-2` are admitted through the AMD iGPU;
+- Samsung is admitted through the RTX 4080 at `5120x1440@240`, scale 1,
+  10-bit, and fullscreen-only VRR;
+- USB-C and logical DP-4 are admitted through the AMD iGPU;
+- `adapter/hyprland/surfaces.lua` reads which monitor each Surface is from
+  `surface-layout.json` (see below), so the configuration names no connector;
 - the RTX 4080 stays the primary renderer and the RTX 4000 stays compute-only;
 - direct scanout and tearing stay disabled for the first measured gaming
   acceptance;
@@ -284,8 +286,16 @@ Wayland object. Every module pane retains one generic persisted record:
 pane_id + surface_id + local_rect + open + optional tile_bounds
 ```
 
-The three-Surface data model maps Samsung `HDMI-A-1`, USB-C `DP-8`, and logical
-DP-4 `HDMI-A-2` into one Hyprland layout. No pane-specific process or display
+The three-Surface data model maps Samsung, USB-C, and logical DP-4 into one
+Hyprland layout. `~/.config/obsidience-shell/surface-layout.json` (seeded from
+`state/initial-surface-layout.json`) is the one Surface identity map: each
+Surface's optional `description` is the monitor's Hyprland description (EDID
+make, model and serial, as `hyprctl -j monitors` reports it, matched as a prefix
+like `desc:`), and `output` is its connector, used only when no present monitor
+matches the description. The compositor configuration, the window adapter
+(`surface_identity.py`), and the layout shortcuts resolve monitors this way; the
+adapter reports each Surface's current connector and `SurfaceLayout` records it
+in `output`, so QML screens follow a renumbered connector. No pane-specific process or display
 bridge is permitted. Native pointer, clipboard, focus, movement, resize, and
 stacking belong to Hyprland. `PanePlacement` keeps one canonical record beneath
 the user's XDG state directory. A newly mapped open module receives one saved

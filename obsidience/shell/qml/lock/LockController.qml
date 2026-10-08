@@ -17,16 +17,7 @@ Scope {
     property bool authenticationFailed: false
 
     function surfaceIdForScreen(screenName) {
-        if (screenName === shellApi.primaryOutputName) {
-            return "samsung"
-        }
-        if (screenName === shellApi.usbOutputName) {
-            return "usb-c"
-        }
-        if (screenName === shellApi.dp4OutputName) {
-            return "dp-4"
-        }
-        return ""
+        return shellApi.surfaceLayout.surfaceIdForOutput(screenName)
     }
 
     function requestLock() {

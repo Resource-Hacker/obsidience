@@ -2,10 +2,12 @@ import QtQml
 
 QtObject {
     readonly property int version: 1
-    readonly property string primaryOutputName: "HDMI-A-1"
-    readonly property string usbOutputName: "DP-8"
-    readonly property string dp4OutputName: "HDMI-A-2"
     readonly property ShellTheme theme: ShellTheme {}
     readonly property SurfaceLayout surfaceLayout: SurfaceLayout {}
     readonly property RealtimeState realtime: RealtimeState {}
+
+    // surface-layout.json is the one Surface identity map; "" for other screens.
+    function surfaceIdForScreen(screen) {
+        return surfaceLayout.surfaceIdForOutput(screen ? screen.name : "")
+    }
 }

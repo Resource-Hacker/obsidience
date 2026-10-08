@@ -47,8 +47,9 @@ def test_hyprland_config_is_one_compositor_with_three_real_outputs() -> None:
         SHELL_ROOT / "adapter" / "hyprland" / "hyprland.lua"
     ).read_text(encoding="utf-8")
     monitor_config = config.split("hl.config({", 1)[0]
-    assert len(re.findall(r"^hl\.monitor\(\{$", config, re.MULTILINE)) == 3
-    assert 'output = "HDMI-A-1"' in config
+    # surface-layout.json identifies the three monitors through surfaces.lua.
+    assert config.count("hl.monitor(rule)") == 1
+    assert "/shell/adapter/hyprland/surfaces.lua" in config
     assert 'mode = "5120x1440@240"' in config
     assert 'position = "0x0"' in config
     assert "scale = 1" in config
@@ -56,10 +57,8 @@ def test_hyprland_config_is_one_compositor_with_three_real_outputs() -> None:
     assert config.count('cm = "hdr"') == 1
     assert config.count("sdr_max_luminance = 225") == 1
     assert "vrr = 2" in config
-    assert 'output = "HDMI-A-2"' in config
     assert 'mode = "3840x1100@60"' in config
     assert 'position = "0x1440"' in config
-    assert 'output = "DP-8"' in config
     assert 'mode = "3840x2400@60"' in config
     assert 'position = "1920x1440"' in config
     assert monitor_config.count("scale = 2") == 2
@@ -175,9 +174,9 @@ def test_native_windows_use_the_obsidience_grid_and_theme() -> None:
     assert 'hl.layout.register("obsidience"' in layout
     assert "local GAP = 5" in layout
     assert "local NATIVE_GAP_START = 2" in layout
-    assert '["HDMI-A-1"] = { surface = "samsung", columns = 8, rows = 2 }' in layout
-    assert '["DP-8"] = { surface = "usb-c", columns = 3, rows = 2 }' in layout
-    assert '["HDMI-A-2"] = { surface = "dp-4", columns = 4, rows = 1 }' in layout
+    assert 'samsung = { surface = "samsung", columns = 8, rows = 2 }' in layout
+    assert '["usb-c"] = { surface = "usb-c", columns = 3, rows = 2 }' in layout
+    assert '["dp-4"] = { surface = "dp-4", columns = 4, rows = 1 }' in layout
     assert "target:place(box)" in layout
     assert "last_placed[id] = box" in layout
     assert "local function context_is_current(key, ctx)" in layout

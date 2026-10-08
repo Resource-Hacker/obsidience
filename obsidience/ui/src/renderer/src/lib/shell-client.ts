@@ -34,7 +34,8 @@ type StageListener = { listener: (visible: boolean) => void; region?: () => Stag
 const stageVisibilityListeners = new Map<string, Set<StageListener>>();
 type WindowRect = { x: number; y: number; width: number; height: number };
 const stageWindows = new Map<string, WindowRect[]>();
-const SURFACE_SIZE: Record<string, [number, number]> = { samsung: [5120, 1440], "usb-c": [1920, 1200], "dp-4": [1920, 550] };
+/** Logical Surface size from the Shell's surface-layout.json, per application.state. */
+const stageSizes = new Map<string, [number, number]>();
 // Tiles sit 5 px apart plus a 1 px border each and 6 px from the Surface edge;
 // growing every window by this margin closes those gaps.
 const COVER_GAP_PX = 8;
@@ -182,6 +183,7 @@ function handleMessage(event: MessageEvent): void {
       tuning?: unknown;
       profile?: unknown;
       session_locked?: unknown; surface_id?: string; surface_awake?: boolean;
+      logical_width?: unknown; logical_height?: unknown;
       oled_mode_enabled?: unknown; oled_shift_distance_px?: unknown; oled_travel_duration_seconds?: unknown;
       windows?: { minimized?: boolean; visible_on_workspace?: boolean; local_rect?: Partial<WindowRect> }[];
       surface?: { surface_id?: unknown; visible?: unknown };
@@ -227,6 +229,9 @@ function handleMessage(event: MessageEvent): void {
           && [r.x, r.y, r.width, r.height].every(Number.isFinite) ? [r as WindowRect] : [];
       }));
       stageAwake.set(message.surface_id, message.surface_awake !== false);
+      const width = message.logical_width, height = message.logical_height;
+      if (typeof width === "number" && typeof height === "number" && width > 0 && height > 0)
+        stageSizes.set(message.surface_id, [width, height]);
       notifyStageVisibility();
     }
 
@@ -402,7 +407,7 @@ export function onShellGraphDisplay(
  * narrow tile gaps as covered. Without a region the caller may itself be one
  * of those windows (a pane page), so only one full-Surface window counts. */
 function stageCovered(surfaceId: string, region?: StageRegion | null): boolean {
-  const size = SURFACE_SIZE[surfaceId], windows = stageWindows.get(surfaceId);
+  const size = stageSizes.get(surfaceId), windows = stageWindows.get(surfaceId);
   if (!size || !windows?.length) return false;
   if (!region) return windows.some(w => w.width >= size[0] - 12 && w.height >= size[1] - 12);
   const left = region.x * size[0], top = region.y * size[1];

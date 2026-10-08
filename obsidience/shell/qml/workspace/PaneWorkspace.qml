@@ -304,19 +304,7 @@ Scope {
     }
 
     function surfaceForScreen(screen) {
-        if (!screen) {
-            return ""
-        }
-        if (screen.name === shellApi.primaryOutputName) {
-            return "samsung"
-        }
-        if (screen.name === shellApi.usbOutputName) {
-            return "usb-c"
-        }
-        if (screen.name === shellApi.dp4OutputName) {
-            return "dp-4"
-        }
-        return ""
+        return shellApi.surfaceIdForScreen(screen)
     }
 
     function screenForSurface(surfaceId) {
