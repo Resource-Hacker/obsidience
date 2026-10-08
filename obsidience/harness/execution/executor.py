@@ -316,6 +316,38 @@ def _nested_headings(body: str) -> str:
     return re.sub(r"(?m)^(#{1,4}) ", lambda m: "#" * (len(m.group(1)) + 2) + " ", body)
 
 
+# With the native conversation windowed, Hindsight mental-model pages carry the
+# long-range continuity. A page changes only with its refreshed version (at most
+# every six hours), so it belongs to the cached system section. owner-preferences
+# is left out: accepted Preferences are already pinned and Curate reviews pages.
+MEMORY_SUMMARY_PAGES = ("recent-decisions", "workstation-changes")
+MEMORY_SUMMARY_CHARS = 12_000  # about 3K tokens, shared equally by the pages
+
+
+def _memory_summary(agent: Note) -> str:
+    """The Agent's cached memory pages as one bounded, unverified section, or ''."""
+    if CONFIG.extras.get("memory_summary", True) is False:
+        return ""
+    from ..memory.hindsight import MEMORY, NOTICE
+    cached = {page.get("id"): page for page in MEMORY.pages(agent.ref)}
+    pages = [cached[identifier] for identifier in MEMORY_SUMMARY_PAGES if identifier in cached]
+    if not pages:
+        return ""
+    share, parts = MEMORY_SUMMARY_CHARS // len(pages), []
+    for page in pages:
+        text = _nested_headings(str(page["content"]).strip())
+        if len(text) > share:
+            cut = text.rfind("\n", 0, share)
+            text = text[:cut if cut > 0 else share].rstrip() + "\n[Page truncated; observations.recall has more.]"
+        try:
+            day = " (as of " + datetime.fromisoformat(page["last_refreshed_at"]).astimezone().date().isoformat() + ")"
+        except (KeyError, TypeError, ValueError):
+            day = ""
+        parts.append(f"### {page.get('name') or page['id']}{day}\n{text}")
+    return ("## Memory Summary\n" + NOTICE + " Older conversation is not shown verbatim; "
+            "use observations.recall for its specifics.\n\n" + "\n\n".join(parts))
+
+
 def _required_context(task: Note, agent: Note | None, spine: dict, res: Resolver,
                       allowed: set[str]) -> list[Note]:
     """Exact accepted constraints must not compete with similarity retrieval."""
@@ -349,11 +381,13 @@ def _activation_packet(task: Note, agent: Note | None, spine: dict,
                        accepted_resolver: Resolver | None = None,
                        provider_sections: dict[str, str] | None = None,
                        public_sections: dict[str, str] | None = None,
-                       pinned: list[Note] | tuple[Note, ...] = ()) -> tuple[str, list[str]]:
+                       pinned: list[Note] | tuple[Note, ...] = (),
+                       memory: str = "") -> tuple[str, list[str]]:
     """Compile the one semantic packet consumed and displayed for every leaf Task.
 
     pinned is the Agent identity's own required context, compiled once into the
-    stable system section in its authored order.
+    stable system section in its authored order; memory, its cached Hindsight
+    page section, follows it.
     """
     runbooks: list[Note] = spine["runbooks"]
     skills: list[Note] = [] if task.kind == "agent" else spine["skills"]
@@ -398,6 +432,7 @@ def _activation_packet(task: Note, agent: Note | None, spine: dict,
         "pinned": "## Required Context\nRequired accepted context (no capability grants):\n\n" + "\n\n".join(
             f"### [[{note.ref}]] — {note.title}\n{_nested_headings(note.body.strip())}" for note in pinned
         ) if pinned else "",
+        "memory": memory,
         "bindings": "## Bindings\n" + (bindings if activation.bindings else "None."),
         "knowledge": "## Relevant Knowledge\n" + (brief or "None."),
         "conversation": _conversation_section(conversation),
@@ -466,7 +501,7 @@ def _activation_packet(task: Note, agent: Note | None, spine: dict,
             # runtime retain an SWA checkpoint across changing Objectives.
             "provider_system": "\n\n".join(sections[key] for key in (
                 "header", "identity", "task", "tools", "skills", "runbook", "pinned",
-            )),
+            )) + ("\n\n" + sections["memory"] if sections["memory"] else ""),
             "provider_reference": reference,
             "provider_user": "\n\n".join(section for section in (
                 sections["objective"] if task.kind != "agent" else "", observations if identity else "",
@@ -640,6 +675,7 @@ async def compile_activation(
         task, requested_agent, resolved_spine, activation, observations, brief,
         conversation_context, accepted_resolver=res, provider_sections=provider_sections,
         public_sections=public_sections, pinned=pinned,
+        memory=_memory_summary(requested_agent) if interactive and _is_agent_identity(requested_agent) else "",
     )
     selected_refs = packet_refs
     selected_refs.extend(ref for ref in context_refs if ref not in selected_refs)

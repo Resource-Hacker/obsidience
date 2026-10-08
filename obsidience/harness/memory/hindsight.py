@@ -125,6 +125,8 @@ class Hindsight:
         # refresh whose page version is already settled in this lifetime.
         self.mental_models = {}
         self.model_seen = {}
+        # The latest read of each page version; the Executive prompt shows it.
+        self.model_pages = {}
         self.models_due = False
         self.model_error = ""
         # Process-local, content-free telemetry; Hindsight remains the memory owner.
@@ -537,14 +539,28 @@ class Hindsight:
             for identifier, _name, _query in MENTAL_MODELS if identifier in listed}
         for identifier, _name, _query in MENTAL_MODELS:
             refreshed = (listed.get(identifier) or {}).get("last_refreshed_at")
+            cached = self.model_pages.get((bank, identifier))
+            if refreshed and (cached is None or cached.get("last_refreshed_at") != refreshed):
+                # A page read needs no inference. The cached version feeds the
+                # Executive prompt independently of Curate's queue.
+                self.model_pages[(bank, identifier)] = await self.api(
+                    "GET", f"{bank}/mental-models/{identifier}", params={"detail": "content"})
+        for identifier, _name, _query in MENTAL_MODELS:
+            refreshed = (listed.get(identifier) or {}).get("last_refreshed_at")
             if not refreshed or self.model_seen.get((bank, identifier)) == refreshed:
                 continue
             if self._curation_busy():
                 return  # The next health tick revisits this refresh.
-            model = await self.api("GET", f"{bank}/mental-models/{identifier}", params={"detail": "content"})
+            model = self.model_pages[(bank, identifier)]
             if not await asyncio.to_thread(self._hand_off_model, bank, model):
                 return  # Scheduler rejection never acknowledges a page version.
             self.model_seen[(bank, identifier)] = model.get("last_refreshed_at")
+
+    def pages(self, agent_ref):
+        """The Agent's cached mental-model pages that have content (no I/O)."""
+        bank = next((b for b, ref in self.banks.items() if ref == agent_ref), None)
+        return [page for identifier, _name, _query in MENTAL_MODELS
+                if (page := self.model_pages.get((bank, identifier))) and str(page.get("content") or "").strip()]
 
     def _hand_off_model(self, bank, model):
         """Capture one changed page version as an attested Source and activate Curate."""
