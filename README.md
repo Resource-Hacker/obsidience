@@ -33,7 +33,7 @@ From the repository root, prepare the Python and native Executive dependencies:
 
 ```sh
 python -m venv .venv
-.venv/bin/python -m pip install -r obsidience/harness/requirements.txt
+.venv/bin/python -m pip install -r obsidience/harness/requirements.txt -c obsidience/harness/requirements.lock.txt
 .venv/bin/python -m pip install --no-deps -r obsidience/harness/execution/deepseek/requirements-optimization.txt
 npm --prefix obsidience/harness/execution/deepseek ci --ignore-scripts --no-audit --no-fund
 ./obsidience/scripts/obsidience init

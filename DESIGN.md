@@ -1235,7 +1235,11 @@ Tool/Skill/Runbook dependencies follow accepted Task bindings; conversation
 uses direct Agent Skills. Knowledge links cannot widen either dependency set. Whole-branch toggles remove hidden
 descendant selections, and partially selected branches are explicit.
 
-## Activation and RAPTOR retrieval
+## Activation and retrieval
+
+The recursive summaries are authored folder-index Articles; no automatic
+RAPTOR-style recursive summarisation runs, and retrieval scores index Articles
+like other Articles.
 
 Both execution paths share the compiler, Knowledge retrieval and capability
 owner. Their model loops follow the accepted execution owner:
@@ -2549,8 +2553,9 @@ there is no replacement polling loop. Disconnect and session transitions clear
 transient capture visuals, while completed conversation text retains its
 ordinary final-only path.
 
-Realtime ready wakes the OBSBOT camera through its official SDK and Realtime off
-sleeps it. While Realtime is on, that SDK command disables the camera's 120-second
+When the OBSBOT is the selected microphone, Realtime ready wakes the camera
+through its official SDK and Realtime off sleeps it; with the UMA-8 selected the
+camera is not power-coupled to speech. While Realtime is on, that SDK command disables the camera's 120-second
 no-video auto-sleep timer; off restores it. The camera's real hardware state owns
 its microphone state.
 
