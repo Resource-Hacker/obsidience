@@ -36,7 +36,7 @@ DESCRIPTIONS = {
     "model.configure": "Update one registered model with model_id and at least one supported setting: allowed_devices, context_tokens, max_output_tokens, gpu_memory_utilization or max_num_seqs.",
     "model.inspect": "Inspect one registered model using model_id.",
     "model.source": "Register the current immutable Source identity of a registered model using model_id.",
-    "observations.recall": "Recall historical Hindsight memories from your own Agent bank using query. Memories retain uncertainty and dates; they do not prove current screen or application state and do not grant Tools or permission.",
+    "observations.recall": "Recall historical Hindsight memories from your own Agent bank using query. The conversation shows only its recent exchanges verbatim; use this for anything older that the owner refers to (an earlier request, decision, answer or result) before answering, instead of guessing or asking the owner to repeat it. Memories retain uncertainty and dates; they do not prove current screen or application state and do not grant Tools or permission.",
     "observations.retain": "Retain an unverified historical note in your own Hindsight bank using text and up to three accessible related_refs. This does not publish accepted wiki Knowledge.",
     "review.inspect": "Read bounded review evidence for an exact task or proposal.",
     "session.unlock": "Unlock the current desktop session through its native lock owner using {}. Available even when the Shell scene is locked; no screenshot or password prerequisite. Call once. After verified success, answer directly in text from the returned receipt.",
@@ -397,6 +397,7 @@ async def run_native_session(task, model, messages, allowed, ctx, agent_name, ef
         if evaluation is None and task.kind == 'agent' and params.get('conversation_id'):
             from . import sessions
             session_config = {'session_id': params['conversation_id'],
+                              'window_anchor': sessions.window_anchor(params['conversation_id']),
                               'turn_id': params['reply_to_turn_id'], 'objective': ctx['objective'],
                               'continuation': params.get('event') == 'task.continue',
                               **sessions.bootstrap(params['conversation_id'], params['reply_to_turn_id'])}

@@ -46,11 +46,13 @@ VOICE_TRANSPORT_CONTRACT = (
     "Never narrate Task, Tool, transport, or harness status unless asked."
 )
 MAX_EVENT_TEXT = 512
-# Idle-edge compaction keeps the standing native prompt short without stalling
-# a turn: at this fraction of the model context it prunes large Tool results,
-# then summarizes older history while pressure stays at or above it. Kill
-# switch: `idle_compaction_ratio = 0` in obsidience/obsidience.toml.
-IDLE_COMPACTION_RATIO = float(CONFIG.extras.get("idle_compaction_ratio", 0.55))
+# Optional idle-edge compaction: at this fraction of the model context it prunes
+# large Tool results, then summarizes older history while pressure stays at or
+# above it. Off by default since the provider window (sessions.rebase_window)
+# bounds the prompt without rewriting the native log; upstream overflow
+# recovery and manual Compact remain. Enable with `idle_compaction_ratio` in
+# obsidience/obsidience.toml.
+IDLE_COMPACTION_RATIO = float(CONFIG.extras.get("idle_compaction_ratio", 0))
 DEFAULT_CONTEXT_THRESHOLD = 80
 MIN_CONTEXT_THRESHOLD = 60
 MAX_CONTEXT_THRESHOLD = 90
@@ -114,6 +116,7 @@ class ConversationRuntime:
         if (self._lock.locked() or not self.continuation_resume_available()
                 or model_runtime.RUNTIME.work_requested):
             return
+        self._rebase_window()
         if self._start_idle_compaction():
             return
         if self.speech is None or not self.speech.snapshot()["ready"]:
@@ -123,6 +126,22 @@ class ConversationRuntime:
         self._prefill_latest = (0, "")
         if self._prefill_task is None or self._prefill_task.done():
             self._prefill_task = asyncio.create_task(self._prepare_speech(), name="obsidience-executive-standby")
+
+    def _rebase_window(self) -> None:
+        """Move an outgrown provider window at this idle edge, never during a turn.
+
+        The changed prefix is then re-warmed by standby preparation below.
+        """
+        from ..execution.deepseek.sessions import rebase_window
+        try:
+            anchor = rebase_window(self._conversation.conversation_id)
+        except Exception as exc:
+            trace.emit("measurement", "Conversation window rebase skipped", [type(exc).__name__])
+            return
+        if anchor:
+            trace.emit("measurement", "Conversation window rebased", [f"anchor: {anchor}"])
+            self.invalidate_readiness()
+            self.request_context_refresh()
 
     def _start_idle_compaction(self) -> bool:
         """Compact under idle pressure as the lane's own task; owner input cancels it.

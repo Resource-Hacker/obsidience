@@ -158,8 +158,34 @@ def _settled_commands(messages: list[dict]) -> list[dict]:
     return projected
 
 
+WINDOW_NOTICE = ('[Earlier conversation is outside this window. Ask observations.recall for '
+                 'earlier requests, decisions and results; never guess them.]')
+
+
+def windowed(messages: list[dict], anchor: str | None) -> list[dict]:
+    """The conversation from its window anchor: one exact owner message.
+
+    The native log keeps everything; the provider sees the system prompt, one
+    fixed notice and the exchanges from the anchor on. An exchange begins at an
+    owner message, so a cut never separates a Tool call from its result. Live
+    runtime context and memory before the cut are kept for wire_messages to
+    place. A missing anchor (new conversation, compacted span) shows everything.
+    A rebase never anchors the first exchange, so the notice is always true.
+    """
+    start = next((index for index, message in enumerate(messages) if anchor
+                  and message.get('id') == anchor and message.get('source', {}).get('kind') == 'user'), None)
+    if start is None:
+        return messages
+    kept = [message for message in messages[:start] if message['role'] == 'system'
+            or message_producer(message) in {'obsidience.context', 'obsidience.memory'}]
+    notice = {'role': 'user', 'source': {'kind': 'plugin:obsidience.window'},
+              'content': [{'type': 'text', 'text': WINDOW_NOTICE}]}
+    return [*kept, notice, *messages[start:]]
+
+
 def wire_messages(messages: list[dict], images: dict, objective: str = '', *,
-                  preparation_prefix: bool = False) -> list[dict]:
+                  preparation_prefix: bool = False, anchor: str | None = None) -> list[dict]:
+    messages = windowed(messages, anchor)
     # This adapter does not advertise native toolUpdate support. DeepSeek's
     # projectToolUpdates therefore removes developer registry annotations before
     # live dispatch. Snapshot-based preparation and accounting must match that
@@ -324,8 +350,11 @@ def request_payload(messages, spec, effort, tools):
 async def stream(options: dict, spec, effort: str, images: dict, send, metrics: dict, *, objective: str = '',
                  decision_messages: list | None = None, evaluation_messages: list | None = None,
                  fast_candidates: list | None = None):
+    # A compaction summary condenses its exact upstream region, never a window.
+    from .sessions import window_anchor
+    anchor = None if options.get('purpose') == 'compaction' else window_anchor(options.get('sessionId'))
     messages = (deepcopy(evaluation_messages) if evaluation_messages is not None
-                else wire_messages(options['messages'], images, objective))
+                else wire_messages(options['messages'], images, objective, anchor=anchor))
     payload = request_payload(messages, spec, effort, options.get('tools', []))
     if evaluation_messages is not None:
         # Captures already include model-family guidance. Do not append it a

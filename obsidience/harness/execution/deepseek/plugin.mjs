@@ -111,9 +111,18 @@ export function apply(ctx) {
     },
   });
   const nativeState = session => ctx.sessionProjections.stateOf(session, NATIVE_STATE);
-  function snapshot(session) {
+  // The host reads only the provider window: the system prompt and the exchanges
+  // from the anchor owner message (live context kept for placement), so this
+  // pipe stays bounded while the native log keeps everything.
+  function windowOf(messages, anchor) {
+    const start = anchor ? messages.findIndex(m => m.id === anchor && m.source?.kind === 'user') : -1;
+    if (start <= 0) return messages;
+    const live = m => m.role === 'system' || ['plugin:obsidience.context', 'plugin:obsidience.memory'].includes(m.source?.kind);
+    return [...messages.slice(0, start).filter(live), ...messages.slice(start)];
+  }
+  function snapshot(session, anchor) {
     const state = nativeState(session);
-    return { id: session.id, revision: session.seq, messages: session.deriveMessages(),
+    return { id: session.id, revision: session.seq, messages: windowOf(session.deriveMessages(), anchor),
       pressure: ctx.tokenMeter.measure(session),
       compaction_count: state.compactions,
       tools: session.requestHeader()?.tools ?? [],
@@ -195,10 +204,10 @@ export function apply(ctx) {
     await ctx.compaction.compactRegion(nodes[1].seq, nodes[keep - 1].seq, agent, signal);
     return { pruned, compacted: true };
   }
-  async function inspectStored(id) {
+  async function inspectStored(id, anchor) {
     const live = sessions.get(id);
     if (live) {
-      return snapshot(live.handle.agent.session);
+      return snapshot(live.handle.agent.session, anchor);
     }
     if (!await ctx.sessionPersistence.stat(id)) return null;
     const reader = await ctx.sessionPersistence.open(id, 'read');
@@ -209,7 +218,7 @@ export function apply(ctx) {
         ? Session.fromRestore(id, events, reader.header, reader.inheritedEventCount, eventState, ctx.sessions.messageProjections)
         : Session.create(id, [...events, ...closers], reader.header, reader.inheritedEventCount, ctx.sessions.messageProjections);
       excludeInterruptedReplies(session);
-      return snapshot(session);
+      return snapshot(session, anchor);
     } finally { await reader.close(); }
   }
   async function start(config) {
@@ -377,7 +386,7 @@ export function apply(ctx) {
           if (state.handle) {
             excludeInterruptedReplies(state.handle.agent.session);
             await ctx.sessions.flush(state.handle.agent.session);
-            session = snapshot(state.handle.agent.session);
+            session = snapshot(state.handle.agent.session, config.window_anchor);
           }
         } catch (error) { state.error = String(error?.message || error); }
         entry.active = undefined;
@@ -395,7 +404,7 @@ export function apply(ctx) {
       if (value.control) {
         const execute = async () => {
           const { session_id: id } = value.params;
-          if (value.method === 'inspect') return inspectStored(id);
+          if (value.method === 'inspect') return inspectStored(id, value.params.window_anchor);
           if (value.method === 'close') {
             const entry = sessions.get(id);
             if (entry?.active) throw new Error('Cannot close an active Executive session');
