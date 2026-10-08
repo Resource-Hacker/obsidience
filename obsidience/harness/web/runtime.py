@@ -16,6 +16,7 @@ import socket
 import subprocess
 import sys
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from html.parser import HTMLParser
 from urllib.parse import quote, urljoin, urlsplit, urlunsplit
@@ -25,7 +26,7 @@ from markdownify import MarkdownConverter
 from lxml import html as lxml_html
 from trafilatura import extract as extract_article
 
-from ..config import PROJECT_ROOT
+from ..config import CONFIG, PROJECT_ROOT
 
 WEB_WORKER_MODULE = "obsidience.harness.web.worker"
 from ..knowledge.source import ingest_source
@@ -299,19 +300,55 @@ def _search_worker(query: str, limit: int) -> list[dict]:
     return rows
 
 
+def _searxng_search(query: str, limit: int) -> list[dict]:
+    """Query the local SearXNG instance; its engines run in parallel."""
+    base = str((CONFIG.extras.get("web") or {}).get("searxng_url", "")).rstrip("/")
+    if not base:
+        raise WebError("local SearXNG is not configured")
+    try:
+        response = httpx.get(
+            base + "/search",
+            params={"q": query, "format": "json", "language": "en-US", "safesearch": 1},
+            # Loopback client identity for SearXNG's bot detection log.
+            headers={"X-Real-IP": "127.0.0.1"}, timeout=httpx.Timeout(8.0, connect=1.0),
+        )
+        response.raise_for_status()
+        rows = response.json().get("results")
+    except (httpx.HTTPError, ValueError, AttributeError) as exc:
+        raise WebError("local SearXNG search failed") from exc
+    if not isinstance(rows, list):
+        raise WebError("local SearXNG returned invalid results")
+    # A few spares cover rows the public-address check drops.
+    return [{"title": row.get("title"), "href": row.get("url"), "body": row.get("content")}
+            for row in rows[:limit + 3] if isinstance(row, dict)]
+
+
 def search_web(query: object, limit: object = 5) -> dict:
     normalized_query = _bounded_text(query, "query", MAX_QUERY_CHARS)
     try:
         safe_limit = max(1, min(int(limit), MAX_RESULTS))
     except (TypeError, ValueError) as exc:
         raise WebError("limit must be an integer") from exc
-    results = []
-    for raw in _search_worker(normalized_query, safe_limit):
-        if not isinstance(raw, dict):
-            continue
+    try:
+        rows = _searxng_search(normalized_query, safe_limit)
+    except WebError:
+        rows = []
+    if not rows:
+        # Direct DDGS scraping remains the fallback when SearXNG is unavailable.
+        rows = [raw for raw in _search_worker(normalized_query, safe_limit) if isinstance(raw, dict)]
+
+    def public(raw: dict) -> str | None:
         try:
-            url = _public_url(raw.get("href") or raw.get("url"))
+            return _public_url(raw.get("href") or raw.get("url"))
         except WebError:
+            return None
+
+    # Resolve result hosts concurrently; serial cold lookups added ~0.3 s.
+    with ThreadPoolExecutor(max_workers=max(1, min(len(rows), MAX_RESULTS))) as pool:
+        urls = list(pool.map(public, rows))
+    results = []
+    for raw, url in zip(rows, urls):
+        if url is None:
             continue
         results.append({
             "title": str(raw.get("title") or url)[:300],

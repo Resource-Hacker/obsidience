@@ -20,11 +20,18 @@ import struct
 import subprocess
 import tempfile
 import time
+import threading
 from contextlib import asynccontextmanager
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
 import httpx
+import pynvml
+
+from . import memory as model_memory
+from ..config import CONFIG
+from ..host.gpu_memory import GpuMemory, process_identity
 
 from .benchmark import (
     MODEL_COMPARISON_CONTRACT,
@@ -50,12 +57,16 @@ from ..host.inventory import (
 
 
 EXECUTIVE_MODEL = "obsidience-gemma"
-SPECIALIST_MODEL = "obsidience-qwen38-9b-distill"
+SPECIALIST_MODEL = EXECUTIVE_MODEL  # Legacy profile ID; auto selection uses CONFIG.
+FLASH_NEXT_MODEL = "obsidience-flash-next"
+FLASH_NEXT_MANIFEST = Path("/var/lib/ai/models/obsidience-flash-next-20261005/strata-manifest.json")
+FLASH_NEXT_LAUNCHER = Path("/home/wissenschafter/.local/bin/obsidience-model-flash-next")
+QWEN_9B_MODEL = "obsidience-qwen38-9b-distill"
 QWEN_W4_MODEL = "obsidience-qwen38-27b-w4a16"
 QWEN_Q8_MODEL = "obsidience-qwen38-27b-q8"
 HOMEUSER_MODEL = "obsidience-qwen38-27b-homeuser"
 MUSE_MODEL = "obsidience-muse-glimmer-30b"
-QWEN_MODELS = frozenset({SPECIALIST_MODEL, QWEN_W4_MODEL, QWEN_Q8_MODEL, HOMEUSER_MODEL})
+QWEN_MODELS = frozenset({QWEN_9B_MODEL, QWEN_W4_MODEL, QWEN_Q8_MODEL, HOMEUSER_MODEL})
 AUTO_MODEL = "auto"
 NONE_COMPONENT = "none"
 PERCEPTION_COMPONENT = "omniparser"
@@ -79,6 +90,12 @@ MODEL_LAUNCH_DIR = PRODUCT_ROOT / "state" / "model-launch"
 MODEL_CATALOG_STATE_PATH = PRODUCT_ROOT / "state" / "model-catalog.json"
 MODEL_SOURCE_ROOT = PRODUCT_ROOT / "evidence" / "models"
 GEMMA_MODEL = PRODUCT_ROOT / "state" / "models" / "executive.gguf"
+GEMMA_TEMPLATE = GEMMA_MODEL.with_name("executive-template.jinja")
+GEMMA_MTP = Path(
+    "/var/lib/ai/models/jarvis-fixed/gemma-4-26b-a4b-it-qat-7b92b5b2/"
+    "mtp-gemma-4-26B-A4B-it.gguf"
+)
+GEMMA_MTP_SHA256 = "7272d97595f0d4c74bd7b623492b7dbdaafd8b7c72f329a8270ba4eca68f768a"
 GEMMA_PROJECTOR = Path(
     "/var/lib/ai/models/jarvis-fixed/gemma-4-26b-a4b-it-qat-7b92b5b2/"
     "mmproj-F16.gguf"
@@ -145,8 +162,13 @@ class ModelSpec:
     runtime_path: Path | None = None
     projector_path: Path | None = None
     projector_sha256: str | None = None
+    chat_template_path: Path | None = None
+    mtp_path: Path | None = None
+    mtp_sha256: str | None = None
+    mtp_tokens: int = 0
     family: str = ""
     supports_json_schema: bool = False
+    supports_input_token_limit: bool = False
 
 
 class ModelResourceUnavailable(RuntimeError):
@@ -178,19 +200,56 @@ class ModelResourceUnavailable(RuntimeError):
         }
 
 
+class ModelMemoryUnavailable(ModelResourceUnavailable):
+    """An unchanged model profile must wait for measurable GPU capacity."""
+
+    def __init__(self, spec: ModelSpec, layouts: list[tuple[str, ...]],
+                 memory: dict | None = None, detail: str = "") -> None:
+        super().__init__(spec, layouts, {})
+        self.memory = memory or {}
+        self.detail = detail
+        devices = dict.fromkeys(device for layout in layouts for device in layout)
+        self.args = (f"{spec.label} is waiting for GPU memory on "
+                     + " + ".join(DEVICE_LABELS[d] for d in devices)
+                     + (f" ({detail})" if detail else "; other applications still occupy the required VRAM"),)
+
+    def as_dict(self) -> dict:
+        return {**super().as_dict(), "code": "model_memory_unavailable",
+                "memory": self.memory, "detail": self.detail}
+
+
 MODELS = {
+    FLASH_NEXT_MODEL: ModelSpec(
+        id=FLASH_NEXT_MODEL, label="Qwen3.8 Flash Next · Strata",
+        base_url="http://127.0.0.1:8096/v1",
+        purpose="Explicit nongaming Executive profile on both Ada GPUs",
+        context_tokens=65_536, max_output_tokens=8_192, max_context_tokens=262_144,
+        quantization="GSQ IQ3 · exact artifact in verified manifest",
+        hardware="RTX 4000 first + RTX 4080 last", runtime="Strata-DualGPU 0.1.38 · sm_89 · MTP",
+        capabilities=("text", "vision", "reasoning", "tools"),
+        reasoning_budgets={"none": 0, "low": 1_536, "medium": 3_072, "high": 4_608, "xhigh": 6_144},
+        supported_devices=GPU_DEVICES,
+        default_allowed_devices=(RTX_4000_DEVICE, RTX_4080_DEVICE), min_gpu_count=2,
+        device_sets=((RTX_4000_DEVICE, RTX_4080_DEVICE),),
+        default_gpu_memory_utilization=0.90, default_max_num_seqs=1,
+        service="obsidience-flash-next.service", model_path=FLASH_NEXT_MANIFEST,
+        verified_path=FLASH_NEXT_MANIFEST.with_suffix(".json.verified"),
+        runtime_path=FLASH_NEXT_LAUNCHER, family="qwen38-flash-next",
+        # Installation remains unavailable until the manifest attests this guard.
+        supports_input_token_limit=True,
+    ),
     EXECUTIVE_MODEL: ModelSpec(
         id=EXECUTIVE_MODEL,
-        label="Gemma 4 26B-A4B",
+        label="Gemma 4 26B-A4B Heretic XXL",
         family="gemma4",
         base_url="http://127.0.0.1:8089/v1",
-        purpose="Responsive Executive conversation and Task dispatch",
+        purpose="Executive conversation and specialist Tasks with Task-selected reasoning",
         context_tokens=16_384,
         max_output_tokens=3_584,
         max_context_tokens=98_304,
-        quantization="Q4_K_XL",
+        quantization="UDmerge-Q4_K_XXL",
         hardware="One Ada GPU",
-        runtime="llama.cpp b10078",
+        runtime="llama.cpp b10078 · MTP3",
         capabilities=("text", "vision", "reasoning", "tools"),
         reasoning_budgets={"none": 0, "low": 256, "medium": 768, "high": 1_536, "xhigh": 2_560},
         supported_devices=(RTX_4000_DEVICE,),
@@ -200,12 +259,20 @@ MODELS = {
         default_max_num_seqs=1,
         service=GEMMA_SERVICE,
         model_path=GEMMA_MODEL,
+        verified_path=GEMMA_MODEL.with_suffix(".gguf.verified"),
+        expected_size=14_329_791_488,
         projector_path=GEMMA_PROJECTOR,
         projector_sha256=GEMMA_PROJECTOR_SHA256,
+        chat_template_path=GEMMA_TEMPLATE,
+        mtp_path=GEMMA_MTP,
+        mtp_sha256=GEMMA_MTP_SHA256,
+        mtp_tokens=3,
         supports_json_schema=True,
+        # Enable only with the matching native admission-guard engine deployment.
+        supports_input_token_limit=True,
     ),
-    SPECIALIST_MODEL: ModelSpec(
-        id=SPECIALIST_MODEL,
+    QWEN_9B_MODEL: ModelSpec(
+        id=QWEN_9B_MODEL,
         label="Qwen3.8 9B Distill Heretic Q8",
         base_url="http://127.0.0.1:8092/v1",
         purpose="Fully GPU-resident specialist reasoning, tools, and knowledge work",
@@ -470,8 +537,16 @@ def _write_launch(spec: ModelSpec, devices: tuple[str, ...], profile: dict) -> N
         "gpu_memory_utilization": profile["gpu_memory_utilization"],
         "max_num_seqs": profile["max_num_seqs"],
         "projector_path": str(spec.projector_path) if spec.projector_path else None,
+        "chat_template_path": str(spec.chat_template_path) if spec.chat_template_path else None,
+        "mtp_path": str(spec.mtp_path) if spec.mtp_path else None,
+        "mtp_tokens": spec.mtp_tokens,
     }, indent=2, sort_keys=True) + "\n")
     temporary.replace(path)
+
+
+def _model_device_order(spec: ModelSpec) -> tuple[str, ...]:
+    # Strata's stage order is part of its qualified pack/memory identity.
+    return spec.default_allowed_devices if spec.id == FLASH_NEXT_MODEL else GPU_DEVICES
 
 
 def _read_launch(model_id: str) -> tuple[str, ...]:
@@ -506,23 +581,58 @@ def normalize_model(value: object, *, allow_auto: bool = True) -> str:
 def resolve_model(preference: object, agent_ref: str) -> ModelSpec:
     selected = normalize_model(preference)
     if selected == AUTO_MODEL:
-        selected = EXECUTIVE_MODEL if agent_ref == "Agents/Executive/Executive" else SPECIALIST_MODEL
+        selected = normalize_model(CONFIG.llm_model, allow_auto=False)
     return configured_spec(selected)
+
+
+MODEL_API_KEY_CREDENTIAL = "obsidience-model-api-key"
+_MODEL_AUTH_HEADERS: dict[str, str] | None = None
+
+
+def model_auth_headers() -> dict[str, str]:
+    """Bearer key for loopback model servers, from this service's credential.
+
+    Browsers can reach loopback ports; the key keeps web pages from driving
+    inference. Health and model listings stay public in llama-server.
+    """
+    global _MODEL_AUTH_HEADERS
+    if _MODEL_AUTH_HEADERS is None:
+        key = ""
+        directory = os.environ.get("CREDENTIALS_DIRECTORY")
+        if directory:
+            with contextlib.suppress(OSError):
+                key = (Path(directory) / MODEL_API_KEY_CREDENTIAL).read_text().strip()
+        _MODEL_AUTH_HEADERS = {"Authorization": f"Bearer {key}"} if key else {}
+    return dict(_MODEL_AUTH_HEADERS)
 
 
 def _healthy(spec: ModelSpec, timeout: float = 0.35) -> bool:
     try:
         # The model owner retains transport connections, never health results.
         # Standalone inspection still owns and closes its temporary client.
-        if RUNTIME.health_client is not None:
-            response = RUNTIME.health_client.get(
+        client_context = (
+            contextlib.nullcontext(RUNTIME.health_client)
+            if RUNTIME.health_client is not None else httpx.Client(timeout=timeout)
+        )
+        with client_context as client:
+            response = client.get(
                 spec.base_url.removesuffix("/v1") + "/health", timeout=timeout,
             )
-            return response.status_code == 200
-        with httpx.Client(timeout=timeout) as client:
-            response = client.get(spec.base_url.removesuffix("/v1") + "/health")
-        return response.status_code == 200
-    except (httpx.HTTPError, OSError):
+            if response.status_code != 200:
+                return False
+            if spec.id == FLASH_NEXT_MODEL:
+                health = response.json()
+                if not isinstance(health, dict) or health.get("loaded") is not True or health.get("model") != spec.id:
+                    return False
+            # A healthy reused port may belong to another model owner.
+            response = client.get(spec.base_url + "/models", timeout=timeout)
+            response.raise_for_status()
+            payload = response.json()
+        models = payload.get("data") if isinstance(payload, dict) else None
+        return isinstance(models, list) and any(
+            isinstance(model, dict) and model.get("id") == spec.id for model in models
+        )
+    except (httpx.HTTPError, OSError, ValueError):
         return False
 
 
@@ -542,6 +652,37 @@ def _service_state(service: str | None) -> str:
         return "unknown"
 
 
+def _flash_next_manifest_verified(spec: ModelSpec) -> bool:
+    try:
+        material = spec.model_path.read_bytes()
+        if spec.verified_path.read_text().strip() != hashlib.sha256(material).hexdigest():
+            return False
+        manifest = json.loads(material)
+        if (manifest.get("model_id") != spec.id
+                or manifest.get("input_guard") != "obsidience.input_token_limit.v1"
+                or not isinstance(manifest.get("artifact_id"), str) or not manifest["artifact_id"]
+                or not isinstance(manifest.get("memory_profile"), dict)):
+            return False
+        files = manifest.get("files")
+        if not isinstance(files, list) or not files:
+            return False
+        for row in files:
+            path = Path(row["path"])
+            digest = row.get("sha256", "")
+            if (not path.is_absolute() or not path.is_file()
+                    or type(row.get("size_bytes")) is not int
+                    or path.stat().st_size != row["size_bytes"]
+                    or type(row.get("mtime_ns")) is not int
+                    or path.stat().st_mtime_ns != row["mtime_ns"]
+                    or not isinstance(digest, str) or len(digest) != 64
+                    or any(c not in "0123456789abcdef" for c in digest)):
+                return False
+        # The parent writes the verification marker after hashing the actual files.
+        return True
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return False
+
+
 def _installed(spec: ModelSpec) -> tuple[bool, int | None]:
     size = None
     if spec.model_path:
@@ -555,7 +696,11 @@ def _installed(spec: ModelSpec) -> tuple[bool, int | None]:
         and (spec.verified_path is None or spec.verified_path.exists())
         and (spec.runtime_path is None or spec.runtime_path.exists())
         and (spec.projector_path is None or spec.projector_path.is_file())
+        and (spec.chat_template_path is None or spec.chat_template_path.is_file())
+        and (spec.mtp_path is None or spec.mtp_path.is_file())
     )
+    if installed and spec.id == FLASH_NEXT_MODEL:
+        installed = _flash_next_manifest_verified(spec)
     return installed, size
 
 
@@ -634,6 +779,26 @@ def _model_source_identity(spec: ModelSpec) -> dict:
             "sha256": spec.projector_sha256,
             "installed": spec.projector_path.is_file(),
         }
+    if spec.chat_template_path:
+        installed_template = spec.chat_template_path.is_file()
+        identity["chat_template"] = {
+            "path": str(spec.chat_template_path),
+            "sha256": (
+                hashlib.sha256(spec.chat_template_path.read_bytes()).hexdigest()
+                if installed_template else None
+            ),
+            "installed": installed_template,
+        }
+    if spec.mtp_path:
+        identity["mtp"] = {
+            "path": str(spec.mtp_path),
+            "size_bytes": spec.mtp_path.stat().st_size if spec.mtp_path.is_file() else None,
+            "sha256": spec.mtp_sha256,
+            "draft_tokens": spec.mtp_tokens,
+            "installed": spec.mtp_path.is_file(),
+        }
+    if spec.id == FLASH_NEXT_MODEL and model_path and model_path.is_file():
+        identity["pack_manifest_sha256"] = hashlib.sha256(model_path.read_bytes()).hexdigest()
     fingerprint_material = json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
     return {
         **identity,
@@ -734,8 +899,11 @@ def inspect_model(model_id: str) -> dict:
     }
 
 
-def _benchmark_doc(value: object) -> dict | None:
+def _benchmark_doc(value: object, spec: ModelSpec) -> dict | None:
     if not isinstance(value, dict):
+        return None
+    if (spec.id == FLASH_NEXT_MODEL
+            and value.get("model_fingerprint") != _model_source_identity(spec)["fingerprint"]):
         return None
     result = json.loads(json.dumps(value))
     result.setdefault(
@@ -791,8 +959,7 @@ def catalog() -> list[dict]:
             "state": "loaded" if loaded else _service_state(spec.service),
             "size_bytes": size,
             "default_for": (
-                "Executive Tasks" if spec.id == EXECUTIVE_MODEL
-                else "Automatic specialist Tasks" if spec.id == SPECIALIST_MODEL
+                "Automatic model selection" if spec.id == CONFIG.llm_model
                 else "Selectable specialist Tasks" if spec.task_capable
                 else "Hardware interface component"
             ),
@@ -804,7 +971,7 @@ def catalog() -> list[dict]:
             "active_devices": active_devices,
             "gpu_memory_utilization": profile["gpu_memory_utilization"],
             "max_num_seqs": profile["max_num_seqs"],
-            "last_benchmark": _benchmark_doc(settings["benchmarks"].get(spec.id)),
+            "last_benchmark": _benchmark_doc(settings["benchmarks"].get(spec.id), spec),
             "task_capable": spec.task_capable,
             "category": "task_reasoning" if spec.task_capable else "realtime_interface",
             "benchmark_kind": spec.benchmark_kind,
@@ -957,7 +1124,7 @@ async def _benchmark_text_model(active: ModelSpec) -> dict:
     """Measure one OpenAI-compatible model under the common comparison contract."""
 
     rows: list[dict] = []
-    async with httpx.AsyncClient(timeout=900) as client:
+    async with httpx.AsyncClient(timeout=900, headers=model_auth_headers()) as client:
         for _ in range(MODEL_COMPARISON_WARMUPS + MODEL_COMPARISON_SAMPLES):
             rows.append(await _benchmark_text_sample(client, active))
     return comparison_result(
@@ -977,16 +1144,232 @@ class _HardwareModelRuntime:
         self.prefill_task: asyncio.Task | None = None
         self.switching = False
         self.reconciliation_pending = False
+        # Incremented by every residency action; with the default target it
+        # identifies whether the last reconciliation still describes the state.
+        self.residency_generation = 0
+        self._reconciled_state: tuple | None = None
         self.external_models: dict[str, tuple[str, ...]] = {}
         self.device_reservations: dict[str, tuple[str, ...]] = {}
+        self._reservation_yielders: dict[str, Callable[[], Awaitable[None]]] = {}
+        self._work_requests = 0
+        self._activity_listeners: set[Callable[[bool], None]] = set()
+        self.gpu_memory = GpuMemory()
+        self._memory_plans: dict[tuple, dict[str, int]] = {}
+        self._memory_plan_lock = threading.RLock()
+        self._memory_refresh_lock = asyncio.Lock()
+        self._reservation_processes: dict[str, tuple[int, float]] = {}
+        self._reservation_memory_mib: dict[str, dict[str, int]] = {}
+        self._reservation_shared_models: dict[str, frozenset[str]] = {}
 
-    def _reserved_devices(self, *, excluding: str | None = None) -> set[str]:
+    @property
+    def work_requested(self) -> bool:
+        return self._work_requests > 0
+
+    def subscribe_activity(self, listener: Callable[[bool], None]) -> Callable[[], None]:
+        """Notify optional standby clients at work boundaries, without polling."""
+        self._activity_listeners.add(listener)
+        return lambda: self._activity_listeners.discard(listener)
+
+    def _notify_activity(self) -> None:
+        for listener in tuple(self._activity_listeners):
+            with contextlib.suppress(Exception):
+                listener(self.work_requested)
+
+    async def _begin_work(self, spec: ModelSpec, devices: object = None) -> None:
+        await self.refresh_memory_plans([spec])
+        selected = self._pick_devices(spec, devices)
+        # Reclaim Edge and verify the projected capacity before interrupting
+        # Wake. A rejected admission never drains the speech worker.
+        await self._prepare_memory(spec, selected)
+        self._work_requests += 1
+        self._notify_activity()
+        try:
+            await self.cancel_prefill()
+            if self._reservation_yielders:
+                selected = set(selected)
+                for owner, release in tuple(self._reservation_yielders.items()):
+                    if (selected.intersection(self.device_reservations.get(owner, ()))
+                            and not self._reservation_compatible(owner, spec.id)):
+                        # The speech owner drains its worker before releasing
+                        # its GPU. Never invoke it under the model lock.
+                        await release()
+        except BaseException:
+            self._end_work()
+            raise
+
+    def _end_work(self) -> None:
+        self._work_requests -= 1
+        self._notify_activity()
+
+    def _reservation_compatible(self, owner: str, model_id: str | None) -> bool:
+        return bool(model_id and model_id in self._reservation_shared_models.get(owner, ()))
+
+    def _reservation_headroom(self, spec: ModelSpec, device: str, rows) -> int:
+        """Protect only the part of the ceiling not already in measured allocation."""
+        headroom = 0
+        for owner, ceilings in tuple(self._reservation_memory_mib.items()):
+            if not self._reservation_compatible(owner, spec.id):
+                continue
+            ceiling = ceilings.get(device, 0)
+            identity = self._reservation_processes.get(owner)
+            resident = sum(p.mib for p in rows[device].processes
+                           if identity == (p.pid, p.started)) if identity else 0
+            headroom += max(0, ceiling - resident)
+        return headroom
+
+    def _reserved_devices(self, *, excluding: str | None = None,
+                          model_id: str | None = None) -> set[str]:
         return {
             device
             for owner, devices in self.device_reservations.copy().items()
-            if owner != excluding
+            if owner != excluding and not self._reservation_compatible(owner, model_id)
             for device in devices
         }
+
+    def set_reservation_yielder(self, owner: str,
+                               release: Callable[[], Awaitable[None]] | None) -> None:
+        """Change only an existing owner's standby policy on the event loop."""
+        if owner not in self.device_reservations:
+            return
+        if release is None:
+            self._reservation_yielders.pop(owner, None)
+        else:
+            self._reservation_yielders[owner] = release
+
+    def set_reservation_process(self, owner: str, pid: int) -> None:
+        """The component owner attests the exact process it can drain."""
+        if owner not in self.device_reservations:
+            raise ValueError("GPU process needs its owner's existing reservation")
+        self._reservation_processes[owner] = process_identity(pid)
+
+    @staticmethod
+    def _memory_script(spec: ModelSpec) -> Path:
+        scripts = {EXECUTIVE_MODEL: "llm.sh", QWEN_9B_MODEL: "qwen38-distill-server.sh",
+                   QWEN_Q8_MODEL: "qwen38-server.sh", QWEN_W4_MODEL: "qwen38-vllm-server.sh",
+                   HOMEUSER_MODEL: "qwen38-homeuser-server.sh", MUSE_MODEL: "muse-glimmer-server.sh"}
+        return FLASH_NEXT_LAUNCHER if spec.id == FLASH_NEXT_MODEL else PRODUCT_ROOT / "scripts" / scripts[spec.id]
+
+    def _memory_plan(self, spec: ModelSpec, devices: tuple[str, ...]) -> dict[str, int] | None:
+        profile = _read_settings()["models"][spec.id]
+        try:
+            key = model_memory.plan_key(spec, profile, devices, self._memory_script(spec))
+        except OSError:
+            return None
+        with self._memory_plan_lock:
+            return self._memory_plans.get(key)
+
+    @staticmethod
+    async def _memory_operation(callback, *args):
+        operation = asyncio.create_task(asyncio.to_thread(callback, *args))
+        try:
+            return await asyncio.shield(operation)
+        except asyncio.CancelledError:
+            # NVML/fit-print and a pidfd signal/wait have bounded native work.
+            # Repeated cancellation must still join that work before teardown.
+            while not operation.done():
+                try:
+                    await asyncio.shield(operation)
+                except asyncio.CancelledError:
+                    continue
+                except Exception:
+                    break
+            with contextlib.suppress(Exception):
+                operation.result()
+            raise
+
+    async def refresh_memory_plans(self, specs: list[ModelSpec] | None = None) -> None:
+        """Estimate changed profiles off the event loop, on existing work edges."""
+        async with self._memory_refresh_lock:
+            settings = _read_settings()
+            for spec in specs or [configured_spec(key) for key in MODELS]:
+                if not _installed(spec)[0]:
+                    continue
+                profile = settings["models"][spec.id]
+                for devices in _device_sets(spec, profile["allowed_devices"]):
+                    try:
+                        key = model_memory.plan_key(spec, profile, devices, self._memory_script(spec))
+                        with self._memory_plan_lock:
+                            if key in self._memory_plans:
+                                continue
+                        rows = await self._memory_operation(self.gpu_memory.snapshot)
+                        if not set(devices).issubset(rows):
+                            continue
+                        # CUDA's estimator aborts when a selected GPU is nearly full.
+                        if spec.id != FLASH_NEXT_MODEL and any(rows[device].free_mib < 1024 for device in devices):
+                            continue
+                        totals = {device: row.total_mib for device, row in rows.items()}
+                        amounts = await self._memory_operation(model_memory.estimate, spec, profile, devices, totals)
+                        with self._memory_plan_lock:
+                            # Keep only the current profile for this model/layout.
+                            self._memory_plans = {k: v for k, v in self._memory_plans.items()
+                                                  if k[:2] != key[:2]}
+                            self._memory_plans[key] = amounts
+                    except (OSError, ValueError, subprocess.SubprocessError, pynvml.NVMLError) as exc:
+                        print(f"[models] {spec.id} memory plan unavailable: {exc}")
+
+    def _memory_error(self, spec: ModelSpec, devices: tuple[str, ...], *,
+                      managed: bool = True, edge: bool = True, fresh: bool = False):
+        try:
+            rows = self.gpu_memory.snapshot(fresh=fresh)
+        except (OSError, pynvml.NVMLError):
+            return ModelMemoryUnavailable(spec, [devices], detail="current VRAM measurement unavailable")
+        if not set(devices).issubset(rows):
+            return ModelMemoryUnavailable(spec, [devices], detail="selected GPU measurement unavailable")
+        if (_read_launch(spec.id) == devices and any(
+                p.unit == spec.service for d in devices for p in rows[d].processes)
+                and _healthy(spec, timeout=0.75)):
+            return None  # The selected resident model already owns its buffers.
+        plan = self._memory_plan(spec, devices)
+        if plan is None:
+            return ModelMemoryUnavailable(spec, [devices], detail="measuring this model profile")
+        units = {candidate.service for candidate in MODELS.values() if candidate.service}
+        if RTX_4080_DEVICE in devices:
+            units.update(PERCEPTION_UNITS)
+        yieldable = {identity for owner, identity in self._reservation_processes.copy().items()
+                     if owner in self._reservation_yielders
+                     and not self._reservation_compatible(owner, spec.id)}
+        capacities = {}
+        for device in devices:
+            row = rows[device]
+            owned = [p for p in row.processes if managed and (
+                p.unit in units or (p.pid, p.started) in yieldable)]
+            reclaimable = sum(p.mib for p in owned)
+            edge_mib = sum(self.gpu_memory.edge_reclaimable(p) for p in row.processes) if edge else 0
+            headroom = self._reservation_headroom(spec, device, rows)
+            capacities[device] = {"required_mib": plan[device], "reserved_headroom_mib": headroom, "free_mib": row.free_mib,
+                                  "managed_reclaimable_mib": reclaimable,
+                                  "edge_reclaimable_mib": edge_mib,
+                                  "available_mib": max(0, min(row.total_mib, row.free_mib + reclaimable + edge_mib) - headroom)}
+        if len(devices) > 1 and "vLLM" not in spec.runtime and spec.id not in {QWEN_9B_MODEL, FLASH_NEXT_MODEL}:
+            # The configured llama.cpp layer split follows available capacity;
+            # protect per-device working buffers while checking the total.
+            total_required = sum(plan.values())
+            usable = {d: max(0, capacities[d]["available_mib"] - 1024) for d in devices}
+            total_usable = max(1, sum(usable.values()))
+            for d in devices:
+                capacities[d]["required_mib"] = 1024 + int(
+                    (total_required - 1024 * len(devices)) * usable[d] / total_usable + 0.999)
+        if any(v["available_mib"] < v["required_mib"] for v in capacities.values()):
+            return ModelMemoryUnavailable(spec, [devices], capacities)
+        return None
+
+    async def _prepare_memory(self, spec: ModelSpec, devices: tuple[str, ...], *,
+                              managed: bool = True) -> None:
+        error = self._memory_error(spec, devices, managed=managed, edge=False, fresh=True)
+        if error is None:
+            return
+        # Only attempt Edge reclamation if that bounded release can make this
+        # exact profile fit. Other desktop applications are never terminated.
+        if self._memory_error(spec, devices, managed=managed, fresh=True) is not None:
+            raise error
+        pids = await self._memory_operation(self.gpu_memory.reclaim_edge, devices)
+        if pids:
+            from ..execution import trace as action_trace
+            action_trace.emit("status", "Recycled Edge GPU helper for model admission",
+                              [spec.label, f"GPU helper processes: {', '.join(map(str, pids))}"])
+        error = self._memory_error(spec, devices, managed=managed, edge=False, fresh=True)
+        if error is not None:
+            raise error
 
     async def _wait_ready(self, spec: ModelSpec, devices: tuple[str, ...]) -> None:
         deadline = asyncio.get_running_loop().time() + 900
@@ -1006,11 +1389,14 @@ class _HardwareModelRuntime:
                     await self._perception(False)
                 try:
                     response = await client.get(spec.base_url.removesuffix("/v1") + "/health")
-                    if response.status_code == 200:
+                    if response.status_code == 200 and (spec.id != FLASH_NEXT_MODEL or _healthy(spec, timeout=0.75)):
                         return
                 except httpx.HTTPError:
                     pass
                 if spec.service and not await _active(spec.service):
+                    error = self._memory_error(spec, devices, managed=False, edge=False, fresh=True)
+                    if error is not None:
+                        raise error
                     raise RuntimeError(f"{spec.service} stopped before the model became ready")
                 await asyncio.sleep(1)
         raise RuntimeError(f"{spec.label} did not become ready within 15 minutes")
@@ -1023,6 +1409,7 @@ class _HardwareModelRuntime:
 
     async def _stop(self, spec: ModelSpec) -> None:
         if spec.service and (await _active(spec.service) or _healthy(spec, timeout=0.75)):
+            self.residency_generation += 1
             await _systemctl("stop", spec.service, timeout=120)
         if _healthy(spec, timeout=0.75):
             raise RuntimeError(f"unmanaged {spec.id} process remained after stopping {spec.service}")
@@ -1034,14 +1421,20 @@ class _HardwareModelRuntime:
             if spec.service and not await _active(spec.service):
                 raise RuntimeError(f"{spec.id} is running outside {spec.service}")
             return
+        # Settings/default residency can start a model without a Task lease.
+        # Refresh the exact profile before stopping or loading its service.
+        self.residency_generation += 1
+        await self.refresh_memory_plans([spec])
         if _healthy(spec, timeout=0.75) or (spec.service and await _active(spec.service)):
             await self._stop(spec)
         profile = _read_settings()["models"][spec.id]
+        await self._prepare_memory(spec, devices, managed=False)
         _write_launch(spec, devices, profile)
         await _systemctl("start", spec.service, timeout=60)
         await self._wait_ready(spec, devices)
 
     async def _perception(self, enabled: bool) -> None:
+        self.residency_generation += 1
         if enabled:
             # Hardware residency is authoritative. Re-enable socket activation
             # only when OmniParser is the selected 4080 component.
@@ -1070,24 +1463,27 @@ class _HardwareModelRuntime:
         for model_id, devices in desired.items():
             spec = MODELS[model_id]
             allowed = settings["models"][model_id]["allowed_devices"]
-            selected = tuple(device for device in GPU_DEVICES if device in devices and device in allowed)
+            selected = tuple(device for device in _model_device_order(spec) if device in devices and device in allowed)
             if selected in _device_sets(spec, allowed):
                 clean[model_id] = selected
         return clean
 
-    async def _reconcile_defaults(self, *, strict: bool = False) -> None:
-        self.reconciliation_pending = True
-        settings = _read_settings()
-        reserved = self._reserved_devices()
+    def _default_target(self, settings: dict) -> tuple[dict[str, tuple[str, ...]], bool]:
         desired = {
             model_id: devices
             for model_id, devices in self._desired_models(settings).items()
-            if not set(devices) & reserved
+            if not set(devices) & self._reserved_devices(model_id=model_id)
         }
         perception_wanted = (
             settings["hardware"].get(RTX_4080_DEVICE) == PERCEPTION_COMPONENT
-            and RTX_4080_DEVICE not in reserved
+            and RTX_4080_DEVICE not in self._reserved_devices()
         )
+        return desired, perception_wanted
+
+    async def _reconcile_defaults(self, *, strict: bool = False) -> None:
+        self.reconciliation_pending = True
+        settings = _read_settings()
+        desired, perception_wanted = self._default_target(settings)
         for model_id, base_spec in MODELS.items():
             service_active = bool(base_spec.service and await _active(base_spec.service))
             if not service_active and not _healthy(base_spec, timeout=0.75):
@@ -1119,7 +1515,16 @@ class _HardwareModelRuntime:
             ]
             if not conflicts:
                 await self._perception(True)
+        self._reconciled_state = (self.residency_generation, desired, perception_wanted)
         self.reconciliation_pending = False
+
+    def _settled_since_reconciliation(self) -> bool:
+        """No residency action or default-target change since the last success."""
+        try:
+            return self._reconciled_state == (
+                self.residency_generation, *self._default_target(_read_settings()))
+        except Exception:
+            return False
 
     def _unreserved_layouts(
         self, spec: ModelSpec, override: object = None,
@@ -1134,7 +1539,7 @@ class _HardwareModelRuntime:
                     or len(override) != len(set(override))
                     or any(device not in allowed for device in override)):
                 raise ValueError("model devices must name each allowed GPU exactly once")
-            requested = tuple(device for device in GPU_DEVICES if device in override)
+            requested = tuple(device for device in _model_device_order(spec) if device in override)
             if requested not in layouts:
                 valid = [" + ".join(devices) for devices in layouts]
                 raise ValueError(
@@ -1146,7 +1551,11 @@ class _HardwareModelRuntime:
             raise ValueError(f"{spec.label} has no valid configured GPU layout")
         # task.create can ask from its Tool thread while Realtime changes the
         # reservation on the event loop. Use one snapshot for decision/evidence.
-        reservations = self.device_reservations.copy()
+        # Yieldable standby reservations permit admission; _begin_work drains
+        # their owners before the selected model can touch the hardware.
+        reservations = {owner: devices for owner, devices in self.device_reservations.copy().items()
+                        if owner not in self._reservation_yielders
+                        and not self._reservation_compatible(owner, spec.id)}
         reserved = set(itertools.chain.from_iterable(reservations.values()))
         candidates = [devices for devices in layouts if not set(devices) & reserved]
         if not candidates:
@@ -1154,11 +1563,23 @@ class _HardwareModelRuntime:
         return candidates
 
     def check_resources(self, spec: ModelSpec, devices: object = None) -> None:
-        """Validate admission without probing or changing services or hardware."""
-        self._unreserved_layouts(spec, devices)
+        """Read current capacity without changing services or reclaiming Edge."""
+        self._memory_layouts(spec, self._unreserved_layouts(spec, devices))
+
+    def _memory_layouts(self, spec: ModelSpec, candidates: list[tuple[str, ...]]) -> list[tuple[str, ...]]:
+        available, errors = [], []
+        for layout in candidates:
+            error = self._memory_error(spec, layout)
+            if error is None:
+                available.append(layout)
+            else:
+                errors.append(error)
+        if not available:
+            raise errors[0]
+        return available
 
     def _pick_devices(self, spec: ModelSpec, override: object = None) -> tuple[str, ...]:
-        candidates = self._unreserved_layouts(spec, override)
+        candidates = self._memory_layouts(spec, self._unreserved_layouts(spec, override))
         if override is not None:
             return candidates[0]
         current = _read_launch(spec.id)
@@ -1182,6 +1603,8 @@ class _HardwareModelRuntime:
 
     async def _activate_task_model(self, spec: ModelSpec, devices: tuple[str, ...]) -> None:
         self.check_resources(spec, list(devices))
+        if self._reserved_devices(model_id=spec.id).intersection(devices):
+            raise ModelResourceUnavailable(spec, [devices], self.device_reservations.copy())
         for model_id, candidate in MODELS.items():
             if model_id == spec.id:
                 continue
@@ -1208,6 +1631,9 @@ class _HardwareModelRuntime:
     ) -> None:
         """Clear only the hardware needed by one externally supervised model."""
 
+        if self._reserved_devices(model_id=spec.id).intersection(devices):
+            raise ModelResourceUnavailable(spec, [devices], self.device_reservations.copy())
+
         for candidate in MODELS.values():
             service_active = bool(candidate.service and await _active(candidate.service))
             healthy = _healthy(candidate, timeout=0.75)
@@ -1225,11 +1651,14 @@ class _HardwareModelRuntime:
             or await _active(PERCEPTION_UNITS[1])
         ):
             await self._perception(False)
+        error = self._memory_error(spec, devices, managed=False, edge=False, fresh=True)
+        if error is not None:
+            raise error
 
     @asynccontextmanager
-    async def resident_prefill(self, spec: ModelSpec):
-        """Borrow an idle resident model; never load, switch or queue speculative work."""
-        if self.lock.locked():
+    async def resident_prefill(self, spec: ModelSpec, *, load_if_idle: bool = False):
+        """Borrow idle capacity; only explicit standby may restore its model."""
+        if self.lock.locked() or self.work_requested:
             yield False
             return
         try:
@@ -1243,10 +1672,23 @@ class _HardwareModelRuntime:
         self.prefill_task = asyncio.current_task()
         try:
             try:
-                resident = _read_launch(spec.id) in self._unreserved_layouts(spec)
+                layout = _read_launch(spec.id)
+                resident = (layout in self._unreserved_layouts(spec)
+                            and not self._reserved_devices(model_id=spec.id).intersection(layout))
             except (ValueError, ModelResourceUnavailable):
                 resident = False
-            yield resident and await asyncio.to_thread(_healthy, spec)
+            healthy = resident and await asyncio.to_thread(_healthy, spec)
+            if not healthy and load_if_idle:
+                try:
+                    selected = self._pick_devices(spec)
+                    self.switching = True
+                    await self._activate_task_model(spec, selected)
+                    healthy = True
+                except ModelResourceUnavailable:
+                    healthy = False
+                finally:
+                    self.switching = False
+            yield healthy
         finally:
             self.prefill_task = None
             self.lock.release()
@@ -1260,8 +1702,12 @@ class _HardwareModelRuntime:
 
     @asynccontextmanager
     async def lease(self, spec: ModelSpec, devices: object = None):
-        await self.cancel_prefill()
-        await self.lock.acquire()
+        await self._begin_work(spec, devices)
+        try:
+            await self.lock.acquire()
+        except BaseException:
+            self._end_work()
+            raise
         activation_attempted = False
         cancelled = False
         try:
@@ -1284,25 +1730,35 @@ class _HardwareModelRuntime:
                 # normal exit; initialize/settings operations also reconcile.
                 if (activation_attempted and not cancelled
                         and not asyncio.current_task().cancelling()):
-                    self.switching = True
-                    with contextlib.suppress(Exception):
-                        await self._reconcile_defaults()
+                    if self._settled_since_reconciliation():
+                        # The resident default served this lease unchanged;
+                        # reconciling again would only repeat its probes.
                         self.reconciliation_pending = False
+                    else:
+                        self.switching = True
+                        with contextlib.suppress(Exception):
+                            await self._reconcile_defaults()
+                            self.reconciliation_pending = False
             finally:
                 self.switching = False
                 self.lock.release()
+                self._end_work()
 
     async def initialize(self) -> list[dict]:
         if self.health_client is None:
             self.health_client = httpx.Client(timeout=0.75, trust_env=False)
         model_events = sync_model_sources()
+        await self.refresh_memory_plans()
         async with self.lock:
             self.switching = True
             try:
                 settings = _read_settings()
                 _write_settings(settings)
-                await self._reconcile_defaults()
-                self.reconciliation_pending = False
+                try:
+                    await self._reconcile_defaults()
+                except ModelMemoryUnavailable as exc:
+                    # Non-model API routes remain useful while another application owns the GPU.
+                    print(f"[models] default residency deferred: {exc}")
             finally:
                 self.switching = False
         return model_events
@@ -1366,6 +1822,7 @@ class _HardwareModelRuntime:
             raise ValueError("unknown model")
         spec = MODELS[model_id]
         cancelled_after_commit = False
+        reconciliation_error = None
         async with self.lock:
             # Read the profile only after admission: a waiting operation must
             # not overwrite another owner's intervening settings commit.
@@ -1414,14 +1871,24 @@ class _HardwareModelRuntime:
                     self.reconciliation_pending = False
                 except asyncio.CancelledError:
                     cancelled_after_commit = True
+                except Exception as exc:
+                    # Preserve the committed settings and Source even when
+                    # restoring runtime residency fails. This is not a safe
+                    # invitation to replay configuration.
+                    reconciliation_error = str(exc)
             finally:
                 self.switching = False
             result = model_document(model_id)
         result.update({
             "configuration_applied": True,
             "configuration_source": configuration_source,
-            "runtime_reconciled": not cancelled_after_commit,
+            "runtime_reconciled": not cancelled_after_commit and reconciliation_error is None,
         })
+        if reconciliation_error is not None:
+            result["reconciliation_warning"] = (
+                "Configuration was saved, but runtime reconciliation failed: "
+                + reconciliation_error + ". Runtime readiness remains unverified."
+            )
         if cancelled_after_commit:
             result.update({
                 "cancellation_requested": True,
@@ -1441,6 +1908,7 @@ class _HardwareModelRuntime:
         try:
             async with self.lease(spec, requested) as active:
                 result = await _benchmark_text_model(active)
+                result["model_fingerprint"] = _model_source_identity(active)["fingerprint"]
                 result["source_path"] = record_model_source(model_id, "benchmark", result)
                 settings = _read_settings()
                 settings["benchmarks"][model_id] = result
@@ -1476,11 +1944,19 @@ class _HardwareModelRuntime:
                 owner: list(devices)
                 for owner, devices in self.device_reservations.items()
             },
+            "accounted_reservations": {
+                owner: {"memory_mib": dict(ceilings),
+                        "shared_model_ids": sorted(self._reservation_shared_models.get(owner, ()))}
+                for owner, ceilings in self._reservation_memory_mib.items() if ceilings
+            },
             "switching": self.switching,
             "reconciliation_pending": self.reconciliation_pending,
         }
 
-    async def reserve_devices(self, owner: str, devices: tuple[str, ...]) -> None:
+    async def reserve_devices(self, owner: str, devices: tuple[str, ...], *,
+                              yield_when_needed: Callable[[], Awaitable[None]] | None = None,
+                              memory_mib: dict[str, int] | None = None,
+                              shared_model_ids: tuple[str, ...] = ()) -> None:
         """Reserve physical GPUs for a non-model component without blocking Tasks."""
 
         if not owner or "\x00" in owner or len(owner) > 96:
@@ -1488,7 +1964,18 @@ class _HardwareModelRuntime:
         selected = tuple(device for device in GPU_DEVICES if device in devices)
         if not selected or len(selected) != len(devices) or len(devices) != len(set(devices)):
             raise ValueError("device reservation must name known GPUs exactly once")
+        ceilings = dict(memory_mib or {})
+        if shared_model_ids and (owner != "obsidience-realtime"
+                or set(shared_model_ids) != {FLASH_NEXT_MODEL}
+                or set(ceilings) != set(selected)):
+            raise ValueError("accounted sharing is limited to speech and the explicit Flash Next profile")
+        if ceilings and (set(ceilings) != set(selected)
+                or any(type(v) is not int or v <= 0 for v in ceilings.values())
+                or not shared_model_ids):
+            raise ValueError("shared hardware needs a positive MiB ceiling for every reserved GPU")
         async with self.lock:
+            if yield_when_needed is not None and self.work_requested:
+                raise RuntimeError("standby hardware is needed by active work")
             conflicts = self._reserved_devices(excluding=owner) & set(selected)
             if conflicts:
                 raise RuntimeError("requested hardware is already reserved")
@@ -1500,6 +1987,17 @@ class _HardwareModelRuntime:
                         continue
                     layout = _read_launch(candidate.id)
                     if not layout or set(layout) & set(selected):
+                        if candidate.id in shared_model_ids and layout:
+                            rows = self.gpu_memory.snapshot(fresh=True)
+                            identity = self._reservation_processes.get(owner)
+                            for device in selected:
+                                if device not in rows:
+                                    raise RuntimeError("speech sharing needs a fresh GPU measurement")
+                                resident = sum(p.mib for p in rows[device].processes
+                                               if identity == (p.pid, p.started)) if identity else 0
+                                if rows[device].free_mib < max(0, ceilings[device] - resident):
+                                    raise RuntimeError("Flash Next has not left the reserved speech capacity")
+                            continue
                         await self._stop(candidate)
                 if RTX_4080_DEVICE in selected and (
                     await _active(PERCEPTION_UNITS[0])
@@ -1507,6 +2005,12 @@ class _HardwareModelRuntime:
                 ):
                     await self._perception(False)
                 self.device_reservations[owner] = selected
+                self._reservation_memory_mib[owner] = ceilings
+                self._reservation_shared_models[owner] = frozenset(shared_model_ids)
+                if yield_when_needed is not None:
+                    self._reservation_yielders[owner] = yield_when_needed
+                else:
+                    self._reservation_yielders.pop(owner, None)
             finally:
                 self.switching = False
 
@@ -1515,7 +2019,14 @@ class _HardwareModelRuntime:
             self.switching = True
             try:
                 self.device_reservations.pop(owner, None)
-                await self._reconcile_defaults()
+                self._reservation_processes.pop(owner, None)
+                self._reservation_yielders.pop(owner, None)
+                self._reservation_memory_mib.pop(owner, None)
+                self._reservation_shared_models.pop(owner, None)
+                try:
+                    await self._reconcile_defaults()
+                except ModelMemoryUnavailable as exc:
+                    print(f"[models] default residency deferred: {exc}")
             finally:
                 self.switching = False
 
@@ -1527,6 +2038,7 @@ class _HardwareModelRuntime:
         client, self.health_client = self.health_client, None
         if client is not None:
             client.close()
+        self.gpu_memory.close()
 
     async def acquire_external_lease(
         self,
@@ -1537,8 +2049,12 @@ class _HardwareModelRuntime:
 
         if not owner or "\x00" in owner or len(owner) > 96:
             raise ValueError("external lease owner must be bounded text")
-        await self.cancel_prefill()
-        await self.lock.acquire()
+        await self._begin_work(spec)
+        try:
+            await self.lock.acquire()
+        except BaseException:
+            self._end_work()
+            raise
         self.switching = True
         try:
             selected = self._pick_devices(spec)
@@ -1550,6 +2066,7 @@ class _HardwareModelRuntime:
             self.running_model = None
             self.switching = False
             self.lock.release()
+            self._end_work()
             raise
 
     def mark_external_lease_ready(
@@ -1564,7 +2081,7 @@ class _HardwareModelRuntime:
             for model_id, devices in models.items():
                 if model_id not in MODELS:
                     raise ValueError(f"unknown external model: {model_id}")
-                clean = tuple(device for device in GPU_DEVICES if device in devices)
+                clean = tuple(device for device in _model_device_order(MODELS[model_id]) if device in devices)
                 if clean not in _device_sets(MODELS[model_id], MODELS[model_id].supported_devices):
                     raise ValueError(f"invalid external device layout for {model_id}")
                 normalized[model_id] = clean
@@ -1591,6 +2108,7 @@ class _HardwareModelRuntime:
         finally:
             self.switching = False
             self.lock.release()
+            self._end_work()
 
 
 def model_document(model_id: str) -> dict:
@@ -1607,8 +2125,8 @@ def check_resources(spec: ModelSpec, devices: object = None) -> None:
 
 
 @asynccontextmanager
-async def resident_prefill(spec: ModelSpec):
-    async with RUNTIME.resident_prefill(spec) as available:
+async def resident_prefill(spec: ModelSpec, *, load_if_idle: bool = False):
+    async with RUNTIME.resident_prefill(spec, load_if_idle=load_if_idle) as available:
         yield available
 
 
@@ -1653,8 +2171,12 @@ async def release_external_lease() -> None:
     await RUNTIME.release_external_lease()
 
 
-async def reserve_devices(owner: str, devices: tuple[str, ...]) -> None:
-    await RUNTIME.reserve_devices(owner, devices)
+async def reserve_devices(owner: str, devices: tuple[str, ...], *,
+                          yield_when_needed: Callable[[], Awaitable[None]] | None = None,
+                          memory_mib: dict[str, int] | None = None,
+                          shared_model_ids: tuple[str, ...] = ()) -> None:
+    await RUNTIME.reserve_devices(owner, devices, yield_when_needed=yield_when_needed,
+                                  memory_mib=memory_mib, shared_model_ids=shared_model_ids)
 
 
 async def release_devices(owner: str) -> None:

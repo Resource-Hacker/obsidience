@@ -1,0 +1,1 @@
+"""Verified browser media capabilities."""

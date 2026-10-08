@@ -1,0 +1,68 @@
+--- a/nemo/agents/voice_agent/pipecat/services/nemo/stt.py
++++ b/nemo/agents/voice_agent/pipecat/services/nemo/stt.py
+@@ -97,6 +97,7 @@
+         logger.info(f"NeMoSTTInputParams: {self._params}")
+ 
+         self._device = device
++        self._model_lock = asyncio.Lock()
+ 
+         self._load_model()
+ 
+@@ -156,6 +157,25 @@
+         await self._queue.put(None)  # Signal to stop processing
+         self._queue = asyncio.Queue()  # Reset the queue
+ 
++    async def _transcribe(self, audio: bytes):
++        # ASR mutates streaming caches. Keep inference off the playback loop,
++        # but drain native work before cancellation releases the shared state.
++        async with self._model_lock:
++            inference = asyncio.create_task(asyncio.to_thread(self._model.transcribe, audio))
++            try:
++                return await asyncio.shield(inference)
++            except asyncio.CancelledError:
++                while not inference.done():
++                    try:
++                        await asyncio.shield(inference)
++                    except asyncio.CancelledError:
++                        continue
++                    except Exception:
++                        break
++                if not inference.cancelled():
++                    inference.exception()  # Retrieve an error without replacing cancellation.
++                raise
++
+     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+         """Process audio data and generate transcription frames.
+ 
+@@ -184,7 +204,7 @@
+                 if self._audio_logger is not None:
+                     self._audio_logger.append_continuous_user_audio(audio)
+ 
+-                asr_result = self._model.transcribe(audio)
++                asr_result = await self._transcribe(audio)
+                 transcription = asr_result.text
+                 is_final = asr_result.is_final
+                 if self._audio_logger is not None:
+@@ -296,8 +316,9 @@
+             model: New model name/path to use
+         """
+         await super().set_model(model)
+-        self._model_name = model
+-        self._load_model()
++        async with self._model_lock:
++            self._model_name = model
++            self._load_model()
+ 
+     async def process_frame(self, frame: Frame, direction: FrameDirection):
+         """Process incoming frames and handle VAD events."""
+@@ -308,7 +329,9 @@
+                 logger.debug(
+                     "[EOU missing] STT failed to detect end of utterance before VAD detected user stopped speaking"
+                 )
+-            self._model.reset_state()
++            # VAD frames are system frames and can arrive during inference.
++            async with self._model_lock:
++                self._model.reset_state()
+             self._is_vad_active = False
+         elif isinstance(frame, VADUserStartedSpeakingFrame):
+             self._is_vad_active = True

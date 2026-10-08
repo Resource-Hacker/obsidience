@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 import math
 import time
 import uuid
@@ -65,17 +66,169 @@ RESTART_DISPOSITION_REASON = "Restart requires disposition; Tool effects are unk
 _PROPOSAL_ARGUMENT_REJECTIONS = frozenset({
     "Proposal rejected: create and update proposals require a nonempty body.",
     "Proposal rejected: Feed publication accepts exact source and target, without body or authored metadata.",
+    "Proposal rejected: archive target must be an accepted Knowledge Article.",
+    "Proposal rejected: New Knowledge must be inside an owned or checked-out branch.",
+    "Proposal rejected: Proposal target is not checked out to this Agent.",
+    "Proposal rejected: Proposal target is outside the accepted Agent scope.",
+    "Proposal rejected: Each Agent owns its own Observations.",
+    "Proposal rejected: Link proposal contains no relationship change.",
+    "Proposal rejected: Memory promotion creates or updates Knowledge recommendations; it cannot archive or change executable definitions.",
+    "Proposal rejected: Memory promotion recommends ordinary Knowledge, not Agent branches or Observations.",
+    "Proposal rejected: Memory recommendation must cite its exact bound observation Source.",
+    "Proposal rejected: Memory recommendation must cite its bound Hindsight Source or an individual observation from that Source.",
+    "Proposal rejected: Merge archive must target one of its exact bound duplicate candidates.",
+    "Proposal rejected: Merge archive requires one distinct retained candidate update staged by this execution first.",
+    "Proposal rejected: Merge retained Article must belong to its exact bound duplicate candidates.",
 })
 
 
-def _proposal_preflight_receipt(call: dict) -> bool:
-    """These exact adapter rejections occur before any proposal is staged."""
-    return (call.get("tool") == "vault.propose" and call.get("status") == "returned"
-            and call.get("tool_ref") == "Tools/vault.propose" and bool(call.get("tool_sha256"))
-            and any(call.get("result_chars") == len(encoded)
-                    and call.get("result_sha256") == hashlib.sha256(encoded).hexdigest()
-                    for text in _PROPOSAL_ARGUMENT_REJECTIONS
-                    for encoded in [json.dumps(text, sort_keys=True).encode()]))
+def _preflight_rejection(call: dict, note: Note) -> str | None:
+    """Attest exact adapter rejections before proposal or Inbox creation."""
+    tool = call.get("tool")
+    if (call.get("status") != "returned" or call.get("tool_ref") != "Tools/" + str(tool)
+            or not call.get("tool_sha256")):
+        return None
+    if tool == "task.complete":
+        try:
+            if call["tool_sha256"] != hashlib.sha256((CONFIG.vault_dir / "Tools/task.complete.md").read_bytes()).hexdigest():
+                return None
+        except OSError:
+            return None
+        entries = _retry_trace(INDEX.run(str(note.meta.get("last_run") or "")) or {})
+        for entry in entries or []:
+            args, text = entry.get("args"), entry.get("obs")
+            if (entry.get("tool") != tool or entry.get("completion_rejected") is not True
+                    or not isinstance(args, dict) or not isinstance(text, str)
+                    or not text.startswith("Completion rejected: ")):
+                continue
+            evidence = args.get("evidence", [])
+            if not isinstance(evidence, list) or not all(isinstance(item, str) for item in evidence):
+                continue
+            result = {"accepted": False, "status": args.get("status", "completed"), "summary": "",
+                      "outcome": args.get("outcome", ""), "evidence": [" ".join(item.split()) for item in evidence],
+                      "error": text.removeprefix("Completion rejected: ").removesuffix(".")}
+            encoded = json.dumps(result, sort_keys=True).encode()
+            if call.get("result_chars") == len(encoded) and call.get("result_sha256") == hashlib.sha256(encoded).hexdigest():
+                return text
+        return None
+    if tool == "vault.propose":
+        candidates = set(_PROPOSAL_ARGUMENT_REJECTIONS)
+        # An exact target collision is rejected before _stage writes anything.
+        entries = _retry_trace(INDEX.run(call.get("run_id") or str(note.meta.get("last_run") or "")) or {})
+        for entry in entries or []:
+            if entry.get("tool") != tool or entry.get("sig") != call.get("signature"):
+                continue
+            text = entry.get("obs")
+            # These exact controller exceptions precede publication. A Feed
+            # retention group can collide on an outgoing Article, not just
+            # args.target; stage_group rolls back its newly staged members.
+            if isinstance(text, str) and len(text) <= 2048 and any(re.fullmatch(pattern, text) for pattern in (
+                r"Proposal rejected: [^\n]+\.md already has a pending review proposal; decide it before staging another\.",
+                r"Proposal rejected: Link endpoints are already connected by native hierarchy: [^\n]+ and [^\n]+\.",
+            )):
+                candidates.add(text)
+            target = entry.get("args", {}).get("target")
+            if isinstance(target, str) and target and "[truncated" not in target:
+                path = target.removesuffix(".md") + ".md"
+                candidates.add(f"Proposal rejected: {path} already has a pending review proposal; decide it before staging another.")
+    elif tool == "harness.optimize" and note.ref == "Tasks/audit":
+        # current() can reject before or after isolated evaluation, but always
+        # before report/proposal publication. Keep any evaluation artifacts;
+        # this does not classify an arbitrary optimizer error as effect-free.
+        from .optimization import STALE_CASE_ERRORS, status as optimization_status, _report_result
+        case = (note.meta.get("params") or {}).get("optimization_case")
+        if not isinstance(case, str) or not re.fullmatch(r"[a-f0-9]{64}", case):
+            return None
+        candidates = {json.dumps({"case_id": case, "error": error}, sort_keys=True)
+                      for error in STALE_CASE_ERRORS | {
+                          "Reload the changed Harness before preparing or running optimization"}}
+        # The exact-case guard precedes all optimizer work. A mistyped case
+        # therefore admits stale-occurrence settlement after receipt attestation,
+        # without rerunning evaluation or changing its original failed run.
+        entries = _retry_trace(INDEX.run(str(note.meta.get("last_run") or "")) or {})
+        for entry in entries or []:
+            args = entry.get("args")
+            if (entry.get("tool") != tool or entry.get("sig") != call.get("signature")
+                    or not isinstance(args, dict) or set(args) != {"case_id"}
+                    or not isinstance(args["case_id"], str) or args["case_id"] == case
+                    or call["signature"] != tool + ":sha256:" + hashlib.sha256(json.dumps(args, sort_keys=True).encode()).hexdigest()):
+                continue
+            try:
+                if call["tool_sha256"] != hashlib.sha256((CONFIG.vault_dir / "Tools/harness.optimize.md").read_bytes()).hexdigest():
+                    continue
+            except OSError:
+                continue
+            candidates.add(json.dumps({"case_id": args["case_id"],
+                                       "error": "Optimization requires the exact case bound to an active Audit"}, sort_keys=True))
+            candidates.add(json.dumps({"error": "Use the exact bound case_id; optimization was not dispatched",
+                                       "case_id": args["case_id"], "bound_case_id": case}))
+        # A finished non-publication report retains isolated artifacts, but
+        # cannot have staged an instruction. Attest its exact Tool result, not
+        # the clipped public trace, before permitting stale-case settlement.
+        try:
+            from . import refinement
+            result = optimization_status(case).get("report") or {}
+            report = refinement._load("executive/reports", result.get("report_id", ""))
+            if (report.get("case_id") == case and report.get("audit_run_id") == note.meta.get("last_run")
+                    and report.get("verdict") in {"incomplete", "not_improved", "regressed", "latency_regressed", "tool_count_regressed"}
+                    and result == _report_result(result["report_id"], report)
+                    and call["tool_sha256"] == hashlib.sha256((CONFIG.vault_dir / "Tools/harness.optimize.md").read_bytes()).hexdigest()):
+                candidates.add(json.dumps(result, sort_keys=True))
+        except (ValueError, OSError, KeyError):
+            pass
+    elif (tool == "task.create" and note.ref == "Tasks/curate"
+          and (note.meta.get("params") or {}).get("event") == "observations.memory.ready"):
+        try:
+            if call["tool_sha256"] != hashlib.sha256((CONFIG.vault_dir / "Tools/task.create.md").read_bytes()).hexdigest():
+                return None
+        except OSError:
+            return None
+        candidates = {"Task activation rejected: Link observation must come from this exact curation handoff."}
+    elif tool == "source.handoff" and note.ref in {LEARN_TASK_REF, "Tasks/research/distill"}:
+        from ..knowledge.source import research_source_binding
+
+        try:
+            bound = research_source_binding(note.meta.get("params") or {})
+            if not bound or call["tool_sha256"] != hashlib.sha256(
+                (CONFIG.vault_dir / "Tools/source.handoff.md").read_bytes()
+            ).hexdigest():
+                return None
+        except (OSError, ValueError):
+            return None
+        # The adapter checks these citations before calling handoff_source.
+        # Successful handoffs, partial calls and all other failures stay blocked.
+        candidates = {
+            "Source handoff rejected: Source Inbox handoffs require at least one source:// citation",
+            "Source handoff rejected: handoff must cite its exact activating Source: " + bound["citation"],
+        }
+    else:
+        return None
+    for text in candidates:
+        encoded = json.dumps(text, sort_keys=True).encode()
+        if (call.get("result_chars") == len(encoded)
+                and call.get("result_sha256") == hashlib.sha256(encoded).hexdigest()):
+            return text
+    return None
+
+
+def _pending_review_dependency(note: Note) -> str:
+    """Do not spend the one retry while its attested Review conflict remains."""
+    coverage = INDEX.tool_run_receipts(str(note.meta.get("last_run") or "")) or {}
+    conflicts = set()
+    for call in coverage.get("calls", []):
+        text = _preflight_rejection(call, note)
+        match = re.fullmatch(
+            r"Proposal rejected: ([^\n]+\.md) already has a pending review proposal; decide it before staging another\.",
+            text or "")
+        if match:
+            conflicts.add(match[1])
+    if conflicts:
+        from ..knowledge.format import loads
+        for path in CONFIG.staging_dir.glob("*.md"):
+            meta, _ = loads(path.read_text(encoding="utf-8"))
+            if meta.get("target") in conflicts:
+                return "Waiting for owner Review: " + path.name + "; no retry until that proposal is decided."
+    return ""
 
 
 def _failed_completion(run: dict, entries: list[dict] | None) -> bool:
@@ -107,6 +260,23 @@ def _retry_trace(run: dict) -> list[dict] | None:
 def _retry_binding_matches(note: Note, entries: list[dict]) -> bool:
     params = note.meta["params"]
     event = params["event"]
+    if event == "source.added":
+        from ..knowledge.source import _row_doc, research_source_binding
+
+        activation = INDEX.activation(str(entries[0].get("activation_id", "")))
+        source = INDEX.source(str(params.get("source_id", "")))
+        binding = research_source_binding(params)
+        if (note.ref not in {LEARN_TASK_REF, "Tasks/research/distill"}
+                or not activation or activation["task_ref"] != note.ref
+                or activation.get("params") != params or not source or not binding
+                or source.get("event_key") != params["activation_key"]
+                or source["material_sha256"] != "sha256:" + hashlib.sha256(bytes(source["material"])).hexdigest()):
+            return False
+        doc = _row_doc(source, include_content=True)
+        if (doc["citation"] != binding["citation"] or doc["content_sha256"] != binding["content_sha256"]
+                or doc["source_ref"] != params.get("source_ref")):
+            return False
+        return not params.get("feed_binding")
     if event == "schedule":
         if not _scheduled_binding_matches(note, params):
             return False
@@ -198,17 +368,18 @@ def _retry_binding_matches(note: Note, entries: list[dict]) -> bool:
             and source.get("content_sha256") == params.get("source_sha256")
             and source.get("material_sha256") == "sha256:" + hashlib.sha256(bytes(source["material"])).hexdigest()
         )
-    if event == "observations.temporary.ready":
-        from ..conversation.observations import resolve_temporary_promotion_inputs
-
-        if params.get("promotion_key") != params["activation_key"]:
-            return False
-        notes = resolve_temporary_promotion_inputs({**params, "origin_task_ref": note.ref})
-        return bool(notes) and all(
-            not item.meta.get("source_archive")
-            and item.meta.get("promotion_pending") == params["promotion_key"]
-            for item in notes
-        )
+    if event == "observations.memory.ready":
+        from ..memory.hindsight import promotion_source
+        promotion_source({**params, "origin_task_ref": note.ref})
+        return params["activation_key"] == "memory:" + params["promotion_key"]
+    if event == "model.added" and note.ref == "Tasks/research/model":
+        activation = INDEX.activation(str(entries[0].get("activation_id", "")))
+        model_id = params.get("model_id")
+        return bool(activation and activation["task_ref"] == note.ref
+                    and activation.get("params") == params and params.get("model_event_id")
+                    and model_id in model_runtime.MODELS
+                    and model_runtime._model_source_identity(model_runtime.configured_spec(model_id))["fingerprint"]
+                    == params.get("model_fingerprint"))
     return False
 
 
@@ -231,7 +402,8 @@ def _scheduled_binding_matches(note: Note, params: dict) -> bool:
         return False
 
 
-def retry_blocked_reason(note: Note, run: dict | None = None) -> str:
+def retry_blocked_reason(note: Note, run: dict | None = None, *, allow_source_captures: bool = False,
+                         allow_retained_effects: bool = False) -> str:
     """Explain whether an explicit owner retry can preserve this failed event."""
     from ..knowledge.vault import _NOTE_WRITE_LOCK
 
@@ -241,8 +413,10 @@ def retry_blocked_reason(note: Note, run: dict | None = None) -> str:
             return "Only a failed Task occurrence can be retried."
         if note.ref in _running:
             return "This Task already has an active executor claim."
-        if (not isinstance(params, dict) or not isinstance(params.get("activation_key"), str)
-                or not params["activation_key"]
+        event_key = (params.get("activation_key") or
+                     params.get("model_event_id") if isinstance(params, dict) else None)
+        if (not isinstance(params, dict) or not isinstance(event_key, str) or not event_key
+                or not params.get("activation_key") and params.get("event") != "model.added"
                 or (params.get("event") not in task_triggers(note.meta)
                     and not _scheduled_binding_matches(note, params))):
             return "The failed request has no exact durable event identity."
@@ -257,22 +431,56 @@ def retry_blocked_reason(note: Note, run: dict | None = None) -> str:
                 or not math.isfinite(started) or not math.isfinite(finished) or finished < started):
             return "The previous execution has not conclusively ended."
         if INDEX.tool_run_receipts(last_run) is not None:
-            receipt_error = _receipt_retry_blocked_reason(note, last_run)
+            receipt_error = _receipt_retry_blocked_reason(note, last_run, allow_source_captures=allow_source_captures,
+                                                         allow_retained_effects=allow_retained_effects)
             if receipt_error:
                 return receipt_error
+        if review_dependency := _pending_review_dependency(note):
+            return review_dependency
         entries = _retry_trace(run)
         if entries is None:
             return "The previous execution trace is incomplete or unreadable."
         coverage = INDEX.tool_run_receipts(last_run)
-        rejected = {call["signature"] for call in (coverage or {}).get("calls", [])
-                    if _proposal_preflight_receipt(call)}
+        from ..memory.hindsight import legacy_archive_reads
+        memory_reads = legacy_archive_reads(note, coverage)
+        from .repair import verified_source_captures, verified_retained_effects
+        captures = verified_source_captures(note, last_run) if allow_source_captures else {}
+        retained = verified_retained_effects(note, last_run) if allow_retained_effects else {}
+        rejected = {(call["tool"], call["signature"]): reason
+                    for call in (coverage or {}).get("calls", [])
+                    if (reason := _preflight_rejection(call, note)) is not None}
         for entry in entries:
+            if (coverage is not None and set(entry) == {"trace_truncated", "trace_sha256"}
+                    and type(entry["trace_truncated"]) is int and entry["trace_truncated"] > 0
+                    and isinstance(entry["trace_sha256"], str) and len(entry["trace_sha256"]) == 64
+                    and all(c in "0123456789abcdef" for c in entry["trace_sha256"])):
+                # Presentation may omit repeated decisions. The independently
+                # committed, exact-input dispatch receipts above remain complete.
+                continue
             if entry.get("created_tasks") or "task" in entry or entry.get("resource_blocked_after_effect"):
                 return "The previous execution created work or may have committed effects."
             if "tool" in entry:
-                if (entry.get("tool") == "vault.propose" and entry.get("sig") in rejected
-                        and entry.get("obs") in _PROPOSAL_ARGUMENT_REJECTIONS | {
-                            "You have repeated this exact call three times; the result will not change. Vary your approach or call task.complete now with your best status."}):
+                if not isinstance(entry["tool"], str) or not isinstance(entry.get("sig"), (str, type(None))):
+                    # A malformed durable entry cannot be classified as safe.
+                    return "The previous execution contains an effect or uncertain Tool outcome."
+                if (entry["tool"] in _RETRY_READ_ONLY_TOOLS
+                        and entry.get("not_dispatched") is True and entry.get("repeat_blocked") is True
+                        and not set(entry) - {"tool", "args", "obs", "sig", "not_dispatched", "repeat_blocked"}):
+                    continue
+                if (entry.get("tool") == "task.complete" and entry.get("completion_rejected") is True
+                        and entry.get("obs") in {text for (tool, _sig), text in rejected.items() if tool == "task.complete"}):
+                    continue
+                if (entry.get("tool") == "observations.temporary.archive"
+                        and entry.get("args") == {} and entry.get("sig") in memory_reads):
+                    continue
+                if entry.get("tool") == "web.fetch" and entry.get("sig") in captures:
+                    continue
+                if entry.get("sig") in retained:
+                    continue
+                rejection = rejected.get((entry.get("tool"), entry.get("sig")))
+                if (rejection is not None and entry.get("obs") in {
+                        rejection,
+                        "You have repeated this exact call three times; the result will not change. Vary your approach or call task.complete now with your best status."}):
                     continue
                 if entry is entries[-1] and coverage is not None and _failed_completion(run, entries):
                     continue
@@ -284,10 +492,11 @@ def retry_blocked_reason(note: Note, run: dict | None = None) -> str:
             elif set(entry) - {
                 "activation_id", "activation_packet", "retrieval_ms", "task_activation", "source_inbox", "created_tasks", "maintenance_candidate",
                 "interactive_turn", "computer_request", "provider_metrics", "context_projection",
-                "interruption_reason", "must_not_replay", "invalid", "parse_error", "finish_reason",
+                "interruption_reason", "must_not_replay", "invalid", "parse_error", "finish_reason", "harness_health",
             }:
                 return "The previous execution contains an unknown outcome record."
-            if entry.get("must_not_replay") and entry.get("interruption_reason") != "foreground_admission":
+            if (entry.get("must_not_replay") and entry.get("interruption_reason") != "foreground_admission"
+                    and not captures):
                 return "The previous execution requires explicit effect disposition."
         if INDEX.db.execute("SELECT 1 FROM review_decisions WHERE run_id=? LIMIT 1", (last_run,)).fetchone():
             return "The previous execution already has an owner review decision."
@@ -331,7 +540,8 @@ def retry_failed_occurrence(note: Note, expected_run_id: str, *, require_receipt
             from .repair import check_retry_transaction
 
             check_retry_transaction(current, already_pending=already_pending)
-        reason = retry_blocked_reason(current)
+        reason = retry_blocked_reason(current, allow_source_captures=require_receipts,
+                                      allow_retained_effects=require_receipts and current.ref == "Tasks/research/model")
         if reason:
             raise ValueError(reason)
         if not already_pending:
@@ -359,7 +569,9 @@ def _settle_occurrence(note: Note, *, kind: str, classify, summary_for, previous
     if (note.kind != "task"
             or note.meta.get("status") not in {"pending", "failed"}
             or not isinstance(params, dict)
-            or not isinstance(params.get("activation_key"), str) or not params["activation_key"]
+            or not (isinstance(params.get("activation_key"), str) and params["activation_key"]
+                    or params.get("event") == "model.added" and isinstance(params.get("model_event_id"), str)
+                    and params["model_event_id"])
             or note.ref in _running):
         return None
     expected = INDEX._runtime_fields(note.meta)
@@ -382,13 +594,15 @@ def _settle_occurrence(note: Note, *, kind: str, classify, summary_for, previous
         if evidence is None:
             return None
         params_hash = hashlib.sha256(json.dumps(params, sort_keys=True).encode()).hexdigest()
+        activation_key = str(params.get("activation_key") or "")
+        event_identity = activation_key or json.dumps(_event_key(params))
         receipt_id = "settled-" + hashlib.sha256(
-            (note.ref + "\0" + params["activation_key"] + "\0" + params_hash).encode()
+            (note.ref + "\0" + event_identity + "\0" + params_hash).encode()
         ).hexdigest()[:32]
         previous_id = str(expected.get("last_run", ""))
         trace = json.dumps([{"controller_disposition": {
             "kind": kind, "params_sha256": params_hash,
-            "activation_key": params["activation_key"], "previous_run_id": previous_id,
+            "activation_key": activation_key, "event_identity": event_identity, "previous_run_id": previous_id,
             "effect_applied": False, "tools_executed": False, **evidence,
         }}], sort_keys=True)
         if len(trace.encode()) > 32_000:
@@ -410,7 +624,7 @@ def _settle_occurrence(note: Note, *, kind: str, classify, summary_for, previous
                 "AND ((?<>'' AND handoff_source_id=?) OR (?<>'' AND ingest_run_id=?) "
                 "OR (target_task_ref=? AND target_activation_key=?)) LIMIT 1",
                 (str(params.get("source_id", "")), str(params.get("source_id", "")), previous_id, previous_id,
-                 note.ref, params["activation_key"]),
+                 note.ref, activation_key),
             ).fetchone():
                 return
             previous = INDEX.run(previous_id) if previous_id else None
@@ -629,9 +843,12 @@ def _maintenance_failure_clear(run: dict, params: dict, *, required: bool) -> bo
         return False
     if any(activation[key] != params.get(key) for key in fields):
         return not required and activation["activation_key"] != params.get("activation_key")
-    # Only a conclusively empty execution is automatically disposed here.
-    # Reads, child work, truncated traces, unknown records and possible effects
-    # remain available for an explicit owner decision.
+    # Complete dispatch receipts also attest reads and exact pre-stage
+    # rejections. Neither requires replay when its candidate is invalidated.
+    if required:
+        note = load_note(str(run.get("task_ref")) + ".md")
+        if note is not None and not _receipt_retry_blocked_reason(note, run["id"]):
+            return True
     return all(not (set(entry) - {"activation_id", "activation_packet", "retrieval_ms", "task_activation",
                                  "provider_metrics", "context_projection"}) for entry in entries)
 
@@ -648,92 +865,22 @@ def settle_maintenance_occurrence(note: Note) -> dict | None:
         return None
 
 
-def _completed_feed_publication(note: Note, params: dict, origin: dict) -> dict | None:
-    """Attest committed publication after interruption, without replaying it."""
-    from ..knowledge.curation import FEED_GENERATOR, _accepted_feed_origin, _feed_article
-    from ..knowledge.links import canonical_body
-    from ..knowledge.source import get_source
-
-    run_id = str(note.meta.get("last_run", ""))
-    run = INDEX.run(run_id) or {}
-    coverage = INDEX.tool_run_receipts(run_id)
-    entries = _retry_trace(run)
-    if (run.get("task_ref") != note.ref or run.get("status") != "interrupted"
-            or not coverage or coverage["task_ref"] != note.ref
-            or coverage["params_sha256"] != INDEX.tool_params_sha256(params)
-            or not entries or not _retry_binding_matches(note, entries)):
-        return None
-    effects = []
-    for call in coverage["calls"]:
-        if (call["status"] != "returned" or not call["finished"]
-                or call["tool_ref"] != "Tools/" + call["tool"] or not call["tool_sha256"]):
-            return None
-        if not (call["read_only"] is True and call["tool"] in READ_ONLY_CAPABILITIES):
-            effects.append(call)
-    if len(effects) != 1 or effects[0]["tool"] != "vault.propose":
-        return None
-    call = effects[0]
-    proposals = [entry for entry in entries if entry.get("tool") == "vault.propose"]
-    if len(proposals) != 1:
-        return None
-    entry = proposals[0]
-    args, result = entry.get("args"), entry.get("obs")
-    if (not isinstance(args, dict) or not isinstance(result, str)
-            or entry.get("sig") != call["signature"]
-            or call["signature"] != "vault.propose:sha256:" + hashlib.sha256(
-                json.dumps(args, sort_keys=True).encode()).hexdigest()
-            or hashlib.sha256(json.dumps(result, sort_keys=True).encode()).hexdigest() != call["result_sha256"]
-            or len(json.dumps(result, sort_keys=True).encode()) != call["result_chars"]):
-        return None
-    handoff = get_source(str(params.get("source_citation", "")))
-    article = _feed_article(handoff, origin)
-    target = article["target"]
-    if (set(args) - {"target", "source", "action", "reason", "metadata"}
-            or args.get("source") != handoff["citation"]
-            or str(args.get("target", "")).removesuffix(".md") != target.removesuffix(".md")
-            or args.get("action", "create") not in {"create", "update"}
-            or args.get("metadata", {}) not in ({}, {"type": "knowledge"})):
-        return None
-    accepted = load_note(target)
-    if (accepted is None or accepted.kind != "knowledge"
-            or accepted.meta.get("article_status") == "deprecated"
-            or _accepted_feed_origin(accepted, origin) != origin
-            or canonical_body(article["body"], target).strip() != accepted.body.strip()
-            or any(accepted.meta.get(key) != article["metadata"][key]
-                   for key in ("resource", "sources", "generated"))):
-        return None
-    decisions = INDEX.db.execute(
-        "SELECT proposal_id,target,decision,decided_at FROM review_decisions "
-        "WHERE run_id=? AND task_ref=?", (run_id, note.ref),
-    ).fetchall()
-    if (not 1 <= len(decisions) <= 31
-            or len({row[1] for row in decisions}) != len(decisions)
-            or sum(row[1] == target for row in decisions) != 1
-            or any(row[2] != "approved" or not call["started"] <= row[3] <= call["finished"]
-                   for row in decisions)):
-        return None
-    expected_result = (
-        f"Article published at {target} under owner Auto-curate policy {origin['destination_ref']}. "
-        f"{len(decisions) - 1} older Feed Articles were archived with their complete content and Sources preserved."
-    )
-    if result != expected_result:
-        return None
-    for _proposal, retired, _decision, _at in decisions:
-        if retired == target:
-            continue
-        archived = load_note("_archived/" + retired)
-        if (load_note(retired) is not None or archived is None or archived.kind != "knowledge"
-                or archived.meta.get("article_status") != "deprecated"
-                or archived.meta.get("generated", {}).get("by") != FEED_GENERATOR):
-            return None
-    return {"disposition": "published_feed_item", "source_id": handoff["id"],
-            "target": target, "call_id": call["call_id"], "result_sha256": call["result_sha256"],
-            "approved_proposals": [row[0] for row in decisions],
-            "reason": "The exact Feed Article and required retention already committed before interruption"}
 
 
 def _resolved_input_evidence(note: Note, params: dict) -> dict | None:
     """Attest obsolete input through its owner; never infer it from a summary."""
+    if note.ref == "Tasks/audit" and params.get("optimization_case"):
+        from .optimization import current, STALE_CASE_ERRORS
+        if note.meta.get("status") != "failed" or _receipt_retry_blocked_reason(
+                note, str(note.meta.get("last_run") or "")):
+            return None
+        try:
+            current(params["optimization_case"])
+        except ValueError as exc:
+            if str(exc) in STALE_CASE_ERRORS:
+                return {"disposition": "obsolete_optimization_case", "case_id": params["optimization_case"],
+                        "reason": str(exc) + ". Retain isolated evaluation artifacts; no instruction was published and the stale case is not replayed"}
+        return None
     if note.ref == "Tasks/audit" and params.get("event") == "runbook.proposed":
         name = params.get("proposal")
         if not isinstance(name, str) or load_note("_staging/" + name) is not None:
@@ -744,51 +891,6 @@ def _resolved_input_evidence(note: Note, params: dict) -> dict | None:
         if row and row[0] == "rejected":
             return {"disposition": "proposal_rejected", "proposal": name, "decided_at": row[1],
                     "reason": "The owner already rejected this exact Runbook proposal"}
-    if note.ref not in {"Tasks/ingest", "Tasks/research/distill"}:
-        return None
-    from ..knowledge.source import (
-        feed_binding_matches, feed_source_binding, research_handoff_origin, research_source_binding,
-    )
-
-    def bound_feed(value: dict) -> tuple[dict, dict] | None:
-        binding = (research_source_binding(value) if value.get("event") == "source.added"
-                   else research_handoff_origin(value) if value.get("event") == "source.inbox" else None)
-        if binding is None:
-            return None
-        source = INDEX.source(str(value.get("source_id", "")))
-        if (source is None or source["content_sha256"] != value.get("source_sha256")
-                or source["event_key"] != value.get("activation_key")):
-            return None
-        origin = feed_source_binding(source["id"], restore=False)
-        if origin is None or not feed_binding_matches(value.get("feed_binding"), origin):
-            return None
-        return source, origin
-
-    current = bound_feed(params)
-    if current is None:
-        return None
-    bound, origin = current
-    if note.ref == "Tasks/ingest" and params.get("event") == "source.inbox":
-        published = _completed_feed_publication(note, params, origin)
-        if published is not None:
-            return published
-    original = INDEX.source(origin["source_id"])
-    for successor in _event_queue(note.meta):
-        candidate = successor.get("feed_binding")
-        if (not isinstance(candidate, dict) or successor.get("event") != params.get("event")
-                or any(candidate.get(key) != origin[key] for key in ("feed_id", "item_key", "destination_ref"))):
-            continue
-        following = bound_feed(successor)
-        if following is None:
-            continue
-        newer, binding = following
-        replacement = INDEX.source(binding["source_id"])
-        if (replacement["id"] == original["id"]
-                or replacement["captured_at"] <= original["captured_at"]):
-            continue
-        return {"disposition": "superseded_feed_version", "source_id": bound["id"],
-                "successor_source_id": newer["id"], "successor_activation_key": successor["activation_key"],
-                "reason": "A newer attested version of the same Feed item is already queued"}
     return None
 
 
@@ -840,7 +942,21 @@ def _autonomous_occurrence(note: Note) -> bool:
 
 
 def _trusted_research_handler(task_ref: str, run_id: str) -> bool:
-    """Validate internal Source provenance for same-research Learn suppression."""
+    """Validate the existing owner of supporting evidence before omitting Learn."""
+    if task_ref == "Agents/Executive/Executive" and run_id:
+        from ..knowledge.vault import resolver
+
+        agent = resolver().resolve(task_ref)
+        if not agent or agent.kind != "agent" or agent.meta.get("role") != "executive":
+            return False
+        receipts = INDEX.tool_run_receipts(run_id)
+        if not receipts or receipts.get("task_ref") != task_ref:
+            return False
+        state = INDEX.task_runtime(task_ref) or {}
+        if state.get("status") == "running" and state.get("last_run") == run_id:
+            return True
+        run = INDEX.run(run_id)
+        return bool(run and run.get("task_ref") == task_ref)
     if not task_ref.startswith("Tasks/research/") or not run_id:
         return False
     from ..knowledge.vault import resolver
@@ -963,7 +1079,8 @@ def _realtime_allows(note: Note, accepted_resolver: Resolver | None = None) -> b
 
 
 def _resource_error(note: Note, model: str | None = None, *,
-                    accepted_resolver: Resolver | None = None) -> model_runtime.ModelResourceUnavailable | None:
+                    accepted_resolver: Resolver | None = None,
+                    owner_requested: bool = False) -> model_runtime.ModelResourceUnavailable | None:
     """Ask the model owner about the Task's unchanged selection before claim."""
     from ..knowledge.vault import resolver
 
@@ -977,6 +1094,31 @@ def _resource_error(note: Note, model: str | None = None, *,
     )
     try:
         spec = model_runtime.resolve_model(model if model is not None else note.meta.get("model"), agent_ref)
+        params = note.meta.get("params")
+        interactive = owner_requested or (
+            str(note.meta.get("status", "")) == "pending"
+            and isinstance(params, dict) and _interactive_occurrence(note.ref, params)
+        )
+        if not interactive:
+            from ..realtime.runtime import RUNTIME
+
+            executive = res.resolve("Agents/Executive/Executive")
+            if executive and executive.kind == "agent" and RUNTIME.snapshot()["enabled"]:
+                executive_spec = model_runtime.resolve_model(executive.meta.get("model"), executive.ref)
+                settings = model_runtime._read_settings()
+                protected_devices = tuple(
+                    device for device in model_runtime.GPU_DEVICES
+                    if settings["hardware"].get(device) == executive_spec.id
+                )
+                profile = settings["models"][spec.id]
+                layouts = model_runtime._device_sets(spec, profile["allowed_devices"])
+                if (spec.id != executive_spec.id and protected_devices and layouts
+                        and all(set(layout) & set(protected_devices) for layout in layouts)):
+                    return model_runtime.ModelResourceUnavailable(
+                        spec, layouts,
+                        {f"Executive voice retains {executive_spec.label} until voice or profile changes":
+                         protected_devices},
+                    )
         model_runtime.check_resources(spec)
     except model_runtime.ModelResourceUnavailable as exc:
         return exc
@@ -999,12 +1141,17 @@ def _resources_allow(note: Note, model: str | None = None, *,
             nonlocal changed
             if str(meta.get("status", "draft")) not in {"pending", "completed", "failed"}:
                 return
-            meta.update(status="pending", blocked_reason=reason)
+            # A due cron Task has not enqueued its next occurrence yet. Keep
+            # its terminal status so _run creates that occurrence after release.
+            meta["blocked_reason"] = reason
+            if not meta.get("schedule"):
+                meta["status"] = "pending"
             changed = True
 
         mutate_note_metadata(note, waiting)
         if changed:
-            action_trace.emit("status", f"{note.title} is waiting for model hardware", [str(error)])
+            subject = "GPU memory" if isinstance(error, model_runtime.ModelMemoryUnavailable) else "model hardware"
+            action_trace.emit("status", f"{note.title} is waiting for {subject}", [str(error)])
     elif not reason and previous.startswith(RESOURCE_WAIT_PREFIX):
         def ready(meta: dict) -> None:
             if str(meta.get("blocked_reason", "")).startswith(RESOURCE_WAIT_PREFIX):
@@ -1029,7 +1176,7 @@ def _run_needs_disposition(run: dict) -> bool:
     )
 
 
-def _other_task_active(task_ref: str) -> bool:
+def _other_task_active(task_ref: str, notes: list[Note] | None = None) -> bool:
     """See every Task owner, including chat and Realtime outside this loop."""
 
     if any(ref != task_ref for ref in _running):
@@ -1038,11 +1185,12 @@ def _other_task_active(task_ref: str) -> bool:
         note.kind == "task"
         and note.ref != task_ref
         and str(note.meta.get("status", "")) == "running"
-        for note in iter_notes()
+        for note in (iter_notes() if notes is None else notes)
     )
 
 
-def _receipt_retry_blocked_reason(note: Note, run_id: str) -> str:
+def _receipt_retry_blocked_reason(note: Note, run_id: str, *, allow_source_captures: bool = False,
+                                 allow_retained_effects: bool = False) -> str:
     """Only controller-written, complete dispatch coverage can authorize recovery."""
     coverage = INDEX.tool_run_receipts(run_id)
     if coverage is None:
@@ -1054,17 +1202,47 @@ def _receipt_retry_blocked_reason(note: Note, run_id: str) -> str:
     if coverage["task_ref"] != note.ref or not same_params:
         return "The Tool receipt does not attest these exact Task inputs."
     run = INDEX.run(run_id) or {}
+    from ..memory.hindsight import legacy_archive_reads
+    memory_reads = legacy_archive_reads(note, coverage)
+    from .repair import verified_source_captures, verified_retained_effects
+    captures = verified_source_captures(note, run_id) if allow_source_captures else {}
+    retained = verified_retained_effects(note, run_id) if allow_retained_effects else {}
     failed_completion = _failed_completion(run, _retry_trace(run))
     for call in coverage["calls"]:
         if call["status"] == "undispatched":
             continue
-        if _proposal_preflight_receipt(call):
+        # The former sync bridge rejected native async adapters before calling
+        # them. Attest that exact controller error, never a generic Tool error.
+        dispatch_error = f"Capability {call['tool']} requires execute_async"
+        encoded_error = json.dumps("Tool error: " + dispatch_error, sort_keys=True).encode()
+        if (call["status"] == "error" and call["tool_ref"] == "Tools/" + call["tool"]
+                and call["tool_sha256"] and run.get("summary") == "Execution failed: " + dispatch_error
+                and call.get("result_chars") == len(encoded_error)
+                and call.get("result_sha256") == hashlib.sha256(encoded_error).hexdigest()):
+            continue
+        if call["signature"] in memory_reads:
+            continue
+        if _preflight_rejection(call, note) is not None:
+            continue
+        if call["signature"] in retained:
+            continue
+        if call["tool"] == "web.fetch" and call["signature"] in captures:
             continue
         if (call["tool"] == "task.complete" and call["status"] == "returned"
                 and call["tool_ref"] == "Tools/task.complete" and call["tool_sha256"]
                 and failed_completion):
             continue
-        if (call["read_only"] is not True or call["tool"] not in READ_ONLY_CAPABILITIES
+        # Older inspection receipts predate the complete read-only registry.
+        # Their exact reviewed Tool definition must still match.
+        legacy_list = False
+        if (call["tool"] in {"vault.list", "task.inspect", "review.inspect", "vault.maintenance"}
+                and call["tool_ref"] == "Tools/" + call["tool"]):
+            try:
+                legacy_list = call["tool_sha256"] == hashlib.sha256(
+                    (CONFIG.vault_dir / (call["tool_ref"] + ".md")).read_bytes()).hexdigest()
+            except OSError:
+                pass
+        if ((call["read_only"] is not True and not legacy_list) or call["tool"] not in READ_ONLY_CAPABILITIES
                 or not call["tool_ref"] or not call["tool_sha256"]):
             return "A Tool may have committed effects."
         if call["status"] not in {"started", "returned", "error", "rejected", "interrupted"}:
@@ -1215,50 +1393,156 @@ def _dedupe_waiting_events(meta: dict) -> list[dict]:
     return queue
 
 
-def reconcile_check_health() -> dict | None:
-    """Deliver the latest completed Check through the existing Task event queue.
+def _queue_health_repair(causes: list[dict], revision: str) -> tuple[dict | None, str]:
+    """One ordinary Repair occurrence per actionable state, then reconsider progress."""
+    from .repair import REPAIR_TASK
 
-    The small controller signal survives trace clipping and process restart.
-    Queue admission precedes its receipt; a crash between them reattaches to
-    the same event identity. No provider call or new polling loop is involved.
-    """
-    check = load_note("Tasks/check.md")
-    if check is None:
-        return None
-    run = INDEX.run(str(check.meta.get("last_run", "")))
-    if not run or run.get("task_ref") != check.ref or run.get("status") != "completed":
-        return None
-    receipt_id = "health-repair-" + hashlib.sha256(str(run["id"]).encode()).hexdigest()[:32]
-    if INDEX.run(receipt_id) is not None:
-        return None
-    try:
-        entries = json.loads(run.get("trace") or "[]")
-    except (ValueError, TypeError):
-        return None
-    signal = entries[0].get("harness_health") if isinstance(entries, list) and entries and isinstance(entries[0], dict) else None
-    if (not isinstance(signal, dict) or type(signal.get("version")) is not int
-            or signal != {"version": 1, "status": "degraded"}):
-        return None
-    repair = load_note("Tasks/repair.md")
-    if (repair is None or repair.kind != "task" or "harness.degraded" not in task_triggers(repair.meta)
-            or repair.meta.get("enabled") is False
-            or str(repair.meta.get("enabled", True)).strip().lower() in {"0", "false", "no", "off"}
-            or repair.meta.get("article_status") == "deprecated"):
-        return None
-    params = {"check_run_id": run["id"], "activation_key": receipt_id,
-              "target_task": repair.ref}
-    results = enqueue_named_event("harness.degraded", params, expected_task=repair.ref)
+    key = hashlib.sha256(json.dumps([sorted(cause["key"] for cause in causes), revision]).encode()).hexdigest()
+    receipt_id = "health-cycle-" + key
+    if _shutting_down or INDEX.run(receipt_id) is not None:
+        return None, receipt_id
+    results = enqueue_named_event("harness.degraded", {
+        "activation_key": receipt_id, "health_causes": causes[:12],
+        "target_task": REPAIR_TASK, "queue_after_review": True,
+    }, expected_task=REPAIR_TASK)
     if len(results) != 1 or results[0]["state"] not in {"started", "queued", "processed"}:
-        return None
+        return None, receipt_id
     now = time.time()
-    INDEX.record_run(id=receipt_id, task_ref=repair.ref, agent="scheduler", started=now,
-                     finished=now, status="dispatched", objective="Repair follow-up to completed Check",
-                     summary=f"Completed degraded Check {run['id']} admitted Repair through harness.degraded.",
-                     trace=json.dumps([{"check_run_id": run["id"], "activation_key": receipt_id}]),
-                     overwrite=False)
-    action_trace.emit("status", "Check activated Repair", [str(run["id"]), repair.ref],
-                      {"run_id": run["id"], "task_ref": check.ref, "agent_ref": "Agents/Heimdall/Heimdall"})
-    return results[0]
+    INDEX.record_run(overwrite=False, id=receipt_id, task_ref=REPAIR_TASK,
+                     agent="scheduler", started=now, finished=now, status="dispatched",
+                     objective="Recover current Harness faults",
+                     summary="Actionable health state admitted a bounded Repair pass.",
+                     trace=json.dumps([{"health_causes": causes[:12], "definition_revision": revision}]))
+    action_trace.emit("status", "Harness recovery activated",
+                      [cause.get("task", cause["kind"]) for cause in causes[:12]],
+                      {"task_ref": REPAIR_TASK, "agent_ref": "Agents/Heimdall/Heimdall"})
+    return results[0], receipt_id
+
+
+_source_health_generation = 0
+_source_health_scanned = -1
+_source_health_issues: list[dict] = []
+_source_delivery_issues: list[dict] = []
+
+
+def source_health_changed() -> None:
+    """The existing Source observer invalidates inspection on real file changes."""
+    global _source_health_generation
+    _source_health_generation += 1
+    wake_scheduler()
+
+
+def source_health_issues() -> list[dict]:
+    return [*_source_health_issues, *_source_delivery_issues]
+
+
+async def _refresh_source_health() -> None:
+    global _source_health_scanned, _source_health_issues
+    if _source_health_scanned == _source_health_generation:
+        return
+    generation = _source_health_generation
+
+    def inspect() -> list[dict]:
+        from ..knowledge.source import list_source_files
+
+        found, after = {}, None
+        while True:
+            page = list_source_files(after=after)
+            for issue in page["issues"]:
+                found[json.dumps(issue, sort_keys=True)] = issue
+            cursor = page["coverage"]["next_cursor"]
+            if page["coverage"]["complete"]:
+                return list(found.values())
+            if not cursor or cursor == after:
+                raise ValueError("Source health inspection did not advance")
+            after = cursor
+
+    try:
+        _source_health_issues = await asyncio.to_thread(inspect)
+    except (OSError, ValueError) as exc:
+        _source_health_issues = [{"status": "inspection_unavailable", "detail": str(exc)[:1000]}]
+    _source_health_scanned = generation
+
+
+def reconcile_task_health(notes: list[Note]) -> dict | None:
+    """Continue actionable recovery; unresolved faults go to the Review owner."""
+    from .repair import REPAIR_TASK, definition_revision, health_causes, repair_plan, settle_superseded_repair
+    from ..knowledge.review import sync_health_notifications
+
+    tasks = [note for note in notes if note.kind == "task"]
+    # A configuration block is not an unresolved execution. Revalidate its
+    # accepted dependencies so a repaired registry does not strand the Task.
+    from .assignments import ensure_task_runbook
+    from .ledger import current_task_issue
+    res = Resolver(notes)
+    for index, note in enumerate(tasks):
+        issue = current_task_issue(note)
+        if note.meta.get("status") != "blocked" or not issue:
+            continue
+        previous = INDEX.run(str(note.meta.get("last_run") or "")) or {}
+        coverage = INDEX.tool_run_receipts(previous["id"]) if previous else None
+        completed = (previous.get("status") == "completed" and previous.get("task_ref") == note.ref
+                     and previous.get("activation_id") == note.meta.get("activation_id")
+                     and coverage is not None and coverage["task_ref"] == note.ref
+                     and coverage["params_sha256"] == INDEX.tool_params_sha256(note.meta.get("params") or {}))
+        if issue["kind"] != "blocked_configuration" and not completed:
+            continue
+        if ensure_task_runbook(note, res).get("status") != "ready":
+            continue
+        def restore(meta: dict) -> None:
+            if (meta.get("status") == "blocked" and meta.get("params") == note.meta.get("params")
+                    and meta.get("last_run") == note.meta.get("last_run")
+                    and not meta.get("event_queue")):
+                meta.update(status="completed" if completed else "pending",
+                            status_updated=time.strftime("%Y-%m-%dT%H:%M:%S"))
+                meta.pop("blocked_reason", None)
+        mutate_note_metadata(note, restore)
+        tasks[index] = load_note(note.path) or note
+    causes = health_causes(tasks, source_health_issues())
+    repair = next((note for note in tasks if note.ref == REPAIR_TASK), None)
+    if repair and settle_superseded_repair(repair, notes, causes):
+        tasks = [load_note(note.path) or note if note.ref == REPAIR_TASK else note for note in tasks]
+        causes = health_causes(tasks, source_health_issues())
+    from ..memory.hindsight import MEMORY
+    plan = {row.get("task") or row.get("component"): row for row in
+            [*repair_plan(tasks, limit=max(1, len(tasks))), *MEMORY.repair_plan()]}
+    by_ref = {note.ref: note for note in tasks}
+    repair = by_ref.get(REPAIR_TASK)
+    unavailable = (repair is None or repair.meta.get("status") in {"failed", "blocked", "review", "draft"}
+                   or str(repair.meta.get("enabled", True)).lower() in {"false", "0", "no", "off"}
+                   or "harness.degraded" not in task_triggers(repair.meta))
+    active = repair is not None and (repair.meta.get("status") == "running"
+                                    or repair.meta.get("status") == "pending" and not unavailable)
+    ready, notifications = [], []
+    for cause in causes:
+        task = cause.get("task", "")
+        row = plan.get(task or cause.get("component"))
+        note = by_ref.get(task)
+        if row and row["operation"] in {"retry", "settle"}:
+            ready.append(cause)
+            continue
+        notifications.append({**cause, "title": note.title if note else cause.get("title", "Source integrity"),
+                              "reason": row["reason"] if row else cause.get("reason") or "Repair itself needs attention.",
+                              "detail": str(note.meta.get("summary") or note.meta.get("blocked_reason") or "")[:2000]
+                                        if note else cause.get("detail", "")})
+    result = None
+    if ready and not active:
+        admission_error = ""
+        if not unavailable:
+            try:
+                result, _ = _queue_health_repair(ready, definition_revision(notes))
+            except ValueError as exc:
+                admission_error = "Automatic Repair could not be admitted: " + str(exc)[:1000]
+        if result is None:
+            reason = admission_error or (
+                "Automatic Repair is unavailable; its Task needs attention." if unavailable else
+                "The Repair pass could not make further progress with the current evidence and definitions.")
+            notifications.extend({**cause, "title": by_ref[cause["task"]].title if cause.get("task") in by_ref
+                                   else cause.get("title", "Harness"), "reason": reason}
+                                 for cause in ready)
+    from .optimization_incidents import notifications as optimization_notifications
+    sync_health_notifications([*notifications, *optimization_notifications()])
+    return result
 
 
 def enqueue_named_event(
@@ -1352,7 +1636,7 @@ def _independent_occurrence(task: Note, incoming: dict) -> bool:
     coverage = INDEX.tool_run_receipts(run_id)
     if not coverage or coverage.get("task_ref") != task.ref:
         return False  # Missing receipts are not evidence that no effect occurred.
-    append_only = {"source.ingest", "source.handoff", "observations.temporary.append", "task.complete"}
+    append_only = {"source.ingest", "source.handoff", "observations.retain", "observations.temporary.append", "task.complete"}
     return all(call.get("status") == "returned" and (
         call.get("read_only") is True or call.get("read_only") == 1 or call.get("tool") in append_only
     ) for call in coverage["calls"])
@@ -1570,6 +1854,19 @@ def prepare_task(note: Note) -> bool:
     return False
 
 
+def memory_curation_paused(note: Note) -> bool:
+    from ..memory.hindsight import MEMORY, EVENT as MEMORY_EVENT
+
+    params = note.meta.get("params")
+    return bool(MEMORY.curation_paused and isinstance(params, dict) and (
+        params.get("event") == MEMORY_EVENT
+        or note.ref == "Tasks/link" and params.get("observation_source")))
+
+
+
+
+
+
 def due_tasks(notes: list[Note] | None = None) -> list:
     from ..realtime.runtime import RUNTIME
 
@@ -1596,10 +1893,14 @@ def due_tasks(notes: list[Note] | None = None) -> list:
             if note is None or not _realtime_allows(note, accepted_resolver):
                 continue
         params = note.meta.get("params")
+        if memory_curation_paused(note):
+            # Preserve the occurrence and FIFO during a rebuild or the owner's
+            # curation hold. Ordinary scheduled/manual Curate is separate.
+            continue
         if (
             isinstance(params, dict)
             and params.get("wait_for_idle") is True
-            and _other_task_active(note.ref)
+            and _other_task_active(note.ref, notes)
         ):
             continue
         status = str(note.meta.get("status", "draft"))
@@ -1608,9 +1909,10 @@ def due_tasks(notes: list[Note] | None = None) -> list:
             status == "pending"
             and isinstance(params, dict)
             and params.get("event")
-            and params.get("activation_key")
+            and (params.get("activation_key") or params.get("event") == "model.added" and params.get("model_event_id"))
         ):
-            # Deliver finished research before admitting other event work.
+            # Recovery and bound improvement work must not starve behind an
+            # ingestion backlog. Then deliver finished research before other work.
             # Each Task FIFO remains authoritative; only competing heads are
             # ordered, chronologically within each event class.
             since = note.mtime
@@ -1619,7 +1921,9 @@ def due_tasks(notes: list[Note] | None = None) -> list:
                     or note.meta.get("status_updated") or "").replace("Z", "+00:00")).timestamp()
             except (ValueError, OverflowError, OSError):
                 pass
-            priority = 0 if params["event"] == "source.inbox" else 1
+            priority = (-2 if note.ref == "Tasks/repair" else
+                        -1 if note.ref == "Tasks/audit" and params.get("optimization_case") else
+                        0 if params["event"] == "source.inbox" else 1)
             due.append((priority, since, note.ref, note))
         elif schedule and status in ("pending", "completed", "review", "failed"):
             if (
@@ -1643,14 +1947,33 @@ def due_tasks(notes: list[Note] | None = None) -> list:
                 nxt = croniter(str(schedule), base).get_next(float)
             except (ValueError, KeyError):
                 continue
+            if (
+                status == "failed" and isinstance(params, dict)
+                and (params.get("activation_key") or params.get("event"))
+                and any(_event_key(item) == ("activation", f"schedule:{note.ref}:{nxt}")
+                        for item in [params, *_event_queue(note.meta)])
+            ):
+                # This firing already waits behind the unresolved failed head.
+                # Launching would only find it queued and wake the loop again.
+                continue
             if nxt <= now and status != "review":
                 due.append((2, nxt, note.ref, note))
         elif not schedule and status == "pending":
             due.append((2, note.mtime, note.ref, note))
     if due and accepted_resolver is None:
         accepted_resolver = Resolver(notes)
-    return [note for _kind, _since, _ref, note in sorted(due, key=lambda item: item[:3])
-            if _resources_allow(note, accepted_resolver=accepted_resolver)]
+    admitted = []
+    for _kind, _since, _ref, note in sorted(due, key=lambda item: item[:3]):
+        if not _resources_allow(note, accepted_resolver=accepted_resolver):
+            if not _event_queue(note.meta) or not _promote_interactive_event(note):
+                continue
+            note = load_note(note.path)
+            if note is None or not _realtime_allows(note, accepted_resolver):
+                continue
+            if not _resources_allow(note, accepted_resolver=accepted_resolver):
+                continue
+        admitted.append(note)
+    return admitted
 
 
 async def _run(note, **run_kwargs) -> None:
@@ -1809,13 +2132,20 @@ def _claim_ready_continuation() -> dict | None:
     return None
 
 
-def launch(note, **run_kwargs) -> asyncio.Task:
+def launch(note, *, owner_requested: bool = False, **run_kwargs) -> asyncio.Task:
     """Start one tracked Task through the same failure boundary as the scheduler."""
     if _shutting_down:
         raise RuntimeError("Harness shutdown has stopped Task admission")
+    if memory_curation_paused(note):
+        raise RuntimeError("Memory curation is paused by the owner")
+    effective = replace(note, meta={**note.meta, "params": run_kwargs["runtime_params"]}) if (
+        run_kwargs.get("runtime_params") is not None) else note
     if not _realtime_allows(note):
         raise RuntimeError("task is paused while foreground input owns execution")
-    error = _resource_error(note, run_kwargs.get("model"))
+    error = _resource_error(
+        effective, run_kwargs.get("model"),
+        owner_requested=owner_requested or run_kwargs.get("interactive") is True,
+    )
     if error:
         raise error
     _claim(note)
@@ -1837,6 +2167,14 @@ async def shutdown() -> None:
 def _launch_due_tasks() -> None:
     """Admit only free executor capacity; overdue work stays in its Task."""
     notes = iter_notes()
+    from .optimization import publish_validated, reconcile_rejections
+    publish_validated()
+    reconcile_rejections(notes)
+    # Audit may have acquired a new ordinary event; use its current runtime.
+    notes = [load_note(note.path) or note if note.ref == "Tasks/audit" else note for note in notes]
+    if reconcile_task_health(notes):
+        current_repair = load_note("Tasks/repair.md")
+        notes = [current_repair if note.ref == "Tasks/repair" and current_repair else note for note in notes]
     active = _running | {note.ref for note in notes
                          if note.kind == "task" and str(note.meta.get("status", "")) == "running"}
     available = 0 if _continuations_running else max(0, CONFIG.concurrency - len(active))
@@ -1852,16 +2190,18 @@ def _launch_due_tasks() -> None:
 
 
 async def loop() -> None:
-    global _wake_loop, _wake_event
+    global _wake_loop, _wake_event, _source_delivery_issues
     _wake_loop, _wake_event = asyncio.get_running_loop(), asyncio.Event()
     try:
         while not _shutting_down:
             _wake_event.clear()
             try:
                 from ..knowledge.source import dispatch_pending_source_events
-                dispatch_pending_source_events()
+                _source_delivery_issues = dispatch_pending_source_events()["issues"]
                 INDEX.sync()
-                reconcile_check_health()
+                await _refresh_source_health()
+                from ..memory.hindsight import MEMORY
+                await MEMORY.check_health()
                 from .refinement import reconcile_candidates
                 reconcile_candidates()
                 continuation = _claim_ready_continuation()
@@ -1870,6 +2210,7 @@ async def loop() -> None:
                     _background.add(task)
                     task.add_done_callback(_background_finished)
                 else:
+                    await model_runtime.RUNTIME.refresh_memory_plans()
                     _launch_due_tasks()
             except Exception as exc:  # A failed tick must not lose queued work.
                 print(f"[scheduler] tick error: {exc}")

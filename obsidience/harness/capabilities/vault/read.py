@@ -12,6 +12,20 @@ ARTICLE_BODY_END = "--- End of Article body ---"
 INBOUND_REFERENCES_HEADING = "## Accepted inbound references"
 
 
+def editable_proposal_body(body: str, note, context: dict) -> str:
+    """Remove only an exact generated footer attested by this run's full read."""
+    if note is None:
+        return body
+    marker = re.search(r"(?m)^" + re.escape(ARTICLE_BODY_END) + r"[ \t]*$", body)
+    read = context.get("_article_reads", {}).get(note.ref, {})
+    if (marker and read.get("complete") is True
+            and read.get("article_sha256") == hashlib.sha256(note.text().encode()).hexdigest()
+            and read.get("graph_context_sha256")
+            == hashlib.sha256(body[marker.start():].strip().encode()).hexdigest()):
+        return body[:marker.start()].rstrip()
+    return body
+
+
 def execute(args: dict, context: dict) -> str:
     from obsidience.harness.knowledge.vault import (
         SYSTEM_DIRS, Resolver, _NOTE_WRITE_LOCK, iter_notes, load_note,
@@ -52,6 +66,10 @@ def execute(args: dict, context: dict) -> str:
             _agent, allowed = execution_scope(context, Resolver(notes))
         except PermissionError as exc:
             return str(exc)
+        # Minted only by the executor for a stored controller task.assigned
+        # occurrence; Tool arguments and nested params cannot supply this field.
+        if context.get("event") == "task.assigned":
+            allowed.update(context.get("_assignment_read_refs", ()))
         notes = [note for note in notes if note.ref in allowed]
         res = Resolver(notes)
         selected = [res.resolve(ref) for ref in refs]
@@ -75,7 +93,10 @@ def execute(args: dict, context: dict) -> str:
                 ok, output = _read(note, sorted(inbound[note.ref]), offset, expected, context)
             else:
                 context.get("_article_reads", {}).pop(ref.removesuffix(".md"), None)
-                ok, output = False, f"Note not found: {ref}"
+                ok, output = False, (
+                    f"Note not found in this Agent's readable scope: {ref}. "
+                    "Links in other Articles do not grant access to their targets."
+                )
             if not batch:
                 return output
             results.append({"ref": note.ref if note else ref, "ok": ok, "result": output})
@@ -135,6 +156,7 @@ def _read(note, inbound: list[str], offset: int, expected: str | None, context: 
         del reads[next(iter(reads))]
     reads[note.ref] = {
         "article_sha256": hashlib.sha256(article.encode("utf-8")).hexdigest(),
+        "graph_context_sha256": hashlib.sha256(graph_context.strip().encode()).hexdigest(),
         "view_sha256": revision, "ranges": merged[-MAX_RECEIPTS:], "total_characters": len(view),
         "complete": merged == [[0, len(view)]],
     }

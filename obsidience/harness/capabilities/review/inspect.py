@@ -7,7 +7,7 @@ import json
 
 def execute(args: dict, context: dict) -> str:
     del context
-    from obsidience.harness.knowledge.review import list_proposals
+    from obsidience.harness.knowledge.review import list_reviews
     from obsidience.harness.knowledge.vault import Resolver, iter_notes
 
     task_ref = str(args.get("task", ""))
@@ -17,7 +17,7 @@ def execute(args: dict, context: dict) -> str:
             return json.dumps({"error": "An exact accepted Task is required"})
         task_ref = task.ref
     proposal = str(args.get("proposal", ""))
-    rows = [row for row in list_proposals()
+    rows = [row for row in list_reviews()
             if (not task_ref or row.get("task") == task_ref)
             and (not proposal or row.get("file") == proposal)]
     fields = ("file", "target", "task", "run_id", "action", "review_class", "reason",
@@ -31,4 +31,4 @@ def execute(args: dict, context: dict) -> str:
         item["link_evidence"] = row.get("link_evidence", [])[:8]
         result.append(item)
     return json.dumps({"pending": result, "count": len(rows), "truncated": len(rows) > 8,
-                       "rule": "Pending proposals are unaccepted. No pending proposal does not prove approval."}, default=str)
+                       "rule": "Article proposals are unaccepted. Health notifications require attention and acknowledgement never clears their cause. An empty queue does not prove approval or health."}, default=str)

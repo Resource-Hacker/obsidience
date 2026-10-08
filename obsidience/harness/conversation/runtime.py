@@ -19,8 +19,13 @@ from ..models import runtime as model_runtime
 from ..models.context import PROMPT_SAFETY_TOKENS, cached_text_count, measure_text
 
 EXECUTIVE_AGENT_REF = "Agents/Executive/Executive"
-COMPACT_TASK_REF = "Tasks/observations/immediate/compact"
 SPEECH_RESPONSE_CONTRACT = (
+    "This is a voice conversation. Owner utterances reach you as speech-recognition text, "
+    "not raw audio. Receiving an utterance establishes that its words were captured. "
+    "For a check such as 'can you hear me?', acknowledge receiving the spoken request "
+    "directly; no camera observation is needed. A camera image cannot establish hearing. "
+    "Transcript receipt alone does not establish audio quality, speaker identity, or "
+    "continuous microphone health. "
     "Answer the owner in one or two short spoken sentences unless detail is requested. "
     "If unclear, ask one brief question. Never narrate Task, Tool, transport, "
     "or harness status unless asked. Answer directly in text; use native Tools for operations."
@@ -29,7 +34,6 @@ MAX_EVENT_TEXT = 512
 DEFAULT_CONTEXT_THRESHOLD = 80
 MIN_CONTEXT_THRESHOLD = 60
 MAX_CONTEXT_THRESHOLD = 90
-RECENT_EXACT_PAIR_COUNT = 2
 DEFAULT_THINKING_OVERHEAD_TOKENS = 1_500
 
 
@@ -66,7 +70,6 @@ class ConversationRuntime:
         self._turn_task: asyncio.Task | None = None
         self._generation = 0
         self._last_task_ref = EXECUTIVE_REF
-        self._compact_lock = asyncio.Lock()
         self._session_finalize_lock = asyncio.Lock()
         self._compacting = False
         self._thinking_overhead_tokens = DEFAULT_THINKING_OVERHEAD_TOKENS
@@ -74,6 +77,43 @@ class ConversationRuntime:
         self._steering: TurnSteering | None = None
         self._prefill_task: asyncio.Task | None = None
         self._prefill_latest: tuple[int, str] | None = None
+        self._prepared_native: tuple[str, int] | None = None
+        self._warm_state = "waiting"
+        self._context_refresh_task: asyncio.Task | None = None
+        self._context_refresh_requested: tuple[int, str] | None = None
+
+    def readiness(self) -> dict:
+        return {"state": self._warm_state, "warm": self._warm_state == "ready"}
+
+    def invalidate_readiness(self) -> None:
+        self._warm_state = "busy"
+        self._prefill_latest = None
+
+    def prepare_idle(self) -> None:
+        """Prepare the selected Executive conversation when model work releases."""
+        if (self.speech is None or not self.speech.snapshot()["ready"]
+                or self._lock.locked() or not self.continuation_resume_available()
+                or model_runtime.RUNTIME.work_requested):
+            return
+        if self._warm_state == "ready" and self._prefill_latest == (0, ""):
+            return
+        self._prefill_latest = (0, "")
+        if self._prefill_task is None or self._prefill_task.done():
+            self._prefill_task = asyncio.create_task(self._prepare_speech(), name="obsidience-executive-standby")
+
+    def _stable_prefix_current(self) -> bool:
+        """Ready standby already warmed the exact prefix a partial would prepare.
+
+        Native preparation stops before request text, Scene and Knowledge. Model
+        work invalidates readiness; any native turn advances the revision.
+        """
+        if self._warm_state != "ready" or self._prepared_native is None:
+            return False
+        from ..execution.deepseek.sessions import view
+        conversation_id, revision = self._prepared_native
+        current = view(conversation_id)
+        return (conversation_id == self._conversation.conversation_id
+                and current is not None and current.get("revision") == revision)
 
     def prepare_speech_prefix(self, text: str, sequence: int) -> None:
         """Coalesce partials into one cancellable, non-persistent model warmup."""
@@ -81,7 +121,8 @@ class ConversationRuntime:
                 or type(sequence) is not int or sequence <= 0
                 or self._lock.locked()
                 or self.speech is None or not self.speech.snapshot()["ready"]
-                or (self._turn_task is not None and not self._turn_task.done())):
+                or (self._turn_task is not None and not self._turn_task.done())
+                or self._stable_prefix_current()):
             return
         latest = (sequence, text)
         if latest == self._prefill_latest:
@@ -96,27 +137,48 @@ class ConversationRuntime:
         try:
             while self._prefill_latest is not None:
                 sequence, text = latest = self._prefill_latest
+                if sequence and self._stable_prefix_current():
+                    # A partial queued behind standby would repeat its exact prefix.
+                    self._prefill_latest = (0, "")
+                    break
                 started = time.monotonic()
+                conversation_id = self._conversation.conversation_id
+                if sequence == 0:
+                    self._warm_state = "warming"
+                    self._prepared_native = None
+                    if self.speech is not None:
+                        await self.speech.publish_readiness()
                 trace.latency("speech_prefill_started", speech_sequence=sequence)
                 try:
-                    result = await prepare(self._conversation, text, SPEECH_RESPONSE_CONTRACT)
+                    result = await prepare(self._conversation, text, SPEECH_RESPONSE_CONTRACT,
+                                           idle=sequence == 0)
+                    if sequence == 0:
+                        self._warm_state = "ready" if result["status"] == "prepared" else "unavailable"
+                        if self._warm_state == "ready" and result.get("native_revision") is not None:
+                            self._prepared_native = (conversation_id, result["native_revision"])
                     trace.latency("speech_prefill_completed", speech_sequence=sequence,
                                   duration_ms=(time.monotonic() - started) * 1000)
-                    trace.emit("measurement", "Speech prefix preparation", [
+                    trace.emit("measurement", "Executive standby preparation" if sequence == 0 else "Speech prefix preparation", [
                         f"status: {result['status']}",
                         f"prompt_tokens: {result.get('prompt_tokens', 0)}",
                         f"cached_tokens: {result.get('cached_tokens', 0)}",
                     ])
                 except asyncio.CancelledError:
+                    if sequence == 0:
+                        self._warm_state = "busy" if model_runtime.RUNTIME.work_requested else "waiting"
                     trace.latency("speech_prefill_cancelled", speech_sequence=sequence)
                     raise
                 except Exception as exc:
+                    if sequence == 0:
+                        self._warm_state = "unavailable"
                     # Optional preparation never blocks final admission or exposes draft output.
                     trace.emit("measurement", "Speech prefix preparation skipped", [type(exc).__name__])
                 if latest == self._prefill_latest:
                     break
         finally:
             self._prefill_task = None
+            if self.speech is not None:
+                await self.speech.publish_readiness()
 
     async def _cancel_speech_prefill(self) -> None:
         self._prefill_latest = None
@@ -166,15 +228,17 @@ class ConversationRuntime:
 
     async def _speak_public(self, text: str, generation: int, *,
                             turn_id: str = "", run_id: str = "",
-                            speech_sequence: int | None = None) -> None:
+                            speech_sequence: int | None = None,
+                            outcome: str = "") -> None:
         """Speech delivery cannot change an already settled Task outcome."""
-        if (self.speech is None or generation != self._generation
-                or not self.speech.snapshot()["ready"]):
+        if self.speech is None or generation != self._generation:
             return
         try:
-            await self.speech._send_worker({
+            await self.speech.speak({
                 "type": "speak", "generation": generation, "text": text,
-                **({"turn_id": turn_id, "run_id": run_id} if turn_id and run_id else {}),
+                "outcome": outcome,
+                **({"turn_id": turn_id} if turn_id else {}),
+                **({"run_id": run_id} if run_id else {}),
                 **({"speech_sequence": speech_sequence} if type(speech_sequence) is int else {}),
             })
         except Exception as exc:
@@ -186,6 +250,7 @@ class ConversationRuntime:
             self.speech._last_error = None
 
     async def cancel(self, *, stop_playback: bool = True, reason: str = "requested") -> None:
+        await self._cancel_context_refresh()
         await self._cancel_speech_prefill()
         self._generation += 1
         if self._steering is not None:
@@ -230,8 +295,12 @@ class ConversationRuntime:
                 await self.finalize_observation_session(
                     outgoing, session_boundary="chat.new_conversation",
                 )
+            from ..execution.deepseek.bridge import BRIDGE
+            await BRIDGE.control('close', session_id=outgoing)
             result = await self._conversation.new_conversation()
-            self.publish_context()
+            await self.publish_context()
+            self._warm_state = "waiting"
+            asyncio.get_running_loop().call_soon(self.prepare_idle)
             return result
 
     async def submit(
@@ -257,6 +326,7 @@ class ConversationRuntime:
                 name=f"obsidience-conversation-turn-{user_turn['id']}",
             )
             self._turn_task = turn_task
+            turn_task.add_done_callback(lambda _task: self.prepare_idle())
         if not wait:
             return user_turn
         try:
@@ -303,13 +373,15 @@ class ConversationRuntime:
         self._conversation.publish({"type": "start", "source": source})
         inbox = self._steering
         self._publish_active_turn()
+        activity_completion: dict = {}
+        refresh_context = False
         try:
             admission_started = time.monotonic()
             task, params, event = admit_executive(text, "voice" if source == "realtime" else "text")
             trace.latency("admission", duration_ms=(time.monotonic() - admission_started) * 1000)
             self._last_task_ref = task.ref
             preparation_started = time.monotonic()
-            context = await self.prepare_immediate_observations(user_turn, context_task_ref=task.ref)
+            context = await self.prepare_conversation_context(user_turn, context_task_ref=task.ref)
             prior_effects = historical_evidence(
                 self._conversation, conversation_id=str(user_turn["conversation_id"]),
                 before_sequence=int(user_turn["sequence"]),
@@ -322,12 +394,21 @@ class ConversationRuntime:
             })
             if source == "realtime":
                 params["response_contract"] = SPEECH_RESPONSE_CONTRACT
+            async def verified_command(name: str, run_id: str) -> None:
+                if source == "realtime" and generation == self._generation and self.speech is not None:
+                    # The command's receipt and fresh state are settled now;
+                    # do not wait for the model to compose its closing text.
+                    trace.latency("command_verified", run_id=run_id)
+                    await self.speech.cue("complete")
+
             result = await run_conversation(
                 task, runtime_params=params, emit_turn_event=False,
                 interactive=True, conversation_context=context,
                 conversation_evidence=prior_effects,
                 routing_context=self._routing_context(user_turn),
                 steering=inbox,
+                activity_completion=activity_completion,
+                verified_command=verified_command,
             )
             self.record_prompt_usage(result, request_text=text)
             if generation != self._generation:
@@ -349,11 +430,14 @@ class ConversationRuntime:
                 reply_to=str(user_turn["id"]),
             )
             trace.latency("answer_committed", run_id=str(result.get("run_id") or ""))
-            self.publish_context()
-            if source == "realtime":
+            from ..memory.hindsight import MEMORY
+            MEMORY.completed("Agents/Executive/Executive", text, reply,
+                             source="conversation:" + str(user_turn["conversation_id"]), identifier=str(user_turn["id"]))
+            if source == "realtime" and result.get("voice_confirmation") != "cue_only":
                 await self._speak_public(reply, generation, turn_id=str(user_turn["id"]),
                                          run_id=str(result.get("run_id") or ""),
-                                         speech_sequence=speech_sequence)
+                                         speech_sequence=speech_sequence, outcome="completed")
+            refresh_context = True
             await self._publish_speech(
                 "reply", text=reply, transcript=text, run_id=result.get("run_id"),
                 turn_id=assistant_turn["id"],
@@ -365,10 +449,12 @@ class ConversationRuntime:
             message = f"Executive turn failed: {type(exc).__name__}: {exc}"[:MAX_EVENT_TEXT]
             trace.emit("error", message)
             await self._report_task_outcome(
-                {"status": "failed"}, source=source, generation=generation,
+                {"status": "failed", "run_id": activity_completion.get("run_id")}, source=source, generation=generation,
             )
             return {"status": "failed", "summary": message}
         finally:
+            if activity_completion:
+                knowledge_activity.emit(**activity_completion)
             if inbox is not None:
                 inbox.close()
             if self._steering is inbox:
@@ -377,6 +463,9 @@ class ConversationRuntime:
             self._conversation.publish({"type": "end"})
             if self._turn_task is asyncio.current_task():
                 self._turn_task = None
+            if (refresh_context and generation == self._generation
+                    and not asyncio.current_task().cancelling()):
+                self.request_context_refresh()
 
     async def _report_task_outcome(self, result: dict, *, source: str, generation: int) -> None:
         """Deliver a terminal notice without inventing a successful dialogue pair.
@@ -407,18 +496,19 @@ class ConversationRuntime:
         await self._publish_speech("task_result", status=status, text=notice,
                                    run_id=result.get("run_id"))
         if source == "realtime":
-            await self._speak_public(notice, generation)
+            await self._speak_public(notice, generation, run_id=str(result.get("run_id") or ""),
+                                     outcome="failed")
 
     def _context_model(self, task_ref: str | None = None) -> model_runtime.ModelSpec:
         from ..knowledge.links import article_ref
         from ..knowledge.vault import load_note, resolver
 
         reference = task_ref or self._last_task_ref
-        # The selected Task already supplies its canonical identity. Preserve
+        # The selected execution owner supplies its canonical identity. Preserve
         # ordinary resolver fallback for aliases, case variants, and misses.
         task = (
             load_note(reference + ".md")
-            if reference.startswith("Tasks/")
+            if reference.startswith(("Tasks/", "Agents/"))
             and article_ref("/" + reference + ".md") == reference
             else None
         )
@@ -432,16 +522,10 @@ class ConversationRuntime:
         )
 
     def _context_threshold(self) -> int:
-        from ..knowledge.vault import load_note
+        from ..execution.deepseek.sessions import compaction_threshold
+        return compaction_threshold()
 
-        task = load_note(COMPACT_TASK_REF + ".md")
-        try:
-            value = int(task.meta.get("context_threshold", DEFAULT_CONTEXT_THRESHOLD))
-        except (AttributeError, TypeError, ValueError):
-            value = DEFAULT_CONTEXT_THRESHOLD
-        return min(MAX_CONTEXT_THRESHOLD, max(MIN_CONTEXT_THRESHOLD, value))
-
-    def context_status(
+    async def context_status(
         self,
         *,
         before_sequence: int | None = None,
@@ -449,42 +533,87 @@ class ConversationRuntime:
         context_task_ref: str | None = None,
         pending_text: str = "",
     ) -> dict[str, Any]:
-        """Project the Immediate Observations Article and report its model occupancy."""
-        from ..conversation.observations import project_immediate_observations
+        """Measure the selected model's native conversation input."""
+        from .context import project_conversation
+        from ..execution.deepseek.sessions import measure_context
 
         exact_conversation_id = conversation_id or self._conversation.conversation_id
-        projection = project_immediate_observations(
+        projection = project_conversation(
             self._conversation,
             conversation_id=exact_conversation_id,
             before_sequence=before_sequence,
-            materialize=(exact_conversation_id == self._conversation.conversation_id),
         )
         spec = self._context_model(context_task_ref)
-        capacity = max(
-            1,
-            spec.context_tokens - spec.max_output_tokens - PROMPT_SAFETY_TOKENS,
-        )
-        immediate = cached_text_count(str(projection["body"]), spec)
-        pending = cached_text_count(pending_text, spec)
-        used = self._thinking_overhead_tokens + immediate.tokens + pending.tokens
+        # Native compaction prices pressure against the adapter's context window.
+        # The provider's exact request guard separately reserves output capacity.
+        capacity = spec.context_tokens
+        count = await measure_context(exact_conversation_id, spec,
+                                      before_sequence=before_sequence, pending_text=pending_text)
+        if count is not None:
+            used, method, scope = count.tokens, count.method, "native_session"
+        else:
+            # A conversation without a native session still uses the legacy
+            # migration projection. Measure its text rather than showing bytes.
+            immediate, pending = await asyncio.gather(
+                measure_text(str(projection["body"]), spec), measure_text(pending_text, spec),
+            )
+            used = self._thinking_overhead_tokens + immediate.tokens + pending.tokens
+            method = "runtime" if immediate.method == pending.method == "runtime" else "utf8_upper_bound"
+            scope = "conversation_with_estimated_overhead"
         return {
             "type": "context",
             "conversation_id": exact_conversation_id,
             "article_ref": projection["ref"],
             "used_tokens": used,
-            "count_method": "runtime" if immediate.method == pending.method == "runtime" else "utf8_upper_bound",
+            "count_method": method,
+            "measurement_scope": scope,
             "capacity_tokens": capacity,
             "percent": round(min(100.0, used * 100.0 / capacity), 1),
             "compact_at": self._context_threshold(),
             "compacting": self._compacting,
-            "compacted_through": projection["compacted_through"],
+            "compaction_count": projection["compaction_count"],
+            "compaction_backend": "deepseek",
             "latest_sequence": projection["latest_sequence"],
         }
 
-    def publish_context(self) -> dict[str, Any]:
-        status = self.context_status()
+    async def publish_context(self) -> dict[str, Any]:
+        status = await self.context_status()
         self._conversation.publish(status)
         return status
+
+    def request_context_refresh(self) -> None:
+        """Refresh the display after delivery; never hold the conversation lane."""
+        self._context_refresh_requested = (self._generation, self._conversation.conversation_id)
+        if self._context_refresh_task is None or self._context_refresh_task.done():
+            self._context_refresh_task = asyncio.create_task(
+                self._refresh_context_display(), name="obsidience-context-display",
+            )
+
+    async def _refresh_context_display(self) -> None:
+        try:
+            while self._context_refresh_requested is not None:
+                generation, conversation_id = self._context_refresh_requested
+                self._context_refresh_requested = None
+                status = await self.context_status(conversation_id=conversation_id)
+                if (generation == self._generation
+                        and conversation_id == self._conversation.conversation_id
+                        and self._context_refresh_requested is None):
+                    self._conversation.publish(status)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            # Display failure cannot turn an accepted answer into a failed turn.
+            trace.emit("measurement", "Conversation context display refresh skipped", [type(exc).__name__])
+        finally:
+            self._context_refresh_task = None
+
+    async def _cancel_context_refresh(self) -> None:
+        self._context_refresh_requested = None
+        task = self._context_refresh_task
+        if task is not None and task is not asyncio.current_task():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
 
     def record_prompt_usage(self, result: dict[str, Any], *, request_text: str = "") -> None:
         prompt = int(result.get("prompt_tokens_estimate") or 0)
@@ -507,180 +636,62 @@ class ConversationRuntime:
             raise ValueError(
                 f"context threshold must be {MIN_CONTEXT_THRESHOLD}-{MAX_CONTEXT_THRESHOLD}"
             )
-        from ..knowledge.index import INDEX
-        from ..knowledge.vault import mutate_note_metadata, resolver
+        from ..execution.deepseek.sessions import set_compaction_threshold
+        await set_compaction_threshold(value)
+        return await self.publish_context()
 
-        task = resolver().resolve(COMPACT_TASK_REF)
-        if task is None or task.kind != "task":
-            raise RuntimeError("the Compact Immediate Observations Task is missing")
-        mutate_note_metadata(task, lambda meta: meta.__setitem__("context_threshold", value))
-        await asyncio.to_thread(INDEX.sync)
-        return self.publish_context()
-
-    async def compact_conversation(
-        self,
-        *,
-        force: bool,
-        before_sequence: int | None = None,
-        conversation_id: str | None = None,
-        context_task_ref: str | None = None,
-        pending_text: str = "",
-        closed_session: bool = False,
-    ) -> dict[str, Any]:
-        """Issue the one graph Task that compacts Immediate into Temporary."""
-        exact_conversation_id = conversation_id or self._conversation.conversation_id
-        current = asyncio.current_task()
-        if force and self._turn_task and self._turn_task is not current and not self._turn_task.done():
-            raise RuntimeError("wait for the active Executive turn before compacting")
-        async with self._compact_lock:
-            status = self.context_status(
-                before_sequence=before_sequence,
-                conversation_id=exact_conversation_id,
-                context_task_ref=context_task_ref,
-                pending_text=pending_text,
+    async def compact_conversation(self, *, force: bool, conversation_id: str | None = None,
+                                   wait: bool = True) -> dict[str, Any]:
+        """Manual control of the native backend; automatic pressure belongs to DeepSeek."""
+        if not force:
+            return {"status": "native_backend_owned"}
+        async with self._lock:
+            if not self.continuation_resume_available():
+                raise RuntimeError("wait for the active Executive turn before compacting")
+            await self._cancel_context_refresh()
+            await self._cancel_speech_prefill()
+            self.invalidate_readiness()
+            task = asyncio.create_task(
+                self._compact_conversation(conversation_id or self._conversation.conversation_id),
+                name="obsidience-conversation-compact",
             )
-            if (not force and status["count_method"] != "runtime"
-                    and int(status["used_tokens"]) * 100
-                    >= int(status["compact_at"]) * int(status["capacity_tokens"])):
-                from .observations import project_immediate_observations
+            self._turn_task = task
+            task.add_done_callback(lambda _task: self.prepare_idle())
+        if not wait:
+            return {"status": "started", "backend": "deepseek"}
+        try:
+            return await task
+        except asyncio.CancelledError:
+            current = asyncio.current_task()
+            if task.cancelled() and current is not None and current.cancelling() == 0:
+                return {"status": "interrupted", "backend": "deepseek"}
+            raise
 
-                projection = project_immediate_observations(
-                    self._conversation, conversation_id=exact_conversation_id,
-                    before_sequence=before_sequence, materialize=False,
-                )
-                spec = self._context_model(context_task_ref)
-                immediate, pending = await asyncio.gather(
-                    measure_text(str(projection["body"]), spec), measure_text(pending_text, spec),
-                )
-                used = self._thinking_overhead_tokens + immediate.tokens + pending.tokens
-                status.update(used_tokens=used, percent=round(min(100.0, used * 100.0 / status["capacity_tokens"]), 1))
-                if immediate.method != "runtime" or pending.method != "runtime":
-                    # A byte upper bound alone cannot justify another model
-                    # inference. The exact whole-request guard still applies.
-                    return {"status": "measurement_unavailable", "context": status}
-                status["count_method"] = "runtime"
-            if (
-                not force
-                and int(status["used_tokens"]) * 100
-                < int(status["compact_at"]) * int(status["capacity_tokens"])
-            ):
-                return {"status": "not_needed", "context": status}
-            if int(status["latest_sequence"]) <= int(status["compacted_through"]):
-                return {"status": "nothing_to_compact", "context": status}
-            pairs = self._conversation.complete_pairs(
-                conversation_id=exact_conversation_id,
-                before_sequence=before_sequence,
-                after_sequence=int(status["compacted_through"]),
-            )
-            keep_recent = 0 if closed_session else RECENT_EXACT_PAIR_COUNT
-            if len(pairs) <= keep_recent:
-                return {"status": "nothing_to_compact", "context": status}
+    async def _compact_conversation(self, conversation_id: str) -> dict[str, Any]:
+        from ..execution.deepseek.sessions import compact
+        generation = self._generation
+        self._compacting = True
+        self._conversation.publish({"type": "start", "source": "compact"})
+        try:
+            await self.publish_context()
+            return await compact(conversation_id, self._context_model())
+        except Exception as exc:
+            self._conversation.publish({"type": "error", "text": str(exc)[:512]})
+            return {"status": "failed", "backend": "deepseek"}
+        finally:
+            self._compacting = False
+            if self._turn_task is asyncio.current_task():
+                self._turn_task = None
+            self._conversation.publish({"type": "end"})
+            if generation == self._generation and not asyncio.current_task().cancelling():
+                self.request_context_refresh()
 
-            from ..conversation.observations import (
-                EXECUTIVE_TEMPORARY_PATH,
-                commit_context_compaction,
-                discard_pending_context_compaction,
-                project_immediate_observations,
-            )
-            from ..execution.executor import run_task
-            from ..knowledge.index import INDEX
-            from ..knowledge.vault import resolver
-
-            task = resolver().resolve(COMPACT_TASK_REF)
-            if task is None or task.kind != "task":
-                raise RuntimeError("the Compact Immediate Observations Task is missing")
-            through_sequence = int(pairs[-keep_recent - 1][1]["sequence"])
-            projection = project_immediate_observations(
-                self._conversation,
-                conversation_id=exact_conversation_id,
-                before_sequence=through_sequence + 1,
-                materialize=(exact_conversation_id == self._conversation.conversation_id),
-            )
-            turn_id = (
-                f"compact-{exact_conversation_id.removeprefix('conversation-')[:16]}"
-                f"-{through_sequence}"
-            )
-            self._compacting = True
-            if exact_conversation_id == self._conversation.conversation_id:
-                self._conversation.publish(status | {"compacting": True})
-            try:
-                result = await run_task(
-                    task,
-                    runtime_params={
-                        "event": (
-                            "observations.immediate.boundary"
-                            if closed_session
-                            else "observations.immediate.manual" if force
-                            else "observations.immediate.threshold"
-                        ),
-                        "source": "executive:context",
-                        "turn_id": turn_id,
-                        "target_path": str(EXECUTIVE_TEMPORARY_PATH),
-                        "curation_mode": "compaction",
-                        "conversation_id": exact_conversation_id,
-                        "through_sequence": str(through_sequence),
-                        "active_conversation_id": self._conversation.conversation_id,
-                    },
-                    emit_turn_event=False,
-                    conversation_context=str(projection["body"]),
-                )
-                if result.get("status") != "completed":
-                    removed = discard_pending_context_compaction(
-                        conversation_id=exact_conversation_id,
-                        through_sequence=through_sequence,
-                        turn_id=turn_id,
-                    )
-                    if removed:
-                        await asyncio.to_thread(INDEX.sync)
-                    return result
-                compacted = commit_context_compaction(
-                    conversation_id=exact_conversation_id,
-                    through_sequence=through_sequence,
-                    turn_id=turn_id,
-                )
-                project_immediate_observations(
-                    self._conversation,
-                    conversation_id=exact_conversation_id,
-                    before_sequence=before_sequence,
-                    materialize=(exact_conversation_id == self._conversation.conversation_id),
-                )
-                await asyncio.to_thread(INDEX.sync)
-                return {**result, "temporary_ref": compacted.ref}
-            except BaseException:
-                removed = discard_pending_context_compaction(
-                    conversation_id=exact_conversation_id,
-                    through_sequence=through_sequence,
-                    turn_id=turn_id,
-                )
-                if removed:
-                    await asyncio.to_thread(INDEX.sync)
-                raise
-            finally:
-                self._compacting = False
-                self.publish_context()
-
-    async def prepare_immediate_observations(
-        self,
-        user_turn: dict[str, Any],
-        *,
-        context_task_ref: str | None = None,
-    ) -> str:
-        exact_conversation_id = str(user_turn["conversation_id"])
-        await self.compact_conversation(
-            force=False,
-            before_sequence=int(user_turn["sequence"]),
-            conversation_id=exact_conversation_id,
-            context_task_ref=context_task_ref,
-            pending_text=str(user_turn.get("text") or ""),
-        )
-        from ..conversation.observations import project_immediate_observations
-
-        return str(project_immediate_observations(
-            self._conversation,
-            conversation_id=exact_conversation_id,
-            before_sequence=int(user_turn["sequence"]),
-            materialize=(exact_conversation_id == self._conversation.conversation_id),
-        )["body"])
+    async def prepare_conversation_context(self, user_turn: dict[str, Any], *, context_task_ref: str | None = None) -> str:
+        from ..execution.deepseek.sessions import refresh
+        from .context import project_conversation
+        await refresh(str(user_turn['conversation_id']))
+        return project_conversation(self._conversation, conversation_id=str(user_turn['conversation_id']),
+                                    before_sequence=int(user_turn['sequence']))['body']
 
     def _routing_context(self, user_turn: dict) -> str:
         """Recent exact dialogue for capability selection; execution keeps full context."""
@@ -769,14 +780,16 @@ class ConversationRuntime:
         async with self._lock:
             if self._turn_task is not None and not self._turn_task.done():
                 raise RuntimeError("the Executive turn lane is busy")
+            await self._cancel_context_refresh()
             self._turn_task = current
             self._last_task_ref = task.ref
             generation = self._generation
         reply_source = str(continuation.get("reply_source") or user_turn.get("source") or "text")
         if reply_source not in {"text", "realtime"}:
             reply_source = "text"
+        refresh_context = False
         try:
-            conversation_context = await self.prepare_immediate_observations(
+            conversation_context = await self.prepare_conversation_context(
                 user_turn,
                 context_task_ref=task.ref,
             )
@@ -831,10 +844,13 @@ class ConversationRuntime:
             active_conversation = (
                 str(user_turn["conversation_id"]) == self._conversation.conversation_id
             )
-            if active_conversation:
-                self.publish_context()
+            from ..memory.hindsight import MEMORY
+            MEMORY.completed("Agents/Executive/Executive", objective, reply,
+                             source="conversation:" + str(user_turn["conversation_id"]), identifier=turn_id)
             if reply_source == "realtime" and active_conversation:
                 await self._speak_public(reply, generation)
+            if active_conversation:
+                refresh_context = True
             await self._publish_speech(
                 "reply",
                 text=reply,
@@ -847,6 +863,9 @@ class ConversationRuntime:
         finally:
             if self._turn_task is current:
                 self._turn_task = None
+            if (refresh_context and generation == self._generation
+                    and not asyncio.current_task().cancelling()):
+                self.request_context_refresh()
 
     def defer_observation_session(
         self,
@@ -865,61 +884,12 @@ class ConversationRuntime:
         *,
         session_boundary: str,
     ) -> dict[str, Any]:
-        """Compact one closed session and issue its ordinary promotion event once."""
-
+        """Settle retained pre-migration finalization markers without memory writes."""
         exact = str(conversation_id).strip()
         if not exact:
-            raise ValueError("observation finalization requires a conversation identity")
-        async with self._session_finalize_lock:
-            from ..conversation.observations import (
-                project_immediate_observations,
-                promoted_context_sequence,
-                queue_temporary_promotion,
-            )
-
-            projection = project_immediate_observations(
-                self._conversation,
-                conversation_id=exact,
-                materialize=(exact == self._conversation.conversation_id),
-            )
-            latest_sequence = int(projection["latest_sequence"])
-            promoted_through = promoted_context_sequence(
-                exact,
-                active=(exact == self._conversation.conversation_id),
-            )
-            if latest_sequence <= promoted_through:
-                self._ledger().complete_observation_finalization(exact)
-                return {
-                    "status": "already_finalized",
-                    "conversation_id": exact,
-                    "through_sequence": promoted_through,
-                }
-            compacted = await self.compact_conversation(
-                force=True,
-                conversation_id=exact,
-                closed_session=True,
-            )
-            if compacted.get("status") not in {
-                "completed", "nothing_to_compact", "not_needed",
-            }:
-                raise RuntimeError(
-                    "final Immediate Observations compaction did not complete: "
-                    f"{compacted.get('status', 'unknown')}"
-                )
-            promotion = queue_temporary_promotion(
-                exact,
-                session_boundary=session_boundary,
-            )
-            if promotion.get("state") == "not_configured":
-                raise RuntimeError("the Alexandria promotion Task is not configured")
-            self._ledger().complete_observation_finalization(exact)
-            return {
-                "status": "finalized",
-                "conversation_id": exact,
-                "through_sequence": latest_sequence,
-                "compaction": compacted,
-                "promotion": promotion,
-            }
+            raise ValueError("Session finalization requires a conversation identity")
+        self._ledger().complete_observation_finalization(exact)
+        return {"status": "finalized", "conversation_id": exact, "backend": "deepseek"}
 
     async def finalize_pending(
         self,

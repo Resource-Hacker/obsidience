@@ -95,7 +95,6 @@ SOURCE_EVENT_TASKS = {
     "source.added": "Tasks/research/learn",
     "source.inbox": "Tasks/ingest",
 }
-DISTILL_TASK = "Tasks/research/distill"
 OBSERVATION_ARCHIVE_SOURCE_CLASS = "observation_archive"
 _FRONTMATTER = re.compile(r"\A---\n(?P<metadata>.*?)\n---\n\n", re.DOTALL)
 _BODY_PREFIX = (
@@ -107,18 +106,34 @@ _SOURCE_CITATION = re.compile(
     r"(?<![A-Za-z0-9])source://(?P<id>[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-"
     r"[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})(?![A-Za-z0-9-])"
 )
-_OBSERVATION_ARCHIVE_REF = re.compile(
-    r"\Aobsidience://observations/temporary/"
-    r"(?P<conversation>conversation-[0-9a-f]{32})/"
-    r"(?P<promotion>[0-9a-f]{20})\Z"
-)
-_EXECUTIVE_TEMPORARY_PREFIX = (
-    "Agents/Executive/Observations/Temporary Observations/"
-)
 
 
 class SourceError(ValueError):
     """A source failed the bounded evidence contract."""
+
+
+
+
+
+
+def research_source_binding(params: dict) -> dict | None:
+    """Keep a Source event's admitted identity distinct from external metadata."""
+    if params.get("event") != "source.added":
+        return None
+    try:
+        source_id = str(uuid.UUID(str(params.get("source_id", ""))))
+    except ValueError as exc:
+        raise SourceError("source.added requires its exact activating Source UUID") from exc
+    citation = "source://" + source_id
+    digest = params.get("source_sha256")
+    if (params.get("source_citation") != citation
+            or params.get("activation_key") != "source.added:" + source_id
+            or not isinstance(digest, str)
+            or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest)):
+        raise SourceError("source.added identity, event key, citation and content hash must agree")
+    return {"citation": citation, "content_sha256": digest}
+
+
 
 
 def normalize_distill_instructions(value: object) -> str:
@@ -138,24 +153,6 @@ def feed_binding_matches(admitted: object, current: dict) -> bool:
     if not isinstance(admitted, dict):
         return False
     return {**admitted, "distill_instructions": admitted.get("distill_instructions", "")} == current
-
-
-def research_source_binding(params: dict) -> dict | None:
-    """Keep a Source event's admitted identity distinct from external metadata."""
-    if params.get("event") != "source.added":
-        return None
-    try:
-        source_id = str(uuid.UUID(str(params.get("source_id", ""))))
-    except ValueError as exc:
-        raise SourceError("source.added requires its exact activating Source UUID") from exc
-    citation = "source://" + source_id
-    digest = params.get("source_sha256")
-    if (params.get("source_citation") != citation
-            or params.get("activation_key") != "source.added:" + source_id
-            or not isinstance(digest, str)
-            or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest)):
-        raise SourceError("source.added identity, event key, citation and content hash must agree")
-    return {"citation": citation, "content_sha256": digest}
 
 
 def feed_source_binding(source_id: str, *, index=None, restore: bool = True) -> dict | None:
@@ -207,6 +204,7 @@ def feed_source_binding(source_id: str, *, index=None, restore: bool = True) -> 
     return {**receipt, "distill_instructions": instructions,
             "reporting_url": str(item.get("reporting_url") or ""),
             "published": item.get("published")}
+
 
 
 class _StrictLoader(getattr(yaml, "CSafeLoader", yaml.SafeLoader)):
@@ -468,31 +466,14 @@ def _trusted_source_class(source: RawSource, lane: str) -> str | None:
         or source.media_type != "text/markdown"
     ):
         return None
-    match = _OBSERVATION_ARCHIVE_REF.fullmatch(source.source_ref)
-    if match is None:
-        return None
-
-    # The reserved URI is necessary but not sufficient.  Require the exact
-    # committed Temporary Observation that the promotion controller marked
-    # with this key; arbitrary Source text and caller-supplied labels cannot
-    # manufacture the routing class.
-    from .vault import iter_notes
-
-    for note in iter_notes():
-        meta = note.meta
-        if (
-            note.kind == "knowledge"
-            and note.ref.startswith(_EXECUTIVE_TEMPORARY_PREFIX)
-            and meta.get("observation_scope") == "temporary"
-            and meta.get("temporary") is True
-            and meta.get("compaction") is True
-            and meta.get("compaction_committed") is True
-            and str(meta.get("source_conversation_id", ""))
-            == match.group("conversation")
-            and str(meta.get("promotion_pending", ""))
-            == match.group("promotion")
-        ):
+    if source.source_ref.startswith("obsidience://observations/hindsight/"):
+        from .index import INDEX
+        with INDEX.lock:
+            row = INDEX.db.execute("SELECT content_hash FROM memory_handoffs WHERE source_ref=?",
+                                   (source.source_ref,)).fetchone()
+        if row and row[0] == hashlib.sha256(source.content.encode()).hexdigest():
             return OBSERVATION_ARCHIVE_SOURCE_CLASS
+        return None
     return None
 
 
@@ -548,13 +529,8 @@ def _source_event(row: dict) -> dict:
                 raise SourceError("Inbox research provenance does not match its execution")
             params.update(research_task=parts[3], research_run_id=parts[2])
     expected = SOURCE_EVENT_TASKS[event]
-    feed_binding = feed_source_binding(source.source_id) if (
-        row.get("origin_source_id") or source.source_ref.startswith("feed://")
-    ) else None
-    if feed_binding is not None:
-        params["feed_binding"] = feed_binding
-        if lane == "raw":
-            expected = DISTILL_TASK
+    if row.get("origin_source_id") or source.source_ref.startswith("feed://"):
+        raise SourceError("Feed intake is retired; retain this Source without dispatch")
     handled_by = {}
     if event_key.startswith("source.added:research:"):
         parts = event_key.split(":", 3)
@@ -578,14 +554,14 @@ def _source_event(row: dict) -> dict:
 def _capture_source(
     *, lane: str, source_type: str, source_ref: str, media_type: str,
     captured_at: str | None, content: str, activation_key: str | None = None,
-    feed_receipt: dict | None = None, origin_source_id: str = "",
+    origin_source_id: str = "",
 ) -> dict:
     if lane not in {*SOURCE_LANE_EVENTS, "system"}:
         raise SourceError("unsupported source lane")
     if lane == "system" and (
         source_type != "tool" or media_type != "application/json"
         or not _system_evidence_ref(source_ref)
-        or activation_key is not None or feed_receipt is not None or origin_source_id
+        or activation_key is not None or origin_source_id
     ):
         raise SourceError("System capture requires the fixed controller identity")
     from .index import INDEX
@@ -604,11 +580,6 @@ def _capture_source(
     if existing:
         status = _restore(existing)
         result = {**_row_doc(existing, include_content=True, status=status), "created": False}
-        if feed_receipt is not None:
-            result["feed_item_created"] = INDEX.record_feed_item(
-                feed_receipt["feed_id"], feed_receipt["item_key"], result, feed_receipt["destination_ref"],
-                feed_receipt.get("distill_instructions", ""),
-            )
         if existing.get("event_key") and existing.get("event_dispatched_at") is None:
             result["source_event"] = _source_event(existing)
         else:
@@ -627,7 +598,7 @@ def _capture_source(
     # process stops before the physical write or event dispatch, the ordinary
     # Source reconciliation/read restores the exact file; event-bearing lanes
     # also resume their ordinary pending-event dispatch once.
-    feed_item_created = INDEX.record_source(
+    INDEX.record_source(
         id=source.source_id,
         path=relative,
         source_type=source.source_type,
@@ -640,7 +611,6 @@ def _capture_source(
         created_at=datetime.now(UTC).timestamp(),
         event_key=durable_event_key,
         event_dispatched_at=None,
-        **({"feed_receipt": feed_receipt} if feed_receipt is not None else {}),
         **({"origin_source_id": origin_source_id} if origin_source_id else {}),
     )
     row = INDEX.source(source.source_id)
@@ -650,7 +620,6 @@ def _capture_source(
     return {
         **_row_doc(row, include_content=True, status=status),
         "created": True,
-        **({"feed_item_created": bool(feed_item_created)} if feed_receipt is not None else {}),
         "source_event": _source_event(row) if event else None,
     }
 
@@ -682,23 +651,10 @@ def capture_system_evidence(category: str, facts: dict) -> dict:
 def ingest_source(
     *, source_type: str, source_ref: str, media_type: str,
     captured_at: str | None, content: str, activation_key: str | None = None,
-    feed_receipt: dict | None = None,
 ) -> dict:
     """Preserve raw evidence and emit its ordinary ``source.added`` trigger."""
-    if feed_receipt is not None:
-        if (not isinstance(feed_receipt, dict)
-                or set(feed_receipt) not in ({"feed_id", "item_key", "destination_ref"},
-                                            {"feed_id", "item_key", "destination_ref", "distill_instructions"})
-                or not all(isinstance(feed_receipt[key], str) and feed_receipt[key]
-                           for key in ("feed_id", "item_key", "destination_ref"))
-                or re.fullmatch(r"[0-9a-f]{32}", feed_receipt["feed_id"]) is None
-                or re.fullmatch(r"[0-9a-f]{64}", feed_receipt["item_key"]) is None
-                or source_ref != f"feed://{feed_receipt['feed_id']}/{feed_receipt['item_key']}"
-                or source_type != "document" or media_type != "application/json"
-                or activation_key is not None):
-            raise SourceError("Feed receipt requires exact controller item identity")
-        feed_receipt = {**feed_receipt, "distill_instructions": normalize_distill_instructions(
-            feed_receipt.get("distill_instructions", ""))}
+    if source_ref.startswith("feed://"):
+        raise SourceError("Feed intake is retired; historical Sources remain readable")
     with _SOURCE_LOCK:
         return _capture_source(
             lane="raw",
@@ -708,8 +664,7 @@ def ingest_source(
             captured_at=captured_at,
             content=content,
             activation_key=activation_key,
-            feed_receipt=feed_receipt,
-        )
+            )
 
 
 def _research_owner(task_ref: str, run_id: str) -> bool:
@@ -771,34 +726,18 @@ def research_handoff_origin(params: dict) -> dict | None:
 
 
 def handoff_source(*, title: str, content: str, captured_at: str | None = None,
-                   research_task: str = "", research_run_id: str = "",
-                   feed_source_id: str = "") -> dict:
+                   research_task: str = "", research_run_id: str = "") -> dict:
     """Drop Darwin's cited synthesis into the physical Source Inbox."""
     citations = validate_source_citations(content, required=True)
-    if feed_source_id:
-        binding = feed_source_binding(feed_source_id)
-        if (research_task != DISTILL_TASK or binding is None
-                or not any(item["id"] == feed_source_id for item in citations)):
-            raise SourceError("Distill handoff requires its exact controller-bound Feed Source")
     activation_key = None
     if research_task or research_run_id:
         if not research_run_id or not _research_owner(research_task, research_run_id):
             raise SourceError("Inbox requires the exact Darwin research execution")
         # Include content identity: multiple findings from one execution remain
         # distinct Inbox items, while retries of the same finding are idempotent.
-        identity = hashlib.sha256((feed_source_id or content).encode()).hexdigest()[:20]
+        identity = hashlib.sha256(content.encode()).hexdigest()[:20]
         activation_key = f"source.inbox:research:{research_run_id}:{research_task}:{identity}"
     with _SOURCE_LOCK:
-        if feed_source_id:
-            from .index import INDEX
-
-            previous = INDEX.source_by_event_key(activation_key)
-            if previous:
-                original = parse_raw_source(bytes(previous["material"]))
-                if (original.source_ref != _text(title, "title", 300)
-                        or original.content != _text(content, "content", MAX_SOURCE_CHARS)
-                        or previous.get("origin_source_id") != feed_source_id):
-                    raise SourceError("This Distill execution already handed off its item; a different handoff cannot be replayed")
         result = _capture_source(
             lane="inbox",
             source_type="research",
@@ -807,7 +746,6 @@ def handoff_source(*, title: str, content: str, captured_at: str | None = None,
             captured_at=captured_at,
             content=content,
             activation_key=activation_key,
-            origin_source_id=feed_source_id,
         )
     return {**result, "source_citations": [item["citation"] for item in citations]}
 
@@ -856,7 +794,7 @@ def list_sources() -> dict:
     }
 
 
-def get_source(value: str) -> dict:
+def get_source(value: str, *, restore: bool = True) -> dict:
     from .index import INDEX
 
     source_id = value.strip().removeprefix("source://").rsplit("/", 1)[-1]
@@ -867,7 +805,11 @@ def get_source(value: str) -> dict:
     row = INDEX.source(source_id)
     if not row:
         raise SourceError(f"source not found: {source_id}")
-    status = _restore(row)
+    if restore:
+        status = _restore(row)
+    else:
+        _attested_material(row)
+        status = 'verified'
     return _row_doc(row, include_content=True, status=status)
 
 
@@ -877,7 +819,12 @@ def validate_source_citations(text: str, *, required: bool = False) -> list[dict
         raise SourceError("source finding must be text")
     matches = list(_SOURCE_CITATION.finditer(text))
     if text.count("source://") != len(matches):
-        raise SourceError("source citations must use the exact source://<uuid> form")
+        valid_starts = {match.start() for match in matches}
+        invalid = [text[match.start():match.start() + 100].split()[0]
+                   for match in re.finditer("source://", text)
+                   if match.start() not in valid_starts][:3]
+        raise SourceError("source citations must use the exact source://<uuid> form; "
+                          "malformed citation: " + json.dumps(invalid, ensure_ascii=False))
     if required and not matches:
         raise SourceError("Source Inbox handoffs require at least one source:// citation")
     verified = []

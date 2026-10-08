@@ -13,13 +13,21 @@ def main() -> int:
         limit = max(1, min(int(request["limit"]), 8))
         from ddgs import DDGS
 
-        results = DDGS(timeout=10).text(
-            query,
-            region="us-en",
-            safesearch="moderate",
-            max_results=limit,
-            backend="auto",
-        )
+        # "auto" tries scraped engines in a varying order and often finds
+        # nothing when they refuse the request; one more pass usually succeeds.
+        for attempt in range(2):
+            try:
+                results = DDGS(timeout=10).text(
+                    query,
+                    region="us-en",
+                    safesearch="moderate",
+                    max_results=limit,
+                    backend="auto",
+                )
+                break
+            except Exception as exc:  # noqa: BLE001 - retry only an empty answer
+                if attempt or "No results found" not in str(exc):
+                    raise
         print(json.dumps({"ok": True, "results": results}, ensure_ascii=False))
         return 0
     except Exception as exc:  # noqa: BLE001 - parent receives one bounded failure

@@ -10,7 +10,7 @@ from obsidience.harness.capabilities.window.command import (
     COMMAND_SCHEMA, EffectNotObserved, ShellCommandUnavailable, _send_command, activate,
 )
 from obsidience.harness.host.scene import SCENE, SceneTarget
-from .applications import canonical_application_id
+from .applications import canonical_application_id, matches_application_window
 from .capture import ScreenCapture, _png_size, capture_screen
 from .grounding import process_start_time
 
@@ -39,12 +39,33 @@ def _validate(target, start_time: int, context: dict):
     scene = SCENE.snapshot()
     if scene.workspace.get("session_locked") is True:
         raise ComputerError("The desktop is locked.")
-    current = SCENE.validate(target)
+    current = SCENE.resolve(window_id=target.window.window_id, surface_id=target.surface_id)
+    if current != replace(target, surface_revision=current.surface_revision):
+        raise ComputerError("The exact observed target changed.")
+    current = SCENE.validate(current)
     if not current.surface_awake or current.window.minimized or not current.window.visible_on_workspace:
         raise ComputerError("The selected target is not visible on an awake Surface.")
     if process_start_time(current.window.pid) != start_time:
         raise ComputerError("The target process changed.")
     return current
+
+
+def _geometry_correction(target, resolved, start: int, context: dict, attempts: int):
+    """One new image/point, only while the exact target has received no input."""
+    same_window = replace(target.window, local_rect=resolved.window.local_rect)
+    if (attempts == 0 and not context.get("_computer_geometry_refreshes")
+            and resolved == replace(target, window=same_window,
+                                    surface_revision=resolved.surface_revision)):
+        _validate(resolved, start, context)
+        context["_computer_geometry_refreshes"] = 1
+        context["_computer_act_attempts"] = 0
+        return {
+            "status": "failed", "delivery": "not_dispatched", "must_not_replay": True,
+            "correction_allowed": True,
+            "failure": {"code": "geometry_changed_before_input",
+                        "message": "The same window moved or resized before any input. Observe it again and choose a new point from that fresh image once; never reuse the old point."},
+        }
+    return None
 
 
 def act_computer(args: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
@@ -90,25 +111,21 @@ def act_computer(args: dict[str, Any], context: dict[str, Any]) -> dict[str, Any
     if attempts and capture.captured_at_unix_ns <= context.get("_computer_act_post_capture_ns", 0):
         raise ComputerError("A new observation after the previous action is required for the next step.")
     _check_cancel(context)
-    resolved = SCENE.resolve_semantic("application", application, "")
+    if (application != target.window.app_id
+            and not matches_application_window(application, target.window.app_id, target.window.title)):
+        raise ComputerError("The requested application does not match the observed window.")
+    # The observation already selected one exact window. Resolving its app name
+    # again loses that identity when another window of the same app exists.
+    SCENE.refresh(cancel_event=context.get("_capability_cancel_event"))
+    resolved = SCENE.resolve(window_id=target.window.window_id, surface_id=target.surface_id)
+    target = replace(target, surface_revision=resolved.surface_revision)
     if resolved != target:
         # A resized window needs a new image and a new model-selected point.
         # This edge precedes activation and input, so one fresh observation is
         # safe; the old point is never dispatched or replayed.
-        same_window = replace(target.window, local_rect=resolved.window.local_rect)
-        if (attempts == 0 and not context.get("_computer_geometry_refreshes")
-                and resolved.window.local_rect != target.window.local_rect
-                and resolved == replace(target, window=same_window,
-                                        surface_revision=resolved.surface_revision)):
-            _validate(resolved, start, context)
-            context["_computer_geometry_refreshes"] = 1
-            context["_computer_act_attempts"] = 0
-            return {
-                "status": "failed", "delivery": "not_dispatched", "must_not_replay": True,
-                "correction_allowed": True,
-                "failure": {"code": "geometry_changed_before_input",
-                            "message": "The same window moved or resized before any input. Observe it again and choose a new point from that fresh image once; never reuse the old point."},
-            }
+        correction = _geometry_correction(target, resolved, start, context, attempts)
+        if correction is not None:
+            return correction
         changed = [field.name for field in fields(target)
                    if getattr(target, field.name) != getattr(resolved, field.name)]
         if "window" in changed:
@@ -118,13 +135,15 @@ def act_computer(args: dict[str, Any], context: dict[str, Any]) -> dict[str, Any
         raise ComputerError("The requested application no longer matches the observed target: "
                             + ", ".join(changed) + ".")
     _validate(target, start, context)
+    activated = not target.active
     if not target.active:
         # Foreground delivery uses the existing exact activation command owner.
-        focused = activate({"target": {"kind": "application", "name": application}})
+        focused = activate({"target": {"kind": "application", "name": application}},
+                           observed_target=target)
         if focused.get("status") != "completed":
             raise ComputerError("The exact application could not be activated; no click was sent.")
         previous = target
-        target = SCENE.resolve_semantic("application", application, "")
+        target = SCENE.resolve(window_id=target.window.window_id, surface_id=target.surface_id)
         if (target.generation != previous.generation or target.window.window_id != previous.window.window_id
                 or target.surface_id != previous.surface_id or target.window != previous.window):
             raise ComputerError("The application changed during foreground activation.")
@@ -154,6 +173,13 @@ def act_computer(args: dict[str, Any], context: dict[str, Any]) -> dict[str, Any
     except EffectNotObserved:
         return result | {"delivery": "uncertain", "failure": "The click receipt was lost or cancelled; do not repeat it."}
     if receipt.get("success") is not True or receipt.get("delivery") != "acknowledged":
+        if (not activated and receipt.get("delivery") == "not_dispatched"
+                and receipt.get("reason") == "geometry_changed_before_input"):
+            SCENE.refresh(cancel_event=context.get("_capability_cancel_event"))
+            resolved = SCENE.resolve(window_id=target.window.window_id, surface_id=target.surface_id)
+            correction = _geometry_correction(target, resolved, start, context, attempts)
+            if correction is not None:
+                return result | correction
         return result | {
             "delivery": receipt.get("delivery", "uncertain"),
             "failure": str(receipt.get("reason", "Input delivery was not acknowledged."))[:200],
@@ -166,7 +192,8 @@ def act_computer(args: dict[str, Any], context: dict[str, Any]) -> dict[str, Any
         # Rebind observation only to that same process/window, then validate the
         # new capture lease. This result never grants an action lease: another
         # state step still requires a separate, later computer.observe image.
-        post_target = SCENE.resolve_semantic("application", application, target.surface_id)
+        SCENE.refresh(cancel_event=context.get("_capability_cancel_event"))
+        post_target = SCENE.resolve(window_id=target.window.window_id, surface_id=target.surface_id)
         if (post_target.generation != target.generation
                 or post_target.surface_id != target.surface_id
                 or any(getattr(post_target.window, key) != getattr(target.window, key)
@@ -174,6 +201,7 @@ def act_computer(args: dict[str, Any], context: dict[str, Any]) -> dict[str, Any
             raise ComputerError("The clicked application identity changed.")
         _validate(post_target, start, context)
         post = capture_screen(stable_id=post_target.window.stable_id)
+        SCENE.refresh(cancel_event=context.get("_capability_cancel_event"))
         _validate(post_target, start, context)
         if post.captured_at_unix_ns <= capture.captured_at_unix_ns:
             raise ComputerError("The post-action capture is not fresh.")
@@ -192,7 +220,7 @@ def act_computer(args: dict[str, Any], context: dict[str, Any]) -> dict[str, Any
             "One click at your selected image point was delivered. The target label is your description, not independent recognition. "
             + ("Evaluate the fresh attached image before claiming the requested application state."
                if state_scope else
-               "This Task requests input only. If you selected the intended control, complete the click Task successfully and describe the fresh post-image separately. An unchanged screen does not make acknowledged input fail; signing in or starting a match is not this Task's goal.")
+               "You selected input scope, so this receipt verifies only the click. It does not change the owner's Objective or establish a requested application state. An unchanged screen does not make acknowledged input fail. Window movement requires window.place and its verified destination; do not claim a window moved from this click receipt.")
         ),
         "_private_image_png": post.image_png,
     }

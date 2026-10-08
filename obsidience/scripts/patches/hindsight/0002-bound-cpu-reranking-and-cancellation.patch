@@ -1,0 +1,165 @@
+--- a/hindsight_api/engine/cross_encoder.py
++++ b/hindsight_api/engine/cross_encoder.py
+@@ -8,6 +8,7 @@
+ 
+ import asyncio
+ import logging
++import os
+ import warnings
+ from abc import ABC, abstractmethod
+ from concurrent.futures import ThreadPoolExecutor
+@@ -16,6 +17,7 @@
+ import aiohttp
+ 
+ from .._cross_loop import CrossLoopSemaphore
++from ..cancellation import CancellationToken
+ from ..config import (
+     DEFAULT_LITELLM_API_BASE,
+     DEFAULT_RERANKER_ALIBABA_MODEL,
+@@ -115,6 +117,15 @@
+             provider=self.provider_name,
+         )
+ 
++    async def predict_cancellable(
++        self, pairs: list[tuple[str, str]], cancellation: CancellationToken
++    ) -> list[float]:
++        """Keep cancellation checkpoints for providers without native support."""
++        cancellation.raise_if_cancelled()
++        scores = await self.predict(pairs)
++        cancellation.raise_if_cancelled()
++        return scores
++
+     async def _predict(self, pairs: list[tuple[str, str]]) -> list[float]:
+         """Score ``pairs`` without retry — what each backend in this module implements.
+ 
+@@ -1005,11 +1016,15 @@
+         # Configure ONNX session options before Ranker creates the session.
+         # When cpu_mem_arena=False (default), ONNX won't pre-allocate an arena
+         # that grows monotonically, keeping RSS bounded after rerank batches.
+-        if not self.cpu_mem_arena:
++        intra_threads = int(os.environ.get("HINDSIGHT_API_RERANKER_FLASHRANK_INTRA_OP_THREADS", "0"))
++        if not self.cpu_mem_arena or intra_threads > 0:
+             import onnxruntime as ort
+ 
+             session_options = ort.SessionOptions()
+-            session_options.enable_cpu_mem_arena = False
++            session_options.enable_cpu_mem_arena = self.cpu_mem_arena
++            if intra_threads > 0:
++                session_options.intra_op_num_threads = intra_threads
++                session_options.add_session_config_entry("session.intra_op.allow_spinning", "0")
+         else:
+             session_options = None
+ 
+@@ -1036,7 +1051,10 @@
+                     break
+             if model_file:
+                 self._ranker.session = ort.InferenceSession(model_file, sess_options=session_options)
+-                logger.info("Reranker: replaced FlashRank ONNX session with cpu_mem_arena=False")
++                logger.info(
++                    "Reranker: FlashRank ONNX cpu_mem_arena=%s intra_op_threads=%s",
++                    self.cpu_mem_arena, intra_threads,
++                )
+ 
+         # Initialize shared executor
+         if FlashRankCrossEncoder._executor is None:
+@@ -1050,7 +1068,7 @@
+         else:
+             logger.info("Reranker: FlashRank provider initialized (using existing executor)")
+ 
+-    def _predict_sync(self, pairs: list[tuple[str, str]]) -> list[float]:
++    def _predict_sync(self, pairs: list[tuple[str, str]], cancellation: CancellationToken | None = None) -> list[float]:
+         """Synchronous predict — each query group, in bounded batches.
+ 
+         FlashRank scores every passage of a request in one ONNX forward pass, and
+@@ -1062,9 +1080,9 @@
+         one long candidate inflates the sequence length for every other one.
+ 
+         Splitting into ``batch_size`` chunks bounds the peak the same way the
+-        local and TEI providers already do. Scores are identical either way —
+-        passages are scored independently, so batching changes only the
+-        allocation profile.
++        local and TEI providers already do. Passages are scored independently;
++        dynamic quantization can produce small numerical differences between
++        batch shapes. Cancellation is checked between forward passes.
+         """
+         if not pairs:
+             return []
+@@ -1085,6 +1103,8 @@
+                 global_indices = [idx for idx, _ in indexed_texts]
+ 
+                 for start in range(0, len(indexed_texts), self.batch_size):
++                    if cancellation is not None:
++                        cancellation.raise_if_cancelled()
+                     batch = indexed_texts[start : start + self.batch_size]
+ 
+                     # Build passages list for FlashRank. Ids are batch-local, so
+@@ -1102,10 +1122,22 @@
+                         global_idx = global_indices[start + local_idx]
+                         all_scores[global_idx] = score
+ 
++            if cancellation is not None:
++                cancellation.raise_if_cancelled()
+             return all_scores
+         finally:
+             release_local_inference_memory(self._device_type)
+ 
++    async def predict_cancellable(
++        self, pairs: list[tuple[str, str]], cancellation: CancellationToken
++    ) -> list[float]:
++        if self._ranker is None:
++            raise RuntimeError("Reranker not initialized. Call initialize() first.")
++        cancellation.raise_if_cancelled()
++        return await asyncio.get_running_loop().run_in_executor(
++            FlashRankCrossEncoder._executor, self._predict_sync, pairs, cancellation,
++        )
++
+     async def _predict(self, pairs: list[tuple[str, str]]) -> list[float]:
+         """
+         Score query-document pairs using FlashRank.
+--- a/hindsight_api/engine/search/reranking.py
++++ b/hindsight_api/engine/search/reranking.py
+@@ -6,6 +6,7 @@
+ import math
+ from datetime import datetime, timezone
+ 
++from ...cancellation import CancellationToken
+ from .types import MergedCandidate, ScoredResult
+ 
+ UTC = timezone.utc
+@@ -342,7 +343,9 @@
+             ) from e
+         self._initialized = True
+ 
+-    async def rerank(self, query: str, candidates: list[MergedCandidate]) -> list[ScoredResult]:
++    async def rerank(
++        self, query: str, candidates: list[MergedCandidate], cancellation: CancellationToken | None = None
++    ) -> list[ScoredResult]:
+         """
+         Rerank candidates using cross-encoder scores.
+ 
+@@ -383,7 +386,10 @@
+             pairs.append([query, doc_text])
+ 
+         # Get cross-encoder scores
+-        scores = await self.cross_encoder.predict(pairs)
++        if cancellation is not None:
++            scores = await self.cross_encoder.predict_cancellable(pairs, cancellation)
++        else:
++            scores = await self.cross_encoder.predict(pairs)
+ 
+         # Normalize scores to [0, 1] range.
+         # External API rerankers (Cohere, Jina, llama.cpp/Qwen, etc.) return
+--- a/hindsight_api/engine/memory_engine.py
++++ b/hindsight_api/engine/memory_engine.py
+@@ -8336,7 +8336,10 @@
+ 
+                     # Ensure reranker is initialized (for lazy initialization mode)
+                     await reranker_instance.ensure_initialized()
+-                    scored_results = await reranker_instance.rerank(query, merged_candidates)
++                    scored_results = await reranker_instance.rerank(
++                        query, merged_candidates,
++                        cancellation=request_context.cancellation if request_context is not None else None,
++                    )
+                 else:
+                     # "rrf" / "interleave": skip the cross-encoder and keep the fusion order
+                     # (rrf_score is descending by fusion position for both). The cross-encoder

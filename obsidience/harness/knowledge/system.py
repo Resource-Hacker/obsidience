@@ -1,7 +1,7 @@
 """Deterministic System inventory Articles from immutable System evidence.
 
 The System schema supplies this publisher's paths. The receipt retains identities
-and hashes, never a second copy of the facts. Authored contracts live in Observations.
+and hashes, never a second copy of the facts. Authored contracts live in Architecture/Shell and Runbooks/Operations.
 """
 
 from __future__ import annotations
@@ -56,7 +56,8 @@ _REFRESH_LOCK = threading.Lock()
 _INDEX_ERROR = ""
 _MAX_ROWS = 200
 _MAX_ARTICLE_CHARS = 96_000
-_OWNERSHIP_ERROR = "System inventory is read-only and follows its schema; write authored workstation knowledge under Workstation Observations"
+_OWNERSHIP_ERROR = ("System inventory is read-only and follows its schema; write authored workstation "
+                    "configuration and incidents under Architecture/Shell and procedures under Runbooks/Operations")
 
 
 def _ref(value: str) -> str:
@@ -66,18 +67,11 @@ def _ref(value: str) -> str:
 
 def is_system_article(ref_or_path: str) -> bool:
     ref = _ref(ref_or_path).casefold()
-    if not ref.startswith("admech workstation/"):
-        return False
-    if str(ref_or_path).startswith("@branch/"):
-        ref += "/" + ref.rsplit("/", 1)[-1]
-    return any(ref == item["ref"].casefold() for item in system_articles().values())
+    return ref == "admech workstation" or ref.startswith("admech workstation/")
 
 
 def assert_system_article_writable(ref_or_path: str) -> None:
-    ref = _ref(ref_or_path).casefold()
-    observations = "admech workstation/workstation observations"
-    if (ref == "admech workstation" or ref.startswith("admech workstation/")) and not (
-            ref == observations or ref.startswith(observations + "/")):
+    if is_system_article(ref_or_path):
         raise ValueError(_OWNERSHIP_ERROR)
 
 
@@ -114,9 +108,10 @@ def _read_state() -> dict:
             or set(state["categories"]) - system_articles().keys()):
         raise ValueError("Invalid System Knowledge receipt")
     for row in state["categories"].values():
-        if (not isinstance(row, dict) or set(row) - {"published", "pending", "status", "detail"}
+        if (not isinstance(row, dict) or set(row) - {"published", "pending", "status", "detail", "checked_at"}
                 or row.get("status", "uninitialized") not in {"current", "unavailable", "conflict", "uninitialized"}
-                or not isinstance(row.get("detail", ""), str)):
+                or not isinstance(row.get("detail", ""), str)
+                or ("checked_at" in row and not isinstance(row["checked_at"], str))):
             raise ValueError("Invalid System Knowledge category receipt")
         for key in ("published", "pending"):
             if key in row and (not isinstance(row[key], dict)
@@ -201,20 +196,55 @@ def _render(item: dict, facts: dict, source: dict) -> tuple[dict, str]:
     for component in (item, *item.get("components", [])):
         if component["descriptor_path"]:
             meta["sources"].append({"resource": component["descriptor_path"]})
-    body = ("System schema and observed inventory, populated automatically by the Harness.\n\n"
-            f"Captured: {source['captured_at']}. [Immutable evidence]({source['citation']}) "
-            f"({source['content_sha256']}).\n\n"
-            + "\n\n".join(_sections(facts)))
+    descriptor = facts.get("descriptor", {})
+    sections = [_cell(descriptor["description"]) if descriptor.get("description")
+                else f"{'Observed' if facts.get('observed') else 'Registered'} inventory for {_cell(item['title'])}."]
+    if facts.get("observed"):
+        sections.extend(["## Observed facts", *_sections(facts["observed"], 3)])
+    technical_keys = {"schema", "id", "label", "description", "category", "collector", "selector",
+                      "live_data_endpoint", "read_only", "surface_contract"}
+    observed = facts.get("observed", {})
+    configuration = {key: value for key, value in descriptor.items() if key not in technical_keys
+                     and (key not in observed or observed[key] != value)}
+    if configuration:
+        sections.extend(["## Registered configuration", *_sections(configuration, 3)])
+    for component in item.get("components", []):
+        detail = facts.get("details", {}).get(component["key"].removeprefix(item["key"] + "/"), {})
+        sections.append("## " + _cell(component["title"]))
+        if detail.get("observed"):
+            sections.extend(_sections(detail["observed"], 3))
+        observed = detail.get("observed", {})
+        configured = {key: value for key, value in detail.get("descriptor", {}).items()
+                      if key not in technical_keys and (key not in observed or observed[key] != value)}
+        if configured:
+            sections.extend(["### Registered configuration", *_sections(configured, 4)])
+        if not detail.get("observed") and not configured:
+            sections.append("Registered inventory descriptor; no additional host facts are collected.")
+    if facts.get("children"):
+        sections.extend(["## Inventory entries", "\n".join("- " + _cell(child["title"])
+                        for child in facts["children"])])
+    # Both Readers support ordinary Markdown; raw HTML disclosure blocks are
+    # not portable. Keep provenance after the useful facts without hiding it.
+    sections.extend(["## Evidence and collection",
+                     f"Captured: {source['captured_at']}. [Complete immutable evidence]({source['citation']}).",
+                     f"Content hash: `{source['content_sha256']}`."])
+    for component in (item, *item.get("components", [])):
+        registered = component.get("descriptor") or {}
+        technical = {key: value for key, value in registered.items()
+                     if key in technical_keys - {"label", "description"}}
+        technical["descriptor_path"] = component["descriptor_path"] or component["path"]
+        if component is not item:
+            sections.append("### " + _cell(component["title"]))
+        sections.extend(_sections(technical, 4))
+    body = "\n\n".join(sections)
     if len(body) > _MAX_ARTICLE_CHARS:
-        body = body[:_MAX_ARTICLE_CHARS].rsplit("\n", 1)[0] + "\n\nArticle excerpt; the Source retains the complete capture."
+        evidence = ("\n\nArticle excerpt; the Source retains the complete capture.\n\n"
+                    "## Evidence and collection\n\n"
+                    f"Captured: {source['captured_at']}. [Complete immutable evidence]({source['citation']}).\n\n"
+                    f"Content hash: `{source['content_sha256']}`.")
+        body = body[:_MAX_ARTICLE_CHARS - len(evidence)].rsplit("\n", 1)[0] + evidence
     if item["parent_ref"]:
         body += f"\n\n[Parent](/{quote(item['parent_ref'] + '.md', safe='/')}).\n"
-    # The schema's children table is descriptive. Folder placement owns
-    # hierarchy, so unavailable first captures cannot create dangling links.
-    if item["key"] == "system":
-        observations = "ADMECH Workstation/Workstation Observations/Workstation Observations"
-        if load_note(observations + ".md"):
-            body += f"\n\n[Workstation Observations](/{quote(observations + '.md', safe='/')}).\n"
     return meta, canonical_body(body, item["ref"] + ".md")
 
 
@@ -245,7 +275,8 @@ def _public_status(state: dict, *, error: str = "") -> dict:
         categories.append({"category": category, "ref": item["ref"], "title": item["title"],
             "status": status, "detail": detail[:300], "source_id": published.get("source_id"),
             "source_citation": "source://" + published["source_id"] if published else None,
-            "observed_at": published.get("captured_at"), "article_exists": exists})
+            "observed_at": published.get("captured_at"), "checked_at": row.get("checked_at"),
+            "article_exists": exists})
     count = sum(row["status"] == "current" for row in categories)
     result = {"status": "ready" if count == len(categories) else "uninitialized" if all(
                 row["status"] == "uninitialized" for row in categories) else "degraded",
@@ -294,6 +325,7 @@ def refresh_system_knowledge(*, sync: bool = True) -> dict:
                 if item.get("components"):
                     facts["details"] = {component["key"].removeprefix(category + "/"):
                         system_node_facts(component, inventory) for component in item["components"]}
+                checked_at = datetime.now(timezone.utc).isoformat()
                 facts["children"] = [{"title": child["title"], "ref": child["ref"]} for child in catalog.values() if child["parent_ref"] == item["ref"]]
                 source = capture_system_evidence(_source_category(category), facts)
                 meta, body = _render(item, facts, source)
@@ -302,6 +334,7 @@ def refresh_system_knowledge(*, sync: bool = True) -> dict:
                             "content_sha256": source["content_sha256"], "captured_at": source["captured_at"]}
                 with _NOTE_WRITE_LOCK:
                     row = state["categories"].setdefault(category, {})
+                    row["checked_at"] = checked_at
                     path = CONFIG.vault_dir / (item["ref"] + ".md")
                     _safe_path(path)
                     parent = load_note(item["parent_ref"] + ".md") if item["parent_ref"] else None

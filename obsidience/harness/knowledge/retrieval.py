@@ -22,6 +22,13 @@ FAST_CONTEXT_LIMIT = 5
 FAST_CONTEXT_DIRECT_FLOOR = 3
 FAST_CONTEXT_GRAPH_LIMIT = 2
 FAST_CONTEXT_ACCOUNTING_LIMIT = 32
+# RRF is rank-only, so it nominates Articles even when nothing is relevant.
+# Fast context admits a lane hit only with raw evidence: strong dense cosine,
+# or an FTS5 bm25 match that dense cosine also supports. Calibrated 2026-10-07
+# for BAAI/bge-small-en-v1.5 on owner utterances; retune if the embedder changes.
+FAST_CONTEXT_MIN_SIMILARITY = 0.60
+FAST_CONTEXT_LEXICAL_MIN_BM25 = 3.0
+FAST_CONTEXT_LEXICAL_MIN_SIMILARITY = 0.55
 PREWARM_QUERY = "Obsidience activation knowledge"
 
 # ---------- fusion ----------
@@ -43,12 +50,21 @@ def _lanes_for(
     kind: str | None = None,
     *,
     eligible_refs: set[str] | None = None,
+    relevant_only: bool = False,
 ) -> list[tuple[float, list[tuple[str, float]]]]:
     filters = {"eligible_refs": eligible_refs} if eligible_refs is not None else {}
-    return [
-        (weight, INDEX.fts(query, k, kind, **filters)),
-        (weight, INDEX.vector(query, k, kind, **filters)),
-    ]
+    lexical = INDEX.fts(query, k, kind, **filters)
+    dense = INDEX.vector(query, k, kind, **filters)
+    if relevant_only:
+        similarity = dict(dense)
+        keep = {ref for ref, score in dense if score >= FAST_CONTEXT_MIN_SIMILARITY} | {
+            ref for ref, score in lexical
+            if score >= FAST_CONTEXT_LEXICAL_MIN_BM25
+            and similarity.get(ref, -1.0) >= FAST_CONTEXT_LEXICAL_MIN_SIMILARITY
+        }
+        lexical = [hit for hit in lexical if hit[0] in keep]
+        dense = [hit for hit in dense if hit[0] in keep]
+    return [(weight, lexical), (weight, dense)]
 
 
 def normalize_search_scope(value: object) -> dict:
@@ -189,12 +205,13 @@ def fast_context_with_refs(
     accepted_resolver: Resolver | None = None,
     diagnostics: dict | None = None,
     allowed_refs: set[str] | None = None,
+    relevant_only: bool = False,
 ) -> tuple[str, list[str]]:
     """Deterministic no-timeout context for every Task activation.
 
-    The original query enters lexical and dense lanes, their ranks fuse
-    deterministically, and a
-    maximum of two graph neighbors may enrich a floor of three direct hits.
+    The original query enters lexical and dense lanes, interactive turns drop
+    hits below the raw relevance floor, the remaining ranks fuse
+    deterministically, and at most two graph neighbors enrich up to three direct hits.
     It deliberately has no LLM expansion, cross-encoder, or elapsed-time cap.
     """
     if diagnostics is not None:
@@ -228,7 +245,8 @@ def fast_context_with_refs(
     for ref in rrf_fuse(
         _lanes_for(query, RRF_ORIGINAL_WEIGHT, k, "knowledge",
                    eligible_refs={ref for ref, note in accepted_by_ref.items()
-                                  if ref not in exclude and _eligible_knowledge(note, now)})
+                                  if ref not in exclude and _eligible_knowledge(note, now)},
+                   relevant_only=relevant_only)
     ):
         note = accepted_by_ref.get(ref)
         if ref not in exclude and _eligible_knowledge(note, now):

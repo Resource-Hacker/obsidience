@@ -1,4 +1,4 @@
-"""One persisted Executive conversation with a bounded hot turn window."""
+"""Public Chat projection and ingress ledger for the native Executive session."""
 
 from __future__ import annotations
 

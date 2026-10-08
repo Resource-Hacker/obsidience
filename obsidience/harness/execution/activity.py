@@ -6,6 +6,7 @@ import asyncio
 import math
 import threading
 import time
+import uuid
 from collections import deque
 from dataclasses import dataclass, field
 
@@ -18,6 +19,11 @@ class _Subscriber:
 
 _HISTORY: deque[dict] = deque(maxlen=100)
 _PLAYBACK: dict = {"status": "idle", "level": 0.0, "run_id": "", "playback_id": ""}
+_OPERATIONS: dict[str, dict] = {}
+_ACTIVE_RUNS: set[str] = set()
+OPERATION_LINGER_MS = 6_000
+MAX_OPERATIONS = 96
+RUN_OPERATION_KINDS = {"context", "read", "search", "list", "tool"}
 _SUBSCRIBERS: dict[asyncio.Queue, _Subscriber] = {}
 _LOCK = threading.RLock()
 MAX_REVIEW_LINKS = 64
@@ -85,7 +91,84 @@ def emit(phase: str, refs: list[str], *, query: str = "", graph_id: str = "main"
         event["turn_id"] = str(turn_id)[:128]
     if retrieval_ms is not None:
         event["retrieval_ms"] = max(0.0, float(retrieval_ms))
-    return _publish(event)
+    _publish(event)
+    if phase == "query_started" and run_id:
+        with _LOCK:
+            _ACTIVE_RUNS.add(run_id)
+    elif phase == "path" and run_id:
+        emit_operation("context", "running", unique_refs, operation_id=f"context:{run_id}",
+                       label="Context in use", graph_id=graph_id, run_id=run_id)
+    elif phase == "graph_changed":
+        emit_operation("edit", "completed", unique_refs, label="Assignment updated", graph_id="*")
+    elif phase in {"query_completed", "cleared"} and run_id:
+        # A run that exits before its Tool result is delivered must not leave
+        # a permanently running visual. This is not retry or success evidence.
+        for operation in operations():
+            if operation["run_id"] == run_id and operation["status"] == "running":
+                emit_operation(operation["kind"],
+                               "completed" if operation["kind"] == "context" else "interrupted",
+                               operation["refs"], operation_id=operation["id"],
+                               label=operation["label"], graph_id=operation["graph_id"], run_id=run_id)
+        with _LOCK:
+            _ACTIVE_RUNS.discard(run_id)
+            if phase == "cleared" or _PLAYBACK.get("run_id") != run_id or _PLAYBACK["status"] == "idle":
+                _release_run_operations(run_id)
+    return event
+
+
+def operations() -> list[dict]:
+    """Current display state, not an execution ledger or a polling signal."""
+    now = int(time.time() * 1000)
+    with _LOCK:
+        for key, value in tuple(_OPERATIONS.items()):
+            deadline = value.get("expires_at", 0)
+            if deadline and now >= deadline:
+                del _OPERATIONS[key]
+        return list(_OPERATIONS.values())
+
+
+def _release_run_operations(run_id: str) -> None:
+    """End display ownership, preserving each actual Tool outcome unchanged."""
+    now = int(time.time() * 1000)
+    for operation in _OPERATIONS.values():
+        if operation["run_id"] == run_id and operation["kind"] in RUN_OPERATION_KINDS:
+            operation["expires_at"] = now
+            _publish({"type": "operation", "operation": dict(operation)}, retain=False)
+
+
+def emit_operation(kind: str, status: str, refs: list[str], *, label: str,
+                   operation_id: str = "", graph_id: str = "*", run_id: str = "",
+                   refresh: bool = False) -> dict:
+    """Project an actual operation using owner-supplied, exact Article refs.
+
+    `returned` attests a Tool response, not a verified real-world outcome.
+    Pending Review is finite activity; its durable preview has its own owner.
+    """
+    with _LOCK:
+        operations()
+        key = str(operation_id or uuid.uuid4().hex)[:180]
+        previous = _OPERATIONS.get(key)
+        unique_refs = list(dict.fromkeys(str(ref)[:512] for ref in refs if ref))
+        now = int(time.time() * 1000)
+        operation = {
+            "id": key, "kind": kind, "status": status, "label": str(label)[:160],
+            "refs": unique_refs[:128], "ref_count": len(unique_refs),
+            "omitted_refs": max(0, len(unique_refs) - 128),
+            "graph_id": str(graph_id or "*")[:80], "run_id": str(run_id)[:128],
+            "started_at": previous["started_at"] if previous else now, "at": now,
+            "expires_at": 0 if status == "running" or (kind in RUN_OPERATION_KINDS and (
+                run_id in _ACTIVE_RUNS or (run_id and _PLAYBACK["run_id"] == run_id and _PLAYBACK["status"] != "idle")))
+            else now + OPERATION_LINGER_MS,
+            "refresh": refresh, "evidence_scope": "runtime_activity_not_hidden_reasoning",
+        }
+        _OPERATIONS.pop(key, None)
+        _OPERATIONS[key] = operation
+        while len(_OPERATIONS) > MAX_OPERATIONS:
+            # Retain active work ahead of already completed flashes.
+            settled = next((key for key, item in _OPERATIONS.items() if item["status"] != "running"), None)
+            del _OPERATIONS[settled or next(iter(_OPERATIONS))]
+        # Tool and Reader bursts must not evict the Executive's speech packet.
+        return _publish({"type": "operation", "operation": operation}, retain=False)
 
 
 def emit_playback(status: str, *, level: float = 0.0, run_id: str = "",
@@ -93,13 +176,17 @@ def emit_playback(status: str, *, level: float = 0.0, run_id: str = "",
     """Ephemeral speaker envelope, separate from the retained Thinking Packet."""
     global _PLAYBACK
     with _LOCK:
+        previous_run = _PLAYBACK.get("run_id", "")
         _PLAYBACK = {
             "status": status, "level": level,
             "run_id": run_id, "playback_id": playback_id,
             "at": int(time.time() * 1000),
         }
         # Audio samples must never evict the packet needed on reconnect.
-        return _publish({"type": "playback", "playback": dict(_PLAYBACK)}, retain=False)
+        event = _publish({"type": "playback", "playback": dict(_PLAYBACK)}, retain=False)
+        if previous_run and (status == "idle" or previous_run != run_id) and previous_run not in _ACTIVE_RUNS:
+            _release_run_operations(previous_run)
+        return event
 
 
 def playback() -> dict:

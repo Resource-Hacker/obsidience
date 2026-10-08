@@ -35,9 +35,7 @@ def namespace_title(segment: str) -> str:
 def callable_namespace(name: str) -> str:
     """Library grouping, independent of the callable's exact stable identity."""
     namespace = name.rsplit(".", 1)[0]
-    # Observation operations are direct peers; Temporary describes their
-    # target data, not another level of executable work or guidance.
-    return "observations" if namespace == "observations.temporary" else namespace
+    return namespace
 
 
 def build_skill_mirror(notes: list[Note]) -> tuple[SkillMirrorNode, ...]:

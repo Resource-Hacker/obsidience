@@ -2,10 +2,10 @@
 
 ``index`` is never a semantic kind.  A Task Article with children is an index
 because it has children; a terminal Task Article is a leaf.  The top-level
-Wiki, Research, Executive, and Observations Articles are Knowledge Articles
+Wiki, Research, Executive, and Harness Articles are Knowledge Articles
 that describe and organize their Task descendants without becoming runnable
-work themselves. Generate remains an outcome family; Observations exposes
-only the two real context-lifecycle transition Tasks.
+work themselves. Generate remains an outcome family. Historical memory is Hindsight-owned;
+conversation compaction is a native DeepSeek backend operation.
 """
 
 from __future__ import annotations
@@ -21,8 +21,6 @@ def _leaves(*names: str) -> Tree:
 
 
 TASK_TAXONOMY: Tree = {
-    # The outcome family exposes its two runnable transitions as direct peers.
-    "observations": _leaves("compact", "promote"),
     # Live conversation is Agent-owned; Query remains independently queueable.
     "executive": _leaves("query"),
     # The wiki loop exposes only outcome-bearing operations. Collection,
@@ -38,55 +36,47 @@ TASK_TAXONOMY: Tree = {
         "link": {},
         "improve": {},
         "archive": {},
-        "audit": {},
-        "check": {},
-        "repair": {},
     },
     # Framing, discovery, collection, screening, assessment, extraction,
     # analysis, and verification are the Research Runbook's procedure. The
-    # Task tree keeps only distinct evidence-producing outcomes. Model is a
-    # real queueable hardware-characterization result, not a procedural stage.
-    "research": _leaves("question", "learn", "distill", "model"),
+    # Task tree keeps distinct research outcomes. Model operation belongs
+    # to Heimdall alongside Harness/Agent Audit and Repair.
+    "research": _leaves("question", "learn"),
+    "harness": _leaves("audit", "repair", "model"),
     "generate": _leaves("tool", "skill", "task", "runbook"),
 }
 
 TASK_TRIGGERS = {
-    "observations/promote": ("observations.temporary.ready",),
+    "wiki/curate": ("observations.memory.ready",),
     "wiki/ingest": ("source.inbox",),
-    "wiki/repair": ("harness.degraded",),
+    "harness/repair": ("harness.degraded",),
     "research/question": ("task.create",),
     "research/learn": ("source.added", "task.create"),
-    "research/distill": ("source.added",),
-    "research/model": ("model.added",),
+    "harness/model": ("model.added",),
     "generate/runbook": ("task.assigned",),
 }
 
 TASK_KNOWLEDGE_PATHS = frozenset({
-    "observations",
     "wiki",
     "research",
     "executive",
+    "harness",
 })
 
 TASK_SUMMARIES = {
-    "observations": (
-        "The Executive memory lifecycle: raw Immediate Observations are compacted into cumulative Temporary Observations, then selected material is proposed into the ordinary reviewed knowledge graph."
-    ),
-    "observations/compact": "Condense the completed Immediate Observations prefix into one cumulative Temporary Observation.",
-    "observations/promote": "Alexandria archives one closed session's Temporary Observations in Source and stages only justified durable Knowledge changes.",
     "executive": (
-        "The owner's interactive work through one Executive Task and standing Runbook, shared by typed Chat and speech."
+        "Typed Chat and speech use the Executive Agent directly; specialist Query remains separately queueable."
     ),
     "executive/query": "Answer a question through an assigned specialist's applicable Runbook; Executive Chat and voice use Executive directly.",
     "wiki": (
         "The graph-native wiki Tasks: Ingest, Curate, Merge, Link, "
-        "Improve, Archive, Audit, Check, and Repair."
+        "Improve, and Archive."
     ),
     "wiki/ingest": (
         "Alexandria transforms one source-backed handoff from the physical Source Inbox into coherent wiki Knowledge."
     ),
     "wiki/curate": (
-        "Alexandria inspects one bounded maintenance snapshot and activates at most one exact accepted peer Task required by the Curate Runbook."
+        "Alexandria curates new Hindsight observations or one bounded wiki-maintenance snapshot, using existing peer Tasks and Review for durable recommendations."
     ),
     "wiki/merge": (
         "Alexandria confirms and consolidates one exact duplicate candidate without losing unique knowledge or relationships."
@@ -98,29 +88,24 @@ TASK_SUMMARIES = {
         "Alexandria improves one bounded Article from accepted evidence and validates the revision."
     ),
     "wiki/archive": (
-        "Alexandria proposes one stale, superseded Knowledge Article for independently reviewed archival."
+        "Alexandria proposes one explicitly deprecated or demonstrably superseded Knowledge Article for reviewed archival."
     ),
-    "wiki/audit": (
-        "Heimdall audits one bounded evidence or graph-integrity question and stages at most one grounded finding."
+    "harness": "Heimdall maintains the Harness and Agents through Audit, Repair and Model characterization.",
+    "harness/audit": (
+        "Heimdall audits Harness and Agent execution, definitions and capability wiring, preserving exact evidence."
     ),
-    "wiki/check": (
-        "Heimdall checks one deterministic harness snapshot and reports the observed state."
-    ),
-    "wiki/repair": (
+    "harness/repair": (
         "Heimdall applies supported recovery to current harness findings and reports verified disposition and remaining blockers."
     ),
-    "research": "The four evidence-producing outcomes owned by Darwin: Question, Learn, Distill, and Model.",
+    "research": "Darwin's evidence-producing outcomes: Question and Learn.",
     "research/question": (
         "Darwin answers one bounded research question with preserved direct-source evidence."
     ),
     "research/learn": (
         "Darwin closes one useful knowledge gap or researches one newly added Source, then drops a source-backed handoff into the physical Source Inbox."
     ),
-    "research/distill": (
-        "Darwin distills one captured Feed item into a source-cited handoff for its configured Feed destination."
-    ),
-    "research/model": (
-        "Darwin characterizes one added local model across its valid hardware layouts and preserves the results."
+    "harness/model": (
+        "Heimdall characterizes one added local model across its valid hardware layouts and preserves the results."
     ),
     "generate": (
         "Darwin synthesizes quality shared Tools, paired Skills, Tasks, and agent-specific Runbooks "
@@ -128,30 +113,24 @@ TASK_SUMMARIES = {
     ),
 }
 
-TASK_TITLES = {
-    # Stable stored identity; one user-facing label across graph, Reader, and Tasks.
-}
+TASK_TITLES = {}
 
 
 # Existing persisted Tasks absorb their closest semantic Task Article.
 # Knowledge roots remain navigation-only while descendant Tasks stay checkoutable.
 CANONICAL_TASK_BY_PATH = {
     "executive/query": "Tasks/query",
-    "observations/compact": "Tasks/observations/immediate/compact",
-    "observations/promote": "Tasks/observations/durable/promote",
     "wiki/ingest": "Tasks/ingest",
     "wiki/curate": "Tasks/curate",
     "wiki/merge": "Tasks/merge",
     "wiki/link": "Tasks/link",
     "wiki/improve": "Tasks/improve",
     "wiki/archive": "Tasks/archive",
-    "wiki/audit": "Tasks/audit",
-    "wiki/check": "Tasks/check",
-    "wiki/repair": "Tasks/repair",
+    "harness/audit": "Tasks/audit",
+    "harness/repair": "Tasks/repair",
     "research/question": "Tasks/research/question",
     "research/learn": "Tasks/research/learn",
-    "research/distill": "Tasks/research/distill",
-    "research/model": "Tasks/research/model",
+    "harness/model": "Tasks/research/model",
     "generate/runbook": "Tasks/generate/runbook",
     "generate/tool": "Tasks/generate/tool",
     "generate/skill": "Tasks/generate/skill",

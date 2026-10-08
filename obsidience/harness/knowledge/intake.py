@@ -42,14 +42,37 @@ class SourceIntake(FileSystemEventHandler):
         self.root.mkdir(parents=True, exist_ok=True)
         if self.root.is_symlink():
             raise ValueError("Source incoming must be a real directory")
-        self.observer.schedule(self, str(self.root), recursive=True)
+        self.observer.schedule(self, str(CONFIG.source_dir), recursive=True)
+        self.observer.schedule(self, str(CONFIG.vault_dir), recursive=True)
         self.observer.start()
+        from ..execution.scheduler import source_health_changed
+
+        source_health_changed()
         # Watching first closes the gap between offline reconciliation and live arrivals.
         self.reconcile(self.root)
 
     def stop(self) -> None:
         self.observer.stop()
         self.observer.join(timeout=5)
+
+    def on_any_event(self, event) -> None:
+        if event.event_type not in {"created", "closed", "deleted", "moved"}:
+            return
+        paths = [event.src_path]
+        if event.event_type == "moved" and event.dest_path:
+            paths.append(event.dest_path)
+        for value in paths:
+            for root in (CONFIG.source_dir, CONFIG.vault_dir):
+                try:
+                    parts = Path(value).relative_to(root).parts
+                except ValueError:
+                    continue
+                if any(part.startswith(".") for part in parts):
+                    continue
+                from ..execution.scheduler import source_health_changed
+
+                source_health_changed()
+                return
 
     def _allowed(self, path: Path) -> bool:
         try:

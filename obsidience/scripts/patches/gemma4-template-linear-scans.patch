@@ -1,0 +1,31 @@
+--- executive-template.jinja
++++ executive-template.jinja
+@@ -280,6 +280,7 @@
+                     {%- if ns_tool_scan.stopped -%}
+                     {%- elif loop_messages[k]['role'] != 'tool' -%}
+                         {%- set ns_tool_scan.stopped = true -%}
++                        {%- break -%}
+                     {%- else -%}
+                         {%- set follow = loop_messages[k] -%}
+                         {#- Resolve tool_call_id to function name -#}
+@@ -350,14 +351,20 @@
+ 
+         {#- Forward-scan: find next non-tool message role for continuation detection -#}
+         {%- set next_nt = namespace(role=None, found=false) -%}
++        {%- if not loop.last and loop.nextitem['role'] != 'tool' -%}
++            {%- set next_nt.role = loop.nextitem['role'] -%}
++            {%- set next_nt.found = true -%}
++        {%- elif not loop.last -%}
+         {%- for j in range(loop.index0 + 1, loop_messages | length) -%}
+             {%- if not next_nt.found -%}
+                 {%- if loop_messages[j]['role'] != 'tool' -%}
+                     {%- set next_nt.role = loop_messages[j]['role'] -%}
+                     {%- set next_nt.found = true -%}
++                    {%- break -%}
+                 {%- endif -%}
+             {%- endif -%}
+         {%- endfor -%}
++        {%- endif -%}
+ 
+         {%- set continues_into_next = (
+             role == 'model'

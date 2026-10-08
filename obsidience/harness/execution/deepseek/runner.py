@@ -6,7 +6,10 @@ import base64
 import hashlib
 import json
 import re
+import time
+import uuid
 from copy import deepcopy
+from datetime import datetime, time as time_of_day, timedelta
 
 from jsonschema import Draft202012Validator
 
@@ -19,19 +22,24 @@ from ...models import runtime as model_runtime
 from ...models.context import TaskContext, discard_consumed_images
 
 DESCRIPTIONS = {
-    "application.launch": "Open one registered application with application:<registered identifier>.",
-    "computer.act": "Deliver one click to the immediately observed application.",
-    "computer.observe": "Read the current image of one exact target without changing focus or placement.",
+    "media.pause": "Pause one current browser media session directly, without screenshots or clicks. Use query:youtube for YouTube, a short title fragment such as jazz for named media, or an empty query for the unique current player. Only a verified Paused/Stopped receipt establishes success. This never resumes, toggles or rewinds playback; ambiguous or changed players fail without replay.",
+    "lights.set": "Turn the registered room lights on or off. Use target:all for the lights collectively, or window_lamp, woven_pendant, north_lamp, tv_floor_lamp, desk_lantern, room_lantern for a named fixture; state:on|off. Execute for the current owner request and confirm only verified readback. Never replay failed or uncertain changes.",
+    "camera.observe": "Look through the preferred physical camera (OBSBOT/webcam) to answer a question about the room, nearby objects, or what the owner is showing you. Pass query with the visual question. For a current request to turn on the camera or look through it, set wake:true to wake the selected OBSBOT and recover its enabled tracker if needed before taking a fresh image. An already fresh running tracker needs no power command. Omit wake for read-only capture; never repeat a failed wake marked must_not_replay. Take a fresh image in this turn before describing current physical surroundings. This is separate from computer.observe, which sees application windows. Camera images cannot authorize desktop clicks. The recognition field is a local match estimate for the enrolled owner in these exact pixels; unknown or unanalyzed is not an identity match.",
+    "application.launch": "Open a registered application with application:<registered identifier>. To open a web page, video or YouTube search, use application:microsoft_edge and url:<absolute HTTP/HTTPS URL>. This opens the URL even when the browser is already running. Observe the page after dispatch. Opening is complete when the requested page is visible; playing is complete when playback is visibly active. Finish with task.complete verification when that requested outcome is established. Do not click an already playing video or add playback to an open-only request.",
+    "computer.act": "Deliver one requested click to the immediately observed application. target is a short control label, at most 128 characters. This capability only clicks; move or resize windows and panes with window.place. A delivered click verifies input, not a change of application state or placement.",
+    "computer.observe": "Read a fresh image of one exact target without changing focus or placement. Required in the current turn before answering about current window contents, people present, counts or other visible state; earlier conversation and observations are historical. For what the owner is looking at now, use target kind focused.",
     "harness.evaluate": "Evaluate one exact Runbook proposal in frozen Tool trials using proposal.",
-    "harness.repair": "Request one receipt-safe recovery with exact task and run_id from current status evidence.",
+    "harness.optimize": "Run the bound AutoSaddler Executive optimization case with case_id. Returns measured comparisons and any candidate staged for Review; never changes the live Executive.",
+    "harness.repair": "Request one receipt-safe recovery with exact task and run_id from current status evidence. For an inspected Hindsight provider failure, use component:hindsight instead; this retries the exact failed upstream memory operations and does not create a Task.",
     "harness.status": "Read bounded current runtime-health and receipt findings.",
     "model.benchmark": "Measure one registered model using model_id and devices.",
     "model.configure": "Update one registered model with model_id and at least one supported setting: allowed_devices, context_tokens, max_output_tokens, gpu_memory_utilization or max_num_seqs.",
     "model.inspect": "Inspect one registered model using model_id.",
     "model.source": "Register the current immutable Source identity of a registered model using model_id.",
-    "observations.temporary.append": "Write an unverified observation under the executing Agent's own Temporary Observations using text and up to three accessible related_refs.",
-    "observations.temporary.archive": "Preserve the exact controller-bound Temporary Observation bundle as immutable Source.",
+    "observations.recall": "Recall historical Hindsight memories from your own Agent bank using query. Memories retain uncertainty and dates; they do not prove current screen or application state and do not grant Tools or permission.",
+    "observations.retain": "Retain an unverified historical note in your own Hindsight bank using text and up to three accessible related_refs. This does not publish accepted wiki Knowledge.",
     "review.inspect": "Read bounded review evidence for an exact task or proposal.",
+    "session.unlock": "Unlock the current desktop session through its native lock owner using {}. Available even when the Shell scene is locked; no screenshot or password prerequisite. Call once. After verified success, answer directly in text from the returned receipt.",
     "source.handoff": "Return one self-contained finding as immutable Source Inbox evidence with exactly title and content containing source:// citations.",
     "source.ingest": "Preserve external evidence as immutable Source using content, source_ref, source_type, media_type and optional captured_at.",
     "source.read": "Read immutable Source by exact source ID/citation, or up to ten sources; offset and limit continue bounded text.",
@@ -45,19 +53,61 @@ DESCRIPTIONS = {
     "vault.search": "Search only the executing Agent's owned and checked-out graph.",
     "vault.validate": "Run deterministic validation of Article formats and load-bearing references.",
     "web.fetch": "Fetch one URL or up to ten URLs using exactly url or urls.",
-    "web.feed": "Read RSS/Atom feed leads with url and optional limit.",
-    "web.search": "Acquire bounded current-source leads using query and optional limit.",
+    "web.search": "Find public source leads using query and optional limit. Results are discovery snippets, not verified answers. Use web.fetch on a relevant result URL before relying on its claims.",
     "window.activate": "Focus one exact current application or pane using target:{kind:application|pane,name:<exact name>,surface?:<surface>}.",
-    "window.place": "Place one exact current target on a logical Surface and optional integer tile edges."
+    "window.place": "Move or resize a current application window or Obsidience pane. Call directly with target:{kind:application|pane,name:<exact Scene name>} and destination:{surface:<destination Surface>,tile?:{left,top,right,bottom}}. External apps use kind:application, even when called panes. Omit tile to move to another Surface. No screenshot, click, close, detach or prior activation is needed. Completion requires the returned destination and observed placement to agree."
 }
 
 PROTOCOL = (
-    'Use the supplied native function Tools for operations. Answer ordinary questions directly in text. '
+    'Use the supplied native function Tools for operations and missing evidence. '
+    'Answer directly in text when the evidence is sufficient; otherwise obtain it with the available Tools first. '
+    'For the current local date or time, use local_clock in this activation, including its timezone '
+    'and human-readable time. Historical conversation and memory timestamps are not the current clock. '
     'Do not emit JSON imitations of Tool calls. Use task.complete only when a structured terminal '
     'status, pending Review or computer-state verification is required. '
     'The capability catalog is code-owned; explanatory Articles are available through vault.read. '
-    'Complete the requested work before the final answer; claims of effects require actual Tool receipts.'
+    'Complete the requested work before the final answer; claims of effects require actual Tool receipts. '
+    'After observing a requested result, decide whether the goal is already satisfied before any further input. '
+    'If it is, complete immediately. Open a page does not request extra playback clicks; if asked to play, '
+    'an active video already satisfies that goal. A visible Pause control indicates playback is active. '
+    'For a requested pause or stop of current browser media, use media.pause directly. Its verified '
+    'Paused/Stopped receipt establishes playback state without screenshots or clicks. '
+    'For current application or screen contents, take computer.observe in this turn before answering, '
+    'even if an earlier answer names the people or objects. Conversation history is not current evidence. '
+    'For what the owner is looking at, observe target kind focused rather than guessing an application. '
+    'For the room, physical surroundings, or an object shown to the camera, take camera.observe '
+    'in this turn. Use its fresh image and state what is outside the view or unclear; never infer '
+    'current camera contents from conversation history or a desktop screenshot. '
+    'Move or resize an application window or pane with window.place directly, using its current Shell '
+    'Scene identity and the requested destination. computer.act only clicks; do not use it to move '
+    'windows. A successful click does not establish placement or completion of a different Objective. '
+    'Report only the outcome established by the matching Tool result. '
+    'When an operation says must_not_replay, end with its actual result; do not promise another attempt. '
+    'When asked about a named product, project, service or community that the supplied evidence does not '
+    'identify, your first action is web.search for that exact name, followed by web.fetch on the relevant '
+    'source. Do not guess a meaning from similar words. For example, "Can you tell me about Project '
+    'Bluebird?" calls for searching "Project Bluebird" and reading a source before describing it. The user '
+    'does not need to say "search" or "look it up". Stable general facts and clearly identified local '
+    'subjects can be answered directly.'
 )
+
+
+def _recalled(row):
+    """Model-facing recall row: local recording minute, differing occurrence date, text."""
+    def moment(value):
+        try:
+            return datetime.fromisoformat(value)
+        except (TypeError, ValueError):
+            return None
+    recorded, occurred = moment(row.get('mentioned_at')), moment(row.get('occurred_start'))
+    item = {'recorded': recorded.astimezone().strftime('%Y-%m-%d %H:%M')} if recorded else {}
+    if occurred:
+        # Hindsight stores a date-only occurrence at UTC midnight; keep that calendar date.
+        day = (occurred.date() if occurred.utcoffset() == timedelta(0) and occurred.time() < time_of_day(0, 0, 1)
+               else occurred.astimezone().date()).isoformat()
+        if day != item.get('recorded', '')[:10]:
+            item['occurred'] = day
+    return {**item, 'text': row['text']}
 
 
 def native_schema(schema):
@@ -113,8 +163,25 @@ def tool_schemas(allowed):
 
 
 async def run_native_session(task, model, messages, allowed, ctx, agent_name, effort,
-                             interruption_event=None, *, initial_lease=None):
+                             interruption_event=None, *, initial_lease=None, evaluation=None,
+                             fast_lane=True):
     from ..executor import CapabilityDispatch, _scope_checkpoint, _foreground_checkpoint
+
+    max_steps = CONFIG.max_steps
+    if evaluation is not None:
+        if ctx or initial_lease is not None:
+            raise ValueError('Native evaluation requires a fresh context and its own model lease')
+        max_steps = evaluation.max_steps
+        if type(max_steps) is not int or not 1 <= max_steps <= CONFIG.max_steps:
+            raise ValueError('Invalid native evaluation step budget')
+        ctx.update(run_id='trial-' + uuid.uuid4().hex, objective=evaluation.case['objective'])
+
+    def emit(channel, line, detail=None, metadata=None):
+        if evaluation is not None:
+            line = 'Simulation · ' + line
+            metadata = {**(metadata or {}), 'payload': {
+                **((metadata or {}).get('payload') or {}), 'simulated': True}}
+        action_trace.emit(channel, line, detail, metadata)
 
     await BRIDGE.start()
     run = ctx['run_id']
@@ -122,20 +189,63 @@ async def run_native_session(task, model, messages, allowed, ctx, agent_name, ef
     BRIDGE.runs[run] = queue
     trace = ctx.setdefault('trace', [])
     dispatch = CapabilityDispatch(task, model, [], allowed, ctx, agent_name, 0, trace,
-                                  action_trace.emit, TaskContext(), CONFIG.max_steps,
+                                  emit, TaskContext(), max_steps,
                                   interruption_event=interruption_event,
                                   steering=ctx.get('_steering'), active_lease=initial_lease)
+    dispatch.decision_messages = []
+    dispatch.prompt_format = 'native_wire'
     images = {}
     ended = False
     model_steps = 0
     invalid_calls = 0
     completion_rejections = 0
     imitations = 0
+    empty_responses = 0
+    last_search_refs = None
+    steered = False
     ctx['_foreground_interruption_event'] = interruption_event
+    for key in ('_reflex_proposal', '_reflex_command_verified', '_voice_confirmation'):
+        ctx.pop(key, None)
     ctx.pop('_computer_observation_lease', None)
 
-    async def reply(message, value=None, *, error=None, done=False):
-        await BRIDGE.send({'id': message['id'], 'result': value, 'error': error, 'done': done})
+    command = None
+    params = ctx.get('params') or {}
+    if (evaluation is None and task.ref == 'Agents/Executive/Executive'
+            and task.kind == 'agent' and params.get('conversation_id')
+            and params.get('reply_to_turn_id') and params.get('event') != 'task.continue'
+            and effort == 'none' and initial_lease is None and not trace
+            and not (dispatch.steering is not None
+                     and (dispatch.steering.pending or dispatch.steering.applied))):
+        from .commands import recognize_command
+        command = recognize_command(ctx['objective'], allowed)
+        if command is not None:
+            ctx['_reflex_proposal'] = deepcopy(command)
+            trace.append({'command_route': 'hassil', 'proposal': deepcopy(command),
+                          'model_requests': 0, 'memory_recalls': 0})
+
+    async def reply(message, value=None, *, error=None, code=None, done=False):
+        await BRIDGE.send({'id': message['id'], 'result': value, 'error': error, 'code': code, 'done': done})
+
+    lease_prefetch = None
+
+    async def acquire_lease():
+        spec = model_runtime.configured_spec(model.id)
+        lease = model_runtime.lease(spec)
+        await lease.__aenter__()
+        return spec, lease
+
+    async def hold_lease():
+        # Adopt the reservation requested at activation start, or acquire it now.
+        nonlocal lease_prefetch
+        pending, lease_prefetch = lease_prefetch, None
+        if pending is None:
+            dispatch.model, dispatch.active_lease = await acquire_lease()
+            return
+        try:
+            dispatch.model, dispatch.active_lease = await asyncio.shield(pending)
+        except BaseException:
+            lease_prefetch = pending  # The finally block cancels or releases it.
+            raise
 
     def discard_observation():
         images.clear()
@@ -144,9 +254,10 @@ async def run_native_session(task, model, messages, allowed, ctx, agent_name, ef
         discard_consumed_images(dispatch.messages)
 
     async def operate(name, args):
-        nonlocal invalid_calls, completion_rejections
+        nonlocal invalid_calls, completion_rejections, last_search_refs
+        last_search_refs = None
         _foreground_checkpoint(interruption_event, ctx)
-        if dispatch.step >= CONFIG.max_steps:
+        if dispatch.step >= max_steps:
             dispatch.done = True
             dispatch.status, dispatch.summary = 'failed', 'Executive operation budget exhausted'
         if dispatch.done:
@@ -161,23 +272,65 @@ async def run_native_session(task, model, messages, allowed, ctx, agent_name, ef
             if invalid_calls >= 3:
                 dispatch.done = True
                 dispatch.status, dispatch.summary = 'failed', 'Three invalid or unavailable native Tool calls'
-            return [{'type': 'text', 'text': 'Capability unavailable at this boundary; no Tool dispatched.'}]
+            return [{'type': 'text', 'text': 'Capability unavailable at this boundary; no Tool dispatched.' + (
+                ' Only completion remains: finish with the actual result; never replay the operation.'
+                if dispatch.allowed == ['task.complete'] else '')}]
         errors = list(Draft202012Validator(_argument_schemas()[name]).iter_errors(args))
         if errors:
             discard_observation()
             invalid_calls += 1
             path = '.'.join(map(str, errors[0].absolute_path)) or 'arguments'
             guidance = json.dumps(native_schema(_argument_schemas()[name]), separators=(',', ':'))
-            diagnostic = f'Invalid {name} {path}: {errors[0].validator} constraint. Use this argument structure: {guidance}'
+            diagnostic = f'Invalid {name} {path}: {errors[0].validator} constraint ({errors[0].validator_value!r}). Use this argument structure: {guidance}'
+            if name == 'computer.act':
+                diagnostic += (' The previous image was consumed without input. If a click is still needed, '
+                               'first observe again and choose a new point. If the goal was already visible, '
+                               'complete without clicking.')
+            elif name == 'task.complete':
+                diagnostic += (' No completion was accepted. If this completion requires visual verification, '
+                               'observe again before the corrected native call; its prior image was consumed.')
+            if name == 'computer.act' and isinstance(args, dict) and args.get('action', 'click') != 'click':
+                diagnostic = ('computer.act supports only a click; the requested action was not dispatched. '
+                              'For moving or resizing a window or pane, use window.place with target and '
+                              'destination. Do not substitute a click for the requested move. ' + diagnostic)
             trace.append({'invalid_tool': name, 'not_dispatched': True, 'obs': diagnostic})
-            action_trace.emit('error', f'{name} arguments rejected before dispatch', [diagnostic])
+            emit('error', f'{name} arguments rejected before dispatch', [diagnostic])
             if invalid_calls >= 3:
                 dispatch.done = True
                 dispatch.status, dispatch.summary = 'failed', 'Three invalid native Tool calls; no effect dispatched'
             return [{'type': 'text', 'text': diagnostic}]
         invalid_calls = 0
+        if evaluation is not None:
+            # The native agent still selects and sequences every call. Only its
+            # effect boundary is replaced; no live dispatch, receipt or writeback.
+            started = time.monotonic()
+            result = await evaluation.handle(name, deepcopy(args))
+            dispatch.step += 1
+            trace.append({'tool': name, 'args': deepcopy(args), 'obs': result.get('observation', ''),
+                          'simulated': True, **({'completion_evidence': result['completion_evidence']}
+                                              if 'completion_evidence' in result else {})})
+            emit('tool', name + ' returned', metadata={'step': dispatch.step, 'payload': {
+                'kind': 'tool', 'name': name, 'phase': 'result', 'status': 'returned',
+                'arguments': args, 'result': result.get('observation', ''),
+                'duration_ms': round((time.monotonic() - started) * 1000, 3)}})
+            if result.get('done'):
+                dispatch.done = True
+                dispatch.status, dispatch.summary = result['status'], result['summary']
+            return [{'type': 'text', 'text': result.get('observation', '')}]
+        if lease_prefetch is not None:
+            await hold_lease()  # Model-resource Tools release it through dispatch.
         before = len(dispatch.messages)
+        # Only receipts newly produced by this exact successful search may
+        # supply read candidates. Old or failed search prose is never parsed.
+        queries = ([args.get('query')] if 'query' in args else args.get('queries', [])) if name == 'vault.search' else []
+        previous_searches = {query: ctx.get('_vault_searches', {}).get(query) for query in queries}
         await dispatch.dispatch(name, args, json.dumps({'tool': name, 'args': args}))
+        if queries:
+            current_searches = ctx.get('_vault_searches', {})
+            fresh = [current_searches.get(query) for query in queries]
+            if all(isinstance(row, dict) and row is not previous_searches[query]
+                   and isinstance(row.get('refs'), list) for query, row in zip(queries, fresh)):
+                last_search_refs = [ref for row in fresh for ref in row['refs']]
         dispatch.step += 1
         if name == 'task.complete' and not dispatch.done:
             completion_rejections += 1
@@ -205,7 +358,21 @@ async def run_native_session(task, model, messages, allowed, ctx, agent_name, ef
         return blocks
 
     try:
+        session_config = {}
+        params = ctx.get('params') or {}
+        if evaluation is None and task.kind == 'agent' and params.get('conversation_id'):
+            from . import sessions
+            session_config = {'session_id': params['conversation_id'],
+                              'turn_id': params['reply_to_turn_id'], 'objective': ctx['objective'],
+                              'continuation': params.get('event') == 'task.continue',
+                              **sessions.bootstrap(params['conversation_id'], params['reply_to_turn_id'])}
+        if session_config and command is None and dispatch.active_lease is None:
+            # The first native step always needs this model. Reserve it while
+            # the agent loop starts and recalls memory, not after the recall.
+            lease_prefetch = asyncio.create_task(acquire_lease())
         await BRIDGE.send({'method': 'start', 'params': {
+            **session_config,
+            **({'command': command} if command is not None else {}),
             'run': run, 'cwd': str(CONFIG.project_root), 'effort': effort,
             'system': messages[0]['content'], 'messages': messages[1:],
             'tools': tool_schemas(allowed),
@@ -217,23 +384,72 @@ async def run_native_session(task, model, messages, allowed, ctx, agent_name, ef
             method = message.get('method')
             if method == 'end':
                 ended = True
+                from .sessions import publish
+                publish(message.get('session'))
                 if message.get('error'):
                     raise RuntimeError(message['error'])
                 break
             _foreground_checkpoint(interruption_event, ctx)
             _scope_checkpoint(ctx)
             if method == 'boundary':
-                if model_steps >= CONFIG.max_steps or dispatch.step >= CONFIG.max_steps:
+                if model_steps >= max_steps or dispatch.step >= max_steps:
                     dispatch.done = True
                     dispatch.status, dispatch.summary = 'failed', 'Executive decision budget exhausted'
                 context = ''
                 if dispatch.steering is not None and dispatch.steering.pending:
+                    steered = True
+                    last_search_refs = None
                     context = 'Owner clarifications within this same Objective; never replay effects:\n' + '\n'.join(
                         turn['text'] for turn in dispatch.steering.take())
                     images.clear()
                     dispatch.pending_observation_lease = dispatch.pending_response_observation = None
                     discard_consumed_images(dispatch.messages)
                 await reply(message, {'done': dispatch.done, 'context': context})
+            elif method == 'settlement':
+                await reply(message, {'status': dispatch.status, 'summary': dispatch.summary})
+            elif method == 'command_complete':
+                if command is None:
+                    raise RuntimeError('No explicit command owns this completion')
+                if command['name'] == 'task.complete':
+                    # Informational replies already crossed the completion
+                    # authority once. Keep them spoken, without effect cues.
+                    if message['params'].get('isError') is True or not dispatch.done:
+                        raise RuntimeError('Explicit informational completion was not accepted')
+                    await reply(message, {'status': dispatch.status, 'summary': dispatch.summary})
+                    continue
+                verified = (ctx.get('_reflex_command_verified') is True
+                            and message['params'].get('isError') is not True)
+                if command['name'] == 'media.pause':
+                    summary = ('Playback stopped.' if verified else
+                               'The media pause could not be verified; no action was replayed.')
+                else:
+                    target = command['args']['target']
+                    label = 'Lights' if target == 'all' else target.replace('_', ' ').capitalize()
+                    summary = (f"{label} turned {command['args']['state']}." if verified else
+                               'The light command could not be verified; no change was replayed.')
+                # The same completion authority accepts public text and status.
+                # A failure never returns to generation or replays the effect.
+                await operate('task.complete', {
+                    'status': 'completed' if verified else 'failed', 'summary': summary})
+                if not dispatch.done:
+                    raise RuntimeError('Explicit command completion was not accepted')
+                await reply(message, {'status': dispatch.status, 'summary': dispatch.summary})
+            elif method == 'memory.recall':
+                from ...memory.hindsight import MEMORY
+                recall_started = time.perf_counter()
+                value = ({'status': 'disabled', 'memories': []} if evaluation is not None else
+                         await MEMORY.recall(ctx['_agent_ref'], message['params']['query']))
+                from .. import activity
+                refs = [row['ref'] for row in value.get('memories', [])]
+                if refs:
+                    activity.emit_operation('read', 'returned', refs, label='Hindsight recall', run_id=run)
+                emit('event', 'Hindsight recall ' + value['status'], refs, metadata={'payload': {
+                    'kind': 'memory', 'provider': 'hindsight', 'status': value['status'], 'refs': refs,
+                    'duration_ms': round((time.perf_counter() - recall_started) * 1000, 3)}})
+                # Refs, status and timing stay with graph activity and the trace.
+                # The prompt needs only the notice and each memory's text and date.
+                await reply(message, {'notice': value.get('notice'),
+                                      'memories': [_recalled(row) for row in value.get('memories', [])]})
             elif method == 'tool':
                 params = message['params']
                 try:
@@ -244,26 +460,45 @@ async def run_native_session(task, model, messages, allowed, ctx, agent_name, ef
                     raise
                 await reply(message, result)
             elif method == 'tool_error':
+                last_search_refs = None
                 discard_observation()
                 invalid_calls += 1
                 name = str(message['params'].get('name') or 'native Tool')[:96]
                 code = str(message['params'].get('code') or 'TOOL_ERROR')[:80]
                 trace.append({'native_tool_error': code, 'invalid_tool': name})
-                action_trace.emit('error', f'{name}: {code}')
+                emit('error', f'{name}: {code}')
                 if invalid_calls >= 3:
                     dispatch.done = True
                     dispatch.status, dispatch.summary = 'failed', 'Three native Tool errors; inspect the Action Trace'
             elif method == 'model':
+                compacting = message['params'].get('purpose') == 'compaction'
+                if compacting:
+                    # Native compaction owns this auxiliary inference. It must
+                    # never consume a visual lease or become spoken completion.
+                    if dispatch.active_lease is None:
+                        await hold_lease()
+                    emit('event', 'Compacting native conversation', metadata={'payload': {
+                        'kind': 'compaction', 'phase': 'started', 'engine': 'deepseek'}})
+                    metrics = {}
+                    try:
+                        await native_model.stream(message['params'], dispatch.model, 'none', images,
+                                                  lambda value: reply(message, value), metrics)
+                    except Exception as exc:
+                        await reply(message, error=type(exc).__name__ + ': ' + str(exc)[:300])
+                    else:
+                        trace.append({'compaction_metrics': metrics})
+                        await reply(message, done=True)
+                    continue
                 model_steps += 1
                 dispatch.response_observation_lease, dispatch.pending_observation_lease = dispatch.pending_observation_lease, None
                 dispatch.response_completion_observation, dispatch.pending_response_observation = dispatch.pending_response_observation, None
                 ctx.pop('_computer_response_observation', None)
                 if dispatch.active_lease is None:
-                    dispatch.model = model_runtime.configured_spec(model.id)
-                    dispatch.active_lease = model_runtime.lease(dispatch.model)
-                    await dispatch.active_lease.__aenter__()
+                    lease_started = time.monotonic()
+                    await hold_lease()
+                    action_trace.latency('model_wait', duration_ms=(time.monotonic() - lease_started) * 1000)
                 fields = {'step': dispatch.step + 1, 'call_id': f'{run}:model:{model_steps}'}
-                action_trace.emit('model', f'{agent_name} model started', metadata={**fields, 'payload': {
+                emit('model', f'{agent_name} model started', metadata={**fields, 'payload': {
                     'kind': 'model', 'phase': 'started', 'model': dispatch.model.id, 'engine': 'deepseek'}})
                 metrics = {}
                 terminal = None
@@ -272,10 +507,30 @@ async def run_native_session(task, model, messages, allowed, ctx, agent_name, ef
                     if value['type'] == 'finish': terminal = value
                     else: await reply(message, value)
                 try:
+                    from .fast_lane import candidates
+                    menu = (candidates(ctx['objective'], dispatch.allowed,
+                                       first_step=model_steps == 1, search_refs=last_search_refs,
+                                       trace=trace,
+                                       steering=steered or (dispatch.steering is not None and dispatch.steering.pending))
+                            if fast_lane and task.kind == 'agent'
+                            and task.ref == 'Agents/Executive/Executive' else None)
+                    last_search_refs = None
+                    # Keep the session's advertised schemas byte-stable. Gemma
+                    # renders them at the start of the prompt, so narrowing them
+                    # after a failed effect re-evaluated the whole conversation.
+                    # operate() still rejects every call outside dispatch.allowed.
                     text, has_calls, reason, projection = await native_model.stream(
-                        message['params'], dispatch.model, effort, images, chunk, metrics)
+                        message['params'],
+                        dispatch.model, effort, images, chunk, metrics,
+                        objective=ctx['objective'], decision_messages=dispatch.decision_messages,
+                        evaluation_messages=getattr(evaluation, 'wire_messages', None),
+                        fast_candidates=menu)
                     _foreground_checkpoint(interruption_event, ctx)
                 except Exception as exc:
+                    from ...models.context import ContextBudgetExceeded
+                    if isinstance(exc, ContextBudgetExceeded) and exc.accounting == 'runtime':
+                        await reply(message, error=str(exc), code='CONTEXT_WINDOW_EXCEEDED')
+                        continue  # Upstream compaction decides whether one recovery is possible.
                     await reply(message, error=type(exc).__name__ + ': ' + str(exc)[:300])
                     raise
                 finally:
@@ -284,7 +539,14 @@ async def run_native_session(task, model, messages, allowed, ctx, agent_name, ef
                 if model_steps == 1:
                     ctx['prompt_tokens'] = metrics['prompt_tokens']
                 trace.append({'provider_metrics': metrics})
-                action_trace.emit('model', f'{agent_name} model returned', metadata={**fields, 'payload': {
+                detail = metrics.get('fast_lane') or {}
+                label = detail.get('selected_label', '')
+                if (menu and detail.get('status') == 'selected' and len(label) == 1
+                        and 0 <= ord(label) - ord('B') < len(menu)):
+                    proposal = menu[ord(label) - ord('B')]
+                    if proposal['name'] in {'lights.set', 'application.launch', 'session.unlock'}:
+                        ctx['_reflex_proposal'] = deepcopy(proposal)
+                emit('model', f'{agent_name} model returned', metadata={**fields, 'payload': {
                     'kind': 'model', 'phase': 'result', 'model': dispatch.model.id, 'metrics': metrics}})
                 if 'before_input_tokens' in projection:
                     trace.append({'context_projection': projection})
@@ -305,10 +567,38 @@ async def run_native_session(task, model, messages, allowed, ctx, agent_name, ef
                         # The upstream inbox owns the next decision after a rejected completion.
                         await BRIDGE.send({'method': 'context', 'run': run, 'text': '\n'.join(
                             block['text'] for block in result if block['type'] == 'text')})
+                elif not has_calls and reason == 'stop':
+                    empty_responses += 1
+                    recovery = 'continuation' if empty_responses == 1 else 'failed'
+                    trace.append({'invalid_native_response': 'empty_public_response',
+                                  'attempt': empty_responses, 'recovery': recovery})
+                    if empty_responses == 1:
+                        # A complete empty response has no action to replay. The
+                        # native inbox retains prior Tool results and the next
+                        # boundary still enforces cancellation and step budgets.
+                        emit('event', 'Empty model response; continuing current request')
+                        await BRIDGE.send({'method': 'context', 'run': run, 'text': (
+                            'The preceding model response ended without a visible answer or native Tool call. '
+                            'Continue the current owner request from the existing Tool results and committed receipts. '
+                            'Do not repeat an already dispatched operation or claim an unverified effect. '
+                            'Use a native Tool only for still-missing evidence, or finish with an ordinary text '
+                            'answer or an explicit failed completion.')})
+                    else:
+                        dispatch.done = True
+                        dispatch.status, dispatch.summary = 'failed', 'Model returned two empty responses; no completion was accepted'
+                        emit('error', dispatch.summary)
                 elif reason not in {'stop', 'tool-calls'}:
                     raise RuntimeError(f'Executive model ended with {reason}; no incomplete Tool is dispatched')
                 await reply(message, terminal)
                 await reply(message, done=True)
+        if (dispatch.status == 'completed' and ctx.get('_reflex_command_verified') is True
+                and not steered
+                and sum(row.get('tool') not in {None, 'task.complete'} for row in trace) == 1
+                and not any(
+                    row.get('invalid_tool') or row.get('native_tool_error')
+                    or row.get('invalid_native_response') or row.get('completion_rejected')
+                    or row.get('interrupted') or row.get('not_dispatched') for row in trace)):
+            ctx['_voice_confirmation'] = 'cue_only'
         return trace, dispatch.status, dispatch.summary
     finally:
         try:
@@ -317,15 +607,29 @@ async def run_native_session(task, model, messages, allowed, ctx, agent_name, ef
                 # Drain this exact upstream activation before releasing its model resource.
                 try:
                     async with asyncio.timeout(5):
-                        while (await queue.get()).get('method') != 'end':
-                            pass
+                        while True:
+                            pending = await queue.get()
+                            if pending.get('method') == 'end':
+                                from .sessions import publish
+                                publish(pending.get('session'))
+                                break
+                            if pending.get('method') == 'settlement':
+                                await reply(pending, {'status': 'interrupted', 'summary': ''})
                 except TimeoutError:
                     await BRIDGE.close()
         finally:
             BRIDGE.runs.pop(run, None)
             images.clear()
+            if lease_prefetch is not None:
+                # An unadopted reservation never outlives its activation.
+                lease_prefetch.cancel()
+                await asyncio.wait([lease_prefetch])
+                if not lease_prefetch.cancelled() and lease_prefetch.exception() is None:
+                    await lease_prefetch.result()[1].__aexit__(None, None, None)
             if dispatch.active_lease is not None:
+                release_started = time.monotonic()
                 await dispatch.active_lease.__aexit__(None, None, None)
+                action_trace.latency('model_release', duration_ms=(time.monotonic() - release_started) * 1000)
             ctx.pop('_computer_observation_lease', None)
             ctx.pop('_computer_response_observation', None)
             ctx.pop('_foreground_interruption_event', None)

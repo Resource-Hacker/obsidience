@@ -28,7 +28,8 @@ _JOURNAL_AVAILABLE = True
 _CONTEXT: ContextVar[dict] = ContextVar("public_action_trace", default={})
 LATENCY_STAGES = frozenset({
     "input_final", "preparation", "admission", "selection", "activation", "model_wait",
-    "model_preflight", "model_first_public", "model_complete", "answer_committed",
+    "model_preflight", "model_first_public", "model_complete", "model_release", "answer_committed",
+    "command_verified",
     "speech_received", "aec_ready", "first_pcm", "first_output_write",
     "speech_onset", "first_partial", "speech_final",
     "speech_prefill_started", "speech_prefill_completed", "speech_prefill_cancelled",
@@ -48,6 +49,7 @@ _PAYLOAD_FIELDS = {
     "packet": ("kind", "refs", "retrieval_ms", "knowledge_accounting", "instruction_accounting", "sections"),
     "model": ("kind", "phase", "model", "model_label", "metrics", "error"),
     "context": ("kind", "projection"),
+    "memory": ("kind", "provider", "status", "refs", "duration_ms"),
     "latency": ("kind", "stage", "monotonic_ms", "duration_ms", "turn_id",
                 "run_id", "speech_sequence", "generation"),
 }
@@ -73,7 +75,7 @@ def bind_trial(trial_id: str, *, case_id: str, split: str, variant: str, repetit
             or _redact(trial_id) != trial_id or _redact(case_id) != case_id
             or not isinstance(split, str) or split not in {"train", "holdout"}
             or not isinstance(variant, str) or variant not in {"baseline", "candidate"}
-            or type(repetition) is not int or not 1 <= repetition <= 3):
+            or type(repetition) is not int or not 1 <= repetition <= 5):
         raise ValueError("Invalid evaluation trace identity")
     return _CONTEXT.set({**_CONTEXT.get(), "trial": {
         "id": trial_id, "case_id": case_id, "split": split,
@@ -256,7 +258,7 @@ def packet_payload(sections: dict[str, str], refs: list[str], retrieval_ms: floa
     titles = {
         "header": "Thinking Packet", "identity": "Agent Identity", "task": "Task",
         "objective": "Objective", "tools": "Tools", "skills": "Skills", "runbook": "Runbook",
-        "bindings": "Bindings", "knowledge": "Relevant Knowledge", "immediate": "Immediate Observations",
+        "bindings": "Bindings", "knowledge": "Relevant Knowledge", "conversation": "Native conversation context",
         "begin": "Execution instructions",
     }
     for key, original in sections.items():

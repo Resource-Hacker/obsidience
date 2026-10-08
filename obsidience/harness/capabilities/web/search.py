@@ -12,7 +12,8 @@ def execute(args: dict, context: dict) -> str:
         result = search_web(args.get("query", ""), args.get("limit", 5))
     except WebError as exc:
         return f"Web search failed: {exc}"
-    lines = [f"Web results for: {result['query']}"]
+    lines = [f"Web results for: {result['query']}",
+             "Discovery leads only. Use web.fetch on a relevant URL before answering from its claims."]
     for index, hit in enumerate(result["results"], 1):
         lines.extend((
             f"{index}. {hit['title']}",

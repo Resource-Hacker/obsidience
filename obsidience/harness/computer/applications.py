@@ -31,6 +31,7 @@ APPLICATIONS = {
         "label": "Microsoft Edge",
         "aliases": ("edge",),
         "desktop_id": "microsoft-edge.desktop",
+        "accepts_web_url": True,
         "window_app_ids": ("microsoft-edge",),
         "window_needles": ("microsoft edge", "microsoft-edge"),
     },

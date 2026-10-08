@@ -7,7 +7,9 @@ import copy
 import json
 import logging
 import re
+import secrets
 import threading
+import time
 from dataclasses import dataclass
 
 from websockets.asyncio.client import connect
@@ -16,6 +18,7 @@ from obsidience.harness.computer.applications import (
     application_window_name,
     matches_application_window,
 )
+from obsidience.shell.command_token import command_url
 
 
 LOGGER = logging.getLogger(__name__)
@@ -443,7 +446,7 @@ class ShellSceneCache:
         return matches[0]
 
     def resolve_semantic(
-        self, kind: str, name: str = "", surface_id: str = "", *, title: str = ""
+        self, kind: str, name: str = "", surface_id: str = "", *, title: str = "", prefer_active: bool = False
     ) -> SceneTarget:
         """Resolve the same public selector for observation, activation and placement."""
         if kind not in {"application", "pane", "focused"}:
@@ -483,7 +486,13 @@ class ShellSceneCache:
         if not matches:
             raise SceneTargetNotFound("no semantic shell target matched")
         if len(matches) != 1:
-            raise SceneTargetAmbiguous("semantic target matched multiple windows")
+            active = [target for target in matches if target.active]
+            if kind == "application" and prefer_active and len(active) == 1:
+                return active[0]
+            ambiguous = SceneTargetAmbiguous("semantic target matched multiple windows")
+            # Exact Scene titles let a caller choose one window without guessing.
+            ambiguous.titles = [_semantic_title(target.window.title) for target in matches[:8]]
+            raise ambiguous
         return matches[0]
 
     def validate(self, target: SceneTarget) -> SceneTarget:
@@ -552,6 +561,49 @@ class ShellSceneClient:
     def snapshot(self) -> SceneSnapshot:
         return self.cache.snapshot()
 
+    def refresh(self, cancel_event=None) -> SceneSnapshot:
+        """Read native geometry through its existing owner before using the cache."""
+        from obsidience.harness.capabilities.window.command import (
+            COMMAND_SCHEMA, EffectNotObserved, ShellCommandUnavailable, _send_command,
+        )
+
+        before = self.snapshot()
+        if before.workspace.get("session_locked") is True:
+            raise SceneLocked("shell scene is locked")
+        try:
+            receipt = _send_command({
+                "schema": COMMAND_SCHEMA, "type": "window.state.refresh",
+                "token": "refresh." + secrets.token_hex(16),
+                "surface_id": "", "window_id": "",
+            }, "window.state.refresh.result", timeout=3.0, cancel_event=cancel_event)
+        except (EffectNotObserved, ShellCommandUnavailable) as exc:
+            raise SceneUnavailable("native scene refresh was not observed") from exc
+        revisions = receipt.get("revisions")
+        if (receipt.get("success") is not True or not isinstance(revisions, dict)
+                or set(revisions) != set(SURFACE_IDS)
+                or any(type(value) is not int or not 1 <= value <= 2**53 - 1
+                       for value in revisions.values())):
+            raise SceneUnavailable("native scene refresh was rejected")
+        if any(revisions[surface.surface_id] < surface.revision for surface in before.surfaces):
+            raise SceneTargetStale("native scene publisher revision regressed")
+        deadline = time.monotonic() + 2.0
+        while True:
+            token = self.change_token()
+            if cancel_event is not None and cancel_event.is_set():
+                raise SceneUnavailable("native scene refresh was cancelled")
+            current = self.snapshot()
+            if current.generation != before.generation:
+                raise SceneTargetStale("shell connection changed during native refresh")
+            if current.workspace.get("session_locked") is True:
+                raise SceneLocked("shell scene is locked")
+            if all(surface.revision >= revisions[surface.surface_id]
+                   for surface in current.surfaces):
+                return current
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise SceneUnavailable("refreshed native scene was not published")
+            self.wait_for_change(token, min(0.05, remaining) if cancel_event is not None else remaining)
+
     def semantic_manifest(self) -> dict[str, object]:
         return self.cache.semantic_manifest()
 
@@ -562,9 +614,9 @@ class ShellSceneClient:
         return self.cache.resolve(**selectors)
 
     def resolve_semantic(
-        self, kind: str, name: str = "", surface_id: str = "", *, title: str = ""
+        self, kind: str, name: str = "", surface_id: str = "", *, title: str = "", prefer_active: bool = False
     ) -> SceneTarget:
-        return self.cache.resolve_semantic(kind, name, surface_id, title=title)
+        return self.cache.resolve_semantic(kind, name, surface_id, title=title, prefer_active=prefer_active)
 
     def validate(self, target: SceneTarget) -> SceneTarget:
         return self.cache.validate(target)
@@ -574,7 +626,7 @@ class ShellSceneClient:
             generation = 0
             try:
                 async with connect(
-                    self.url,
+                    command_url(self.url),
                     subprotocols=[SHELL_SUBPROTOCOL],
                     open_timeout=2,
                     close_timeout=1,

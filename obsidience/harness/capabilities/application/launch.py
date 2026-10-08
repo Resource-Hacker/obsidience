@@ -59,6 +59,12 @@ def _visible_application_window(application: str) -> dict | None:
         return None
 
 
+def _launched_target(application: str, url: str = ""):
+    # URI forwarding may target a running browser with several windows. Only
+    # its uniquely active match can attest the resulting page's window.
+    return SCENE.resolve_semantic("application", application, prefer_active=bool(url))
+
+
 def _unit_is_active(unit: str | None) -> bool:
     if not unit:
         return False
@@ -84,12 +90,15 @@ def _await_readiness(result: dict, context: dict, *, launch_unit: str | None = N
         if cancel is not None and cancel.is_set():
             return {**result, "wait_status": "cancelled", "must_not_replay": True}
         try:
-            witness = _witness(SCENE.resolve_semantic("application", result["application"]))
+            witness = _witness(_launched_target(result["application"], result.get("url", "")))
             return {**result, "state": "ready", "ready": True, "window": witness,
                     "wait_status": "observed", "assistant_status": f"{result['label']} is open."}
-        except (SceneLocked, SceneTargetAmbiguous) as exc:
-            return {**result, "state": "unverified", "wait_status": "locked" if isinstance(exc, SceneLocked) else "ambiguous",
+        except SceneLocked:
+            return {**result, "state": "unverified", "wait_status": "locked",
                     "must_not_replay": True}
+        except SceneTargetAmbiguous:
+            if not result.get("url"):
+                return {**result, "state": "unverified", "wait_status": "ambiguous", "must_not_replay": True}
         except (SceneUnavailable, SceneTargetNotFound):
             pass
         now = time.monotonic()
@@ -115,17 +124,23 @@ def _launch_application(args: dict, context: dict | None = None) -> dict:
     if cancel is not None and cancel.is_set():
         raise ValueError("Launch cancelled before dispatch")
     application = str(args.get("application", "")).strip().lower()
-    if set(args) - {"application"}:
-        raise ValueError("application.launch accepts only the application field")
+    if set(args) - {"application", "url"}:
+        raise ValueError("application.launch accepts application and optional browser url")
     spec = APPLICATIONS.get(application)
     if not spec:
         raise ValueError("application must be one of: " + ", ".join(sorted(APPLICATIONS)))
+    url = ""
+    if "url" in args:
+        from obsidience.harness.web.runtime import validate_fetch_url
+        if not spec.get("accepts_web_url"):
+            raise ValueError("This registered application does not accept web URLs")
+        url = validate_fetch_url(args["url"])
     witness = _visible_application_window(application)
-    if witness:
+    if witness and not url:
         return {"application": application, "label": spec["label"], "state": "ready",
                 "ready": True, "dispatched": False, "window": witness,
                 "assistant_status": f"{spec['label']} is already open."}
-    if _unit_is_active(spec.get("unit")):
+    if not url and _unit_is_active(spec.get("unit")):
         return _await_readiness({"application": application, "label": spec["label"],
             "state": "starting", "ready": False, "dispatched": False, "unit": spec.get("unit"),
             "assistant_status": f"{spec['label']} is already starting; readiness is not verified yet."}, context)
@@ -136,16 +151,18 @@ def _launch_application(args: dict, context: dict | None = None) -> dict:
     except SceneLocked as exc:
         raise ValueError("The desktop is locked; nothing was dispatched") from exc
     except SceneTargetAmbiguous as exc:
-        raise ValueError("Application target is ambiguous; nothing was dispatched") from exc
+        if not url:
+            raise ValueError("Application target is ambiguous; nothing was dispatched") from exc
     except (SceneUnavailable, SceneTargetNotFound):
         pass
     else:
-        return _await_readiness({"application": application, "label": spec["label"],
-            "state": "starting", "ready": False, "dispatched": False}, context)
+        if not url:
+            return _await_readiness({"application": application, "label": spec["label"],
+                "state": "starting", "ready": False, "dispatched": False}, context)
     if cancel is not None and cancel.is_set():
         raise ValueError("Launch cancelled before dispatch")
     result = subprocess.run(
-        ["/home/wissenschafter/bin/agent-launch-gui", spec["desktop_id"]],
+        ["/home/wissenschafter/bin/agent-launch-gui", spec["desktop_id"], *([url] if url else [])],
         capture_output=True, text=True, timeout=30, check=False,
     )
     if result.returncode != 0:
@@ -155,9 +172,12 @@ def _launch_application(args: dict, context: dict | None = None) -> dict:
                 "assistant_status": f"I could not start {spec['label']}: {detail}"}
     return _await_readiness({"application": application, "label": spec["label"],
         "desktop_id": spec["desktop_id"], "state": "starting", "ready": False,
+        **({"url": url, "url_delivery": "dispatched", "page_verified": False} if url else {}),
         "dispatched": True, "window": None,
         "assistant_status": f"{spec['label']} was dispatched; readiness is not verified yet."}, context,
-        launch_unit=_managed_unit(result.stdout, spec["desktop_id"]))
+        # A running browser may consume the URI and end the launcher client.
+        # Its window, not that short-lived forwarding process, owns readiness.
+        launch_unit=None if url else _managed_unit(result.stdout, spec["desktop_id"]))
 
 
 def execute(args: dict, context: dict) -> str:

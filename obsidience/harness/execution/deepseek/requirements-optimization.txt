@@ -1,0 +1,4 @@
+# The embedded V2 core uses the Harness's existing PyYAML and jsonschema.
+# Install with --no-deps to omit optional Claude/Copilot/legacy benchmark SDKs:
+# uv pip install --python .venv/bin/python --no-deps -r <this file>
+autosaddler @ git+https://github.com/microsoft/AutoSaddler@6a2b7a9ab2412a8fe384fd5471d2a49b03a60013

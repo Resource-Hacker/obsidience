@@ -26,6 +26,7 @@ def local_clock() -> dict[str, str]:
         now = datetime.now().astimezone()
         timezone = now.tzname() or now.strftime("UTC%z")
     return {"iso": now.isoformat(timespec="seconds"), "timezone": timezone,
+            "time": now.strftime("%I:%M %p %Z").lstrip("0"),
             "weekday": now.strftime("%A")}
 
 

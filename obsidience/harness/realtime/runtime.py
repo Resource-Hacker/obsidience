@@ -15,11 +15,14 @@ from pathlib import Path
 from typing import Any, Literal
 
 from ..conversation import runtime as conversation_runtime
+from ..conversation.selection import EXECUTIVE_REF
+from ..knowledge.vault import resolver
 from ..execution import activity, trace
 from ..models import runtime as model_runtime
 from . import media as media_runtime
 
-RealtimePhase = Literal["off", "starting", "command", "proactive", "stopping", "error"]
+RealtimePhase = Literal["off", "starting", "wake", "command", "proactive", "suspended", "stopping", "error"]
+READY_PHASES = {"wake", "command", "proactive"}
 
 PROJECT_ROOT = Path("/home/wissenschafter/Projects/obsidience")
 REALTIME_PYTHON = Path("/var/lib/ai/venvs/obsidience-speech/bin/python")
@@ -45,8 +48,22 @@ class RealtimeSessionManager:
         self._lock = asyncio.Lock()
         self._process: asyncio.subprocess.Process | None = None
         self._monitor: asyncio.Task[None] | None = None
+        self._audio_monitor: asyncio.Task[None] | None = None
+        self._audio_reconnect_pending = False
+        self._audio_reconnect_attempt: tuple | None = None
         self._transport_ready = False
         self._phase: RealtimePhase = "off"
+        self._mode = "wake"
+        self._desired_mode = "off"
+        self._mode_revision = 0
+        self._wake_open = False
+        self._wake_word = "Computer"
+        self._paused_for_work = False
+        self._standby_event = asyncio.Event()
+        self._standby_task: asyncio.Task | None = None
+        self._unsubscribe_activity = None
+        self._closed = False
+        self._deferred_reply: dict | None = None
         self._requested_proactive = False
         self._started_ns: int | None = None
         self._last_error: str | None = None
@@ -57,9 +74,11 @@ class RealtimeSessionManager:
         self._capture_active = False
         self._user_speaking = False
         self._speech_sequence = 0
+        self._speech_handoff_task: asyncio.Task | None = None
         self._live_transcript: dict[str, Any] | None = None
         self._aec_active = False
         self._tts_voice = media_runtime.DEFAULT_TTS_VOICE
+        self._cue_names: list[str] = []
         self._events: deque[dict[str, Any]] = deque(maxlen=MAX_EVENTS)
         self._recent_log: deque[str] = deque(maxlen=8)
         self._subscribers: set[asyncio.Queue[dict[str, Any]]] = set()
@@ -72,18 +91,41 @@ class RealtimeSessionManager:
         self.conversation = conversation or conversation_runtime.RUNTIME
 
     def scheduler_paused(self) -> bool:
-        # Connection setup/teardown is a short transition. Idle listening does
-        # not block nonconflicting work; actual GPU reservations remain owned
-        # by the existing model runtime and foreground demand preempts safely.
-        return self._phase in {"starting", "stopping"}
+        # Accepted wake/recognized speech is foreground demand. Passive room
+        # VAD and idle listening do not pause background work. Keep the final
+        # dispatch bridge until its existing conversation task owns admission.
+        return (self._phase in {"starting", "stopping"} or self._wake_open
+                or self._user_speaking or (self._speech_handoff_task is not None
+                                          and not self._speech_handoff_task.done()))
+
+    async def _prioritize_speech_capture(self) -> None:
+        from ..execution.scheduler import foreground_admission
+
+        # Signal through the existing scheduler; each executor joins its own
+        # cancellation. Its admission count is transient; capture state above
+        # prevents another autonomous run from starting before final dispatch.
+        async with foreground_admission("speech.capture"):
+            pass
+
+    def _speech_handoff_done(self, task: asyncio.Task) -> None:
+        if self._speech_handoff_task is task:
+            self._speech_handoff_task = None
+        from ..execution.scheduler import wake_scheduler
+        wake_scheduler()
 
     def snapshot(self) -> dict[str, Any]:
         process = self._process
+        aec_backend = (media_runtime.realtime_aec_backend()
+                       if not self._audio_reconnect_pending else "none")
         return {
             "schema_version": 1,
             "phase": self._phase,
+            "mode": self._desired_mode,
+            "wake_word": self._wake_word,
+            "command_open": self._wake_open or self._mode == "realtime",
+            "executive": self.conversation.readiness(),
             "enabled": self._phase not in {"off", "error"},
-            "ready": self._phase in {"command", "proactive"},
+            "ready": self._phase in READY_PHASES,
             "transport_ready": self._transport_ready,
             "proactive": self._phase == "proactive",
             "requested_proactive": self._requested_proactive,
@@ -98,8 +140,10 @@ class RealtimeSessionManager:
             "capture_active": self._capture_active,
             "user_speaking": self._user_speaking,
             "live_transcript": self._live_transcript,
-            "acoustic_echo_cancellation": self._aec_active,
+            "acoustic_echo_cancellation": self._aec_active and aec_backend != "none",
+            "echo_cancellation_backend": aec_backend,
             "speech": {
+                "input_channel": "left" if self._audio_source == media_runtime.UMA8_SOURCE else "mono",
                 "transport": "Pipecat LocalAudioTransport 0.0.98",
                 "turn_taking": "NVIDIA NeMo Voice Agent",
                 "asr": "Nemotron Speech Streaming EN 0.6B",
@@ -108,13 +152,15 @@ class RealtimeSessionManager:
                 "tts": "Pocket TTS 3.0.2",
                 "tts_device": "CPU",
                 "voice": self._tts_voice,
+                "cues": list(self._cue_names),
             },
             "scheduler_paused": self.scheduler_paused(),
             "recent_log": list(self._recent_log),
         }
 
     async def _publish(self, kind: str, **payload: Any) -> None:
-        if kind == "state" and self._phase not in {"command", "proactive"}:
+        queued_reply = self._deferred_reply and self._phase in {"suspended", "starting"}
+        if kind == "state" and self._phase not in READY_PHASES and not queued_reply:
             self._clear_playback()
         event = {
             "type": kind,
@@ -141,6 +187,163 @@ class RealtimeSessionManager:
 
     def unsubscribe(self, queue: asyncio.Queue[dict[str, Any]]) -> None:
         self._subscribers.discard(queue)
+
+    async def publish_readiness(self) -> None:
+        await self._publish("state", reason="executive_readiness")
+
+    def _model_activity(self, busy: bool) -> None:
+        if busy:
+            self.conversation.invalidate_readiness()
+        self._standby_event.set()
+
+    async def _audio_devices_changed(self) -> None:
+        async with self._lock:
+            if (self._closed or self._desired_mode == "off"
+                    or self._audio_source != media_runtime.UMA8_SOURCE):
+                return
+            if not self._aec_active and not self._audio_reconnect_pending:
+                return
+            intact, generation = await asyncio.to_thread(
+                media_runtime.uma8_reference_state, self._audio_sink,
+            )
+            if intact and not self._audio_reconnect_pending:
+                return
+            lost = self._aec_active
+            if lost:
+                self._audio_reconnect_pending = True
+                self._audio_reconnect_attempt = None
+                self._phase = "error"
+                self._transport_ready = False
+                self._last_error = "Selected UMA-8 audio disconnected; waiting for its capture and hardware reference."
+                await self._publish("state", reason="audio_disconnected")
+        if lost:
+            # Drain the same capture/reference owner; never replay interrupted
+            # speech or silently retain a stream on a fallback microphone.
+            await self.stop(preserve_requested=True, audio_lost=True)
+        async with self._lock:
+            if self._closed or self._desired_mode == "off" or not self._audio_reconnect_pending:
+                return
+            self._phase = "error"
+            await self._publish("state", reason="waiting_for_audio")
+            if generation is None or generation == self._audio_reconnect_attempt:
+                return
+            self._audio_reconnect_attempt = generation
+            mode, operation = self._desired_mode, self._operation
+            if mode == "wake" and model_runtime.RUNTIME.work_requested:
+                self._paused_for_work = True
+                self._audio_reconnect_pending = False
+                self._phase = "suspended"
+                self._standby_event.set()
+                return
+        try:
+            await self._start_admitted(mode=mode, audio_reconnect_operation=operation)
+        except (OSError, RuntimeError, ValueError) as exc:
+            # One attempt per available endpoint generation. A permanent bad
+            # graph stays explicit rather than repeatedly loading the worker.
+            self._last_error = f"Audio reconnection failed: {exc}"[:MAX_EVENT_TEXT]
+            await self._publish("state", reason="audio_reconnect_failed")
+
+    async def _watch_audio_devices(self) -> None:
+        subscription = None
+        try:
+            subscription = await asyncio.create_subprocess_exec(
+                "/usr/bin/pactl", "subscribe", stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL, env={**os.environ, "LC_ALL": "C"},
+            )
+            assert subscription.stdout is not None
+            await self._audio_devices_changed()
+            while line := await subscription.stdout.readline():
+                if self._closed:
+                    return
+                if (b" on source #" in line or b" on sink #" in line) and (
+                    b"'new'" in line or b"'remove'" in line
+                    or (self._audio_reconnect_pending and b"'change'" in line)
+                ):
+                    await self._audio_devices_changed()
+            raise RuntimeError("the audio-device subscription closed")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            if not self._closed:
+                self._last_error = f"Audio hotplug monitor failed: {exc}"[:MAX_EVENT_TEXT]
+                await self._publish("state", reason="audio_monitor_failed")
+        finally:
+            if subscription is not None and subscription.returncode is None:
+                with contextlib.suppress(ProcessLookupError):
+                    subscription.terminate()
+                try:
+                    await asyncio.wait_for(subscription.wait(), timeout=2)
+                except TimeoutError:
+                    with contextlib.suppress(ProcessLookupError):
+                        subscription.kill()
+                    await subscription.wait()
+
+    async def _standby(self) -> None:
+        while not self._closed:
+            await self._standby_event.wait()
+            self._standby_event.clear()
+            if self._closed:
+                return
+            if not model_runtime.RUNTIME.work_requested:
+                if self._paused_for_work and self._desired_mode == "wake":
+                    try:
+                        await self._start_admitted(mode="wake", only_if_requested=True)
+                    except (OSError, RuntimeError, ValueError):
+                        # A new owner may have claimed the GPU on this edge.
+                        # Another work boundary can resume it; never retry-loop.
+                        if model_runtime.RUNTIME.work_requested:
+                            self._phase = "suspended"
+                            self._last_error = None
+                self.conversation.prepare_idle()
+            await self.publish_readiness()
+
+    async def _yield_for_model(self) -> None:
+        if self._desired_mode == "wake":
+            self._paused_for_work = True
+            # A cancelled model request must still finish the speech handoff;
+            # otherwise a stopped worker can retain an unreleasable GPU lease.
+            draining = asyncio.create_task(
+                self.stop(preserve_requested=True, for_work=True), name="obsidience-speech-yield",
+            )
+            cancelled = False
+            while True:
+                try:
+                    await asyncio.shield(draining)
+                    break
+                except asyncio.CancelledError:
+                    cancelled = True
+                    if draining.done():
+                        break
+            if cancelled:
+                raise asyncio.CancelledError
+
+    async def speak(self, payload: dict) -> None:
+        if self._paused_for_work and self._desired_mode == "wake" and self._phase not in READY_PHASES:
+            # One accepted public reply may wait for the same speech owner to
+            # regain hardware. Generation changes and Stop discard it.
+            self._deferred_reply = self._prepare_playback(payload)
+            return
+        if self._phase in READY_PHASES:
+            await self._send_worker(payload)
+
+    async def cue(self, name: str) -> None:
+        """Nonverbal feedback uses the same generation-bound speech transport."""
+        if self._phase in READY_PHASES and name in self._cue_names:
+            try:
+                await self._send_worker({
+                    "type": "cue", "name": name,
+                    "generation": self.conversation._generation,
+                })
+            except (OSError, RuntimeError):
+                trace.emit("error", f"Computer cue delivery failed: {name}")
+
+    def _prepare_playback(self, payload: dict) -> dict:
+        """Publish queued speech at acceptance, including a deferred worker handoff."""
+        self._playback_id = uuid.uuid4().hex
+        self._playback_run_id = str(payload.get("run_id") or "")[:128]
+        activity.emit_playback("pending", run_id=self._playback_run_id,
+                              playback_id=self._playback_id)
+        return {**payload, "playback_id": self._playback_id}
 
     def _trace_speech_boundary(self, event_type: str) -> None:
         """Correlate speech edges without copying words or acoustic data."""
@@ -175,23 +378,27 @@ class RealtimeSessionManager:
             str(POCKET_ROOT),
             "--voice",
             self._tts_voice,
+            "--input-channel", "left" if media_runtime.realtime_aec_backend() == "uma8" else "mono",
+            "--wake-word", self._wake_word,
+            "--mode", self._mode,
+            "--mode-revision", str(self._mode_revision),
             "--startup-confirmation",
-            REALTIME_CONFIRMATION,
+            REALTIME_CONFIRMATION if self._mode == "realtime" else "",
         )
 
     async def _send_worker(self, payload: dict[str, Any]) -> None:
+        if payload.get("type") in {"cancel", "stop"}:
+            if payload.get("type") == "stop" or payload.get("stop_playback", True):
+                self._wake_open = self._capture_active = self._user_speaking = False
+            self._deferred_reply = None
+            self._clear_playback()
         process = self._process
         if process is None or process.returncode is not None or process.stdin is None:
             return
         if payload.get("type") in {"speak", "cancel", "stop"}:
             if payload["type"] == "speak":
-                self._playback_id = uuid.uuid4().hex
-                self._playback_run_id = str(payload.get("run_id") or "")[:128]
-                payload = {**payload, "playback_id": self._playback_id}
-                activity.emit_playback("pending", run_id=self._playback_run_id,
-                                       playback_id=self._playback_id)
-            else:
-                self._clear_playback()
+                if not payload.get("playback_id") or payload["playback_id"] != self._playback_id:
+                    payload = self._prepare_playback(payload)
             self._playback_timing_binding = (
                 tuple(payload.get(key) for key in ("generation", "speech_sequence", "turn_id", "run_id"))
                 if payload.get("type") == "speak" else None
@@ -250,40 +457,94 @@ class RealtimeSessionManager:
             key: event[key] for key in ("generation", "speech_sequence", "turn_id", "run_id")
         })
 
-    async def start(self) -> dict[str, Any]:
+    async def start(self, *, mode: str = "realtime") -> dict[str, Any]:
         from ..execution.scheduler import foreground_admission
 
+        if self._process is not None:
+            return await self.set_listening_mode(mode)
+        if mode == "wake":
+            # Arming passive listening is not foreground work. If another
+            # agent owns the model, its release event starts this same worker.
+            if not model_runtime.RUNTIME.work_requested:
+                try:
+                    return await self._start_admitted(mode=mode)
+                except RuntimeError:
+                    if not model_runtime.RUNTIME.work_requested:
+                        raise
+            async with self._lock:
+                self._mode = self._desired_mode = "wake"
+                self._paused_for_work = True
+                self._phase = "suspended"
+                self._last_error = None
+                if self._requested_state_path is not None:
+                    media_runtime._atomic_json(self._requested_state_path, {"mode": "wake"})
+                self._standby_event.set()
+                await self._publish("state", reason="waiting_for_work")
+                return self.snapshot()
         async with foreground_admission("realtime.start"):
-            return await self._start_admitted()
+            return await self._start_admitted(mode=mode)
 
     async def restore(self) -> dict[str, Any]:
-        """Restore same-login speech intent before autonomous admission opens."""
+        """Wake-by-name is the default; retain explicit same-login mute/mode."""
         path = self._requested_state_path
         if path is None:
             return self.snapshot()
+        self._closed = False
+        if self._audio_monitor is None or self._audio_monitor.done():
+            self._audio_monitor = asyncio.create_task(
+                self._watch_audio_devices(), name="obsidience-audio-hotplug",
+            )
+        if self._unsubscribe_activity is None:
+            self._unsubscribe_activity = model_runtime.RUNTIME.subscribe_activity(self._model_activity)
+            self._standby_task = asyncio.create_task(self._standby(), name="obsidience-voice-standby")
         try:
             requested = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, UnicodeError, ValueError):
+            requested = {"mode": "wake"}
+        if not isinstance(requested, dict):
+            requested = {}
+        # Legacy intent is exactly {"enabled": true}; 1 == True must not match.
+        legacy = set(requested) == {"enabled"} and requested["enabled"] is True
+        mode = "realtime" if legacy else requested.get("mode", "wake")
+        if mode == "off":
             return self.snapshot()
-        if requested != {"enabled": True} or requested.get("enabled") is not True:
-            return self.snapshot()
+        if mode not in {"wake", "realtime"}:
+            mode = "wake"
         try:
-            return await self.start()
+            return await self.start(mode=mode)
         except (OSError, RuntimeError, ValueError) as exc:
             self._phase = "error"
             self._last_error = f"{type(exc).__name__}: {exc}"[:MAX_EVENT_TEXT]
             await self._publish("state", reason="restore_failed")
             return self.snapshot()
 
-    async def _start_admitted(self) -> dict[str, Any]:
+    async def _start_admitted(self, *, mode: str = "realtime",
+                             only_if_requested: bool = False,
+                             audio_reconnect_operation: int | None = None) -> dict[str, Any]:
+        if mode not in {"wake", "realtime"}:
+            raise ValueError("Voice mode must be wake or realtime")
         async with self._lock:
+            if audio_reconnect_operation is not None and (
+                self._closed or self._desired_mode != mode
+                or not self._audio_reconnect_pending or self._operation != audio_reconnect_operation
+            ):
+                return self.snapshot()
+            if only_if_requested and (self._closed or self._desired_mode != mode
+                                      or not self._paused_for_work):
+                return self.snapshot()
             if self._process is not None:
                 return self.snapshot()
+            # Bind the worker and its status to the accepted Executive identity.
+            executive = resolver(include_system=False).resolve(EXECUTIVE_REF)
+            self._wake_word = executive.title.strip() if executive is not None else "Computer"
+            self._wake_word = self._wake_word or "Computer"
             if not REALTIME_PYTHON.is_file() or not REALTIME_PYTHON.resolve().is_file():
                 raise RuntimeError("the pinned Obsidience Realtime Python is unavailable")
             if not NEMOTRON_MODEL.is_file():
                 raise RuntimeError("the pinned Nemotron streaming ASR model is unavailable")
             self._operation += 1
+            self._mode = self._desired_mode = mode
+            self._wake_open = False
             operation = self._operation
             self._phase = "starting"
             self._transport_ready = False
@@ -302,10 +563,10 @@ class RealtimeSessionManager:
                 self._audio_source = media["microphone"]
                 self._audio_sink = media["speaker"]
                 self._tts_voice = media["tts_voice"]
-                transport_source = await asyncio.to_thread(
+                await asyncio.to_thread(
                     media_runtime.prepare_microphone, self._audio_source,
                 )
-                aec_source, aec_sink = await asyncio.to_thread(
+                aec_source, playback_sink = await asyncio.to_thread(
                     media_runtime.start_realtime_aec,
                     self._audio_source,
                     self._audio_sink,
@@ -313,6 +574,9 @@ class RealtimeSessionManager:
                 self._aec_active = True
                 await model_runtime.reserve_devices(
                     RUNTIME_LEASE_OWNER, (model_runtime.RTX_4080_DEVICE,),
+                    yield_when_needed=self._yield_for_model if mode == "wake" else None,
+                    memory_mib={model_runtime.RTX_4080_DEVICE: 6000},
+                    shared_model_ids=(model_runtime.FLASH_NEXT_MODEL,),
                 )
                 self._hardware_leased = True
                 RUNTIME_ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -344,21 +608,22 @@ class RealtimeSessionManager:
                         "HF_HUB_DISABLE_TELEMETRY": "1",
                         "TRANSFORMERS_OFFLINE": "1",
                         "PYTHONUNBUFFERED": "1",
-                        "PULSE_SOURCE": transport_source,
-                        "PULSE_SINK": aec_sink,
-                        "OBSIDIENCE_RAW_SOURCE": transport_source,
-                        "OBSIDIENCE_AEC_SOURCE": aec_source,
+                        "PULSE_SOURCE": aec_source,
+                        "PULSE_SINK": playback_sink,
+                        "PULSE_PROP": "node.dont-fallback=true node.linger=true",
                     },
                     stdin=asyncio.subprocess.PIPE,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.STDOUT,
                     start_new_session=True,
                 )
+                model_runtime.RUNTIME.set_reservation_process(RUNTIME_LEASE_OWNER, self._process.pid)
                 self.conversation.speech = self
                 if self._requested_state_path is not None:
-                    media_runtime._atomic_json(self._requested_state_path, {"enabled": True})
+                    media_runtime._atomic_json(self._requested_state_path, {"mode": mode})
                 # Reconnecting speech preserves the one selected conversation.
                 # Only the explicit Conversation control creates a new identity.
+                self._audio_reconnect_pending = False
             except BaseException as exc:
                 process, self._process = self._process, None
                 if process is not None and process.returncode is None:
@@ -387,6 +652,36 @@ class RealtimeSessionManager:
             await self._publish("state", reason="start_requested")
             return self.snapshot()
 
+    async def set_listening_mode(self, mode: str) -> dict[str, Any]:
+        if mode == "off":
+            return await self.stop()
+        if mode not in {"wake", "realtime"}:
+            raise ValueError("Voice mode must be wake, realtime or off")
+        if self._process is not None and self._process.returncode is not None:
+            await self.stop(preserve_requested=True)
+        if self._process is None:
+            return await self.start(mode=mode)
+        async with self._lock:
+            if mode == self._mode and self._phase in READY_PHASES:
+                return self.snapshot()
+            await self.conversation.cancel(reason="voice.mode_changed")
+            self._mode = self._desired_mode = mode
+            self._mode_revision += 1
+            self._wake_open = False
+            self._requested_proactive = False
+            self._live_transcript = None
+            self._capture_active = self._user_speaking = False
+            self._input_level = 0.0
+            self._phase = "starting"
+            model_runtime.RUNTIME.set_reservation_yielder(
+                RUNTIME_LEASE_OWNER, self._yield_for_model if mode == "wake" else None,
+            )
+            await self._send_worker({"type": "mode", "mode": mode, "mode_revision": self._mode_revision})
+            if self._requested_state_path is not None:
+                media_runtime._atomic_json(self._requested_state_path, {"mode": mode})
+            await self._publish("state", reason="mode_requested")
+            return self.snapshot()
+
     async def set_proactive(self, enabled: bool) -> dict[str, Any]:
         if not isinstance(enabled, bool):
             raise TypeError("proactive must be bool")
@@ -401,7 +696,8 @@ class RealtimeSessionManager:
             await self._publish("state", reason="mode_applied")
             return self.snapshot()
 
-    async def stop(self, *, preserve_requested: bool = False) -> dict[str, Any]:
+    async def stop(self, *, preserve_requested: bool = False, for_work: bool = False,
+                   audio_lost: bool = False) -> dict[str, Any]:
         finalize_observations = False
         intent_error = None
 
@@ -411,16 +707,22 @@ class RealtimeSessionManager:
             return self.snapshot()
 
         async with self._lock:
+            if not preserve_requested:
+                self._desired_mode = "off"
+                self._paused_for_work = False
+                self._audio_reconnect_pending = False
+                self._audio_reconnect_attempt = None
+            self._wake_open = False
             if not preserve_requested and self._requested_state_path is not None:
                 try:
-                    self._requested_state_path.unlink(missing_ok=True)
+                    media_runtime._atomic_json(self._requested_state_path, {"mode": "off"})
                 except OSError as exc:
                     intent_error = exc
             conversation_id = self.conversation._conversation.conversation_id
             process = self._process
             operation = self._operation
             if process is None or process.returncode is not None:
-                if self.conversation.speech is self:
+                if self.conversation.speech is self and not for_work:
                     await self.conversation.cancel()
                 finalize_observations = bool(
                     self._phase not in {"off", "error"}
@@ -428,9 +730,11 @@ class RealtimeSessionManager:
                 )
                 await asyncio.to_thread(media_runtime.stop_realtime_aec)
                 self._aec_active = False
-                await asyncio.to_thread(
-                    media_runtime.set_realtime_camera_active, self._audio_source, False,
-                )
+                # An unplugged source cannot resolve; release must still finish.
+                with contextlib.suppress(Exception):
+                    await asyncio.to_thread(
+                        media_runtime.set_realtime_camera_active, self._audio_source, False,
+                    )
                 self._phase = "off"
                 self._transport_ready = False
                 self._input_level = 0.0
@@ -443,31 +747,37 @@ class RealtimeSessionManager:
                 self._hardware_leased = False
                 if release_hardware:
                     await model_runtime.release_devices(RUNTIME_LEASE_OWNER)
-                if self.conversation.speech is self:
+                if self.conversation.speech is self and not for_work:
                     self.conversation.speech = None
+                if for_work:
+                    self._phase = "suspended"
                 result = self.snapshot()
             else:
                 result = None
             if result is None and self._phase != "stopping":
                 self._phase = "stopping"
                 self._requested_proactive = False
-                await self.conversation.cancel()
+                if not for_work:
+                    await self.conversation.cancel()
                 await self._send_worker({"type": "stop"})
                 await self._publish("state", reason="stop_requested")
                 with contextlib.suppress(ProcessLookupError):
-                    os.killpg(process.pid, signal.SIGINT)
+                    # PortAudio cleanup can block in stop_stream after its
+                    # device vanishes. The stateless worker cannot drain that
+                    # dead input; cancellation is already owned by the parent.
+                    os.killpg(process.pid, signal.SIGTERM if audio_lost else signal.SIGINT)
         if result is not None:
-            if finalize_observations:
+            if finalize_observations and not for_work:
                 await self.conversation.finalize_pending(
                     "",
                     session_boundary="realtime.stopped",
                 )
             return stopped_snapshot()
         try:
-            await asyncio.wait_for(process.wait(), timeout=60)
+            await asyncio.wait_for(process.wait(), timeout=5 if audio_lost else 60)
         except TimeoutError:
             with contextlib.suppress(ProcessLookupError):
-                os.killpg(process.pid, signal.SIGTERM)
+                os.killpg(process.pid, signal.SIGKILL if audio_lost else signal.SIGTERM)
             try:
                 await asyncio.wait_for(process.wait(), timeout=15)
             except TimeoutError:
@@ -483,13 +793,14 @@ class RealtimeSessionManager:
             if self._hardware_leased:
                 await model_runtime.release_devices(RUNTIME_LEASE_OWNER)
                 self._hardware_leased = False
-            await asyncio.to_thread(
-                media_runtime.set_realtime_camera_active, self._audio_source, False,
-            )
-            if self.conversation.speech is self:
+            with contextlib.suppress(Exception):
+                await asyncio.to_thread(
+                    media_runtime.set_realtime_camera_active, self._audio_source, False,
+                )
+            if self.conversation.speech is self and not for_work:
                 self.conversation.speech = None
             self._process = None
-            self._phase = "off"
+            self._phase = "suspended" if for_work else "off"
             self._transport_ready = False
             self._input_level = 0.0
             self._capture_active = False
@@ -498,10 +809,8 @@ class RealtimeSessionManager:
             self._started_ns = None
             self._vision_source = None
             await self._publish("state", reason="stopped")
-        await self.conversation.finalize_pending(
-            "",
-            session_boundary="realtime.stopped",
-        )
+        if not for_work:
+            await self.conversation.finalize_pending("", session_boundary="realtime.stopped")
         return stopped_snapshot()
 
     async def _monitor_process(
@@ -539,13 +848,82 @@ class RealtimeSessionManager:
                     if isinstance(worker_event, dict)
                     else ""
                 )
+                if self._mode == "wake" and not isinstance(worker_event, dict):
+                    # Upstream diagnostic text may include raw ASR tokens.
+                    # Ambient recognition is never a retained public log.
+                    continue
+                if event_type == "wake_detected":
+                    if (self._mode != "wake" or self._phase not in READY_PHASES
+                            or worker_event.get("mode_revision", 0) != self._mode_revision):
+                        continue
+                    self._wake_open = True
+                    self._capture_active = True
+                    self._live_transcript = None
+                    await self._prioritize_speech_capture()
+                    await self._publish("runtime", reason="wake_detected")
+                    continue
+                if event_type == "wake_idle":
+                    if worker_event.get("mode_revision", 0) == self._mode_revision:
+                        if self._wake_open:
+                            await self.cue("cancel")
+                        self._wake_open = False
+                        self._capture_active = False
+                        self._user_speaking = False
+                        self._input_level = 0.0
+                        self._standby_event.set()
+                        await self._publish("runtime", reason="wake_idle")
+                    continue
+                if event_type in {"cue_started", "cue_finished"}:
+                    name = worker_event.get("name")
+                    generation = worker_event.get("generation")
+                    if (name in self._cue_names and type(generation) is int
+                            and (generation == self.conversation._generation
+                                 or (name == "ready" and 0 <= generation < self.conversation._generation))):
+                        # A started opening chirp can finish after natural speech
+                        # advances the turn. These events attest actual writes only.
+                        trace.emit("speech", f"Computer cue: {name} ({event_type[4:]})", [
+                            json.dumps({"event": "speech." + event_type, "name": name,
+                                        "generation": worker_event["generation"]}, sort_keys=True),
+                        ])
+                        await self._publish("runtime", reason=event_type, cue=name)
+                    continue
+                if event_type in {"speech_detected", "speech_ended", "interruption",
+                                  "transcript_partial", "transcript_final"}:
+                    if worker_event.get("mode_revision", 0) != self._mode_revision:
+                        continue
+                    if self._mode == "wake" and not self._wake_open and event_type != "speech_ended":
+                        continue
                 if event_type == "speech_timing":
                     self._record_playback_timing(worker_event)
                     continue
                 if event_type == "output_audio":
                     self._record_output_audio(worker_event)
                     continue
+                if event_type == "playback_error":
+                    if (type(worker_event.get("generation")) is not int
+                            or worker_event["generation"] != self.conversation._generation
+                            or type(worker_event.get("epoch")) is not int
+                            or worker_event["epoch"] < 0
+                            or self._playback_id is None
+                            or worker_event.get("playback_id") != self._playback_id
+                            or worker_event.get("code") != "pocket_tts_failed"):
+                        continue
+                    message = "Pocket TTS speech delivery failed."
+                    self._last_error = message
+                    trace.emit("error", message, [json.dumps({
+                        "event": "speech.delivery_failed",
+                        "generation": worker_event["generation"],
+                        "epoch": worker_event["epoch"],
+                        "playback_id": self._playback_id,
+                        "run_id": self._playback_run_id,
+                        "code": "pocket_tts_failed",
+                    }, sort_keys=True)], {"run_id": self._playback_run_id})
+                    self._clear_playback()
+                    await self._publish("runtime", reason="playback_error", line=message)
+                    continue
                 if event_type == "input_capture":
+                    if self._mode == "wake" and not self._wake_open:
+                        continue
                     active = worker_event.get("active")
                     if isinstance(active, bool) and active != self._capture_active:
                         # This provisional VAD hint is presentation only. NeMo's
@@ -557,6 +935,8 @@ class RealtimeSessionManager:
                         await self._publish("runtime", reason="capture_active")
                     continue
                 if event_type == "input_level":
+                    if self._mode == "wake" and not self._wake_open:
+                        continue
                     level = worker_event.get("level")
                     if isinstance(level, (int, float)) and not isinstance(level, bool):
                         numeric_level = float(level)
@@ -572,6 +952,7 @@ class RealtimeSessionManager:
                     if not exact_sequence and not self._user_speaking:
                         self._speech_sequence += 1
                     self._user_speaking = True
+                    await self._prioritize_speech_capture()
                     if self._live_transcript and self._live_transcript.get("final") is True:
                         self._live_transcript = None
                 elif event_type == "speech_ended":
@@ -614,17 +995,29 @@ class RealtimeSessionManager:
                 if event_type == "transport_ready":
                     self._transport_ready = True
                     await self._publish("state", reason="transport_ready")
-                elif event_type == "runtime_ready":
+                elif event_type in {"runtime_ready", "mode_applied"}:
+                    if event_type == "runtime_ready":
+                        # Cue assets belong to this worker, not its startup
+                        # mode revision; a mode change before ready keeps them.
+                        self._cue_names = [name for name in worker_event.get("cues", [])
+                                           if name in {"ready", "accepted", "complete", "cancel", "error"}]
                     if self._phase != "starting":
                         continue
-                    self._phase = "command"
+                    if worker_event.get("mode_revision", 0) != self._mode_revision:
+                        continue
+                    self._phase = "wake" if self._mode == "wake" else "command"
+                    self._paused_for_work = False
+                    reply, self._deferred_reply = self._deferred_reply, None
+                    if reply and reply.get("generation") == self.conversation._generation:
+                        await self._send_worker(reply)
+                    self.conversation.prepare_idle()
                     await self._publish("state", reason="runtime_ready")
                 elif event_type == "transcript_final":
                     pending_partial = None
                     prepared_sequence = 0
                     async with self._lock:
                         if (operation != self._operation or self._process is not process
-                                or self._phase not in {"command", "proactive"}):
+                                or self._phase not in READY_PHASES):
                             continue
                         timing = _input_speech_timing(worker_event.get("speech_timing"))
                         if timing is not None:
@@ -634,18 +1027,28 @@ class RealtimeSessionManager:
                             transcript_text, source="realtime", wait=False,
                             **({"speech_timing": timing} if timing is not None else {}),
                         )
+                        # submit(wait=False) schedules final admission. Bridge
+                        # that scheduling edge without releasing capture early.
+                        self._speech_handoff_task = self.conversation._turn_task
+                        if self._speech_handoff_task is not None:
+                            self._speech_handoff_task.add_done_callback(self._speech_handoff_done)
+                        await self.cue("accepted")
+                        if self._mode == "wake":
+                            self._wake_open = False
+                            self._capture_active = False
+                            self._input_level = 0.0
                     await self._publish("runtime", line=display_line)
                 elif event_type == "transcript_partial":
                     if exact_sequence:
                         pending_partial = (sequence, transcript_text)
                         if (sequence == prepared_sequence and self._user_speaking
-                                and self._phase in {"command", "proactive"}):
+                                and self._phase in READY_PHASES):
                             self.conversation.prepare_speech_prefix(transcript_text, sequence)
                     await self._publish("runtime", line=display_line)
                 elif event_type == "interruption":
                     async with self._lock:
                         if (operation != self._operation or self._process is not process
-                                or self._phase not in {"command", "proactive"}):
+                                or self._phase not in READY_PHASES):
                             continue
                         self._trace_speech_boundary(event_type)
                         await self.conversation.cancel(
@@ -676,6 +1079,7 @@ class RealtimeSessionManager:
                     return
                 conversation_id = self.conversation._conversation.conversation_id
                 self._phase = "stopping"
+                self._wake_open = self._capture_active = self._user_speaking = False
                 await self.conversation.cancel()
                 if self._aec_active:
                     await asyncio.to_thread(media_runtime.stop_realtime_aec)
@@ -717,12 +1121,27 @@ class RealtimeSessionManager:
                     if self._phase == "stopping":
                         return
                     self._phase = "error"
+                    self._wake_open = self._capture_active = self._user_speaking = False
                     self._last_error = f"{type(exc).__name__}: {exc}"[:MAX_EVENT_TEXT]
                     await self._publish("state", reason="monitor_failed")
                     # A failed monitor cannot release a live worker's GPU or
                     # another operation's lease. Stop retains exact ownership.
 
     async def shutdown(self) -> None:
+        self._closed = True
+        if self._audio_monitor is not None:
+            self._audio_monitor.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._audio_monitor
+            self._audio_monitor = None
+        if self._unsubscribe_activity is not None:
+            self._unsubscribe_activity()
+            self._unsubscribe_activity = None
+        if self._standby_task is not None:
+            self._standby_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._standby_task
+            self._standby_task = None
         await self.stop(preserve_requested=True)
         monitor = self._monitor
         if monitor is not None and monitor is not asyncio.current_task():

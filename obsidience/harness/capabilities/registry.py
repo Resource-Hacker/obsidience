@@ -18,25 +18,30 @@ from typing import Any
 CAPABILITY_PREFIX = "capability:"
 CAPABILITY_SOURCE_ROOT = PurePosixPath("obsidience/harness/capabilities")
 ALWAYS_ALLOWED = ("task.complete",)
-MODEL_RESOURCE_TOOLS = frozenset({"model.configure", "model.benchmark", "harness.evaluate"})
+MODEL_RESOURCE_TOOLS = frozenset({"model.configure", "model.benchmark", "harness.evaluate", "harness.optimize"})
 # Reviewed implementation policy; Article prose cannot declare an effect safe.
 READ_ONLY_CAPABILITIES = frozenset({
-    "source.read", "vault.read", "vault.search", "vault.validate", "harness.status",
+    "source.read", "vault.read", "vault.search", "vault.list", "vault.validate", "harness.status",
+    "task.inspect", "review.inspect", "vault.maintenance", "observations.recall",
 })
 
 _CAPABILITY_NAMES = (
     "application.launch",
+    "camera.observe",
+    "lights.set",
+    "media.pause",
     "computer.act",
     "computer.observe",
     "harness.evaluate",
+    "harness.optimize",
     "harness.repair",
     "harness.status",
     "model.benchmark",
     "model.configure",
     "model.inspect",
     "model.source",
-    "observations.temporary.append",
-    "observations.temporary.archive",
+    "observations.recall",
+    "observations.retain",
     "review.inspect",
     "session.unlock",
     "source.handoff",
@@ -52,7 +57,6 @@ _CAPABILITY_NAMES = (
     "vault.search",
     "vault.validate",
     "web.fetch",
-    "web.feed",
     "web.search",
     "window.activate",
     "window.place",
@@ -181,9 +185,13 @@ def _argument_schemas() -> dict[str, dict]:
     bounded_scope = obj({"kind": {"enum": ["knowledge", "task", "runbook", "tool", "skill", "agent"]},
         "current_only": {"type": "boolean"}, "exclude_subtrees": array(text(300),10)})
     schemas = {
-        "application.launch": obj({"application": {"type":"string","enum":sorted(APPLICATIONS)}},("application",)),
+        "application.launch": obj({"application": {"type":"string","enum":sorted(APPLICATIONS)},
+            "url":text(2000)},("application",)),
+        "camera.observe": obj({"query":text(500), "wake":{"type":"boolean"}},("query",)),
+        "media.pause": obj({"query":text(128, empty=True)}),
         "computer.observe": obj({"target":observe_target,"query":text(500)},("target","query")),
-        "computer.act": obj({"scope":{"enum":["input","state"]},"application":text(256),"action":{"const":"click"},"target":text(128),
+        "computer.act": obj({"scope":{"enum":["input","state"]},"application":text(256),"action":{"const":"click"},
+            "target":{**text(128),"description":"Short clicked-control label, 1-128 characters, e.g. Play/Pause button. Do not copy the browser window title."},
             "point":obj({axis:{"type":"integer","minimum":0,"maximum":999} for axis in ("x","y")},("x","y")),
             "postcondition":text(500)},("scope","application","target","point")),
         "window.activate": obj({"target":target},("target",)),
@@ -197,25 +205,31 @@ def _argument_schemas() -> dict[str, dict]:
             obj({"target":text(512),"action":{"enum":["create","update"]},
                 "title":text(300),"body":text(96000),"source":text(512),"reason":text(400,empty=True),
                 "metadata":{"type":"object","additionalProperties":True}},("target","body")),
-            obj({"target":text(512),"source":text(512),"action":{"enum":["create","update"]},
-                "reason":text(400,empty=True),"metadata":{"type":"object","additionalProperties":True}},("target","source")),
             obj({"target":text(512),"action":{"const":"archive"},"title":text(300),
                 "body":text(96000,empty=True),"source":text(512),"reason":text(400,empty=True),
                 "metadata":{"type":"object","additionalProperties":True}},("target","action")),
         ]},
         "vault.maintenance":obj({}), "vault.validate":obj({}), "harness.status":obj({}),
-        "harness.repair":obj({"task":text(512),"run_id":text(128)},("task","run_id")),
+        "harness.repair":{"anyOf":[obj({"task":text(512),"run_id":text(128)},("task","run_id")),
+                                    obj({"component":{"const":"hindsight"}},("component",))]},
         "harness.evaluate":obj({"proposal":text(512)},("proposal",)),
+        "harness.optimize":obj({"case_id":text(64)},("case_id",)),
         "task.inspect":obj({"task":text(512),"run_id":text(128)},("task",)),
         "review.inspect":obj({"task":text(512),"proposal":text(512)}),
         "session.unlock":obj({}),
+        "lights.set":obj({"target":{"enum":["all", "window_lamp", "woven_pendant", "north_lamp",
+            "tv_floor_lamp", "desk_lantern", "room_lantern"]},"state":{"enum":["on","off"]}},("target","state")),
         "task.create":obj({"task":text(512),"params":{"type":"object","additionalProperties":True,"maxProperties":8},
             "wait_for_result":{"type":"boolean"},"await_publication":{"type":"boolean"}},("task",)),
-        "task.complete":obj({"status":{"enum":["completed","failed","review"]},"summary":text(2000,empty=True),
-            "outcome":text(100,empty=True),"evidence":array(text(500),8),
-            "verification":obj({"status":{"enum":["established","not_established"]},"observation":text(1000)},("status","observation"))},("status","summary")),
-        "observations.temporary.append":obj({"text":text(2000),"related_refs":array(text(512),3)},("text",)),
-        "observations.temporary.archive":obj({}),
+        "task.complete":obj({"status":{"enum":["completed","failed","review"],
+                "description":"Defaults to completed. Use failed for a blocker or review for pending proposals."},"summary":text(2000,empty=True),
+            "outcome":{"enum":["changed","no_change",""],
+                "description":"Optional change classification; omit for ordinary answers. no_change requires completed status and explicit evidence."},
+            "evidence":array(text(500),8),
+            "verification":{**obj({"status":{"enum":["established","not_established"]},"observation":text(1000)},("status","observation")),
+                "description":"Required to establish page or playback state after opening a URL, or application state after computer.act. Requires the current image and its visible evidence."}},("summary",)),
+        "observations.retain":obj({"text":text(2000),"related_refs":array(text(512),3)},("text",)),
+        "observations.recall":obj({"query":text(3000)},("query",)),
         "source.read":{"anyOf":[obj({key:value,"offset":integer,"limit":{"type":"integer","minimum":1,"maximum":12000}},(key,))
             for key,value in (("source",text(128)),("sources",array(text(128),10,1)))]},
         "source.ingest":obj({"source_type":text(32),"source_ref":text(2048,empty=True),"media_type":text(128),
@@ -223,7 +237,6 @@ def _argument_schemas() -> dict[str, dict]:
         "source.handoff":obj({"title":text(300),"content":text(500000)},("title","content")),
         "web.search":obj({"query":text(2000),"limit":{"type":"integer","minimum":1,"maximum":20}},("query",)),
         "web.fetch":{"anyOf":[obj({"url":text(8192)},("url",)),obj({"urls":array(text(8192),10,1)},("urls",))]},
-        "web.feed":obj({"url":text(8192),"limit":{"type":"integer","minimum":1,"maximum":100}},("url",)),
         "model.inspect":obj({"model_id":text(200)},("model_id",)),
         "model.source":obj({"model_id":text(200)},("model_id",)),
         "model.benchmark":obj({"model_id":text(200),"devices":array(text(100),8,1)},("model_id",)),
@@ -262,7 +275,7 @@ def argument_schema(name: str) -> dict:
     return schema
 
 
-def action_schema(allowed: list[str], *, completion_no_change: bool = False,
+def action_schema(allowed: list[str], *, completion_no_change: bool = False, completion_blocked: bool = False,
                   proposal_mode: str = "") -> dict:
     """Constrain Tool arguments and the active completion contract, not its evidence."""
     if not allowed or set(allowed) - set(REGISTRY):
@@ -270,32 +283,44 @@ def action_schema(allowed: list[str], *, completion_no_change: bool = False,
     choices = []
     for name in sorted(set(allowed)):
         args = argument_schema(name)
-        if name == "vault.propose" and proposal_mode == "feed":
-            # The Feed owner compiles the body and any retention. The model
-            # only names its bound Inbox and destination, never an archive.
-            args = args["anyOf"][1]
-            args["properties"].pop("metadata", None)
-        elif name == "vault.propose" and proposal_mode == "link":
+        if name == "vault.propose" and proposal_mode == "link":
             args = args["anyOf"][0]
             args["properties"]["action"] = {"const": "update"}
             args["required"].append("action")
             for key in ("metadata", "source"):
                 args["properties"].pop(key, None)
-        if name == "task.complete" and completion_no_change:
+        elif name == "vault.propose" and proposal_mode == "ingest":
+            # General Inbox ingestion authors Knowledge. Retirement belongs to
+            # Archive; documentary metadata is compiled by the publication owner.
+            args = args["anyOf"][0]
+            args["required"].append("action")
+            for key in ("metadata", "source"):
+                args["properties"].pop(key, None)
+        if name == "task.complete" and completion_blocked:
+            args["properties"]["status"] = {"const": "failed"}
+            args["required"] = list(dict.fromkeys([*args["required"], "status"]))
+            args["properties"]["outcome"]["enum"] = ["changed", ""]
+        elif name == "task.complete" and completion_no_change:
             from copy import deepcopy
             successful = deepcopy(args)
             successful["properties"]["status"] = {"const": "completed"}
             successful["properties"]["outcome"] = {"const": "no_change"}
             successful["properties"]["evidence"]["minItems"] = 1
-            successful["required"] = list(dict.fromkeys([*successful["required"], "outcome", "evidence"]))
-            args["properties"]["status"] = {"enum": ["failed", "review"]}
+            # llama.cpp emits required fields before optional fields. Both
+            # branches must allow status first, or that prefix forces failure.
+            successful["required"] = list(dict.fromkeys([*successful["required"], "status", "outcome", "evidence"]))
+            args["properties"]["status"] = {"const": "failed"}
+            # Without an explicit status this branch would bypass the successful
+            # contract, then default to completed in the capability adapter.
+            args["required"] = list(dict.fromkeys([*args["required"], "status"]))
+            args["properties"]["outcome"]["enum"] = ["changed", ""]
             args = {"anyOf": [successful, args]}
         choices.append(_schema_object({"tool": {"type": "string", "enum": [name]},
                                        "args": args}, ("tool", "args")))
     return {"anyOf": choices}
 
 
-def decoder_action_schema(allowed: list[str], *, completion_no_change: bool = False,
+def decoder_action_schema(allowed: list[str], *, completion_no_change: bool = False, completion_blocked: bool = False,
                           proposal_mode: str = "") -> dict:
     """Keep exact argument structure without exponential grammar repetitions.
 
@@ -312,4 +337,5 @@ def decoder_action_schema(allowed: list[str], *, completion_no_change: bool = Fa
             return [structural(item) for item in value]
         return value
     return structural(action_schema(allowed, completion_no_change=completion_no_change,
+                                    completion_blocked=completion_blocked,
                                     proposal_mode=proposal_mode))

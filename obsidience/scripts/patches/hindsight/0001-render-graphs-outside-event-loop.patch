@@ -1,0 +1,45 @@
+--- a/hindsight_api/engine/memory_engine.py
++++ b/hindsight_api/engine/memory_engine.py
+@@ -11615,10 +11615,19 @@
+             # Keep only direct links between visible nodes
+             direct_links = [
+                 link for link in links if link["from_unit_id"] in unit_id_set and link["to_unit_id"] in unit_id_set
+             ]
+ 
++        # The database read above stays on its owning loop. Project the detached
++        # rows in a worker so large graphs cannot stall recall or worker leases.
++        return await asyncio.to_thread(
++            self._render_graph_data, units, total_count, unit_ids, unit_entities,
++            direct_links, copied_links, limit,
++        )
++
++    @staticmethod
++    def _render_graph_data(units, total_count, unit_ids, unit_entities, direct_links, copied_links, limit):
+         # Build entity mapping
+         entity_map = {}
+         for row in unit_entities:
+             unit_id = row["unit_id"]
+             entity_name = row["canonical_name"]
+--- a/hindsight_api/api/http.py
++++ b/hindsight_api/api/http.py
+@@ -5359,11 +5359,19 @@
+                 tags_match=tags_match,
+                 document_id=document_id,
+                 chunk_id=chunk_id,
+                 request_context=request_context,
+             )
+-            return data
++            def render():
++                # Preserve the public schema while validating/encoding outside
++                # the request loop, alongside the graph's CPU projection.
++                return Response(
++                    GraphDataResponse.model_validate(data).model_dump_json(by_alias=True),
++                    media_type="application/json",
++                )
++
++            return await asyncio.to_thread(render)
+         except OperationValidationError as e:
+             raise HTTPException(status_code=e.status_code, detail=e.reason)
+         except (AuthenticationError, HTTPException):
+             raise
+         except Exception as e:

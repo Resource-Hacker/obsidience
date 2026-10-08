@@ -33,5 +33,7 @@ def execute(args: dict, context: dict) -> str:
     if offset > len(rows):
         return f"Invalid offset: folder has {len(rows)} Articles."
     continuation = f"Next offset: {end}" if end < len(rows) else "End of folder."
+    # Listing a title is visible activity, not evidence of reading its body.
+    context["_last_activity_refs"] = [note.ref for note in rows[offset:end]]
     return f"Rows {offset}-{end} of {len(rows)}. {continuation}\n" + "\n".join(
         f"- [[{note.ref}]] — {note.title}" for note in rows[offset:end])

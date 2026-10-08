@@ -29,6 +29,55 @@ def library_candidates(res: Resolver) -> dict[str, list[str]]:
             "skills": sorted(skill for _tool, skill in pairs)}
 
 
+def assignment_params(task: Note, agent: Note, catalog: dict[str, list[str]]) -> dict:
+    """The controller's exact missing-procedure event recipe."""
+    identity = hashlib.sha256(f"{task.ref}\0{agent.ref}".encode()).hexdigest()
+    task_path = task.ref.removeprefix("Tasks/")
+    agent_path = slugify(str(agent.meta.get("role") or agent.ref.removeprefix("Agents/")))
+    output_path = "/".join(slugify(part) for part in task_path.split("/"))
+    return {
+        "event": "task.assigned", "activation_key": f"assignment-{identity}",
+        "assignment_event_id": f"assignment-{identity}",
+        "target_task": task.ref, "target_task_title": task.title,
+        "target_task_article": task.body.strip()[:8_000],
+        "target_task_hierarchy": [task.ref],
+        "target_agent": agent.ref, "target_agent_name": agent.title,
+        **catalog, "output_runbook": f"Runbooks/Generated/{agent_path}/{output_path}.md",
+        "queue_after_review": True,
+    }
+
+
+def assignment_read_refs(generation: Note, params: dict, res: Resolver, index) -> tuple[str, ...]:
+    """Exact candidate reads for an already admitted controller assignment only.
+
+    Explicit runtime overrides must never call this helper. The allowance is
+    execution-local; candidates remain references, not executable grants.
+    """
+    if params.get("event") != "task.assigned":
+        return ()
+    occurrence = index.activation(index.activation_id_for(generation.ref, params))
+    if (not occurrence or occurrence.get("task_ref") != generation.ref
+            or occurrence.get("params") != params
+            or occurrence.get("status") not in {"pending", "failed", "blocked"}):
+        return ()
+    res = dependency_resolver(res)
+    subscribers = [note for note in res.by_ref.values() if note.kind == "task"
+                   and "task.assigned" in task_triggers(note.meta)
+                   and str(note.meta.get("enabled", True)).lower() not in {"false", "0", "off", "no"}]
+    if len(subscribers) != 1 or subscribers[0].ref != generation.ref:
+        return ()
+    task = res.resolve(str(params.get("target_task") or ""))
+    agent = res.resolve(str(params.get("target_agent") or ""))
+    if (not task or task.kind != "task" or task.children or task.ref == generation.ref
+            or not agent or agent.kind != "agent"
+            or not resolve_task_dependencies(task, res, agent_ref=agent.ref).get("missing")):
+        return ()
+    catalog = library_candidates(res)
+    if params != assignment_params(task, agent, catalog):
+        return ()
+    return tuple([task.ref, agent.ref, *catalog["tools"], *catalog["skills"]])
+
+
 def ensure_task_runbook(task: Note, res: Resolver, *, agent_ref: str | None = None) -> dict:
     """Return ready/queued/blocked; never rewrite the requested Task or its inputs.
 
@@ -85,20 +134,7 @@ def ensure_task_runbook(task: Note, res: Resolver, *, agent_ref: str | None = No
     catalog = library_candidates(res)
     if "Tools/task.complete" not in catalog["tools"]:
         return {"status": "blocked", "error": "shared Library is missing the task.complete Tool/Skill pair"}
-    identity = hashlib.sha256(f"{task.ref}\0{agent.ref}".encode()).hexdigest()
-    task_path = task.ref.removeprefix("Tasks/")
-    agent_path = slugify(str(agent.meta.get("role") or agent.ref.removeprefix("Agents/")))
-    output_path = "/".join(slugify(part) for part in task_path.split("/"))
-    params = {
-        "event": "task.assigned", "activation_key": f"assignment-{identity}",
-        "assignment_event_id": f"assignment-{identity}",
-        "target_task": task.ref, "target_task_title": task.title,
-        "target_task_article": task.body.strip()[:8_000],
-        "target_task_hierarchy": [task.ref],
-        "target_agent": agent.ref, "target_agent_name": agent.title,
-        **catalog, "output_runbook": f"Runbooks/Generated/{agent_path}/{output_path}.md",
-        "queue_after_review": True,
-    }
+    params = assignment_params(task, agent, catalog)
     from .scheduler import enqueue_event
 
     queued = enqueue_event(generation, params)

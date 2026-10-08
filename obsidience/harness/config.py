@@ -21,6 +21,7 @@ class Config:
     # LLM (OpenAI-compatible llama.cpp server)
     llm_base_url: str = "http://127.0.0.1:8089/v1"
     llm_model: str = "obsidience-gemma"
+    task_reasoning_effort: str = "medium"
     llm_temperature: float = 0.4
     llm_max_tokens: int = 3584
     max_steps: int = 24  # tool-loop cap per session

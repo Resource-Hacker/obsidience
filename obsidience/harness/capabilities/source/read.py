@@ -11,16 +11,25 @@ MAX_RECEIPTS = 256
 
 def required_source(context: dict) -> dict | None:
     """Resolve only the admitted Learn event, never model-supplied arguments."""
-    from obsidience.harness.knowledge.source import SourceError, feed_binding_matches, feed_source_binding, research_source_binding
+    from obsidience.harness.knowledge.source import SourceError, research_source_binding
 
+    params = context.get("params") if isinstance(context.get("params"), dict) else {}
+    if context.get("event") == "observations.memory.ready":
+        from obsidience.harness.memory.hindsight import promotion_source
+        try:
+            source = promotion_source({**params, "origin_task_ref": context.get("task"),
+                                       "event": context["event"]})
+        except ValueError as exc:
+            raise SourceError(str(exc)) from exc
+        return {"citation": source["citation"], "content_sha256": source["content_sha256"]}
+    if context.get("task") == "Tasks/link" and params.get("observation_source"):
+        from obsidience.harness.memory.hindsight import observation_source
+        evidence = observation_source(params["observation_source"])
+        if not evidence or evidence["endpoint_sha256"] != params.get("observation_source_sha256"):
+            raise SourceError("Link observation Source does not match its activation")
+        return {"citation": evidence["source_citation"], "content_sha256": evidence["endpoint_sha256"]}
     if context.get("task") not in {"Tasks/research/learn", "Tasks/research/distill"}:
         return None
-    params = context.get("params") if isinstance(context.get("params"), dict) else {}
-    if context.get("task") == "Tasks/research/distill":
-        feed = feed_source_binding(str(params.get("source_id", "")))
-        if (params.get("event") != "source.added" or feed is None
-                or not feed_binding_matches(params.get("feed_binding"), feed)):
-            raise SourceError("Distill requires its exact controller-bound Feed item")
     return research_source_binding({**params, "event": context.get("event") or params.get("event")})
 
 
@@ -56,11 +65,6 @@ def precondition_error(name: str, args: dict, context: dict) -> str | None:
         return None
     error = bound_read_error(context)
     if error is None:
-        if context.get("task") == "Tasks/research/distill" and name == "web.fetch":
-            url = context["params"]["feed_binding"]["reporting_url"]
-            values = args.get("urls") if "urls" in args else [args.get("url")]
-            if not url or values != [url]:
-                return "Distill may fetch only the exact reporting_url bound to this Feed item."
         return None
     if name == "source.read":
         from obsidience.harness.knowledge.source import SourceError
@@ -152,7 +156,25 @@ def _private_source_allowed(result: dict, context: dict) -> bool:
     except PermissionError:
         return False
     origin = str(result.get("source_ref", ""))
-    if origin.startswith("obsidience://observations/temporary/"):
+    if origin.startswith(("obsidience://observations/temporary/", "obsidience://observations/hindsight/")):
+        # A curation/Link activation carries one attested Source handoff. It
+        # grants those exact bytes, never a browse grant for the originating bank.
+        bound = required_source(context)
+        if (bound and bound["citation"] == result.get("citation")
+                and bound["content_sha256"] == result.get("content_sha256")):
+            return True
+        if (context.get("task") == "Tasks/curate"
+                and context.get("event") == "observations.memory.ready"
+                and bound_read_error(context) is None):
+            from obsidience.harness.memory.hindsight import promotion_source, promotion_observation
+            try:
+                manifest = promotion_source({**context.get("params", {}),
+                    "origin_task_ref": context["task"], "event": context["event"]})
+                member = promotion_observation(manifest, result.get("citation"))
+                if member["endpoint_sha256"] == result.get("content_sha256"):
+                    return True  # Exact batch member, never a grant to browse its bank.
+            except ValueError:
+                pass
         receipt = context.get("_observation_archive", {})
         if (isinstance(receipt, dict) and receipt.get("citation") == result.get("citation")
                 and receipt.get("content_sha256") == result.get("content_sha256")):

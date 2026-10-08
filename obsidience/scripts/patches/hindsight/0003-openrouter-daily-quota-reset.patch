@@ -1,0 +1,28 @@
+--- a/hindsight_api/engine/providers/openai_compatible_llm.py
++++ b/hindsight_api/engine/providers/openai_compatible_llm.py
+@@ -625,6 +625,25 @@
+                     reset_seconds.append(seconds)
+         if reset_seconds:
+             retry_candidates.append(now + timedelta(seconds=max(reset_seconds)))
++
++    # OpenRouter's free daily quota reports its reset as epoch milliseconds
++    # inside the structured error body. Honor it only for that exact quota marker.
++    body = getattr(e, "body", None)
++    if isinstance(body, dict):
++        error = body.get("error", body)
++        metadata = error.get("metadata") if isinstance(error, dict) else None
++        quota_headers = metadata.get("headers") if isinstance(metadata, dict) else None
++        if (isinstance(metadata, dict)
++                and metadata.get("limit_source") == "openrouter_free_tier_daily"
++                and isinstance(quota_headers, dict)):
++            reset_ms = quota_headers.get("X-RateLimit-Reset")
++            if isinstance(reset_ms, str) and re.fullmatch(r"\d{13}", reset_ms):
++                try:
++                    quota_retry_at = datetime.fromtimestamp(int(reset_ms) / 1000, UTC)
++                except (OverflowError, OSError, ValueError):
++                    quota_retry_at = None
++                if quota_retry_at is not None and quota_retry_at > now:
++                    retry_candidates.append(quota_retry_at)
+ 
+     body_text = _status_error_body_text(e)
+     body_retry_at: datetime | None = None

@@ -245,7 +245,7 @@ def execute(args: dict, context: dict) -> str:
                 )
 
     reserved_source_events = {
-        "source.added": ({"Tasks/research/learn", "Tasks/research/distill"}, "Agents/Darwin/Darwin"),
+        "source.added": ({"Tasks/research/learn"}, "Agents/Darwin/Darwin"),
         "source.inbox": ({"Tasks/ingest"}, "Agents/Alexandria/Alexandria"),
     }
     tasks = [note for note in notes if note.kind == "task"]

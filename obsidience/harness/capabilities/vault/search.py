@@ -43,6 +43,12 @@ def execute(args: dict, context: dict) -> str:
         _agent, allowed = execution_scope(context, Resolver(snapshot))
     except PermissionError as exc:
         return str(exc)
+    if context.get("event") == "observations.memory.ready":
+        # This occurrence curates memory into the wiki. Filter before lexical
+        # and vector limits so executable definitions cannot displace Knowledge.
+        allowed.intersection_update(note.ref for note in snapshot
+                                    if note.kind == "knowledge" and not note.runtime_observation
+                                    and not note.ref.startswith("Agents/"))
     context["_last_context_refs"] = []
     results = []
     for query in queries:
@@ -58,7 +64,7 @@ def execute(args: dict, context: dict) -> str:
                     output = "Search cancelled."
                 else:
                     output = "\n".join(
-                        f"- [[{hit['ref']}]] ({hit['kind']}) — {hit['snippet'][:160]}" for hit in hits
+                        f"- [[{hit['ref']}]] ({hit['kind']}) — {hit['snippet']}" for hit in hits
                     ) if hits else "No results."
                     receipts = context.setdefault("_vault_searches", {})
                     if query not in receipts and len(receipts) >= MAX_RECEIPTS:

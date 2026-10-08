@@ -32,7 +32,9 @@ def _render_result(result: dict, *, preview_chars: int = MAX_FETCH_PREVIEW_CHARS
         f"Fetched and {'captured' if result['created'] else 'verified'} {result['url']} as "
         f"{citation} ({result['content_sha256']}).\n\n"
         f"Characters 0-{end} of {len(content)}. {page_status}\n\n"
-        f"{content[:end]}"
+        f"{content[:end]}\n\n"
+        "End of fetched page. Use this evidence to complete the current Objective: "
+        "answer the question, or take the next needed Tool action if evidence is still missing."
     )
 
 
@@ -88,6 +90,11 @@ def execute(args: dict, context: dict) -> str:
     except WebError as exc:
         return f"Web fetch failed: {exc}"
     activation_key = research_activation_key(context)
+    owner, run_id = context.get("task"), context.get("run_id")
+    if (owner == context.get("_agent_ref") == "Agents/Executive/Executive"
+            and context.get("interactive") is True and run_id):
+        # This page supports the current conversation, not a new Learn Task.
+        activation_key = f"source.added:research:{run_id}:{owner}"
     cancel_event = context.get("_capability_cancel_event")
 
     def acquire(url: str) -> dict | str:
@@ -96,8 +103,21 @@ def execute(args: dict, context: dict) -> str:
         except (WebError, SourceError, httpx.HTTPError) as exc:
             return f"Web fetch failed for {url}: {str(exc)[:256]}"
 
+    def remember(result: dict | str) -> None:
+        if not isinstance(result, dict):
+            return
+        # This execution received the captured page. Preserve its exact handle
+        # for citation validation and useful correction of a mistyped UUID.
+        sources = context.setdefault("_fetched_sources", {})
+        sources[result["citation"]] = {
+            "citation": result["citation"], "content_sha256": result["content_sha256"],
+        }
+        if len(sources) > 256:
+            del sources[next(iter(sources))]
+
     if not batch:
         result = acquire(urls[0])
+        remember(result)
         return result if isinstance(result, str) else _render_result(result)
 
     # The context manager joins every worker before the Tool returns. STOP is
@@ -105,4 +125,6 @@ def execute(args: dict, context: dict) -> str:
     # no detached worker or additional acquisition owner outlives this batch.
     with ThreadPoolExecutor(max_workers=min(MAX_FETCH_BATCH_WORKERS, len(urls))) as pool:
         results = list(pool.map(acquire, urls))
+    for result in results:
+        remember(result)
     return _render_batch(urls, results)

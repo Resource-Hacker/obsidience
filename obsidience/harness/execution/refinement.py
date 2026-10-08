@@ -24,7 +24,8 @@ GENERATOR = "Tasks/generate/runbook"
 AUDITOR = "Tasks/audit"
 DARWIN = "Agents/Darwin/Darwin"
 HEIMDALL = "Agents/Heimdall/Heimdall"
-MAX_ARTIFACT_BYTES = 512_000
+# Five complete decision captures (up to 160 KB each) plus frozen definitions.
+MAX_ARTIFACT_BYTES = 1_024_000
 
 
 def _json(value) -> str:
@@ -422,6 +423,9 @@ async def evaluate_proposal(name: str, context: dict) -> dict:
 
 
 def review_blocker(note: Note, *, accepted_resolver: Resolver | None = None) -> str | None:
+    from .optimization import review_blocker as executive_blocker
+    if blocker := executive_blocker(note, accepted_resolver):
+        return blocker
     envelope = note.meta.get("refinement")
     if envelope is None:
         # Removing the marker from a refinement-authored proposal is not a way

@@ -56,7 +56,7 @@ def body_links(body: str, path: str = "") -> list[str]:
     return list(dict.fromkeys(ref for ref, _line, _excerpt in body_link_locations(body, path)))
 
 
-def body_link_locations(body: str, path: str = "") -> list[tuple[str, int, str]]:
+def body_link_locations(body: str, path: str = "", *, include_sources: bool = False) -> list[tuple[str, int, str]]:
     """Use the full document parse so reference-style links retain their evidence."""
     links = []
     lines = body.splitlines()
@@ -67,7 +67,8 @@ def body_link_locations(body: str, path: str = "") -> list[tuple[str, int, str]]
             refs = []
             if token.type == "link_open":
                 link_depth += 1
-                ref = article_ref(token.attrGet("href") or "", path)
+                href = token.attrGet("href") or ""
+                ref = href if include_sources and href.startswith("source://") else article_ref(href, path)
                 if ref:
                     refs.append(ref)
             elif token.type == "link_close":
@@ -81,13 +82,16 @@ def body_link_locations(body: str, path: str = "") -> list[tuple[str, int, str]]
     return links
 
 
-def canonical_body(body: str, path: str, mapping: dict[str, str] | None = None) -> str:
+def canonical_body(body: str, path: str, mapping: dict[str, str] | None = None,
+                   *, accepted_refs: list[str] | None = None) -> str:
     """Normalize authored wikilinks and moved paths to bundle-root Markdown links.
 
     Explicit typed metadata edges remain separate from body relationships.
     Code blocks and inline code are examples, not navigable links.
+    An accepted path catalog permits repairing omitted document suffixes.
     """
     mapping = {old.casefold(): new for old, new in (mapping or {}).items()}
+    accepted = {ref.casefold(): ref for ref in accepted_refs or []}
 
     def wiki(match):
         ref = match.group(1).strip().removesuffix(".md")
@@ -107,6 +111,16 @@ def canonical_body(body: str, path: str, mapping: dict[str, str] | None = None) 
     def destination(match):
         href = match.group("href")
         ref = article_ref(href, path)
+        if ref is None and accepted:
+            # Model proposals may use an exact Article ref as the URL. Add
+            # the document suffix only when that full path is accepted;
+            # external URLs, unknown paths and basename guesses stay untouched.
+            try:
+                url = urlsplit(href)
+                candidate = article_ref(url._replace(path=url.path + ".md").geturl(), path)
+            except ValueError:
+                candidate = None
+            ref = accepted.get(candidate.casefold()) if candidate else None
         if ref is None:
             return match.group(0)
         ref = mapping.get(ref.casefold(), ref)

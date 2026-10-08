@@ -17,6 +17,8 @@ import httpx
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import PlainTextResponse, Response
+from starlette.datastructures import Headers
 from croniter import croniter
 
 from ...conversation.store import CONVERSATION
@@ -67,7 +69,7 @@ from ...realtime import media as media_runtime
 from ...realtime import runtime as realtime
 from obsidience.shell.applications import packagekit as application_packages
 from obsidience.shell.adapter.hyprland import input as input_adapter
-from . import connections as connections_api
+from obsidience.shell import command_token as shell_command_token
 
 
 # Tasks are the only authored capability assignments. The dependency graph
@@ -92,11 +94,8 @@ _REVIEW_LOCK = threading.RLock()
 
 EXECUTIVE_AGENT_SUBJECTS = {
     "Architecture": "How the executive is wired into Obsidience and the local workstation.",
-    "Subagents": "The named specialist agents coordinated by the executive.",
+    "Specialists": "The named specialist agents coordinated by the executive.",
     "Observations": "Distilled notes about the executive, its preferences, and its own runs.",
-    "Temporary Observations": (
-        "The executive's transient, unverified bounded working-memory cache."
-    ),
 }
 EXECUTIVE_SYSTEM_ROOTS = frozenset({"Agents", "Tools", "Skills", "Runbooks", "Tasks"})
 SATELLITE_AGENT_SUBJECTS = {
@@ -104,10 +103,6 @@ SATELLITE_AGENT_SUBJECTS = {
     "knowledge": ("Knowledge", "Knowledge branches related to checked-out Source trees."),
     "other-agents": ("Other Agents", "The executive and sibling agents: who they are and what they do."),
     "observations": ("Observations", "The agent's distilled notes, preferences, and run observations."),
-    "temporary-observations": (
-        "Temporary Observations",
-        "The agent's transient, unverified bounded working-memory cache.",
-    ),
 }
 SATELLITE_ROLE_SUBJECTS = {
     "Alexandria": {},
@@ -175,15 +170,13 @@ def _executive_folder_ref(folder: str) -> str:
     """Keep existing subject identities while deriving descendants from disk."""
     roots = {
         "Agents/Executive/Architecture": "@agent/Architecture",
-        "Agents/Executive/Subagents": "@agent/Subagents",
         "Agents/Executive/Observations": "@agent/Observations",
-        "Agents/Executive/Observations/Temporary Observations": "@agent/Temporary Observations",
     }
     return roots.get(folder, f"@branch/{folder}")
 
 
 def _executive_folder_paths(notes: list[Note] | None = None) -> list[str]:
-    folders = {f"Agents/Executive/{key}" for key in ("Architecture", "Subagents", "Observations")}
+    folders = set()
     for note in iter_notes() if notes is None else notes:
         parts = Path(note.path).parts[:-1]
         if note.kind != "knowledge" or not parts:
@@ -277,6 +270,10 @@ def _is_enabled(value: object) -> bool:
 def _auto_curate_state(request_ref: str, doc: dict) -> tuple[bool, str | None]:
     from ...knowledge.auto_curate import policy_for, selection
 
+    if doc.get("managed_by") == "hindsight":
+        # Native memory consolidation is automatic. It does not grant wiki
+        # publication permission to the containing Knowledge branch.
+        return doc.get("auto_curate") is True, None
     if not _auto_curate_supported(request_ref, doc):
         return False, None
     policy = policy_for(_auto_curate_target_path(request_ref, doc))
@@ -292,6 +289,8 @@ def _article_with_curation(request_ref: str, doc: dict) -> dict:
 
 
 def _auto_curate_supported(ref: str, doc: dict) -> bool:
+    if ref.startswith("@memory/"):
+        return False
     if system_knowledge.is_system_article(str(doc.get("ref", ref))):
         return False
     if doc.get("kind") not in {"knowledge", "agent", "index"} or ref.startswith("@library"):
@@ -304,8 +303,6 @@ def _auto_curate_supported(ref: str, doc: dict) -> bool:
 def _auto_curate_target_path(ref: str, doc: dict) -> str:
     if ref == "@vault":
         return "Agents/Executive/Executive.md"
-    if ref == "@agent/Temporary Observations":
-        return "Agents/Executive/Observations/Temporary Observations"
     if ref == "@agent/Observations":
         return "Agents/Executive/Observations"
     if ref.startswith("@agent/"):
@@ -314,7 +311,6 @@ def _auto_curate_target_path(ref: str, doc: dict) -> str:
         _, name, key = ref.split("/", 2)
         labels = {
             "observations": "Observations",
-            "temporary-observations": "Observations/Temporary Observations",
             "architecture": "Architecture",
             "other-agents": "Other Agents",
         }
@@ -702,15 +698,24 @@ def _scoped_knowledge_subjects(identity: Note | None, notes: list[Note], base: l
     folders = set()
     for note in selected:
         parts = Path(note.path).parts[:-1]
-        first = 3 if parts and parts[0] == "Agents" else 1
+        first = (2 if identity is None else 3) if parts and parts[0] == "Agents" else 1
         folders.update("/".join(parts[:depth]) for depth in range(first, len(parts)+1))
+    if identity is None:
+        folders.update(str(Path(note.path).parent) for note in notes if note.kind == "agent")
     ids = {folder: _executive_folder_ref(folder) for folder in folders}
     subjects = [item for item in base if not item.get("path") and (
         item["id"].rsplit("/", 1)[-1].lower() in {"tools", "skills", "runbooks", "tasks", "other-agents"})]
     for folder in sorted(folders):
         authored = next((note for note in selected if note.path == folder_article_path(folder)), None)
+        agent_folder = identity is None and folder.startswith("Agents/") and folder.count("/") == 1
+        if agent_folder:
+            authored = next((note for note in notes if note.path == folder_article_path(folder)), None)
+            if not authored or authored.kind != "agent":
+                continue
+            ids[folder] = authored.ref
+        parent_id = "@library/Agents" if agent_folder else ids.get(str(Path(folder).parent))
         subjects.append({"id": ids[folder], "title": authored.title if authored else folder.rsplit("/",1)[-1],
-            "parent_id": ids.get(str(Path(folder).parent)), "path": folder,
+            "parent_id": parent_id, "path": folder,
             **({"article_ref": authored.ref} if authored else {}), "scope_proxy": authored is None})
     return subjects
 
@@ -738,6 +743,8 @@ def _navigation_manifest(overrides: dict[str, Note]) -> dict:
             subjects = [_navigation_subject(f"@sat/{name}/{key}", None, overrides)
                         for key in ("tools", "skills", "runbooks", "tasks", "other-agents")]
         subjects = _scoped_knowledge_subjects(identity, notes, subjects, overrides)
+        if group_id == "executive":
+            subjects.append({"id": "@agent/Specialists", "title": "Specialists", "parent_id": None})
         from ...knowledge.scope import readable_refs
         try:
             access_refs = sorted(readable_refs(identity, Resolver(notes)))
@@ -788,6 +795,11 @@ async def lifespan(app: FastAPI):
         resources.callback(trace.stop)
         await llm.start_provider_client()
         resources.push_async_callback(llm.close_provider_client)
+        from ...memory.hindsight import MEMORY
+        await MEMORY.start()
+        resources.push_async_callback(MEMORY.close)
+        from ...graphs.api import lifespan as graph_views_lifespan
+        await resources.enter_async_context(graph_views_lifespan())
         review.recover_groups()
         scheduler.reconcile_interrupted_runs()
         source.list_sources()  # attest raw evidence before serving it
@@ -801,24 +813,22 @@ async def lifespan(app: FastAPI):
         from ...execution.deepseek.bridge import BRIDGE
         await BRIDGE.start()
         resources.push_async_callback(BRIDGE.close)
+        from ...execution.deepseek.sessions import reconcile as reconcile_native_conversation
+        await reconcile_native_conversation(CONVERSATION)
         resources.push_async_callback(shell_scene.SCENE.stop)
         shell_scene.SCENE.start()
         intake = SourceIntake()
         resources.push_async_callback(asyncio.to_thread, intake.stop)
         await asyncio.to_thread(intake.start)
         app.state.shell_scene = shell_scene.SCENE
-        connections, credentials = connections_api.create_manager()
-        app.state.connections = connections
-        app.state.connection_credentials = credentials
         resources.push_async_callback(realtime.RUNTIME.shutdown)
+        from ...realtime import tracking as camera_tracking
+        resources.push_async_callback(asyncio.to_thread, camera_tracking.stop)
         await realtime.RUNTIME.restore()
+        await asyncio.to_thread(camera_tracking.restore)
         resources.push_async_callback(conversation_runtime.RUNTIME.cancel)
         task = asyncio.create_task(scheduler.loop())
         resources.push_async_callback(stop_scheduler, task)
-        # Collection is owned by this Harness lifetime. Stop it before the
-        # scheduler so every completed capture retains its durable admission.
-        resources.push_async_callback(connections.stop)
-        await connections.start()
         for params in model_events:
             scheduler.enqueue_named_event("model.added", params)
         yield
@@ -826,8 +836,40 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Obsidience", lifespan=lifespan)
-app.include_router(connections_api.router)
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+from ...memory.api import router as memory_router
+app.include_router(memory_router)
+from ...graphs.api import router as graph_views_router
+app.include_router(graph_views_router)
+
+# Workstation browsers visit arbitrary sites. Only non-browser local clients
+# (Quickshell, CLI, turn bridges, Hindsight; no Origin) and pages served by
+# this Harness may drive it. A loopback Host defeats DNS rebinding; a browser
+# Origin or cross-site fetch must belong to this exact origin.
+_LOCAL_HOSTS = frozenset(f"{host}:{CONFIG.port}" for host in (CONFIG.host, "127.0.0.1", "localhost"))
+_LOCAL_ORIGINS = frozenset("http://" + host for host in _LOCAL_HOSTS)
+
+
+class LocalClientsOnly:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] in {"http", "websocket"}:
+            headers = Headers(scope=scope)
+            origin = headers.get("origin")
+            if (headers.get("host") not in _LOCAL_HOSTS
+                    or (origin is not None and origin not in _LOCAL_ORIGINS)
+                    or headers.get("sec-fetch-site", "none") not in {"same-origin", "none"}):
+                if scope["type"] == "websocket":
+                    await send({"type": "websocket.close", "code": 1008})
+                else:
+                    await PlainTextResponse("Forbidden", status_code=403)(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(CORSMiddleware, allow_origins=sorted(_LOCAL_ORIGINS), allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(LocalClientsOnly)
 
 
 class ShellKnowledgeFiles(StaticFiles):
@@ -851,6 +893,20 @@ app.mount(
 )
 
 
+@app.get("/api/shell/command-token")
+def shell_command_token_for_pages():
+    """Give pages served above the Shell credential that browsers cannot read.
+
+    LocalClientsOnly admits only this origin's pages and non-browser local
+    clients, which can read the user-only runtime file anyway."""
+    try:
+        token = shell_command_token.read_token()
+    except OSError as exc:
+        raise HTTPException(503, "Shell command token unavailable") from exc
+    return Response(json.dumps({"token": token}), media_type="application/json",
+                    headers={"Cache-Control": "no-store"})
+
+
 @app.get("/api/status")
 def status():
     notes = iter_notes()
@@ -866,7 +922,7 @@ def status():
         "name": "obsidience", "vault": str(CONFIG.vault_dir),
         "notes": len(notes), "tasks": len(tasks),
         "tasks_by_status": _count_by(tasks),
-        "proposals_pending": len(review.list_proposals()),
+        "proposals_pending": len(review.list_reviews()),
         "sources": len(source_status["files"]),
         "source_issues": len(source_status["issues"]),
         "source_coverage": source_status.get("coverage", {}),
@@ -1037,6 +1093,36 @@ def update_hardware_camera(payload: dict):
         raise HTTPException(503, str(exc)) from exc
 
 
+@app.get("/api/hardware/camera/tracking")
+def camera_tracking_status():
+    from ...realtime import tracking
+    return tracking.snapshot()
+
+
+@app.get("/api/hardware/camera/frame")
+async def camera_owner_frame():
+    """One private, uncached owner preview through the same capture boundary."""
+    from ...realtime.camera import CameraCaptureError, capture_selected_camera
+    try:
+        frame = await capture_selected_camera()
+    except CameraCaptureError as error:
+        raise HTTPException(503, str(error)) from error
+    return Response(frame.image_png, media_type="image/png", headers={
+        "Cache-Control": "no-store", "X-Captured-At-Ns": str(frame.captured_at_unix_ns),
+        "X-Camera-Recognition": json.dumps(frame.recognition, separators=(",", ":")),
+    })
+
+
+@app.post("/api/hardware/camera/tracking/enroll")
+def camera_owner_enroll():
+    """Explicit local owner enrollment; never a model-exposed Tool."""
+    from ...realtime import tracking
+    try:
+        return tracking.enroll()
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from error
+
+
 @app.get("/api/realtime")
 def realtime_status():
     """Return speech transport state, independent of the selected work Task."""
@@ -1055,6 +1141,8 @@ async def realtime_start():
 @app.patch("/api/realtime/mode")
 async def realtime_mode(payload: dict):
     try:
+        if "mode" in payload:
+            return await realtime.RUNTIME.set_listening_mode(payload["mode"])
         return await realtime.RUNTIME.set_proactive(payload.get("proactive"))
     except (OSError, RuntimeError, TypeError, ValueError) as exc:
         raise HTTPException(409, str(exc)) from exc
@@ -1228,8 +1316,12 @@ def _graph_snapshot():
             target = subject.get("path") or _auto_curate_target_path(ref, {"ref": ref})
             if _auto_curate_supported(ref, {"ref": ref, "kind": "knowledge"}) and enabled(target, notes_by_ref):
                 auto_curated.add(ref)
+    from ...memory.hindsight import MEMORY
+    # Memory has its own native graph view. Accepted Source citations remain
+    # readable evidence; a recalled observation is not an accepted wiki Article.
     return {
         **doc,
+        "memory": MEMORY.status(),
         "auto_curated": sorted(auto_curated),
         "auto_curate_resolved": True,
         "navigation": navigation,
@@ -1239,11 +1331,17 @@ def _graph_snapshot():
 
 def _base_article(ref: str):
     """Resolve real notes and graph subject nodes through one Reader path."""
+    if ref.startswith("@memory/"):
+        from ...memory.hindsight import MEMORY
+        doc = MEMORY.article(ref)
+        if doc is None:
+            raise HTTPException(404, "Hindsight memory record is unavailable")
+        return doc
     # Presentation IDs are exact graph nodes. Never let the resolver's useful
     # leaf-title fallback turn @library/.../generate into Runbooks/generate.
     note = None if ref.startswith("@") else load_note(ref + ".md") or resolver().resolve(ref)
     if note:
-        if note.kind == "knowledge" and is_folder_article(note):
+        if note.kind in {"knowledge", "agent"} and is_folder_article(note):
             return _folder_article(str(Path(note.path).parent), ref)
         return _note_doc(note)
 
@@ -1329,14 +1427,10 @@ def _base_article(ref: str):
         summary = EXECUTIVE_AGENT_SUBJECTS.get(key)
         if not summary:
             raise HTTPException(404, f"executive agent node not found: {ref}")
-        if key != "Subagents":
-            folder = "Agents/Executive/Observations/Temporary Observations" if key == "Temporary Observations" else f"Agents/Executive/{key}"
-            return _folder_article(folder, ref)
+        if key != "Specialists":
+            return _folder_article(f"Agents/Executive/{key}", ref)
         children = [item for item in iter_notes() if item.kind == "agent"
                     and item.ref != CHECKOUT_AGENTS["executive"]]
-        authored = _folder_index("Agents/Executive/Subagents")
-        if authored:
-            return {**_note_doc(authored), "children": [item.ref for item in children]}
         return _virtual_subject(ref, key, summary, children=children)
     if ref.startswith("@sat/"):
         parts = ref.split("/")
@@ -1359,8 +1453,6 @@ def _base_article(ref: str):
             if _folder_index(target_folder):
                 return _folder_article(target_folder, ref)
             child_keys = list(SATELLITE_ROLE_CHILDREN.get(agent_name, {}).get(folder_key, []))
-            if folder_key == "observations":
-                child_keys.insert(0, "temporary-observations")
             subject_lookup = {**SATELLITE_AGENT_SUBJECTS, **role_subjects}
             subnodes = [
                 (f"@sat/{agent_name}/{child_key}", subject_lookup[child_key][0])
@@ -1375,13 +1467,7 @@ def _base_article(ref: str):
             elif folder_key == "observations":
                 children = [item for item in iter_notes()
                             if item.ref.startswith(f"Agents/{agent_name}/Observations/")
-                            and "/Observations/Temporary Observations/" not in item.ref
                             and item.ref != identity.ref]
-            elif folder_key == "temporary-observations":
-                children = [item for item in iter_notes()
-                            if item.ref.startswith(
-                                f"Agents/{agent_name}/Observations/Temporary Observations/"
-                            )]
             elif agent_name == "Darwin" and folder_key == "sources":
                 children = [item for item in iter_notes()
                             if item.ref.startswith("Sources/")
@@ -1402,18 +1488,33 @@ def _base_article(ref: str):
 
 
 @app.get("/api/articles/{ref:path}")
-def get_article(ref: str, graph_id: str = ""):
+def get_article(ref: str, graph_id: str = "", activity: bool = False):
+    doc = _get_article(ref, graph_id)
+    if activity:
+        knowledge_activity.emit_operation("read", "returned", [str(doc["ref"])],
+            label="Reading memory" if ref.startswith("@memory/") else "Reading · " + str(doc["title"]),
+            graph_id="memory:" + ref.split("/", 2)[1] if ref.startswith("@memory/") else graph_id or "*")
+    return doc
+
+
+def _get_article(ref: str, graph_id: str = ""):
     doc = _article_with_curation(ref, _apply_reader_override(_base_article(ref)))
-    if not graph_id or graph_id == "library":
-        return doc
     snapshot = graph()
-    group = next((item for item in snapshot["navigation"]["groups"] if graph_id in {
+    selected_graph = graph_id or "library"
+    group = next((item for item in snapshot["navigation"]["groups"] if selected_graph in {
         item["id"], item["root_ref"], item["root_ref"].split("/")[1]
         if "/" in item["root_ref"] else "library", "main" if item["id"] == "executive" else item["id"]}), None)
     if group is None:
         raise HTTPException(404, "Agent graph is unavailable")
     members = set(group["article_refs"])
     subject = next((item for item in group["subjects"] if ref in {item["id"], item.get("article_ref")}), None)
+    from ...memory.hindsight import MEMORY
+    # Evidence records remain readable in their owner's bank even though they
+    # are not nodes in the Article graph. Presentation never grants bank access.
+    memory_owned = ref.startswith("@memory/") and MEMORY.owns(ref, group["root_ref"])
+    display_ref = subject["id"] if subject else doc["ref"]
+    if selected_graph == "library":
+        return doc
     if subject and subject.get("scope_proxy"):
         children = [item.get("article_ref") or item["id"] for item in group["subjects"]
                     if item["parent_id"] == subject["id"]]
@@ -1422,7 +1523,8 @@ def get_article(ref: str, graph_id: str = ""):
         return {"ref":ref, "title":subject["title"], "kind":"knowledge", "meta":{"scope_proxy":"true"},
                 "body":"Navigation for this Agent's checked-out descendants. The unselected parent Article is not supplied to the Agent.",
                 "children":sorted(set(children)), "read_only":True, "auto_curate_supported":False}
-    if ref not in members and doc["ref"] not in members and ref != "@vault" and doc.get("kind") != "agent":
+    if (ref not in members and doc["ref"] not in members and not memory_owned
+            and ref != "@vault" and doc.get("kind") != "agent"):
         raise HTTPException(404, "Article is outside this Agent graph; open it from Library")
     return {**doc, "children":[child for child in doc.get("children", []) if child in members]}
 
@@ -1438,11 +1540,21 @@ def set_article_auto_curate(ref: str, payload: dict):
         raise HTTPException(400, "Auto-curate applies to Knowledge branches, not capability definitions or checkouts")
     _set_auto_curate_tag(ref, doc, enabled)
     INDEX.sync()
+    knowledge_activity.emit_operation("edit", "completed", [str(doc["ref"])],
+        label="Auto-curate enabled" if enabled else "Auto-curate disabled", refresh=True)
     return {"article": ref, "enabled": enabled, "task": None}
 
 
 @app.patch("/api/articles/{ref:path}")
 def update_article(ref: str, payload: dict):
+    try:
+        return _update_article(ref, payload)
+    except HTTPException:
+        knowledge_activity.emit_operation("edit", "rejected", [ref], label="Edit rejected")
+        raise
+
+
+def _update_article(ref: str, payload: dict):
     """Direct owner edit for authored Articles and editable navigation nodes."""
     title = str(payload.get("title", "")).strip()
     body = str(payload.get("body", ""))
@@ -1455,6 +1567,8 @@ def update_article(ref: str, payload: dict):
 
     base = _base_article(ref)
     target_ref = str(base["ref"])
+    if target_ref.startswith("@memory/"):
+        raise HTTPException(409, "Hindsight owns this observation; durable changes are Alexandria recommendations")
     try:
         system_knowledge.assert_system_article_writable(target_ref)
     except ValueError as cause:
@@ -1467,6 +1581,8 @@ def update_article(ref: str, payload: dict):
             raise HTTPException(409, "cannot edit a running task")
         meta = dict(note.meta)
         meta["title"] = title
+        if note.kind == "agent":
+            meta["name"] = title
         write_note(note.path, meta, body)
         saved_ref = note.ref
     else:
@@ -1484,6 +1600,8 @@ def update_article(ref: str, payload: dict):
         )
         saved_ref = target_ref
     INDEX.sync()
+    knowledge_activity.emit_operation("edit", "completed", [saved_ref],
+        label="Saved · " + title, refresh=True)
     return {"article": saved_ref, "updated": True}
 
 
@@ -1515,11 +1633,18 @@ def source_files(scope: str | None = None, after: str | None = None, limit: int 
 
 
 @app.get("/api/source-files/{key:path}")
-def read_source_file(key: str):
+def read_source_file(key: str, activity: bool = False):
     try:
-        return source.get_source_file(key)
+        record = source.get_source_file(key)
     except source.SourceError as cause:
         raise HTTPException(404, str(cause)) from cause
+    if activity and record.get("storage") == "code":
+        from ...graphs.api import CODE_PROJECT
+        from ...execution.activity import emit_operation
+        project = str(CONFIG.extras.get("graphs", {}).get("codebase_project", CODE_PROJECT))
+        emit_operation("read", "returned", ["file:" + key], label="Reading source",
+                       graph_id="code:" + project)
+    return record
 
 
 @app.get("/api/source-checkouts")
@@ -1591,6 +1716,8 @@ def set_source_checkout(tree: str, payload: dict):
         except source.SourceError as cause:
             raise HTTPException(409, str(cause)) from cause
         INDEX.sync()
+        if changed:
+            knowledge_activity.emit("graph_changed", [identity.ref])
     return {
         "agent": agent,
         "tree": normalized,
@@ -1635,6 +1762,8 @@ def move_file(payload: dict):
     except ValueError as cause:
         raise HTTPException(400, str(cause)) from cause
     INDEX.sync()
+    knowledge_activity.emit_operation("edit", "completed", list(result["refs"].values()),
+        label="Articles moved", refresh=True)
     return result
 
 
@@ -1824,6 +1953,34 @@ def stage_proposal(payload: dict):
         raise HTTPException(400, str(cause)) from cause
 
 
+@app.post("/api/harness/optimizations")
+def prepare_executive_optimization(payload: dict):
+    """Local owner registration; model Tools cannot author evaluation criteria."""
+    from ...execution.optimization import prepare
+    try:
+        return prepare(payload)
+    except (ValueError, KeyError, OSError) as cause:
+        raise HTTPException(400, str(cause)) from cause
+
+
+@app.post("/api/harness/optimizations/{case_id}/run")
+def queue_executive_optimization(case_id: str):
+    from ...execution.optimization import queue
+    try:
+        return queue(case_id)
+    except (ValueError, KeyError, OSError) as cause:
+        raise HTTPException(409, str(cause)) from cause
+
+
+@app.get("/api/harness/optimizations/{case_id}")
+def executive_optimization_status(case_id: str):
+    from ...execution.optimization import status
+    try:
+        return status(case_id)
+    except (ValueError, KeyError, OSError) as cause:
+        raise HTTPException(404, str(cause)) from cause
+
+
 @app.post("/api/turns/complete")
 async def completed_turn(payload: dict):
     """Queue a completed external turn through Obsidience's graph event Tasks."""
@@ -1837,17 +1994,31 @@ async def completed_turn(payload: dict):
         raise HTTPException(400, "completed turn is incomplete")
     if len(user) > 256 * 1024 or len(assistant) > 256 * 1024:
         raise HTTPException(413, "completed turn exceeds the bounded handoff size")
+    # The external developer agent that completed the turn; Codex is the
+    # historical default, so existing Codex turn identities are unchanged.
+    source = payload.get("source", "codex")
+    if source not in {"codex", "claude-code"}:
+        raise HTTPException(400, "unsupported completed-turn source")
     turn_id = hashlib.sha256(
-        f"codex\0{thread_id}\0{external_turn_id}".encode()
+        f"{source}\0{thread_id}\0{external_turn_id}".encode()
     ).hexdigest()[:24]
-    from ...conversation.observations import queue_turn_complete
+    from ...memory.hindsight import queue_turn_complete
 
+    timestamp = payload.get("timestamp")
+    if timestamp is not None:
+        from datetime import datetime
+        try:
+            if not isinstance(timestamp, str) or datetime.fromisoformat(timestamp).tzinfo is None:
+                raise ValueError("timezone required")
+        except ValueError as cause:
+            raise HTTPException(400, "timestamp must be an ISO date with timezone") from cause
     queued = queue_turn_complete(
         "Agents/Executive/Executive",
         user,
         assistant,
-        source="codex",
+        source=source,
         turn_id=turn_id,
+        timestamp=timestamp,
     )
     return {
         "accepted": True,
@@ -1881,14 +2052,22 @@ def task_execution_state(note: Note, accepted_resolver: Resolver) -> dict:
             blocked = "Resolve the Task configuration before running it."
         result.update(state="needs_attention", reason=issue["reason"],
                       retry_allowed=not blocked, retry_blocked_reason=blocked)
-    elif status == "pending":
-        if not scheduler._realtime_allows(note, accepted_resolver):
+    elif (status == "pending" or (
+        status in {"completed", "failed"} and note.meta.get("schedule")
+        and str(note.meta.get("blocked_reason", "")).startswith(scheduler.RESOURCE_WAIT_PREFIX)
+    )):
+        if scheduler.memory_curation_paused(note):
+            result.update(state="waiting", label="Paused: memory curation",
+                          reason="The owner paused Hindsight-to-Knowledge curation; this occurrence and its FIFO remain retained.")
+        elif not scheduler._realtime_allows(note, accepted_resolver):
             result.update(state="waiting", label="Paused: Realtime" if realtime.RUNTIME.scheduler_paused() else "Paused: foreground",
                           reason="Background work is paused while Realtime or foreground input owns execution.")
         else:
-            error = scheduler._resource_error(note)
+            error = scheduler._resource_error(note, accepted_resolver=accepted_resolver)
             if error:
-                result.update(state="waiting", label="Waiting: hardware", reason=scheduler.RESOURCE_WAIT_PREFIX + str(error))
+                result.update(state="waiting", label=("Waiting: GPU memory" if isinstance(
+                    error, model_runtime.ModelMemoryUnavailable) else "Waiting: hardware"),
+                    reason=scheduler.RESOURCE_WAIT_PREFIX + str(error), resource=error.as_dict())
             else:
                 result.update(state="ready", reason="Waiting for its turn in the existing execution queue.")
     return result
@@ -1897,8 +2076,8 @@ def task_execution_state(note: Note, accepted_resolver: Resolver) -> dict:
 @app.get("/api/tasks")
 def tasks():
     out = []
-    accepted_resolver = resolver()
-    for n in iter_notes():
+    accepted_resolver = resolver(include_system=False)
+    for n in accepted_resolver.by_ref.values():
         if n.kind != "task":
             continue
         subtasks = n.meta.get("subtasks") or []
@@ -1908,9 +2087,10 @@ def tasks():
             [_link_ref(str(x)) for x in excluded]
             if isinstance(excluded, list) else [_link_ref(str(excluded))]
         )
-        effort = str(n.meta.get("reasoning_effort", "medium")).lower()
-        if effort not in llm.REASONING_BUDGETS:
-            effort = "medium"
+        try:
+            effort = llm.normalize_reasoning_effort(n.meta.get("reasoning_effort"))
+        except ValueError:
+            effort = llm.normalize_reasoning_effort(None)
         status = str(n.meta.get("status", "draft"))
         try:
             model = model_runtime.normalize_model(n.meta.get("model"))
@@ -1990,6 +2170,7 @@ async def create_task(payload: dict):
     write_note(task.path, meta, task.body)
     readiness = ensure_task_runbook(load_note(task.path), resolver())
     INDEX.sync()
+    knowledge_activity.emit_operation("edit", "completed", [task.ref], label="Task queued", refresh=True)
     return {"task": task.ref, "state": state, "status": meta["status"],
             "dependencies": readiness}
 
@@ -2012,6 +2193,7 @@ async def set_task_reasoning(ref: str, payload: dict):
     meta["reasoning_effort"] = effort
     write_note(note.path, meta, note.body)
     INDEX.sync()
+    knowledge_activity.emit_operation("edit", "completed", [note.ref], label="Task reasoning saved", refresh=True)
     return {"task": note.ref, "reasoning_effort": effort}
 
 
@@ -2035,6 +2217,7 @@ async def set_task_assignee(ref: str, payload: dict):
     write_note(note.path, meta, note.body)
     readiness = ensure_task_runbook(load_note(note.path), resolver())
     INDEX.sync()
+    knowledge_activity.emit_operation("edit", "completed", [note.ref, agent.ref], label="Task assignment saved", refresh=True)
     return {"task": note.ref, "assignee": assignee, "dependencies": readiness}
 
 
@@ -2056,6 +2239,7 @@ async def set_task_model(ref: str, payload: dict):
     meta["model"] = model
     write_note(note.path, meta, note.body)
     INDEX.sync()
+    knowledge_activity.emit_operation("edit", "completed", [note.ref], label="Task model saved", refresh=True)
     agent_ref = _link_ref(str(meta.get("assignee", ""))) or "Agents/Executive/Executive"
     return {
         "task": note.ref,
@@ -2110,6 +2294,7 @@ async def set_task_exclusions(ref: str, payload: dict):
         meta.pop("exclude_subtasks", None)
     write_note(note.path, meta, note.body)
     INDEX.sync()
+    knowledge_activity.emit_operation("edit", "completed", [note.ref], label="Task exclusions saved", refresh=True)
     return {"task": note.ref, "excluded_subtask_refs": ordered}
 
 
@@ -2180,6 +2365,7 @@ async def update_task(ref: str, payload: dict):
     write_note(note.path, meta, body)
     readiness = ensure_task_runbook(load_note(note.path), resolver())
     INDEX.sync()
+    knowledge_activity.emit_operation("edit", "completed", [note.ref], label="Task saved", refresh=True)
     return {"task": note.ref, "updated": True, "dependencies": readiness}
 
 
@@ -2233,6 +2419,14 @@ async def run_now(ref: str, payload: dict | None = None):
     from ...capabilities.task.complete import validate_computer_outcome
 
     stored_params = note.meta.get("params")
+    preserve_pending = str(note.meta.get("status", "")) == "pending" and "params" not in (payload or {})
+    expected_key = (payload or {}).get("expected_activation_key")
+    if expected_key is not None:
+        if not isinstance(expected_key, str) or not expected_key:
+            raise HTTPException(400, "expected_activation_key must identify the pending occurrence")
+        if (not preserve_pending or not isinstance(stored_params, dict)
+                or expected_key != stored_params.get("activation_key")):
+            raise HTTPException(409, "pending occurrence changed; refresh its activation key")
     bound_params = {**(stored_params if isinstance(stored_params, dict) else {}), **runtime_params}
     outcome_error = validate_computer_outcome(
         bound_params.get("computer_outcome"), bound_params.get("computer_scope"),
@@ -2242,9 +2436,10 @@ async def run_now(ref: str, payload: dict | None = None):
     try:
         scheduler.launch(
             note,
+            owner_requested=True,
             reasoning_effort=effort,
             model=model,
-            runtime_params=runtime_params,
+            runtime_params=None if preserve_pending else runtime_params,
         )
     except RuntimeError as exc:
         raise HTTPException(409, str(exc)) from exc
@@ -2309,7 +2504,8 @@ async def knowledge_activity_ws(ws: WebSocket):
 
     async def send_events():
         await ws.send_json({"type": "snapshot", "entries": knowledge_activity.history(),
-                            "playback": knowledge_activity.playback()})
+                            "playback": knowledge_activity.playback(),
+                            "operations": knowledge_activity.operations()})
         while True:
             await ws.send_json({"type": "activity", **await queue.get()})
 
@@ -2322,7 +2518,16 @@ async def knowledge_activity_ws(ws: WebSocket):
 @app.get("/api/reviews")
 def reviews():
     with _REVIEW_LOCK:
-        return review.list_proposals()
+        return review.list_reviews()
+
+
+@app.post("/api/reviews/{name}/acknowledge")
+def acknowledge_review(name: str):
+    try:
+        with _REVIEW_LOCK:
+            return review.acknowledge_notification(name)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
 
 
 @app.post("/api/reviews/{name}/approve")
@@ -2348,10 +2553,13 @@ async def chat_ws(ws: WebSocket):
     """Project the one persisted Executive conversation into every Chat pane."""
     await ws.accept()
     queue = CONVERSATION.subscribe()
-    queue.put_nowait(conversation_runtime.RUNTIME.context_status())
     queue.put_nowait(conversation_runtime.RUNTIME.active_turn())
 
     async def send_events() -> None:
+        # Deliver the conversation immediately, even if tokenization is cold.
+        while not queue.empty():
+            await ws.send_json(queue.get_nowait())
+        queue.put_nowait(await conversation_runtime.RUNTIME.context_status())
         while True:
             await ws.send_json(await queue.get())
 
@@ -2388,13 +2596,10 @@ async def chat_ws(ws: WebSocket):
                     queue.put_nowait({"type": "error", "text": str(exc)[:512]})
                 continue
             if msg.get("type") == "compact":
-                queue.put_nowait({"type": "start", "source": "compact"})
                 try:
-                    await conversation_runtime.RUNTIME.compact_conversation(force=True)
+                    await conversation_runtime.RUNTIME.compact_conversation(force=True, wait=False)
                 except (ValueError, RuntimeError) as exc:
                     queue.put_nowait({"type": "error", "text": str(exc)[:512]})
-                finally:
-                    queue.put_nowait({"type": "end"})
                 continue
             text = str(msg.get("text", "")).strip()
             if not text:

@@ -16,12 +16,12 @@ from dataclasses import dataclass, field
 
 import httpx
 
-from .runtime import ModelSpec
+from .runtime import FLASH_NEXT_MODEL, ModelSpec, model_auth_headers
 
 PROMPT_SAFETY_TOKENS = 256
 _TEXT_COUNTS: OrderedDict[tuple, int] = OrderedDict()
 _TEXT_COUNTS_LOCK = threading.Lock()
-_TOKENIZER = httpx.Client(timeout=0.5, trust_env=False)
+_TOKENIZER = httpx.Client(timeout=0.5, trust_env=False, headers=model_auth_headers())
 
 
 def _artifact_key(spec: ModelSpec) -> tuple:
@@ -140,7 +140,7 @@ class ContextBudgetExceeded(ValueError):
 
 async def measure_payload(payload: dict, spec: ModelSpec, client: httpx.AsyncClient) -> PayloadCount:
     """Count exactly the same request that will be sent to chat/completions."""
-    if spec.runtime.startswith("llama.cpp"):
+    if spec.runtime.startswith("llama.cpp") or spec.id == FLASH_NEXT_MODEL:
         url = spec.base_url + "/chat/completions/input_tokens"
         body = payload
     else:

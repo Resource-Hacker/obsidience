@@ -44,6 +44,20 @@ from .tasks import (
 from .vault import Note, Resolver, expand_primitive, iter_notes
 
 _SCHEMA = """
+CREATE TABLE IF NOT EXISTS memory_deliveries(
+  id TEXT PRIMARY KEY, bank TEXT NOT NULL, content_hash TEXT NOT NULL,
+  payload TEXT NOT NULL, state TEXT NOT NULL, created_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS memory_promotions(
+  bank TEXT NOT NULL, memory_id TEXT NOT NULL, content_hash TEXT NOT NULL,
+  PRIMARY KEY(bank,memory_id)
+);
+CREATE TABLE IF NOT EXISTS memory_handoffs(
+  source_ref TEXT PRIMARY KEY, content_hash TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS memory_retries(
+  operation_id TEXT PRIMARY KEY, attempted_at REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS notes(
   ref TEXT PRIMARY KEY, path TEXT, title TEXT, kind TEXT, mtime REAL,
   hash TEXT, meta TEXT, links TEXT
@@ -61,6 +75,11 @@ CREATE TABLE IF NOT EXISTS runs(
   runbook_ref TEXT, runbook_sha256 TEXT, reasoning_effort TEXT, model TEXT
 );
 CREATE INDEX IF NOT EXISTS runs_started_order ON runs(started DESC,id DESC);
+CREATE TABLE IF NOT EXISTS review_notifications(
+  id TEXT PRIMARY KEY, kind TEXT NOT NULL, payload TEXT NOT NULL,
+  state TEXT NOT NULL CHECK(state IN ('pending','acknowledged','resolved')),
+  created_at REAL NOT NULL, updated_at REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS task_runtime(
   task_ref TEXT PRIMARY KEY,
   state TEXT NOT NULL,
@@ -98,19 +117,6 @@ CREATE TABLE IF NOT EXISTS source_evidence(
   material BLOB NOT NULL, created_at REAL NOT NULL,
   event_key TEXT, event_dispatched_at REAL,
   origin_source_id TEXT NOT NULL DEFAULT ''
-);
-CREATE TABLE IF NOT EXISTS feed_runtime(
-  feed_id TEXT PRIMARY KEY, state TEXT NOT NULL, updated_at REAL NOT NULL
-);
-CREATE TABLE IF NOT EXISTS connection_runtime(
-  connection_id TEXT PRIMARY KEY, state TEXT NOT NULL, updated_at REAL NOT NULL
-);
-CREATE TABLE IF NOT EXISTS feed_items(
-  feed_id TEXT NOT NULL, item_key TEXT NOT NULL, content_sha256 TEXT NOT NULL,
-  source_id TEXT NOT NULL, source_path TEXT NOT NULL, captured_at TEXT NOT NULL,
-  last_seen_at REAL NOT NULL DEFAULT 0, destination_ref TEXT NOT NULL DEFAULT '',
-  distill_instructions TEXT NOT NULL DEFAULT '',
-  PRIMARY KEY(feed_id,item_key,content_sha256)
 );
 CREATE TABLE IF NOT EXISTS conversations(
   id TEXT PRIMARY KEY, created_at REAL NOT NULL
@@ -360,6 +366,12 @@ class Index:
         if sqlite3.threadsafety != 3:
             raise RuntimeError("The shared ledger requires serialized SQLite support")
         self.db = sqlite3.connect(self.db_path, check_same_thread=False, cached_statements=0)
+        # Keep receipts durable before dispatch, normally one WAL sync per commit
+        # instead of rollback-journal/directory/main-file synchronization.
+        # Live backups must use SQLite backup, including committed WAL state.
+        if self.db.execute("PRAGMA journal_mode=WAL").fetchone()[0] != "wal":
+            raise RuntimeError("The shared ledger requires SQLite WAL support")
+        self.db.execute("PRAGMA synchronous=FULL")
         self.db.executescript(_SCHEMA)
         self._migrate()
         self.lock = threading.RLock()
@@ -414,13 +426,16 @@ class Index:
             "CREATE INDEX IF NOT EXISTS source_event_receipts "
             "ON source_evidence(event_key,event_dispatched_at)"
         )
+        # Upgrade only retained Feed receipts; fresh ledgers have no Feed tables.
         feed_columns = {row[1] for row in self.db.execute("PRAGMA table_info(feed_items)")}
-        if "last_seen_at" not in feed_columns:
-            self.db.execute("ALTER TABLE feed_items ADD COLUMN last_seen_at REAL NOT NULL DEFAULT 0")
-        if "destination_ref" not in feed_columns:
-            self.db.execute("ALTER TABLE feed_items ADD COLUMN destination_ref TEXT NOT NULL DEFAULT ''")
-        if "distill_instructions" not in feed_columns:
-            self.db.execute("ALTER TABLE feed_items ADD COLUMN distill_instructions TEXT NOT NULL DEFAULT ''")
+        if feed_columns:
+            for name, definition in (
+                ("last_seen_at", "REAL NOT NULL DEFAULT 0"),
+                ("destination_ref", "TEXT NOT NULL DEFAULT ''"),
+                ("distill_instructions", "TEXT NOT NULL DEFAULT ''"),
+            ):
+                if name not in feed_columns:
+                    self.db.execute(f"ALTER TABLE feed_items ADD COLUMN {name} {definition}")
         # Materialize legacy active/FIFO occurrences once without admitting or
         # replaying any work. task_runtime remains only their compatibility head.
         for ref, raw in self.db.execute("SELECT task_ref,state FROM task_runtime").fetchall():
@@ -1745,6 +1760,55 @@ class Index:
         })
         return True
 
+    def sync_review_notifications(self, kind: str, items: list[dict]) -> None:
+        """Reconcile controller notifications; acknowledgement never clears health."""
+        if kind != "health" or any(not isinstance(item.get("file"), str) for item in items):
+            raise ValueError("invalid Review notification")
+        desired = {item["file"]: json.dumps(item, sort_keys=True) for item in items}
+        with self.lock:
+            try:
+                self.db.execute("BEGIN IMMEDIATE")
+                existing = {row[0]: row[1:] for row in self.db.execute(
+                    "SELECT id,payload,state FROM review_notifications WHERE kind=?", (kind,))}
+                now = time.time()
+                for identity, payload in desired.items():
+                    old = existing.get(identity)
+                    if old and old[0] == payload and old[1] != "resolved":
+                        continue
+                    self.db.execute(
+                        "INSERT INTO review_notifications VALUES(?,?,?,'pending',?,?) "
+                        "ON CONFLICT(id) DO UPDATE SET payload=excluded.payload, "
+                        "state=CASE WHEN review_notifications.state='resolved' THEN 'pending' "
+                        "ELSE review_notifications.state END,updated_at=excluded.updated_at",
+                        (identity, kind, payload, now, now))
+                for identity, (_, state) in existing.items():
+                    if identity not in desired and state != "resolved":
+                        self.db.execute("UPDATE review_notifications SET state='resolved',updated_at=? WHERE id=?",
+                                        (now, identity))
+                self.db.commit()
+            except BaseException:
+                self.db.rollback()
+                raise
+
+    def review_notifications(self) -> list[dict]:
+        with self.lock:
+            return [{**json.loads(payload), "proposed_at": created_at}
+                    for payload, created_at in self.db.execute(
+                        "SELECT payload,created_at FROM review_notifications WHERE state='pending' "
+                        "ORDER BY created_at,id")]
+
+    def acknowledge_review_notification(self, identity: str) -> dict:
+        with self.lock:
+            row = self.db.execute("SELECT state FROM review_notifications WHERE id=?", (identity,)).fetchone()
+            if row is None:
+                raise FileNotFoundError("Review notification not found")
+            if row[0] == "pending":
+                self.db.execute("UPDATE review_notifications SET state='acknowledged',updated_at=? WHERE id=?",
+                                (time.time(), identity))
+                self.db.commit()
+            return {"notification": identity, "status": "acknowledged" if row[0] != "resolved" else "resolved",
+                    "health_changed": False}
+
     def record_review_decision(
         self,
         *,
@@ -2122,60 +2186,12 @@ class Index:
             ).fetchone()
         return dict(zip(self._CONVERSATION_TURN_COLUMNS, row)) if row else None
 
-    # ---------- feed intake receipts, never a second content store ----------
-
-    def connection_runtime(self, connection_id: str) -> dict:
-        with self.lock:
-            row = self.db.execute("SELECT state FROM connection_runtime WHERE connection_id=?", (connection_id,)).fetchone()
-        return json.loads(row[0]) if row else {}
-
-    def update_connection_runtime(self, connection_id: str, **fields) -> None:
-        with self.lock, self.db:
-            row = self.db.execute("SELECT state FROM connection_runtime WHERE connection_id=?", (connection_id,)).fetchone()
-            state = json.loads(row[0]) if row else {}
-            state.update(fields)
-            self.db.execute(
-                "INSERT INTO connection_runtime(connection_id,state,updated_at) VALUES(?,?,?) "
-                "ON CONFLICT(connection_id) DO UPDATE SET state=excluded.state,updated_at=excluded.updated_at",
-                (connection_id, json.dumps(state, sort_keys=True, allow_nan=False), time.time()),
-            )
-
-    def feed_runtime(self, feed_id: str) -> dict:
-        with self.lock:
-            row = self.db.execute("SELECT state FROM feed_runtime WHERE feed_id=?", (feed_id,)).fetchone()
-        return json.loads(row[0]) if row else {}
-
-    def update_feed_runtime(self, feed_id: str, **fields) -> dict:
-        with self.lock, self.db:
-            row = self.db.execute("SELECT state FROM feed_runtime WHERE feed_id=?", (feed_id,)).fetchone()
-            state = json.loads(row[0]) if row else {}
-            state.update(fields)
-            self.db.execute(
-                "INSERT INTO feed_runtime(feed_id,state,updated_at) VALUES(?,?,?) "
-                "ON CONFLICT(feed_id) DO UPDATE SET state=excluded.state,updated_at=excluded.updated_at",
-                (feed_id, json.dumps(state, sort_keys=True, allow_nan=False), time.time()),
-            )
-        return state
-
-    def record_feed_item(self, feed_id: str, item_key: str, source: dict, destination_ref: str = "",
-                         distill_instructions: str = "") -> bool:
-        """Remember one already-durable Source version; repeat capture is harmless."""
-        with self.lock, self.db:
-            cursor = self.db.execute(
-                "INSERT OR IGNORE INTO feed_items(feed_id,item_key,content_sha256,source_id,source_path,captured_at,destination_ref,distill_instructions) "
-                "VALUES(?,?,?,?,?,?,?,?)",
-                (feed_id, item_key, source["content_sha256"], source["id"], source["path"], source["captured_at"], destination_ref, distill_instructions),
-            )
-            created = cursor.rowcount == 1
-            self.db.execute(
-                "UPDATE feed_items SET last_seen_at=? WHERE feed_id=? AND item_key=? AND content_sha256=?",
-                (time.time(), feed_id, item_key, source["content_sha256"]),
-            )
-        return created
-
+    # Historical Feed provenance remains readable; no collector writes these receipts.
     def feed_source_binding(self, source_id: str) -> dict | None:
         """Read controller-written provenance, never provider-authored routing."""
         with self.lock:
+            if not self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='feed_items'").fetchone():
+                return None
             rows = self.db.execute(
                 "SELECT f.feed_id,f.item_key,f.destination_ref,f.source_id,f.content_sha256,f.distill_instructions "
                 "FROM feed_items f JOIN source_evidence s ON s.id=f.source_id "
@@ -2188,30 +2204,6 @@ class Index:
             raise ValueError("Feed Source has ambiguous controller receipts")
         return dict(zip(("feed_id", "item_key", "destination_ref", "source_id", "source_sha256", "distill_instructions"), rows[0]))
 
-    def bind_feed_destination(self, feed_id: str, destination_ref: str) -> int:
-        """Migration-only binding for legacy receipts without a destination."""
-        if not destination_ref:
-            raise ValueError("Feed destination must be nonempty")
-        with self.lock, self.db:
-            if self.db.execute("SELECT 1 FROM feed_items WHERE feed_id=? AND destination_ref NOT IN ('',?)",
-                               (feed_id, destination_ref)).fetchone():
-                raise ValueError("A captured Feed destination cannot be replaced")
-            return self.db.execute("UPDATE feed_items SET destination_ref=? WHERE feed_id=? AND destination_ref=''",
-                                   (destination_ref, feed_id)).rowcount
-
-    def feed_item_summary(self, feed_id: str) -> dict:
-        with self.lock:
-            counts = self.db.execute(
-                "SELECT COUNT(DISTINCT item_key),COUNT(*) FROM feed_items WHERE feed_id=?", (feed_id,),
-            ).fetchone()
-            latest = self.db.execute(
-                "SELECT source_id,source_path FROM feed_items WHERE feed_id=? ORDER BY last_seen_at DESC,rowid DESC LIMIT 1",
-                (feed_id,),
-            ).fetchone()
-        return {"item_count": counts[0], "source_count": counts[1],
-                "last_source": "source://" + latest[0] if latest else "",
-                "last_source_id": latest[0] if latest else "",
-                "last_source_path": "obsidience/evidence/" + latest[1] if latest else ""}
 
     def feed_item_sources(self, *, feed_id: str | None = None, source_id: str | None = None,
                           limit: int = 100) -> list[dict]:
@@ -2230,6 +2222,8 @@ class Index:
                               "(newer.last_seen_at=f.last_seen_at AND newer.rowid>f.rowid)))")
         columns = ("feed_id", "item_key", *self._SOURCE_COLUMNS)
         with self.lock:
+            if not self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='feed_items'").fetchone():
+                return []
             rows = self.db.execute(
                 "SELECT f.feed_id,f.item_key," + ",".join("s." + name for name in self._SOURCE_COLUMNS)
                 + " FROM feed_items f JOIN source_evidence s ON s.id=f.source_id WHERE "
@@ -2237,7 +2231,6 @@ class Index:
             ).fetchall()
         return [dict(zip(columns, row)) for row in rows]
 
-    # ---------- immutable source evidence ----------
 
     _SOURCE_COLUMNS = (
         "id", "path", "source_type", "source_ref", "media_type", "captured_at",
@@ -2245,7 +2238,7 @@ class Index:
         "event_key", "event_dispatched_at", "origin_source_id",
     )
 
-    def record_source(self, *, feed_receipt: dict | None = None, **kw) -> bool:
+    def record_source(self, **kw) -> bool:
         with self.lock:
             try:
                 self.db.execute("BEGIN IMMEDIATE")
@@ -2254,18 +2247,8 @@ class Index:
                     + ") VALUES(" + ",".join(f":{name}" for name in self._SOURCE_COLUMNS) + ")",
                     {"origin_source_id": "", **kw},
                 )
-                created = False
-                if feed_receipt is not None:
-                    cursor = self.db.execute(
-                        "INSERT INTO feed_items(feed_id,item_key,content_sha256,source_id,source_path,captured_at,last_seen_at,destination_ref,distill_instructions) "
-                        "VALUES(?,?,?,?,?,?,?,?,?)",
-                        (feed_receipt["feed_id"], feed_receipt["item_key"], kw["content_sha256"], kw["id"],
-                         kw["path"], kw["captured_at"], time.time(), feed_receipt["destination_ref"],
-                         feed_receipt.get("distill_instructions", "")),
-                    )
-                    created = cursor.rowcount == 1
                 self.db.commit()
-                return created
+                return True
             except BaseException:
                 self.db.rollback()
                 raise

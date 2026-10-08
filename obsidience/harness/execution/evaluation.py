@@ -94,10 +94,16 @@ def _validate_case(case: dict) -> None:
         tools.add(response["tool"])
     expected = case["expected"]
     _object(expected, {"status", "required_tools", "max_tool_calls"},
-            {"outcome", "summary_contains"}, "expected")
+            {"outcome", "summary_contains", "forbidden_tools", "exact_arguments"}, "expected")
     if expected["status"] not in ("completed", "failed", "review"):
         raise ValueError("expected status is invalid")
     _strings(expected["required_tools"], "required_tools", 7)
+    _strings(expected.get("forbidden_tools", []), "forbidden_tools", 32)
+    _strings(expected.get("exact_arguments", []), "exact_arguments", 7)
+    if not set(expected.get("exact_arguments", [])) <= tools:
+        raise ValueError("Exact argument criteria require frozen Tool responses")
+    if set(expected["required_tools"]) & set(expected.get("forbidden_tools", [])):
+        raise ValueError("A required Tool cannot also be forbidden")
     _integer(expected["max_tool_calls"], "max_tool_calls", 0, 7)
     if len(expected["required_tools"]) > expected["max_tool_calls"] or not set(expected["required_tools"]) <= tools:
         raise ValueError("required Tools must have fixtures and fit the call budget")
@@ -112,7 +118,7 @@ def validate_suite(suite: dict) -> None:
     _object(suite, {"schemaVersion", "cases", "repetitions"}, set(), "suite")
     if type(suite["schemaVersion"]) is not int or suite["schemaVersion"] != 1:
         raise ValueError("suite schemaVersion must be 1")
-    _integer(suite["repetitions"], "repetitions", 1, 3)
+    _integer(suite["repetitions"], "repetitions", 1, 5)
     cases = suite["cases"]
     if not isinstance(cases, list) or not 2 <= len(cases) <= 6:
         raise ValueError("suite must contain two to six cases")
@@ -162,8 +168,14 @@ class FrozenTrial:
         if name == "task.complete":
             return self._complete(args)
         self.tool_count += 1
+        if name in self._expected.get("forbidden_tools", []):
+            return self._finish("failed", "Evaluation selected a forbidden Tool.",
+                                "The independent case criteria forbid this operation.")
         key = (name, encoded)
         if key not in self._responses:
+            if name in self._expected.get("exact_arguments", []):
+                return self._finish("failed", "Evaluation selected arguments outside the fixed case criteria.",
+                                    "The independent case requires one of its exact Tool argument bindings.")
             self.error = "No frozen response matches the exact Tool and arguments."
             return self._finish("failed", "Evaluation stopped at a fixture gap.", self.error)
         if len(self.calls) >= self.max_steps:
@@ -208,7 +220,7 @@ def compare_observations(parent: list, child: list) -> dict:
     result = {"verdict": "incomplete", "counts": {}, "fixed": [], "regressed": [], "unchanged": []}
 
     def validate(rows):
-        if not isinstance(rows, list) or not 2 <= len(rows) <= 18:
+        if not isinstance(rows, list) or not 2 <= len(rows) <= 30:
             raise ValueError("observations must contain a bounded complete suite")
         keys, cases = [], {}
         for row in rows:
@@ -218,7 +230,7 @@ def compare_observations(parent: list, child: list) -> dict:
             _text(row["case_id"], "case_id")
             if row["split"] not in ("train", "holdout") or type(row["passed"]) is not bool or row["error"] is not None:
                 raise ValueError("observation has an error or invalid result")
-            _integer(row["repetition"], "repetition", 1, 3)
+            _integer(row["repetition"], "repetition", 1, 5)
             if "status" in row and row["status"] not in ("completed", "failed", "review"):
                 raise ValueError("observation status is invalid")
             if "summary" in row:

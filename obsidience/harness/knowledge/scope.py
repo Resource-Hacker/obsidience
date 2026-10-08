@@ -103,13 +103,30 @@ def knowledge_ancestry(res: Resolver) -> dict[str, list[str]]:
     return ancestors
 
 
+def _reference_runbook_refs(agent: Note, res: Resolver) -> set[str]:
+    """Unbound procedures are references for their exact Agent, not grants."""
+    return {note.ref for note in res.by_ref.values()
+            if note.kind == "runbook" and _accepted(note)
+            and not private_observation(note, agent.ref)
+            and not metadata_ref(str(note.meta.get("task") or ""))
+            and metadata_ref(str(note.meta.get("for_agent") or "")) == agent.ref}
+
+
 def readable_refs(agent: Note, res: Resolver) -> set[str]:
-    """Knowledge membership plus the exact Task-derived capability spine."""
+    """Knowledge, capability dependencies and explicitly scoped procedure references."""
     from .dependencies import agent_dependencies
     refs = knowledge_refs(agent, res) | {agent.ref}
     dependency = agent_dependencies(agent, res)
     for field in ("tasks", "runbooks", "skills", "tools"):
         refs.update(dependency[field])
+    if agent.meta.get("role") == "guardian":
+        # Harness/Agent maintenance needs definition visibility, not another
+        # wiki checkout or permission to execute every inspected capability.
+        refs.update(note.ref for note in res.by_ref.values() if _accepted(note)
+                    and not private_observation(note, agent.ref)
+                    and (note.kind in {"agent", "task", "runbook", "skill", "tool"}
+                         or note.kind == "knowledge" and note.ref.startswith("Agents/")))
+    refs.update(_reference_runbook_refs(agent, res))
     return refs
 
 
@@ -159,6 +176,11 @@ def assert_proposal_scope(target: str, context: dict, res: Resolver) -> None:
         raise PermissionError("Each Agent owns its own Observations")
     if existing and existing.ref not in allowed:
         raise PermissionError("Proposal target is not checked out to this Agent")
+    if (existing and existing.ref in _reference_runbook_refs(agent, res)
+            and agent.meta.get("role") != "guardian"):
+        from .dependencies import agent_dependencies
+        if existing.ref not in agent_dependencies(agent, res)["runbooks"]:
+            raise PermissionError("Reference-only Runbooks do not grant proposal authority")
     definitions = key.split("/", 1)[0] in {"Tasks", "Runbooks", "Skills", "Tools"}
     if not existing and not definitions:
         own = agent.ref.rsplit("/", 1)[0] + "/"

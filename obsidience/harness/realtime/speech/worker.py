@@ -7,12 +7,13 @@ import asyncio
 import contextlib
 import json
 import os
-import subprocess
+import re
 import sys
 import threading
 import time
 import types
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +50,7 @@ from pipecat.frames.frames import (
     InputAudioRawFrame,
     InterimTranscriptionFrame,
     StartInterruptionFrame,
+    SystemFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSSpeakFrame,
@@ -71,10 +73,36 @@ from pipecat.transports.local.audio import (
     LocalAudioTransportParams,
 )
 from pocket_tts import TTSModel
+from .cues import CueAudioFrame, CueMarker, ReplyFinished, load_assets, CHUNK_BYTES
 
 SAMPLE_RATE = 16_000
 TTS_SAMPLE_RATE = 24_000
 TRANSCRIPT_IDLE_SECS = 0.7
+WAKE_COMMAND_WAIT_SECS = 8
+# Speech PCM needs level correction independently of the selected device volume.
+# A fixed gain preserves pauses and syllable dynamics across streaming chunks.
+TTS_GAIN = 10.0 ** (9.0 / 20.0)
+TTS_PEAK_KNEE = 0.85
+TTS_PEAK_CEILING = 0.95
+
+
+def _speech_pcm(samples: np.ndarray) -> bytes:
+    boosted = samples * TTS_GAIN
+    magnitude = np.abs(boosted)
+    # A continuous soft knee protects unusually loud peaks without chunk-level
+    # normalization, lookahead, or an envelope that pumps between chunks.
+    headroom = TTS_PEAK_CEILING - TTS_PEAK_KNEE
+    protected = np.sign(boosted) * (
+        TTS_PEAK_KNEE + headroom * np.tanh((magnitude - TTS_PEAK_KNEE) / headroom)
+    )
+    boosted = np.where(magnitude > TTS_PEAK_KNEE, protected, boosted)
+    return np.rint(boosted * 32767.0).astype("<i2").tobytes()
+
+
+@dataclass
+class ListeningModeFrame(SystemFrame):
+    mode: str
+    revision: int
 
 
 class SpeechInputTiming:
@@ -114,8 +142,9 @@ class SpeechInputTiming:
 class NeMoLocalAudioInputTransport(LocalAudioInputTransport):
     """Leave turn interruption to NeMo without replacing Pipecat capture."""
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(self, *args: Any, input_channel: str = "mono", **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
+        self._input_channel = input_channel
         self._last_level_at = 0.0
         self._capture_active = False
 
@@ -125,6 +154,16 @@ class NeMoLocalAudioInputTransport(LocalAudioInputTransport):
         await super().push_frame(frame, direction)
 
     async def push_audio_frame(self, frame: InputAudioRawFrame) -> None:
+        if self._input_channel == "left":
+            # This UMA-8's left channel contains the cancelled DSP signal;
+            # folding its two USB channels to mono reintroduces speaker echo.
+            # Select samples inside the existing frame, before metering/VAD/ASR.
+            if frame.num_channels != 2 or len(frame.audio) % 4:
+                raise ValueError("UMA-8 capture must provide interleaved stereo PCM")
+            frame = InputAudioRawFrame(
+                audio=np.frombuffer(frame.audio, dtype="<i2")[::2].tobytes(),
+                sample_rate=frame.sample_rate, num_channels=1,
+            )
         # Observe the existing captured frame before ASR queues or inference.
         # No PCM is retained or sent to the Harness/UI.
         if self._params.audio_in_enabled and not self._paused:
@@ -147,13 +186,16 @@ class NeMoLocalAudioInputTransport(LocalAudioInputTransport):
 
 
 class NeMoLocalAudioTransport(LocalAudioTransport):
-    def __init__(self, *args, playback=None, **kwargs):
+    def __init__(self, *args, playback=None, input_channel="mono", **kwargs):
         super().__init__(*args, **kwargs)
         self._playback = playback
+        self._input_channel = input_channel
 
     def input(self) -> FrameProcessor:
         if self._input is None:
-            self._input = NeMoLocalAudioInputTransport(self._pyaudio, self._params)
+            self._input = NeMoLocalAudioInputTransport(
+                self._pyaudio, self._params, input_channel=self._input_channel,
+            )
         return self._input
 
     def output(self) -> FrameProcessor:
@@ -171,14 +213,71 @@ class SpeechTimingAudioOutput(LocalAudioOutputTransport):
         self._timing = None
         self._first_write = False
         self._binding = None
+        self._cue_binding = None
+        self._cue_failed = False
+        self._cue_wrote = False
+        self._reply_failed = False
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        if (direction is FrameDirection.DOWNSTREAM
+                and isinstance(frame, StartInterruptionFrame)
+                and not frame.metadata.get("obsidience_playback_cancel")
+                and self._playback._ready_cue_binding is not None):
+            # Natural speech still cancels reasoning/TTS upstream and keeps
+            # capture live, but must not flush an opening chirp already playing.
+            return
+        await super().process_frame(frame, direction)
+        # The open input window is local speech state. Queue its acknowledgement
+        # as soon as native interruption clears old output, without a Harness
+        # round trip or waiting for conversation/model cancellation cleanup.
+        turn = self._playback._turn_taking
+        if (direction is FrameDirection.DOWNSTREAM
+                and isinstance(frame, StartInterruptionFrame)
+                and not frame.metadata.get("obsidience_playback_cancel")
+                and frame.metadata.get("obsidience_wake_ready")
+                and turn is not None and turn.mode == "wake"
+                and frame.metadata.get("obsidience_mode_revision") == turn.mode_revision
+                and (turn._timing is None or (
+                    turn._timing.sequence > 0
+                    and frame.metadata.get("obsidience_speech_sequence") == turn._timing.sequence))
+                and turn._wake_cue_eligible):
+            await self._playback.queue_cue("ready", self._playback.generation)
 
     async def push_frame(self, frame: Frame, direction=FrameDirection.DOWNSTREAM) -> None:
+        if direction is FrameDirection.DOWNSTREAM and isinstance(frame, CueMarker):
+            if not frame.end:
+                self._cue_binding = frame
+                self._cue_failed = False
+                self._cue_wrote = False
+                if frame.cue_name == "ready" and self._playback.cue_current(frame):
+                    self._playback._ready_cue_binding = (frame.generation, frame.epoch)
+                if (frame.cue_name == "ready"
+                        and self._playback._pending_ready_cue_binding == (frame.generation, frame.epoch)):
+                    self._playback._pending_ready_cue_binding = None
+            elif self._cue_binding is not None and self._playback.cue_current(frame) and not self._cue_failed and self._cue_wrote:
+                emit("cue_finished", name=frame.cue_name, generation=frame.generation, epoch=frame.epoch)
+            if frame.end:
+                if (frame.cue_name == "ready"
+                        and self._playback._ready_cue_binding == (frame.generation, frame.epoch)):
+                    self._playback._ready_cue_binding = None
+                self._cue_binding = None
+        elif direction is FrameDirection.DOWNSTREAM and isinstance(frame, ReplyFinished):
+            binding = frame.binding
+            if (binding.get("generation"), binding.get("epoch")) == (self._playback.generation, self._playback.epoch):
+                self._playback._reply_active = False
+                self._playback.cancel_cues()
+            if (not self._reply_failed
+                    and (binding.get("generation"), binding.get("epoch")) == (self._playback.generation, self._playback.epoch)):
+                name = "error" if not frame.successful or binding.get("outcome") == "failed" else "complete" if binding.get("outcome") == "completed" else None
+                if name:
+                    await self._playback.queue_cue(name, binding["generation"])
         # Upstream queues this marker with PCM and forwards it only when its
         # output task reaches it. Binding at process_frame would race old audio.
         if direction is FrameDirection.DOWNSTREAM and isinstance(frame, TTSStartedFrame):
             self._timing = frame.metadata.get("obsidience_timing")
             self._binding = frame.metadata.get("obsidience_output")
             self._first_write = False
+            self._reply_failed = False
         elif direction is FrameDirection.DOWNSTREAM and isinstance(frame, (TTSStoppedFrame, BotStoppedSpeakingFrame)):
             self._output_level("idle", 0.0)
         await super().push_frame(frame, direction)
@@ -192,12 +291,44 @@ class SpeechTimingAudioOutput(LocalAudioOutputTransport):
                  generation=binding["generation"], status=status, level=round(level, 4))
 
     async def write_audio_frame(self, frame) -> bool:
+        is_cue = isinstance(frame, CueAudioFrame)
+        if is_cue and (self._cue_binding is None or not self._playback.cue_current(self._cue_binding)):
+            return False
         timing = self._timing
+        binding = self._binding
+        def current_reply() -> bool:
+            return (binding is not None and self._playback is not None
+                    and (binding["generation"], binding["epoch"])
+                    == (self._playback.generation, self._playback.epoch))
+        if isinstance(frame, TTSAudioRawFrame) and not current_reply():
+            # An opening chirp may outlive natural interruption. Any old TTS
+            # already queued behind it must still be discarded.
+            return False
         try:
             written = await super().write_audio_frame(frame)
         except Exception:
-            self._output_level("idle", 0.0)
+            if is_cue:
+                self._cue_failed = True
+            else:
+                self._reply_failed = True
+            if not is_cue and current_reply():
+                self._playback.cancel_cues()
+            if not is_cue:
+                self._output_level("idle", 0.0)
             raise
+        if not written:
+            if is_cue:
+                self._cue_failed = True
+            else:
+                self._reply_failed = True
+                if current_reply():
+                    self._playback.cancel_cues()
+        if is_cue:
+            if written and not self._cue_wrote:
+                marker = self._cue_binding
+                self._cue_wrote = True
+                emit("cue_started", name=marker.cue_name, generation=marker.generation, epoch=marker.epoch)
+            return written
         if written and not self._first_write and self._playback is not None:
             self._first_write = True
             self._playback.record_timing("first_output_write", timing, since="first_pcm_ns")
@@ -215,15 +346,157 @@ def emit(kind: str, **payload: Any) -> None:
     print(json.dumps({"type": kind, **payload}, ensure_ascii=False), flush=True)
 
 
+class UtteranceNeMoSTTService(NemoSTTService):
+    """Start voiced utterances with fresh ASR context and their onset audio."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._preroll = bytearray()
+        self._recognized_since_stop = False
+
+    async def _handle_transcription(self, transcript, is_final, language=None):
+        if transcript.strip():
+            self._recognized_since_stop = True
+        await super()._handle_transcription(transcript, is_final, language)
+
+    async def process_audio_frame(self, frame, direction) -> None:
+        if not self._is_vad_active:
+            # 320 ms of mono s16/16 kHz, including the first 100 ms before
+            # Silero confirms onset. Never retain an unbounded idle recording.
+            self._preroll.extend(frame.audio)
+            del self._preroll[:-10_240]
+        # Preserve recognition when quiet speech falls below VAD confidence.
+        await super().process_audio_frame(frame, direction)
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        if isinstance(frame, VADUserStartedSpeakingFrame):
+            preroll = bytes(self._preroll)
+            self._preroll.clear()
+            # Long silence suppresses short words in this streaming model.
+            # Reset at actual onset, but never replay text already recognized
+            # before VAD: that existing unvoiced path owns the utterance.
+            reset = not self._is_vad_active and not self._recognized_since_stop
+            if reset:
+                async with self._model_lock:
+                    self._model.reset_state()
+                self.audio_buffer.clear()
+            await super().process_frame(frame, direction)
+            if reset:
+                # Keep NeMo's existing 4 x 20 ms batching and encoder shift.
+                for offset in range(0, len(preroll), 640):
+                    await super().process_audio_frame(
+                        InputAudioRawFrame(preroll[offset:offset + 640], SAMPLE_RATE, 1),
+                        direction,
+                    )
+            return
+        await super().process_frame(frame, direction)
+        if isinstance(frame, VADUserStoppedSpeakingFrame):
+            # NeMo resets its caches on this same edge. Partial batches belong
+            # to that finished utterance, never to the next one.
+            self.audio_buffer.clear()
+            self._recognized_since_stop = False
+        if isinstance(frame, (VADUserStoppedSpeakingFrame, ListeningModeFrame,
+                              EndFrame, CancelFrame)):
+            self._preroll.clear()
+
+
 class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
     """Close recognized and empty VAD turns without leaving speech latched."""
 
-    def __init__(self, *, timing: SpeechInputTiming | None = None, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
+    def __init__(self, *, timing: SpeechInputTiming | None = None,
+                 playback: PlaybackCommands | None = None,
+                 mode: str = "realtime", mode_revision: int = 0,
+                 wake_word: str = "Computer", **kwargs: Any) -> None:
+        # STT audio and VAD share its system-frame FIFO, but transcription
+        # frames use a separate downstream queue. Consume text inline so a
+        # VAD stop cannot overtake recognized words before finalization.
+        super().__init__(enable_direct_mode=True, **kwargs)
         self._timing = timing
+        self._playback = playback
         self._transcript_timeout: asyncio.Task[None] | None = None
+        self.mode = mode
+        self.mode_revision = mode_revision
+        self._wake_pattern = re.compile(
+            rf"(?<!\w){re.escape(wake_word.strip() or 'Computer')}(?!\w)", re.IGNORECASE,
+        )
+        self._wake_prefix = ""
+        self._wake_open = False
+        self._wake_timeout: asyncio.Task[None] | None = None
+        self._mode_waiting_for_stop = False
+        self._wake_cue_eligible = False
+
+    async def _close_wake(self) -> None:
+        timeout, self._wake_timeout = self._wake_timeout, None
+        if timeout is not None and timeout is not asyncio.current_task():
+            await self.cancel_task(timeout)
+        self._wake_prefix = ""
+        self._wake_open = False
+        self._wake_cue_eligible = False
+
+    async def _expire_wake(self) -> None:
+        try:
+            await asyncio.sleep(WAKE_COMMAND_WAIT_SECS)
+            if not self._user_speaking_buffer.strip():
+                await self._close_wake()
+                if self._have_sent_user_started_speaking and not self._vad_user_speaking:
+                    await self._handle_user_interruption(UserStoppedSpeakingFrame())
+                    self._have_sent_user_started_speaking = False
+                emit("wake_idle", mode_revision=self.mode_revision)
+        finally:
+            if self._wake_timeout is asyncio.current_task():
+                self._wake_timeout = None
+
+    async def _handle_transcription(self, frame, direction) -> None:
+        # STT stays resident. Unaddressed words never enter NeMo's command
+        # buffer, interruption frames, UI events or the conversation owner.
+        if self._mode_waiting_for_stop:
+            return
+        if self.mode == "wake" and not self._wake_open:
+            self._wake_prefix = (self._wake_prefix + frame.text)[-512:]
+            match = self._wake_pattern.search(self._wake_prefix)
+            if match is None:
+                return
+            frame.text = self._wake_prefix[match.end():].lstrip(" ,.!?:;—-")
+            self._wake_prefix = ""
+            self._wake_open = True
+            if self._timing is not None:
+                self._timing.onset()
+            emit("wake_detected", mode_revision=self.mode_revision,
+                 speech_sequence=self._timing.sequence if self._timing else 0)
+            self._wake_timeout = self.create_task(self._expire_wake(), name="wake-command-window")
+            # NeMo's bot flag includes the output queue's idle delay plus its
+            # own stop grace. A completed reply's closing cue extends that tail.
+            # Snapshot the actual reply owner before interruption invalidates
+            # it, so immediate follow-ups chirp and true speech barge-in stays quiet.
+            reply_active = (self._playback._reply_active if self._playback is not None
+                            else self._bot_speaking)
+            wake_only = not any(c.isalnum() for c in frame.text) and not reply_active
+            self._wake_cue_eligible = wake_only
+            if not self._have_sent_user_started_speaking:
+                await self._handle_user_interruption(UserStartedSpeakingFrame())
+                self._have_sent_user_started_speaking = True
+        if self._wake_open and not self._user_speaking_buffer.strip():
+            # NeMo may return punctuation after the name in a later delta.
+            frame.text = frame.text.lstrip(" ,.!?:;—-\t\n")
+        if self._wake_open and any(character.isalnum() for character in frame.text):
+            self._wake_cue_eligible = False
+            timeout, self._wake_timeout = self._wake_timeout, None
+            if timeout is not None:
+                await self.cancel_task(timeout)
+        if frame.text.strip():
+            await super()._handle_transcription(frame, direction)
+
+    async def _handle_completed_text(self, completed_text, direction, is_final=True):
+        if not any(character.isalnum() for character in completed_text):
+            return
+        await super()._handle_completed_text(completed_text, direction, is_final)
+        if is_final and self.mode == "wake":
+            await self._close_wake()
 
     async def push_frame(self, frame: Frame, direction=FrameDirection.DOWNSTREAM) -> None:
+        if isinstance(frame, (UserStartedSpeakingFrame, UserStoppedSpeakingFrame,
+                              StartInterruptionFrame, TranscriptionFrame)):
+            frame.metadata["obsidience_mode_revision"] = self.mode_revision
         if (self._timing is not None and self._timing.sequence > 0
                 and isinstance(frame, (UserStartedSpeakingFrame, UserStoppedSpeakingFrame, StartInterruptionFrame))):
             frame.metadata["obsidience_speech_sequence"] = self._timing.sequence
@@ -231,6 +504,8 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
                 and isinstance(frame, TranscriptionFrame) and frame.text.strip()
                 and not (frame.text.startswith("(") and frame.text.endswith(")"))):
             frame.metadata["obsidience_speech_timing"] = self._timing.finish()
+        if isinstance(frame, StartInterruptionFrame):
+            frame.metadata["obsidience_wake_ready"] = self._wake_cue_eligible
         await super().push_frame(frame, direction)
 
     async def _handle_vad_user_started_speaking(
@@ -271,6 +546,22 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
                 self._transcript_timeout = None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        if isinstance(frame, ListeningModeFrame):
+            waiting = self._vad_user_speaking
+            await self._cancel_transcript_timeout()
+            await self._close_wake()
+            self.reset()
+            self._mode_waiting_for_stop = waiting
+            self.mode, self.mode_revision = frame.mode, frame.revision
+            if self._timing is not None:
+                self._timing.discard()
+            emit("mode_applied", mode=self.mode, mode_revision=self.mode_revision)
+            return
+        if isinstance(frame, (EndFrame, CancelFrame)):
+            await self._close_wake()
+        if isinstance(frame, VADUserStoppedSpeakingFrame):
+            self._wake_prefix = ""
+            self._mode_waiting_for_stop = False
         if (self._timing is not None and (
                 isinstance(frame, (EndFrame, CancelFrame)) or (
                     isinstance(frame, VADUserStoppedSpeakingFrame)
@@ -304,6 +595,7 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
             await self._handle_user_interruption(UserStartedSpeakingFrame())
             self._have_sent_user_started_speaking = True
         emit("transcript_partial", text=transcript,
+             mode_revision=self.mode_revision,
              **({"speech_sequence": self._timing.sequence} if self._timing else {}))
         await self._cancel_transcript_timeout()
         self._transcript_timeout = self.create_task(
@@ -324,7 +616,9 @@ class PocketTTSService(TTSService):
         voice_path = root / "voices" / f"{voice}.safetensors"
         if not config.is_file() or not voice_path.is_file():
             raise FileNotFoundError("Pocket TTS config or selected voice is missing")
-        torch.set_num_threads(max(1, min(16, (os.cpu_count() or 8) // 2)))
+        # Small streaming batches start sooner without a 16-thread CPU pool.
+        # Four threads also preserve the GPU ASR's measured batch latency.
+        torch.set_num_threads(max(1, min(4, (os.cpu_count() or 8) // 2)))
         self._model = TTSModel.load_model(
             config=config,
             temp=0.3,
@@ -346,9 +640,12 @@ class PocketTTSService(TTSService):
             return
 
         timing = self._timing
+        output_binding = dict(self._output_binding) if isinstance(self._output_binding, dict) else None
         if timing is not None:
             timing["tts_started_ns"] = time.monotonic_ns()
         first_pcm = True
+        successful = True
+        pcm_bytes = 0
 
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue[bytes | BaseException | None] = asyncio.Queue()
@@ -377,8 +674,7 @@ class PocketTTSService(TTSService):
                             if cancelled.is_set():
                                 continue
                             samples = chunk.detach().float().cpu().numpy().reshape(-1)
-                            pcm = np.rint(np.clip(samples, -1.0, 1.0) * 32767.0).astype("<i2")
-                            loop.call_soon_threadsafe(queue.put_nowait, pcm.tobytes())
+                            loop.call_soon_threadsafe(queue.put_nowait, _speech_pcm(samples))
                     finally:
                         hook.remove()
             except BaseException as exc:
@@ -392,7 +688,7 @@ class PocketTTSService(TTSService):
         worker.start()
         started = TTSStartedFrame()
         started.metadata["obsidience_timing"] = timing
-        started.metadata["obsidience_output"] = self._output_binding
+        started.metadata["obsidience_output"] = output_binding
         try:
             yield started
             while True:
@@ -400,87 +696,26 @@ class PocketTTSService(TTSService):
                 if item is None:
                     break
                 if isinstance(item, BaseException):
-                    yield ErrorFrame(error=f"Pocket TTS failed: {item}")
+                    # Exception text can contain owner text or private paths.
+                    # Preserve only this synthesis's exact playback identity.
+                    successful = False
+                    error = ErrorFrame(error="Pocket TTS speech delivery failed")
+                    error.metadata["obsidience_playback_error"] = output_binding
+                    yield error
                     break
                 if first_pcm and self._playback is not None:
                     first_pcm = False
                     self._playback.record_timing("first_pcm", timing, since="tts_started_ns")
+                pcm_bytes += len(item)
                 yield TTSAudioRawFrame(item, TTS_SAMPLE_RATE, 1)
         finally:
             cancelled.set()
             await asyncio.to_thread(worker.join, 2)
+        if pcm_bytes % CHUNK_BYTES:
+            yield TTSAudioRawFrame(b"\0" * (-pcm_bytes % CHUNK_BYTES), TTS_SAMPLE_RATE, 1)
         yield TTSStoppedFrame()
-
-
-class PlaybackInputRoute(FrameProcessor):
-    """Keep one Pipecat input on AEC only while assistant audio is playing."""
-
-    def __init__(self, *, raw_source: str, aec_source: str) -> None:
-        super().__init__()
-        self._raw_source = raw_source
-        self._aec_source = aec_source
-        self._current_source = raw_source
-        self._source_output: int | None = None
-
-    def _move_sync(self, source: str) -> None:
-        if source == self._current_source:
-            return
-        if self._source_output is None:
-            completed = subprocess.run(
-                ("/usr/bin/pactl", "-f", "json", "list", "source-outputs"),
-                stdin=subprocess.DEVNULL,
-                capture_output=True,
-                check=False,
-                timeout=2,
-            )
-            if completed.returncode:
-                raise RuntimeError("Pipecat microphone stream could not be inspected")
-            rows = json.loads(completed.stdout)
-            matches = [
-                row.get("index")
-                for row in rows
-                if isinstance(row, dict)
-                and isinstance(row.get("properties"), dict)
-                and row["properties"].get("application.process.id") == str(os.getpid())
-                and isinstance(row.get("index"), int)
-            ]
-            if len(matches) != 1:
-                raise RuntimeError("Pipecat microphone stream is not uniquely addressable")
-            self._source_output = matches[0]
-        completed = subprocess.run(
-            (
-                "/usr/bin/pactl",
-                "move-source-output",
-                str(self._source_output),
-                source,
-            ),
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            check=False,
-            timeout=2,
-        )
-        if completed.returncode:
-            raise RuntimeError("Pipecat microphone stream could not change input route")
-        self._current_source = source
-
-    async def prepare_playback(self) -> None:
-        """Settle capture on AEC before the first speaker sample is queued."""
-
-        await asyncio.to_thread(self._move_sync, self._aec_source)
-
-    async def restore_capture(self) -> None:
-        await asyncio.to_thread(self._move_sync, self._raw_source)
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
-        await super().process_frame(frame, direction)
-        if direction is FrameDirection.DOWNSTREAM and isinstance(frame, TTSStartedFrame):
-            await self.prepare_playback()
-        elif (
-            direction is FrameDirection.UPSTREAM
-            and isinstance(frame, BotStoppedSpeakingFrame)
-        ) or isinstance(frame, (EndFrame, CancelFrame)):
-            await self.restore_capture()
-        await self.push_frame(frame, direction)
+        if output_binding is not None:
+            yield ReplyFinished(output_binding, successful and pcm_bytes > 0)
 
 
 class PlaybackCommands:
@@ -489,18 +724,63 @@ class PlaybackCommands:
     def __init__(self) -> None:
         self.generation = -1
         self.epoch = 0
-        self._queued: tuple[int, int, str, dict | None, str] | None = None
+        self._queued: tuple[int, int, str, dict | None, str, str | None] | None = None
         self._preparing: asyncio.Task | None = None
         self._controller_ready = asyncio.Event()
         self._startup_pending = True
+        self._cue_assets = load_assets(Path(__file__).resolve().parents[3] / "state/realtime-cues")
+        self._ready_cue_binding: tuple[int, int] | None = None
+        self._pending_ready_cue_binding: tuple[int, int] | None = None
+        self._output = None
+        self._turn_taking = None
+        self._reply_active = False
 
-    def invalidate(self, generation: int | None = None) -> bool:
+    def cancel_cues(self) -> None:
+        self._ready_cue_binding = None
+        self._pending_ready_cue_binding = None
+
+    def cue_current(self, marker) -> bool:
+        turn = self._turn_taking
+        if marker.cue_name == "ready" and self._ready_cue_binding == (marker.generation, marker.epoch):
+            return True
+        # Harness's natural-speech cancellation may arrive before the queued
+        # marker. It must not delay this local acknowledgement. Command text
+        # still suppresses an unstarted cue; explicit cancellation clears both
+        # pending and started bindings.
+        pending_ready = (marker.cue_name == "ready"
+                         and self._pending_ready_cue_binding == (marker.generation, marker.epoch))
+        return (((marker.generation, marker.epoch) == (self.generation, self.epoch) or pending_ready)
+                and not (turn and turn._user_speaking_buffer.strip())
+                and (marker.cue_name != "ready" or (not self._reply_active and turn and turn._wake_open and turn._wake_cue_eligible)))
+
+    async def queue_cue(self, name: str, generation: int) -> None:
+        pcm = self._cue_assets.get(name) if isinstance(name, str) else None
+        if not pcm or type(generation) is not int or generation != self.generation or self._output is None:
+            return
+        marker = CueMarker(name, generation, self.epoch)
+        if not self.cue_current(marker):
+            return
+        if name == "ready":
+            self._pending_ready_cue_binding = (marker.generation, marker.epoch)
+        # Admit ordinary frames to the existing output processor: TTS
+        # synthesis gaps and zero-PCM failures must not hold cue delivery.
+        for frame in (marker, CueAudioFrame(pcm, 24000, 1), CueMarker(name, generation, self.epoch, True)):
+            await self._output.queue_frame(frame)
+
+    async def cue(self, task: PipelineTask, command: dict) -> None:
+        name, generation = command.get("name"), command.get("generation")
+        await self.queue_cue(name, generation)
+
+    def invalidate(self, generation: int | None = None, *, preserve_ready: bool = False) -> bool:
         if generation is not None and (
             type(generation) is not int or generation < self.generation
         ):
             return False
         if generation is None or self._controller_ready.is_set():
             self._startup_pending = False
+        if not preserve_ready:
+            self.cancel_cues()
+        self._reply_active = False
         self.generation = self.generation + 1 if generation is None else generation
         self.epoch += 1
         self._queued = None
@@ -538,47 +818,50 @@ class PlaybackCommands:
             "epoch": self.epoch, "received_ns": time.monotonic_ns(),
         }
 
-    def speak(self, task: PipelineTask, route: PlaybackInputRoute, command: dict) -> None:
+    def speak(self, task: PipelineTask, command: dict) -> None:
         generation = command.get("generation")
         text = " ".join(str(command.get("text", "")).split())[:4_000]
         if type(generation) is not int or generation < self.generation or not text:
             return
+        self._reply_active = True
         self._startup_pending = False
         self._controller_ready.set()
         self.generation = generation
         self.epoch += 1
         timing = self._timing_context(command)
         self.record_timing("speech_received", timing)
-        self._queued = (generation, self.epoch, text, timing, command.get("playback_id", "startup"))
+        self._queued = (generation, self.epoch, text, timing, command.get("playback_id", "startup"), command.get("outcome"))
         if self._preparing is None or self._preparing.done():
             self._preparing = asyncio.create_task(
-                self._prepare(task, route), name="speech-playback-prepare",
+                self._prepare(task), name="speech-playback-prepare",
             )
 
-    async def startup(self, task: PipelineTask, route: PlaybackInputRoute, text: str) -> None:
-        # The initial new-conversation cancellation establishes the generation;
-        # later user activity supersedes this optional startup announcement.
-        await self._controller_ready.wait()
+    async def startup(self, task: PipelineTask, text: str) -> None:
+        # Speak once the pipeline starts. Reconnecting speech sends no initial
+        # cancellation, so waiting for one deferred this announcement until a
+        # later STOP or typed turn. A command received before start still sets
+        # the generation; earlier user activity supersedes the announcement.
+        if not text.strip():
+            self._startup_pending = False
+            return
         if self._startup_pending:
-            self.speak(task, route, {"generation": self.generation, "text": text})
+            self.speak(task, {"generation": self.generation, "text": text})
 
-    async def _prepare(self, task: PipelineTask, route: PlaybackInputRoute) -> None:
+    async def _prepare(self, task: PipelineTask) -> None:
         try:
             while self._queued is not None:
-                generation, epoch, text, timing, playback_id = self._queued
+                generation, epoch, text, timing, playback_id, outcome = self._queued
                 self._queued = None
-                # Let the bounded PipeWire operation finish before restoring raw
-                # capture; cancelling to_thread would leave its mutation running.
-                await route.prepare_playback()
+                # Capture already uses the resident AEC feed, including while
+                # waiting for a wake word or hearing other speaker playback.
                 if (generation, epoch) != (self.generation, self.epoch):
-                    await route.restore_capture()
                     continue
                 self.record_timing("aec_ready", timing, since="received_ns")
                 frame = TTSSpeakFrame(text)
                 frame.metadata["obsidience_playback"] = (generation, epoch)
                 frame.metadata["obsidience_timing"] = timing
                 frame.metadata["obsidience_output"] = {
-                    "generation": generation, "epoch": epoch, "playback_id": playback_id,
+                    "generation": generation, "epoch": epoch, "playback_id": playback_id, "outcome": outcome,
                 }
                 await task.queue_frame(frame)
         except Exception as exc:
@@ -602,15 +885,19 @@ class ObsidienceTaskBridge(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         if isinstance(frame, StartInterruptionFrame) and not frame.metadata.get("obsidience_playback_cancel"):
-            self.playback.invalidate()
+            self.playback.invalidate(preserve_ready=True)
         await super().process_frame(frame, direction)
         sequence = frame.metadata.get("obsidience_speech_sequence")
         correlation = {"speech_sequence": sequence} if type(sequence) is int and sequence > 0 else {}
+        revision = frame.metadata.get("obsidience_mode_revision")
+        if type(revision) is int:
+            correlation["mode_revision"] = revision
         if isinstance(frame, TranscriptionFrame):
             text = " ".join(frame.text.split())
             if text and not (text.startswith("(") and text.endswith(")")):
                 timing = frame.metadata.get("obsidience_speech_timing")
-                emit("transcript_final", text=text, **({"speech_timing": timing} if timing else {}))
+                emit("transcript_final", text=text, **correlation,
+                     **({"speech_timing": timing} if timing else {}))
         elif isinstance(frame, StartInterruptionFrame):
             if not frame.metadata.get("obsidience_playback_cancel"):
                 emit("interruption", **correlation)
@@ -624,7 +911,7 @@ class ObsidienceTaskBridge(FrameProcessor):
 
 
 async def command_loop(
-    task: PipelineTask, playback_input: PlaybackInputRoute,
+    task: PipelineTask,
     playback: PlaybackCommands | None = None,
 ) -> None:
     playback = playback or PlaybackCommands()
@@ -642,10 +929,14 @@ async def command_loop(
             if not isinstance(command, dict):
                 continue
             kind = command.get("type")
-            if kind == "speak":
-                playback.speak(task, playback_input, command)
+            if kind == "cue":
+                await playback.cue(task, command)
+            elif kind == "speak":
+                playback.speak(task, command)
             elif kind == "cancel":
-                if not playback.invalidate(command.get("generation")):
+                if not playback.invalidate(
+                    command.get("generation"), preserve_ready=command.get("stop_playback", True) is False,
+                ):
                     continue
                 if command.get("stop_playback", True) is True:
                     frame = StartInterruptionFrame()
@@ -655,6 +946,13 @@ async def command_loop(
                 await playback.close()
                 await task.queue_frame(EndFrame())
                 return
+            elif kind == "mode" and command.get("mode") in {"wake", "realtime"}:
+                revision = command.get("mode_revision")
+                if type(revision) is int and revision >= 0:
+                    playback.cancel_cues()
+                    playback.epoch += 1
+                    playback._turn_taking._wake_cue_eligible = False
+                    await task.queue_frame(ListeningModeFrame(command["mode"], revision))
     finally:
         await playback.close()
 
@@ -679,6 +977,7 @@ async def run(args: argparse.Namespace) -> None:
             input_device_index=pulse_devices[0],
             output_device_index=pulse_devices[0],
             audio_in_enabled=True,
+            audio_in_channels=2 if args.input_channel == "left" else 1,
             audio_out_enabled=True,
             vad_analyzer=SileroVADAnalyzer(
                 sample_rate=SAMPLE_RATE,
@@ -692,9 +991,9 @@ async def run(args: argparse.Namespace) -> None:
             audio_in_sample_rate=SAMPLE_RATE,
             audio_out_sample_rate=TTS_SAMPLE_RATE,
             audio_out_10ms_chunks=4,
-        ), playback=playback,
+        ), playback=playback, input_channel=args.input_channel,
     )
-    stt = NemoSTTService(
+    stt = UtteranceNeMoSTTService(
         model=args.asr_model,
         device="cuda:0",
         sample_rate=SAMPLE_RATE,
@@ -711,18 +1010,20 @@ async def run(args: argparse.Namespace) -> None:
     )
     turn_taking = ObsidienceNeMoTurnTakingService(
         timing=input_timing,
+        playback=playback,
+        mode=args.mode,
+        mode_revision=args.mode_revision,
+        wake_word=args.wake_word,
         use_vad=True,
         use_diar=False,
         max_buffer_size=2,
         bot_stop_delay=0.5,
         backchannel_phrases=None,
     )
+    playback._turn_taking = turn_taking
     bridge = ObsidienceTaskBridge(playback)
     tts = PocketTTSService(root=Path(args.pocket_root), voice=args.voice, playback=playback)
-    playback_input = PlaybackInputRoute(
-        raw_source=os.environ["OBSIDIENCE_RAW_SOURCE"],
-        aec_source=os.environ["OBSIDIENCE_AEC_SOURCE"],
-    )
+    playback._output = transport.output()
     pipeline = Pipeline(
         [
             transport.input(),
@@ -730,7 +1031,6 @@ async def run(args: argparse.Namespace) -> None:
             turn_taking,
             bridge,
             tts,
-            playback_input,
             transport.output(),
         ]
     )
@@ -748,20 +1048,39 @@ async def run(args: argparse.Namespace) -> None:
         cancel_on_idle_timeout=False,
     )
 
+    @task.event_handler("on_pipeline_error")
+    async def on_pipeline_error(task: PipelineTask, frame: ErrorFrame) -> None:
+        binding = frame.metadata.get("obsidience_playback_error")
+        if (not isinstance(binding, dict)
+                or type(binding.get("generation")) is not int
+                or type(binding.get("epoch")) is not int
+                or (binding["generation"], binding["epoch"])
+                != (playback.generation, playback.epoch)
+                or not isinstance(binding.get("playback_id"), str)
+                or not 0 < len(binding["playback_id"]) <= 96
+                or any(not (c.isascii() and (c.isalnum() or c in "-_:."))
+                       for c in binding["playback_id"])):
+            return
+        emit("playback_error", generation=binding["generation"], epoch=binding["epoch"],
+             playback_id=binding["playback_id"], code="pocket_tts_failed")
+
     @task.event_handler("on_pipeline_started")
     async def on_pipeline_started(task: PipelineTask, frame: Frame) -> None:
         emit("transport_ready", transport="pipecat.local")
         emit(
             "runtime_ready",
+            mode=args.mode,
+            mode_revision=args.mode_revision,
             asr="nvidia/nemotron-speech-streaming-en-0.6b",
             asr_chunk_ms=160,
             tts="pocket-tts-3.0.2-cpu",
             voice=args.voice,
+            cues=sorted(playback._cue_assets),
         )
-        await playback.startup(task, playback_input, args.startup_confirmation)
+        await playback.startup(task, args.startup_confirmation)
 
     commands = asyncio.create_task(
-        command_loop(task, playback_input, playback), name="speech-commands",
+        command_loop(task, playback), name="speech-commands",
     )
     try:
         await PipelineRunner(handle_sigint=True, handle_sigterm=True).run(task)
@@ -776,7 +1095,11 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--asr-model", required=True)
     result.add_argument("--pocket-root", required=True)
     result.add_argument("--voice", choices=("starfleet", "hal", "ultron"), required=True)
+    result.add_argument("--input-channel", choices=("mono", "left"), default="mono")
     result.add_argument("--startup-confirmation", default="Realtime active.")
+    result.add_argument("--wake-word", default="Computer")
+    result.add_argument("--mode", choices=("wake", "realtime"), default="realtime")
+    result.add_argument("--mode-revision", type=int, default=0)
     return result
 
 

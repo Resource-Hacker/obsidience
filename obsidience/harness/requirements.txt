@@ -6,6 +6,7 @@ python-frontmatter>=1.1
 PyYAML>=6.0
 fastembed>=0.7
 numpy>=1.26
+opencv-python-headless==4.13.0.92
 tokenizers>=0.23
 croniter>=3
 ddgs==9.15.0
@@ -13,9 +14,10 @@ python-multipart>=0.0.9
 cbor2==5.8.0
 websockets>=15
 watchdog==6.0.0
-feedparser==6.0.14
 markdownify==1.2.3
 trafilatura==2.2.0
 markdown-it-py==4.0.0
 psutil==7.2.2
+nvidia-ml-py==13.610.43
 jsonschema==4.25.1
+hassil==3.12.1

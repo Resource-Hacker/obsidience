@@ -48,6 +48,46 @@ MAX_REVIEW_TRANSACTION_BYTES = 16 * 1024 * 1024
 MAX_PENDING_LINKS = 128
 
 
+def validate_proposal_target(target: str, action: str) -> Note | None:
+    """Use the same literal target and action checks at staging, display and approval."""
+    if not target or target.startswith(("_", "/")) or ".." in target:
+        raise ValueError(f"invalid target: {target}")
+    if action not in ("create", "update", "archive"):
+        raise ValueError(f"invalid action: {action}")
+    existing = load_note(target)
+    if action == "create" and existing:
+        raise ValueError(f"target already exists: {target} (use action: update)")
+    if action == "update" and not existing:
+        raise ValueError(f"target does not exist: {target} (use action: create)")
+    if action == "archive" and not existing:
+        raise ValueError(f"target does not exist: {target}")
+    return existing
+
+
+def merge_archive_blocker(meta: dict) -> str:
+    """A Merge may retire redundancy, never its canonical retained copy."""
+    if meta.get("task") != "Tasks/merge" or meta.get("action") != "archive":
+        return ""
+    binding = meta.get("merge_retained")
+    if not isinstance(binding, dict):
+        return "Merge archive lacks retained-Article evidence; reject this proposal and rerun Merge."
+    target, digest = binding.get("target"), binding.get("body_sha256")
+    if (not isinstance(target, str) or not target.endswith(".md") or target.startswith(("_", "/"))
+            or ".." in target or target == meta.get("target")
+            or not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)):
+        return "Merge archive has invalid retained-Article evidence."
+    retained = load_note(target)
+    if retained is None:
+        return "Merge retained Article is no longer accepted; do not archive its duplicate."
+    for path in CONFIG.staging_dir.glob("*.md"):
+        pending, _ = article_format.loads(path.read_text(encoding="utf-8"))
+        if pending.get("target") == target:
+            return "Decide the retained Article's pending proposal before approving this Merge archive."
+    if hashlib.sha256(retained.body.strip().encode()).hexdigest() != digest:
+        return "Merge retained content is not the accepted canonical union; approve its update or reject this archive."
+    return ""
+
+
 def _transaction_path(group: str) -> Path:
     return CONFIG.staging_dir / f".review-transaction-{group}.json"
 
@@ -276,15 +316,6 @@ def recover_groups() -> dict:
                 for path, meta, body in complete:
                     if meta.pop("review_building", None):
                         _atomic_write(path, article_format.dumps(meta, body))
-    # Definitions precede the Article lock. Ordinary recovery above preserves
-    # committed continuation journals until this owner has staged their successor.
-    for path in sorted(CONFIG.staging_dir.glob(".review-transaction-*.json")):
-        try:
-            continuation = _resume_feed_retention(path)
-            if continuation and continuation.get("staged"):
-                _approve_retention_successors(continuation)
-        except (ValueError, OSError) as exc:
-            recovered.setdefault("blocked_continuations", []).append(str(exc)[:300])
     return {**recovered,
             **({"discarded_builds": discarded, "discarded_tasks": sorted(discarded_tasks)} if discarded else {})}
 
@@ -400,6 +431,10 @@ def stage_group(specs: list[dict], context: dict, reason: str, batch_key: str) -
             raise
         result = _group_result(members)
         context.setdefault("staged_proposals", []).append(result)
+        from ..execution import activity
+        activity.emit_operation("review", "pending", targets,
+            operation_id="review:" + group, label="Article changes awaiting Review",
+            run_id=str(context.get("run_id", "")), refresh=True)
         return result
 
 
@@ -422,9 +457,8 @@ def _validate_group(members: list[tuple[Path, dict, str]], accepted: list[Note] 
     from .system import assert_system_article_writable
 
     accepted = iter_notes() if accepted is None else accepted
-    from .curation import validate_feed_retention_group
-
-    validate_feed_retention_group(members, accepted)
+    if any(meta.get("feed_retention") or meta.get("feed_publication") for _path, meta, _body in members):
+        raise ValueError("Feed publication is retired; reject its retained proposal through Review")
     candidates = {note.ref: note for note in accepted}
     names = {path.name for path, _, _ in members}
     targets = {_group_target(meta.get("target")) for _, meta, _ in members}
@@ -498,65 +532,17 @@ def _validate_group(members: list[tuple[Path, dict, str]], accepted: list[Note] 
     return writes
 
 
-def _resume_feed_retention(path: Path, *, definition_guard=None) -> dict | None:
-    """Stage one successor before releasing the previous journal or originating Task."""
-    from .curation import stage_feed_retention
-    from ..connections.runtime import feed_destination_guard
-
-    plan = json.loads(path.read_text())
-    continuation = _transaction_feed_continuation(plan)
-    if continuation is None:
-        return None
-    envelope, context = continuation["envelope"], continuation["context"]
-    # The old batch is already accepted. A new cap can govern the remaining
-    # work, while the original Inbox's destination is still exact authority.
-    guard = definition_guard() if definition_guard else feed_destination_guard(envelope["feed_id"], expected_ref=envelope["destination_ref"])
-    with guard as destination, _NOTE_WRITE_LOCK:
-        if destination["destination_ref"] != envelope["destination_ref"]:
-            raise ValueError("Feed continuation destination changed; its original Inbox remains retained")
-        committed, origin = _recover_group_transaction(path, retain_continuation=True)
-        if not committed:
-            return None
-        result = stage_feed_retention(envelope["feed_id"], destination, context, publication=envelope["publication"])
-        # stage_group is idempotent. A crash before this unlink resumes the same
-        # pending group; a crash afterward retains that group as visible Review.
-        path.unlink()
-        reconcile_origin_review_task(origin)
-        return result
 
 
-def resume_feed_retention(feed_id: str, *, definition_guard=None) -> dict | None:
-    """Explicit policy edits resume already committed work before planning more."""
-    result = None
-    for path in sorted(CONFIG.staging_dir.glob(".review-transaction-*.json")):
-        continuation = _transaction_feed_continuation(json.loads(path.read_text()))
-        if not continuation or continuation["envelope"]["feed_id"] != feed_id:
-            continue
-        try:
-            pending = _resume_feed_retention(path, definition_guard=definition_guard)
-            if pending and pending.get("staged"):
-                result = _approve_retention_successors(pending, definition_guard=definition_guard)
-                if result.get("retention_pending") or result.get("retention_blocked"):
-                    return result
-        except (ValueError, OSError) as exc:
-            return {"retention_blocked": str(exc)[:300]}
-    return result
 
 
-def _decide_group(name: str, decision: str, reason: str = "", *, definition_guard=None) -> dict:
+def _decide_group(name: str, decision: str, reason: str = "") -> dict:
     from .index import INDEX
-    from .curation import feed_retention_guard, validate_feed_retention_group
-
-    envelope = _load_proposal(name)[1].get("feed_retention") if decision == "approved" else None
-    with feed_retention_guard(envelope, definition_guard=definition_guard) as destination, _NOTE_WRITE_LOCK:
+    with _NOTE_WRITE_LOCK:
         _recover_pending_publications()
         members = _load_group(name, verify=decision == "approved")
         root_path, root_meta, _body = members[0]
         if decision == "approved":
-            if any(meta.get("feed_retention") != envelope for _path, meta, _body in members):
-                raise ValueError("Feed retention binding changed before approval")
-            if envelope is not None:
-                validate_feed_retention_group(members, destination=destination)
             writes = _validate_group(members)
         else:
             writes = []
@@ -620,13 +606,6 @@ def _decide_group(name: str, decision: str, reason: str = "", *, definition_guar
                             if not str(path.relative_to(CONFIG.vault_dir)).startswith("_staging/")])
             except Exception as exc:
                 warnings.append(f"audit commit: {exc}"[:400])
-        continuation, continuation_error = None, ""
-        if decision == "approved" and envelope and envelope["include_incoming"] is False:
-            try:
-                continuation = _resume_feed_retention(transaction_path, definition_guard=definition_guard)
-            except (ValueError, OSError) as exc:
-                continuation_error = str(exc)[:300]
-                warnings.append("Feed continuation: " + continuation_error)
         try:
             reconcile_origin_review_task(str(root_meta.get("task", "")))
         except Exception as exc:
@@ -648,44 +627,21 @@ def _decide_group(name: str, decision: str, reason: str = "", *, definition_guar
             "members": [{"target": meta["target"], "action": meta["action"]} for _, meta, _ in members],
             **({"review_outcome": review_outcome} if review_outcome is not None else {}),
             "committed": True,
-            **({"archived_count": sum(meta["action"] == "archive" for _, meta, _ in members)} if envelope else {}),
-            **({"retention_pending": continuation} if continuation and continuation.get("staged") else {}),
-            **({"retention_blocked": continuation_error} if continuation_error else {}),
         }
         if warnings:
             result["publication_warning"] = "; ".join(warnings)[:1600]
+        from ..execution import activity
+        activity.emit_operation("review", decision,
+            [str(meta["target"]).removesuffix(".md") for _, meta, _ in members],
+            operation_id="review:" + str(root_meta["review_group"]),
+            label="Article changes " + decision, run_id=str(root_meta.get("run_id", "")), refresh=True)
         return result
 
 
-def _approve_retention_successors(pending: dict, *, definition_guard=None) -> dict:
-    from .curation import enabled, feed_retention_guard
-
-    archived, last = 0, {}
-    while pending:
-        name = Path(pending["staged"]).name
-        try:
-            envelope = _load_proposal(name)[1]["feed_retention"]
-            with feed_retention_guard(envelope, definition_guard=definition_guard), _NOTE_WRITE_LOCK:
-                if not all(enabled(member["target"]) for member in pending["members"]):
-                    break
-                last = _decide_group(name, "approved", definition_guard=definition_guard)
-        except (ValueError, OSError) as exc:
-            pending.update(auto_curate_blocked=str(exc)[:300], retention_status="blocked")
-            break
-        archived += last.get("archived_count", 0)
-        pending = last.get("retention_pending")
-        if last.get("retention_blocked"):
-            break
-    return {**last, "archived_count": archived, **({"retention_pending": pending} if pending else {})}
 
 
-def approve_group(name: str, *, definition_guard=None) -> dict:
-    result = _decide_group(name, "approved", definition_guard=definition_guard)
-    if result.get("retention_pending"):
-        following = _approve_retention_successors(result.pop("retention_pending"), definition_guard=definition_guard)
-        result["archived_count"] = result.get("archived_count", 0) + following["archived_count"]
-        result.update({key: following[key] for key in ("retention_pending", "retention_blocked") if key in following})
-    return result
+def approve_group(name: str) -> dict:
+    return _decide_group(name, "approved")
 
 
 def _record_review_decision(
@@ -718,7 +674,7 @@ def _record_review_decision(
 def notify_link_review(proposal_id: str, meta: dict, state: str, *, links: list[dict] | None = None) -> None:
     """Notify presentation after the existing Review owner changed its state."""
     review_class = meta.get("review_class") or review_class_for_task(str(meta.get("task", "")))
-    if review_class != "link" or meta.get("review_group") or meta.get("review_building"):
+    if meta.get("review_group") or meta.get("review_building"):
         return
     from ..execution import activity
     from .index import INDEX
@@ -729,15 +685,24 @@ def notify_link_review(proposal_id: str, meta: dict, state: str, *, links: list[
             # A concurrent owner decision may finish between staging and this
             # invalidation; never announce a removed proposal as pending.
             if (CONFIG.staging_dir / proposal_id).is_file() and INDEX.review_decision(proposal_id) is None:
-                activity.emit_review_change(proposal_id, run_id, state)
+                activity.emit_operation("review", "pending",
+                    [str(meta.get("target", "")).removesuffix(".md"), str(meta.get("task", ""))],
+                    operation_id="review:" + proposal_id, label="Article change awaiting Review",
+                    run_id=run_id, refresh=True)
+                if review_class == "link":
+                    activity.emit_review_change(proposal_id, run_id, state)
         return
     decision = INDEX.review_decision(proposal_id)
-    if (not decision or decision["decision"] != state
+    if run_id and (not decision or decision["decision"] != state
             or any(decision[key] != str(meta.get(field, "")) for key, field in (
                 ("run_id", "run_id"), ("task_ref", "task"), ("target", "target")))):
         return
-    activity.emit_review_change(proposal_id, run_id, state,
-                                decided_at=decision["decided_at"], links=links)
+    activity.emit_operation("review", state, [str(meta.get("target", "")).removesuffix(".md")],
+        operation_id="review:" + proposal_id, label="Article change " + state,
+        run_id=run_id, refresh=True)
+    if review_class == "link" and decision:
+        activity.emit_review_change(proposal_id, run_id, state,
+                                    decided_at=decision["decided_at"], links=links)
 
 
 def review_class_for_task(task_ref: str, accepted_resolver: Resolver | None = None) -> str:
@@ -805,6 +770,16 @@ def link_evidence(existing, body: str, accepted_resolver: Resolver) -> list[dict
                         "endpoint_sha256": endpoint_sha256,
                     })
                     break
+    from ..memory.hindsight import observation_links
+
+    before_memories = {row["ref"]: row for row in observation_links(existing.body, existing.path)}
+    after_memories = {row["ref"]: row for row in observation_links(body, existing.path)}
+    for change, current, other in (("added", after_memories, before_memories),
+                                   ("removed", before_memories, after_memories)):
+        for ref in sorted(current.keys() - other.keys()):
+            row = current[ref]
+            evidence.append({**row, "change": change,
+                             "derivation": "proposed_source_citation" if change == "added" else "accepted_source_citation"})
     if not evidence:
         raise ValueError("Link proposal contains no relationship change")
     return evidence
@@ -874,29 +849,47 @@ def _has_group_decision(name: str, meta: dict) -> bool:
 
 
 def list_proposals() -> list[dict]:
-    from .curation import feed_retention_guard
-
-    # Read policy before the Article lock; approval independently revalidates
-    # the exact current definition while holding both in their owner order.
-    policies = {}
-    for path in sorted(CONFIG.staging_dir.glob("*.md")):
-        try:
-            meta, _ = article_format.loads(path.read_text())
-            envelope = meta.get("feed_retention")
-            if envelope is not None:
-                try:
-                    with feed_retention_guard(envelope):
-                        error = ""
-                except (ValueError, OSError) as exc:
-                    error = str(exc)
-                policies[path.name] = (envelope, error)
-        except OSError:
-            continue  # A concurrent decision can remove this presentation row.
     with _NOTE_WRITE_LOCK:
-        return _list_proposals(feed_policies=policies)
+        return _list_proposals()
 
 
-def _list_proposals(accepted: list[Note] | None = None, *, feed_policies=None) -> list[dict]:
+def list_reviews() -> list[dict]:
+    """One Review surface for Article decisions and controller notifications."""
+    from .index import INDEX
+
+    return INDEX.review_notifications() + list_proposals()
+
+
+def sync_health_notifications(findings: list[dict]) -> None:
+    """A blocked recovery is operational evidence, never a Knowledge proposal."""
+    from .index import INDEX
+
+    rows = []
+    for finding in findings:
+        task, reason = finding.get("task", ""), str(finding["reason"])[:1000]
+        title = finding.get("title") or task.rsplit("/", 1)[-1].replace("-", " ").title() or "Source integrity"
+        rows.append({
+            "file": "health-" + finding["key"], "review_class": "health", "action": "attention",
+            "title": title + " needs attention", "target": task, "task": task,
+            "agent": "Heimdall", "run_id": finding.get("run_id", ""),
+            "reason": reason, "approvable": False, "blocked_reason": "",
+            "body_preview": (reason + "\n\n" + str(finding.get("detail", ""))[:2000]
+                             + "\n\n" + str(finding.get("recovery_guidance") or
+                             "Automatic recovery cannot proceed with the current evidence.") + " "
+                             "Acknowledging this notification leaves the warning and original receipts intact. "
+                             "Recovery is reconsidered when the underlying state or repair definition changes."),
+            "link_changes": None, "link_evidence": [], "evidence_warning": "",
+        })
+    INDEX.sync_review_notifications("health", rows)
+
+
+def acknowledge_notification(identity: str) -> dict:
+    from .index import INDEX
+
+    return INDEX.acknowledge_review_notification(identity)
+
+
+def _list_proposals(accepted: list[Note] | None = None) -> list[dict]:
     from ..execution.refinement import review_blocker
     from .system import assert_system_article_writable
 
@@ -925,6 +918,9 @@ def _list_proposals(accepted: list[Note] | None = None, *, feed_policies=None) -
                 "added": sorted(after - before),
                 "removed": sorted(before - after),
             }
+            for item in meta.get("link_evidence", []):
+                if item.get("source_citation") and item.get("change") in link_changes:
+                    link_changes[item["change"]].append(item["ref"])
         out.append({
             "file": p.name, "title": title, "review_class": review_class,
             "link_changes": link_changes,
@@ -944,6 +940,7 @@ def _list_proposals(accepted: list[Note] | None = None, *, feed_policies=None) -
             out[-1]["blocked_reason"] = blocker
         try:
             assert_system_article_writable(target)
+            validate_proposal_target(target, str(meta.get("action", "create")))
         except ValueError as exc:
             out[-1]["blocked_reason"] = str(exc)
         if review_class == "link":
@@ -972,6 +969,9 @@ def _list_proposals(accepted: list[Note] | None = None, *, feed_policies=None) -
             current_sha256 = hashlib.sha256(accepted_path.read_bytes()).hexdigest()
             if current_sha256 != base_sha256:
                 block = "The accepted Article changed after this proposal was drafted. Reject it and rerun the Task."
+        if not block and row["action"] == "archive":
+            _, proposal_meta, _ = _load_proposal(row["file"])
+            block = merge_archive_blocker(proposal_meta)
         if not block and row["action"] == "archive":
             prerequisite_updates = [
                 candidate for candidate in out
@@ -1024,13 +1024,6 @@ def _list_proposals(accepted: list[Note] | None = None, *, feed_policies=None) -
         try:
             members = _load_group(row["file"])
             _validate_group(members, accepted)
-            envelope = members[0][1].get("feed_retention")
-            if envelope is not None:
-                captured = (feed_policies or {}).get(members[0][0].name)
-                if not captured or captured[0] != envelope:
-                    raise ValueError("Feed policy changed during the Review snapshot; refresh before deciding")
-                if captured[1]:
-                    raise ValueError(captured[1])
             card.update(approvable=True, blocked_reason="")
         except (ValueError, OSError) as exc:
             card.update(approvable=False, blocked_reason=str(exc))
@@ -1084,15 +1077,17 @@ def link_proposals(accepted: list[Note] | None = None) -> dict:
                 continue
             for target_ref in row["link_changes"]["added"]:
                 target = by_ref.get(target_ref)
-                if not target or target.kind not in {"knowledge", "agent"} or target.runtime_observation:
+                memory = next((item for item in row["link_evidence"] if item.get("source_citation")
+                               and item["ref"] == target_ref and item["change"] == "added"), None)
+                if not memory and (not target or target.kind not in {"knowledge", "agent"} or target.runtime_observation):
                     continue
                 if (len(entries) == MAX_PENDING_LINKS or len(source.ref) > MAX_REVIEW_REF_CHARS
-                        or len(target.ref) > MAX_REVIEW_REF_CHARS or len(row["file"]) > 512
+                        or len(target_ref) > MAX_REVIEW_REF_CHARS or len(row["file"]) > 512
                         or not isinstance(row["run_id"], str) or len(row["run_id"]) > 80):
                     truncated = True
                     continue
                 entries.append({"proposal_id": row["file"], "run_id": row["run_id"],
-                                "source": source.ref, "target": target.ref})
+                                "source": source.ref, "target": target_ref})
         return {"entries": entries, "truncated": truncated}
 
 
@@ -1238,21 +1233,14 @@ def _validate_capability_metadata(target: str, meta: dict) -> None:
 
 
 def approve(name: str) -> dict:
-    from .curation import feed_review_guard, validate_feed_proposal
-
-    initial = _load_proposal(name)[1]
-    if initial.get("review_group"):
-        return approve_group(name)
-    envelope = initial.get("feed_publication")
-    with feed_review_guard(envelope) as destination:
-        with _NOTE_WRITE_LOCK:
-            _recover_pending_publications()
-            _path, meta, body = _load_proposal(name)
-            if meta.get("feed_publication") != envelope:
-                raise ValueError("Feed proposal binding changed before approval")
-            if envelope is not None:
-                validate_feed_proposal(meta, body, destination=destination)
-            return _approve(name)
+    with _NOTE_WRITE_LOCK:
+        _recover_pending_publications()
+        initial = _load_proposal(name)[1]
+        if initial.get("feed_publication") or initial.get("feed_retention"):
+            raise ValueError("Feed publication is retired; reject its retained proposal through Review")
+        if initial.get("review_group"):
+            return approve_group(name)
+        return _approve(name)
 
 
 def _approve(name: str) -> dict:
@@ -1268,16 +1256,12 @@ def _approve(name: str) -> dict:
         return approve_group(name)
     target = str(meta.get("target", "")).strip()
     assert_system_article_writable(target)
-    if not target or target.startswith(("_", "/")) or ".." in target:
-        raise ValueError(f"invalid target: {target}")
     action = meta.get("action", "create")
-    if action not in ("create", "update", "archive"):
-        raise ValueError(f"invalid action: {action}")
+    existing = validate_proposal_target(target, action)
     expected_review_class = review_class_for_task(str(meta.get("task", "")))
     review_class = str(meta.get("review_class") or expected_review_class)
     if review_class not in REVIEW_CLASSES or review_class != expected_review_class:
         raise ValueError("proposal review class does not match its accepted Task")
-    existing = load_note(target)
     if existing and existing.runtime_observation:
         raise ValueError("runtime Observations are maintained by Compact and Promote, not wiki proposals")
     conflicts = []
@@ -1299,12 +1283,6 @@ def _approve(name: str) -> dict:
             raise ValueError(
                 "accepted Article changed after this proposal was drafted; reject it and rerun the Task"
             )
-    if action == "create" and existing:
-        raise ValueError(f"target already exists: {target} (use action: update)")
-    if action == "update" and not existing:
-        raise ValueError(f"target does not exist: {target} (use action: create)")
-    if action == "archive" and not existing:
-        raise ValueError(f"target does not exist: {target}")
     evidence_warning = ""
     approved_links = []
     if review_class == "link":
@@ -1312,6 +1290,8 @@ def _approve(name: str) -> dict:
         approved_links = [{"source": existing.ref, "target": evidence["ref"]}
                           for evidence in meta["link_evidence"] if evidence["change"] == "added"]
     if action == "archive":
+        if blocker := merge_archive_blocker(meta):
+            raise ValueError(blocker)
         if existing.kind != "knowledge":
             raise ValueError("only ordinary Knowledge Articles may be archived")
         accepted = iter_notes()
@@ -1355,6 +1335,7 @@ def _approve(name: str) -> dict:
         from .index import INDEX
 
         INDEX.sync()
+        notify_link_review(path.name, meta, "approved")
         return {
             "archived": target,
             "moved_to": str(destination.relative_to(CONFIG.vault_dir)),
@@ -1411,7 +1392,7 @@ def _approve(name: str) -> dict:
         note_meta.update({k: v for k, v in meta.items()
                           if k not in ("proposal", "action", "target", "reason", "proposed_at",
                                        "agent", "task", "run_id", "base_sha256", "event_context",
-                                       "review_class", "link_evidence", "proposal_body_sha256", "refinement")})
+                                       "review_class", "link_evidence", "proposal_body_sha256", "refinement", "optimization")})
     if generated:
         note_meta["kind"] = "runbook"
         note_meta["task"] = f"[[{generation_params['target_task']}]]"

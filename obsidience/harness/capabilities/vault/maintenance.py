@@ -80,6 +80,8 @@ def candidate_invalidation(task_ref: str, params: dict, res) -> dict | None:
     if any(note is None or note.kind not in {"agent", "knowledge"}
            or note.runtime_observation or is_system_article(note.ref) for note in notes):
         reason, current = "inputs_unavailable", None
+    elif any(note.ref.startswith("Agents/") for note in notes):
+        reason, current = "agent_maintenance_scope", candidate_revision(notes)
     elif task_ref == "Tasks/link" and any(
         set(hierarchy.get(note.ref, ())) & {other.ref for other in notes}
         for note in notes
@@ -113,7 +115,8 @@ def _maintenance_candidates(context: dict | None = None) -> dict:
     notes = [
         note
         for note in snapshot
-        if note.ref in allowed and note.kind in {"agent", "knowledge"} and not note.runtime_observation and not is_system_article(note.ref)
+        if note.ref in allowed and note.kind == "knowledge" and not note.ref.startswith("Agents/")
+        and not note.runtime_observation and not is_system_article(note.ref)
     ]
     title_words = {
         note.ref: _curation_words(note.title, title=True)
@@ -195,7 +198,7 @@ def _maintenance_candidates(context: dict | None = None) -> dict:
             except ValueError:
                 stale = None
             if stale is not None and stale.utcoffset() is not None and stale <= now:
-                add_lead("stale_after", "Audit", [note], 0.96, stale_after=stale_after)
+                add_lead("stale_after", "Improve", [note], 0.96, stale_after=stale_after)
         review_due = note.meta.get("review_due")
         if review_due:
             try:
@@ -203,7 +206,7 @@ def _maintenance_candidates(context: dict | None = None) -> dict:
             except ValueError:
                 due = None
             if due is not None and due <= date.today():
-                add_lead("review_due", "Audit", [note], 0.96, review_due=due.isoformat())
+                add_lead("review_due", "Improve", [note], 0.96, review_due=due.isoformat())
         successor = res.resolve(str(note.meta.get("superseded_by", "")))
         if successor and successor.ref != note.ref and successor.kind == "knowledge" and not successor.runtime_observation:
             add_lead("superseded", "Archive", [note, successor], 0.95,
@@ -395,6 +398,11 @@ def _maintenance_candidates(context: dict | None = None) -> dict:
 
 def execute(args: dict, context: dict) -> str:
     del args
+    if context.get("event") == "observations.memory.ready":
+        return ("Maintenance rejected: this Curate activation is bound to one Hindsight Source. "
+                "Search and read ordinary Knowledge for that Source, then recommend content, "
+                "link one exact observation, or report an evidenced no-change result. "
+                "General maintenance belongs to a manual or scheduled activation.")
     try:
         return json.dumps(_maintenance_candidates(context), sort_keys=True)
     except PermissionError as exc:

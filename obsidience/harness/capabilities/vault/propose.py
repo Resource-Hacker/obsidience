@@ -304,10 +304,73 @@ def _validate_task_definition(
             )
 
 
-def stage_proposal(args: dict, context: dict) -> dict:
-    from .read import ARTICLE_BODY_END, INBOUND_REFERENCES_HEADING
-    from obsidience.harness.knowledge.links import canonical_body
-    from obsidience.harness.knowledge.review import link_evidence, review_class_for_task
+def _merge_retention(target: str, action: str, body: str, context: dict) -> dict | None:
+    """Bind archive to the canonical candidate actually staged by this run."""
+    from obsidience.harness.knowledge.links import metadata_ref
+
+    if context.get("task") != "Tasks/merge":
+        return None
+    params = context.get("params") or {}
+    refs = params.get("candidate_refs", [])
+    candidates = {metadata_ref(ref).removesuffix(".md") + ".md"
+                  for ref in refs if isinstance(ref, str)} if isinstance(refs, list) else set()
+    retained = context.get("_merge_retained_updates", {})
+    if action != "archive":
+        return {"target": target, "body_sha256": hashlib.sha256(body.strip().encode()).hexdigest()} if (
+            action == "update" and target in candidates) else None
+    if len(candidates) < 2 or target not in candidates:
+        raise ValueError("Merge archive must target one of its exact bound duplicate candidates")
+    if len(retained) != 1 or target in retained:
+        raise ValueError("Merge archive requires one distinct retained candidate update staged by this execution first")
+    retained_target, body_sha256 = next(iter(retained.items()))
+    if retained_target not in candidates:
+        raise ValueError("Merge retained Article must belong to its exact bound duplicate candidates")
+    return {"target": retained_target, "body_sha256": body_sha256}
+
+
+def _memory_source_citations(text):
+    """Extract canonical Source UUIDs without surrounding Markdown punctuation."""
+    citations = set()
+    for token in re.findall(r"source://[^\s<>\[\]()\"'`]+", text):
+        citation = token.rstrip(".,;:!?")
+        if not re.fullmatch(r"source://[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", citation):
+            raise ValueError("Memory recommendation contains a malformed Source citation")
+        citations.add(citation)
+    return citations
+
+
+def _check_memory_recommendation_limit(context):
+    from obsidience.harness.knowledge.index import INDEX
+    from obsidience.harness.knowledge.vault import load_note
+
+    run_id = str(context.get("run_id") or "")
+    if not run_id:
+        raise ValueError("Memory recommendation requires its exact originating run")
+    row = INDEX.db.execute("SELECT activation_id FROM runs WHERE id=?", (run_id,)).fetchone()
+    # The running attempt has no runs row until finalization. The executor owns
+    # this private identity, so retries still count earlier attempts immediately.
+    activation_id = str(context.get("_activation_id") or (row[0] if row else ""))
+    if not activation_id or (row and row[0] != activation_id):
+        raise ValueError("Memory recommendation requires its exact originating activation")
+    run_ids = {run_id}
+    run_ids.update(row[0] for row in INDEX.db.execute(
+        "SELECT id FROM runs WHERE activation_id=?", (activation_id,)))
+    placeholders = ",".join("?" for _ in run_ids)
+    decided = {row[0] for row in INDEX.db.execute(
+        "SELECT proposal_id FROM review_decisions WHERE run_id IN (" + placeholders + ")",
+        tuple(run_ids))}
+    for path in CONFIG.staging_dir.glob("*.md"):
+        pending = load_note(path.relative_to(CONFIG.vault_dir))
+        if pending and pending.meta.get("run_id") in run_ids:
+            decided.add(path.name)
+    if len(decided) >= 3:
+        raise ValueError("Memory Curate occurrence permits at most three recommendations, including decided proposals")
+
+
+def stage_proposal(args: dict, context: dict, *, validate_only: bool = False) -> dict:
+    from .read import ARTICLE_BODY_END, INBOUND_REFERENCES_HEADING, editable_proposal_body
+    from obsidience.harness.knowledge.links import canonical_body, metadata_ref
+    from obsidience.harness.knowledge.review import link_evidence, review_class_for_task, validate_proposal_target
     from obsidience.harness.knowledge.vault import (
         Resolver,
         iter_notes,
@@ -316,7 +379,9 @@ def stage_proposal(args: dict, context: dict) -> dict:
     )
 
     context.pop("_proposal_read_prerequisite", None)
-    target = str(args.get("target", "")).strip()
+    # Scope already accepts typed Article links. Persist that same exact path,
+    # never the wiki-link brackets as part of a filename.
+    target = metadata_ref(str(args.get("target", "")))
     if not target or target.startswith("_") or ".." in target:
         raise ValueError("invalid target path")
     if not target.endswith(".md"):
@@ -328,14 +393,13 @@ def stage_proposal(args: dict, context: dict) -> dict:
     if action not in {"create", "update", "archive"}:
         raise ValueError("action must be create, update, or archive")
     params = context.get("params")
-    if (not context.get("_feed_compiling") and context.get("task") == "Tasks/ingest"
-            and context.get("event") == "source.inbox" and isinstance(params, dict)
-            and params.get("feed_binding")):
-        return _stage_feed_article(args, context)
     if "source" in args:
-        raise ValueError("proposal source is supported only for the active source-bound Feed Ingest")
+        raise ValueError("proposal source is not an authored field; cite immutable Sources in the body")
     if "contextual_links" in args:
         raise ValueError("contextual_links is not a proposal field; use ordinary Article links")
+    existing_target = validate_proposal_target(target, action)
+    if "body" in args:
+        args = {**args, "body": editable_proposal_body(str(args["body"]), existing_target, context)}
     if any(line.strip() in {ARTICLE_BODY_END, INBOUND_REFERENCES_HEADING}
            for line in str(args.get("body", "")).splitlines()):
         raise ValueError(
@@ -343,20 +407,70 @@ def stage_proposal(args: dict, context: dict) -> dict:
             "Accepted inbound references section, preserve the Article body and its authored links, "
             "then submit the corrected body"
         )
-    existing_target = load_note(target)
+    if context.get("event") == "observations.memory.ready":
+        from obsidience.harness.memory.hindsight import (
+            feed_processing_handoff, promotion_observation, promotion_source)
+        if target.startswith("Agents/"):
+            raise ValueError("Memory promotion recommends ordinary Knowledge, not Agent branches or Observations")
+        source = promotion_source({**(context.get("params") or {}),
+                                   "origin_task_ref": context.get("task"), "event": context.get("event")})
+        receipt = context.get("_source_reads", {}).get(source["citation"], {})
+        if (receipt.get("content_sha256") != source["content_sha256"]
+                or [0, len(source["content"])] not in receipt.get("ranges", [])):
+            raise ValueError("Read the complete bound Hindsight Source before recommending Knowledge")
+        if action not in {"create", "update"} or (existing_target and existing_target.kind != "knowledge"):
+            raise ValueError("Memory promotion creates or updates Knowledge recommendations; it cannot archive or change executable definitions")
+        if args.get("metadata"):
+            raise ValueError("Memory promotion authors documentary bodies, not Agent or capability metadata")
+        bundle = json.loads(source["content"].split("\n\n", 2)[2])
+        members = {row.get("citation") for row in bundle.get("observations", [])}
+        # A valid batch citation in the reason cannot mask a new foreign URI.
+        citations = _memory_source_citations(
+            str(args.get("body", "")) + "\n" + str(args.get("reason", "")))
+        bound = members | {source["citation"]}
+        if not citations & bound:
+            raise ValueError("Memory recommendation must cite its bound batch or observation Source")
+        preserved = set()
+        if existing_target:
+            from obsidience.harness.knowledge.source import get_source
+            old_citations = _memory_source_citations(existing_target.body)
+            for citation in citations & old_citations:
+                get_source(citation, restore=False)
+                preserved.add(citation)
+        if not citations - preserved <= bound:
+            raise ValueError("New memory recommendation citations must exactly match its bound batch or observation Sources")
+        if source["citation"] in citations and feed_processing_handoff(source):
+            raise ValueError("Feed processing history is retained in Memory, not automatic wiki recommendations")
+        for citation in (citations & members) - preserved:
+            evidence = promotion_observation(source, citation)
+            read = context.get("_source_reads", {}).get(citation, {})
+            if (read.get("content_sha256") != evidence["endpoint_sha256"]
+                    or [0, evidence["source_characters"]] not in read.get("ranges", [])):
+                raise ValueError("Read the complete cited observation Source before recommending Knowledge")
     if existing_target and existing_target.runtime_observation:
         raise ValueError("runtime Observations are maintained by Compact and Promote, not wiki proposals")
 
     review_class = review_class_for_task(str(context.get("task", "")))
+    link_resolver = Resolver(iter_notes()) if review_class == "link" else None
     if action == "archive":
         archive_target = load_note(target)
         if not archive_target or archive_target.kind != "knowledge":
             raise ValueError("archive target must be an accepted Knowledge Article")
-    proposal_title = str(args.get("title") or target)[:300 if context.get("_feed_compiling") else 200]
+    proposal_title = str(args.get("title") or "").strip()
+    if proposal_title in {target, target.removesuffix(".md")}:
+        proposal_title = ""
+    if not proposal_title:
+        # An omitted title on a body/link update must preserve the Article name.
+        # A new Article can use its authored heading, never its directory path.
+        heading = re.search(r"^#{1,6}\s+(.+?)\s*#*\s*$", str(args.get("body", "")), re.M)
+        proposal_title = (existing_target.title if existing_target else
+                          heading.group(1) if heading else target.rsplit("/", 1)[-1].removesuffix(".md"))
+    proposal_title = proposal_title[:200]
     # Canonicalize against the target before staging changes its filesystem
     # parent; pin the exact final newline emitted by the OKF serializer too.
     body = canonical_body(
         normalize_article_body(str(args.get("body", "")), proposal_title).strip(), target,
+        accepted_refs=[note.ref for note in link_resolver.by_ref.values()] if link_resolver else None,
     )
     if action != "archive" and not body.strip():
         raise ValueError("create and update proposals require a nonempty body")
@@ -365,6 +479,9 @@ def stage_proposal(args: dict, context: dict) -> dict:
     if len(body) > 128 * 1024:
         raise ValueError("proposal body must contain 1-131072 characters")
     authored_meta = _authored_metadata(args.get("metadata", {}))
+    merge_retention = _merge_retention(target, action, body, context)
+    from obsidience.harness.execution.optimization import proposal_binding
+    optimization = proposal_binding(context, target, action, proposal_title, body, authored_meta)
     from obsidience.harness.execution.refinement import (
         candidate_staged, proposal_context, validate_candidate,
     )
@@ -388,9 +505,8 @@ def stage_proposal(args: dict, context: dict) -> dict:
             and all(isinstance(key, str) for key in pending_fields)
             and {key: pending.meta.get(key) for key in pending_fields} == authored_meta
             and pending.meta.get("refinement") == refinement
-            and (not context.get("_feed_compiling")
-                 or (pending.meta.get("feed_publication") == context.get("_feed_publication")
-                     and pending.meta.get("feed_retention") == context.get("_feed_retention")))
+            and pending.meta.get("optimization") == optimization
+            and pending.meta.get("merge_retained") == (merge_retention if action == "archive" else None)
         )
         if same_proposal:
             if review_class == "link":
@@ -403,7 +519,11 @@ def stage_proposal(args: dict, context: dict) -> dict:
                 "review_class": str(pending.meta.get("review_class") or review_class),
                 "existing": True,
             }
+            if validate_only:
+                return {"validated": True, "target": target, "action": action}
             context.setdefault("staged_proposals", []).append(result)
+            if merge_retention and action == "update":
+                context.setdefault("_merge_retained_updates", {})[target] = merge_retention["body_sha256"]
             if refinement is not None:
                 candidate_staged(str(pending_path), context)
             return result
@@ -431,10 +551,6 @@ def stage_proposal(args: dict, context: dict) -> dict:
         "reason": str(args.get("reason", ""))[:400],
         "review_class": review_class,
     }
-    if context.get("_feed_compiling") and context.get("_feed_publication"):
-        proposal_meta["feed_publication"] = dict(context["_feed_publication"])
-    if context.get("_feed_compiling") and context.get("_feed_retention"):
-        proposal_meta["feed_retention"] = dict(context["_feed_retention"])
     if context.get("_group_staging") and context.get("_review_building"):
         proposal_meta["review_building"] = str(context["_review_building"])
     accepted_path = CONFIG.vault_dir / target
@@ -444,12 +560,12 @@ def stage_proposal(args: dict, context: dict) -> dict:
     if review_class == "link":
         if action != "update" or authored_meta:
             raise ValueError("Link updates an existing Article body, not its authority metadata")
-        link_resolver = Resolver(iter_notes())
         proposal_meta["link_evidence"] = link_evidence(existing_target, body, link_resolver)
         if context.get("_agent_ref"):
             from obsidience.harness.knowledge.scope import execution_scope
             _agent, readable = execution_scope(context, link_resolver)
-            endpoints = {existing_target.ref, *(item["ref"] for item in proposal_meta["link_evidence"])}
+            endpoints = {existing_target.ref, *(item["ref"] for item in proposal_meta["link_evidence"]
+                                               if not item.get("source_citation"))}
             if not endpoints <= readable:
                 raise PermissionError("Link endpoints must be within the executing Agent's Knowledge scope")
             reads = context.get("_article_reads", {})
@@ -471,6 +587,14 @@ def stage_proposal(args: dict, context: dict) -> dict:
                     + ". Complete these reads before retrying the proposal; unchanged arguments "
                     "are valid after the missing evidence is supplied"
                 )
+            for item in proposal_meta["link_evidence"]:
+                if not item.get("source_citation") or item["change"] != "added":
+                    continue
+                receipt = context.get("_source_reads", {}).get(item["source_citation"], {})
+                if (receipt.get("content_sha256") != item["endpoint_sha256"]
+                        or [0, item["source_characters"]] not in receipt.get("ranges", [])):
+                    raise ValueError("Link requires a complete source.read of the exact observation Source: "
+                                     + item["source_citation"])
         proposal_meta["proposal_body_sha256"] = hashlib.sha256(body.encode()).hexdigest()
     accepted_note = load_note(target) if action == "update" else None
     effective_meta = dict(accepted_note.meta) if accepted_note else {}
@@ -506,7 +630,19 @@ def stage_proposal(args: dict, context: dict) -> dict:
         proposal_meta["event_context"] = generation_params
     if refinement is not None:
         proposal_meta["refinement"] = refinement
-    staged = _stage(proposal_meta, body)
+    if optimization is not None:
+        proposal_meta["optimization"] = optimization
+    if merge_retention and action == "archive":
+        proposal_meta["merge_retained"] = merge_retention
+    if validate_only:
+        return {"validated": True, "target": target, "action": action}
+    if context.get("event") == "observations.memory.ready":
+        from obsidience.harness.knowledge.vault import _NOTE_WRITE_LOCK
+        with _NOTE_WRITE_LOCK:
+            _check_memory_recommendation_limit(context)
+            staged = _stage(proposal_meta, body)
+    else:
+        staged = _stage(proposal_meta, body)
     result = {
         "staged": staged,
         "target": target,
@@ -516,39 +652,20 @@ def stage_proposal(args: dict, context: dict) -> dict:
     if refinement is not None:
         # Bind evaluation to the complete staged file, including its metadata.
         candidate_staged(staged, context)
-    if not context.get("_group_staging") and not context.get("_feed_compiling"):
+    if not context.get("_group_staging"):
         from obsidience.harness.knowledge.curation import try_auto_approve
         result = try_auto_approve(result, args, context)
-        if review_class == "link" and not result.get("auto_approved"):
+        if not result.get("auto_approved"):
             from pathlib import Path
             from obsidience.harness.knowledge.review import notify_link_review
 
             notify_link_review(Path(staged).name, proposal_meta, "pending")
     context.setdefault("staged_proposals", []).append(result)
+    if merge_retention and action == "update":
+        context.setdefault("_merge_retained_updates", {})[target] = merge_retention["body_sha256"]
     return result
 
 
-def _stage_feed_article(args: dict, context: dict) -> dict:
-    """Publish the exact summary and any bounded retention through one owner."""
-    from obsidience.harness.knowledge import curation
-    from obsidience.harness.knowledge.vault import _NOTE_WRITE_LOCK
-
-    params = context.get("params") or {}
-    binding = params.get("feed_binding") or {}
-    from obsidience.harness.connections.runtime import feed_destination_guard
-
-    with feed_destination_guard(binding.get("feed_id", ""), expected_ref=binding.get("destination_ref")) as destination:
-        with _NOTE_WRITE_LOCK:
-            plan = curation.prepare_feed_article(args, context)
-            if plan["already_current"]:
-                result = {"target": plan["article"]["target"], "feed_publication": True,
-                          "already_current": True}
-                context["feed_publication_result"] = result
-                return result
-            result = curation.apply_feed_retention(binding["feed_id"], destination, context, publication=plan["envelope"])
-            result["target"] = plan["article"]["target"]
-            context["feed_publication_result"] = result
-            return result
 
 
 def execute(args: dict, context: dict) -> str:
@@ -559,15 +676,14 @@ def execute(args: dict, context: dict) -> str:
         assert_proposal_scope(str((args or {}).get("target", "")), context or {}, resolver())
         result = stage_proposal(args or {}, context or {})
     except (ValueError, PermissionError) as exc:
+        if context.get("event") == "observations.memory.ready":
+            context["_memory_proposal_rejection"] = str(exc)[:1000]
+        if context.get("task") == "Tasks/link":
+            context["_link_proposal_rejection"] = str(exc)[:1000]
         return f"Proposal rejected: {exc}."
-    if result.get("feed_publication") and result.get("already_current"):
-        return f"Article already published at {result['target']} from this Feed item version. Accepted content and timestamps were preserved."
+    context.pop("_link_proposal_rejection", None)
+    context.pop("_memory_proposal_rejection", None)
     if result.get("auto_approved"):
-        if result.get("feed_publication"):
-            warning = result.get("approval", {}).get("publication_warning", "")
-            return (f"Article published at {result['target']} under owner Auto-curate policy {result['policy']}. "
-                    f"{result.get('archived_count', 0)} older Feed Articles were archived with their complete content and Sources preserved."
-                    + (f" Publication follow-up warning: {warning}" if warning else ""))
         return f"Article published at {result['target']} under owner Auto-curate policy {result['policy']}."
     reason = result.get("auto_curate_blocked")
     return f"Proposal staged for owner review at {result['staged']}." + (

@@ -120,7 +120,9 @@ def _extract_links(meta: dict, body: str, path: str = "") -> list[str]:
     return [l.strip() for l in links if l and l.strip()]
 
 
-@lru_cache(maxsize=512)
+# Resolution includes archived and staged Articles: the current working set
+# exceeds 1,000 paths. Keep a bounded cache large enough for a complete scan.
+@lru_cache(maxsize=2048)
 def _parsed_note(text: str, path: str) -> tuple[dict, str, tuple[str, ...]]:
     """Cache parsing only, keyed by current bytes and link-resolution path.
 
@@ -131,7 +133,15 @@ def _parsed_note(text: str, path: str) -> tuple[dict, str, tuple[str, ...]]:
     return meta, body, tuple(_extract_links(meta, body, path))
 
 
+def _escapes_vault(rel_path: str | Path) -> bool:
+    # Owner/API refs and Tool arguments are vault-relative; never join "..".
+    path = Path(rel_path)
+    return path.is_absolute() or ".." in path.parts
+
+
 def load_note(rel_path: str | Path) -> Note | None:
+    if _escapes_vault(rel_path):
+        return None
     with _NOTE_WRITE_LOCK:
         p = CONFIG.vault_dir / rel_path
         if not p.exists() or p.suffix != ".md":
@@ -261,6 +271,8 @@ def expand_primitive(
 
 def write_note(rel_path: str, meta: dict, body: str) -> str:
     """Write one native OKF Article; operational Task fields stay in SQLite."""
+    if _escapes_vault(rel_path):
+        raise ValueError("Article paths must stay inside the Vault")
     with _NOTE_WRITE_LOCK:
         p = CONFIG.vault_dir / rel_path
         meta = dict(meta)

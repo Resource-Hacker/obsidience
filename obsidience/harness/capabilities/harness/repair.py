@@ -5,12 +5,21 @@ from __future__ import annotations
 import json
 
 
-def execute(args: dict, context: dict) -> str:
+async def execute(args: dict, context: dict) -> str:
     from obsidience.harness.execution import repair, scheduler
     from obsidience.harness.knowledge.vault import _NOTE_WRITE_LOCK, load_note
 
     def result(status: str, reason: str, **evidence) -> str:
         return json.dumps({"status": status, "reason": reason, **evidence}, sort_keys=True)
+
+    if args == {"component": "hindsight"}:
+        from obsidience.harness.memory.hindsight import MEMORY
+        snapshot = context.pop("_harness_snapshot", None)
+        if not context.get("task") or not context.get("run_id") or not isinstance(snapshot, dict):
+            return result("blocked", "An active execution and same-run harness.status are required")
+        if repair.repair_attempt_count(context) >= repair.PASS_ATTEMPT_LIMIT:
+            return result("blocked", "This pass reached its recovery-attempt limit; refresh status and report remaining work")
+        return json.dumps(await MEMORY.repair(snapshot.get("memory", {})), sort_keys=True)
 
     if (not isinstance(args, dict) or set(args) != {"task", "run_id"}
             or any(not isinstance(args[key], str) or not args[key] or len(args[key]) > maximum
@@ -20,7 +29,9 @@ def execute(args: dict, context: dict) -> str:
     if (not isinstance(context.get("task"), str) or not context["task"]
             or not isinstance(context.get("run_id"), str) or not context["run_id"]):
         return result("blocked", "Recovery requires an active Task execution with the harness.repair Tool.", **args)
-    snapshot = context.get("_harness_snapshot")
+    # Every attempted recovery consumes its inspection, including a stale
+    # occurrence rejected before mutation. Completion must inspect again.
+    snapshot = context.pop("_harness_snapshot", None)
     plan = snapshot.get("repair_plan") if isinstance(snapshot, dict) else None
     if not isinstance(plan, list) or len(plan) > repair.PLAN_LIMIT:
         return result("blocked", "A same-run harness.status repair plan is required.", **args)
@@ -29,14 +40,11 @@ def execute(args: dict, context: dict) -> str:
     if len(matches) != 1:
         return result("blocked", "The exact occurrence is absent or ambiguous in the inspected plan.", **args)
     row = matches[0]
-    if row.get("operation") != "retry":
+    if row.get("operation") not in {"retry", "settle"}:
         return result("blocked", str(row.get("reason") or "This occurrence has no permitted repair."), **args)
-    # Any attempted recovery consumes the inspection, including a rejected
-    # race. Completion must observe current state again after this boundary.
-    context.pop("_harness_snapshot", None)
     if repair.repair_attempt_count(context) >= repair.PASS_ATTEMPT_LIMIT:
         return result("blocked", "This pass reached its recovery-attempt limit. Read harness.status again "
-                      "and report the remaining work for a later Check pass.", **args)
+                      "and report remaining work; the controller continues recovery automatically.", **args)
     # Keep snapshot validation and the existing mutation under the same owner
     # lock. The scheduler rechecks exact params/FIFO and strict coverage inside
     # its SQLite transaction before committing the once-per-occurrence receipt.
@@ -49,6 +57,12 @@ def execute(args: dict, context: dict) -> str:
         try:
             if repair.occurrence_key(note) != row.get("occurrence_key"):
                 raise ValueError("The occurrence changed after the health inspection.")
+            if row["operation"] == "settle":
+                applied = repair.settle_failed_occurrence(note, run_id)
+                return result("settled", "The evidenced commitment was settled; retained effects were not replayed.",
+                              **args, settlement_run_id=applied["settlement_run_id"],
+                              disposition=applied["disposition"], current_status=applied["status"],
+                              queue_depth=applied["queue_depth"])
             previous = repair.retry_receipt(note)
             if previous is not None:
                 return result("already_processed", repair.ALREADY_RETRIED, **args,

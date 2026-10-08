@@ -20,6 +20,7 @@ from obsidience.harness.host.scene import (
     SceneTargetStale,
     SceneUnavailable,
 )
+from obsidience.shell.command_token import command_url
 
 COMMAND_SCHEMA = "obsidience.shell.command.v1"
 COMMAND_TIMEOUT_SECONDS = 3.0
@@ -164,7 +165,7 @@ def _send_command(
     sent = False
     try:
         with connect(
-            SHELL_URL,
+            command_url(SHELL_URL),
             subprotocols=[SHELL_SUBPROTOCOL],
             open_timeout=2,
             close_timeout=1,
@@ -278,13 +279,20 @@ def _result_failure(result: dict[str, object]) -> dict[str, object] | None:
     )
 
 
-def activate(args: dict[str, object]) -> dict[str, object]:
+def activate(args: dict[str, object], *, observed_target: SceneTarget | None = None) -> dict[str, object]:
     dispatched = False
     try:
         if set(args) != {"target"}:
             raise InvalidTarget("invalid target")
         kind, name, surface = _target(args["target"])
-        target = _scene_target(SCENE.resolve_semantic(kind, name, surface))
+        if observed_target is not None:
+            if (kind != "application" or name not in {
+                    observed_target.window.semantic_name, observed_target.window.app_id}
+                    or (surface and surface != observed_target.surface_id)):
+                raise InvalidTarget("selector does not match the observed window")
+            target = _scene_target(SCENE.validate(observed_target))
+        else:
+            target = _scene_target(SCENE.resolve_semantic(kind, name, surface))
         token = "tool." + secrets.token_hex(16)
         dispatched = True
         result = _send_command(

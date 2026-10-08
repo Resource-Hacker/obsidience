@@ -41,7 +41,7 @@ OBSIDIENCE_FIELDS = frozenset({
     "knowledge", "exclude_knowledge", "required_context", "relations", "context_role",
     "operation_tools", "runtime_sections", "requires", "router_model",
     "acceptance", "action", "agent", "approved_at", "archive_reason", "archived_at", "articles", "assignee",
-    "authored_fields", "auto_curate", "auto_done", "base_sha256", "binding", "compacted_through",
+    "authored_fields", "optimization_auto_apply", "auto_curate", "auto_done", "base_sha256", "binding", "compacted_through",
     "compaction", "compaction_committed", "context_threshold", "conversation_id",
     "curation_task", "enabled", "event_context", "exclude_subtasks", "expires_at",
     "for_agent", "generated_by", "immediate", "invalidated_at",
