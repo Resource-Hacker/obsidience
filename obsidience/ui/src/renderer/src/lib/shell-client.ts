@@ -28,7 +28,16 @@ const knowledgeVisibilityListeners = new Map<
   Set<(visible: boolean) => void>
 >();
 const graphDisplayListeners = new Set<(surfaceId: string) => void>();
-const stageVisibilityListeners = new Map<string, Set<(visible: boolean) => void>>();
+/** A region of one Surface as fractions of its full logical size. */
+export type StageRegion = { x: number; y: number; width: number; height: number };
+type StageListener = { listener: (visible: boolean) => void; region?: () => StageRegion | null };
+const stageVisibilityListeners = new Map<string, Set<StageListener>>();
+type WindowRect = { x: number; y: number; width: number; height: number };
+const stageWindows = new Map<string, WindowRect[]>();
+const SURFACE_SIZE: Record<string, [number, number]> = { samsung: [5120, 1440], "usb-c": [1920, 1200], "dp-4": [1920, 550] };
+// Tiles sit 5 px apart plus a 1 px border each and 6 px from the Surface edge;
+// growing every window by this margin closes those gaps.
+const COVER_GAP_PX = 8;
 export type ShellOledPolicy = { enabled: boolean; shiftPx: number; travelSeconds: number };
 const oledPolicyListeners = new Set<(policy: ShellOledPolicy) => void>();
 let oledPolicy: ShellOledPolicy = { enabled: false, shiftPx: 32, travelSeconds: 3600 };
@@ -174,7 +183,7 @@ function handleMessage(event: MessageEvent): void {
       profile?: unknown;
       session_locked?: unknown; surface_id?: string; surface_awake?: boolean;
       oled_mode_enabled?: unknown; oled_shift_distance_px?: unknown; oled_travel_duration_seconds?: unknown;
-      windows?: { minimized?: boolean; visible_on_workspace?: boolean; local_rect?: { width?: number; height?: number } }[];
+      windows?: { minimized?: boolean; visible_on_workspace?: boolean; local_rect?: Partial<WindowRect> }[];
       surface?: { surface_id?: unknown; visible?: unknown };
       selected_surface_id?: unknown;
       pane?: { pane_id?: unknown; open?: unknown };
@@ -212,10 +221,12 @@ function handleMessage(event: MessageEvent): void {
       }
     }
     if (message.type === "application.state" && typeof message.surface_id === "string") {
-      const size = { samsung: [5120, 1440], "usb-c": [1920, 1200], "dp-4": [1920, 550] }[message.surface_id];
-      const covered = size && message.windows?.some(w => !w.minimized && w.visible_on_workspace !== false
-        && (w.local_rect?.width || 0) >= size[0] - 12 && (w.local_rect?.height || 0) >= size[1] - 12);
-      stageAwake.set(message.surface_id, message.surface_awake !== false && !covered);
+      stageWindows.set(message.surface_id, (message.windows || []).flatMap(w => {
+        const r = w.local_rect;
+        return !w.minimized && w.visible_on_workspace !== false && r
+          && [r.x, r.y, r.width, r.height].every(Number.isFinite) ? [r as WindowRect] : [];
+      }));
+      stageAwake.set(message.surface_id, message.surface_awake !== false);
       notifyStageVisibility();
     }
 
@@ -387,9 +398,38 @@ export function onShellGraphDisplay(
   return () => graphDisplayListeners.delete(listener);
 }
 
+/** Whether the visible windows together hide a Surface region, treating the
+ * narrow tile gaps as covered. Without a region the caller may itself be one
+ * of those windows (a pane page), so only one full-Surface window counts. */
+function stageCovered(surfaceId: string, region?: StageRegion | null): boolean {
+  const size = SURFACE_SIZE[surfaceId], windows = stageWindows.get(surfaceId);
+  if (!size || !windows?.length) return false;
+  if (!region) return windows.some(w => w.width >= size[0] - 12 && w.height >= size[1] - 12);
+  const left = region.x * size[0], top = region.y * size[1];
+  const right = (region.x + region.width) * size[0], bottom = (region.y + region.height) * size[1];
+  if (!(right > left && bottom > top)) return false;
+  const boxes = windows.map(w => [Math.max(left, w.x - COVER_GAP_PX), Math.max(top, w.y - COVER_GAP_PX),
+    Math.min(right, w.x + w.width + COVER_GAP_PX), Math.min(bottom, w.y + w.height + COVER_GAP_PX)])
+    .filter(([l, t, rr, b]) => rr > l && b > t);
+  // Unusually many windows: keep rendering rather than spend time on the test.
+  if (!boxes.length || boxes.length > 64) return false;
+  const edges = (low: number, high: number, a: number, b: number) =>
+    [...new Set([low, high, ...boxes.flatMap(box => [box[a], box[b]])])].sort((m, n) => m - n);
+  const xs = edges(left, right, 0, 2), ys = edges(top, bottom, 1, 3);
+  for (let i = 1; i < xs.length; i++) for (let j = 1; j < ys.length; j++) {
+    const cx = (xs[i - 1] + xs[i]) / 2, cy = (ys[j - 1] + ys[j]) / 2;
+    if (!boxes.some(([l, t, rr, b]) => l <= cx && cx < rr && t <= cy && cy < b)) return false;
+  }
+  return true;
+}
+
+function stageVisible(surfaceId: string, region?: () => StageRegion | null): boolean {
+  return !sessionLocked && stageAwake.get(surfaceId) !== false && !stageCovered(surfaceId, region?.());
+}
+
 function notifyStageVisibility(): void {
   for (const [surfaceId, listeners] of stageVisibilityListeners)
-    for (const listener of listeners) listener(!sessionLocked && stageAwake.get(surfaceId) !== false);
+    for (const { listener, region } of listeners) listener(stageVisible(surfaceId, region));
 }
 
 /** Read-only presentation of the existing Shell OLED policy; no second settings owner. */
@@ -400,11 +440,14 @@ export function onShellOledPolicy(listener: (policy: ShellOledPolicy) => void): 
   return () => { oledPolicyListeners.delete(listener); };
 }
 
-/** The existing Shell owns lock, output wake and covering-window state. */
-export function onShellStageVisibility(surfaceId: string, listener: (visible: boolean) => void): () => void {
+/** The existing Shell owns lock, output wake and covering-window state. A
+ * region limits the covering test to that part of the Surface. */
+export function onShellStageVisibility(surfaceId: string, listener: (visible: boolean) => void,
+  region?: () => StageRegion | null): () => void {
   const listeners = stageVisibilityListeners.get(surfaceId) || new Set();
-  listeners.add(listener); stageVisibilityListeners.set(surfaceId, listeners);
-  listener(!sessionLocked && stageAwake.get(surfaceId) !== false);
+  const entry = { listener, region };
+  listeners.add(entry); stageVisibilityListeners.set(surfaceId, listeners);
+  listener(stageVisible(surfaceId, region));
   connect();
-  return () => { listeners.delete(listener); if (!listeners.size) stageVisibilityListeners.delete(surfaceId); };
+  return () => { listeners.delete(entry); if (!listeners.size) stageVisibilityListeners.delete(surfaceId); };
 }

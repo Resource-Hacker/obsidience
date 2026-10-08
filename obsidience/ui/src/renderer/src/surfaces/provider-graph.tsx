@@ -37,12 +37,19 @@ function MemoryStageWall() {
   const [presentation, setPresentation] = useState<MemoryStagePresentation | null>(null);
   const [oled, setOled] = useState<ShellOledPolicy>({ enabled: false, shiftPx: 32, travelSeconds: 3600 });
   const [shellVisible, setShellVisible] = useState(false), [pageVisible, setPageVisible] = useState(!document.hidden);
+  const [stageVisible, setStageVisible] = useState(true);
   useEffect(() => onShellOledPolicy(setOled), []);
   useEffect(() => onShellStageVisibility("samsung", setShellVisible), []);
   useEffect(() => {
     const changed = () => setPageVisible(!document.hidden);
+    // The stage also reports when windows cover this view's own region.
+    const stage = (event: MessageEvent) => {
+      if (event.origin === location.origin && event.data?.type === "obsidience-stage-visibility")
+        setStageVisible(event.data.visible === true);
+    };
     document.addEventListener("visibilitychange", changed);
-    return () => document.removeEventListener("visibilitychange", changed);
+    window.addEventListener("message", stage);
+    return () => { document.removeEventListener("visibilitychange", changed); window.removeEventListener("message", stage); };
   }, []);
   useEffect(() => {
     const owner = new MemoryStagePresentation(); setPresentation(owner);
@@ -59,7 +66,7 @@ function MemoryStageWall() {
     if (settings.bank) presentation?.select(settings.bank);
   }), [presentation]);
   return <main className="memory-stage-wall" aria-label="All Agent memory graphs"
-    data-motion={shellVisible && pageVisible} data-oled={oled.enabled}
+    data-motion={shellVisible && pageVisible && stageVisible} data-oled={oled.enabled}
     style={{ "--oled-shift": `${oled.shiftPx}px`, "--oled-travel": `${oled.travelSeconds}s` } as CSSProperties}>
     {presentation && banks.map((bank, index) => <section className="memory-stage-row" key={bank.id} aria-label={`${bank.name} memory`}>
       <MemoryAgentIcon bank={bank} index={index}/>
