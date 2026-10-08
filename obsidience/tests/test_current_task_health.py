@@ -17,6 +17,9 @@ api = import_module("obsidience.harness.interfaces.api.app")
 def projected(tmp_path, monkeypatch, isolated_task_ledger):
     monkeypatch.setattr(CONFIG, "vault_dir", tmp_path / "vault")
     monkeypatch.setattr(review, "list_proposals", lambda: [])
+    from obsidience.harness.memory.hindsight import MEMORY
+    # harness.status now includes Hindsight health; no provider runs in tests.
+    monkeypatch.setattr(MEMORY, "status", lambda: {"status": "disabled", "provider": "hindsight"})
     monkeypatch.setattr(source, "list_source_files", lambda: {"files": [], "issues": []})
     monkeypatch.setattr(isolated_task_ledger, "graph", lambda: {"nodes": [], "links": []})
     monkeypatch.setattr(api.scheduler, "_realtime_allows", lambda *_args: True)

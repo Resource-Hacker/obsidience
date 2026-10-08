@@ -13,7 +13,7 @@ import pytest
 
 from obsidience.harness.capabilities.registry import REGISTRY
 from obsidience.harness.conversation import context_bindings as bindings
-from obsidience.harness.conversation.selection import project_historical_evidence, TaskSelectionError
+from obsidience.harness.conversation.selection import project_historical_evidence, TaskAdmissionError
 from obsidience.harness.execution import executor
 from obsidience.harness.knowledge.vault import Note, Resolver
 from obsidience.tests.test_execution_cancellation import execution  # noqa: F401
@@ -49,18 +49,6 @@ def graph(*, tasks=2, tool_names=("computer.act",), long_description=False):
     return Resolver(notes), agent, assigned
 
 
-def test_rechecked_query_can_answer_but_cannot_delegate_or_mutate():
-    names = ("task.complete", "vault.read", "task.create", "observations.temporary.append")
-    articles = [Note(f"Tools/{name}.md", name, {"kind": "tool"}, "") for name in names]
-    skills = [Note(f"Skills/{name}.md", name, {"kind": "skill", "tool": f"Tools/{name}"}, "") for name in names]
-    spine = {"tools": list(names), "tool_articles": articles, "skills": skills}
-    narrowed = executor._operation_spine(spine, {"routing_rechecked": True, "computer_outcome": "answer"})
-    assert narrowed["tools"] == ["task.complete", "vault.read"]
-    assert {tool.title for tool in narrowed["tool_articles"]} == {"task.complete", "vault.read"}
-    assert {skill.title for skill in narrowed["skills"]} == {"task.complete", "vault.read"}
-    assert spine["tools"] == list(names)
-
-
 def test_local_clock_is_current_system_time_with_matching_zone():
     before = time.time()
     clock = bindings.local_clock()
@@ -68,8 +56,10 @@ def test_local_clock_is_current_system_time_with_matching_zone():
     stamp = datetime.fromisoformat(clock["iso"])
     assert before - 1 < stamp.timestamp() <= after
     assert stamp.utcoffset() == stamp.astimezone(ZoneInfo(clock["timezone"])).utcoffset()
-    assert set(clock) == {"iso", "timezone", "weekday"}
+    assert set(clock) == {"iso", "timezone", "time", "weekday"}
     assert clock["weekday"] == stamp.strftime("%A")
+    zoned = stamp.astimezone(ZoneInfo(clock["timezone"]))
+    assert clock["time"] == zoned.strftime("%I:%M %p %Z").lstrip("0")
 
 
 def test_assigned_catalog_describes_actual_click_contract_without_granting_tools():
@@ -155,7 +145,9 @@ def test_compiler_injects_only_into_interactive_executive_and_preserves_authorit
     assert activation["spine"] is before
     assert before["tools"] == ["task.complete", "vault.read"]
     assert "computer.act" not in activation["provider_system"]
-    assert ("computer.act" in activation["provider_user"]) == (interactive and executive)
+    # The descriptive catalog is serialized as earlier reference data.
+    assert ("computer.act" in activation.get("provider_reference", "")) == (interactive and executive)
+    assert "computer.act" not in activation["provider_user"]
     assert "Tools/computer.act" not in activation["refs"]
 
 
@@ -203,5 +195,5 @@ def test_activation_serializes_only_projected_historical_evidence(monkeypatch):
                                          ("omitted_tool_count", -1), ("omitted_tool_count", 1_000_001)])
 def test_historical_projection_rejects_invalid_provenance(field, value):
     record = {"run_id": "abc123", "task_ref": "Tasks/query", "status": "completed", field: value}
-    with pytest.raises(TaskSelectionError):
+    with pytest.raises(TaskAdmissionError):
         project_historical_evidence([record])

@@ -19,9 +19,9 @@ def validation_vault(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(registry, "REGISTRY", ("vault.read",))
     for name in ("Darwin", "Alexandria"):
         write_note(f"Agents/{name}/{name}.md", {"kind": "agent", "title": name}, "Agent.")
+    # Darwin Distill was retired with Feeds (2026-10-06); Learn alone subscribes.
     for task, agent, trigger in (
         ("research/learn", "Darwin", "source.added"),
-        ("research/distill", "Darwin", "source.added"),
         ("ingest", "Alexandria", "source.inbox"),
     ):
         write_note(f"Tasks/{task}.md", {
@@ -117,6 +117,6 @@ def test_reserved_source_split_rejects_foreign_subscriber_and_wrong_owner(valida
                "assignee": "[[Agents/Darwin/Darwin]]"}, "Unrelated.")
     assert "source.added subscribers" in execute({}, {})
     (validation_vault / "Tasks/unrelated.md").unlink()
-    write_note("Tasks/research/distill.md", {"kind": "task", "triggers": ["source.added"],
+    write_note("Tasks/research/learn.md", {"kind": "task", "triggers": ["source.added"],
                "assignee": "[[Agents/Alexandria/Alexandria]]"}, "Wrong owner.")
-    assert "[[Tasks/research/distill]] assignee: expected [[Agents/Darwin/Darwin]]" in execute({}, {})
+    assert "[[Tasks/research/learn]] assignee: expected [[Agents/Darwin/Darwin]]" in execute({}, {})

@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import pytest
-from types import SimpleNamespace
 from fastapi import HTTPException
 
 from obsidience.harness.config import CONFIG
 from obsidience.harness.capabilities.vault import maintenance
-from obsidience.harness.conversation import observations
 from obsidience.harness.interfaces.api import app as server
 from obsidience.harness.knowledge import auto_curate, curation, review
 from obsidience.harness.knowledge.links import canonical_body
@@ -47,9 +45,8 @@ def test_toggle_specialist_subject_writes_real_index_without_task(vault):
     assert result == {"article": "@branch/Agents/Darwin/Observations", "enabled": False, "task": None}
     assert load_note("Agents/Darwin/Observations/Observations.md").meta["auto_curate"] is False
     assert not list(vault.glob("Tasks/**/*.md"))
-    assert not server.get_article("@sat/Darwin/temporary-observations")["auto_curate"]
     server.set_article_auto_curate("@branch/Agents/Darwin/Observations", {"enabled": True})
-    assert server.get_article("@sat/Darwin/temporary-observations")["auto_curate"]
+    assert load_note("Agents/Darwin/Observations/Observations.md").meta["auto_curate"] is True
 
 
 @pytest.mark.parametrize("ref", ["@library", "@sat/Darwin/tools", "@sat/Darwin/tasks"])
@@ -57,34 +54,6 @@ def test_capability_checkout_containers_are_not_auto_curated(vault, ref):
     assert not server.get_article(ref)["auto_curate_supported"]
     with pytest.raises(HTTPException, match="capability definitions"):
         server.set_article_auto_curate(ref, {"enabled": True})
-
-
-def test_runtime_temporary_append_obeys_owner_permission(vault):
-    target = "Agents/Darwin/Observations/Temporary Observations"
-    runtime = {"curation_mode": "temporary", "target_path": target, "turn_id": "turn1"}
-    created = observations.append_temporary_observation({"text": "A pending research question."}, runtime)
-    assert created["status"] == "appended"
-    assert "pending research" in observations.read_temporary_observations("Agents/Darwin/Darwin")
-    server.set_article_auto_curate("@sat/Darwin/temporary-observations", {"enabled": False})
-    with pytest.raises(ValueError, match="Auto-curate is disabled"):
-        observations.append_temporary_observation({"text": "Another summary."}, {**runtime, "turn_id": "turn2"})
-    assert load_note(created["ref"] + ".md") is not None
-    assert observations.read_temporary_observations("Agents/Darwin/Darwin") == ""
-
-
-def test_immediate_projection_disabled_retains_history_and_enabled_override(vault):
-    conversation = SimpleNamespace(
-        conversation_id="conversation", complete_pairs=lambda **_kw: [],
-        index=SimpleNamespace(conversation_turns=lambda _conversation_id: [], sync=lambda: None),
-    )
-    result = observations.project_immediate_observations(conversation, conversation_id="conversation")
-    original = (vault / observations.IMMEDIATE_OBSERVATIONS_PATH).read_bytes()
-    server.set_article_auto_curate("@agent/Observations", {"enabled": False})
-    assert observations.project_immediate_observations(conversation, conversation_id="conversation")["body"] == result["body"]
-    assert (vault / observations.IMMEDIATE_OBSERVATIONS_PATH).read_bytes() == original
-    server.set_article_auto_curate(observations.IMMEDIATE_OBSERVATIONS_REF, {"enabled": True})
-    observations.project_immediate_observations(conversation, conversation_id="conversation")
-    assert load_note(observations.IMMEDIATE_OBSERVATIONS_PATH).meta["auto_curate"] is True
 
 
 def test_scoped_knowledge_approval_uses_permission_and_normal_review(vault, monkeypatch):

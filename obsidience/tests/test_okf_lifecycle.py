@@ -28,7 +28,7 @@ def test_explicit_deprecation_nominates_only_ordinary_leaf_knowledge(isolated):
     assert load_note("Articles/old.md") is not None
 
 
-def test_expired_instant_nominates_audit_without_archival_or_age_inference(isolated):
+def test_expired_instant_nominates_improve_without_archival_or_age_inference(isolated):
     now = datetime.now(timezone.utc)
     expired = (now - timedelta(hours=1)).astimezone(timezone(timedelta(hours=9))).isoformat()
     note("Articles/expired", stale_after=expired)
@@ -37,7 +37,7 @@ def test_expired_instant_nominates_audit_without_archival_or_age_inference(isola
     leads = [row for row in maintenance._maintenance_candidates()["candidates"]
              if row["kind"] in {"stale_after", "deprecated", "superseded"}]
     assert len(leads) == 1
-    assert leads[0]["recommended_task"] == "Audit"
+    assert leads[0]["recommended_task"] == "Improve"  # Freshness leads use Improve (2026-09-14).
     assert leads[0]["signals"] == {"stale_after": expired}
     assert load_note("Articles/expired.md") is not None
 

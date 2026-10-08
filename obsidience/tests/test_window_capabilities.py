@@ -9,7 +9,20 @@ import pytest
 from obsidience.harness.capabilities.computer import observe
 from obsidience.harness.capabilities.window import command as window_command
 from obsidience.harness.computer.capture import ScreenCapture
-from obsidience.harness.host.scene import EVENT_SCHEMA, ShellSceneCache
+from obsidience.harness.host.scene import EVENT_SCHEMA, SceneLocked, ShellSceneCache
+
+
+@pytest.fixture(autouse=True)
+def native_scene_matches_cache(monkeypatch):
+    """The production ShellSceneClient.refresh reads native geometry from the live
+    Shell; these tests install a bare ShellSceneCache, whose native state is the cache."""
+    def refresh(self, cancel_event=None):
+        snapshot = self.snapshot()
+        if snapshot.workspace.get("session_locked") is True:
+            raise SceneLocked("shell scene is locked")
+        return snapshot
+
+    monkeypatch.setattr(ShellSceneCache, "refresh", refresh, raising=False)
 
 
 def _workspace() -> dict:
@@ -326,7 +339,18 @@ def test_shell_rejection_does_not_offer_local_argument_correction(monkeypatch) -
     assert result["must_not_replay"] is True
 
 
-def test_partial_send_is_delivery_uncertainty(monkeypatch) -> None:
+def isolated_command_token(monkeypatch, tmp_path) -> str:
+    """Give the Shell command client its own runtime token, never the live one."""
+    token = "0123456789abcdef" * 4
+    (tmp_path / "obsidience-shell").mkdir()
+    (tmp_path / "obsidience-shell" / "command.token").write_text(token + "\n", encoding="ascii")
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    return token
+
+
+def test_partial_send_is_delivery_uncertainty(monkeypatch, tmp_path) -> None:
+    isolated_command_token(monkeypatch, tmp_path)
+
     class PartialSocket:
         def __enter__(self):
             return self

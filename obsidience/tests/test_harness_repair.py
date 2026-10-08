@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import replace
 
@@ -32,7 +33,7 @@ def inspect(note):
 
 
 def apply(note, context):
-    return json.loads(capability.execute({"task": note.ref, "run_id": note.meta["last_run"]}, context))
+    return json.loads(asyncio.run(capability.execute({"task": note.ref, "run_id": note.meta["last_run"]}, context)))
 
 
 def test_covered_retry_preserves_original_evidence_article_and_fifo(occurrence, monkeypatch):
@@ -75,8 +76,10 @@ def test_uncovered_legacy_read_remains_blocked_despite_owner_retry_compatibility
     row = context["_harness_snapshot"]["repair_plan"][0]
     assert row["operation"] == "blocked" and "predates" in row["reason"]
     assert apply(note, context)["status"] == "blocked"
+    assert "_harness_snapshot" not in context  # Every attempt consumes its inspection.
     # A stale or forged eligible projection still cannot bypass the owner guard.
-    row["operation"] = "retry"
+    context = inspect(note)
+    context["_harness_snapshot"]["repair_plan"][0]["operation"] = "retry"
     assert "predates" in apply(note, context)["reason"]
     assert "_harness_snapshot" not in context
     with pytest.raises(ValueError, match="predates"):
@@ -282,7 +285,8 @@ def test_unverifiable_existing_marker_never_allows_another_retry(occurrence, tra
     assert ledger.task_runtime(note.ref)["status"] == "failed"
 
 
-@pytest.mark.parametrize("change", ["missing", "duplicate", "other_run", "other_key", "wrong_task", "extra_arg"])
+# The Task/Tool grant (not this adapter) owns which Task may call harness.repair.
+@pytest.mark.parametrize("change", ["missing", "duplicate", "other_run", "other_key", "extra_arg"])
 def test_only_exact_same_run_health_plan_can_authorize_repair(occurrence, change):
     note, ledger = occurrence
     cover(ledger, note)
@@ -293,9 +297,8 @@ def test_only_exact_same_run_health_plan_can_authorize_repair(occurrence, change
     if change == "duplicate": plan.append(dict(plan[0]))
     if change == "other_run": plan[0]["run_id"] = "other-run"
     if change == "other_key": plan[0]["occurrence_key"] = "other-occurrence"
-    if change == "wrong_task": context["task"] = "Tasks/check"
     if change == "extra_arg": args["command"] = "ignored shell request"
-    assert json.loads(capability.execute(args, context))["status"] == "blocked"
+    assert json.loads(asyncio.run(capability.execute(args, context)))["status"] == "blocked"
     assert ledger.task_runtime(note.ref)["status"] == "failed" and len(ledger.runs()) == 1
 
 
@@ -365,7 +368,7 @@ def test_more_than_eight_eligible_items_fit_a_bounded_pass_without_mutating_the_
     for _ in range(repair.PASS_ATTEMPT_LIMIT):
         row = plan[0]
         args = {"task": row["task"], "run_id": row["run_id"]}
-        returned = capability.execute(args, context)
+        returned = asyncio.run(capability.execute(args, context))
         assert json.loads(returned)["status"] == "requeued"
         assert "_harness_snapshot" not in context
         # Match the executor's append-after-return ordering. No second counter
@@ -378,7 +381,7 @@ def test_more_than_eight_eligible_items_fit_a_bounded_pass_without_mutating_the_
     assert 18 <= CONFIG.max_steps
     before = {task.ref: ledger.task_runtime(task.ref) for task in tasks}
     row = plan[0]
-    rejected = json.loads(capability.execute({"task": row["task"], "run_id": row["run_id"]}, context))
+    rejected = json.loads(asyncio.run(capability.execute({"task": row["task"], "run_id": row["run_id"]}, context)))
     assert rejected["status"] == "blocked" and "limit" in rejected["reason"]
     assert "_harness_snapshot" not in context  # Final acceptance still needs a fresh read.
     assert {task.ref: ledger.task_runtime(task.ref) for task in tasks} == before

@@ -57,8 +57,6 @@ def test_compiled_source_objective_omits_unrelated_scene_and_observations(captur
     book = Note("Runbooks/research/learn.md", "Learn procedure", {"kind": "runbook"}, "Exact procedure")
     accepted = Resolver([agent, task, book])
     monkeypatch.setattr(executor.shell_scene, "SCENE", NS(activation_binding=lambda: pytest.fail("read unrelated desktop")))
-    from obsidience.harness.conversation import observations
-    monkeypatch.setattr(observations, "read_temporary_observations", lambda *_: pytest.fail("read unrelated observations"))
     monkeypatch.setattr(source, "article_refs_for_trees", lambda *_: [])
     queries = []
     monkeypatch.setattr(executor.retrieval, "fast_context_with_refs",

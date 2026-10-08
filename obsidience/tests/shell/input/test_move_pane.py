@@ -7,6 +7,16 @@ import pytest
 from obsidience.shell.input import move_pane
 
 
+@pytest.fixture(autouse=True)
+def isolated_command_token(monkeypatch: pytest.MonkeyPatch, tmp_path) -> str:
+    """The Shell command socket requires a runtime token; never read the live one."""
+    token = "0123456789abcdef" * 4
+    (tmp_path / "obsidience-shell").mkdir()
+    (tmp_path / "obsidience-shell" / "command.token").write_text(token + "\n", encoding="ascii")
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    return token
+
+
 class FakeSocket:
     def __init__(self, events: str | list[dict]) -> None:
         self.events = (

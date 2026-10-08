@@ -205,6 +205,9 @@ def test_executor_crash_boundaries_preserve_evidence_without_redispatch(
     monkeypatch.setattr(executor.model_runtime, "lease", lease)
     monkeypatch.setattr(executor.llm, "chat", chat)
     monkeypatch.setattr(executor, "execute_capability", capability)
+    # The executor dispatches through the async registry entry; never reach real Tools.
+    monkeypatch.setattr(executor, "execute_capability_async",
+                        lambda name, args, ctx: asyncio.to_thread(capability, name, args, ctx))
     monkeypatch.setattr(executor.action_trace, "emit", lambda *_a, **_k: None)
     monkeypatch.setattr(executor.action_trace, "latency", lambda *_a, **_k: None)
     context = {

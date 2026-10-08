@@ -267,7 +267,7 @@ def test_status_attestation_survives_concurrent_system_publication(system_source
         source.capture_system_evidence("identity", {"fixture": i})
     barrier = Barrier(5)
     def reader():
-        client = TestClient(api.app)  # Do not enter live service startup.
+        client = TestClient(api.app, base_url=f"http://{config.CONFIG.host}:{config.CONFIG.port}")  # Do not enter live service startup.
         try:
             barrier.wait(timeout=5)
             for _ in range(12):

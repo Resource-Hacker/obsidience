@@ -197,7 +197,7 @@ def test_native_reader_owned_articles_cannot_edit_save_or_change_auto_curate(man
                REQUEST_SETUP + r"""
 const state={XMLHttpRequest:Request,feedItemMode:false,feedItemId:'',sourceMode:false,sourceKey:'',
  previewMode:false,previewItem:{},selectionKind:'article',articleRef:'ADMECH Workstation/System Identity',
- requestGeneration:0,loadArticleTitles(){}};
+ requestGeneration:0,pendingReadIntent:false,graphId:'main',loadArticleTitles(){}};
 """, "const management=" + management + r""";
 state.loadDocument();
 requests.at(-1).respond({title:'System Identity',kind:'knowledge',body:'Exact observed evidence',

@@ -35,7 +35,7 @@ const graph = {{nodes:[
   {{source:skill, target:'Missing'}}], navigation:{{groups:[]}}}};
 const state = {{XMLHttpRequest:Request, feedItemMode:false, feedItemId:'', sourceMode:false, sourceKey:'',
   previewMode:false, previewItem:{{}}, selectionKind:'article',
-  articleRef:tool, graphId:'', requestGeneration:0}};
+  articleRef:tool, graphId:'', requestGeneration:0, pendingReadIntent:false}};
 state.root = state;
 state.checkouts = {{refresh(){{}}}};
 vm.createContext(state);
@@ -133,6 +133,7 @@ assert.deepEqual(selections.at(-1), ['Tools/vault.propose','Alexandria']);
 stop();
 const sent = [];
 const state = {{followShellSelection:true,requestGeneration:0,selectionKind:'article',
+  receivedShellSelection:false,pendingReadIntent:false,
   articleRef:'',sourceKey:'',feedItemId:'',previewItem:{{}},graphId:'',
   Qt:{{callLater() {{}}}},loadDocument() {{}},WebSocket:{{Open:1}},
   shellSocket:{{status:1,sendTextMessage(text) {{sent.push(JSON.parse(text));}}}}}};

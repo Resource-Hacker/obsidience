@@ -434,19 +434,25 @@ const tree=ts.createSourceFile('graph.tsx',source,ts.ScriptTarget.Latest,true,ts
 const functions=tree.statements.filter(node=>ts.isFunctionDeclaration(node)
   && ['activityFromWire','latestActivityTransaction'].includes(node.name?.text));
 let callback, bridge;
+// The callback now delegates to component-local run/playback helpers.
+const helpers=[];
 const visit=node=>{{
+  if(ts.isFunctionDeclaration(node)&&['speechHolds','finishRun','settleActivity'].includes(node.name?.text)) helpers.push(node);
   if(ts.isCallExpression(node)&&node.expression.getText(tree)==='onKnowledgeActivity') callback=node.arguments[0];
   if(ts.isCallExpression(node)&&node.expression.getText(tree)==='useEffect'
     &&node.arguments[0]?.getText(tree).includes('new WebSocket(`${{WS_BASE}}/ws/activity`)')) bridge=node.arguments[0];
   ts.forEachChild(node,visit);
 }};
 visit(tree);
-assert.equal(functions.length,2);assert(callback);assert(bridge);
+assert.equal(functions.length,2);assert.equal(helpers.length,3);assert(callback);assert(bridge);
 let state=null;let now=1788665811270;const timers=[];
 const context={{setActivity:next=>{{state=typeof next==='function'?next(state):next;}},
+  playback:{{current:{{status:'idle',level:0,run_id:'',playback_id:''}}}},finishedRuns:{{current:new Map()}},
+  setClearedRuns(){{}},setOperations(){{}},currentOperations:entries=>entries,
+  speechEnvelope:{{current:{{level:0,updatedAt:0}}}},performance:{{now:()=>0}},
   activityKey:{{current:0}},lingerTimer:{{current:null}},activityTransaction:{{current:null}},FOCUS_LINGER_MS:6000,MAIN_GRAPH_ID:'main',
   Date:{{now:()=>now}},window:{{clearTimeout(){{}},setTimeout(fn,ms){{timers.push({{fn,ms}});return timers.length;}}}}}};
-const compiled=ts.transpileModule(functions.map(node=>node.getText(tree)).join('\n')
+const compiled=ts.transpileModule([...functions,...helpers].map(node=>node.getText(tree)).join('\n')
   +'\n({{replay:latestActivityTransaction,fromWire:activityFromWire,receive:'+callback.getText(tree)+',bridge:'+bridge.getText(tree)+'}})',
   {{compilerOptions:{{target:ts.ScriptTarget.ESNext}}}}).outputText;
 const {{replay,fromWire,receive,bridge:connectBridge}}=vm.runInNewContext(compiled,context);
@@ -541,7 +547,10 @@ const ts=require('typescript');
 const source=fs.readFileSync({json.dumps(str(PANES / 'graph-backdrop.tsx'))},'utf8');
 const tree=ts.createSourceFile('graph.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
 let receive,visibilityEffect,popup;
+// The callback now delegates to component-local run/playback helpers.
+const helpers=[];
 const visit=node=>{{
+ if(ts.isFunctionDeclaration(node)&&['speechHolds','finishRun','settleActivity'].includes(node.name?.text)) helpers.push(node);
  if(ts.isCallExpression(node)&&node.expression.getText(tree)==='onKnowledgeActivity') receive=node.arguments[0];
  if(ts.isCallExpression(node)&&node.expression.getText(tree)==='useEffect'
     &&node.arguments[0]?.getText(tree).includes('setTraceInspectionSince')
@@ -552,9 +561,11 @@ const visit=node=>{{
  }}
  ts.forEachChild(node,visit);
 }};
-visit(tree);assert(receive);assert(visibilityEffect);assert(popup);
+visit(tree);assert(receive);assert(visibilityEffect);assert(popup);assert.equal(helpers.length,3);
 const timers=[];
-const context={{activity:null,traceInspectionSince:null,traceDismissedSince:null,
+const context={{activity:null,traceInspectionSince:null,traceDismissedSince:null,MAIN_GRAPH_ID:'main',
+ playback:{{current:{{status:'idle',level:0,run_id:'',playback_id:''}}}},finishedRuns:{{current:new Map()}},
+ setClearedRuns(){{}},setOperations(){{}},currentOperations:entries=>entries,
  visible:true,lockMode:false,activityKey:{{current:0}},lingerTimer:{{current:null}},activityTransaction:{{current:null}},FOCUS_LINGER_MS:6000,
  Date:{{now:()=>1000}},ActionTracePopup:'ActionTracePopup',exports:{{}},
  window:{{clearTimeout(){{}},setTimeout(fn,ms){{timers.push({{fn,ms}});return timers.length;}}}},
@@ -563,7 +574,7 @@ const context={{activity:null,traceInspectionSince:null,traceDismissedSince:null
 context.setActivity=next=>{{context.activity=typeof next==='function'?next(context.activity):next;}};
 context.setTraceInspectionSince=next=>{{context.traceInspectionSince=next;}};
 context.setTraceDismissedSince=next=>{{context.traceDismissedSince=next;}};
-const compiled=ts.transpileModule('const receive='+receive.getText(tree)
+const compiled=ts.transpileModule(helpers.map(node=>node.getText(tree)).join('\n')+';const receive='+receive.getText(tree)
  +';const visibilityEffect='+visibilityEffect.getText(tree)
  +';function popup(){{return '+popup.getText(tree)+';}};({{receive,visibilityEffect,popup}})',
  {{compilerOptions:{{target:ts.ScriptTarget.ESNext,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}}}).outputText;

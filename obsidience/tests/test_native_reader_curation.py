@@ -29,7 +29,7 @@ class Request {{
 }}
 const state = {{XMLHttpRequest:Request, feedItemMode:false, feedItemId:'', sourceMode:false, sourceKey:'',
   previewMode:false, previewItem:{{}}, selectionKind:'article',
-  articleRef:'@sat/Alexandria/observations', requestGeneration:0,
+  articleRef:'@sat/Alexandria/observations', requestGeneration:0, pendingReadIntent:false, graphId:'main',
   loadArticleTitles() {{}}}};
 state.root = state;
 vm.createContext(state);
@@ -79,4 +79,7 @@ assert.equal(requests.length, count); // Unsupported Articles cannot submit.
     assert result.returncode == 0, result.stderr
     assert "checked: root.autoCurateEnabled" in source
     assert "onClicked: root.setAutoCurate(!root.autoCurateEnabled)" in source
-    assert "visible: !root.sourceMode && !root.articleReadOnly && root.autoCurateSupported && !root.editing" in source
+    # Read-only Articles never become supported; Hindsight memory shows its state disabled.
+    assert "root.autoCurateSupported = !root.articleReadOnly && document.auto_curate_supported === true" in source
+    assert "visible: !root.sourceMode && !root.editing && (root.autoCurateSupported" in source
+    assert "enabled: root.autoCurateSupported && !root.loading && !root.curationBusy" in source

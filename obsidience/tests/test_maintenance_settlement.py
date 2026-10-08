@@ -95,15 +95,6 @@ def test_agent_folder_similarity_excluded_but_real_leaf_duplicates_remain(scene)
     assert not maintenance.agent_structural_hub(res.resolve("Agents/A/Records/Records"), res)
 
 
-def test_canonical_agent_and_ordinary_shadow_charter_remain_merge_candidates(scene):
-    vault.write_note("Agents/A/A.md", {"kind": "agent", "title": "Routing evidence"}, BODY)
-    vault.write_note("Agents/A/shadow.md", {"kind": "knowledge", "title": "Routing evidence"}, BODY)
-    rows = maintenance._maintenance_candidates()["candidates"]
-    assert any(row["recommended_task"] == "Merge" and set(row["refs"]) == {
-        "Agents/A/A", "Agents/A/shadow",
-    } for row in rows)
-
-
 @pytest.mark.parametrize("legacy,migrated,bounded", [(False, False, True), (True, False, False), (True, True, False), (True, False, True)])
 def test_exact_creator_binding_and_empty_attempt_settle_hub( scene, legacy, migrated, bounded):
     refs = ["Agents/A/Records/Records", "Agents/B/Records/Records"]
@@ -116,7 +107,8 @@ def test_exact_creator_binding_and_empty_attempt_settle_hub( scene, legacy, migr
     assert result and result["status"] == "completed"
     receipt = scene.run(result["settlement_run_id"])
     evidence = json.loads(receipt["trace"])[0]["controller_disposition"]
-    assert evidence["reason"] == "agent_structural_hub"
+    # Any Agent-owned input now settles as outside Knowledge maintenance.
+    assert evidence["reason"] == "agent_maintenance_scope"
     assert evidence["creator_run_id"] == params["created_by_run_id"]
     assert evidence["tools_executed"] is False
     assert scene.run("previous") == previous
@@ -217,7 +209,7 @@ def test_same_revision_dedupes_but_new_revision_reopens_settled_refs(scene):
 
 def test_executor_rechecks_structural_scope_before_session(scene):
     params = activation(["Agents/A/Records/Records", "Agents/B/Records/Records"])
-    with pytest.raises(RuntimeError, match="agent_structural_hub"):
+    with pytest.raises(RuntimeError, match="agent_maintenance_scope"):
         executor._maintenance_candidate_evidence(vault.load_note("Tasks/merge.md"), params, vault.resolver())
 
 
@@ -396,8 +388,9 @@ def test_real_activation_admission_race_settles_without_replaying_and_preserves_
     monkeypatch.setattr(executor.action_trace, "emit", lambda *_a, **_kw: None)
     monkeypatch.setattr(executor, "_execute_session", lambda *_a, **_kw: pytest.fail("No provider or Tool may run"))
 
-    async def compile_packet(*_args, **_kwargs):
+    async def compile_packet(*_args, **kwargs):
         return {"spine": executor.resolve_spine(note, executor.resolver()), "packet": "Isolated packet", "refs": [note.ref, book.ref], "retrieval_ms": 1.0,
+                "params": dict(kwargs.get("params") or {}),
                 "objective": "Inspect the bound candidate", "provider_system": "Isolated", "provider_user": "Inspect"}
 
     monkeypatch.setattr(executor, "compile_activation", compile_packet)
@@ -423,8 +416,10 @@ def test_real_activation_admission_race_settles_without_replaying_and_preserves_
 def test_redundant_hierarchy_link_settles_without_model_or_losing_fifo(scene, monkeypatch):
     vault.write_note('Tasks/link.md', {'kind': 'task', 'title': 'Link',
                      'triggers': ['task.create']}, 'Confirm a useful cross-link.')
-    vault.write_note('Agents/A/Records/deep/leaf.md', {'kind': 'knowledge', 'title': 'Leaf'}, BODY)
-    params = activation(['Agents/A/Records/Records', 'Agents/A/Records/deep/leaf'])
+    # Knowledge refs: any Agents/ input would settle as agent_maintenance_scope.
+    vault.write_note('Knowledge/Records/Records.md', {'kind': 'knowledge', 'title': 'Records'}, BODY)
+    vault.write_note('Knowledge/Records/deep/leaf.md', {'kind': 'knowledge', 'title': 'Leaf'}, BODY)
+    params = activation(['Knowledge/Records/Records', 'Knowledge/Records/deep/leaf'])
     params.update(target_task='Tasks/link', candidate_kind='missing_link')
     creator(scene, params)
     waiting = activation(['Knowledge/one', 'Knowledge/two'], key='b' * 20)

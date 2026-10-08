@@ -57,10 +57,11 @@ def test_shared_node_ring_shader_compiles():
     validator = shutil.which("glslangValidator")
     if not validator:
         pytest.skip("GLSL validator is not installed")
-    scene = Path(__file__).parents[1] / (
-        "ui/src/renderer/src/components/themes/obsidience/knowledge-3d-scene.tsx"
+    # The shaders moved from the scene component into their own module.
+    shaders = Path(__file__).parents[1] / (
+        "ui/src/renderer/src/components/themes/obsidience/knowledge-3d-shaders.ts"
     )
-    shader = scene.read_text().split("const POINT_FRAGMENT_SHADER = `", 1)[1].split("`;", 1)[0]
+    shader = shaders.read_text().split("export const POINT_FRAGMENT_SHADER = `", 1)[1].split("`;", 1)[0]
     result = subprocess.run(
         [validator, "--stdin", "-S", "frag"],
         input="precision highp float;\n" + shader,

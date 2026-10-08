@@ -8,22 +8,19 @@ from obsidience.harness.capabilities.review import inspect as review_inspect
 from obsidience.harness.capabilities.task import inspect as task_inspect
 from obsidience.harness.capabilities.vault import maintenance
 from obsidience.harness.config import CONFIG
-from obsidience.harness.execution import repair, scheduler
-from obsidience.harness.knowledge import index, review, source, vault
+from obsidience.harness.knowledge import review, source, vault
 
 
 @pytest.fixture
-def isolated(tmp_path, monkeypatch):
+def isolated(tmp_path, monkeypatch, isolated_task_ledger):
     monkeypatch.setattr(CONFIG, "vault_dir", tmp_path / "vault")
-    monkeypatch.setattr(CONFIG, "db_path", tmp_path / "index.sqlite3")
     monkeypatch.setattr(CONFIG, "git_commit", False)
     monkeypatch.setattr(maintenance, "_completed_candidates", lambda: set())
-    ledger = index.Index()
-    monkeypatch.setattr(index, "INDEX", ledger)
-    monkeypatch.setattr(repair, "INDEX", ledger)
-    monkeypatch.setattr(scheduler, "INDEX", ledger)
-    yield ledger
-    ledger.db.close()
+    from obsidience.harness.memory.hindsight import MEMORY
+    # harness.status now includes Hindsight health; no provider runs in tests.
+    monkeypatch.setattr(MEMORY, "status", lambda: {"status": "disabled", "provider": "hindsight"})
+    # The conftest ledger is installed in every module (task.complete reads it too).
+    return isolated_task_ledger
 
 
 def note(ref, body="One ordinary accepted fact.", **meta):
@@ -87,7 +84,8 @@ def test_age_alone_never_creates_freshness_or_archive_lead(isolated):
     note("Articles/old", approved_at="2001-01-01")
     assert maintenance._maintenance_candidates()["candidates"] == []
     note("Articles/old", review_due="2001-01-01")
-    assert lead("review_due")["recommended_task"] == "Audit"
+    # Wiki freshness/evidence leads use Improve (2026-09-14).
+    assert lead("review_due")["recommended_task"] == "Improve"
     note("Articles/new")
     note("Articles/old", superseded_by="Articles/new")
     assert lead("superseded")["signals"]["archive_ref"] == "Articles/old"
@@ -170,9 +168,11 @@ def test_review_approval_during_run_explains_exact_completion_repair(isolated, m
     monkeypatch.setattr(review,'list_proposals',lambda:[])
     isolated.record_review_decision(proposal_id='approved.md',run_id='link-run',task_ref='Tasks/link',
         target='Articles/one.md',decision='approved')
+    # The controller settles a stale review status from the approval receipt
+    # instead of spending another model call on a correction.
     stale=complete.execute({'status':'review','summary':'Staged link'},context)
-    assert not stale['accepted']
-    assert 'already approved' in stale['error'] and 'Do not stage another' in stale['error']
+    assert stale['accepted'] and stale['status']=='completed' and stale['outcome']=='changed'
+    assert stale['evidence']==['Owner review approved Articles/one.md']
     result=complete.execute({'status':'completed','summary':'The owner approved the link.'},context)
     assert result['accepted'] and result['outcome']=='changed'
     assert result['evidence']==['Owner review approved Articles/one.md']

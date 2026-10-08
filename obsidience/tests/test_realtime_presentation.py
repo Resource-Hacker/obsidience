@@ -18,7 +18,7 @@ const assert=require('node:assert/strict'),vm=require('node:vm');
 let captions=0;
 const context={{state:{{}},levels:[],connected:true,levelLimit:32,transcriptUpdated:()=>captions++}};
 vm.createContext(context);vm.runInContext({json.dumps(chr(10).join(functions))},context);
-const state={{enabled:true,ready:true,phase:'command',input_level:0.25,capture_active:false,user_speaking:false,live_transcript:null}};
+const state={{enabled:true,ready:true,command_open:true,phase:'command',input_level:0.25,capture_active:false,user_speaking:false,live_transcript:null}};
 const event=(payload,reason,type='runtime')=>context.applyMessage(JSON.stringify({{type,reason,state:payload}}));
 event(state,undefined,'state');assert.equal(context.levels.length,0);
 for(let i=0;i<40;i++)event({{...state,input_level:i/40}},'input_level');
@@ -56,35 +56,8 @@ assert.equal(JSON.stringify(context.state),before);
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_capture_reveals_existing_shelf_without_opening_launcher():
-    source = (QML / "workspace/PaneLauncher.qml").read_text()
-    callback = re.search(r"    onRecognitionVisibleChanged: \{(.*?)\n    \}", source, re.S).group(1)
-    script = f"""
-const assert=require('node:assert/strict'),vm=require('node:vm');
-let stopped=0,hidden=0;
-const context={{recognitionVisible:true,shelfOpen:false,launcherOpen:false,
-  shelfHideTimer:{{stop:()=>stopped++}},scheduleShelfHide:()=>hidden++}};
-vm.createContext(context);vm.runInContext({json.dumps(callback)},context);
-assert(context.shelfOpen);assert.equal(context.launcherOpen,false);assert.equal(stopped,1);
-context.recognitionVisible=false;vm.runInContext({json.dumps(callback)},context);assert.equal(hidden,1);
-"""
-    result = subprocess.run(["node", "-e", script], capture_output=True, text=True, timeout=10)
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert 'realtimeRequest("GET", "/api/realtime"' not in source
-    assert "function onTranscriptUpdated() { recognitionLinger.restart() }" in source
-    assert "id: recognitionLinger\n        interval: 2000\n        repeat: false" in source
-    assert "!root.recognitionVisible" in source
-    assert "height: Math.min(48, contentHeight)" in source
-    assert "contentY: Math.max(0, contentHeight - height)" in source
-    assert "font.pixelSize: 11" in source
-
-
 def test_waveform_real_qml_geometry_and_quiet_reset(tmp_path):
-    launcher = (QML / "workspace/PaneLauncher.qml").read_text()
-    caption = re.search(
-        r"                            Flickable \{\n                                id: transcriptViewport.*?\n                            \}",
-        launcher, re.S,
-    ).group(0)
+    # The launcher's recognition caption was retired; the waveform remains.
     fixture = tmp_path / "tst_waveform.qml"
     fixture.write_text(f"""
 import QtQuick
@@ -96,21 +69,7 @@ TestCase {{
     name: "InputWaveform"
     when: windowShown
     width: 352; height: 100
-    property string liveTranscriptText: ""
     Visual.InputWaveform {{ id: waveform; width: 280; height: 24 }}
-    Text {{ id: transcriptPrefix; width: 60; height: 16 }}
-    {caption}
-    function test_caption_keeps_latest_words_at_narrow_width() {{
-        root.liveTranscriptText = "A longer spoken sentence ".repeat(16) + "latest words"
-        tryVerify(() => transcriptViewport.contentY > 0 && transcriptViewport.atYEnd)
-        compare(transcriptViewport.height, 48)
-        root.width = 180
-        tryVerify(() => transcriptViewport.atYEnd)
-        verify(transcriptText.text.endsWith("latest words"))
-        root.liveTranscriptText = "new partial"
-        tryCompare(transcriptViewport, "contentY", 0)
-        compare(transcriptViewport.height, 16)
-    }}
     function test_samples_and_reset() {{
         compare(findChild(waveform, "inputBar0").height, 2)
         waveform.levels = [0, 0.5, 1]

@@ -238,6 +238,13 @@ def test_review_public_payload_discards_unrecognized_fields_and_never_shortens_r
 
 
 def test_worker_thread_review_reaches_waiting_activity_subscriber(link_graph):
+    async def next_review(queue, first=None):
+        # The stream also carries the Review's runtime operation entries.
+        event = await asyncio.wait_for(first, 2) if first else await asyncio.wait_for(queue.get(), 2)
+        while "review" not in event:
+            event = await asyncio.wait_for(queue.get(), 2)
+        return event
+
     async def run():
         loop = asyncio.get_running_loop()
         loop.set_debug(True)  # Cross-thread asyncio.Queue.set_result would fail here.
@@ -245,11 +252,11 @@ def test_worker_thread_review_reaches_waiting_activity_subscriber(link_graph):
         waiter = asyncio.create_task(queue.get())
         await asyncio.sleep(0)
         name = await asyncio.to_thread(stage)
-        pending = await asyncio.wait_for(waiter, 2)
+        pending = await next_review(queue, waiter)
         assert pending["review"]["proposal_id"] == name
         assert pending["review"]["state"] == "pending"
         await asyncio.to_thread(review.approve, name)
-        approved = await asyncio.wait_for(queue.get(), 2)
+        approved = await next_review(queue)
         assert approved["review"]["state"] == "approved"
         assert approved["review"]["links"] == [expected_edge()]
         activity.unsubscribe(queue)
@@ -262,15 +269,24 @@ def test_existing_activity_socket_delivers_and_replays_review_changes(link_graph
     from fastapi.testclient import TestClient
 
     api = importlib.import_module("obsidience.harness.interfaces.api.app")
-    client = TestClient(api.app)
+    client = TestClient(api.app, headers={"host": f"{CONFIG.host}:{CONFIG.port}"})
+
+    def next_review(socket):
+        # Runtime operation entries share the socket with Review changes.
+        event = socket.receive_json()
+        while "review" not in event:
+            event = socket.receive_json()
+        return event
+
     with client.websocket_connect("/ws/activity") as socket:
-        assert socket.receive_json() == {"type": "snapshot", "entries": []}
+        snapshot = socket.receive_json()
+        assert snapshot["type"] == "snapshot" and snapshot["entries"] == []
         name = stage()
-        pending = socket.receive_json()
+        pending = next_review(socket)
         assert pending["type"] == "activity"
         assert pending["review"]["state"] == "pending"
         review.approve(name)
-        approved = socket.receive_json()
+        approved = next_review(socket)
         assert approved["type"] == "activity"
         assert approved["review"]["links"] == [expected_edge()]
     with client.websocket_connect("/ws/activity") as socket:

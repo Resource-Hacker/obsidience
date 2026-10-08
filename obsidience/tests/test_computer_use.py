@@ -16,8 +16,21 @@ from obsidience.harness.computer.applications import canonical_application_id, a
 from obsidience.harness.computer.capture import ScreenCapture, ScreenCaptureError
 from obsidience.harness.execution.executor import resolve_spine
 from obsidience.harness.capabilities.registry import REGISTRY, resolve
-from obsidience.harness.host.scene import EVENT_SCHEMA, ShellSceneCache
+from obsidience.harness.host.scene import EVENT_SCHEMA, SceneLocked, ShellSceneCache
 from obsidience.harness.knowledge.vault import iter_notes, resolver
+
+
+@pytest.fixture(autouse=True)
+def native_scene_matches_cache(monkeypatch):
+    """The production ShellSceneClient.refresh reads native geometry from the live
+    Shell; these tests install a bare ShellSceneCache, whose native state is the cache."""
+    def refresh(self, cancel_event=None):
+        snapshot = self.snapshot()
+        if snapshot.workspace.get("session_locked") is True:
+            raise SceneLocked("shell scene is locked")
+        return snapshot
+
+    monkeypatch.setattr(ShellSceneCache, "refresh", refresh, raising=False)
 
 
 def test_application_names_share_the_central_registry() -> None:
@@ -25,26 +38,6 @@ def test_application_names_share_the_central_registry() -> None:
     assert canonical_application_id("teamfight_tactics") == "teamfight_tactics"
     assert application_window_needles("TFT") == application_window_needles(
         "teamfight_tactics"
-    )
-
-
-def test_computer_use_spine_is_generic_and_closed() -> None:
-    res = resolver()
-    task = res.resolve("Tasks/executive/operate")
-    assert task is not None and task.title == "Computer Use"
-    spine = resolve_spine(task, res)
-    assert "error" not in spine
-    assert {"application.launch", "computer.act", "computer.observe", "task.complete",
-            "task.create", "window.activate", "window.place"} <= set(spine["tools"])
-    assert all(skill.meta.get("tool") for skill in spine["skills"])
-    from obsidience.harness.execution.executor import _operation_spine
-    launch = _operation_spine(spine, {"computer_outcome": "launch"})
-    assert set(launch["tools"]) == {"application.launch", "task.complete"}
-    assert {
-        "computer.act", "computer.observe", "window.activate", "window.place",
-    } <= set(REGISTRY)
-    assert not any(
-        "play" in note.ref.casefold() and note.kind == "task" for note in iter_notes()
     )
 
 
@@ -58,7 +51,8 @@ def test_computer_contracts_resolve_canonical_tool_skill_pairs() -> None:
 
 
 NOW = 1_000_000_000_000
-ARGS = {"application": "TFT", "action": "click", "target": "Play button",
+# scope is a required argument now that no controller selector binds computer_scope.
+ARGS = {"scope": "input", "application": "TFT", "action": "click", "target": "Play button",
         "point": {"x": 500, "y": 250}, "postcondition": "game_started"}
 
 
@@ -141,7 +135,8 @@ def pipeline(monkeypatch):
             state.receipt_hook()
         return state.receipt
 
-    def activate(args):
+    def activate(args, *, observed_target=None):
+        assert observed_target is not None  # Activation binds the exact observed target.
         state.activations.append(args)
         if state.activation_hook:
             state.activation_hook()
@@ -211,17 +206,18 @@ def test_normalized_points_map_inside_native_image_extent(pipeline, point):
 
 def test_state_outcome_allows_three_distinct_freshly_observed_steps(pipeline, monkeypatch):
     pipeline.context["params"] = {"computer_outcome": "action", "computer_scope": "state"}
+    state_args = ARGS | {"scope": "state"}
     for step in range(3):
         now = NOW + step * 2_000_000_000
         monkeypatch.setattr(computer.time, "time_ns", lambda: now)
         lease = pipeline.bind()
         lease["capture"] = replace(lease["capture"], captured_at_unix_ns=now - 100_000_000)
         pipeline.post_timestamp = now + 1_000_000
-        result = act.execute(ARGS | {"target": f"Step {step + 1}"}, pipeline.context)
+        result = act.execute(state_args | {"target": f"Step {step + 1}"}, pipeline.context)
         assert result["status"] == "completed"
         assert "_computer_observation_lease" not in pipeline.context
     pipeline.bind()
-    result = act.execute(ARGS, pipeline.context)
+    result = act.execute(state_args, pipeline.context)
     assert result["status"] == "failed"
     assert len(pipeline.commands) == 3
 

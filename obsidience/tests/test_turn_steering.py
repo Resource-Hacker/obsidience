@@ -75,6 +75,12 @@ def scene(monkeypatch, isolated_task_ledger, tmp_path):
     monkeypatch.setattr(executor.model_runtime, "lease", lease)
     monkeypatch.setattr(executor.llm, "chat", chat)
     monkeypatch.setattr(executor, "execute_capability", execute)
+
+    async def execute_async(name, args, ctx):
+        # The executor dispatches through the async registry entry; never reach real Tools.
+        return await asyncio.to_thread(execute, name, args, ctx)
+
+    monkeypatch.setattr(executor, "execute_capability_async", execute_async)
     monkeypatch.setattr(executor.action_trace, "emit", lambda *args: state.events.append(args))
 
     async def initialize():
@@ -335,7 +341,6 @@ def test_task_closing_during_append_saves_message_but_never_queues_it(scene, end
 ])
 def test_history_marks_only_exact_applied_clarifications_with_a_completed_reply(scene, change):
     from obsidience.harness.conversation.evidence import historical_steered_turns
-    from obsidience.harness.conversation.observations import project_immediate_observations
 
     async def record():
         owner = await scene.initialize()
@@ -361,13 +366,6 @@ def test_history_marks_only_exact_applied_clarifications_with_a_completed_reply(
     assert historical_steered_turns(scene.store, conversation_id=scene.store.conversation_id) == expected
     assert historical_steered_turns(scene.store, conversation_id=scene.store.conversation_id,
                                     before_sequence=clarification["sequence"]) == set()
-    projection = project_immediate_observations(scene.store, conversation_id=scene.store.conversation_id,
-                                                materialize=False)
-    following = projection["body"].split("User: Keep the current size\n", 1)[1]
-    if expected:
-        assert following.startswith("[Owner clarification applied within the same completed Task")
-    else:
-        assert following.startswith("[No successful Executive reply recorded; this request remains unresolved.]")
 
 
 def test_full_run_persists_applied_ids_with_the_original_activation(execution, monkeypatch):

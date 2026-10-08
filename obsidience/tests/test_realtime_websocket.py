@@ -57,7 +57,8 @@ def test_idle_disconnect_releases_event_subscription(queued_event, name, path, d
             delivered = {"type": "entry", "entry": event, "cursor": 1}
         else:
             event = {"phase": "query_started", "refs": ["Tasks/query"]}
-            snapshot = {"type": "snapshot", "entries": []}
+            snapshot = {"type": "snapshot", "entries": [], "playback": {"run_id": "", "status": "idle"},
+                        "operations": []}
             delivered = {"type": "activity", **event}
 
         def subscribe():
@@ -71,6 +72,7 @@ def test_idle_disconnect_releases_event_subscription(queued_event, name, path, d
             subscribe=subscribe, unsubscribe=subscribers.remove,
             snapshot=lambda: {"phase": "off"}, history=lambda: [],
             replay=lambda _after=None: snapshot,
+            playback=lambda: {"run_id": "", "status": "idle"}, operations=lambda: [],
         ), name)
 
         async def endpoint(ws):

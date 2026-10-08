@@ -18,7 +18,12 @@ def test_receipts_commit_before_dispatch_and_before_next_decision(execution, mon
         receipt = executor.INDEX.tool_run_receipts(ctx['run_id'])['calls'][-1]
         assert receipt['status'] == 'started'
         assert receipt['tool'] == name
-        return real_tool(name, args, ctx)
+        result = real_tool(name, args, ctx)
+        if name == 'window.place':
+            # Completion requires a verified placement witness.
+            result.update(target={'kind': 'application', 'name': 'microsoft_edge'},
+                          destination={'surface': 'usb-c'}, observed={'surface': 'usb-c'})
+        return result
 
     async def model(messages, **_kwargs):
         requests.append(json.loads(json.dumps(messages)))

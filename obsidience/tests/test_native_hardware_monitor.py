@@ -166,8 +166,16 @@ def test_native_monitor_sections_nulls_and_hidden_window_stop_sampling(tmp_path,
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     visual = json.dumps((FOLDER.parents[1] / "components/visual").resolve().as_uri())
+    # The real ShellCommandToken singleton needs Quickshell; plain qml6 gets an
+    # inert token, and this fixture keeps the Shell socket inactive anyway.
+    api = tmp_path / "api"
+    api.mkdir()
+    (api / "qmldir").write_text("singleton ShellCommandToken 1.0 ShellCommandToken.qml\n")
+    (api / "ShellCommandToken.qml").write_text(
+        'pragma Singleton\nimport QtQml\nQtObject { readonly property string query: "" }\n')
     for source in FOLDER.glob("*.qml"):
         text = source.read_text().replace('import "../../components/visual"', "import " + visual)
+        text = text.replace('import "../../api"', "import " + json.dumps(api.as_uri()))
         text = text.replace('active: root.visible', 'active: false')
         (tmp_path / source.name).write_text(text)
     fixture = r"""

@@ -119,9 +119,15 @@ def test_completed_work_wakes_the_existing_scheduler_without_waiting_for_its_tic
     import asyncio
     from obsidience.harness.knowledge import source
     from obsidience.harness.execution import refinement
-    monkeypatch.setattr(source, 'dispatch_pending_source_events', lambda: None)
+    monkeypatch.setattr(source, 'dispatch_pending_source_events', lambda: {'issues': []})
     monkeypatch.setattr(scheduler.INDEX, 'sync', lambda: None)
-    monkeypatch.setattr(scheduler, 'reconcile_check_health', lambda: None)
+    # Loop owners that read live Source, Hindsight or model servers stay inert.
+    async def inert():
+        return None
+    from obsidience.harness.memory.hindsight import MEMORY
+    monkeypatch.setattr(scheduler, '_refresh_source_health', inert)
+    monkeypatch.setattr(MEMORY, 'check_health', inert)
+    monkeypatch.setattr(scheduler.model_runtime.RUNTIME, 'refresh_memory_plans', inert)
     monkeypatch.setattr(refinement, 'reconcile_candidates', lambda: None)
     monkeypatch.setattr(scheduler, '_claim_ready_continuation', lambda: None)
     monkeypatch.setattr(scheduler.CONFIG, 'tick_seconds', 60)

@@ -34,17 +34,17 @@ def test_each_reader_slot_is_exact_and_docked_occupants_swap():
 assert.equal(location('knowledge'),'left:0');
 assert.equal(location('source'),'right:0');
 assert(dock('knowledge','left','bottom'));
-assert(dock('feeds','right','bottom'));
+assert(dock('source','right','bottom'));
 assert.equal(location('knowledge'),'left:1');
-assert.equal(location('feeds'),'right:1');
+assert.equal(location('source'),'right:1');
 assert(state.commitCollapsed(state.revision,'source',true));
-assert(dock('knowledge','right','top'));
-assert.equal(location('knowledge'),'right:0');
-assert.equal(location('source'),'left:1');
+assert(dock('knowledge','right','bottom'));
+assert.equal(location('knowledge'),'right:1');
+assert.equal(location('source'),'left:1');  // Docked occupants swap slots.
 assert.equal(state.modules.source.collapsed,true);
-assert(dock('feeds','left','top'));
-assert.equal(location('feeds'),'left:0');
-assert.equal(state.slotState('reader','right',1),null);
+assert(dock('source','left','top'));
+assert.equal(location('source'),'left:0');
+assert.equal(state.slotState('reader','right',0),null);
 assert(distinct());
 assert(Object.values(state.modules).every(m=>m.order===0||m.order===1));
 assert.equal(writes.length,state.revision);
@@ -54,29 +54,29 @@ assert.equal(writes.length,state.revision);
 def test_floating_incoming_keeps_displaced_module_and_its_collapse_state():
     run_layout("""
 assert(state.commitCollapsed(state.revision,'knowledge',true));
-assert(dock('feeds','left','top'));
-assert.equal(location('feeds'),'left:0');
+assert(state.commitFloat(state.revision,'source'));
+assert(dock('source','left','top'));
+assert.equal(location('source'),'left:0');
 assert.equal(location('knowledge'),'left:1');
 assert.equal(state.modules.knowledge.collapsed,true);
-assert.equal(location('source'),'right:0');
 assert(distinct());
-assert.equal(Object.keys(state.modules).length,3);
+assert.equal(Object.keys(state.modules).length,2);
 assert.equal(state.modulesFor('reader','left',true)[0].pane_id,'knowledge');
 """)
 
 
 def test_collapse_expand_and_float_preserve_sibling_slots():
     run_layout("""
-assert(dock('feeds','left','bottom'));
-const prior=JSON.stringify(state.modules.feeds);
+assert(dock('source','left','bottom'));
+const prior=JSON.stringify(state.modules.source);
 assert(state.commitCollapsed(state.revision,'knowledge',true));
-assert.equal(JSON.stringify(state.modules.feeds),prior);
+assert.equal(JSON.stringify(state.modules.source),prior);
 assert(state.commitCollapsed(state.revision,'knowledge',false));
-assert.equal(JSON.stringify(state.modules.feeds),prior);
+assert.equal(JSON.stringify(state.modules.source),prior);
 assert(state.commitFloat(state.revision,'knowledge'));
-assert.equal(JSON.stringify(state.modules.feeds),prior);
+assert.equal(JSON.stringify(state.modules.source),prior);
 assert.equal(state.slotState('reader','left',0),null);
-assert.equal(state.slotState('reader','left',1).pane_id,'feeds');
+assert.equal(state.slotState('reader','left',1).pane_id,'source');
 """)
 
 
@@ -98,12 +98,11 @@ def test_legacy_order_migrates_once_without_losing_or_reordering_modules():
     run_layout("""
 const module=(pane,side,order,collapsed=false)=>({pane_id:pane,host_pane_id:'reader',side,order,collapsed});
 assert(state.applyRecord({schema:state.schema,revision:4,modules:[
- module('knowledge','left',1),module('source','left',2),module('feeds','right',1,true)
+ module('knowledge','left',1),module('source','left',2,true)
 ]}));
 assert.equal(location('knowledge'),'left:0');
 assert.equal(location('source'),'left:1');
-assert.equal(location('feeds'),'right:1');
-assert.equal(state.modules.feeds.collapsed,true);
+assert.equal(state.modules.source.collapsed,true);
 const normalized=JSON.stringify(state.record());
 assert(state.applyRecord(JSON.parse(normalized)));
 assert.equal(JSON.stringify(state.record()),normalized);
@@ -113,7 +112,8 @@ assert.equal(JSON.stringify(state.record()),normalized);
 assert(state.applyRecord({schema:state.schema,revision:5,modules:[
  module('knowledge','left',-3),module('source','left',-2),module('feeds','left',-1)
 ]}));
-assert.equal(Object.keys(state.modules).length,3);assert(distinct());
+// A saved record from before the Feed retirement drops only that module.
+assert.equal(Object.keys(state.modules).length,2);assert(distinct());
 assert.equal(location('knowledge'),'left:0');assert.equal(location('source'),'left:1');
-assert.equal(location('feeds'),'right:0');
+assert.equal(state.modules.feeds,undefined);
 """)

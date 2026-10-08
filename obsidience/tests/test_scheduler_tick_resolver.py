@@ -73,6 +73,8 @@ def test_tick_uses_supplied_snapshot_and_rechecks_resources(ledger, monkeypatch,
 
 @pytest.mark.parametrize("gate", ["realtime", "foreground"])
 def test_tick_reuse_preserves_attested_delegation_and_pending_fifo(ledger, monkeypatch, gate):
+    # Model admission measures live GPU memory; this test covers FIFO reuse only.
+    monkeypatch.setattr(scheduler, "_resource_error", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(scheduler, "_foreground_admissions", int(gate == "foreground"))
     monkeypatch.setattr(RUNTIME, "scheduler_paused", lambda: gate == "realtime")
     task, _receipt = delegate(ledger)

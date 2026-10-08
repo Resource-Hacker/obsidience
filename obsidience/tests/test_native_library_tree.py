@@ -97,21 +97,19 @@ assert.deepEqual(snapshot().tree, []); // No invented shelves when navigation is
     assert result.returncode == 0, result.stderr
 
 
-def test_canonical_research_articles_project_only_four_real_library_tasks(
+def test_canonical_research_articles_project_only_two_real_library_tasks(
     tmp_path, monkeypatch, isolated_task_ledger,
 ):
     from obsidience.harness.config import CONFIG
 
     canonical = Path(__file__).parents[1] / "vault/Tasks/research"
+    # Darwin Distill was archived with the Feed retirement (2026-10-06); Model
+    # stays in this folder but belongs to Heimdall's Harness taxonomy.
     expected = [
         ("Tasks/research/question", "Question"),
         ("Tasks/research/learn", "Learn"),
-        ("Tasks/research/distill", "Distill"),
-        ("Tasks/research/model", "Model"),
     ]
-    assert {path.stem for path in canonical.glob("*.md")} == {
-        ref.rsplit("/", 1)[-1] for ref, _title in expected
-    }
+    assert {path.stem for path in canonical.glob("*.md")} == {"question", "learn", "model"}
     monkeypatch.setattr(CONFIG, "vault_dir", tmp_path / "vault")
     destination = CONFIG.vault_dir / "Tasks/research"
     destination.mkdir(parents=True)

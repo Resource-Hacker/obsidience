@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 import pytest
 
+from obsidience.harness.config import CONFIG
 from obsidience.harness.host import inventory, monitor
 
 
@@ -424,7 +425,7 @@ def test_monitor_route_is_get_only_and_does_not_read_or_mutate_configuration(sam
     monkeypatch.setattr(api.model_runtime, "hardware_catalog", lambda: pytest.fail("Monitor must not reconcile model runtime"))
     monkeypatch.setattr(api.model_runtime, "settings", lambda: pytest.fail("Monitor must not access settings"))
     monkeypatch.setattr(api.media_runtime, "interface_catalog", lambda: pytest.fail("Monitor must not query media configuration"))
-    client = TestClient(api.app)
+    client = TestClient(api.app, base_url=f"http://{CONFIG.host}:{CONFIG.port}")
     result = client.get("/api/hardware/monitor")
     assert result.status_code == 200
     assert result.json()["schema"] == "obsidience.hardware-monitor.v1"

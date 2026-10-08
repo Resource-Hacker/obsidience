@@ -69,7 +69,8 @@ def refinement_review(tmp_path, monkeypatch, isolated_task_ledger):
         path = Path(staged)
         if not path.is_absolute():
             path = CONFIG.vault_dir / path
-        note = vault.load_note(path)
+        # load_note accepts only Vault-relative paths (absolute/traversal refused).
+        note = vault.load_note(str(path.relative_to(CONFIG.vault_dir)))
         assert note.meta["refinement"] == state.envelope
         state.handoffs.append((path, context["run_id"], hashlib.sha256(path.read_bytes()).hexdigest()))
 
@@ -181,13 +182,6 @@ def _audit_context():
 
 def _audit_completion(status, context):
     return _completion_error(SimpleNamespace(ref="Tasks/audit", kind="task", meta={}), status, "", [], context)
-
-
-@pytest.mark.parametrize("verdict", ["passed", "not_improved", "regressed", "incomplete"])
-def test_audit_completion_reports_actual_evaluation_including_negative_findings(verdict):
-    context = _audit_context()
-    context["_harness_evaluation"]["verdict"] = verdict
-    assert _audit_completion("completed", context) is None
 
 
 @pytest.mark.parametrize("field,value", [

@@ -277,7 +277,9 @@ def test_article_batch_one_snapshot_preserves_backlinks_and_partial_failure(arti
     assert len(calls) == 1
     assert len(rows) == 10
     assert rows[0]["ref"] == "Knowledge/0"
-    assert rows[-1] == {"ref": "Knowledge/absent", "ok": False, "result": "Note not found: Knowledge/absent"}
+    assert rows[-1] == {"ref": "Knowledge/absent", "ok": False, "result": (
+        "Note not found in this Agent's readable scope: Knowledge/absent. "
+        "Links in other Articles do not grant access to their targets.")}
     assert sum(len(page(row["result"])[1]) for row in rows if row["ok"]) == 72000
     receipt = context["_article_reads"]["Knowledge/0"]
     assert receipt["complete"] is False

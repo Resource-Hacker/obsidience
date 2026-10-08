@@ -75,6 +75,9 @@ def run(monkeypatch):
     monkeypatch.setattr(executor.model_runtime, "lease", lease)
     monkeypatch.setattr(executor.llm, "chat", chat)
     monkeypatch.setattr(executor, "execute_capability", execute)
+    # The executor dispatches through the async registry entry; never reach real Tools.
+    monkeypatch.setattr(executor, "execute_capability_async",
+                        lambda name, args, ctx: asyncio.to_thread(execute, name, args, ctx))
     monkeypatch.setattr(executor.action_trace, "emit", lambda *args: state.events.append(args))
 
     async def execute_session(actions):
@@ -125,8 +128,9 @@ def test_exact_next_response_receives_one_matching_private_lease_and_no_public_p
     assert_private_output_absent(result)
 
 
+# A failed window.activate now ends effects (only task.complete remains), so it
+# no longer exercises lease consumption by a later computer.act.
 @pytest.mark.parametrize("intervening", [
-    {"tool": "window.activate", "args": {}},
     {"tool": "not.authorized", "args": {}},
     {"tool": "task.complete", "args": {"status": "reject"}},
     '{"tool":"computer.act","args":{"point":{"x":731.125,"y":283.875}',

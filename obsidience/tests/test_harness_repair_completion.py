@@ -31,6 +31,9 @@ def finish(context, **args):
 @pytest.fixture
 def health_inputs(monkeypatch, isolated_task_ledger):
     inputs = NS(tasks=[], issues=[])
+    from obsidience.harness.memory.hindsight import MEMORY
+    # harness.status now includes Hindsight health; no provider runs in tests.
+    monkeypatch.setattr(MEMORY, "status", lambda: {"status": "disabled", "provider": "hindsight"})
     monkeypatch.setattr(vault, "iter_notes", lambda **_kwargs: inputs.tasks)
     monkeypatch.setattr(review, "list_proposals", lambda: [])
     monkeypatch.setattr(isolated_task_ledger, "graph", lambda: {"nodes": [], "links": []})
@@ -87,13 +90,13 @@ def test_repair_must_apply_eligible_operation_then_refresh_before_completion(occ
     assert "eligible recovery operation" in finish(context)["error"]
     saved = {**context, "_harness_snapshot": deepcopy(context["_harness_snapshot"])}
     args = {"task": note.ref, "run_id": note.meta["last_run"]}
-    result = json.loads(repair_capability.execute(args, context))
+    result = json.loads(asyncio.run(repair_capability.execute(args, context)))
     assert result["status"] == "requeued"
     assert "_harness_snapshot" not in context
     assert "current harness.status snapshot" in finish(context)["error"]
 
     before = ledger.task_runtime(note.ref)
-    duplicate = json.loads(repair_capability.execute(args, saved))
+    duplicate = json.loads(asyncio.run(repair_capability.execute(args, saved)))
     assert duplicate["status"] == "already_processed"
     assert "_harness_snapshot" not in saved
     assert ledger.task_runtime(note.ref) == before
@@ -118,7 +121,7 @@ def test_eligible_attempt_that_loses_revalidation_consumes_snapshot(occurrence, 
         raise ValueError("The occurrence changed during the attempt.")
 
     monkeypatch.setattr(scheduler, "retry_failed_occurrence", late_block)
-    result = json.loads(repair_capability.execute({"task": note.ref, "run_id": note.meta["last_run"]}, context))
+    result = json.loads(asyncio.run(repair_capability.execute({"task": note.ref, "run_id": note.meta["last_run"]}, context)))
     assert result["status"] == "blocked" and "changed" in result["reason"]
     assert "_harness_snapshot" not in context
     assert finish(context)["accepted"] is False
@@ -152,7 +155,7 @@ def test_pass_limit_defers_eligible_work_only_after_eight_attempts_and_fresh_sta
         raise ValueError("The eighth attempt lost its current precondition.")
 
     monkeypatch.setattr(scheduler, "retry_failed_occurrence", late_block)
-    observation = repair_capability.execute(args, context)
+    observation = asyncio.run(repair_capability.execute(args, context))
     assert "eighth attempt" in json.loads(observation)["reason"]
     # The executor appends the actual Tool result after dispatch returns.
     context["trace"].append({"tool": "harness.repair", "args": args, "obs": observation, "sig": "eighth"})
@@ -173,16 +176,20 @@ def test_pass_limit_defers_eligible_work_only_after_eight_attempts_and_fresh_sta
     assert len(ledger.runs()) == 1
 
 
-def test_unsupported_plan_row_does_not_require_reinspection(occurrence, health_inputs):
+def test_unsupported_plan_row_attempt_consumes_inspection(occurrence, health_inputs):
     note, _ledger = occurrence  # No durable dispatch coverage: this row cannot be retried.
     health_inputs.tasks = [note]
     context = repair_context()
     health.execute({}, context)
     snapshot = deepcopy(context["_harness_snapshot"])
     assert snapshot["repair_plan"][0]["operation"] == "blocked"
-    result = json.loads(repair_capability.execute({"task": note.ref, "run_id": note.meta["last_run"]}, context))
+    result = json.loads(asyncio.run(repair_capability.execute({"task": note.ref, "run_id": note.meta["last_run"]}, context)))
     assert result["status"] == "blocked"
-    assert context["_harness_snapshot"] == snapshot
+    # Every attempted recovery consumes its inspection; completion must inspect again.
+    assert "_harness_snapshot" not in context
+    assert finish(context)["accepted"] is False
+    health.execute({}, context)
+    assert context["_harness_snapshot"]["repair_plan"] == snapshot["repair_plan"]
     assert finish(context)["accepted"] is True
 
 
@@ -193,9 +200,11 @@ def test_repair_completion_guard_does_not_gate_other_tasks(ref):
     assert finish(context)["accepted"] is True
 
 
+# Check (the only Task that persisted controller health) was retired 2026-09-14;
+# no Task persists harness_health, and model-supplied values never enter the trace.
 @pytest.mark.parametrize("ref,observed,expected", [
-    ("Tasks/check", "healthy", {"version": 1, "status": "healthy"}),
-    ("Tasks/check", "degraded", {"version": 1, "status": "degraded"}),
+    ("Tasks/check", "healthy", None),
+    ("Tasks/check", "degraded", None),
     ("Tasks/check", None, None),
     ("Tasks/query", "degraded", None),
     ("Tasks/repair", "degraded", None),

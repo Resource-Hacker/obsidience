@@ -226,6 +226,8 @@ def test_scheduler_registers_only_autonomous_specialist_for_interruption(ledger,
 
     monkeypatch.setattr(RUNTIME, "scheduler_paused", lambda: False)
     monkeypatch.setattr(scheduler, "_autonomous_interruptions", {})
+    # Model admission measures live GPU memory; this test covers interruption only.
+    monkeypatch.setattr(scheduler, "_resource_error", lambda *_args, **_kwargs: None)
     calls = []
 
     async def run(note, **kwargs):

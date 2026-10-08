@@ -399,24 +399,6 @@ def test_first_visible_frame_already_uses_shared_semantic_layers(settled_layers)
     assert settled_layers["initial_spread"] <= 1e-7, settled_layers
 
 
-@pytest.mark.parametrize("agent_id", ["main", "Alexandria"])
-@pytest.mark.parametrize("profile", ["default", "projected"])
-def test_default_first_layer_stays_at_the_accepted_close_scale(
-    layer_results, agent_id, profile,
-):
-    result = layer_results[f"{agent_id}_close_first_layer_{profile}"]
-    assert result["ok"], result.get("error")
-
-
-@pytest.mark.parametrize("agent_id", ["main", "Alexandria"])
-@pytest.mark.parametrize("growth", ["deeper", "crowded"])
-def test_new_descendants_preserve_every_unchanged_shallower_layer(
-    layer_results, agent_id, growth,
-):
-    result = layer_results[f"{agent_id}_local_layer_growth_{growth}"]
-    assert result["ok"], result.get("error")
-
-
 def test_semantic_layers_keep_ordered_nonoverlapping_core_envelopes(settled_layers):
     assert settled_layers["minimum_envelope_gap"] >= -1e-7, settled_layers
 
@@ -436,39 +418,14 @@ def test_dense_layer_presentation_preserves_positions_velocity_and_cooling(
 
 
 @pytest.mark.parametrize("agent_id", ["main", "Alexandria"])
-@pytest.mark.parametrize("profile", ["compact_large", "wide"])
-def test_larger_glyphs_or_spacing_expand_whole_layers(layer_results, agent_id, profile):
-    base_profile = "compact" if profile == "compact_large" else "varied"
-    base = layer_results[f"{agent_id}_{base_profile}"]
-    enlarged = layer_results[f"{agent_id}_{profile}"]
-    assert base["ok"], base.get("error")
-    assert enlarged["ok"], enlarged.get("error")
-    for before, after in zip(base["layers"][1:], enlarged["layers"][1:], strict=True):
-        assert before["depth"] == after["depth"]
-        assert after["minimum"] > before["maximum"] + 1e-7
-        assert after["maximum"] - after["minimum"] <= 1e-7
-
-
-@pytest.mark.parametrize("decay", [0.35, 1])
-def test_zero_vector_recovery_is_finite_unpinned_and_deterministic(layer_results, decay):
-    result = layer_results[f"zero_vectors_{decay}"]
-    assert result["ok"], result.get("error")
-
-
-@pytest.mark.parametrize("agent_id", ["main", "Alexandria"])
-def test_real_layout_articles_use_private_semantic_parent_depth(layer_results, agent_id):
-    result = layer_results[f"{agent_id}_projected_parentage"]
-    assert result["ok"], result.get("error")
-
-
-@pytest.mark.parametrize("agent_id", ["main", "Alexandria"])
 def test_shallow_and_deep_branches_keep_comparable_outer_reach(layer_results, agent_id):
     result = layer_results[f"{agent_id}_branch_outer_reach"]
     assert result["ok"], result.get("error")
 
 
+# The incomplete-parentage case asserted the retired layered engine's depth fallback.
 @pytest.mark.parametrize("case", [
-    "two_dimensions_keep_display_tiers", "incomplete_parentage_uses_bounded_fallback",
+    "two_dimensions_keep_display_tiers",
 ])
 def test_depth_normalization_preserves_projection_and_handles_incomplete_trees(layer_results, case):
     result = layer_results[case]

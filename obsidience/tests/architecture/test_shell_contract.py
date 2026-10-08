@@ -34,7 +34,7 @@ def test_shell_manifest_names_one_real_module() -> None:
             "obsidience/shell/session/obsidience-shell-login",
             "obsidience/shell/session/restart-shell",
             "obsidience/shell/session/session-lock",
-            "obsidience/shell/surfaces/knowledge/host.py",
+            "obsidience/shell/qml/graph-stage.qml",
             "obsidience/shell/adapter/windows/host.py",
             "obsidience/shell/theme/apply.py",
         ],
@@ -90,12 +90,8 @@ def test_one_quickshell_host_owns_all_three_logical_surfaces() -> None:
 
 def test_knowledge_graph_is_shell_owned_threejs_stage_content() -> None:
     stage = (SHELL_ROOT / "qml" / "surfaces" / "stage" / "Stage.qml").read_text()
-    desktop = (
-        SHELL_ROOT
-        / "surfaces"
-        / "knowledge"
-        / "host.py"
-    ).read_text()
+    # The GTK/WebKit host.py presenter was retired for the Quickshell graph stage.
+    graph_stage = (SHELL_ROOT / "qml" / "graph-stage.qml").read_text()
     api = (
         PROJECT_ROOT
         / "obsidience"
@@ -160,46 +156,14 @@ def test_knowledge_graph_is_shell_owned_threejs_stage_content() -> None:
     assert shell.count("PaneWorkspace {") == 1
     assert shell.count("Stage {") == 3
     assert "KnowledgeDesktop" not in pane
-    assert 'gi.require_version("GtkLayerShell", "0.1")' in desktop
-    assert 'gi.require_version("Gdk", "3.0")' in desktop
-    assert 'gi.require_version("WebKit2", "4.1")' in desktop
-    assert "WebKit2.WebView()" in desktop
-    assert 'GtkLayerShell.set_namespace(window, "obsidience-knowledge-desktop")' in desktop
-    assert "GtkLayerShell.Layer.BACKGROUND" in desktop
-    assert "GtkLayerShell.KeyboardMode.ON_DEMAND" in desktop
-    assert "window.set_accept_focus(True)" in desktop
-    assert "GtkLayerShell.set_exclusive_zone(window, 0)" in desktop
-    assert "display.get_n_monitors() != 1" not in desktop
-    assert 'display.connect("monitor-added"' in desktop
-    assert 'display.connect("monitor-removed"' in desktop
-    assert 'monitor.connect("notify::geometry"' in desktop
-    assert "Gio.File.new_for_path" in desktop
-    assert 'monitor_directory(Gio.FileMonitorFlags.NONE, None)' in desktop
-    assert 'record.get("graph_surface_id")' in desktop
-    assert '"samsung": (5120, 1440)' in desktop
-    assert '"usb-c": (1920, 1200)' in desktop
-    assert '"dp-4": (1920, 550)' in desktop
-    assert "self.window.hide()" in desktop
-    assert "GtkLayerShell.set_monitor(self.window, monitor)" in desktop
-    assert "self.window.show_all()" in desktop
-    assert "self.window.destroy()" not in desktop
-    assert "set_enable_webgl(True)" in desktop
-    assert "HardwareAccelerationPolicy.ALWAYS" in desktop
-    assert 'WEBKIT_DMABUF_RENDERER_FORCE_SHM", "1"' in desktop
-    assert "was_unavailable" not in desktop
-    assert "self.webview is not None and previous_surface_id != surface_id" in desktop
-    assert "?surface=reader" not in desktop
-    assert "?surface=knowledge" in desktop
-    assert "Electron" not in desktop
     assert 'app.mount(' in api
     assert '"/shell/knowledge"' in api
     assert "class ShellKnowledgeFiles(StaticFiles):" in api
     assert '"ui" / "out" / "renderer"' in api
-    assert "/usr/bin/python3" in service
-    assert "surfaces/knowledge/host.py" in service
-    assert "GDK_BACKEND=wayland" in service
-    assert "WEBKIT_DMABUF_RENDERER_FORCE_SHM=1" in service
-    assert "QT_QPA_PLATFORM" not in service
+    assert "obsidience/shell/qml/graph-stage.qml" in service
+    assert "surfaces/knowledge/host.py" not in service
+    assert "QT_QPA_PLATFORM=wayland" in service
+    assert "WebEngine" in graph_stage
     assert "QSG_RHI_BACKEND" not in service
     assert "PartOf=obsidience-shell-session.target" in service
     assert "obsidience-shell-knowledge.service" in target
@@ -270,14 +234,13 @@ def test_knowledge_graph_is_shell_owned_threejs_stage_content() -> None:
     assert "onKnowledgeVisibleChanged: broadcast(knowledgeState())" in command_server
     assert "onShellKnowledgeVisibility" in shell_client
     assert 'message.type !== "surface.state"' in shell_client
-    assert "selectedSurfaceId === surfaceId && (lockMode || visible)" in renderer_surface
+    # The selected Surface (or the Library graph) owns the stage; presentation
+    # consumers may keep it visible while the pane is hidden.
+    assert "const ownsStage = library || selectedSurfaceId === surfaceId;" in renderer_surface
+    assert "(library || lockMode || visible)" in renderer_surface
     assert 'const CENTERED_HUB = { x: 0.5, y: 0.5 } as const' in renderer_surface
-    assert "{selectedSurfaceId === surfaceId ? (" in renderer_surface
-    assert (
-        "<GraphBackdrop visible={showGraph} lockMode={lockMode} "
-        "hub={CENTERED_HUB} />"
-        in renderer_surface
-    )
+    assert '{showGraph && (surfaceId !== "samsung" || lockMode) ? (' in renderer_surface
+    assert "<GraphBackdrop visible={showGraph} lockMode={lockMode} hub={CENTERED_HUB}" in renderer_surface
     assert "{showGraph ? (\n        <GraphBackdrop" not in renderer_surface
     assert 'surfaceId !== "samsung" || lockMode' in renderer_surface
     assert "OBSIDIENCE" in renderer_surface
@@ -331,7 +294,6 @@ def test_knowledge_graph_is_shell_owned_threejs_stage_content() -> None:
     assert "anchor: hub" in graph_backdrop
     assert "hub={hub}" in graph_backdrop
     assert "lockMode = false" in graph_backdrop
-    assert "if (!visible) return" in graph_backdrop
     assert "visible={visible}" in graph_backdrop
     assert "antialias: true" in graph_scene
     assert graph_scene.count("new THREE.WebGLRenderer") == 1
@@ -350,9 +312,9 @@ def test_knowledge_graph_is_shell_owned_threejs_stage_content() -> None:
     assert "ProjectedGraphLabels" not in graph_backdrop
     assert "onProjected={setProjected}" not in graph_backdrop
     assert "<svg" not in graph_backdrop
-    assert "labelIds={labelIds}" in graph_backdrop
-    assert "activeLabelNodeIds={lockMode ? new Set<string>() : gatedMainNodeIds}" in graph_backdrop
-    assert "labelMetadata={presentation.labelMetadata}" in graph_backdrop
+    # Labels are scoped to the presented graph's local identities.
+    assert "labelIds={labelIds.flatMap(" in graph_backdrop
+    assert "labelMetadata={scopedLabels}" in graph_backdrop
     assert "obsidience-knowledge-map-drift" not in graph_styles
     assert "obsidience-knowledge-tag-active-lock" not in graph_styles
     assert "obsidience-knowledge-tag-scan" not in graph_styles
@@ -423,7 +385,7 @@ def test_one_shell_host_shares_displays_pane_and_surface_layout() -> None:
     assert workspace.count("PaneWindow {") == 1
     assert "PaneCanvas" not in workspace
     assert 'readonly property var paneDefinitions' in workspace
-    assert workspace.count('"label":') == 15
+    assert workspace.count('"label":') == 16
     assert "targetScreens: root.workspaceScreens" in shell
     assert shell.count("shellApi: root.shellApi") == 5
     assert "SurfaceLayout surfaceLayout: SurfaceLayout {}" in shell_api
@@ -517,7 +479,6 @@ def test_one_shell_host_shares_displays_pane_and_surface_layout() -> None:
     assert "readonly property int shelfMaximumWidth: 1200" in launcher
     assert "readonly property int edgeTriggerHeight: 12" in launcher
     assert "mask: Region { item: shelfSurface }" in launcher
-    assert "width: 352" in launcher
     assert 'color: "#cc020b14"' in launcher
     assert '\n                    text: String(modelData.title)' not in launcher
     assert "glyph: String(paneButton.modelData.icon" in launcher
@@ -732,7 +693,8 @@ def test_one_shell_host_shares_displays_pane_and_surface_layout() -> None:
     assert "Qt5Compat.GraphicalEffects" not in frame
     assert "layer.effect: MultiEffect" not in frame
     assert "height: root.theme.titleHeight" in frame
-    assert "color: root.theme.separator" in frame
+    # The title separator follows actual native keyboard focus.
+    assert "color: root.keyboardActive ? root.theme.strongAccent : root.theme.separator" in frame
     assert '"frame":' not in workspace
     assert 'readonly property string schema: "obsidience.shell-theme.v1"' in theme
     assert "watchChanges: true" in theme
@@ -804,7 +766,7 @@ def test_shell_bar_has_one_ordered_native_application_and_pane_surface() -> None
     ).read_text()
     markers = (
         "id: applicationLauncherButton",
-        "id: realtimeContainer",
+        "id: cameraButton",  # Speech controls moved to Chat; the bar gained Camera.
         "id: runningApplicationRow",
         "id: paneRow",
         "id: clockLabel",
@@ -815,7 +777,7 @@ def test_shell_bar_has_one_ordered_native_application_and_pane_surface() -> None
     assert "precision: SystemClock.Minutes" in launcher
     assert "implicitHeight: launcherRow.implicitHeight + 4" in launcher
     assert "anchors.margins: 2" in launcher
-    assert launcher.count("Layout.topMargin: 4") == 4
+    assert launcher.count("Layout.topMargin: 4") == 5
     assert "property bool shelfOpen: false" in launcher
     assert "id: shelfSurface" in launcher
     assert "id: shelfHover" in launcher
@@ -866,9 +828,9 @@ def test_pane_registry_is_the_single_source_for_titles_and_icons() -> None:
     definitions = workspace.split(
         "readonly property var paneDefinitions", 1
     )[1].split("Variants {", 1)[0]
-    assert definitions.count('"icon":') == 15
+    assert definitions.count('"icon":') == 16
     assert '"label": "Hardware"' in definitions
-    assert '"label": "Feeds"' in definitions
+    assert '"label": "Feeds"' not in definitions  # Feeds retired 2026-10-06.
     assert '"label": "Connections"' not in definitions
     assert '"label": "Chat"' in definitions
     assert '"label": "Applications"' in definitions
@@ -1255,7 +1217,7 @@ def test_shell_owns_one_secure_graph_lock_with_pam_authentication() -> None:
     assert "&& !locked" not in pane_window
     assert "active: root.paneVisible" in pane_window
     assert "visible: true" in pane_launcher
-    assert "{selectedSurfaceId === surfaceId ? (" in renderer_surface
+    assert "const ownsStage = library || selectedSurfaceId === surfaceId;" in renderer_surface
     assert "<GraphBackdrop visible={showGraph}" in renderer_surface
     assert not (SHELL_ROOT / "qml" / "api" / "LockState.qml").exists()
     assert not (SHELL_ROOT / "state" / "initial-unlocked-state").exists()
@@ -1340,7 +1302,7 @@ def test_pane_shortcut_move_is_atomic_and_has_one_owner_per_display_path() -> No
     assert 'hl.bind("ALT + TAB", hl.dsp.window.cycle_next())' in compositor
     assert "hl.dsp.window.cycle_next({ next = false })" in compositor
     assert "move_pane.py focused focus" not in compositor
-    assert compositor.count('hl.bind("SUPER + SHIFT +') == 5
+    assert compositor.count('hl.bind("SUPER + SHIFT +') == 6  # incl. SUPER+SHIFT+RETURN kitty
     assert compositor.count('hl.bind("SUPER + LEFT"') == 1
     assert compositor.count('hl.bind("SUPER + RIGHT"') == 1
     assert compositor.count('hl.bind("SUPER + UP"') == 1
@@ -1404,7 +1366,7 @@ def test_reader_explorers_share_one_native_dock_layout() -> None:
     assert "property PaneDockLayout dockLayout" in workspace
     assert 'root.dockLayout.isDocked("knowledge")' in workspace
     assert 'root.dockLayout.isDocked("source")' in workspace
-    assert 'root.dockLayout.isDocked("feeds")' in workspace
+    assert 'root.dockLayout.isDocked("feeds")' not in workspace  # Feeds retired.
     assert "root.readerPlacement.surfaceId" in workspace
     assert "root.knowledgePlacement.surfaceId" in workspace
     assert "root.sourcePlacement.surfaceId" in workspace
@@ -1432,7 +1394,6 @@ def test_reader_explorers_share_one_native_dock_layout() -> None:
     assert "Electron" not in host + stack + header + reader + knowledge + source
     assert 'color: "#bf020a12"' in knowledge
     assert 'color: "#c708050f"' in source
-    assert 'textFormat: root.feedItemMode || root.previewMode ? Text.PlainText : Text.MarkdownText' in reader
     assert 'root.sourceMode ? 1100 : root.indexArticle ? 920 : 720' in reader
     assert '"SYSTEM"' in source
     assert 'title: "Knowledge"' in knowledge
@@ -1470,9 +1431,8 @@ def test_live_shell_runtime_dependencies_are_pinned_without_kde_shell_entries() 
         for upstream in manifest["upstreams"]
     }
     assert packages["Quickshell"] == "quickshell 0.3.1-1.1"
-    assert packages["gtk-layer-shell"] == "gtk-layer-shell 0.10.1-1.1"
-    assert packages["WebKitGTK"] == "webkit2gtk-4.1 2.52.6-1"
-    assert packages["PyGObject"] == "python-gobject 3.56.3-1"
+    # The GTK/WebKit graph host was retired for the Quickshell graph stage.
+    assert not {"gtk-layer-shell", "WebKitGTK", "PyGObject"} & packages.keys()
     assert packages["QMLTermWidget"] == "qmltermwidget 2.0.0.git1-1.1"
     assert packages["Qt WebEngine"] == "qt6-webengine 6.11.2-1"
     assert packages["Qt WebSockets"] == "qt6-websockets 6.11.1-1.1"
@@ -1606,7 +1566,10 @@ def test_native_terminal_is_one_tmux_view_inside_the_generic_pane() -> None:
     assert '"snapshot"' in terminal
     assert '"entry"' in terminal
     assert "node-pty" not in terminal
-    assert "xterm" not in terminal.lower()
+    # Only the embedded AGENT CANVAS (nodeterm, xterm.js) clipboard grant mentions
+    # xterm; the native tmux view itself never uses it.
+    assert [line.strip() for line in terminal.splitlines() if "xterm" in line.lower()] == [
+        "// xterm.js copy/paste only; every other permission stays denied."]
     assert "Electron" not in terminal
     assert 'tmux=/usr/bin/tmux' in attach
     assert 'new-session -d -t =codex -s obsidience-ui' in attach

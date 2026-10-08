@@ -139,24 +139,6 @@ def test_observation_archive_handoff_is_exact_not_global_access(scoped):
     assert 'Agents/Executive/Observations/Observations' not in scope.execution_scope(context, scoped())[1]
 
 
-def test_working_context_retains_objective_and_rejects_late_progress(scoped):
-    from obsidience.harness.conversation.observations import project_activation_context
-    agent = scoped().resolve('Agents/Executive/Executive')
-    vault.write_note(agent.path, {**agent.meta,'auto_curate':True}, agent.body)
-    first = project_activation_context(agent.ref, 'Tasks/query', 'first', {}, [],
-        objective='Exact current request', context_refs=['Shared/first'], begin=True)
-    assert first['materialized']
-    note = vault.load_note(first['ref'] + '.md')
-    assert 'Exact current request' in note.body and 'Shared/first' in note.body
-    assert note.runtime_observation and note.meta['retrieval'] is False
-    assert first['context']['current_objective'] != 'Exact current request'  # The prompt has one Objective.
-    project_activation_context(agent.ref, 'Tasks/query', 'second', {}, [], objective='Next request', begin=True)
-    for state in ('running','completed','interrupted'):
-        late = project_activation_context(agent.ref, 'Tasks/query', 'first', {}, [], state)
-        assert not late['materialized']
-    assert vault.load_note(first['ref'] + '.md').meta['activation_id'] == 'second'
-
-
 def test_reader_library_indexes_include_all_agents_and_procedures(scoped):
     vault.write_note('Runbooks/example.md', {'kind':'runbook','title':'Example'}, 'Procedure.')
     root = api._base_article('@library')

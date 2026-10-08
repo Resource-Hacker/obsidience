@@ -62,7 +62,7 @@ def test_trial_metadata_survives_public_projection_and_unicode_roundtrip(public_
     ("trial_id", "x" * 161), ("trial_id", "bad\nidentity"),
     ("case_id", "x" * 65), ("case_id", "sk-" + "a" * 24),
     ("split", ["train"]), ("variant", "unknown"),
-    ("repetition", True), ("repetition", 0), ("repetition", 4),
+    ("repetition", True), ("repetition", 0), ("repetition", 6),  # bound is 1..5
 ])
 def test_trial_identity_is_bounded_and_invalid_binding_does_not_leak(public_stream, field, value):
     args = {"trial_id": "audit:case:baseline:1", "case_id": "case", "split": "train",

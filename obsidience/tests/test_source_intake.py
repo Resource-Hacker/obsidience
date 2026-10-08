@@ -16,6 +16,7 @@ def incoming(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(config.CONFIG, "db_path", tmp_path / "index.sqlite3")
     monkeypatch.setattr(config.CONFIG, "vault_dir", tmp_path / "vault")
+    (tmp_path / "vault").mkdir()  # Intake also watches the Vault for Source health.
     ledger = index.Index()
     monkeypatch.setattr(index, "INDEX", ledger)
     dispatched = []

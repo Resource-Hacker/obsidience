@@ -91,7 +91,7 @@ def test_compiler_emits_actual_ordered_sections_without_reparsing_article_headin
     assert "\n\n".join(part["text"] for part in parts) == activation["packet"]
     assert event["run_id"] == "actual-run"
     assert event["task_ref"] == tasks[0].ref and event["agent_ref"] == agent.ref
-    assert [part["key"] for part in parts] == ["header", "identity", "task", "objective", "tools", "skills", "runbook", "bindings", "knowledge", "immediate", "begin"]
+    assert [part["key"] for part in parts] == ["header", "identity", "task", "objective", "tools", "skills", "runbook", "bindings", "knowledge", "conversation", "begin"]
     assert next(part["text"] for part in parts if part["key"] == "objective") == "## Objective\nThe current exact objective."
     assert "An authored heading" in next(part["text"] for part in parts if part["key"] == "task")
     assert all(not part["truncated"] for part in parts) and not event["truncated"]

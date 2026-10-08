@@ -1,6 +1,30 @@
 """Graph inventory responses respect the Settings Loader's page lifetime."""
 
-from obsidience.tests.test_native_feed_browser import PANES, run_qml_functions
+import json
+import re
+import subprocess
+from pathlib import Path
+
+PANES = Path(__file__).parents[1] / 'shell/qml/panes'
+
+
+def run_qml_functions(path, fields, body):
+    # Shared QML-function harness (formerly in the retired Feed browser tests).
+    functions = '\n'.join(re.findall(r'^    function \w+\([^\n]*\) \{.*?^    \}', path.read_text(), re.M | re.S))
+    code = r'''
+import {strict as assert} from 'node:assert';
+import vm from 'node:vm';
+const requests=[];
+class Request {
+ static DONE=4;
+ open(method,url){this.method=method;this.url=url;}
+ send(){requests.push(this);}
+ respond(status,payload){this.status=status;this.readyState=4;this.responseText=JSON.stringify(payload);this.onreadystatechange();}
+}
+const state={XMLHttpRequest:Request,requestGeneration:0,loading:false,errorMessage:'',
+''' + fields + '};\nstate.root=state;vm.createContext(state);\n' + f'vm.runInContext({json.dumps(functions)},state);\n' + body
+    result = subprocess.run(['node','--input-type=module','-e',code],capture_output=True,text=True,timeout=10)
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 SOURCE = PANES / "settings/graph/GraphSettings.qml"

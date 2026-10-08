@@ -118,7 +118,9 @@ def test_backend_exception_is_delivery_uncertainty():
     assert result["reason"] == "click_error" and result["delivery"] == "uncertain"
 
 
-def test_guard_uses_independent_bounded_read_only_socket(monkeypatch):
+def test_guard_uses_independent_bounded_read_only_socket(monkeypatch, tmp_path):
+    from obsidience.tests.test_window_capabilities import isolated_command_token
+    token = isolated_command_token(monkeypatch, tmp_path)
     sent, received, connections = [], [], []
     events = iter([
         {"schema": "obsidience.shell.event.v1", "type": "workspace.state"},
@@ -148,6 +150,7 @@ def test_guard_uses_independent_bounded_read_only_socket(monkeypatch):
                        "expected_revision": 1, "lock_generation": 2}
     assert all(0 < timeout <= 0.5 for timeout in received)
     assert connections[0][1]["max_size"] == 65536
+    assert connections[0][0][0] == f"ws://127.0.0.1:8768/?token={token}"
     assert not ShellWindowTransport.click_guard("click-1", "samsung", "0x123", 1, 2)
 
 
@@ -216,6 +219,7 @@ const owner=socket('owner'),other=socket('other'),adapter=socket('adapter'),guar
 const context={WebSocket:{Open:1},Date:{now:()=>now},eventSchema:'obsidience.shell.event.v1',
   clients:[owner,other,adapter,guard],windowAdapterSocket:adapter,sessionLocked:false,
   lockGeneration:2,clickTokens:[],clickRequests:[],clickTokenLimit:4096,clickRequestLifetimeMs:6000,
+  windowRefreshRequests:[],graphStreams:[],moduleRestorePending:null,moduleWindowBindings:{},
   surfaceLayout:{surface:id=>['samsung','usb-c','dp-4'].includes(id)},windowStates:{samsung:{
     revision:1,surface_awake:true,windows:[{window_id:'0x123',window_kind:'application',
     minimized:false,visible_on_workspace:true}]}}};
@@ -268,6 +272,8 @@ for(const [index,change] of [{minimized:true},{visible_on_workspace:false},{wind
 context.handleWindowCommand(owner,request('revision'));
 context.windowStates.samsung.revision++;assert(!check('revision'));
 context.windowStates.samsung.revision=1;
+// Only one click may be in flight (click_busy); let the unresolved ones expire.
+now+=context.clickRequestLifetimeMs;
 // A causal post-click scene change invalidates further input, but cannot erase
 // the current adapter's already delivered, correlated acknowledgement.
 for(const change of ['revision','title','geometry','visibility','removed','sleep']){

@@ -59,9 +59,11 @@ def test_long_final_record_is_parsed_before_display_truncation(monkeypatch):
             submitted.append((text,kwargs)); completed.set()
         conversation = SimpleNamespace(
             _generation=1, _conversation=SimpleNamespace(conversation_id='c1'), submit=submit,
+            _turn_task=None,  # Final admission hands off to the scheduled turn.
         )
         manager = speech.RealtimeSessionManager(conversation)
         manager._phase = 'command'
+        manager._mode = 'realtime'  # Wake mode (the default) drops speech until wake.
         stream = asyncio.StreamReader()
         process = SimpleNamespace(stdout=stream,pid=123,returncode=None)
         manager._process = process

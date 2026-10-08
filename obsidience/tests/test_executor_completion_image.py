@@ -91,10 +91,17 @@ def harness(monkeypatch):
                 decision = complete.execute(args, context)
                 state.decisions.append(decision)
                 return decision
+            if name == "computer.act":
+                # Mirror the real act adapter, which records its scope in the context.
+                context.setdefault("_computer_act_scope",
+                                   args.get("scope", context["params"].get("computer_scope")))
             return next(results)
 
         monkeypatch.setattr(executor.llm, "chat", chat)
         monkeypatch.setattr(executor, "execute_capability", execute)
+        # The executor dispatches through the async registry entry; never reach real Tools.
+        monkeypatch.setattr(executor, "execute_capability_async",
+                            lambda name, args, ctx: asyncio.to_thread(execute, name, args, ctx))
         return await executor._execute_session(task, model, state.messages,
             ["computer.observe", "computer.act", "harness.status", "task.complete"],
             state.context, "Executive", "none")

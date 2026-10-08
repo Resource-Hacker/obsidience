@@ -8,7 +8,6 @@ from obsidience.harness.config import CONFIG
 from obsidience.harness.knowledge import curation, index, review, source
 from obsidience.harness.knowledge.source import SourceError
 from obsidience.harness.knowledge.vault import write_note
-from obsidience.harness.web import feeds
 
 
 def _citation(number: int) -> str:
@@ -49,11 +48,6 @@ def source_documents(monkeypatch) -> dict[str, dict]:
 
     monkeypatch.setattr(source, "get_source", get_source)
     monkeypatch.setattr(curation, "get_source", get_source)
-    monkeypatch.setattr(
-        feeds,
-        "_public_url",
-        lambda *_args, **_kwargs: pytest.fail("approval canonicalization performed DNS"),
-    )
     return documents
 
 

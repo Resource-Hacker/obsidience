@@ -71,7 +71,9 @@ def test_pressure_projects_only_earlier_recoverable_pages_before_one_generation(
     generations = [body for path, body in requests if not path.endswith("input_tokens")]
     assert len(generations) == 1
     actual = generations[0]["messages"]
-    assert actual[:4] == original[:4]
+    # Gemma appends its fixed history guidance to the single system turn.
+    assert actual[0]["content"].startswith(original[0]["content"] + "\n\n")
+    assert actual[1:4] == original[1:4]
     assert actual[-1] == original[-1]
     assert [m for m in actual if m["role"] == "assistant"] == [m for m in original if m["role"] == "assistant"]
     for number, index in enumerate((5, 7, 9), 1):
@@ -276,6 +278,9 @@ def test_executor_attaches_private_image_to_only_the_next_inference(monkeypatch)
     monkeypatch.setattr(executor.model_runtime, "lease", lease)
     monkeypatch.setattr(executor.llm, "chat", chat)
     monkeypatch.setattr(executor, "execute_capability", execute)
+    # The executor dispatches through the async registry entry; never reach real Tools.
+    monkeypatch.setattr(executor, "execute_capability_async",
+                        lambda name, args, ctx: asyncio.to_thread(execute, name, args, ctx))
     monkeypatch.setattr(executor.action_trace, "emit", lambda *_args: None)
     trace, status, _summary = asyncio.run(executor._execute_session(
         task, model, [{"role": "system", "content": "Fixed packet"}],

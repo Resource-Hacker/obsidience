@@ -79,27 +79,6 @@ def test_generated_runbook_rejects_callable_outside_checkout() -> None:
         )
 
 
-@pytest.mark.parametrize(
-    "path",
-    [
-        "Runbooks/Generated/curator/query.md",
-        "Runbooks/Generated/guardian/query.md",
-        "Runbooks/Generated/researcher/query.md",
-    ],
-)
-def test_accepted_generated_query_runbooks_match_current_contract(path: str) -> None:
-    metadata, body = loads((VAULT / path).read_text())
-    post = frontmatter.Post(body, **metadata)
-    skills = [str(value).strip("[]") for value in post.metadata["skills"]]
-    tools = [value.replace("Skills/", "Tools/", 1) for value in skills]
-    validate_generated_runbook(
-        path,
-        post.content,
-        {"output_runbook": path, "skills": skills, "tools": tools},
-        skills,
-    )
-
-
 @pytest.fixture
 def generation_vault(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(CONFIG, "vault_dir", tmp_path)
@@ -195,18 +174,15 @@ def test_generated_task_rejects_invalid_definition_metadata(
 
 
 def test_executive_taxonomy_contains_only_real_executable_outcomes() -> None:
-    assert TASK_TAXONOMY_BY_PATH["executive"].children == (
-        "executive/query",
-        "executive/operate",
-    )
+    # Computer Use (executive/operate) was retired: the Executive acts natively.
+    assert TASK_TAXONOMY_BY_PATH["executive"].children == ("executive/query",)
+    assert "executive/operate" not in TASK_TAXONOMY_BY_PATH
     assert TASK_TAXONOMY_BY_PATH["executive"].kind == "knowledge"
     assert TASK_TAXONOMY_BY_PATH["executive"].triggers == ()
     assert TASK_TAXONOMY_BY_PATH["executive"].routing is None
     assert CANONICAL_TASK_BY_PATH["executive/query"] == "Tasks/query"
     assert "wiki/query" not in TASK_TAXONOMY_BY_PATH
-    assert canonical_members("executive", {"Tasks/query", "Tasks/executive/operate"}) == [
-        "Tasks/executive/operate", "Tasks/query",
-    ]
+    assert canonical_members("executive", {"Tasks/query"}) == ["Tasks/query"]
     for fake_leaf in (
         "realtime", "respond", "recall", "delegate", "plan", "schedule", "monitor",
     ):
@@ -215,13 +191,12 @@ def test_executive_taxonomy_contains_only_real_executable_outcomes() -> None:
 
 def test_interactive_work_preserves_authored_model_and_effort() -> None:
     query_meta, query_body = loads((VAULT / "Tasks/query.md").read_text())
-    operate_meta, operate_body = loads((VAULT / "Tasks/executive/operate.md").read_text())
     query = frontmatter.Post(query_body, **query_meta)
-    operate = frontmatter.Post(operate_body, **operate_meta)
-    assert query.metadata["model"] == operate.metadata["model"] == "obsidience-gemma"
-    assert query.metadata["reasoning_effort"] == "none"
-    assert operate.metadata["reasoning_effort"] == "none"
+    # Every Task uses obsidience-gemma (2026-10-06); Query keeps its authored effort.
+    assert query.metadata["model"] == "obsidience-gemma"
+    assert query.metadata["reasoning_effort"] in {"none", "minimal", "low", "medium", "high", "xhigh"}
     assert query.metadata["taxonomy_path"] == "executive/query"
+    assert not (VAULT / "Tasks/executive/operate.md").exists()
     assert not (VAULT / "Tasks/executive/realtime.md").exists()
     assert not (VAULT / "Runbooks/realtime.md").exists()
     assert not (VAULT / "Runbooks/executive.md").exists()
@@ -240,7 +215,7 @@ def test_interactive_task_graph_preserves_query_identity_and_resolves_checkouts(
     nodes = {node["id"]: node for node in graph["nodes"]}
     executive = nodes["@library/Tasks/executive"]
     assert executive["kind"] == "knowledge"
-    assert executive["children"] == ["Tasks/query", "Tasks/executive/operate"]
+    assert executive["children"] == ["Tasks/query"]
     assert nodes["Tasks/query"]["children"] == []
     assert "Tasks/query" not in nodes["@library/Tasks/wiki"]["children"]
     retired = {"Tasks/executive/realtime", "Runbooks/realtime", "Runbooks/executive"}

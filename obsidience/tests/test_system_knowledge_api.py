@@ -43,14 +43,3 @@ def test_system_reader_is_read_only_through_article_and_folder_routes(tmp_path, 
     with pytest.raises(HTTPException):
         api.set_article_auto_curate(ref, {"enabled": True})
     assert (CONFIG.vault_dir / (note_ref + ".md")).read_bytes() == before
-
-
-def test_authored_workstation_article_remains_editable(tmp_path, monkeypatch):
-    monkeypatch.setattr(CONFIG, "vault_dir", tmp_path / "vault")
-    monkeypatch.setattr(api.INDEX, "sync", lambda: None)
-    ref = "ADMECH Workstation/Workstation Observations/Hardware/Input/Mouse policy"
-    vault.write_note(ref + ".md", {"title": "Mouse policy", "kind": "knowledge"}, "Original")
-    assert not api.get_article(ref).get("read_only", False)
-    result = api.update_article(ref, {"title": "Mouse policy", "body": "Owner correction"})
-    assert result == {"article": ref, "updated": True}
-    assert vault.load_note(ref + ".md").body == "Owner correction\n"

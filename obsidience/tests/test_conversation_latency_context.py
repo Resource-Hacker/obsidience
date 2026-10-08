@@ -29,16 +29,11 @@ def lane(execution, latency_stream, monkeypatch):
     async def publish(*_args, **_kwargs):
         pass
 
-    runtime.speech = NS(snapshot=lambda: {"ready": True}, _send_worker=send, _publish=publish)
+    # Replies are spoken through speech.speak(); control messages use _send_worker.
+    runtime.speech = NS(snapshot=lambda: {"ready": True}, _send_worker=send, speak=send, _publish=publish)
 
     async def prepare(_turn, **_kwargs):
         return "User: The earlier exact context."
-
-    async def select(text, source, **kwargs):
-        state.selections.append(deepcopy(kwargs))
-        event = "voice.activation" if source == "voice" else "chat.request"
-        return execution.task, {"request": text, "event": event, "source": source,
-                                "computer_outcome": "answer"}, event
 
     @asynccontextmanager
     async def admitted(owner):
@@ -47,18 +42,19 @@ def lane(execution, latency_stream, monkeypatch):
 
     run_task = executor.run_task
 
-    async def run(task, **kwargs):
+    async def run(_executive, **kwargs):
+        # The turn admits the Executive itself (run_conversation); execute the
+        # isolated fixture Task through the real executor instead.
         state.calls.append(deepcopy(kwargs["runtime_params"]))
-        return await run_task(task, **kwargs)
+        return await run_task(execution.task, **kwargs)
 
     monkeypatch.setattr(runtime, "_context_model", lambda *_args: "isolated")
-    monkeypatch.setattr(runtime, "prepare_immediate_observations", prepare)
+    monkeypatch.setattr(runtime, "prepare_conversation_context", prepare)
     monkeypatch.setattr(runtime, "record_prompt_usage", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(runtime, "publish_context", lambda: None)
     monkeypatch.setattr(conversation_runtime, "historical_evidence", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(conversation_runtime, "select_task", select)
     monkeypatch.setattr(scheduler, "foreground_admission", admitted)
-    monkeypatch.setattr(executor, "run_task", run)
+    monkeypatch.setattr(executor, "run_conversation", run)
     return state
 
 
@@ -90,7 +86,8 @@ def test_completed_turn_correlates_timing_without_changing_task_or_dialogue(lane
     events = [row for row in trace.history() if row.get("payload", {}).get("kind") == "latency"]
     stages = [row["payload"]["stage"] for row in events]
     assert stages[0] == "input_final" and stages[-1] == "answer_committed"
-    assert stages.index("preparation") < stages.index("selection") < stages.index("activation")
+    # Executive admission replaced Task selection; it precedes context preparation.
+    assert stages.index("admission") < stages.index("preparation") < stages.index("activation")
     assert stages.index("activation") < stages.index("answer_committed")
     assert all(row["payload"]["turn_id"] == user["id"] for row in events)
     assert all(row["payload"]["generation"] == lane.runtime._generation for row in events)
@@ -106,8 +103,8 @@ def test_completed_turn_correlates_timing_without_changing_task_or_dialogue(lane
     spoken = [message for message in lane.worker if message["type"] == "speak"]
     if source == "realtime":
         assert spoken == [{"type": "speak", "generation": lane.runtime._generation,
-                           "text": "Done.", "turn_id": user["id"], "run_id": result["run_id"],
-                           "speech_sequence": 9}]
+                           "text": "Done.", "outcome": "completed", "turn_id": user["id"],
+                           "run_id": result["run_id"], "speech_sequence": 9}]
     else:
         assert spoken == []
     persisted = json.dumps([lane.memory.turns, lane.memory.events, lane.calls, lane.selections])
@@ -136,7 +133,7 @@ def test_uncommitted_outcome_never_emits_answer_commit_or_leaks_turn_scope(lane,
             raise asyncio.CancelledError
         return {"status": "failed", "run_id": "failed-run", "summary": "Internal outcome"}
 
-    monkeypatch.setattr(executor, "run_task", outcome)
+    monkeypatch.setattr(executor, "run_conversation", outcome)
 
     async def exercise():
         result = await lane.runtime.submit("Hello", source="text")

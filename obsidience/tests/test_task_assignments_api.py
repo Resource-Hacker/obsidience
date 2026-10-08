@@ -95,10 +95,18 @@ def test_removing_direct_child_preserves_parent_assignment(assignments):
     assert row["inherited"] and not row["direct"]
 
 
-@pytest.mark.parametrize("field", ["tools", "skills", "runbooks"])
+@pytest.mark.parametrize("field", ["tools", "runbooks"])
 def test_agent_profile_rejects_independent_capability_grants(field):
-    assert any("derived from assigned Tasks" in error for error in format.validate_profile({
+    assert any("is derived" in error for error in format.validate_profile({
         "type": "agent", "obsidience": {field: []},
+    }))
+
+
+def test_agent_profile_skills_are_exact_direct_skill_references():
+    # Agents own direct Skills (their capability catalog); only exact refs are accepted.
+    assert format.validate_profile({"type": "agent", "obsidience": {"skills": ["[[Skills/vault.read]]"]}}) == []
+    assert any("exact Skill references" in error for error in format.validate_profile({
+        "type": "agent", "obsidience": {"skills": ["[[Tools/vault.read]]"]},
     }))
 
 

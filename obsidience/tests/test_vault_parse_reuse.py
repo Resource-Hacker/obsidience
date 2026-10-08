@@ -65,9 +65,11 @@ def test_task_projection_is_never_cached(tmp_path, monkeypatch, isolated_task_le
 def test_cache_is_bounded_and_large_articles_bypass_it(tmp_path, monkeypatch):
     monkeypatch.setattr(CONFIG, 'vault_dir', tmp_path)
     vault._parsed_note.cache_clear()
-    for number in range(520):
+    limit=vault._parsed_note.cache_info().maxsize  # 2048 since the parse cache was enlarged
+    assert limit is not None
+    for number in range(limit+8):
         vault._parsed_note('Content '+str(number), 'one.md')
-    assert vault._parsed_note.cache_info().currsize==512
+    assert vault._parsed_note.cache_info().currsize==limit
     (tmp_path/'large.md').write_text('x'*(128*1024+1))
     before=vault._parsed_note.cache_info()
     assert len(vault.load_note('large.md').body)==128*1024+1

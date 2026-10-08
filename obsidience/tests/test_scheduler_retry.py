@@ -158,28 +158,6 @@ def test_source_retry_requires_same_immutable_material(occurrence, monkeypatch):
     assert scheduler.retry_blocked_reason(note, run)
 
 
-def test_promotion_uses_shared_input_authority_and_rejects_archived_input(occurrence, monkeypatch):
-    from obsidience.harness.conversation import observations
-    note, ledger = occurrence
-    params = {"event": "observations.temporary.ready", "activation_key": "promotion-key", "promotion_key": "promotion-key"}
-    note = replace(note, path="Tasks/promote.md", meta={**note.meta, "triggers": [params["event"]], "params": params})
-    run = {**ledger.run("failed-run"), "task_ref": note.ref}
-    temporary = vault.Note("Temporary/exact.md", "Temporary", {"promotion_pending": "promotion-key"}, "Body")
-    calls = []
-    def resolve(runtime):
-        calls.append(runtime)
-        return [temporary]
-    monkeypatch.setattr(observations, "resolve_temporary_promotion_inputs", resolve)
-    assert scheduler.retry_blocked_reason(note, run) == ""
-    assert calls == [{**params, "origin_task_ref": note.ref}]
-    temporary.meta["source_archive"] = "already-archived"
-    assert scheduler.retry_blocked_reason(note, run)
-    def invalid(_runtime):
-        raise ValueError("invalid old compaction")
-    monkeypatch.setattr(observations, "resolve_temporary_promotion_inputs", invalid)
-    assert scheduler.retry_blocked_reason(note, run)
-
-
 @pytest.fixture
 def source_interruption(occurrence):
     from obsidience.harness.knowledge import source

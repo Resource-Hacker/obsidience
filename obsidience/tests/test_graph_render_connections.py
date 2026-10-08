@@ -44,6 +44,9 @@ function load(filename) {
     if (id === '@/lib/api') return {};
     if (id === '@/lib/graph-tuning') return {
       MAIN_GRAPH_ID:'main',
+      // Subscriptions registered at import time by shell-client/graph-backdrop.
+      onGraphSelected: () => () => {}, onGraphThinkingTest: () => () => {},
+      onGraphTuning: () => () => {}, selectGraph: () => {},
       loadGraphTuning: () => load(path.join(ui,
         'src/renderer/src/components/themes/obsidience/knowledge-3d.ts')).DEFAULT_KNOWLEDGE_3D_TUNING,
     };
@@ -215,8 +218,8 @@ def test_actual_geometry_retains_parent_and_absorbed_article_relationships():
     assert {"source": "@agent/Darwin/temporary-observations", "target": tool} in rendered["Darwin"]["links"]
     assert observations not in rendered["Darwin"]["nodes"]
     assert hub not in rendered["main"]["nodes"]
-    assert {"source": task, "target": tool} in rendered["library"]["links"]
-    assert mirror not in rendered["library"]["nodes"]  # Existing Tool+Skill pair display.
+    # The Library graph has its own presenter; the main stage omits its satellite.
+    assert "library" not in rendered
     for cloud in rendered.values():
         assert len(cloud["nodes"]) == len(set(cloud["nodes"]))
         pairs = [tuple(sorted(edge.values())) for edge in cloud["links"] + cloud["taxonomy"]]
@@ -296,8 +299,7 @@ def test_actual_executive_geometry_keeps_local_bindings_and_excludes_foreign_var
     assert "Agents/Darwin/private" not in main["nodes"]
     assert "Agents/Darwin/private" in rendered["Darwin"]["nodes"]
     assert not neighbors(main, "Agents/Darwin/Darwin")
-    # Library intentionally has no Runbooks and keeps the global relationship.
-    assert "Tasks/query" in neighbors(rendered["library"], "Tools/vault.propose")
+    assert "library" not in rendered  # Presented by the separate Library graph stage.
     assert main["geometry_vertices"] == len(main["links"]) * main["segments_per_link"] * 4
     # A removed authored requirement retracts the actual beam, not just its DTO.
     article("Runbooks/operate", "runbook", skills=["[[Skills/task.create]]"])

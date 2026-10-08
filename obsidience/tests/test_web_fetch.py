@@ -8,6 +8,11 @@ from obsidience.harness.knowledge.vault import resolver
 from obsidience.harness.web import runtime
 
 
+# Every fetched page ends with the Objective-continuation reminder.
+FETCH_TAIL = ("\n\nEnd of fetched page. Use this evidence to complete the current Objective: "
+              "answer the question, or take the next needed Tool action if evidence is still missing.")
+
+
 def _result(content: str, *, created: bool = True) -> dict:
     return {
         "url": "https://example.com/report",
@@ -34,7 +39,7 @@ def test_fetch_returns_bounded_source_page_with_explicit_unread_tail() -> None:
     assert "only when a needed claim or detail is absent" in rendered
     assert "the unread tail is optional and has not been inspected" in rendered
     assert f"offset {fetch.MAX_FETCH_PREVIEW_CHARS}" in rendered
-    assert rendered.endswith("A" * fetch.MAX_FETCH_PREVIEW_CHARS)
+    assert rendered.endswith("A" * fetch.MAX_FETCH_PREVIEW_CHARS + FETCH_TAIL)
     assert "UNREAD" not in rendered
     assert "before relying on" not in rendered
 
@@ -44,7 +49,7 @@ def test_fetch_returns_complete_short_source_page() -> None:
 
     assert "Fetched and verified https://example.com/report" in rendered
     assert "Characters 0-18 of 18. End of Source." in rendered
-    assert rendered.endswith("Complete evidence.")
+    assert rendered.endswith("Complete evidence." + FETCH_TAIL)
     assert "Unread tail" not in rendered
 
 
@@ -349,7 +354,7 @@ def test_batch_fetch_has_bounded_concurrency_ordered_results_and_partial_failure
     assert [item["ok"] for item in results] == [index != 2 for index in range(10)]
     assert "503" in results[2]["result"]
     assert results[3]["result"].startswith("Fetched and captured")
-    assert results[3]["result"].endswith("Article 3")
+    assert results[3]["result"].endswith("Article 3" + FETCH_TAIL)
     assert maximum == 4
     assert active == 0
     assert all(row[2] is cancel_event for row in seen)
@@ -373,7 +378,7 @@ def test_batch_output_bound_includes_json_escaping_urls_and_exact_returned_range
         end, total = map(int, match.groups())
         assert 0 < end <= fetch.MAX_FETCH_PREVIEW_CHARS
         assert total == len(content)
-        assert rendered.endswith(content[:end])
+        assert rendered.endswith(content[:end] + FETCH_TAIL)
         assert f"offset {end}" in rendered
 
 

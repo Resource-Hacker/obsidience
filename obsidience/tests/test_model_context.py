@@ -81,7 +81,8 @@ def test_gemma_projection_is_selected_by_family_and_does_not_mutate_packet():
     assert branches[1]["properties"]["args"]["required"] == ["target", "destination"]
 
 
-    other = llm._chat_payload(messages, MODELS[SPECIALIST_MODEL], max_tokens=None,
+    # SPECIALIST_MODEL is now a legacy alias of Gemma; use an explicit non-Gemma family.
+    other = llm._chat_payload(messages, replace(MODELS[SPECIALIST_MODEL], family="qwen38"), max_tokens=None,
                               temperature=0, reasoning_effort="none",
                               allowed_tools=["window.place", "task.complete"])
     assert other["messages"] == messages

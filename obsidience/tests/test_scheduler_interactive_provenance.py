@@ -12,6 +12,12 @@ from obsidience.harness.knowledge import index, source, vault
 from obsidience.harness.realtime.runtime import RUNTIME
 
 
+@pytest.fixture(autouse=True)
+def model_admission_isolated(monkeypatch):
+    """Model admission measures live GPU memory; provenance tests exclude it."""
+    monkeypatch.setattr(scheduler, "_resource_error", lambda *_args, **_kwargs: None)
+
+
 @pytest.fixture
 def ledger(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "PROJECT_ROOT", tmp_path)

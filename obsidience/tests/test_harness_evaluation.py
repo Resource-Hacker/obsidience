@@ -156,7 +156,7 @@ def test_invalid_case_contracts_are_rejected_before_execution(mutate):
 def test_suite_requires_distinct_training_and_holdout_cases_and_bounded_repetition():
     suite = {"schemaVersion": 1, "cases": [case(), case("protected", "holdout")], "repetitions": 3}
     assert validate_suite(suite) is None
-    variants = [dict(suite, schemaVersion=True), dict(suite, repetitions=4), dict(suite, repetitions=0),
+    variants = [dict(suite, schemaVersion=True), dict(suite, repetitions=6), dict(suite, repetitions=0),
                 dict(suite, cases=[case()]), dict(suite, cases=[case(), case()]),
                 dict(suite, cases=[case(), case("another")]), dict(suite, override=True)]
     for invalid in variants:

@@ -30,6 +30,10 @@ def allocation(monkeypatch):
     monkeypatch.setattr(runtime, "_stop", AsyncMock())
     monkeypatch.setattr(runtime, "_perception", AsyncMock())
     monkeypatch.setattr(runtime, "_reconcile_defaults", AsyncMock())
+    # VRAM admission measures the live GPUs (NVML); these tests cover reservations
+    # and layouts, so every measured profile fits.
+    monkeypatch.setattr(runtime, "_memory_error", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(runtime, "_prepare_memory", AsyncMock())
     return runtime, settings
 
 
@@ -210,7 +214,9 @@ def test_due_schedule_stays_pending_until_same_model_layout_is_released(ledger, 
     runtime.device_reservations["realtime-speech"] = (models.RTX_4080_DEVICE,)
     assert scheduler.due_tasks() == []
     current = vault.load_note(target.path)
-    assert current.meta["status"] == "pending" and current.meta["last_run"] == "previous"
+    # A resource-blocked cron firing is skipped without rewriting the Task;
+    # the unchanged _last_fired keeps it due for the next tick.
+    assert current.meta["status"] == "completed" and current.meta["last_run"] == "previous"
     assert scheduler._last_fired[target.ref] == 60.0
     assert current.meta["model"] == models.QWEN_Q8_MODEL
     asyncio.run(runtime.release_devices("realtime-speech"))

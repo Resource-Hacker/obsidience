@@ -68,6 +68,9 @@ def session(monkeypatch):
 
         monkeypatch.setattr(executor.llm, "chat", chat)
         monkeypatch.setattr(executor, "execute_capability", execute)
+        # The executor dispatches through the async registry entry; never reach real Tools.
+        monkeypatch.setattr(executor, "execute_capability_async",
+                            lambda name, args, ctx: asyncio.to_thread(execute, name, args, ctx))
         trace, status, summary = asyncio.run(executor._execute_session(
             task, model, [{"role": "system", "content": "Isolated test packet"}],
             allowed or [*complete.COMPUTER_OUTCOME_TOOLS.values(), "task.complete"],
@@ -289,7 +292,7 @@ def test_verified_click_to_wrong_application_cannot_complete_requested_action(se
     assert result.status == "failed"
     assert result.trace[0]["completion_evidence"]["verified_scope"] == "click"
     assert result.trace[1]["completion_rejected"] is True
-    assert "requested application" in result.trace[1]["obs"]
+    assert "explicitly bound application" in result.trace[1]["obs"]
 
 
 @pytest.mark.parametrize("omitted", ["effect", "verified_scope", "semantic_postcondition_verified"])
@@ -334,12 +337,6 @@ def test_ordinary_query_answer_needs_no_computer_effect(session):
     assert result.dispatched == []
 
 
-def test_unclassified_computer_outcome_still_needs_actual_evidence(session):
-    result = session([terminal(), terminal("failed", "Which pane do you mean?")], outcome="")
-    assert result.status == "failed"
-    assert result.trace[0]["completion_rejected"] is True
-
-
 @pytest.mark.parametrize("outcome,name,tool_result", [
     ("focus", "window.activate", {"status": "completed", "active": True, "target": TFT}),
     ("placement", "window.place", {"status": "completed", "target": TFT,
@@ -359,7 +356,7 @@ def test_verified_wrong_application_cannot_satisfy_explicit_binding(session, out
     ], [tool_result], outcome=outcome, application="microsoft_edge")
     assert result.trace[0]["completion_evidence"] == {"verified": True, "target": TFT}
     assert result.trace[1]["completion_rejected"] is True
-    assert "requested application" in result.trace[1]["obs"]
+    assert "explicitly bound application" in result.trace[1]["obs"]
     assert result.status == "failed"
 
 
@@ -489,7 +486,8 @@ def test_query_cannot_complete_a_controller_bound_computer_outcome(session, outc
     ], task_ref="Tasks/query", outcome=outcome)
     assert result.status == "failed"
     assert result.trace[0]["completion_rejected"] is True
-    assert "selected Task does not match" in result.trace[0]["obs"]
+    # The Query/Operate Task split is retired; the actual verified result is required.
+    assert "Completion requires a verified result from" in result.trace[0]["obs"]
     assert result.dispatched == []
 
 

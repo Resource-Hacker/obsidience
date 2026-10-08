@@ -234,6 +234,8 @@ def test_scheduler_restart_uses_recorded_firing_time_without_article_writes(ledg
     )
     monkeypatch.setattr(scheduler, "iter_notes", lambda: [task])
     monkeypatch.setattr(scheduler, "_realtime_allows", lambda _task, _res=None: True)
+    # Model admission measures live GPU memory; this test covers cron timing only.
+    monkeypatch.setattr(scheduler, "_resource_error", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(scheduler, "_running", set())
     monkeypatch.setattr(scheduler, "_last_fired", {})
     monkeypatch.setattr(scheduler.time, "time", lambda: 4000.0)
@@ -248,6 +250,9 @@ def test_scheduler_preserves_an_executor_terminal_receipt(ledger, monkeypatch):
     monkeypatch.setattr(scheduler, "load_note", lambda _path: current)
     monkeypatch.setattr(scheduler, "_last_fired", {})
     monkeypatch.setattr(scheduler.time, "time", lambda: 20.0)
+    # Admission rechecks live GPU memory and speech state; isolate the receipt path.
+    monkeypatch.setattr(scheduler, "_resource_error", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(scheduler, "_realtime_allows", lambda *_args, **_kwargs: True)
 
     async def failed(_task):
         ledger.record_run(

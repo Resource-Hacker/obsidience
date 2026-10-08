@@ -1,6 +1,6 @@
 """Input responses respect the Settings Loader's page lifetime."""
 
-from obsidience.tests.test_native_feed_browser import PANES, run_qml_functions
+from obsidience.tests.test_native_graph_settings import PANES, run_qml_functions
 
 
 SOURCE = PANES / "settings/input/InputSettings.qml"

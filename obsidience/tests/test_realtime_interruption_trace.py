@@ -13,7 +13,9 @@ def test_speech_trace_distinguishes_empty_onset_recognized_text_and_new_final(mo
     entries = []
     monkeypatch.setattr(
         speech.trace, "emit",
-        lambda channel, line, detail: entries.append((channel, line, json.loads(detail[0]))),
+        # Speech evidence only; foreground admission also emits a status row.
+        lambda channel, line, detail, *_fields: channel == "speech"
+        and entries.append((channel, line, json.loads(detail[0]))),
     )
 
     async def scenario():
@@ -21,6 +23,7 @@ def test_speech_trace_distinguishes_empty_onset_recognized_text_and_new_final(mo
         finished = asyncio.Event()
         conversation = SimpleNamespace(
             _conversation=SimpleNamespace(conversation_id="conversation-test"),
+            _turn_task=None,  # Final admission hands off to the scheduled turn.
             _generation=7,
         )
 
@@ -36,6 +39,7 @@ def test_speech_trace_distinguishes_empty_onset_recognized_text_and_new_final(mo
         conversation.submit = submit
         runtime = speech.RealtimeSessionManager(conversation)
         runtime._phase = "command"
+        runtime._mode = "realtime"  # Wake mode (the default) drops speech until wake.
         # A previous final must not make a new empty VAD onset look recognized.
         runtime._live_transcript = {"text": "previous private words", "final": True}
         stream = asyncio.StreamReader()
@@ -91,14 +95,18 @@ def test_speech_trace_preserves_transcript_before_nemo_start_and_ignores_stale_w
     entries = []
     monkeypatch.setattr(
         speech.trace, "emit",
-        lambda channel, line, detail: entries.append(json.loads(detail[0])),
+        # Speech evidence only; foreground admission also emits a status row.
+        lambda channel, line, detail, *_fields: channel == "speech"
+        and entries.append(json.loads(detail[0])),
     )
 
     async def scenario():
         interrupted = asyncio.Event()
         conversation = SimpleNamespace(
             _conversation=SimpleNamespace(conversation_id="conversation-test"),
+            _turn_task=None,  # Final admission hands off to the scheduled turn.
             _generation=3,
+            readiness=lambda: {"state": "cold", "warm": False},  # Published state snapshot.
         )
 
         async def cancel(**kwargs):
@@ -107,6 +115,7 @@ def test_speech_trace_preserves_transcript_before_nemo_start_and_ignores_stale_w
         conversation.cancel = cancel
         runtime = speech.RealtimeSessionManager(conversation)
         runtime._phase = "command"
+        runtime._mode = "realtime"  # Wake mode (the default) drops speech until wake.
         stream = asyncio.StreamReader()
         process = SimpleNamespace(stdout=stream, pid=1234, returncode=None)
         runtime._process = process

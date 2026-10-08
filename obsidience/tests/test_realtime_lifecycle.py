@@ -21,6 +21,20 @@ class Conversation:
         self.submitted = []
         self.finalized = []
         self.rotation_error = None
+        self._generation = 0
+        self._turn_task = None
+
+    def readiness(self):
+        return {"state": "cold", "warm": False}
+
+    def invalidate_readiness(self):
+        pass
+
+    def prepare_idle(self):
+        pass
+
+    def prepare_speech_prefix(self, text, sequence):
+        pass
 
     def _ledger(self):
         return SimpleNamespace(deferred_observation_finalizations=lambda: [])
@@ -97,7 +111,7 @@ def environment(monkeypatch, tmp_path):
             await state.cleanup_release.wait()
         return function(*args, **kwargs)
 
-    async def reserve(owner, devices):
+    async def reserve(owner, devices, **_options):  # yield/memory/shared-model options
         state.reservations.append((owner, devices))
 
     async def release(owner):
@@ -118,7 +132,16 @@ def environment(monkeypatch, tmp_path):
     monkeypatch.setattr(speech.asyncio, "create_subprocess_exec", spawn)
     monkeypatch.setattr(speech.model_runtime, "reserve_devices", reserve)
     monkeypatch.setattr(speech.model_runtime, "release_devices", release)
+    # The fake reservation is not registered with the real model owner.
+    monkeypatch.setattr(speech.model_runtime.RUNTIME, "set_reservation_process",
+                        lambda owner, pid: state.reservations.append((owner, ("pid", pid))))
     monkeypatch.setattr(speech.os, "killpg", killpg)
+
+    async def no_audio_hotplug(_runtime):
+        # The real watcher subscribes to the live PulseAudio server (pactl).
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(speech.RealtimeSessionManager, "_watch_audio_devices", no_audio_hotplug)
     return state
 
 
@@ -148,7 +171,9 @@ def test_restart_waits_for_previous_hardware_camera_and_speech_cleanup(environme
         assert conversation.speech is runtime
         assert runtime._hardware_leased
         assert environment.releases == [speech.RUNTIME_LEASE_OWNER]
-        assert environment.cameras == [("mic", False)]
+        # A start racing cleanup re-enters stop() through set_listening_mode,
+        # repeating the idempotent camera release; nothing reactivates it.
+        assert environment.cameras and set(environment.cameras) == {("mic", False)}
         await runtime.shutdown()
 
     asyncio.run(scenario())
@@ -312,7 +337,7 @@ def test_restart_restores_requested_speech_before_background_admission(environme
         conversation = Conversation()
         original = speech.RealtimeSessionManager(conversation, requested_state_path=path)
         await original.start()
-        assert json.loads(path.read_text()) == {"enabled": True}
+        assert json.loads(path.read_text()) == {"mode": "realtime"}
         await original.shutdown()
         assert path.exists()
         replacement = speech.RealtimeSessionManager(conversation, requested_state_path=path)
@@ -322,7 +347,7 @@ def test_restart_restores_requested_speech_before_background_admission(environme
         assert len(environment.processes) == 2
         assert conversation._conversation.conversation_id == "conversation-test"
         await replacement.stop()
-        assert not path.exists()
+        assert json.loads(path.read_text()) == {"mode": "off"}  # Explicit mute persists.
         await replacement.shutdown()
         fresh = speech.RealtimeSessionManager(conversation, requested_state_path=path)
         await fresh.restore()
@@ -331,11 +356,26 @@ def test_restart_restores_requested_speech_before_background_admission(environme
     asyncio.run(scenario())
 
 
+# Wake-by-name is the default; only an explicit {"mode": "off"} keeps speech off.
 @pytest.mark.parametrize("contents", ['broken', '[]', '{"enabled": 1}', '{"enabled": false}',
-                                      '{"enabled": true, "extra": true}'])
-def test_restart_ignores_invalid_or_disabled_speech_intent(environment, tmp_path, contents):
+                                      '{"enabled": true, "extra": true}', '{"mode": "invalid"}'])
+def test_restart_defaults_invalid_or_legacy_intent_to_wake(environment, tmp_path, contents):
     path = tmp_path / "requested.json"
     path.write_text(contents)
+    runtime = speech.RealtimeSessionManager(Conversation(), requested_state_path=path)
+
+    async def scenario():
+        await runtime.restore()
+        assert runtime._phase == "starting" and len(environment.processes) == 1
+        assert runtime._desired_mode == "wake"
+        await runtime.shutdown()
+
+    asyncio.run(scenario())
+
+
+def test_restart_keeps_explicit_off_intent(environment, tmp_path):
+    path = tmp_path / "requested.json"
+    path.write_text('{"mode": "off"}')
     runtime = speech.RealtimeSessionManager(Conversation(), requested_state_path=path)
     asyncio.run(runtime.restore())
     assert runtime._phase == "off" and environment.processes == []
@@ -385,6 +425,28 @@ def test_harness_restores_speech_before_first_scheduler_tick(monkeypatch):
     monkeypatch.setattr(api.conversation_runtime.RUNTIME, "cancel", nothing)
     monkeypatch.setattr(api.scheduler, "loop", scheduler_loop)
     monkeypatch.setattr(api.scheduler, "shutdown", nothing)
+    # Lifespan owners added since: keep Hindsight, graph views, DeepSeek and
+    # camera tracking inert (they would reach live services and hardware).
+    from contextlib import asynccontextmanager
+    from obsidience.harness.execution.deepseek import bridge, sessions
+    from obsidience.harness.graphs import api as graph_views
+    from obsidience.harness.memory import hindsight
+    from obsidience.harness.realtime import tracking
+
+    @asynccontextmanager
+    async def no_graph_views():
+        yield
+
+    async def reconcile(_conversation):
+        return None
+
+    monkeypatch.setattr(hindsight.MEMORY, "start", nothing)
+    monkeypatch.setattr(hindsight.MEMORY, "close", nothing)
+    monkeypatch.setattr(graph_views, "lifespan", no_graph_views)
+    monkeypatch.setattr(bridge, "BRIDGE", SimpleNamespace(start=nothing, close=nothing))
+    monkeypatch.setattr(sessions, "reconcile", reconcile)
+    monkeypatch.setattr(tracking, "restore", lambda: None)
+    monkeypatch.setattr(tracking, "stop", lambda: None)
 
     async def scenario():
         async with api.lifespan(api.app):
@@ -400,14 +462,15 @@ def test_explicit_stop_tears_down_worker_even_if_restart_intent_cannot_be_cleare
         runtime = speech.RealtimeSessionManager(Conversation(), requested_state_path=path)
         await runtime.start()
         process = runtime._process
-        original_unlink = Path.unlink
+        original_write = speech.media_runtime._atomic_json
 
-        def fail_unlink(candidate, *args, **kwargs):
+        def fail_write(candidate, value):
             if candidate == path:
                 raise PermissionError("injected intent persistence failure")
-            return original_unlink(candidate, *args, **kwargs)
+            return original_write(candidate, value)
 
-        monkeypatch.setattr(Path, "unlink", fail_unlink)
+        # Stop records the explicit off intent instead of deleting the file.
+        monkeypatch.setattr(speech.media_runtime, "_atomic_json", fail_write)
         with pytest.raises(RuntimeError, match="stopped.*restart intent"):
             await runtime.stop()
         assert process.returncode is not None

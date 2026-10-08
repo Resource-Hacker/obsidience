@@ -6,12 +6,25 @@ import pytest
 
 from obsidience.harness.capabilities.computer import observe
 from obsidience.harness.computer.capture import ScreenCapture
-from obsidience.harness.host.scene import EVENT_SCHEMA, ShellSceneCache
+from obsidience.harness.host.scene import EVENT_SCHEMA, SceneLocked, ShellSceneCache
 
 
 @pytest.fixture(autouse=True)
 def stable_process_identity(monkeypatch):
     monkeypatch.setattr(observe, "process_start_time", lambda pid: 12345)
+
+
+@pytest.fixture(autouse=True)
+def native_scene_matches_cache(monkeypatch):
+    """The production ShellSceneClient.refresh reads native geometry from the live
+    Shell; these tests install a bare ShellSceneCache, whose native state is the cache."""
+    def refresh(self, cancel_event=None):
+        snapshot = self.snapshot()
+        if snapshot.workspace.get("session_locked") is True:
+            raise SceneLocked("shell scene is locked")
+        return snapshot
+
+    monkeypatch.setattr(ShellSceneCache, "refresh", refresh, raising=False)
 
 
 def _workspace(*, locked: bool = False) -> dict:
@@ -37,6 +50,7 @@ def _window(
     pane_id: str = "",
     visible: bool = False,
 ) -> dict:
+
     return {
         "window_id": window_id,
         "stable_id": stable_id,
@@ -244,8 +258,10 @@ def test_scene_change_after_capture_discards_private_image(monkeypatch):
                 "schema": EVENT_SCHEMA,
                 "type": "application.state",
                 "surface_id": "samsung",
-                "revision": 2,
-                "active_window_id": "0xedge",
+                # Change the scene after every capture: observe retries a stale
+                # scene once, and the retry must also be discarded.
+                "revision": 1 + len(calls),
+                "active_window_id": "0xedge" if len(calls) % 2 else "",
                 "surface_awake": True,
                 "windows": [edge],
             },
@@ -263,7 +279,7 @@ def test_scene_change_after_capture_discards_private_image(monkeypatch):
         {},
     )
 
-    assert calls == ["18000007"]
+    assert calls == ["18000007", "18000007"]  # One fresh retry, never more.
     assert result["observation"]["failure"]["code"] == "stale_scene"
     assert observe.PRIVATE_IMAGE_FIELD not in result
     assert observe.PRIVATE_OBSERVATION_FIELD not in result
@@ -340,9 +356,10 @@ def test_process_change_or_disappearance_returns_no_image_or_action_lease(monkey
         nonlocal reads
         reads += 1
         assert pid == 42
-        if failure == "missing_before" or (failure == "missing_after" and reads == 2):
+        # Post-capture reads (even) keep failing, so observe's one stale retry fails too.
+        if failure == "missing_before" or (failure == "missing_after" and reads % 2 == 0):
             raise observe.GroundingError("Process disappeared.")
-        return 12346 if failure == "pid_reused" and reads == 2 else 12345
+        return 12346 if failure == "pid_reused" and reads % 2 == 0 else 12345
 
     monkeypatch.setattr(observe, "process_start_time", start)
     result = observe.execute({
@@ -351,7 +368,7 @@ def test_process_change_or_disappearance_returns_no_image_or_action_lease(monkey
     assert result["observation"]["failure"]["code"] == "stale_scene"
     assert observe.PRIVATE_OBSERVATION_FIELD not in result
     assert observe.PRIVATE_IMAGE_FIELD not in result
-    assert calls == ([] if failure == "missing_before" else ["18000007"])
+    assert calls == ([] if failure == "missing_before" else ["18000007", "18000007"])
 
 
 def test_capture_failure_returns_no_private_lease(monkeypatch):

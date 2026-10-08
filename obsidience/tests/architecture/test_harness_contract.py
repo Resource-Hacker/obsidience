@@ -19,8 +19,8 @@ def test_harness_manifest_names_the_real_module() -> None:
         "id": "harness",
         "name": "Harness",
         "summary": (
-            "Activates and executes Tasks using the graph, local models, "
-            "capabilities, and system services."
+            "Hosts the DeepSeek Executive composition and reusable Tasks with shared "
+            "graph, model, capability and receipt owners."
         ),
         "package": "obsidience.harness",
         "entrypoints": [

@@ -18,6 +18,9 @@ def fake_runtime(monkeypatch):
     monkeypatch.setattr(runtime, "_pick_devices", lambda *_args: ("test-device",))
     monkeypatch.setattr(runtime, "_activate_task_model", AsyncMock())
     monkeypatch.setattr(runtime, "_reconcile_defaults", AsyncMock())
+    # Lease admission now measures live VRAM plans first; keep it inert here.
+    monkeypatch.setattr(runtime, "refresh_memory_plans", AsyncMock())
+    monkeypatch.setattr(runtime, "_prepare_memory", AsyncMock())
     monkeypatch.setattr(model_runtime, "configured_spec", lambda _model_id: spec)
     return runtime, spec
 

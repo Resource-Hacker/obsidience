@@ -32,7 +32,9 @@ pane.root=pane;vm.createContext(pane);
 const placement={paneId:'settings',surfaceId:'usb-c'};
 const host={commandSchema:'obsidience.shell.command.v1',eventSchema:'obsidience.shell.event.v1',
     subprotocol:'obsidience.shell.v1',WebSocket:{Open:1,Closed:0,Error:3},
-    settingsSelectionRevision:0,placementAllowed:true,clients:[],graphStates:{},windowStates:{},selectedGraphId:'main'};
+    settingsSelectionRevision:0,placementAllowed:true,clients:[],graphStates:{},windowStates:{},selectedGraphId:'main',
+    // Clients must present the Shell command token (isolated test value).
+    ShellCommandToken:{value:'0123456789abcdef'.repeat(4)}};
 host.root=host;vm.createContext(host);
 """ + f"""
 pane.sections=vm.runInContext({json.dumps(sections)},pane);
@@ -44,7 +46,8 @@ const tabClick={json.dumps(tab_click)};
 host.placementFor=id=>id==='settings'?placement:null;
 host.presentPlacementOnSurface=(target,surface)=>{presentations.push([target.paneId,surface]);return host.placementAllowed};
 host.broadcast=event=>events.push(copy(event));
-for(const name of ['readerState','knowledgeState','graphDisplayState','workspaceState','dockState'])host[name]=()=>({type:name});
+for(const name of ['readerState','knowledgeState','graphDisplayState','workspaceState','dockState','graphViewerState'])host[name]=()=>({type:name});
+host.providerGraphViews={memory:{},code:{}};
 function command(section,selectionExtra={}) {
     return {schema:host.commandSchema,type:'pane.present',pane_id:'settings',
         selection:{kind:'settings',section,...selectionExtra}};
@@ -63,25 +66,25 @@ function clickTab(section) {
 def test_manual_navigation_survives_replay_and_fresh_external_navigation_still_works():
     run_navigation(r"""
 deliver(host.settingsState());assert.equal(pane.activeSection,'graph');assert.equal(pane.selectionRevision,0);
-present('connections');const oldConnections=events.at(-1);deliver(oldConnections);
-assert.equal(pane.activeSection,'connections');assert.equal(pane.selectionRevision,1);
+present('workspace');const oldConnections=events.at(-1);deliver(oldConnections);
+assert.equal(pane.activeSection,'workspace');assert.equal(pane.selectionRevision,1);
 clickTab('ai-voice');
 assert.equal(commands.length,1);
 assert.deepEqual(JSON.parse(commands[0]),command('ai-voice'));
-assert.equal(pane.activeSection,'connections'); // Only the owner commits navigation.
+assert.equal(pane.activeSection,'workspace'); // Only the owner commits navigation.
 deliver(oldConnections);host.handleCommand(null,commands.shift());deliver(events.at(-1));
 assert.equal(pane.activeSection,'ai-voice');assert.equal(pane.selectionRevision,2);
 deliver(oldConnections);deliver({...oldConnections,revision:2});
 assert.equal(pane.activeSection,'ai-voice');assert.equal(pane.selectionRevision,2);
 const replay=[];
-host.acceptClient({status:1,negotiatedSubprotocol:host.subprotocol,
+host.acceptClient({status:1,negotiatedSubprotocol:host.subprotocol,url:'ws://127.0.0.1:8768/?token='+host.ShellCommandToken.value,
     textMessageReceived:{connect(){}},statusChanged:{connect(){}},sendTextMessage(text){replay.push(JSON.parse(text))}});
 const settingsReplay=replay.find(event=>event.type==='pane.selection');
 assert.deepEqual(settingsReplay,copy(host.settingsState()));deliver(settingsReplay);
 assert.equal(pane.activeSection,'ai-voice');assert.equal(commands.length,0); // No echo loop.
-present('connections');deliver(events.at(-1));assert.equal(pane.activeSection,'connections');
+present('workspace');deliver(events.at(-1));assert.equal(pane.activeSection,'workspace');
 assert.equal(pane.selectionRevision,3);
-present('connections');deliver(events.at(-1));assert.equal(pane.selectionRevision,4);
+present('workspace');deliver(events.at(-1));assert.equal(pane.selectionRevision,4);
 assert.equal(presentations.length,4);
 assert(presentations.every(([id,surface])=>id==='settings'&&surface==='usb-c'));
 """)
@@ -89,17 +92,17 @@ assert(presentations.every(([id,surface])=>id==='settings'&&surface==='usb-c'));
 
 def test_owner_accepts_only_known_sections_and_projects_only_selection_fields():
     run_navigation(r"""
-for(const section of ['graph','input','workspace','connections','ai-voice']) {
+for(const section of ['graph','input','workspace','ai-voice']) {
     present(section,{extra:'must not be relayed'});
     assert.deepEqual(copy(host.settingsSelection),{kind:'settings',section});
     deliver(events.at(-1));assert.equal(pane.activeSection,section);
 }
-assert.equal(host.settingsSelectionRevision,5);
-for(const section of [null,undefined,{},[],true,42,'','AI & Voice','ai_voice',' connections','graph\u0000','x'.repeat(10000)])present(section);
+assert.equal(host.settingsSelectionRevision,4);
+for(const section of [null,undefined,{},[],true,42,'','AI & Voice','ai_voice',' connections','graph\u0000','x'.repeat(10000),'connections'])present(section);
 host.handleCommand(null,JSON.stringify({...command('graph'),schema:'wrong'}));
 host.handleCommand(null,JSON.stringify(command('graph',{kind:'source'})));
-assert.equal(host.settingsSelectionRevision,5);assert.equal(events.length,5);
-assert.equal(presentations.length,5);assert.equal(pane.activeSection,'ai-voice');
+assert.equal(host.settingsSelectionRevision,4);assert.equal(events.length,4);
+assert.equal(presentations.length,4);assert.equal(pane.activeSection,'ai-voice');
 assert.equal(commands.length,0);
 """)
 
@@ -145,7 +148,7 @@ def test_native_settings_navigation_round_trips_through_the_owner(tmp_path):
         pytest.skip("qml6 is not installed")
     for directory, component in (
         ("graph", "GraphSettings"), ("input", "InputSettings"),
-        ("workspace", "WorkspaceSettings"), ("connections", "ConnectionsSettings"),
+        ("workspace", "WorkspaceSettings"),
         ("ai_voice", "AiVoiceSettings"),
     ):
         target = tmp_path / directory
@@ -168,10 +171,10 @@ Window {
                 stage = 1
             } else if (stage === 1 && pane.selectionRevision === 1) {
                 if (pane.activeSection !== "ai-voice") { Qt.exit(21); return }
-                pane.selectSection("connections")
+                pane.selectSection("workspace")
                 stage = 2
             } else if (stage === 2 && pane.selectionRevision === 2) {
-                if (pane.activeSection !== "connections") { Qt.exit(22); return }
+                if (pane.activeSection !== "workspace") { Qt.exit(22); return }
                 Qt.quit()
             }
         }
@@ -210,8 +213,14 @@ Window {
             handle, "127.0.0.1", 0, subprotocols=["obsidience.shell.v1"]
         ) as server:
             port = server.sockets[0].getsockname()[1]
+            api = tmp_path / "api"
+            api.mkdir()
+            (api / "qmldir").write_text("singleton ShellCommandToken 1.0 ShellCommandToken.qml\n")
+            (api / "ShellCommandToken.qml").write_text(
+                'pragma Singleton\nimport QtQml\nQtObject { readonly property string query: "" }\n')
             (tmp_path / "SettingsPane.qml").write_text(
                 SETTINGS.read_text().replace("ws://127.0.0.1:8768", f"ws://127.0.0.1:{port}")
+                .replace('import "../../api"', "import " + json.dumps(api.as_uri()))
             )
             environment = os.environ.copy()
             environment.update(
@@ -232,6 +241,6 @@ Window {
             assert process.returncode == 0, output
             assert not any(error in output for error in ("ReferenceError", "TypeError", "Binding loop")), output
             assert failures == []
-            assert [command["selection"]["section"] for command in commands] == ["ai-voice", "connections"]
+            assert [command["selection"]["section"] for command in commands] == ["ai-voice", "workspace"]
 
     asyncio.run(exercise())

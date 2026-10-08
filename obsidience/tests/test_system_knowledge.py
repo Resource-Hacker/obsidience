@@ -240,7 +240,11 @@ def test_identical_refresh_preserves_source_and_article_bytes_and_retries_index(
     assert result["changed"] == 0 and result["status"] == "ready"
     assert _files(CONFIG.vault_dir) == before_articles
     assert _files(CONFIG.source_dir) == before_sources
-    assert result["categories"] == before["categories"]
+    # Current check time advances; immutable Source observation time does not.
+    unchecked = lambda rows: [{k: v for k, v in row.items() if k != "checked_at"} for row in rows]
+    assert unchecked(result["categories"]) == unchecked(before["categories"])
+    assert all(row["checked_at"] >= old["checked_at"]
+               for row, old in zip(result["categories"], before["categories"]))
     assert len(inventory[2]) == 2
 
 
@@ -439,11 +443,15 @@ def test_generated_paths_and_branch_aliases_are_protected_without_blocking_obser
         assert system.is_system_article(item["ref"] + ".md")
     assert system.is_system_article("@branch/ADMECH Workstation/Compute")
     assert system.is_system_article("ADMECH Workstation/Compute/Compute")
-    assert not system.is_system_article("ADMECH Workstation/Hardware/Hardware")
-    assert not system.is_system_article("ADMECH Workstation/Workstation Observations/Workstation Observations")
-    system.assert_system_article_writable("ADMECH Workstation/Workstation Observations/Owner policy")
-    with pytest.raises(ValueError, match="System inventory"):
-        system.assert_system_article_writable("ADMECH Workstation/Hardware/Unregistered/Injected")
+    # Since 2026-10-06 the complete ADMECH Workstation namespace is publisher owned.
+    assert system.is_system_article("ADMECH Workstation/Hardware/Hardware")
+    assert system.is_system_article("ADMECH Workstation/Workstation Observations/Workstation Observations")
+    assert not system.is_system_article("Architecture/Shell/Owner policy")
+    system.assert_system_article_writable("Architecture/Shell/Owner policy")
+    for ref in ("ADMECH Workstation/Workstation Observations/Owner policy",
+                "ADMECH Workstation/Hardware/Unregistered/Injected"):
+        with pytest.raises(ValueError, match="System inventory"):
+            system.assert_system_article_writable(ref)
 
 
 def test_managed_facts_are_not_maintenance_candidates_but_remain_link_targets(inventory):

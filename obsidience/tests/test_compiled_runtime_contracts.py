@@ -10,7 +10,7 @@ from obsidience.harness.knowledge import scope
 
 def test_every_registered_tool_has_a_distinct_argument_contract():
     schema=registry.action_schema(list(registry.REGISTRY))
-    assert len(schema['anyOf'])==len(registry.REGISTRY)==30
+    assert len(schema['anyOf'])==len(registry.REGISTRY)==34
     byname={row['properties']['tool']['enum'][0]:row['properties']['args'] for row in schema['anyOf']}
     assert byname['application.launch']['required']==['application']
     assert byname['application.launch']['properties']['application']['enum']
@@ -31,28 +31,6 @@ def test_runtime_sections_are_exact_noncontiguous_source_ranges():
     assert 'Observe first' not in text and 'Extra detail' not in text
     assert all(body[a:b].strip() in text for a,b in executor._instruction_ranges(note,'launch'))
     with pytest.raises(ValueError): executor._instruction_text(replace(note,meta={**note.meta,'runtime_sections':{'launch':'Missing'}}),'launch')
-
-
-def test_operation_profile_cannot_grant_an_unassigned_tool():
-    book=Note('Runbooks/demo.md','Demo',{'kind':'runbook','operation_tools':{'launch':['Tools/imaginary']}},'Procedure')
-    with pytest.raises(ValueError,match='widen'):
-        executor._operation_spine({'runbook':book,'tools':['task.complete']},{'computer_outcome':'launch'})
-
-
-def test_actual_launch_packet_uses_two_tools_and_not_reference_prose():
-    res=resolver(); task=res.resolve('Tasks/executive/operate'); agent=res.resolve('Agents/Executive/Executive')
-    complete=executor.resolve_spine(task,res)
-    assert not complete.get('error'),complete
-    narrow=executor._operation_spine(complete,{'computer_outcome':'launch'})
-    assert narrow['tools']==['application.launch','task.complete']
-    binding=executor.ActivationBinding(objective='Open Microsoft Edge.',bindings={'computer_outcome':'launch','application':'microsoft_edge'})
-    packet,refs=executor._activation_packet(task,agent,narrow,binding,'','',accepted_resolver=res)
-    assert 'Tools/application.launch' in refs and 'Tools/computer.act' not in refs
-    assert '## Reference' not in packet
-    assert 'Wait for ready' not in packet  # This exact synthetic fixture cannot contaminate real contracts.
-    full_chars=sum(len(note.body) for note in [task,*complete['runbooks'],*complete['skills'],*complete['tool_articles']])
-    compiled_chars=sum(len(executor._instruction_text(note,'launch')) for note in [*narrow['runbooks'],*narrow['skills'],*narrow['tool_articles']])
-    assert compiled_chars<full_chars*0.30,(compiled_chars,full_chars)
 
 
 def test_required_context_fails_closed_when_revoked_or_stale():
@@ -107,8 +85,10 @@ def test_evidence_bound_completion_schema_requires_fields_without_forcing_succes
     assert success['properties']['outcome']=={'const':'no_change'}
     assert {'outcome','evidence'} <= set(success['required'])
     assert success['properties']['evidence']['minItems']==1
-    assert 'failed' in other['properties']['status']['enum']
-    assert 'outcome' not in other['required']
+    # The non-success branch is explicitly failed: without status it would
+    # bypass the evidence contract and default to completed.
+    assert other['properties']['status']=={'const':'failed'}
+    assert 'status' in other['required'] and 'outcome' not in other['required']
     assert not completion_requires_no_change({'task':'Tasks/query'})
     assert not completion_requires_no_change({**ctx,'staged_proposals':[{'auto_approved':True,'target':'A.md'}]})
     assert not completion_requires_no_change({**ctx,'staged_proposals':[{'staged':'','target':'A.md'}]})

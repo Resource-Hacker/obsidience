@@ -53,7 +53,11 @@ def test_paging_recovers_complete_exact_article_and_backlinks(article_vault):
         'Article lifecycle (document metadata, not Task execution or verification):\n'
         '{"freshness": "current", "status": "stable"}\n\n'
     ) + load_note("Knowledge/evidence.md").text() + (
-        "\n\n## Accepted inbound references\n- [[Knowledge/caller]]"
+        # Generated backlinks are explicitly separated from the Article body.
+        "\n\n--- End of Article body ---\n\n## Accepted inbound references\n"
+        "Generated read-only graph context, not Article content. These Articles link TO this "
+        "Article; this list does not establish outgoing relationships. Never copy this section "
+        "or the end marker into a proposed body.\n- [[Knowledge/caller]]"
     )
     assert view == expected
     assert "End of Article view." in output

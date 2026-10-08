@@ -424,6 +424,10 @@ def test_continuation_resume_appends_one_reply_to_the_original_turn(ledger, monk
         "research-resume",
         {"evidence": ["The direct evidence was already represented."]},
     )
+    # Resumption now verifies the original waiting caller execution exists.
+    ledger.record_run(id="caller-resume", task_ref="Tasks/query", objective=user_turn["text"],
+                      agent="Executive", started=1, finished=2, status="waiting",
+                      summary="Waiting", trace="[]")
     claimed = ledger.claim_continuation(continuation["id"])
     assert claimed is not None
     seen = []
@@ -439,7 +443,8 @@ def test_continuation_resume_appends_one_reply_to_the_original_turn(ledger, monk
             "summary": "The accepted answer remains current.",
         }
 
-    monkeypatch.setattr(runtime, "prepare_immediate_observations", prepare)
+    # Context preparation refreshes the native session; keep it inert.
+    monkeypatch.setattr(runtime, "prepare_conversation_context", prepare)
     monkeypatch.setattr(executor, "run_task", run_task)
 
     first = asyncio.run(runtime.resume_continuation(claimed))
@@ -453,68 +458,6 @@ def test_continuation_resume_appends_one_reply_to_the_original_turn(ledger, monk
     assert seen[0]["runtime_params"]["event"] == "task.continue"
     assert seen[0]["runtime_params"]["continuation_result"]["disposition"] == "no_change"
     assert seen[0]["conversation_evidence"] == []
-
-
-@pytest.mark.parametrize("fault", [None, "missing_binding", "wrong_conversation", "wrong_task", "wrong_objective", "invalid_scope"])
-def test_computer_continuation_restores_exact_recorded_intent_without_reselection(ledger, monkeypatch, fault):
-    from obsidience.harness.conversation import runtime as runtime_module
-
-    store = ConversationStore(ledger)
-    runtime = ConversationRuntime(store)
-    user = asyncio.run(store.append(role="user", source="text", text="Start the match"))
-    request = {"computer_outcome": "action", "computer_scope": "state",
-               "application": "teamfight_tactics", "operation": "computer_use"}
-    activation = {"interactive_turn": {"conversation_id": store.conversation_id,
-                                       "reply_to_turn_id": user["id"]},
-                  "computer_request": dict(request)}
-    if fault == "missing_binding":
-        activation.pop("computer_request")
-    elif fault == "wrong_conversation":
-        activation["interactive_turn"]["conversation_id"] = "conversation-other"
-    elif fault == "invalid_scope":
-        activation["computer_request"]["computer_scope"] = "invented"
-    ledger.record_run(
-        id="caller-computer", task_ref="Tasks/query" if fault == "wrong_task" else "Tasks/executive/operate",
-        objective="Other request" if fault == "wrong_objective" else user["text"],
-        agent="Executive", started=1, finished=2, status="waiting", summary="Waiting",
-        trace=json.dumps([activation]),
-    )
-    continuation = ledger.create_continuation(
-        caller_task_ref="Tasks/executive/operate", caller_run_id="caller-computer",
-        target_task_ref="Tasks/research/question", target_activation_key="computer-question",
-        objective=user["text"], conversation_id=store.conversation_id,
-        reply_to_turn_id=user["id"], reply_source="text",
-    )
-    ledger.resolve_research_no_change("caller-computer", "research-computer", {"evidence": ["Research result"]})
-    claimed = ledger.claim_continuation(continuation["id"])
-    calls = []
-
-    async def forbidden_selection(*_args, **_kwargs):
-        raise AssertionError("A continuation must not classify the owner request again")
-
-    async def prepare(_turn, **_kwargs):
-        return "exact originating context"
-
-    async def execute(task, **kwargs):
-        calls.append((task, kwargs))
-        return {"status": "failed", "summary": "fixture performs no computer action"}
-
-    monkeypatch.setattr(runtime_module, "select_task", forbidden_selection)
-    monkeypatch.setattr(runtime, "prepare_immediate_observations", prepare)
-    monkeypatch.setattr(executor, "run_task", execute)
-    if fault:
-        with pytest.raises(RuntimeError, match="computer continuation"):
-            asyncio.run(runtime.resume_continuation(claimed))
-        assert calls == []
-    else:
-        result = asyncio.run(runtime.resume_continuation(claimed))
-        assert result["status"] == "failed"
-        assert len(calls) == 1
-        task, fields = calls[0]
-        assert task.ref == "Tasks/executive/operate"
-        assert {key: fields["runtime_params"][key] for key in request} == request
-        assert fields["conversation_context"] == "exact originating context"
-        assert fields["conversation_evidence"] == []
 
 
 def test_continuation_rejects_changed_original_user_binding_before_execution(ledger, monkeypatch):

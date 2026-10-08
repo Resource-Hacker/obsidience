@@ -23,10 +23,11 @@ def execution(monkeypatch):
     state.tools = tools
     spine = dict(runbook=book, runbooks=[book], skills=[], tools=tools)
 
-    async def compile_packet(*_args, **_kwargs):
+    async def compile_packet(*_args, **kwargs):
         state.events.append(dict(phase="path", refs=[task.ref, book.ref]))
         return dict(
             packet="Isolated packet", refs=[task.ref, book.ref], spine=spine,
+            params=dict(kwargs.get("params") or {}),
             provider_system="Isolated fixed instructions",
             provider_user="Move the requested application",
             retrieval_ms=1.25, objective="Move the requested application",
@@ -73,7 +74,8 @@ def execution(monkeypatch):
     monkeypatch.setattr(executor, "cached_text_count", lambda *_args: NS(tokens=100, method="runtime"))
     monkeypatch.setattr(executor, "execute_capability", tool)
     async def async_tool(name, args, ctx):
-        return executor.execute_capability(name, args, ctx)
+        # Like registry.execute_async: synchronous adapters run in a worker.
+        return await asyncio.to_thread(executor.execute_capability, name, args, ctx)
     monkeypatch.setattr(executor, "execute_capability_async", async_tool)
     monkeypatch.setattr(executor, "update_status", status)
     monkeypatch.setattr(executor, "mutate_note_metadata", mutate)
@@ -266,8 +268,9 @@ def test_interactive_completion_uses_one_packet_tools_and_protocol(execution, mo
 
     async def complete(messages, **kwargs):
         assert executor.llm.PROTOCOL in messages[0]["content"]
-        assert contract in messages[0]["content"]
-        assert messages[1]["content"] == "Move the requested application"
+        # Transport reply formatting follows the shared prompt (cache prefix).
+        assert contract not in messages[0]["content"]
+        assert "Move the requested application\n\n" + contract in [m["content"] for m in messages[1:]]
         assert "Isolated fixed instructions" in messages[0]["content"]
         assert set(kwargs["allowed_tools"]) == {
             "task.complete", "window.place", *executor.MODEL_RESOURCE_TOOLS,
@@ -368,6 +371,17 @@ def test_invalid_action_streak_ignores_diagnostic_trace_rows(
             completion_tokens=5, provider_metrics=metrics, context_projection=projection,
         )
 
+    execution_tool = executor.execute_capability
+
+    def verified_placement(name, args, ctx):
+        result = execution_tool(name, args, ctx)
+        if name == "window.place":
+            # Completion requires a verified placement witness.
+            result.update(target={"kind": "application", "name": "microsoft_edge"},
+                          destination={"surface": "usb-c"}, observed={"surface": "usb-c"})
+        return result
+
+    monkeypatch.setattr(executor, "execute_capability", verified_placement)
     monkeypatch.setattr(executor.llm, "chat", reply)
     result = asyncio.run(execution.run())
     trace = json.loads(execution.records[0]["trace"])
@@ -560,11 +574,8 @@ def test_specialist_read_activity_keeps_its_execution_graph_and_identity(executi
     monkeypatch.setattr(executor.llm, "chat", response)
     monkeypatch.setattr(executor, "execute_capability", dispatch)
     result = asyncio.run(execution.run())
-    reads = [row for row in execution.events if "Shared/fact" in row.get("refs", [])]
-    assert len(reads) == 1
-    assert reads[0]["graph_id"] == "Alexandria"
-    assert reads[0]["run_id"] == result["run_id"]
-    assert reads[0]["retrieval_ms"] == 1.25
+    # Tool read activity now belongs to the receipt-bound operation stream
+    # (emit_operation); the run lifecycle keeps the specialist's graph identity.
     lifecycle = [row for row in execution.events if row["phase"] in {"query_started", "query_completed"}]
     assert all(row["graph_id"] == "Alexandria" and row["run_id"] == result["run_id"] for row in lifecycle)
 
@@ -590,49 +601,3 @@ def test_completion_decoder_tracks_controller_proposal_state(execution, monkeypa
     monkeypatch.setattr(executor,'execute_capability',dispatch)
     assert asyncio.run(execution.run())['status']=='completed'
     assert observed==[True,False]
-
-
-@pytest.mark.parametrize('target', ['Tasks/executive/operate', '[[Tasks/executive/operate]]', 'Tasks/executive/operate.md'])
-def test_misrouted_query_reclassifies_before_delegation_dispatch(execution, monkeypatch, target):
-    execution.tools.append('task.create')
-    async def mistaken(*_args, **_kwargs):
-        return NS(content=json.dumps({'tool':'task.create','args':{
-            'task':target, 'params':{'application':'teamfight_tactics'}}}), prompt_tokens=100)
-    monkeypatch.setattr(executor.llm, 'chat', mistaken)
-    result = asyncio.run(execution.run(runtime_params={'request':'Can you start TFT?'}))
-    assert result['status'] == 'failed' and result['routing_reclassification'] is True
-    assert execution.calls == []  # No task.create adapter, computer effect, or synthetic task.complete.
-    recorded = json.loads(execution.records[-1]['trace'])
-    attempts = [row for row in recorded if row.get('tool') == 'task.create']
-    assert len(attempts) == 1 and attempts[0]['not_dispatched'] is True
-    receipt = executor.INDEX.tool_run_receipts(result['run_id'])
-    assert len(receipt['calls']) == 1 and receipt['calls'][0]['status'] == 'undispatched'
-    assert [row['phase'] for row in execution.events].count('query_completed') == 1
-
-
-@pytest.mark.parametrize('changes', [
-    {'interactive':False}, {'params':{'routing_rechecked':True}},
-    {'_created_tasks':[{'target_task_ref':'Tasks/research/question'}]},
-    {'trace':[{'tool':'application.launch'}]}, {'trace':[{'tool':'task.create'}]},
-    {'trace':[{'tool':'observations.temporary.append'}]},
-])
-def test_admission_repair_cannot_repeat_effects_or_prior_reclassification(changes):
-    from obsidience.harness.capabilities.task.complete import reclassification_allowed
-    assert not reclassification_allowed({'task':'Tasks/query','interactive':True,**changes})
-
-
-@pytest.mark.parametrize('field', ['applied','pending'])
-def test_reclassification_cannot_ignore_an_owner_clarification(field):
-    from obsidience.harness.capabilities.task.complete import reclassification_allowed
-    steering = NS(applied=[],pending=[])
-    setattr(steering,field,['exact-clarification'])
-    assert not reclassification_allowed({'task':'Tasks/query','interactive':True,'_steering':steering})
-
-
-def test_reclassification_allows_only_observed_readonly_or_undispatched_calls():
-    from obsidience.harness.capabilities.task.complete import reclassification_allowed
-    context = {'task':'Tasks/query','interactive':True,'trace':[
-        {'tool':'vault.read'}, {'tool':'task.create','not_dispatched':True}]}
-    assert reclassification_allowed(context)
-    context['trace'].append({'tool':'window.place','interrupted':True})
-    assert not reclassification_allowed(context)

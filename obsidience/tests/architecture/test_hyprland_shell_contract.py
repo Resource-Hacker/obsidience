@@ -96,9 +96,13 @@ def test_hyprland_config_is_one_compositor_with_three_real_outputs() -> None:
     assert 'hl.bind("SUPER + SHIFT + ESCAPE"' in config
     assert 'hl.bind("SUPER + ESCAPE"' in config
     assert "move_pane.py focused close" in config
-    assert config.count("hl.device({") == 1
+    # Cyborg M.M.O.7 plus both enumeration names of the M.M.O. 7+ (2026-10-01).
+    assert config.count("hl.device({") == 3
     assert 'name = "saitek-cyborg-m.m.o.7-gaming-mouse"' in config
     assert 'accel_profile = "custom 1 0 0.125"' in config
+    assert 'name = "mad-catz-mad-catz-m.m.o.-7+"' in config
+    assert 'name = "mad-catz-mad-catz-m.m.o.-7+-1"' in config
+    assert config.count('accel_profile = "custom 1 0 0.03076923076923077"') == 2
     assert "sensitivity = 0" in config
     assert "kwin" not in config.casefold()
     assert "plasmashell" not in config.casefold()
@@ -247,7 +251,9 @@ def test_hyprland_services_reuse_one_shell_and_one_graph() -> None:
     assert "OBSIDIENCE_SHELL_STATE_NAMESPACE" not in host
     assert "OBSIDIENCE_SHELL_PRIMARY_ONLY" not in host
     assert "obsidience/shell/qml" in host
-    assert "surfaces/knowledge/host.py" in knowledge
+    # The retired GTK/WebKit host was replaced by the Quickshell graph stage.
+    assert "obsidience/shell/qml/graph-stage.qml" in knowledge
+    assert "surfaces/knowledge/host.py" not in knowledge
     assert "OBSIDIENCE_KNOWLEDGE_ORIGIN=http://127.0.0.1:8765/shell/knowledge/" in knowledge
     assert "OBSIDIENCE_SURFACE_LAYOUT=%h/.config/obsidience-shell/surface-layout.json" in knowledge
     assert "Type=simple" in notifications
@@ -304,9 +310,9 @@ def test_hyprland_and_uwsm_are_declared_runtime_plumbing() -> None:
     )
     upstreams = {item["name"]: item for item in manifest["upstreams"]}
     hyprland = upstreams["Hyprland"]
-    assert hyprland["package"] == "hyprland 0.56.2-2.4"
+    assert hyprland["package"] == "hyprland-obsidience 0.56.2-3.2"
     assert hyprland["commit"] == "efb50993780079460b0cbed1363e2166a2de1d9f"
-    assert hyprland["selected_sources"] == [
+    assert [{key: row[key] for key in ("path", "sha256")} for row in hyprland["selected_sources"]] == [
         {
             "path": "src/desktop/state/ViewHitTester.cpp",
             "sha256": (
@@ -325,10 +331,17 @@ def test_hyprland_and_uwsm_are_declared_runtime_plumbing() -> None:
                 "da2cdb373e6ba757369495f4087216c29fdda142af852aaa79e3590d7c0a29ed"
             ),
         },
+        {
+            "path": "src/managers/input/InputManager.cpp",
+            "sha256": (
+                "feedf32e2e3d23aeaed7a02ef4ab94be2d66f4b22873b3166026da1e9ece4765"
+            ),
+        },
     ]
     assert hyprland["patches"] == [
         "adapter/hyprland/patches/0001-hit-test-overlapping-tiled-windows.patch",
         "adapter/hyprland/patches/0002-forward-lua-layout-resize.patch",
+        "adapter/hyprland/patches/0003-restore-keyboard-focus-after-desktop-click.patch",
     ]
     hit_test_patch = (SHELL_ROOT / hyprland["patches"][0]).read_text(
         encoding="utf-8"

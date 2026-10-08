@@ -29,6 +29,9 @@ def recovery(tmp_path, monkeypatch):
     monkeypatch.setattr(scheduler, "INDEX", ledger)
     monkeypatch.setattr(scheduler, "iter_notes", lambda: [task])
     monkeypatch.setattr(scheduler, "update_status", update)
+    # Failed restart disposition now goes through the executor's status owner.
+    from obsidience.harness.execution import executor
+    monkeypatch.setattr(executor, "_update_execution_status", update)
     monkeypatch.setattr(scheduler, "mutate_note_metadata", lambda note, edit: edit(note.meta))
     try:
         yield ledger, task

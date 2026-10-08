@@ -6,6 +6,8 @@ import threading
 from fastapi.testclient import TestClient
 import pytest
 
+from obsidience.harness.config import CONFIG
+
 api = import_module("obsidience.harness.interfaces.api.app")
 
 
@@ -50,7 +52,7 @@ def test_listing_waits_for_inflight_review_decision(monkeypatch, decision):
     monkeypatch.setattr(api.review, "list_proposals", listing)
     # No lifespan startup: these are real ASGI routes with inert review bodies,
     # not another running Harness, provider, microphone or Vault writer.
-    client = TestClient(api.app)
+    client = TestClient(api.app, base_url=f"http://{CONFIG.host}:{CONFIG.port}")
     with ThreadPoolExecutor(max_workers=2) as pool:
         mutation = pool.submit(client.post, f"/api/reviews/isolated.md/{decision}")
         read = None
@@ -81,7 +83,7 @@ def test_failed_decision_releases_lock_for_next_poll(monkeypatch, decision, erro
     monkeypatch.setattr(api, "_REVIEW_LOCK", threading.RLock())
     monkeypatch.setattr(api.review, decision, fail)
     monkeypatch.setattr(api.review, "list_proposals", lambda: [{"file": "remaining.md"}])
-    client = TestClient(api.app)
+    client = TestClient(api.app, base_url=f"http://{CONFIG.host}:{CONFIG.port}")
     try:
         with ThreadPoolExecutor(max_workers=1) as pool:
             response = pool.submit(client.post, f"/api/reviews/isolated.md/{decision}").result(timeout=5)

@@ -13,12 +13,15 @@ from fastapi.testclient import TestClient
 import pytest
 from starlette.websockets import WebSocketDisconnect
 
+from obsidience.harness.config import CONFIG
 from obsidience.harness.conversation.runtime import ConversationRuntime
 from obsidience.harness.conversation.store import ConversationStore
 from obsidience.harness.execution import trace
 
 
 api = import_module("obsidience.harness.interfaces.api.app")
+# LocalClientsOnly requires a loopback Host; websocket_connect ignores base_url.
+LOCAL_HOST = f"{CONFIG.host}:{CONFIG.port}"
 
 
 def receive(socket):
@@ -55,7 +58,7 @@ def stream_trace(monkeypatch, isolated_task_ledger):
 def test_trace_cursor_replay_live_delivery_and_reconnect(stream_trace):
     for number in range(4):
         stream_trace.append_trace({"id": str(number), "channel": "status", "line": str(number)})
-    client = TestClient(api.app)  # No model/scheduler/scene lifespan.
+    client = TestClient(api.app, headers={"host": LOCAL_HOST})  # No model/scheduler/scene lifespan.
     with client.websocket_connect("/ws/trace?after=2") as socket:
         frame = receive(socket)
         assert frame["type"] == "replay" and frame["gap"] is False
@@ -76,7 +79,7 @@ def test_trace_cursor_replay_live_delivery_and_reconnect(stream_trace):
 @pytest.mark.parametrize("burst,expected_type,first_sequence", [(150, "replay", 2), (510, "snapshot", 12)])
 def test_slow_trace_subscriber_recovers_gap_without_duplicate_delivery(stream_trace, burst, expected_type, first_sequence):
     stream_trace.append_trace({"id": "initial", "line": "Initial"})
-    client = TestClient(api.app)
+    client = TestClient(api.app, headers={"host": LOCAL_HOST})
     with client.websocket_connect("/ws/trace?after=1") as socket:
         initial = receive(socket)
         assert initial["cursor"] == 1 and initial["entries"] == []
@@ -103,7 +106,7 @@ def test_slow_trace_subscriber_recovers_gap_without_duplicate_delivery(stream_tr
 
 @pytest.mark.parametrize("cursor", ["", "-1", "1.5", "abc", "١", "9" * 17])
 def test_trace_rejects_invalid_cursor_before_subscribing(stream_trace, cursor):
-    client = TestClient(api.app)
+    client = TestClient(api.app, headers={"host": LOCAL_HOST})
     with client.websocket_connect("/ws/trace?" + urlencode({"after": cursor})) as socket:
         with pytest.raises(WebSocketDisconnect) as error:
             receive(socket)
@@ -117,7 +120,10 @@ def test_chat_accepts_and_steers_same_live_turn_without_waiting_for_completion(m
     runtime = ConversationRuntime(store)
     monkeypatch.setattr(api, "CONVERSATION", store)
     monkeypatch.setattr(api.conversation_runtime, "RUNTIME", runtime)
-    monkeypatch.setattr(runtime, "context_status", lambda: {"type": "context", "used_tokens": 0})
+    async def context_status():
+        return {"type": "context", "used_tokens": 0}
+
+    monkeypatch.setattr(runtime, "context_status", context_status)
     submissions, ended = [], []
     original_submit = runtime.submit
 
@@ -135,10 +141,11 @@ def test_chat_accepts_and_steers_same_live_turn_without_waiting_for_completion(m
 
     monkeypatch.setattr(runtime, "submit", submit)
     monkeypatch.setattr(runtime, "_run_turn", run)
-    client = TestClient(api.app)
+    client = TestClient(api.app, headers={"host": LOCAL_HOST})
     with client.websocket_connect("/ws/chat") as socket:
         try:
-            assert [receive(socket)["type"] for _ in range(3)] == ["history", "context", "active_turn"]
+            # Conversation first; the (possibly cold) context meter follows.
+            assert [receive(socket)["type"] for _ in range(3)] == ["history", "active_turn", "context"]
             socket.send_json({"text": "Research the exact article"})
             original = receive(socket)
             assert original["type"] == "turn"
@@ -166,8 +173,13 @@ def test_chat_accepts_and_steers_same_live_turn_without_waiting_for_completion(m
 
 @pytest.mark.parametrize("failure", ["review", "model", "intake", "realtime", "enqueue"])
 def test_lifespan_startup_failure_unwinds_all_acquired_owners(monkeypatch, isolated_task_ledger, failure):
+    from contextlib import asynccontextmanager
+    from obsidience.harness.execution.deepseek import bridge, sessions
+    from obsidience.harness.graphs import api as graph_views
     from obsidience.harness.knowledge import intake
+    from obsidience.harness.memory import hindsight
     from obsidience.harness.models import llm
+    from obsidience.harness.realtime import tracking
 
     calls = []
 
@@ -188,6 +200,22 @@ def test_lifespan_startup_failure_unwinds_all_acquired_owners(monkeypatch, isola
     monkeypatch.setattr(api.trace, "stop", record("trace.stop"))
     monkeypatch.setattr(llm, "start_provider_client", asynchronous("provider.start"))
     monkeypatch.setattr(llm, "close_provider_client", asynchronous("provider.close"))
+    monkeypatch.setattr(hindsight.MEMORY, "start", asynchronous("memory.start"))
+    monkeypatch.setattr(hindsight.MEMORY, "close", asynchronous("memory.close"))
+
+    @asynccontextmanager
+    async def graph_views_lifespan():
+        calls.append("graphs.start")
+        try:
+            yield
+        finally:
+            calls.append("graphs.stop")
+
+    monkeypatch.setattr(graph_views, "lifespan", graph_views_lifespan)
+    monkeypatch.setattr(bridge, "BRIDGE", SimpleNamespace(start=asynchronous("bridge.start"), close=asynchronous("bridge.close")))
+    monkeypatch.setattr(sessions, "reconcile", asynchronous("native.reconcile"))
+    monkeypatch.setattr(tracking, "restore", record("camera.restore"))
+    monkeypatch.setattr(tracking, "stop", record("camera.stop"))
     monkeypatch.setattr(api.review, "recover_groups", record("review", "review"))
     monkeypatch.setattr(api.scheduler, "reconcile_interrupted_runs", record("reconcile"))
     monkeypatch.setattr(api.source, "list_sources", record("sources"))
@@ -219,12 +247,15 @@ def test_lifespan_startup_failure_unwinds_all_acquired_owners(monkeypatch, isola
 
     asyncio.run(exercise())
     cleanup = [name for name in calls if name.endswith((".stop", ".shutdown", ".close", ".cancel"))]
+    base = ["graphs.stop", "memory.close", "provider.close", "trace.stop"]
+    native = ["bridge.close", "model.shutdown", *base]
     expected = {
-        "review": ["provider.close", "trace.stop"],
-        "model": ["model.shutdown", "provider.close", "trace.stop"],
-        "intake": ["intake.stop", "scene.stop", "model.shutdown", "provider.close", "trace.stop"],
-        "realtime": ["realtime.shutdown", "intake.stop", "scene.stop", "model.shutdown", "provider.close", "trace.stop"],
-        "enqueue": ["scheduler.shutdown", "conversation.cancel", "realtime.shutdown", "intake.stop", "scene.stop", "model.shutdown", "provider.close", "trace.stop"],
+        "review": base,
+        "model": ["model.shutdown", *base],
+        "intake": ["intake.stop", "scene.stop", *native],
+        "realtime": ["camera.stop", "realtime.shutdown", "intake.stop", "scene.stop", *native],
+        "enqueue": ["scheduler.shutdown", "conversation.cancel", "camera.stop", "realtime.shutdown",
+                    "intake.stop", "scene.stop", *native],
     }
     assert cleanup == expected[failure]
     if failure != "review":

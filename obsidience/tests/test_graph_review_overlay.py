@@ -15,10 +15,12 @@ PROBE = SIMULATION_PROBE.split("if (options.legacy_source) {", 1)[0] + r"""
 const overlay = cloud => cloud.group.getObjectByName('knowledge-review-links');
 const {KNOWLEDGE_LINK_APPROVAL_DURATION_MS:duration} = load(cloudFile);
 assert.equal(duration,4000);
-const layersMatch=(cloud,tuning)=>{
-  const nodes=[...cloud.captureSimNodes().values()],radii=physics.knowledge3dDepthRadii(nodes,tuning);
-  for(const node of nodes)assert(Math.abs(Math.hypot(node.x,node.y,node.z)-radii.get(node.depth))<1e-8,
-    'node left its current semantic shell: '+node.id);
+// The layered depth-shell engine was replaced by a per-node radial layout;
+// every node stays on the radius its cloud's current layout assigns.
+const layersMatch=(cloud,_tuning)=>{
+  const nodes=[...cloud.captureSimNodes().values()],radii=cloud.layoutDiagnostics().radii;
+  for(const node of nodes)assert(Math.abs(Math.hypot(node.x,node.y,node.z)-radii.get(node.id))<1e-6,
+    'node left its current radial shell: '+node.id);
   coordinates(cloud.captureSimNodes());
 };
 for(const agentId of ['main','Alexandria']) {
@@ -151,7 +153,9 @@ for(const agentId of ['main','Alexandria']) {
     const originalInput=fixture(agentId),original=build(originalInput);
     layersMatch(original,originalInput.tuning);settle(original);
     const before=original.captureSimulation();
-    for(const change of ['new_node','reparent','spacing']) {
+    // Link spacing no longer places nodes in the radial layout; only structural
+    // changes must move the cloud.
+    for(const change of ['new_node','reparent']) {
       const next=clone(originalInput);
       if(change==='new_node') {
         next.nodes.push({...next.nodes[3],id:'new-leaf',radius:30});
@@ -159,7 +163,7 @@ for(const agentId of ['main','Alexandria']) {
       } else if(change==='reparent') {
         next.nodes.find(node=>node.id==='branch-a').parentId='branch-b';
         next.edges.find(edge=>edge.target==='branch-a').source='branch-b';
-      } else next.tuning.linkDistance*=1.2;
+      }
       const rebuilt=build(next,before);
       layersMatch(rebuilt,next.tuning);
       if(change==='reparent')assert.equal(rebuilt.captureSimNodes().get('leaf-a').depth,3);

@@ -207,28 +207,29 @@ def test_realtime_aec_wraps_the_selected_physical_route(monkeypatch) -> None:
 
     monkeypatch.setattr(media_runtime.subprocess, "Popen", popen)
 
+    # The speaker is monitored as the reference; playback stays on the
+    # selected physical speaker instead of a separate AEC sink.
     assert media_runtime.start_realtime_aec(microphone, speaker) == (
         media_runtime.REALTIME_AEC_SOURCE,
-        media_runtime.REALTIME_AEC_SINK,
+        speaker,
     )
     load = process.stdin.writes[0]
     assert "libpipewire-module-echo-cancel" in load
-    assert "monitor.mode = false" in load
+    assert "monitor.mode = true" in load
     assert "node.latency = 1440/48000" in load
     assert 'target.object = "72"' in load
     assert 'target.object = "74"' in load
     assert "audio.channels = 1" in load
     assert "load-module module-echo-cancel" not in load
     assert "aec.args" not in load
-    assert "playback.props" in load
-    assert "media.class = Audio/Sink" in load
+    assert "playback.props" not in load
+    assert "media.class = Audio/Source" in load
     assert load.count("node.dont-move = true") == 2
     assert load.count("node.dont-fallback = true") == 2
     assert media_runtime.REALTIME_AEC_CAPTURE in load
-    assert media_runtime.REALTIME_AEC_SINK in load
-    assert media_runtime.REALTIME_AEC_PLAYBACK in load
+    assert media_runtime.REALTIME_AEC_REFERENCE in load
     assert ("resolve", "microphone", media_runtime.REALTIME_AEC_SOURCE) in calls
-    assert ("resolve", "speaker", media_runtime.REALTIME_AEC_SINK) in calls
+    assert ("resolve", "speaker", speaker) in calls
     media_runtime.stop_realtime_aec()
     assert process.stdin.writes[-1] == "quit\n"
 

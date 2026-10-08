@@ -129,57 +129,6 @@ def test_raw_source_emits_learn_once(monkeypatch, tmp_path) -> None:
     assert len(calls) == 1
 
 
-def test_controller_bound_observation_archive_emits_without_learn(
-    monkeypatch, tmp_path,
-) -> None:
-    _runtime(monkeypatch, tmp_path)
-    conversation_id = "conversation-" + "a" * 32
-    promotion_key = "b" * 20
-    write_note(
-        "Agents/Executive/Observations/Temporary Observations/archive.md",
-        {
-            "title": "Temporary archive input",
-            "kind": "knowledge",
-            "observation_scope": "temporary",
-            "temporary": True,
-            "compaction": True,
-            "compaction_committed": True,
-            "source_conversation_id": conversation_id,
-            "promotion_pending": promotion_key,
-        },
-        "Controller-bound metadata, not this body, establishes the archive class.",
-    )
-    learn = SimpleNamespace(
-        kind="task",
-        ref="Tasks/research/learn",
-        meta={"triggers": ["source.added"]},
-    )
-    monkeypatch.setattr(scheduler, "iter_notes", lambda: [learn])
-    monkeypatch.setattr(
-        scheduler,
-        "enqueue_event",
-        lambda *_args, **_kwargs: pytest.fail("observation archive activated Learn"),
-    )
-
-    result = source.ingest_source(
-        source_type="document",
-        source_ref=(
-            "obsidience://observations/temporary/"
-            f"{conversation_id}/{promotion_key}"
-        ),
-        media_type="text/markdown",
-        captured_at="2026-09-04T20:00:00Z",
-        content="The raw content does not classify itself.",
-    )
-
-    assert result["created"] is True
-    assert result["source_event"]["name"] == "source.added"
-    assert result["source_event"]["params"]["source_class"] == (
-        source.OBSERVATION_ARCHIVE_SOURCE_CLASS
-    )
-    assert result["source_event"]["occurrences"] == []
-
-
 @pytest.mark.parametrize(
     ("source_ref", "content"),
     [
@@ -502,22 +451,6 @@ def test_observation_archive_filter_is_exact_and_learn_only(monkeypatch) -> None
     assert calls == [(learn.ref, {"event": "source.added", "source_class": "observation-archive"})]
 
 
-def test_observation_archive_and_promotion_completion_contracts_are_explicit() -> None:
-    learn = resolver().resolve("Runbooks/research/learn")
-    promote = resolver().resolve("Runbooks/observations/promote")
-    promote_body = " ".join(promote.body.split()) if promote is not None else ""
-
-    assert learn is not None
-    assert "`source_class: observation_archive`" in learn.body
-    assert "legacy queued observation archive" in learn.body
-    assert promote is not None
-    assert "Finish `review` when this execution staged" in promote_body
-    assert (
-        "Finish `completed` for explicitly published changes or an honest no-change/archival-only"
-        in promote_body
-    )
-
-
 def test_restart_retries_active_event_without_losing_fifo(monkeypatch, tmp_path) -> None:
     # This synthetic no-effect run owns an empty Review scope. The workstation
     # or copied integration Vault may contain unrelated real Ingest proposals.
@@ -714,6 +647,9 @@ def test_failed_event_keeps_active_params_and_waiting_fifo(monkeypatch) -> None:
     monkeypatch.setattr(scheduler, "run_task", fail)
     monkeypatch.setattr(scheduler, "update_status", update)
     monkeypatch.setattr(scheduler, "load_note", lambda _path: task)
+    # Admission rechecks live GPU memory and speech state; isolate the failure path.
+    monkeypatch.setattr(scheduler, "_resource_error", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(scheduler, "_realtime_allows", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(
         scheduler,
         "advance_event_queue",

@@ -40,6 +40,9 @@ def operation_runtime(monkeypatch):
     monkeypatch.setattr(runtime, "_stop", AsyncMock())
     monkeypatch.setattr(runtime, "_activate_task_model", AsyncMock())
     monkeypatch.setattr(runtime, "_reconcile_defaults", AsyncMock())
+    # VRAM plans/admission measure the live GPUs; keep them inert here.
+    monkeypatch.setattr(runtime, "refresh_memory_plans", AsyncMock())
+    monkeypatch.setattr(runtime, "_prepare_memory", AsyncMock())
     monkeypatch.setattr(models, "_benchmark_text_model", AsyncMock(return_value={"sample_count": 3}))
     return runtime, model_id, state, writes, sources
 

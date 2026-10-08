@@ -124,7 +124,9 @@ def test_model_adapter_does_not_turn_precommit_cancellation_into_failure_text(
 
 def test_read_only_policy_is_reviewed_implementation_allowlist():
     assert registry.READ_ONLY_CAPABILITIES == {
-        "source.read", "vault.read", "vault.search", "vault.validate", "harness.status",
+        "source.read", "vault.read", "vault.search", "vault.list", "vault.validate", "harness.status",
+        # Reviewed 2026-09-14: complete receipts of these inspections are read-only.
+        "task.inspect", "review.inspect", "vault.maintenance", "observations.recall",
     }
     assert not registry.READ_ONLY_CAPABILITIES.intersection(registry.MODEL_RESOURCE_TOOLS)
     assert "task.complete" not in registry.READ_ONLY_CAPABILITIES

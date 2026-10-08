@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
-import sys
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
@@ -289,26 +288,6 @@ def test_foreground_request_cancels_provider_without_simulated_action(trial_runt
     assert not state.calls and state.releases == 1
 
 
-def test_generate_activation_uses_only_controller_public_refinement_context(monkeypatch):
-    public = {"objective": "Propose a bounded Runbook revision", "baseline_sha256": "a" * 64}
-    seen = []
-
-    def activation_context(case):
-        seen.append(case)
-        return public
-
-    monkeypatch.setitem(sys.modules, "obsidience.harness.execution.refinement",
-                        SimpleNamespace(activation_context=activation_context))
-    task = SimpleNamespace(ref="Tasks/generate/runbook", title="Runbook")
-    binding = executor.build_activation_binding(task, [], {"refinement_case": "fixed-case"})
-    assert seen == ["fixed-case"]
-    assert binding.objective == public["objective"]
-    assert binding.bindings["refinement"] is public
-    task.ref = "Tasks/other"
-    ordinary = executor.build_activation_binding(task, [], {"refinement_case": "unrelated"})
-    assert seen == ["fixed-case"] and "refinement" not in ordinary.bindings
-
-
 def test_ordinary_capability_receives_private_foreground_event(trial_runtime, monkeypatch):
     state = trial_runtime
     interruption = asyncio.Event()
@@ -323,6 +302,9 @@ def test_ordinary_capability_receives_private_foreground_event(trial_runtime, mo
         return "Healthy"
 
     monkeypatch.setattr(executor, "execute_capability", execute)
+    # The executor dispatches through the async registry entry.
+    monkeypatch.setattr(executor, "execute_capability_async",
+                        lambda name, args, ctx: asyncio.to_thread(execute, name, args, ctx))
     monkeypatch.setattr(source_read, "precondition_error", lambda *_a: None)
     monkeypatch.setattr(complete, "computer_request_target_error", lambda *_a: None)
     monkeypatch.setattr(complete, "computer_completion_evidence", lambda *_a, **_k: None)

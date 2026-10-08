@@ -182,8 +182,9 @@ def test_activity_and_reader_selection_share_exact_display_identity():
     )[1]
     selection = re.search(r"const selectNode = .*?^  \};", backdrop, re.M | re.S)[0]
     selection = selection.replace("id: string, read: boolean", "id, read")
-    assert "buildThinkingRoute(model, renderedActivityRefs)" in backdrop
-    assert "buildThinkingRoute(satellite, renderedActivityRefs)" in backdrop
+    # Every cloud (main and satellites) builds its route from the same grouped refs.
+    assert "route: buildThinkingRoute(cloud, refGroups.flat(), refGroups)" in backdrop
+    assert "[activity, operations, model, renderedActivityRefs, displayAliases, graph.navigation]" in backdrop
     result = subprocess.run([
         "node", "--experimental-strip-types", "--input-type=module", "-e", f"""
 import {{ strict as assert }} from 'node:assert';
@@ -193,7 +194,8 @@ const hub = 'Agents/Executive/Observations/index';
 const graph = {{nodes:[
   {{id:mirror, article_ref:physical}},
   {{id:hub, navigation_ref:'@agent/Observations'}},
-]}};
+], navigation:{{groups:[{{id:'executive', root_ref:'Agents/Executive/Executive'}}]}}}};
+const MAIN_GRAPH_ID = 'main', ROOT_ID = 'brain';  // Executive activity maps to Brain.
 const displayAliases = articleDisplayAliases(graph.nodes);
 let activity = {{refs:[physical, hub, 'Other/vault.read']}};
 const activityRefs = () => {{ {activity_body} }};
@@ -201,11 +203,11 @@ assert.deepEqual(activityRefs(), [mirror, '@agent/Observations', 'Other/vault.re
 activity = null;
 assert.deepEqual(activityRefs(), []);
 let selected = '', opened = '', selectedGraph = '', readerGraph = '';
-const MAIN_GRAPH_ID = 'main';
 const parseKnowledgeAgentNodeId = id => id.startsWith('agent:Darwin/')
   ? {{agentId:'Darwin', nodeId:id.slice('agent:Darwin/'.length)}} : {{nodeId:id}};
 const setSelectedId = id => {{selected = id;}};
 const setNodeMenu = () => {{}};
+const setReaderSelection = () => {{}};  // Reader focus follows the selection.
 const selectGraph = id => {{selectedGraph = id;}};
 const openReader = (ref, graphId) => {{opened = ref; readerGraph = graphId;}};
 {selection}
