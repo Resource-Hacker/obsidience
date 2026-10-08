@@ -341,7 +341,11 @@ neighbours); (9) history projected from the native conversation (no conversation
   never cameras.
 - `tv.control`: one private identity-bound LAN television through upstream ADB;
   discrete power with display/wake readback, registered app launch, fresh screen
-  observation and one remote key/text action per observation. Bounded commands,
+  observation and one remote key/text action per observation. Text requires an active
+  Android text-input method; custom keyboards use visible remote navigation.
+  Missing observation or text focus is correctable before dispatch; transport or
+  uncertain-effect failures remain terminal. Navigation completion requires explicit
+  established outcome evidence. Bounded commands,
   cancellation and no uncertain replay. Navigation delivery is not playback proof;
   app results and player evidence determine availability. No arbitrary shell or address.
 - `lights.set`: precheck every fixture, durably save appearance before OFF and restore on

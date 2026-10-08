@@ -134,7 +134,7 @@ def _observe(row, cancel, context):
             'preferred_app': row.get('preferred_app', ''),
             'media_sessions': media_lines[:24], 'captured_at': time.time(),
             'visual_evidence': {'attached': True, 'content_role': 'untrusted_visual_evidence'},
-            'note': 'Foreground alone does not prove playback. Protected video may be black.'},
+            'note': 'For playback, launch preferred_app (or the requested service), navigate to Search, then focus its text field. Text is not a search command and does nothing on Home. If the app uses a custom keyboard, select its visible letters with remote keys. Foreground alone does not prove playback. Protected video may be black.'},
             '_private_image_png': output.getvalue()}
 
 
@@ -191,7 +191,15 @@ def execute(args: dict, context: dict) -> dict:
         else:
             observed = context.pop('_tv_observation', None)
             if not observed or time.monotonic() - observed[1] > 60 or _focus(row, cancel) != observed[0]:
-                raise ValueError('Observe the current TV screen before each remote key or text entry')
+                return {'status': 'failed', 'delivery': 'not_dispatched',
+                        'effect_applied': False, 'correction_allowed': True,
+                        'failure': 'Observe the current TV screen before each remote key or text entry; no input was sent. You may observe and choose the next action.'}
+            if action == 'text':
+                ime = _shell(row, cancel, _guard(row) + 'dumpsys input_method')
+                if not re.search(r'\bmInputShown=true\b', ime):
+                    return {'status': 'failed', 'delivery': 'not_dispatched',
+                            'effect_applied': False, 'correction_allowed': True,
+                            'failure': 'No active TV text input. Text is not a search command. Observe, open the requested or preferred app, navigate to Search and focus its text field. For a custom on-screen keyboard, select visible letters using remote keys.'}
             command = ('input keyevent ' + KEYS[args['key']] if action == 'key' else
                        'input text ' + shlex.quote(args['text'].replace(' ', '%s')))
         if cancel is not None and cancel.is_set():
@@ -203,6 +211,8 @@ def execute(args: dict, context: dict) -> dict:
         delivery = 'uncertain'
         _shell(row, cancel, _guard(row) + command)
         delivery = 'acknowledged'
+        if action in ('launch', 'key', 'text'):
+            context['_tv_navigation_applied'] = True
         if action in ('on', 'off'):
             deadline = time.monotonic() + 8
             while True:

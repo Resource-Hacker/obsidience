@@ -315,7 +315,7 @@ def public_claim_error(summary: str, context: dict) -> str | None:
     is spoken; it inspects text only and never routes or acts.
     """
     if context.get("_tv_control_failed") and re.search(
-            r"\b(?:I(?:['’]ll| will)|we(?:['’]ll| will))\s+(?:try|retry|reconnect|check).*\b(?:again|later|moment|shortly|soon)\b",
+            r"\b(?:I(?:['’]ll| will)|we(?:['’]ll| will))\s+(?:try|retry|reconnect|check).*\b(?:again|later|moment|shortly|soon|now)\b",
             summary, re.I):
         return "TV control failed and no retry is scheduled. Report the current blocker without promising a later action."
     return _unlock_claim_error(summary, context) or _effect_claim_error(summary, context)
@@ -332,6 +332,8 @@ def _computer_completion_error(task, status: str, context: dict, verification=No
         return "TV control failed in this run; finish with status failed and the actual blocker."
     if status != "completed":
         return None
+    if context.get("_tv_navigation_applied") and (not verification or verification["status"] != "established"):
+        return "TV input delivery is not outcome verification. Use task.complete with verification status established and current title/player or requested screen evidence; otherwise finish failed with the actual blocker."
     params = context.get("params") if isinstance(context.get("params"), dict) else {}
     outcome, scope = params.get("computer_outcome", ""), params.get("computer_scope")
     if invalid := validate_computer_outcome(outcome, scope):

@@ -1305,7 +1305,8 @@ class CapabilityDispatch:
                 # step; read-only failure dispatched no input to preserve.
                 self.allowed = ["task.complete"]
         if name == "tv.control" and (not isinstance(result_object, dict)
-                                     or result_object.get("status") == "failed"):
+                                     or (result_object.get("status") == "failed"
+                                         and result_object.get("correction_allowed") is not True)):
             # The TV adapter has already exhausted its bounded transport/read
             # attempt. Preserve the failure and end this turn's effects.
             self.ctx["_tv_control_failed"] = True
