@@ -800,7 +800,6 @@ async def lifespan(app: FastAPI):
         resources.push_async_callback(MEMORY.close)
         from ...graphs.api import lifespan as graph_views_lifespan
         await resources.enter_async_context(graph_views_lifespan())
-        review.recover_groups()
         scheduler.reconcile_interrupted_runs()
         source.list_sources()  # attest raw evidence before serving it
         # System facts are a deterministic projection of recorded evidence.

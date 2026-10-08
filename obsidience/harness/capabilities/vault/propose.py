@@ -539,8 +539,6 @@ def stage_proposal(args: dict, context: dict, *, validate_only: bool = False) ->
         "reason": str(args.get("reason", ""))[:400],
         "review_class": review_class,
     }
-    if context.get("_group_staging") and context.get("_review_building"):
-        proposal_meta["review_building"] = str(context["_review_building"])
     accepted_path = CONFIG.vault_dir / target
     if action in {"update", "archive"} and accepted_path.is_file():
         proposal_meta["base_sha256"] = hashlib.sha256(accepted_path.read_bytes()).hexdigest()
@@ -640,14 +638,13 @@ def stage_proposal(args: dict, context: dict, *, validate_only: bool = False) ->
     if refinement is not None:
         # Bind evaluation to the complete staged file, including its metadata.
         candidate_staged(staged, context)
-    if not context.get("_group_staging"):
-        from obsidience.harness.knowledge.curation import try_auto_approve
-        result = try_auto_approve(result, args, context)
-        if not result.get("auto_approved"):
-            from pathlib import Path
-            from obsidience.harness.knowledge.review import notify_link_review
+    from obsidience.harness.knowledge.curation import try_auto_approve
+    result = try_auto_approve(result, args, context)
+    if not result.get("auto_approved"):
+        from pathlib import Path
+        from obsidience.harness.knowledge.review import notify_link_review
 
-            notify_link_review(Path(staged).name, proposal_meta, "pending")
+        notify_link_review(Path(staged).name, proposal_meta, "pending")
     context.setdefault("staged_proposals", []).append(result)
     if merge_retention and action == "update":
         context.setdefault("_merge_retained_updates", {})[target] = merge_retention["body_sha256"]

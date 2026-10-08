@@ -13,9 +13,7 @@ a trusted writer by design.
 
 from __future__ import annotations
 
-import base64
 import hashlib
-import json
 import re
 import subprocess
 import time
@@ -32,8 +30,6 @@ from .vault import (
     Note,
     Resolver,
     _NOTE_WRITE_LOCK,
-    _atomic_write,
-    _extract_links,
     iter_notes,
     load_note,
     mutate_note_metadata,
@@ -43,8 +39,6 @@ from .vault import (
 )
 
 REVIEW_CLASSES = frozenset({"article", "link"})
-MAX_REVIEW_MEMBERS = 24
-MAX_REVIEW_TRANSACTION_BYTES = 16 * 1024 * 1024
 MAX_PENDING_LINKS = 128
 
 
@@ -88,10 +82,6 @@ def merge_archive_blocker(meta: dict) -> str:
     return ""
 
 
-def _transaction_path(group: str) -> Path:
-    return CONFIG.staging_dir / f".review-transaction-{group}.json"
-
-
 def _archive_destination(target: str) -> Path:
     """Retain every historical retirement, including a returning Article."""
     original = CONFIG.vault_dir / target
@@ -105,543 +95,6 @@ def _archive_destination(target: str) -> Path:
         if not candidate.exists():
             return candidate
     raise ValueError("archive revision history exceeded its bounded collision range")
-
-
-def _transaction_plan(group: str, rows: list[dict], writes: list[tuple[Path, str | None]]) -> dict:
-    return {
-        "schema_version": 1, "review_group": group, "decisions": rows,
-        "files": [{"path": str(path.relative_to(CONFIG.vault_dir)),
-                   "before": base64.b64encode(path.read_bytes()).decode() if path.exists() else None,
-                   "after_sha256": hashlib.sha256(material.encode()).hexdigest() if material is not None else None}
-                  for path, material in writes],
-    }
-
-
-def _transaction_feed_continuation(plan: dict) -> dict | None:
-    """The original pinned proposal carries continuation, including after a crash."""
-    rows = plan.get("decisions") or []
-    if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
-        raise ValueError("Feed continuation decisions are invalid")
-    if not rows or any(row.get("decision") != "approved" for row in rows):
-        return None
-    first = rows[0]
-    if not all(isinstance(first.get(key), str) for key in ("proposal_id", "task_ref", "run_id")):
-        raise ValueError("Feed continuation origin is invalid")
-    if not isinstance(plan.get("files"), list) or any(not isinstance(file, dict) for file in plan["files"]):
-        raise ValueError("Feed continuation preimages are invalid")
-    original = next((file for file in plan.get("files", [])
-                     if file.get("path") == "_staging/" + first["proposal_id"]), None)
-    if not original or not original.get("before"):
-        return None
-    meta, _body = article_format.loads(base64.b64decode(original["before"], validate=True).decode())
-    envelope = meta.get("feed_retention")
-    if envelope is not None and (not isinstance(envelope, dict) or set(envelope) != {
-            "feed_id", "destination_ref", "max_active_articles", "membership_sha256", "publication", "include_incoming"}):
-        raise ValueError("Feed continuation controller envelope is invalid")
-    if envelope is None or envelope.get("include_incoming") is not False:
-        return None
-    if (meta.get("review_group") != plan["review_group"] or meta.get("action") != "archive"
-            or meta.get("review_members") != [row["proposal_id"] for row in rows]
-            or meta.get("task", "") != first["task_ref"] or meta.get("run_id", "") != first["run_id"]):
-        raise ValueError("Feed continuation does not match its committed Review")
-    return {"envelope": envelope, "context": {key: meta.get(key, "") for key in ("agent", "task", "run_id")}}
-
-
-def _recover_group_transaction(path: Path, *, retain_continuation: bool = False) -> tuple[bool, str]:
-    """Rollback an undecided publication or finish an already committed one.
-
-    The existing SQLite decision rows are the commit witness. Unexpected
-    current bytes are never overwritten by a stale transaction preimage.
-    """
-    from .index import INDEX
-
-    if path.stat().st_size > MAX_REVIEW_TRANSACTION_BYTES:
-        raise ValueError("Review recovery manifest exceeds its bound")
-    plan = json.loads(path.read_text(encoding="utf-8"))
-    group, rows, files = plan.get("review_group"), plan.get("decisions"), plan.get("files")
-    if (plan.get("schema_version") != 1 or not isinstance(group, str)
-            or len(group) != 64 or any(char not in "0123456789abcdef" for char in group)
-            or path != _transaction_path(group)
-            or not isinstance(rows, list) or not 1 <= len(rows) <= MAX_REVIEW_MEMBERS
-            or not isinstance(files, list) or not 1 <= len(files) <= MAX_REVIEW_MEMBERS * 3):
-        raise ValueError("invalid Review recovery manifest")
-    allowed, proposal_paths, decisions = set(), set(), []
-    for row in rows:
-        if (not isinstance(row, dict)
-                or set(row) != {"proposal_id", "run_id", "task_ref", "target", "decision"}
-                or any(not isinstance(value, str) for value in row.values())
-                or row["decision"] not in {"approved", "rejected"}
-                or Path(row["proposal_id"]).name != row["proposal_id"]
-                or not row["proposal_id"].endswith(".md")):
-            raise ValueError("invalid Review recovery disposition")
-        target = _group_target(row["target"])
-        proposal = "_staging/" + row["proposal_id"]
-        if proposal in proposal_paths:
-            raise ValueError("duplicate Review recovery member")
-        proposal_paths.add(proposal)
-        allowed.add(proposal)
-        if row["decision"] == "approved":
-            allowed.update({target, "_archived/" + target})
-        else:
-            allowed.add("_staging/_rejected/" + row["proposal_id"])
-        existing = INDEX.review_decision(row["proposal_id"])
-        if existing and any(existing.get(key) != value for key, value in row.items()):
-            raise ValueError("Review recovery decision conflicts with its exact proposal")
-        decisions.append(existing is not None)
-    if len({row["decision"] for row in rows}) != 1 or len({(row["task_ref"], row["run_id"]) for row in rows}) != 1:
-        raise ValueError("Review recovery members disagree about their disposition")
-    if any(decisions) and not all(decisions):
-        raise ValueError("Review recovery found a partial decision group")
-    committed = all(decisions)
-    restored, seen = [], set()
-    for file in files:
-        if not isinstance(file, dict) or set(file) != {"path", "before", "after_sha256"}:
-            raise ValueError("invalid Review recovery file")
-        rel = file["path"]
-        archive_of = next((row["target"] for row in rows if row["decision"] == "approved"
-                          and isinstance(rel, str)
-                          and str(Path(rel).parent) == str(Path("_archived") / Path(row["target"]).parent)
-                          and re.fullmatch(re.escape(Path(row["target"]).stem) + r"--[0-9a-f]{16}(?:-[0-9]{1,3})?\.md", Path(rel).name)), None)
-        if not isinstance(rel, str) or (rel not in allowed and archive_of is None) or rel in seen:
-            raise ValueError("Review recovery file is outside its exact member set")
-        seen.add(rel)
-        target = CONFIG.vault_dir / rel
-        if any(parent.is_symlink() for parent in (target, *target.parents)):
-            raise ValueError("Review recovery cannot follow symlinks")
-        encoded = file["before"]
-        if encoded is not None and not isinstance(encoded, str):
-            raise ValueError("invalid Review recovery preimage")
-        before = base64.b64decode(encoded, validate=True) if encoded is not None else None
-        before_hash = hashlib.sha256(before).hexdigest() if before is not None else None
-        after_hash = file["after_sha256"]
-        if after_hash is not None and (not isinstance(after_hash, str) or len(after_hash) != 64
-                                       or any(char not in "0123456789abcdef" for char in after_hash)):
-            raise ValueError("invalid Review recovery postimage hash")
-        current_hash = hashlib.sha256(target.read_bytes()).hexdigest() if target.exists() else None
-        if current_hash not in {before_hash, after_hash}:
-            raise ValueError(f"Review recovery preserves unexpected current Article bytes: {rel}")
-        if committed and rel not in proposal_paths and current_hash != after_hash:
-            raise ValueError(f"Review committed file does not match its publication: {rel}")
-        if rel in proposal_paths and (before is None or after_hash is not None):
-            raise ValueError("Review recovery must preserve exact pending proposal preimages")
-        restored.append((target, before))
-    if not proposal_paths <= seen:
-        raise ValueError("Review recovery is missing a pending member preimage")
-    by_path = {file["path"]: file for file in files}
-    expected_archives = set()
-    for row in rows:
-        destination = row["target"] if row["decision"] == "approved" else "_staging/_rejected/" + row["proposal_id"]
-        if destination not in by_path:
-            raise ValueError("Review recovery is missing a publication file")
-        if row["decision"] == "approved" and by_path[destination]["after_sha256"] is None:
-            before = base64.b64decode(by_path[destination]["before"], validate=True)
-            revision = hashlib.sha256(before).hexdigest()[:16]
-            base = Path("_archived") / destination
-            archived = [file for rel, file in by_path.items() if rel == str(base) or (
-                str(Path(rel).parent) == str(base.parent)
-                and re.fullmatch(re.escape(base.stem) + "--" + revision + r"(?:-[0-9]{1,3})?\.md", Path(rel).name))]
-            if len(archived) != 1 or archived[0]["after_sha256"] is None or archived[0]["before"] is not None:
-                raise ValueError("Review recovery is missing its archived Article")
-            expected_archives.add(archived[0]["path"])
-        elif row["decision"] == "rejected" and by_path[destination]["after_sha256"] is None:
-            raise ValueError("Review recovery is missing its rejected proposal")
-    if {rel for rel in seen if rel.startswith("_archived/")} != expected_archives:
-        raise ValueError("Review recovery archive path does not attest its original revision")
-    for target, before in restored:
-        if committed:
-            if str(target.relative_to(CONFIG.vault_dir)) in proposal_paths:
-                target.unlink(missing_ok=True)
-        elif before is None:
-            target.unlink(missing_ok=True)
-        else:
-            _atomic_write(target, before.decode("utf-8"))
-    if not (committed and retain_continuation and _transaction_feed_continuation(plan)):
-        path.unlink()
-    return committed, rows[0]["task_ref"]
-
-
-def _recover_pending_publications() -> dict:
-    """Finish older decisions before Review can supersede their pinned files.
-
-    The caller holds the note lock across recovery and its subsequent writes.
-    This is one bounded pass at admission, not background retry work.
-    """
-    from .index import INDEX
-
-    rolled_back, finalized, origins = 0, 0, set()
-    with INDEX.lock:
-        for path in sorted(CONFIG.staging_dir.glob(".review-transaction-*.json")):
-            committed, origin = _recover_group_transaction(path, retain_continuation=True)
-            if committed:
-                finalized += 1
-                if not path.exists():
-                    origins.add(origin)
-            else:
-                rolled_back += 1
-    for origin in origins:
-        reconcile_origin_review_task(origin)
-    return {"rolled_back": rolled_back, "finalized": finalized}
-
-
-def recover_groups() -> dict:
-    """Run once at Harness startup, before index sync or Task admission."""
-    discarded, discarded_tasks = 0, set()
-    with _NOTE_WRITE_LOCK:
-        recovered = _recover_pending_publications()
-        pending = [_load_proposal(path.name) for path in CONFIG.staging_dir.glob("*.md")]
-        builds = {meta.get("review_building") for _, meta, _ in pending if meta.get("review_building")}
-        for group in builds:
-            if not isinstance(group, str) or len(group) != 64 or any(char not in "0123456789abcdef" for char in group):
-                raise ValueError("invalid interrupted Review build identity")
-            building = [(path, meta, body) for path, meta, body in pending
-                        if meta.get("review_building") == group or meta.get("review_group") == group]
-            try:
-                candidate = next(path.name for path, meta, _ in building if meta.get("review_group") == group)
-                complete = _load_group(candidate, allow_building=True)
-                if {path for path, _, _ in complete} != {path for path, _, _ in building}:
-                    raise ValueError("Review build has incomplete membership")
-            except (ValueError, OSError, StopIteration):
-                # Preserve interrupted draft bytes in the existing rejected
-                # staging lane; they never became independently reviewable.
-                for path, meta, _ in building:
-                    destination = CONFIG.staging_dir / "_rejected" / path.name
-                    if destination.exists():
-                        raise ValueError("interrupted Review build disposition already exists")
-                    destination.parent.mkdir(parents=True, exist_ok=True)
-                    path.rename(destination)
-                    if meta.get("task"):
-                        discarded_tasks.add(str(meta["task"]))
-                discarded += 1
-            else:
-                for path, meta, body in complete:
-                    if meta.pop("review_building", None):
-                        _atomic_write(path, article_format.dumps(meta, body))
-    return {**recovered,
-            **({"discarded_builds": discarded, "discarded_tasks": sorted(discarded_tasks)} if discarded else {})}
-
-
-def _group_digest(members: list[tuple[Path, dict, str]]) -> str:
-    material = [(path.name, {key: value for key, value in meta.items()
-                            if key not in {"review_group_sha256", "review_building"}}, body)
-                for path, meta, body in members]
-    return hashlib.sha256(json.dumps(material, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
-
-
-def _load_group(name: str, *, verify: bool = True, allow_building: bool = False) -> list[tuple[Path, dict, str]]:
-    _path, first, _body = _load_proposal(name)
-    group = first.get("review_group")
-    names = first.get("review_members")
-    if (not isinstance(group, str) or len(group) != 64
-            or not isinstance(names, list) or not 1 <= len(names) <= MAX_REVIEW_MEMBERS
-            or any(not isinstance(item, str) or Path(item).name != item
-                   or not item.endswith(".md") for item in names)
-            or len(set(names)) != len(names) or name not in names):
-        raise ValueError("invalid Review group membership")
-    members = [_load_proposal(item) for item in names]
-    for pending in CONFIG.staging_dir.glob("*.md"):
-        if pending.name not in names and _load_proposal(pending.name)[1].get("review_group") == group:
-            raise ValueError("Review group has an unexpected additional member")
-    for _path, meta, body in members:
-        if meta.get("review_building") and not allow_building:
-            raise ValueError("Review group is still being staged")
-        if meta.get("review_group") != group or meta.get("review_members") != names:
-            raise ValueError("Review group membership changed")
-        if verify and meta.get("proposal_body_sha256") != hashlib.sha256(body.encode()).hexdigest():
-            raise ValueError("Review group member body changed")
-    if verify:
-        digest = _group_digest(members)
-        if any(meta.get("review_group_sha256") != digest for _, meta, _ in members):
-            raise ValueError("Review group proposal metadata changed")
-    return members
-
-
-def _group_result(members: list[tuple[Path, dict, str]]) -> dict:
-    path, meta, _body = members[0]
-    return {
-        "staged": str(path), "target": meta["target"], "action": meta["action"],
-        "review_class": "article", "review_group": meta["review_group"],
-        "member_count": len(members),
-        "members": [{"file": p.name, "target": m["target"], "action": m["action"]}
-                    for p, m, _ in members],
-    }
-
-
-def stage_group(specs: list[dict], context: dict, reason: str, batch_key: str) -> dict:
-    """Stage one bounded Knowledge edition through ordinary Article proposals.
-
-    The first member is its Review card. No member may publish independently.
-    A repeated input reattaches the pinned group; generated.at is audit time,
-    so its regeneration alone does not create a different edition.
-    """
-    from ..capabilities.vault.propose import stage_proposal
-
-    if (not isinstance(specs, list) or not 1 <= len(specs) <= MAX_REVIEW_MEMBERS
-            or any(not isinstance(spec, dict) for spec in specs)
-            or not isinstance(batch_key, str) or not 1 <= len(batch_key) <= 512):
-        raise ValueError("Review group requires 1-24 Knowledge changes and a bounded batch key")
-    canonical = json.loads(json.dumps(specs, sort_keys=True))
-    for spec in canonical:
-        generated = (spec.get("metadata") or {}).get("generated")
-        if isinstance(generated, dict):
-            generated.pop("at", None)
-    fingerprint = hashlib.sha256(json.dumps(canonical, sort_keys=True).encode()).hexdigest()
-    group = hashlib.sha256(batch_key.encode()).hexdigest()
-    with _NOTE_WRITE_LOCK:
-        _recover_pending_publications()
-        for pending in sorted(CONFIG.staging_dir.glob("*.md")):
-            _, meta, _ = _load_proposal(pending.name)
-            if meta.get("review_group") == group:
-                members = _load_group(pending.name)
-                if any(m.get("review_batch_sha256") != fingerprint for _, m, _ in members):
-                    raise ValueError("Review batch key was reused for different Article changes")
-                result = {**_group_result(members), "existing": True}
-                context.setdefault("staged_proposals", []).append(result)
-                return result
-        targets = [str(spec.get("target", "")).removesuffix(".md") for spec in specs]
-        if len(set(targets)) != len(targets):
-            raise ValueError("Review group targets must be distinct")
-        existing_names = {path.name for path in CONFIG.staging_dir.glob("*.md")}
-        members = []
-        child_context = {**context, "_group_staging": True, "_review_building": group,
-                         "staged_proposals": []}
-        try:
-            for spec in specs:
-                result = stage_proposal({**spec, "reason": reason}, child_context)
-                path = Path(result["staged"])
-                if path.name in existing_names or result.get("auto_approved"):
-                    raise ValueError("Review group cannot adopt or publish an independent proposal")
-                members.append(_load_proposal(path.name))
-            names = [path.name for path, _, _ in members]
-            for _path, meta, body in members:
-                meta.update(review_group=group, review_members=names,
-                            review_batch_sha256=fingerprint,
-                            proposal_body_sha256=hashlib.sha256(body.encode()).hexdigest())
-            digest = _group_digest(members)
-            for path, meta, body in members:
-                meta["review_group_sha256"] = digest
-                _atomic_write(path, article_format.dumps(meta, body))
-            _validate_group(members)
-            for path, meta, body in members:
-                meta.pop("review_building", None)
-                _atomic_write(path, article_format.dumps(meta, body))
-        except Exception:
-            for path, _meta, _body in members:
-                if path.name not in existing_names:
-                    path.unlink(missing_ok=True)
-            raise
-        result = _group_result(members)
-        context.setdefault("staged_proposals", []).append(result)
-        from ..execution import activity
-        activity.emit_operation("review", "pending", targets,
-            operation_id="review:" + group, label="Article changes awaiting Review",
-            run_id=str(context.get("run_id", "")), refresh=True)
-        return result
-
-
-def _group_target(value: object) -> str:
-    if not isinstance(value, str) or not value.endswith(".md"):
-        raise ValueError("Review group target must be a Knowledge Article path")
-    path = Path(value)
-    if (path.is_absolute() or len(value) > 512
-            or any(part.startswith((".", "_")) for part in path.parts)
-            or path.parts[0] in {"Tools", "Skills", "Tasks", "Runbooks", "raw"}
-            or path.name.casefold() in {"index.md", "log.md"}
-            or any((CONFIG.vault_dir / parent).is_symlink() for parent in (path, *path.parents))):
-        raise ValueError("Review group target must be an ordinary Knowledge Article path")
-    return value
-
-
-def _validate_group(members: list[tuple[Path, dict, str]], accepted: list[Note] | None = None) -> list[tuple[Path, str | None]]:
-    """Validate base pins and all links against the complete proposed graph."""
-    from ..capabilities.vault.propose import DOCUMENTARY_METADATA_FIELDS
-    from .system import assert_system_article_writable
-
-    accepted = iter_notes() if accepted is None else accepted
-    if any(meta.get("feed_retention") or meta.get("feed_publication") for _path, meta, _body in members):
-        raise ValueError("Feed publication is retired; reject its retained proposal through Review")
-    candidates = {note.ref: note for note in accepted}
-    names = {path.name for path, _, _ in members}
-    targets = {_group_target(meta.get("target")) for _, meta, _ in members}
-    if len(targets) != len(members):
-        raise ValueError("Review group targets must be distinct")
-    origins = {(meta.get("agent"), meta.get("task"), meta.get("run_id")) for _, meta, _ in members}
-    if len(origins) != 1:
-        raise ValueError("Review group members must have one originating execution")
-    for path in CONFIG.staging_dir.glob("*.md"):
-        if path.name not in names and _load_proposal(path.name)[1].get("target") in targets:
-            raise ValueError("multiple pending proposals target this Review group")
-    writes = []
-    for _path, meta, body in members:
-        target = _group_target(meta.get("target"))
-        assert_system_article_writable(target)
-        accepted_path = CONFIG.vault_dir / target
-        action = meta.get("action")
-        existing = candidates.get(target.removesuffix(".md"))
-        if (meta.get("review_class") != "article"
-                or review_class_for_task(str(meta.get("task", ""))) != "article"):
-            raise ValueError("Review groups contain ordinary Knowledge Article proposals")
-        if existing and (existing.kind != "knowledge" or existing.runtime_observation):
-            raise ValueError("Review groups cannot change executable authority or runtime Observations")
-        if action == "create":
-            if existing or accepted_path.exists():
-                raise ValueError(f"Review group create target already exists: {target}")
-        elif action in {"update", "archive"}:
-            if (not existing or not accepted_path.is_file()
-                    or meta.get("base_sha256") != hashlib.sha256(accepted_path.read_bytes()).hexdigest()):
-                raise ValueError(f"accepted Article changed or is missing: {target}")
-        else:
-            raise ValueError("Review group action must be create, update, or archive")
-        if action == "archive":
-            destination = _archive_destination(target)
-            archive_meta = {**existing.meta, "article_status": "deprecated",
-                            "archived_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                            "archive_reason": str(meta.get("reason", ""))[:400]}
-            writes.extend([(destination, article_format.dumps(archive_meta, existing.body)),
-                           (accepted_path, None)])
-            del candidates[existing.ref]
-            continue
-        fields = meta.get("authored_fields")
-        allowed = (DOCUMENTARY_METADATA_FIELDS - {"status"}) | {"kind", "article_status"}
-        if not isinstance(fields, list) or any(not isinstance(key, str) or key not in allowed for key in fields):
-            raise ValueError("Review groups cannot author permission or executable metadata")
-        note_meta = dict(existing.meta) if existing else {"kind": "knowledge"}
-        note_meta.update({key: meta[key] for key in fields if key in meta})
-        if note_meta.get("kind") != "knowledge":
-            raise ValueError("Review groups contain only Knowledge Articles")
-        note_meta.update(title=meta.get("title"), approved_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
-                         provenance=f"proposed by {meta.get('agent', '?')} (task {meta.get('task', '-')})")
-        material = article_format.dumps(note_meta, body)
-        errors = article_format.validate_profile(article_format.parse(material)[0], target)
-        if errors:
-            raise ValueError("invalid Review group Article: " + "; ".join(errors))
-        note = Note(target, str(note_meta["title"]), note_meta, body,
-                    links=_extract_links(note_meta, body, target))
-        candidates[note.ref] = note
-        writes.append((accepted_path, material))
-    res = Resolver(list(candidates.values()))
-    previous_resolver = Resolver(accepted)
-    previous_missing = {
-        note.ref: {raw for raw in note.links if not previous_resolver.resolve(raw)}
-        for note in accepted
-    }
-    for note in candidates.values():
-        missing = [raw for raw in note.links if not res.resolve(raw)
-                   and raw not in previous_missing.get(note.ref, set())]
-        if missing:
-            raise ValueError(f"Review group would leave unresolved Article links in {note.ref}: " + ", ".join(missing[:6]))
-    return writes
-
-
-
-
-
-
-def _decide_group(name: str, decision: str, reason: str = "") -> dict:
-    from .index import INDEX
-    with _NOTE_WRITE_LOCK:
-        _recover_pending_publications()
-        members = _load_group(name, verify=decision == "approved")
-        root_path, root_meta, _body = members[0]
-        if decision == "approved":
-            writes = _validate_group(members)
-        else:
-            writes = []
-            for path, meta, body in members:
-                destination = CONFIG.staging_dir / "_rejected" / path.name
-                if destination.exists():
-                    raise ValueError("rejected Review group destination already exists")
-                rejected = {**meta, "rejected_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                            "rejected_reason": reason[:400]}
-                writes.append((destination, article_format.dumps(rejected, body)))
-        writes.extend((path, None) for path, _, _ in members)
-        preimages = {path: path.read_bytes() if path.exists() else None for path, _ in writes}
-        rows = [dict(proposal_id=path.name, run_id=str(meta.get("run_id", "")),
-                     task_ref=str(meta.get("task", "")), target=meta["target"], decision=decision)
-                for path, meta, _ in members]
-        transaction_path = _transaction_path(root_meta["review_group"])
-        if transaction_path.exists():
-            raise ValueError("Review group has an unfinished publication; recover it before deciding again")
-        material = json.dumps(_transaction_plan(root_meta["review_group"], rows, writes), sort_keys=True)
-        if len(material.encode()) > MAX_REVIEW_TRANSACTION_BYTES:
-            raise ValueError("Review transaction preimages exceed their bounded recovery envelope")
-        _atomic_write(transaction_path, material)
-        pending_paths = {path for path, _, _ in members}
-        with INDEX.lock:
-            INDEX.db.execute("BEGIN IMMEDIATE")
-            try:
-                for path, material in writes:
-                    if path in pending_paths:
-                        continue  # Retain every proposal until its decision is durable.
-                    if material is None:
-                        path.unlink()
-                    else:
-                        _atomic_write(path, material)
-                INDEX.record_review_decisions(rows, commit=False)
-                INDEX.db.commit()
-            except Exception:
-                INDEX.db.rollback()
-                for path, material in preimages.items():
-                    if material is None:
-                        path.unlink(missing_ok=True)
-                    else:
-                        _atomic_write(path, material.decode("utf-8"))
-                transaction_path.unlink()
-                raise
-        # The decision is now durable. Cleanup or index failures must never
-        # report this accepted edition as an undecided proposal or replay it.
-        warnings = []
-        for path in pending_paths:
-            try:
-                path.unlink()
-            except OSError as exc:
-                warnings.append(f"proposal cleanup: {exc}"[:400])
-        if decision == "approved":
-            try:
-                INDEX.sync()
-            except Exception as exc:
-                warnings.append(f"index refresh: {exc}"[:400])
-            try:
-                git_commit(f"[review] approve group: {root_meta['target']}",
-                           [str(path.relative_to(CONFIG.vault_dir)) for path, _ in writes
-                            if not str(path.relative_to(CONFIG.vault_dir)).startswith("_staging/")])
-            except Exception as exc:
-                warnings.append(f"audit commit: {exc}"[:400])
-        try:
-            reconcile_origin_review_task(str(root_meta.get("task", "")))
-        except Exception as exc:
-            warnings.append(f"Task reconciliation: {exc}"[:400])
-        review_outcome = None
-        try:
-            review_outcome = INDEX.review_outcome(str(root_meta.get("run_id", "")))
-        except Exception as exc:
-            warnings.append(f"decision projection: {exc}"[:400])
-        if not warnings:
-            try:
-                transaction_path.unlink(missing_ok=True)
-            except OSError as exc:
-                warnings.append(f"publication cleanup: {exc}"[:400])
-        result = {
-            ("approved" if decision == "approved" else "rejected"):
-                root_meta["target"] if decision == "approved" else root_path.name,
-            "review_group": root_meta["review_group"], "member_count": len(members),
-            "members": [{"target": meta["target"], "action": meta["action"]} for _, meta, _ in members],
-            **({"review_outcome": review_outcome} if review_outcome is not None else {}),
-            "committed": True,
-        }
-        if warnings:
-            result["publication_warning"] = "; ".join(warnings)[:1600]
-        from ..execution import activity
-        activity.emit_operation("review", decision,
-            [str(meta["target"]).removesuffix(".md") for _, meta, _ in members],
-            operation_id="review:" + str(root_meta["review_group"]),
-            label="Article changes " + decision, run_id=str(root_meta.get("run_id", "")), refresh=True)
-        return result
-
-
-
-
-def approve_group(name: str) -> dict:
-    return _decide_group(name, "approved")
 
 
 def _record_review_decision(
@@ -674,8 +127,6 @@ def _record_review_decision(
 def notify_link_review(proposal_id: str, meta: dict, state: str, *, links: list[dict] | None = None) -> None:
     """Notify presentation after the existing Review owner changed its state."""
     review_class = meta.get("review_class") or review_class_for_task(str(meta.get("task", "")))
-    if meta.get("review_group") or meta.get("review_building"):
-        return
     from ..execution import activity
     from .index import INDEX
 
@@ -836,18 +287,6 @@ def git_commit(message: str, rel_paths: list[str]) -> None:
         pass
 
 
-def _has_group_decision(name: str, meta: dict) -> bool:
-    """A cleanup-only envelope cannot become pending work after commit."""
-    if not meta.get("review_group"):
-        return False
-    from .index import INDEX
-
-    decision = INDEX.review_decision(name)
-    return bool(decision and decision.get("decision") in {"approved", "rejected"}
-                and all(decision.get(key) == str(meta.get(field, ""))
-                        for key, field in (("run_id", "run_id"), ("task_ref", "task"), ("target", "target"))))
-
-
 def list_proposals() -> list[dict]:
     with _NOTE_WRITE_LOCK:
         return _list_proposals()
@@ -898,8 +337,6 @@ def _list_proposals(accepted: list[Note] | None = None) -> list[dict]:
     out = []
     for p in sorted(CONFIG.staging_dir.glob("*.md")):
         meta, body = article_format.loads(p.read_text(encoding="utf-8"))
-        if meta.get("review_building") or _has_group_decision(p.name, meta):
-            continue
         title = str(meta.get("title") or p.stem)
         task_ref = str(meta.get("task", ""))
         stored_class = str(meta.get("review_class", ""))
@@ -932,8 +369,6 @@ def _list_proposals(accepted: list[Note] | None = None) -> list[dict]:
             "reason": meta.get("reason", ""), "proposed_at": meta.get("proposed_at", ""),
             "body_preview": normalize_article_body(body, title)[:12_000],
             "base_sha256": meta.get("base_sha256", ""),
-            **({"review_group": meta["review_group"], "review_members": meta.get("review_members", [])}
-               if meta.get("review_group") else {}),
         })
         if blocker := review_blocker(Note(str(p.relative_to(CONFIG.vault_dir)), title, meta, body),
                                      accepted_resolver=accepted_resolver):
@@ -1005,43 +440,6 @@ def _list_proposals(accepted: list[Note] | None = None) -> list[dict]:
         row["blocked_reason"] = block
         row.pop("base_sha256", None)
 
-    # One ordinary Review card represents the complete candidate edition.
-    # Per-member archive prerequisites are evaluated against that candidate,
-    # rather than requiring the owner to publish a temporarily broken graph.
-    collapsed = []
-    seen_groups = set()
-    by_file = {row["file"]: row for row in out}
-    for row in out:
-        group = row.get("review_group")
-        if not group:
-            collapsed.append(row)
-            continue
-        if group in seen_groups:
-            continue
-        seen_groups.add(group)
-        root_name = next(iter(row.get("review_members") or []), row["file"])
-        card = dict(by_file.get(root_name, row))
-        try:
-            members = _load_group(row["file"])
-            _validate_group(members, accepted)
-            card.update(approvable=True, blocked_reason="")
-        except (ValueError, OSError) as exc:
-            card.update(approvable=False, blocked_reason=str(exc))
-            members = []
-            for filename in row.get("review_members", []):
-                if isinstance(filename, str) and filename in by_file:
-                    members.append(_load_proposal(filename))
-        card["members"] = [{"file": path.name, "target": meta.get("target", ""),
-                            "action": meta.get("action", ""), "title": meta.get("title", "")}
-                           for path, meta, _ in members]
-        card["member_count"] = len(card["members"])
-        card["body_preview"] = ("This Review decides the complete group together.\n\n" + "\n\n".join(
-            f"## {meta.get('action', '').upper()}: {meta.get('title', '')}\n"
-            f"{meta.get('target', '')}\n\n{body[:800]}"
-            for _, meta, body in members
-        ))[:12_000]
-        collapsed.append(card)
-    out = collapsed
     priority = {"update": 0, "create": 1, "archive": 2}
     out.sort(key=lambda row: (
         0 if row["approvable"] else 1,
@@ -1070,7 +468,7 @@ def link_proposals(accepted: list[Note] | None = None) -> dict:
             return {"entries": [], "truncated": True}
         for row in proposals:
             if (row["review_class"] != "link" or not row["approvable"] or row["action"] != "update"
-                    or row.get("review_group") or review_class_for_task(row["task"], res) != "link"):
+                    or review_class_for_task(row["task"], res) != "link"):
                 continue
             source = by_path.get(row["target"])
             if not source or source.kind not in {"knowledge", "agent"} or source.runtime_observation:
@@ -1133,16 +531,9 @@ def reconcile_origin_review_task(origin_ref: str) -> str:
         from .index import INDEX
         origin = replace(origin, meta={**origin.meta, **(INDEX.task_runtime(origin.ref) or {})})
     status = str(origin.meta.get("status", ""))
-    for journal in CONFIG.staging_dir.glob(".review-transaction-*.json"):
-        plan = json.loads(journal.read_text())
-        continuation = _transaction_feed_continuation(plan)
-        if continuation and continuation["context"]["task"] == origin.ref:
-            return status
     pending_run_ids = set()
     for pending in CONFIG.staging_dir.glob("*.md"):
         pending_meta, _ = article_format.loads(pending.read_text(encoding="utf-8"))
-        if _has_group_decision(pending.name, pending_meta):
-            continue
         pending_origin = resolver().resolve(str(pending_meta.get("task", "")))
         if pending_origin and pending_origin.ref == origin.ref:
             pending_run_ids.add(str(pending_meta.get("run_id", "")))
@@ -1234,12 +625,6 @@ def _validate_capability_metadata(target: str, meta: dict) -> None:
 
 def approve(name: str) -> dict:
     with _NOTE_WRITE_LOCK:
-        _recover_pending_publications()
-        initial = _load_proposal(name)[1]
-        if initial.get("feed_publication") or initial.get("feed_retention"):
-            raise ValueError("Feed publication is retired; reject its retained proposal through Review")
-        if initial.get("review_group"):
-            return approve_group(name)
         return _approve(name)
 
 
@@ -1250,10 +635,6 @@ def _approve(name: str) -> dict:
     path, meta, body = _load_proposal(name)
     if blocker := review_blocker(Note(str(path.relative_to(CONFIG.vault_dir)), str(meta.get("title") or path.stem), meta, body)):
         raise ValueError(blocker)
-    if meta.get("review_building"):
-        raise ValueError("Review group is still being staged")
-    if meta.get("review_group"):
-        return approve_group(name)
     target = str(meta.get("target", "")).strip()
     assert_system_article_writable(target)
     action = meta.get("action", "create")
@@ -1456,16 +837,11 @@ def _approve(name: str) -> dict:
 
 def reject(name: str, reason: str = "") -> dict:
     with _NOTE_WRITE_LOCK:
-        _recover_pending_publications()
         return _reject(name, reason)
 
 
 def _reject(name: str, reason: str = "") -> dict:
     path, meta, body = _load_proposal(name)
-    if meta.get("review_building"):
-        raise ValueError("Review group is still being staged")
-    if meta.get("review_group"):
-        return _decide_group(name, "rejected", reason)
     meta["rejected_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     meta["rejected_reason"] = reason[:400]
     dest = f"_staging/_rejected/{path.name}"

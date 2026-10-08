@@ -171,7 +171,7 @@ def test_chat_accepts_and_steers_same_live_turn_without_waiting_for_completion(m
     client.close()
 
 
-@pytest.mark.parametrize("failure", ["review", "model", "intake", "realtime", "enqueue"])
+@pytest.mark.parametrize("failure", ["reconcile", "model", "intake", "realtime", "enqueue"])
 def test_lifespan_startup_failure_unwinds_all_acquired_owners(monkeypatch, isolated_task_ledger, failure):
     from contextlib import asynccontextmanager
     from obsidience.harness.execution.deepseek import bridge, sessions
@@ -216,8 +216,7 @@ def test_lifespan_startup_failure_unwinds_all_acquired_owners(monkeypatch, isola
     monkeypatch.setattr(sessions, "reconcile", asynchronous("native.reconcile"))
     monkeypatch.setattr(tracking, "restore", record("camera.restore"))
     monkeypatch.setattr(tracking, "stop", record("camera.stop"))
-    monkeypatch.setattr(api.review, "recover_groups", record("review", "review"))
-    monkeypatch.setattr(api.scheduler, "reconcile_interrupted_runs", record("reconcile"))
+    monkeypatch.setattr(api.scheduler, "reconcile_interrupted_runs", record("reconcile", "reconcile"))
     monkeypatch.setattr(api.source, "list_sources", record("sources"))
     def publish_system(*, sync):
         assert sync is False
@@ -250,7 +249,7 @@ def test_lifespan_startup_failure_unwinds_all_acquired_owners(monkeypatch, isola
     base = ["graphs.stop", "memory.close", "provider.close", "trace.stop"]
     native = ["bridge.close", "model.shutdown", *base]
     expected = {
-        "review": base,
+        "reconcile": base,
         "model": ["model.shutdown", *base],
         "intake": ["intake.stop", "scene.stop", *native],
         "realtime": ["camera.stop", "realtime.shutdown", "intake.stop", "scene.stop", *native],
@@ -258,6 +257,6 @@ def test_lifespan_startup_failure_unwinds_all_acquired_owners(monkeypatch, isola
                     "intake.stop", "scene.stop", *native],
     }
     assert cleanup == expected[failure]
-    if failure != "review":
+    if failure != "reconcile":
         assert calls.index("sources") < calls.index("system.publish") < calls.index("index.sync")
         assert calls.index("index.sync") < calls.index("prewarm")

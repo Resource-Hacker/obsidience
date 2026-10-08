@@ -128,9 +128,7 @@ def _preflight_rejection(call: dict, note: Note) -> str | None:
             if entry.get("tool") != tool or entry.get("sig") != call.get("signature"):
                 continue
             text = entry.get("obs")
-            # These exact controller exceptions precede publication. A Feed
-            # retention group can collide on an outgoing Article, not just
-            # args.target; stage_group rolls back its newly staged members.
+            # These exact controller exceptions precede publication.
             if isinstance(text, str) and len(text) <= 2048 and any(re.fullmatch(pattern, text) for pattern in (
                 r"Proposal rejected: [^\n]+\.md already has a pending review proposal; decide it before staging another\.",
                 r"Proposal rejected: Link endpoints are already connected by native hierarchy: [^\n]+ and [^\n]+\.",
@@ -566,7 +564,6 @@ def retry_failed_occurrence(note: Note, expected_run_id: str, *, require_receipt
 
 def _settle_occurrence(note: Note, *, kind: str, classify, summary_for, previous_safe=None) -> dict | None:
     """One controller receipt and FIFO transaction for an evidenced disposition."""
-    from ..knowledge import review
     from ..knowledge.format import loads
     from ..knowledge.vault import _NOTE_WRITE_LOCK
 
@@ -591,8 +588,7 @@ def _settle_occurrence(note: Note, *, kind: str, classify, summary_for, previous
                 meta, _body = loads(path.read_text(encoding="utf-8"))
                 if (str(meta.get("task", "")).strip("[]") == note.ref
                         or (expected.get("last_run") and meta.get("run_id") == expected["last_run"])):
-                    if not review._has_group_decision(path.name, meta):
-                        return None
+                    return None
         except (OSError, ValueError):
             return None
         evidence = classify(params)
@@ -934,7 +930,6 @@ def cancel_task_occurrences(note: Note, *, reason: str, expected_last_run: str, 
     so admission never sees a partially cancelled queue. Original runs, Tool
     receipts and effects are retained; nothing is replayed.
     """
-    from ..knowledge import review
     from ..knowledge.format import loads
     from ..knowledge.vault import _NOTE_WRITE_LOCK
 
@@ -952,8 +947,7 @@ def cancel_task_occurrences(note: Note, *, reason: str, expected_last_run: str, 
     with _NOTE_WRITE_LOCK:
         try:
             pending_review = any(
-                (str(meta.get("task", "")).strip("[]") == note.ref or meta.get("run_id") == expected_last_run)
-                and not review._has_group_decision(path.name, meta)
+                str(meta.get("task", "")).strip("[]") == note.ref or meta.get("run_id") == expected_last_run
                 for path in CONFIG.staging_dir.glob("*.md")
                 for meta, _body in [loads(path.read_text(encoding="utf-8"))])
         except (OSError, ValueError):
