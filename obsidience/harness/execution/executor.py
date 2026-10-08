@@ -741,7 +741,10 @@ def activation_messages(task: Note, activation: dict, *, agent_name: str,
     # Each Executive turn names only its transport; the rules it selects are fixed.
     metadata = "\n".join(filter(None, [
         activation.get("provider_activation") or "## Current activation metadata",
-        "transport: " + ("voice" if response_contract else "text"),
+        # A per-turn reminder: the cached system rules alone did not keep
+        # spoken replies short and plain.
+        "transport: " + ("voice (spoken reply: plain text without Markdown; one or two short "
+                         "sentences unless detail is requested)" if response_contract else "text"),
         # Owner speech cut off the previous spoken reply (per-turn, never cached).
         str(activation["params"].get("speech_interruption") or ""),
     ])) if agent else ""
