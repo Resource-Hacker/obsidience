@@ -1,5 +1,26 @@
 # Obsidience design
 
+## Knowledge organization decision — 2026-10-06
+
+The owner authorized consolidation around accepted Knowledge, historical Memory
+and generated System inventory. Four canonical Agent identities remain in the
+Library, with direct Executive delegation and per-Agent Memory access. Shared
+architecture belongs at the root `Architecture/Architecture` Article; Projects
+holds genuine independent project knowledge.
+Owner preferences belong directly to Executive. Reusable workstation procedures
+belong under Runbooks/Operations, with explicit Skills that resolve to existing
+Tools; explanatory configuration and incident context belongs in Architecture/Shell. Hindsight
+is the sole historical-memory owner; generic Observation/Subagents wiki folders
+and legacy custom-category registries are retired. System publication reserves
+its complete namespace and distinguishes current checks from observed Source
+versions. Bounded memory curation retains Source identity, global backpressure
+and mandatory Review. Unbound Runbooks with exact for_agent applicability may be
+read as procedure references; they add no Task, Tool grant or automatic prompt
+content. Their new read access does not grant proposal authority. Procedure
+metadata derives ordinary graph dependency links through existing Skills and
+Tools. Dated incident records below retain
+their original historical meaning.
+
 ## Installation knowledge and Git publication
 
 The application repository tracks `obsidience/defaults/vault/`, a reviewed starter
@@ -17,7 +38,8 @@ ledger. The default template is distribution input, not another runtime authorit
 Reusable default changes are deliberately authored and reviewed separately from
 live Articles. Strip local facts, permission grants, Source IDs and audit metadata;
 validate native Article profiles, links and Agent/Task dependencies. Default
-Agents and Tasks use configurable model selection and empty observation subjects.
+Agents and Tasks use configurable model selection. Hindsight supplies historical
+Memory; starter knowledge does not require Observation folders.
 Local setup notes belong in ignored `AGENTS.local.md` and similar files.
 See `obsidience/defaults/README.md` for setup and publication rules.
 
@@ -38,13 +60,13 @@ or infer procedures from a giant system prompt.
 
 ## Design laws
 
-1. **One graph is authoritative.** The vault defines knowledge, work,
+1. **One Article graph is authoritative.** The vault defines knowledge, work,
    procedure, Tool authority, tool guidance, and agent identity. UI trees, menus,
    schedules, and prompts are projections of that graph. The graph API's
    navigation manifest resolves Agent card names and generated subject Articles
    once; every UI consumes those exact IDs, titles, parents, and roles rather
    than reconstructing labels from paths.
-2. **Every graph node is an Article.** A parent Article is the readable index
+2. **Every Knowledge graph node is an Article.** A parent Article is the readable index
    and condensation of its descendants. A leaf is the complete local article.
    `index`, `folder`, and `domain` are therefore presentation roles, not kinds.
    Generated index titles are human-facing and begin uppercase; terminal
@@ -75,7 +97,7 @@ or infer procedures from a giant system prompt.
 The owner adopted Cordis's dependency and lifecycle design on 2026-09-12 for
 all future Obsidience development: Harness, Shell, UI and integrations.
 The canonical ontology Article is
-[Cordis composition](obsidience/vault/Agents/Executive/Architecture/Harness/cordis-composition.md).
+[Cordis composition](obsidience/vault/Architecture/Harness/cordis-composition.md).
 
 - A plugin provides or consumes explicit service interfaces and owns its effects.
   Plugin and service are implementation roles, not Article types or Tool grants.
@@ -116,16 +138,89 @@ cancellation. DeepSeek now owns the Executive model/Tool loop. The existing
 completion authority validates ordinary final text locally; native task.complete
 remains available for structured terminal status and computer-state verification.
 
+A complete model stop without public text or native Tool calls receives at most
+one continuation through the existing DeepSeek inbox per activation. Controller
+feedback retains completed Tool results and prohibits replay of dispatched
+effects; the ordinary cancellation and model-step boundaries still apply. A
+second empty response ends with an explicit failure. This recovery does not
+apply to truncated streams, output-limit stops or partial Tool calls.
+
 DeepSeek Harness now owns the Executive conversation model/Tool loop through
 its supported CLI profile and public Cordis interfaces. The existing Python
 capability owner retains argument validation, committed receipts, fresh target
 verification, cancellation and completion acceptance. Ordinary answers are native
 text; the shared completion authority accepts them locally without another model
-request. SQLite remains the only durable conversation and receipt store. Native
-sessions and observation images are ephemeral. Scheduled Tasks retain their
-Python decision loop and share the same CapabilityDispatch operation boundary.
-Primary references: [Cordis primer](https://github.com/deepseek-ai/deepseek-harness/blob/c291e7961a515f6d7af9304e7fd1d257929aef26/docs/cordis-primer.md)
-and [spatiotemporal composability paper](https://arxiv.org/abs/2608.25512).
+request. Read-only failures return to DeepSeek for its next decision; the native
+Agent does not inherit the specialist Task loop's duplicate-call heuristic or
+forced completion after an ambiguous observation. Fresh observations can replace
+earlier read failures without erasing failed or uncertain effects. One native
+DeepSeek session owns each Executive conversation and uses
+that conversation's exact ID. Final voice transcripts and typed Chat enter the
+same session. The upstream JSONL persistence plugin preserves native user,
+assistant and Tool events; the same session resumes after a Harness restart.
+Internal completion records stay in the native audit log and do not become model-facing user messages. The provider projection places current runtime context before the latest exact exchange, preserving adjacency between an offered action and a short owner follow-up. Execution and prewarming use that same projection.
+
+The native CLI and integration packages are pinned together at 0.2.0-rc.2 on
+Cordis 4.0.4. V4 producer-owned message sources and first-class Tool-result roles
+retain the same provider payload, Tool-call correlation and ephemeral image
+boundary. Historical V3 stores upgrade offline through upstream codecs and
+persistence APIs, preserving their original files. Only the older Obsidience
+bootstrap system attribution requires explicit normalization; the V4 successor
+retains its original source metadata and every prompt byte. Manual compaction
+uses a cancellable activation signal; shutdown drains application finalization
+before releasing native session persistence.
+
+Obsidience's SQLite dialogue is the public Chat projection and ingress ledger;
+its Tool receipts remain the operation authority. Context and
+prewarming project the native model history instead of reconstructing a second
+conversation. A missing accepted reply is reconciled from the native outcome.
+
+Only New Conversation changes the selected conversation ID. The native compaction backend owns summary generation and checkpoint transactions.
+
+The Executive's native provider can score a bounded menu of complete Tool calls
+with one Gemma token. Eligibility is limited to standalone registered application
+launch, unlock and Harness-status commands, plus an explicit request to find/read
+one exact named Article immediately after a fresh scoped search. General research,
+title-only queries, compound requests, images, steering, prior effects and
+reasoning-enabled requests keep ordinary native generation. Every menu includes
+native-generation fallback. The scorer preserves the complete canonical prompt
+and Tool schemas, checks the full input budget, verifies the served model and
+complete label distribution, and emits an ordinary native Tool proposal. DeepSeek
+and CapabilityDispatch retain sequencing, current grants, validation, receipts,
+cancellation and all effects. This is a provider mode, not a second router or
+agent. Conditional label probabilities are not correctness confidence.
+
+### Knowledge provider boundary
+
+Obsidience supplies application services to DeepSeek through its native Cordis
+adapter. DeepSeek owns the Executive conversation and model/Tool loop;
+Obsidience owns the accepted Article graph, scoped retrieval, Source capture,
+Review, capability receipts, model reservations and specialist scheduling.
+The Shell presents those owners' state. The existing `vault.search`, `vault.read`
+and `vault.list` capabilities are native Tools registered through `ctx.tools`.
+Fast prefetch and subsequent Tool searches use the same knowledge index.
+
+[Tencent's dsh-weknora plugin](https://github.com/Tencent/WeKnora/tree/1ef38fdb8b19347b82d3a99f6f17d75ac09ad606/packages/dsh-weknora)
+is a reference for this boundary: it provides bounded source passages and
+document reads through DeepSeek's Tool registry. Its separate `weknora_ask`
+delegates to a server-side answer pipeline with another conversation and model
+calls. Keep ordinary Executive retrieval free of that extra synthesis stage.
+Use existing specialist work when independently queueable research is needed.
+
+Retain the current local BM25/dense RRF index and accepted Markdown wiki.
+Search results preserve the retrieval owner's selected passage without a second
+cut; they remain evidence leads, and complete current reads still govern Article
+edits and relationship proposals. New knowledge integrations should replace or
+extend a demonstrated service gap through the existing capability boundary,
+with explicit scope, lifecycle and evidence identity. A full WeKnora deployment
+would introduce its own knowledge store and processing queues, so it requires a
+separate migration case. This comparison imports no code or runtime dependency.
+
+An unrelated search hit does not require a full Article read just to decline a
+memory recommendation. Full reads still bind Articles cited as completion
+evidence and proposed changes. The publication owner also reconciles an already
+approved proposal's terminal state; a stale model request for Review does not
+require another model call or recreate pending work.
 
 ## Canonical Article types
 
@@ -139,7 +234,7 @@ Format v0.2 and the Obsidience profile. The six meanings do not change.
 | `runbook` | The ordered or branching process for completing a Task |
 | `tool` | Knowledge describing one registered executable interface, its arguments, effects, and failures |
 | `skill` | Exact practical instructions for using one Tool correctly |
-| `agent` | An accountable executor with a role, assigned Tasks, Knowledge, and Observations |
+| `agent` | An accountable executor with a role, assigned Tasks, scoped Knowledge, and historical Memory |
 
 One physical Markdown Article carries the native OKF document, not an export
 copy. `type` is required; optional common fields such as `title`, `description`,
@@ -156,52 +251,123 @@ event FIFO, last execution and result. Updating execution state does not alter
 the Article or invalidate retrieval embeddings. Runtime state is projected
 fresh into task views rather than written into reusable definitions.
 
-Execution success and diagnostic findings are separate. Check completes when
-it obtains and reports a valid health snapshot, including a degraded finding;
-an unavailable or invalid inspection fails. The health Tool and Task API share
-the execution ledger's current-issue projection: unresolved event commitments
-or waiting queues, blocked configuration, and scheduled drafts. A terminal
-failed attempt with no outstanding work remains history rather than a current
-fault. Prior failed runs and their findings are never rewritten to make health
-appear recovered.
+Execution success and diagnostic findings are separate. The status Tool and
+Tasks pane share the execution ledger's current-issue projection: unresolved
+event commitments or waiting queues, blocked configuration, and scheduled
+drafts. An idle terminal failure remains history. Prior failed runs and their
+findings are never rewritten to make health appear recovered.
 
-A completed degraded Check activates Heimdall's ordinary Repair Task through
-`harness.degraded`. The controller persists the actual status finding in the
-Check trace and records its handoff in the existing ledger; model prose cannot
-activate recovery. Repair reads current status and uses only the paired
-`harness.repair` interface. It may requeue one exact failed occurrence only when
-complete durable dispatch receipts rule out effects, pending Review and
-continuations. One controller receipt commits atomically with the existing
-pending-state transition and limits automatic retry to once per original
-Task/event/activation key. A new run ID never resets that limit. Unsupported
-faults remain explicit blockers. Repair cannot retry itself, edit Source, alter
-models, or approve changes. Each attempted recovery consumes its inspection;
-completion requires a fresh status read and either no remaining eligible
-operation or the completed eight-attempt pass budget. Eligible entries precede
-blocked entries in the bounded plan so unsupported faults cannot hide work.
-The pass counts existing controller Tool trace entries, without another store.
-Remaining eligible work is explicitly deferred to a later pass.
-A completed Repair pass reports its disposition, including unresolved blockers
-or a queued outcome that has not yet executed. It does not assert universal
-health or replace independent acceptance of consequential changes.
+Health recovery is automatic and event-driven. Check and its Runbook are retired.
+The existing scheduler reconciles startup state and Task completion; the existing
+Source inotify observer also watches Source and Vault changes, including atomic
+replacements and deletion. Source inspection traverses live pages on startup or
+change, off the foreground event loop. Unchanged files do not cause repeated
+Source scans. Failed Source event deliveries enter the same health projection.
+There is no scheduled model-driven health inspection or new scheduler.
+
+The controller classifies every current finding. Supported recoveries activate
+Heimdall's ordinary Repair Task through `harness.degraded`. Each bounded pass
+uses `harness.status` and paired `harness.repair`, then refreshes status. Progress
+changes the remaining actionable state and automatically activates the next pass.
+Foreground work, existing resource admission and Task FIFO remain authoritative.
+A durable cycle key combines the actionable findings and current execution
+contracts, so an unchanged unsuccessful pass cannot loop. New state or changed
+repair definitions permit fresh consideration without resetting effect guards.
+
+Known no-publication rejections are matched against committed result hashes,
+including native-hierarchy Link refusals and pending Review collisions. A still-pending exact
+Review dependency blocks retry without consuming the occurrence's one attempt;
+its normal owner decision allows event-driven reconsideration. Unknown effects
+remain blocked. An obsolete AutoSaddler case may be settled only with complete
+receipts attesting its pre-publication contract rejection and a currently stale
+case. Isolated evaluation artifacts and the original failed run remain intact;
+settlement neither publishes instructions nor replays evaluation.
+
+The persistent Hindsight curation hold also covers already-delegated Link
+occurrences carrying an observation Source. Admission and Task presentation use
+the same predicate, preserving their FIFO while reporting the owner pause.
+
+Merge archive proposals require an exact distinct retained candidate update
+staged by that execution. The controller pins the intended retained body hash;
+Review rechecks that the canonical Article is accepted with that body and has
+no pending competing proposal before archival. Legacy Merge archives without
+this evidence remain visible but cannot be approved. This prevents archiving
+every candidate; it does not certify the factual quality of a proposed union
+or replace owner Review.
+
+A failed Repair pass with complete no-effect or attested recovery receipts can be settled when its
+bound health findings disappear or its execution contracts change. The original
+failure stays in history; a new cycle inspects current health and retains each
+target's retry limit. The exact legacy async-dispatch rejection is attested by
+its committed error digest before it is classified as undispatched. A resolved
+configuration block restores normal Task admission only after current accepted
+dependencies validate and any retained activation is proven completed.
+
+Model events also retain their native `model_event_id`. A manifest-only
+interruption can receive one ordinary Repair retry when its original activation,
+immutable manifest and current model fingerprint agree. Benchmark/configuration
+effects remain blocked. The manifest is retained in the repair receipt, and the
+resumed model occurrence keeps chronological event priority. Hindsight SQL reads
+inside that admission retain the caller's transaction; a memory lookup cannot
+commit the Task owner's pending transition before its recovery receipt.
+
+Failed consolidation is a separate Hindsight status from failed asynchronous
+operations. The same component repair attests the current failed source set,
+records one attempt per unchanged source memory, and uses native
+`consolidation/recover` followed by deduplicated `consolidate`. This retains
+memories, dates and existing observations. Unknown delivery and already retried
+source memories remain blocked for Review; there is no replay through re-import.
+
+Complete durable receipts must attest read-only work, an exact proposal rejection
+before staging, or a missing-citation Source handoff rejected before Inbox creation.
+For Source-bound Learn, Repair can explicitly retain a completed page
+capture when exact argument/result hashes, activation binding and immutable
+Source bytes agree. An ordinary later fetch may capture an updated page. This is
+an explicit effect disposition, never read-only classification or permission for
+startup replay. Unknown effects, pending Review and continuations stay blocked.
+The pending transition and recovery receipt commit atomically and limit retry
+to once per original Task/event/activation key; a later run never resets it.
+A specifically implemented argument-contract correction may permit one further
+receipt-keyed attempt for its exact pre-stage rejection class. Settlement retains
+attested effects and advances an obsolete or already handed-off commitment without replay.
+
+After an eligible attempt consumes its snapshot, the next model decision exposes
+only status until refreshed. A Repair call resets the repeated-status guard;
+reads without intervening recovery stay bounded. Each pass allows eight attempts,
+then reports remaining work for automatic continuation. A completed pass reports
+its disposition, never a queued target's unverified success.
+
+Hindsight component calls may use identical arguments while selecting distinct
+native operations from fresh status. They retain the native once-per-operation
+intent and per-pass attempt limits. Explicit provider quota deadlines defer
+outbox delivery and automatic repair; the existing health tick resumes delivery
+when due. Native worker quota deferral preserves its operation and retry budget.
+Completed recovery calls can be retained during superseded-pass settlement only
+with exact Tool, dispatch, result and native-intent receipts covering every call.
+An Audit argument mismatch before optimizer entry does not spend its evaluation
+attempt. A genuine attempt with no bound report permits failed completion only.
+
+Unsupported or exhausted recovery, a pass that makes no further progress, and
+Repair's own failure create persistent health notifications in the existing
+SQLite Review owner. They appear alongside Article proposals in the same Review
+queue, with their exact Task/run and blocker. They are runtime notifications,
+not Knowledge Articles or proposed mutations, and expose Acknowledge instead of
+Approve/Reject. Acknowledgement only records that the owner saw the notification;
+the underlying fault and receipts remain. Notifications deduplicate across reads
+and restart, resolve when the current fault disappears, and reappear for a new
+fault or recurrence after resolution. An acknowledged unchanged blocker does not
+re-notify continuously. The controller reconsiders available recovery when its
+state or definitions change. A Review notification never grants Tool authority.
 
 Scheduled occurrences use their recorded cron activation identity even when the
-Task has no event triggers. Exact controller receipts for empty-body and
-invalid Feed-publication arguments attest that staging never began; generic errors and
-uncertain writes remain blocked. A failed completion only finalizes runtime
-state and cannot conceal preceding Tool effects. The scheduler may settle an
-obsolete failed Audit after the exact proposal's recorded rejection, or a failed
-Feed version after attesting a newer queued version of the same item and
-destination. Settlement preserves the original run, effects and FIFO; it never
-reports the failed work as performed or replays a Tool.
+Task has no event triggers. Exact controller receipts for empty-body and invalid
+archive targets attest that staging never began; generic errors and uncertain
+writes remain blocked. A failed completion only finalizes runtime state and
+cannot conceal preceding Tool effects. The scheduler may settle an obsolete
+failed Audit after the exact proposal's recorded rejection. Settlement preserves
+the original run, effects and FIFO; it never reports failed work as performed
+or replays a Tool.
 
-An interrupted Feed Ingest can also settle after attesting its already committed
-publication: complete exact-input Tool coverage, one returned publication with
-its original argument/result hashes, approved publication and retention decisions,
-matching current Article and immutable Source, and the preserved retired Articles.
-The scheduler writes a separate disposition receipt and advances one FIFO head.
-It retains the interrupted run unchanged. Missing or uncertain evidence, pending
-Review and active continuations still block settlement; no publication is retried.
 
 The existing Uvicorn server disarms new scheduler admission on its stop signal,
 before the WebSocket drain and lifespan cleanup. A queued executor claim checks
@@ -209,65 +375,96 @@ that same shutdown flag before entering execution. Already running work retains
 the normal cancellation, durable receipt and recovery boundaries. This prevents
 an otherwise idle maintenance restart from starting a new Task during teardown.
 
-The decision schema reflects each active proposal contract: Feed Ingest can
-name its Source and destination while the publication owner compiles the body
-and retention; Link can update an Article body without changing metadata.
-Learn and Distill expose source.read and task.complete while the bound Source
-remains unread; the dispatch prerequisite permits only reading that Source or
-reporting terminal failure until its complete-read receipt is present.
-Wikilink notation around a source:// citation normalizes to that Source URI,
-without creating an Article path or knowledge-graph edge.
+The decision schema reflects each active proposal contract. Link can update an
+Article body without changing metadata. Source-bound Learn exposes source.read
+and task.complete while the bound Source remains unread; the dispatch prerequisite
+permits only reading that Source or reporting terminal failure until its
+complete-read receipt is present. Wikilink notation around a source:// citation
+normalizes to that Source URI without creating an Article path or graph edge.
 
-Runbook refinement preserves the researcher/verifier split. Darwin's existing
-Generate / Runbook Task may revise the body of one accepted leaf procedure from
-an explicitly registered regression case. Its title, applicability, Skills,
-Tools and Task model settings remain frozen. The existing `vault.propose`
-boundary stages the candidate, and `runbook.proposed` activates Heimdall Audit
-through its ordinary durable FIFO. This is a handoff between sibling outcomes,
-not a new Task family or a Repair operation.
+### AutoSaddler improvement
 
-Heimdall's `harness.evaluate` uses the ordinary activation packet builder and
-executor with a private frozen Tool boundary. Every trial action, including
-completion, stays inside its fixed fixtures; there is no fallback to live Tool
-dispatch, ordinary trial receipt, Task state mutation or knowledge writeback.
-The target Task's model and reasoning settings, existing model lease, context
-accounting and foreground/STOP cancellation remain authoritative. Trial trace
-rows carry a bounded case, variant and repetition identity within the one Audit
-execution. The popup labels simulations and correlates their own actions and
-measurements without combining them with the outer Audit response. This evaluates a procedure against
-reconstructed inputs, not exact historical execution or live workstation effects.
+Heimdall Audit uses the pinned Microsoft AutoSaddler V2 engine as its single
+instruction-improvement path. Executive trials use native DeepSeek; specialist
+trials use the ordinary Task executor. Both intercept Tool dispatch. The previous
+model-authored inspection/definition-proposal fallback is removed. Darwin still
+creates missing Runbooks; new refinement registrations use the same AutoSaddler
+engine. Existing legacy report validation remains for historical Review evidence.
 
-Developer-authored fixtures include independent grading criteria and held-out
-cases. Darwin receives training cases only. Internal evaluation artifacts live
-as immutable, content-addressed Source files under `evidence/evaluations/`;
-they are derived execution evidence, not external intake and do not emit
-`source.added`. The existing execution ledger attests handoff and actual Audit
-Tool receipts. There is no second scheduler, database, provider or graph.
-Both sides must cover every frozen case/repetition. Acceptance requires every
-candidate case to pass, no regression, and a strict training improvement.
-Missing observations and execution errors remain incomplete. Total trial time,
-Tool count and prompt-token measurements are reported separately; time includes
-model admission and is not TTFT or a statistically established speed improvement.
+The shared Capability boundary captures bounded, complete decision inputs for
+completion/proposal contracts after committing the actual Tool receipt. A rejected
+call can activate Audit even when the overall Task recovers. Failed terminal work
+is considered too. One unchanged definition/failure admits one optimizer job;
+new independent accepted controls can unblock a case that lacked held-out evidence.
+Captures and immutable cases are private internal evaluation Source, not wiki
+Knowledge or another event queue. Historical reconstruction requires exact receipt
+matches for every load-bearing input; omitted search snippets are explicitly
+unavailable and supply no completion evidence.
 
-Review rechecks the exact complete proposal hash, accepted dependency selection
-and bytes, model profile, evaluator revision, full suite coverage, and a completed
-independent Audit with its exact returned Tool receipt. A model-authored verdict
-or a changed candidate cannot satisfy that gate. Ordinary approval still owns
-publication; successful evaluation never promotes a Runbook automatically.
-Review listing reuses its one accepted-Article snapshot while holding the existing
-Article lock; it does not rescan the entire Vault for every candidate. Actual
-approval independently revalidates current state. No stale acceptance cache exists.
-Check continues diagnosis and Repair continues receipt-safe recovery. Refining
-implementation code or expanding Tool authority remains developer work.
+Native Executive capture uses the fitted provider prompt, not its separate Tool
+observation buffer; isolated native decisions preserve those wire roles. Empty
+or visual prompts cannot become complete decision cases. A new current-contract
+case may derive from an older capture only when its exact instruction body,
+Article dependencies, Tool authority and committed receipt still attest. The
+original capture and implementation identity remain unchanged; publication pins
+the new evaluator revision. This is counterfactual validation, not historical
+effect replay. A settled stale dispatch without a completed report may be
+prepared once for a new implementation rather than being permanently deduplicated.
 
-Register a bounded case with `python -m obsidience.scripts.runbook_evaluation
-prepare <fixture.json> --origin-run <exact-run-id>` from the project root, then
-`python -m obsidience.scripts.runbook_evaluation start <case-id>` to admit the
-existing Generate Task. The first fixture reconstructs the historical Check
-error where a valid degraded inspection was marked failed; it does not assume
-that the current accepted procedure still has that defect. These patterns refer
-to pinned AutoSaddler v2 in `artifacts.lock.json`; no upstream engine or code was
-imported.
+Mutable Review collisions are operational failures, not instruction grades. An
+operational notification resolves only when the captured arguments now validate
+and the exact same occurrence has a later receipt-attested accepted completion.
+Missing historical observations remain implementation-review findings, not
+optimizer failures; original warnings and receipts remain retained.
+An incomplete-engine warning likewise resolves only after a complete replacement
+comparison for the same origin and subject has its exact returned Tool receipt.
+
+Automatic cases use the actual read-only completion/proposal validators as their
+rubric. Missing prerequisites are taken from those executable contracts, not
+model-authored grades. Each new evaluation uses five distinct decision cases,
+each repeated five times: 25 observations per baseline or full candidate.
+Both the durable trace producer and its viewer accept all five repetitions;
+presentation validation must not abort the fourth isolated rollout.
+Automatic suites pair the triggering rejection with four accepted controls from
+four other runs of the same Task/Tool. The bounded control pool retains five runs;
+insufficient current evidence waits for more independent controls and stays
+visible in Review. Cases are never padded by duplicating a captured decision.
+Manually registered whole-session cases remain available for other operations. Unsupported
+contracts, missing observations and code defects become explicit Review findings;
+AutoSaddler cannot infer a correct semantic result from a failure flag alone.
+
+The upstream engine owns diagnosis, structured edits, reflection, candidate
+selection and checkpoint resumption. Its default two session retries permit three
+attempts per session. There is no universal candidate budget upstream: this adapter
+sets three iterations, at most four complete suites of rollouts, ninety-second
+trials, 180-second diagnosis sessions and a fifteen-minute outer job budget.
+Foreground demand cancels and joins work through the existing model owner. STOP
+is cancellation, never automatic action replay.
+
+Candidates change only Agent/Runbook instruction bodies, preserving exact authored
+links, metadata, Tool grants, model settings and the optimizer/recovery authority.
+All candidate cases must pass, training must improve, and previously passing
+cases must preserve Tool counts. The 25-percent-plus-200-ms latency bound applies
+only when the affected Agent is Executive and its evaluation reasoning is `none`.
+Specialists at every reasoning level and Executive with reasoning enabled are
+judged on correctness without a latency rejection. Timings remain in the report;
+the Audit optimizer's own reasoning setting does not select this policy.
+Complete coverage, cancellation, bounded execution and publication validation
+remain required. These comparisons measure specific decision contracts, not general
+intelligence, factual accuracy or physical desktop delivery.
+
+Publication first stages the exact measured candidate through the existing writer.
+After Audit completes, Review revalidates unchanged inputs, code, model, full
+comparison and the committed returned Tool receipt. Owner-set
+`Tasks/audit.obsidience.optimization_auto_apply` permits automatic instruction
+publication; it defaults off in fresh installations. Code changes and ordinary
+wiki recommendations retain Review. Deterministic Harness recovery remains with
+Repair, including no replay of uncertain effects; optimizer retries apply to
+isolated optimization sessions, not failed live actions.
+
+The existing `executive_optimization` API/CLI accepts Executive and registered
+specialist cases. The legacy Runbook registration CLI routes new optimization to
+Heimdall. Dependency provenance is recorded in `artifacts.lock.json`.
 
 Bodies use standard Markdown links, including relative and bundle-root paths;
 one CommonMark parser supplies graph edges and review locations. Code examples,
@@ -313,9 +510,10 @@ Source is intentionally outside this kind list:
 - The Harness records stable, observed System facts in immutable, deduplicated
   Source versions under `evidence/system/`. One shared catalog derives both
   Source labels and ordinary Knowledge Articles from the actual System
-  descriptors and folder hierarchy. It absorbs `system.json` into **ADMECH
-  Workstation** and each `application.json` into its application hub. The
-  generated branches are **Hardware** and **Applications**. **Drives** contains
+  descriptors and folder hierarchy. It absorbs `system.json` into the
+  **System** root (stable **ADMECH Workstation** identity). Hardware remains a
+  physical Source grouping; **Compute**, **Devices**, **Drives**, **Network**
+  and **Applications** are direct generated branches. **Drives** contains
   physical drive Articles directly, selected by serial/model and attested WWN
   from util-linux's read-only block inventory. Partitions and mount points are
   details within each Article; configured application directories belong to
@@ -323,25 +521,29 @@ Source is intentionally outside this kind list:
   direct leaf; only applications with meaningful subsubjects need a folder.
   Host network
   interfaces belong under
-  the single **Hardware / Network** Article; third-party Connection configuration remains in
-  Settings. Existing authored workstation contracts and history belong under
-  the separate **Workstation Observations** branch as direct Article children,
-  with accepted links repaired through the ordinary Vault move owner. This
-  branch has no repeated hardware, application, or incident hierarchy: native
-  Article links express subject associations. Redundant folder condensations
-  are archived while substantive observation content and provenance are retained.
+  the single **System / Network** Article; third-party Connection configuration
+  remains in Settings. Accepted workstation operating policies and reusable dated
+  incident lessons belong under **Architecture / Shell**; reusable procedures belong
+  under **Runbooks / Operations** with exact Skill dependencies,
+  with accepted links repaired through the ordinary Vault move owner. Owner
+  preferences belong directly under **Executive / Preferences**; shared design
+  belongs under **Architecture**. File Articles by subject
+  and purpose, preserve provenance, and update existing knowledge instead of
+  maintaining generic Observations digests or duplicate hierarchy.
   Publication runs on Harness startup and explicit **Refresh System**. It
   does not call a model, enqueue a Task, or create a Review. The existing
   Source ledger owns evidence attestation and `source://` identity; these
   controller captures do not emit general research intake events.
-  Generated Articles cite their exact evidence version and observation time.
-  Unchanged facts preserve Article bytes and graph state. An unavailable
+  Generated Articles cite their exact evidence version and `observed_at` time.
+  The separate `checked_at` records the latest successful inventory check;
+  unchanged facts preserve source observation time, Article bytes and graph state. An unavailable
   collector retains the last successful Article and reports degraded coverage;
   it never turns a failed read into a claim that hardware disappeared.
   Schema-derived publication destinations and controller receipts protect
   generated content through Reader, proposal, Review, move and maintenance
-  paths. The ADMECH namespace outside Workstation Observations is reserved for
-  this deterministic mirror; authored Articles cannot create competing branches.
+  paths. The entire ADMECH/System namespace is reserved for this deterministic
+  publisher, including unsupported descendants. Authored Articles cannot create
+  competing inventory branches or move operating policy into System.
   Arbitrary imported `generated` metadata cannot claim that ownership.
 - Obsidience is an ordinary directory on `/home`; `/var/lib/ai` is the Models
   storage location. `/home` and `/var/lib/ai` are separate Btrfs subvolume
@@ -349,7 +551,7 @@ Source is intentionally outside this kind list:
   dedicated Obsidience partition or quota.
 - A newly created immutable raw Source emits one `source.added` event after its
   bytes and ledger identity are durable. The event is one trigger on Darwin's
-  Learn Task for general intake or Distill for Feed items. Darwin writes one cited handoff through
+  Learn Task for general intake. Darwin writes one cited handoff through
   `source.handoff` into the physical `obsidience/evidence/inbox/`; that durable
   transition emits `source.inbox` for Alexandria's centralized Ingest Task. Duplicate
   capture or handoff emits nothing. Source never becomes accepted Knowledge or
@@ -366,16 +568,10 @@ hidden, binary, symlinked and oversized files are excluded, and original
 files remain present. Existing Research acquisitions carry their controller
 Task/run identity so supporting captures do not trigger redundant research.
 
-Connections provide access; Feeds select provider items and collection policy.
-New Feed items enter immutable Source and activate Darwin's existing Distill
-Task. Its cited handoff activates Alexandria's existing Ingest Task. There is
-no separate News Task, hourly briefing job, fixed ten-story compiler or
-News-specific Tool mode. `News & Research/Top Stories` is an ordinary Knowledge
-destination selectable in Feed settings. The former Top 10 edition is archived;
-new or changed items from the BBC Top Stories Feed route to Top Stories.
-Historical Feed publications remain at their captured paths and count toward
-normal Feed retention across destinations. Sources, Articles and historical
-execution receipts retain their identities and native OKF freshness fields.
+Explicit research and general Source intake use Question and Learn. The retired
+Feed collector and Distill route are not alternate ways to recreate news from
+historical processing reports. Existing news Articles retain their original
+Sources, dates, lifecycle and review history.
 
 Acquisition and contextual examination use the existing Tool boundaries.
 `web.fetch` applies pinned Trafilatura 2.2.0 to already acquired article HTML,
@@ -391,10 +587,8 @@ discarding failures, the current observation or effect receipts.
 
 Darwin owns research and summary accuracy. Alexandria reads the complete bound
 Inbox and handles ingestion and useful contextual relationships without
-repeating Darwin's research or rewriting his summaries. Feed Ingest compiles
-that immutable summary into the owner-selected destination and applies the
-Feed's active-Article limit through the same atomic publication and archival
-Review path. Other research handoffs use Ingest's general procedure.
+repeating Darwin's research or rewriting his summaries. Research handoffs use
+Ingest's general procedure and the existing Article publication boundary.
 
 The existing Scheduler admits only currently available configured execution
 capacity, counting direct-owner claims and externally running Task identities.
@@ -412,19 +606,15 @@ Auto-curate is the owner-authored `auto_curate` boolean on an actual Article.
 The nearest explicit selection wins, including a child's false override. An
 Agent Brain scopes its own Knowledge folder; shared Library definitions
 never inherit that permission. The checkbox changes permission, not Task
-triggers. The Reader, graph rings, ordinary Knowledge publication, Immediate
-disk projection and Temporary append all consult the same policy resolver.
+triggers. The Reader, graph rings and ordinary Knowledge publication consult
+the same policy resolver. Hindsight auto-organizes its own memory records;
+Curate recommendations into the wiki still require Review.
 
 The author may maintain its own permitted Knowledge; Alexandria may maintain an
 owner-enabled destination through the existing proposal validator and review
 ledger. Auto-curate does not change Agent identity, Tool/Skill/Task/Runbook
 authority, generally archive Articles, resolve conflicts, or turn inference into truth.
-Feed publication independently attests the captured item, Distill execution,
-Inbox and selected destination. Its explicit retention policy may retain
-excess Feed-owned Articles as deprecated archives only after validating their
-provenance, current policy, exact revisions and surviving inbound references.
-It cannot archive unrelated Knowledge or immutable Source. Proposed metadata,
-Source prose and model output cannot grant permission. Broken links, stale
+Proposed metadata, Source prose and model output cannot grant permission. Broken links, stale
 bases, unsupported evidence and disabled scopes remain reviewable. Dotted node
 rings show the backend's effective selection, never a second client-side policy.
 
@@ -517,7 +707,7 @@ or outer-chrome system.
 Reader consumes the typed selection, reads either
 the exact Article through `/api/articles/{ref}` or the exact Source bytes
 through `/api/source-files/{key}`, and renders the result in a translucent
-native Qt Quick pane. The WebKit surface is
+native Qt Quick pane. The stage web surface is
 graph-only: the shell has no `?surface=reader` route, Reader web view, or
 React Reader wrapper. This preserves one graph implementation and one generic
 shell placement contract without Electron IPC or a second coordinator.
@@ -690,10 +880,16 @@ output, or no visible active Samsung workspace freezes physical and native-glow
 phase without catch-up. Every retained callback is checked against the
 Surface and workspace that created it before it can place a pane. OLED off
 restores the manual baseline and ordinary chrome. Only policy persists. The
-Stage has no separate outer-edge effect, texture, or animation. OLED
-presentation is limited to Hyprland's native pane border and inner glow. There
-is no GIF decoder, per-pane timer, scheduler Task, daemon, plugin, full-screen
-effect, or second geometry authority.
+Stage has no separate outer-edge effect or texture. Samsung's native wordmark
+and cached neon Memory-agent icons also consume this policy for bounded inward
+drift and gentle dimming. The icons turn slowly through CSS transforms; the
+wordmark uses native QML animations. These presentation-only animations pause
+while hidden, locked, output-off or covered by a full-size window and resume
+without catching up; they never place windows or redraw the shared icon artwork.
+OLED off removes branding drift/dimming while retaining the requested icon turns;
+reduced-motion preference disables those turns. The lock and non-Samsung
+identities remain unchanged. There is no GIF decoder, per-pane script timer,
+scheduler Task, daemon, plugin, full-screen effect, or second geometry authority.
 
 Idle triggering is a separate upstream integration: official `hypridle`
 requests the Quickshell session lock after five genuinely idle minutes, turns
@@ -795,7 +991,30 @@ uncertain delivery is never replayed. No browser-facing unlock command exists.
 Normal Voice mode accepts an ordinary spoken request without speaker identity
 verification. Voice and Chat retain the same DeepSeek/CapabilityDispatch route,
 receipts and cancellation; no additional microphone or Executive loop is created.
-Password/PAM unlock and subsequent Computer Use integrity checks remain in force.
+Password/PAM unlock and subsequent Computer Use integrity checks remain in force. Positive desktop-unlock completion claims require this run's verified session.unlock receipt; an ungrounded native text claim is withheld and returned to the existing loop for correction. This output check does not route a request or dispatch an unlock.
+
+The registered browser accepts an optional HTTP/HTTPS URL through application.launch and the existing managed desktop entry. An existing browser does not suppress a requested URL dispatch. Browser readiness and URL delivery remain distinct from the requested page or playback state, which requires fresh computer.observe evidence and explicit completion verification. The image carries that native completion contract; a rejected completion consumes the image and requires a new observation. Named observation can resolve the uniquely active matching application window, while ambiguous matches without that witness still fail and mutation selectors retain their exact-target requirements. No browser session, input owner or command executor is added.
+
+An explicitly granted media.pause Tool pauses the current supported browser's
+MPRIS media session through the existing capability owner. It binds a unique
+bus owner, verified browser process/start time and current track; a supplied
+query filters current metadata. It calls Pause once and requires a fresh
+same-identity Paused/Stopped readback before completion. Already paused media
+needs no effect. A changed identity or uncertain delivery ends effects for the
+activation; it never toggles playback, starts it, retries or guesses another
+tab. MPRIS identifies the browser-selected media session, not an arbitrary tab.
+This native state receipt establishes pause completion without an image.
+The existing finite HassIL command lane recognizes complete simple playback
+commands; other titles, questions and compound requests retain normal model
+interpretation. All paths retain current Skill grants and committed receipts.
+
+Literal current-local-time questions use that same finite command lane to read
+the workstation clock in its configured timezone and submit the spoken answer
+through the existing task.complete authority. They perform no model request or
+memory recall and do not use device-action confirmation cues. Other locations,
+time calculations and compound requests retain ordinary reasoning. Every
+Executive activation also supplies an explicit human-readable local clock;
+historical conversation and memory timestamps are not current-time evidence.
 
 ```text
 obsidience/harness/
@@ -803,7 +1022,7 @@ obsidience/harness/
   __main__.py
   config.py
   interfaces/{api,cli}/
-  {execution,knowledge,conversation,models,realtime,computer,web,host,connections}/
+  {execution,knowledge,conversation,models,realtime,computer,web,host}/
   capabilities/<exact dotted Tool ID as directories>/<leaf>.py
 ```
 
@@ -813,154 +1032,22 @@ real hierarchy such as the speech worker or a dotted Tool ID. Cross-subsystem
 imports are explicit, package `__init__` files are side-effect-free, and generic
 `utils`, `common`, and `core` junk drawers are not architecture.
 
-Connections describe access to third-party services. A Connection may own zero
-or more Feeds; each Feed selects an endpoint and bounded collection cadence.
-They are configuration and runtime records, not extra Article kinds or agents.
-Settings > Connections owns third-party access and credentials. The standalone
-Feeds pane owns Connection-grouped feeds and captured items; selecting an item
-presents it in the same Reader used by Knowledge and Source. The Feeds pane
-uses their existing PaneModuleHeader and dock authority. Reader has four fixed
-slots: upper/lower left and upper/lower right, one module per slot. Collapsing
-or removing a sibling does not move a pane between slots; occupied-slot drops
-swap docked modules or move the occupant into an empty slot without losing it.
-There is no second Reader, placement authority or feed root in the graph.
+## Source intake after Feed retirement
 
-Opening these panes only reads Harness metadata; it performs no provider I/O.
-Host network interface inventory remains a separate System Source projection.
-A selected Feed opens directly into Preview or Settings. Wide panes use a feed
-sidebar; narrow panes use a compact selector. Preview holds publisher choice
-and items; Settings groups collection, destination/retention and Darwin
-instructions. The amount is edited only beside Preview; Settings links back
-to that control. Connection access fields remain in Settings > Connections,
-and new feeds inherit the chosen Connection address. Save/reset stay outside
-the scrolling editor. The pane host supplies the title once.
+The owner retired Connections, Feeds, their collector/API/panes, `web.feed`,
+and the Feed Distill Task. They are not active acquisition, scheduling,
+publication or retention routes. Historical `feed://` Sources, Feed receipts,
+Articles and execution records remain read-only provenance; retaining them does
+not resume collection or replay captured work.
 
-Explicit Preview reads the current RSS/Atom endpoint through the same bounded
-HTTPX acquisition and feedparser item parser used by collection. It supports a
-draft endpoint on an existing Connection's exact origin before saving. The
-response shows up to 30 unique entries in publisher order, available count,
-publication dates, inert summaries and supplied-content indicators. The first
-`item_limit` entries are highlighted locally; changing the count does not fetch
-again. This is the first X publisher entries, not X unseen stories or a
-relevance ranking. Existing captured versions remain deduplicated by ordinary
-collection. Preview is transient presentation, never a raw Source, Task,
-configuration change, cursor/validator update or second reader database. The
-network response and the UI both reject stale connection/draft/revision
-bindings. Opening or selecting an item never fetches its reporting page or
-loads remote assets. Explicit Collect now remains the separate existing intake
-action and uses saved Feed settings.
-
-Reader projects a captured provider item as plain text and attests its exact
-Source ID/path. It also renders a bounded, clearly labeled uncollected publisher
-preview from the shell's ephemeral selection. Preview carries no fabricated
-Source identity, performs no HTTP request or mutation, and enables no Article
-edit or curation control. Selection admission invalidates pending fetch/save
-responses so one document cannot overwrite a newly selected item.
-Tide's simple source manager and FreshRSS's bounded reading widths are
-presentation references. Existing feedparser and HTTPX provide the actual RSS
-plumbing. Matcha's incremental item-processing pattern remains implemented
-through existing Source/Index identities; no separate digest writer, reading
-database or AI summarizer is imported.
-
-The initial collector supports RSS and Atom through installed feedparser and
-HTTPX. One Harness-owned async lifetime schedules acquisition off the event
-loop. Each complete parsed provider item has a stable feed/native-item identity
-and an immutable content version in existing Source; exact repeated material
-uses Source's existing deduplication. ETag and Last-Modified validators commit
-only after all selected items are captured. Configuration revisions invalidate
-stale results, and disabling a Feed prevents a late request from capturing more
-items. The existing Index stores collection state; no second database, external
-job runner, or agent loop is introduced.
-
-Source remains the ingestion boundary: a Feed's `source.added` activates Darwin's
-Distill Task; general intake activates Learn. Darwin hands off a cited finding,
-and `source.inbox` activates
-Alexandria's Ingest Task. The Source delivery receipt commits atomically with
-the Task's FIFO admission, including replay after the earlier Task completed.
-RSS-provided content is raw evidence rather than an assertion that a linked
-reporting article was fetched. Its `feed://` Source reference and embedded
-reporting URL preserve that distinction for research.
-
-A Source-triggered Learn or Distill activation names the exact admitted Source citation as
-its objective and validates the UUID, event key, and content hash together.
-Unrelated ambient Shell Scene and temporary Observations are excluded from this
-activation. Before other research Tools or a successful outcome, the executor
-requires complete matching-hash read receipts from the ordinary `source.read`
-Tool. Handoff independently checks those receipts and includes the activating
-Source citation. Completion requires the attested handoff or an explicit
-Source-cited no-change outcome; a failed read can still end honestly as failed.
-This is a prerequisite on the existing Tool boundary, not a hidden read, another
-research pass, or a second pipeline. Explicit `task.create` research keeps its
-ordinary bounded objective.
-
-Each Feed selects an existing accepted Knowledge container with `destination_ref`.
-Several feeds may contribute to the same node, including the ordinary
-`News & Research/Top Stories` destination; configuring a Feed creates no graph
-node. New feeds default enabled.
-On Save, an otherwise unset destination policy defaults to Auto-curate enabled,
-while explicit or inherited choices are preserved. The graph and Connections
-read and write the same Article permission; Feed configuration has no duplicate
-Auto-curate flag. Explicit Pause prevents further scheduled collection.
-
-The Source item and its exact Feed/destination receipt commit before event
-dispatch. Darwin's Distill Task reads that item, fetches only its exact reporting
-page when needed, and sends one complete cited finding to Alexandria's physical
-Inbox. Ingest preserves the complete handoff and compiles native OKF provenance
-through the existing proposal owner. Enabled Auto-curate automatically accepts
-eligible Articles; disabled retains Review. Immediate and later approval both
-validate the current destination and attested Source lineage. Article identity
-comes from the Feed and provider item, so updated versions use the same leaf
-while the destination is unchanged.
-Changing destinations affects new captures and never moves accepted history.
-Feeds use their configured retention limits and do not impose a fixed 26-hour
-expiry.
-
-Feed policy separates `item_limit` (the first 1–30 unique publisher entries
-checked per poll) from `max_active_articles` (1–1000 active Articles from that
-exact Feed, default 10). The latter spans destination changes and counts only
-native Inbox-to-Feed provenance, never every Article beneath a shared node.
-Owner-moved Feed Articles remain counted but are protected from automatic
-retirement; unexpected copies protect every copy of that item. Neither a move
-nor a filename sort can silently remove provenance or authorize deletion.
-Darwin's Distill handoff remains the automatic trigger: Alexandria's Ingest
-compiles the incoming Article and the oldest eligible excess Feed Articles into the
-existing atomic Review group. Retirement preserves complete content, Sources and
-history under `_archived/` with native OKF `status: deprecated` and namespaced
-archive time/reason. It does not assert that an older report became false.
-All affected Article Auto-curate policies and surviving inbound links remain
-authoritative. A blocked or review-required retirement holds incoming
-publication; the system must never claim the cap is satisfied while it is not.
-Retirement selects the oldest eligible leaves, retaining any leaf pinned by
-surviving inbound links or protected placement. Dependent Feed leaves may retire
-together within the required batch; no authored link is removed to meet the cap.
-An explicit retention-policy save also reconciles quiet Feeds through that same
-owner, in bounded archive-only groups when a large reduction needs them. GETs
-and the network collector never archive. No extra model pass or scheduler is
-introduced, and `stale_after` continues to request Audit rather than deletion.
-Large reductions retain their exact continuation in the existing Review
-transaction journal until the successor group is staged. Task settlement waits
-for the held Inbox publication or explicit rejection. Restart and policy-save
-recovery preserve that obligation, recheck the current cap and original
-destination, and never overwrite a newer accepted item version.
-
-Optional `distill_instructions` is owner-authored Feed configuration, limited
-to 500 characters. It controls focus and presentation within the existing
-Distill procedure, never tools, placement or publication permission. The
-existing atomic Feed receipt snapshots it with each newly captured item
-version, separately from immutable provider bytes. Duplicate captures retain
-that snapshot; edits never rewrite queued occurrences or redistill old items.
-The compiler admits it through the exact Source binding and labels it as the
-owner's captured instructions. The pane explains RSS/Atom's supplied titles,
-dates, summary/content and links, separates collection and graph-retention
-limits, and displays actual active count and retention disposition.
-
-An API-only Connection can test read-only access at a configured endpoint without
-creating a Feed. Generic JSON API streams and provider-specific event adapters
-require their own actual acquisition implementation; a descriptor never grants
-model-facing authority. Optional Bearer/Bot credentials use the installed
-systemd-creds user encryption path outside Source and configuration. They are
-write-only and bound to the Connection's exact HTTPS origin; changing providers
-cannot reuse an old token, and authenticated redirects cannot cross origins.
+General immutable Source intake and explicit Research Question/Learn remain.
+A complete Source emits `source.added` for Learn. Darwin produces one cited
+finding through `source.handoff` into the physical Source Inbox, whose
+`source.inbox` event activates Alexandria's general Ingest procedure. The existing
+Article writer and Review owner govern publication. Source and Hindsight history
+never grant permission or establish current facts. Automatic memory-to-wiki
+handoffs exclude wholly attested retired Feed-processing lineage while preserving
+historical memory and unrelated or mixed-provenance knowledge.
 
 ## Recursive hierarchy
 
@@ -995,8 +1082,7 @@ bindings, never the Task's identity, acceptance contract, or hierarchy.
 Do not use hierarchy merely to name procedure. Research framing, discovery,
 screening, extraction, analysis, and verification are Runbook stages unless
 one becomes a separately queueable outcome with its own acceptance condition.
-Observations is the model exception: Immediate, Temporary, and Durable have
-genuinely different lifecycles, so their deeper Task structure is useful.
+Observation memory and native context compaction are provider services, not Task subtypes.
 
 
 A Task definition is not an active request. The existing SQLite ledger stores
@@ -1113,13 +1199,18 @@ paths, protocols, object kinds, or architecture.
   operates, and returns the verified result.
 - **Alexandria** is the Curator. She owns Ingest, Curate, Merge, Link,
   Improve, and Archive and maintains the accepted wiki from bounded findings.
-- **Darwin** is the Researcher. He owns Question, Learn, Distill, Model, and Generate.
-- **Heimdall** is the Guardian. He owns Audit, Check, bounded Repair, and independent acceptance
-  and integrity checks.
+- **Darwin** is the Researcher. He owns Question, Learn, and Generate.
+- **Heimdall** is the Guardian. He owns Harness and Agent Audit, automatic Repair, operational Model characterization, and independent Runbook evaluation. Alexandria owns ordinary wiki content and freshness.
 
-Each Agent Article directly owns Architecture, Tools, Skills, Runbooks, Tasks,
-Other Agents or Subagents, and Observations. There is no extra Agent wrapper
-beneath Executive or any specialist.
+The Agents Library contains exactly four canonical identities: Executive,
+Alexandria, Darwin and Heimdall. Executive delegates directly to those same three
+specialists; a second Subagents wiki hierarchy creates no additional identity.
+Each Agent page exposes its assigned Tasks, Runbooks, Skills, Tools and scoped
+Knowledge, plus a direct Memory action for its Hindsight bank. Shared architecture
+belongs at the root `Architecture/Architecture` Article; Projects holds genuine
+project knowledge. Established owner preferences belong
+in `Agents/Executive/Preferences`. Observation, Subagents and local Architecture
+folders are not mandatory Agent subjects.
 
 Each named Agent has one canonical `type: agent` Brain Article. A parallel
 Knowledge role charter is an architectural duplicate of that Agent, even when
@@ -1131,8 +1222,8 @@ ordinary shadow Article for archival.
 Each Agent keeps a separate orbiting graph with the Executive's existing base
 Knowledge branches preserved. One canonical Vault stores shared Articles, but
 `knowledge` checkout roots and `exclude_knowledge` define each Agent's contextual
-view. Own Knowledge and Observations stay owned; another Agent's Observations
-are private even when the owner Library can display them. Search and direct read
+view. Each Agent's historical Memory remains bank-scoped; the owner may inspect
+all banks, but inspection grants no Agent access to another bank. Search and direct read
 use the same accepted scope as graph membership. Folder proxies are navigation,
 not permission to read unselected siblings. A checked-out Article is one shared
 identity, never a per-Agent copy. Reader checkout changes are revision-checked;
@@ -1183,8 +1274,8 @@ It is transient, unverified, and excluded from search. The model receives the
 current request once in Objective; Reader additionally displays that request in
 its working-state view. Public graph activity means actual context supplied,
 Article read/search, Tool dispatch/result or accepted relationship, not inspection
-of hidden model reasoning. Idle transport and checkout refreshes never fabricate
-thinking. Late progress from a superseded activation cannot replace the new view.
+of hidden model reasoning. Idle transport and status refreshes stay quiet; an
+intentional checkout commit emits its exact changed references. Late progress from a superseded activation cannot replace the new view.
 
 Chat and speech use the same Agent-owned session and native DeepSeek loop. The
 Executive identity supplies standing instructions; selected Skill/Tool pairs
@@ -1204,8 +1295,8 @@ order:
 8. up to five accepted Knowledge Articles from fast lexical+dense RRF,
    preserving at least three direct hits when available and admitting at most
    two direct graph neighbors;
-9. the exact `Current conversation` Article in the `Immediate Observations`
-   packet section for an activation in the active Executive conversation.
+9. historical context projected from the same native Executive conversation,
+   without creating or retrieving a conversation Article.
 
 Bindings always include the newest bounded Shell Scene or an explicit
 unavailable reason. It lets the Agent name focused and unfocused windows and
@@ -1270,22 +1361,75 @@ suppresses stale speech; VAD thresholds are unchanged. Tentative VAD onset
 does not interrupt thinking or playback. The existing NeMo transcript path
 confirms speech and emits the interruption before final endpointing.
 
+The NeMo STT adapter retains at most 320 ms of transient onset pre-roll. A real
+VAD start resets idle streaming context and replays that audio through the
+existing batch geometry; if ASR already recognized text before VAD, reset and
+replay are skipped to avoid duplication. Continuous recognition still supports
+quiet speech below VAD confidence. Canonical stop clears partial ASR batches,
+and mode changes or shutdown discard pre-roll. Idle silence therefore cannot
+poison the next VAD-confirmed wake word's context, without adding a second
+capture, recognizer or endpoint owner.
+
 Known failed/reviewed Task outcomes produce transient Chat and speech notices.
 Only an accepted task.complete can supply their public summary; unexpected
 executor errors use one fixed public notice while details remain in Action Trace.
-Notices do not create successful assistant history or Immediate Observation
-pairs, and work failure never changes the speech connection's lifecycle.
+Notices do not create successful assistant history, and work failure never changes the speech connection's lifecycle.
 A speech-pipe failure records a delivery error without changing an already
 completed Task or its exact Chat reply. Cancellation sends a new generation
 before awaiting Task cleanup; the existing speech worker invalidates pending
 playback during its preparation awaits without echoing an acoustic interruption.
 
+Optional local computer cues use that same Pipecat output and speaker/AEC path.
+The worker preloads bounded PCM assets for five semantic cues from ignored
+`state/realtime-cues`; missing clips are silent. There are no processing clips,
+processing timers or waiting sounds. A wake-only recognition queues the ready cue
+locally after the native output interruption has drained, without a Harness
+round trip or conversation-cancellation wait. Mode revision and speech sequence
+must still match. A pending cue can survive natural cancellation's generation
+update only while that wake remains eligible; started playback retains its
+separate completion binding. Only the opening clip's exact-zero leading PCM is
+removed on load; all audible samples and other cue assets are preserved.
+Wake-only eligibility snapshots the existing playback owner's active reply before
+interruption cancels it. The ordered reply-finished marker ends that state;
+NeMo's delayed bot-speaking flag cannot suppress a fresh wake after completion.
+Queued or playing spoken replies still keep natural barge-in quiet, and NeMo's
+own stop grace remains unchanged for its turn-taking behavior.
+Continuing command text
+suppresses a ready cue that has not started. Once started, the opening chirp plays
+fully through natural speech and final speech admission while microphone capture
+continues. Only that bound ready clip survives the changed generation; cancelled
+TTS remains invalid. STOP, mute, mode changes and shutdown still cancel it.
+Durable final-turn acceptance emits the recognition cue. For a successful
+receipt-verified effectful reflex command (lights, application launch or unlock),
+a separate completion chirp follows immediately after the verified Tool receipt,
+without waiting for the model's closing text. An explicit Conversation callback
+owns that generation-bound feedback; the model cannot invoke it. Normal dialogue
+and receipts are retained while Conversation skips speech handoff. Informational
+reflexes, failures, uncertain
+effects, native-generation fallback and more complex Tool sequences still speak.
+The code-owned cue-only result requires the exact scored proposal, verified
+untruncated Tool return, committed receipts and normal successful completion.
+The earlier command-completion chirp attests the verified effect itself, not the
+subsequent model or whole activation. Failed or uncertain effects cannot emit it.
+Local cue gain is applied to whole clips at installation; it is independent of
+TTS speech gain and physical speaker volume.
+An ordered, successful speech terminal marker admits completion only after
+the final padded PCM writes; synthesis and failed/reviewed outcomes use error
+feedback. Device-write failures cannot claim completion. An unused wake window
+uses the dismissal cue; natural speech barge-in adds no interruption sound. Cue
+PCM carries no bot-speaking state, transcript or Tool success authority. Actual
+writes retain generation/epoch checks, with only the already-started ready clip
+allowed to finish across a natural speech boundary. Bounded cue events appear
+in Action Trace.
+
 Foreground admission is controller state in the existing scheduler. A conversation
 turn or Realtime startup closes autonomous specialist admission and asks active
 autonomous work to yield. Only the provider request may be canceled; an in-flight
 Tool returns and records its receipt before the executor observes the boundary.
-Accepted completion still wins. The interrupted occurrence and later FIFO remain
-recorded for explicit disposition and must not be replayed by a cron tick.
+Accepted completion still wins. An interruption after only receipt-attested,
+completed read-only Tools leaves the exact durable occurrence pending in its
+existing FIFO. Incomplete or effectful calls remain recorded for disposition
+and must not be replayed by a cron tick.
 Attested user-requested specialist continuations remain eligible. This creates
 no new Task, Runbook, scheduling service, model preference, or speech owner.
 
@@ -1298,11 +1442,6 @@ the same occurrence to pending. It never changes the model or launches outside
 normal foreground/resource admission. Unknown or possibly mutating outcomes
 require separate disposition and cannot pass this retry path.
 
-Promote validates its exact committed Temporary inputs through the observation
-owner before model acquisition and again before archival. Older queued summaries
-that fail the current completeness contract cannot consume inference or be
-archived as valid context.
-
 Shell Scene publishes each Surface's current columns and rows with explicit
 `grid_edges` units. Invalid pre-dispatch placement returns that contract for
 correction; uncertain delivered effects remain non-replayable. Exact tile success
@@ -1310,68 +1449,251 @@ requires the existing compositor layout's addressed-window readback through the
 one Shell adapter, matching requested Surface and bounds after placement settles.
 A verified no-op is reported honestly and is not evidence that a window moved.
 
-The Executive's exact public dialogue is runtime state. One active conversation
-uses an 80-turn in-memory deque backed by complete SQLite history; typed Chat and
-Realtime speech append to that same ordered conversation. Enabling, reconnecting
+The native DeepSeek session owns the Executive's conversation. Typed Chat and
+Realtime speech use its exact ID and ordered user, assistant and Tool history.
+Native Executive dispatch does not apply the legacy Task loop's identical-call
+heuristic: fresh observations can change even when their arguments match.
+DeepSeek owns the next model/Tool step; Obsidience's capability boundary retains
+argument validation, receipts, one-use input leases, completion evidence and the
+overall decision budget. The `task.complete` schema exposes its existing
+`completed` default, avoiding a format-repair turn that would consume the current
+image. Rejected completions still require fresh evidence before another visual
+completion, and no uncertain input or URL dispatch is repeated.
+The public Chat view uses an 80-turn deque backed by its SQLite projection. Enabling, reconnecting
 or restarting Realtime preserves it. Only the owner's explicit New conversation
 action rotates the identity; speech connection lifetime is not conversation lifetime. A final user transcript is
 stored before execution, while an assistant turn is stored only after one
 current execution produces a completed, nonempty public reply. Each assistant
 row names its exact user row. Rotation never deletes prior SQLite rows.
 
-That dialogue projects into one transient, unverified Knowledge Article named
-`Current conversation` beneath the real `Observations/Immediate Observations`
-folder/index Article. Immediate Observations and Temporary Observations are
-sibling branches, while established owner preferences form the ordinary durable
-Preferences subject. Their same-named Markdown Articles condense their children.
-The current-conversation Article contains the newest cumulative Temporary
-Observation summary, when present, followed by exact completed dialogue and
-unresolved final owner requests after its SQLite sequence boundary. Accepted
-failed clarification replies retain their explicit failed status and exact run
-link, so the next correction can resolve the original question. Partial model
-output and raw executor errors never enter this projection. It rides inside every Thinking Packet for that
-conversation and its ref drives the same visible graph activation. It is never a
-similarity-search candidate, executable authority, or durable claim. The current
-owner request remains the Task binding and therefore is not duplicated into the
-Article before execution.
-The graph and Knowledge explorer consume the same API-derived folder parentage,
-title and exact authored index ref. An index is absorbed into its folder node,
-never repeated as a leaf; neither lifecycle gets a permanent-label exception.
-Ordinary wiki maintenance and Review cannot rewrite or merge the runtime
-Immediate/Temporary children. Compact and Promote own that lifecycle, while
-indexes and durable Knowledge remain normal wiki-maintenance targets.
+DeepSeek's native session is the active conversation context. The upstream
+`dsh-compaction-basic` backend and singleton token meter own automatic step-boundary
+pressure, confirmed context-overflow recovery, and the manual Compact command.
+The backend uses the selected model through the existing resource owner, with no
+Tool dispatch or spoken summary output. Automatic compaction retains a recent
+tail of 16% of the model window; summary generation is capped at 2,048 tokens within
+the model allowance. Native compaction validates balanced Tool groups, records its
+checkpoint transaction and preserves original JSONL events. SQLite remains the
+public Chat projection and operation-receipt authority. The threshold is an ordinary
+60–90% setting (80% by default), not a Task Article. The Chat meter measures the
+provider request; native pressure uses upstream usage and replay pricing. The
+provider's exact input guard continues reserving output capacity.
 
-The ordinary `observations/immediate/compact` Task runs at a configurable
-60-to-90-percent model occupancy threshold, default 80 percent, or when the
-owner presses Compact. Occupancy is measured against the active Task's selected
-model; Compact uses its own authored resident Executive model to reduce the completed
-Immediate prefix into one self-contained cumulative Temporary Observation of at
-most 2,000 characters. Every compaction summary is a separate transient,
-unverified Article; exact SQLite turns remain unchanged. Ongoing/manual compaction
-retains the last two completed pairs verbatim; a conversation boundary compacts
-the remaining tail. Summaries use four brief headings: Goal, Constraints and
-corrections, Verified state, and Outstanding. The newest committed summary for
-the active conversation is protected from Temporary TTL pruning. Promotion
-idempotence follows conversation sequence, not a permanent finalized-session
-flag, so later dialogue in that same Chat remains eligible.
-At a real conversation
-boundary, Alexandria's `observations/durable/promote` Task archives the exact
-Temporary bundle in Source and stages only justified owner-review candidates.
-When New conversation explicitly closes an identity during speech, Realtime
-defers only that old identity's final compaction and event until speech ends; promotion then waits for the executor to become idle.
-Compaction and Source archival never create accepted durable Knowledge, and the
-retired per-turn Maintain Temporary Observations activation does not run for
-Executive Chat or Realtime.
-Source archives retain their ordinary `source.added` event and an exact
-controller-derived `observation_archive` class; that class bypasses redundant
-Research Learn activation. It does not bypass Source storage or Review. Promote
-reports `review` for staged proposals and `completed` for an honest no-change.
+The post-reply Chat context display is optional background work owned by the
+conversation runtime. A single coalescing refresh runs after delivery and turn
+completion; generation and selected-conversation checks discard stale results.
+New turns, continuation admission, manual compaction and shutdown cancel and
+drain that work. Display failures cannot fail an accepted answer. Native
+compaction, final request accounting and committed action receipts remain on
+their existing authoritative paths.
+
+Native preparation and execution preserve the compiler's separate catalog,
+fixed reply/decision instructions, current Bindings/Knowledge, and activation
+metadata messages. Fresh clock and activation IDs follow the reusable context.
+Preparation supersedes both prior context and prior Hindsight recall, matching
+native admission; final execution still performs fresh recall. The current
+context group remains before the preceding owner exchange so short follow-ups
+retain their conversational adjacency. These are provider representation
+boundaries, not changes to the public packet, capabilities, or context guard.
+
+The Executive's finite decision lane renders the complete native request and
+scores one token among complete, schema-validated proposals plus ordinary native
+generation. It uses the same selection method as the TFT controller. First-step
+eligibility includes explicit registered application launches, unlock/status,
+standalone registered light on/off commands, and bounded literal room-camera
+observations; grounded Article-read proposals remain available after search.
+Negated, compound, ambiguous, steered, previously effected, failed or uncertain
+requests keep the ordinary native path. Selection emits a native Tool call to
+the existing executor; it never bypasses receipts, fresh observations,
+cancellation, completion validation or the no-replay rules. Lights retain the
+full model's on/off choice; camera queries retain the exact owner question.
+
+Finite selection caches the complete validated one-token label map against the
+model artifact, endpoint and runtime, then slices it for the current menu. The
+independent label lookups and base/suffix tokenization share the existing client
+and lease concurrently; failure or cancellation drains every owned request before
+fallback. The complete prompt tokens, menu, sampling and probability checks are
+unchanged. This cache stores tokenizer results, never choices or action results.
+
+The local llama.cpp b10078 runtime constructs a per-item Jinja filter context
+only when a filtered-loop predicate needs it. Its native Executive request also
+carries an exact input-token ceiling. The server checks the completely rendered
+and tokenized input, including Tools and media expansion, before creating or
+queueing inference tasks. Accepted count/limit headers acknowledge that exact
+request before the adapter reads any generated events. This removes the normal
+separate render/tokenize preflight without estimating or weakening the budget.
+
+Only a structured, verified pre-enqueue overflow permits the existing projection
+of recoverable earlier read pages and one guarded retry. The fixed packet and
+latest result remain protected; ordinary errors, cancellation, missing guard
+headers and any failure after admission cannot retry inference. Other providers,
+specialist Tasks and the finite decision lane retain their current accounting.
+There is no rendered-text cache or additional resource owner. Source patches and
+library hashes are in artifacts.lock.json. The common and server libraries carry
+these bounded corrections; model weights, template, CUDA kernels, KV precision,
+context capacity, tool/vision formats and speculative decoding settings remain.
+
+Historical observations belong to Hindsight and appear in the Graph pane's Memory
+view. Native memory-type filters inspect world facts, experiences and consolidated
+observations, preserving entities, original dates and source evidence without a
+custom category schema or Article folders. Accepted wiki preferences retain their
+ordinary Article identities. No Immediate/Temporary branches, TTL scratchpad,
+Compact Task or Promote Task remain. When ingestion is enabled, new observations activate Alexandria's
+existing Curate Task. Intake offers at most eight material changes per refresh,
+prioritizing recent updates, with only one outstanding memory Curate/Link batch
+across banks through existing runtime/FIFO/Review backpressure. Unadmitted records
+retain dedup state for catchup through the existing health cadence. Curate compares
+accepted Knowledge first, favors useful corrections and updates to existing
+subject Articles, and stages at most three recommendations. Durable changes and
+Source links require owner Review even under Auto-curate; curation outputs do not
+feed back into memory. Delivery/recall health and the owner curation hold remain
+separate; a hold does not disable recall.
+
+### Provider graph views
+
+Knowledge, Memory and Code are distinct presentations. Knowledge is the accepted
+Article graph and retains the established spherical layout and thinking effects.
+Memory reads Hindsight's native per-Agent graph, including its temporal, semantic,
+entity and causal relationships. Code reads codebase-memory-mcp's derived symbol
+graph, presented through the shared spherical layout engine. Provider edges never become Article relationships,
+permissions, accepted knowledge or a second execution owner. Existing immutable
+observation Sources remain the citation bridge to Curate, Link and Review.
+
+The shared Quickshell/QtWebEngine graph presenter gives Samsung three equal
+stages: Memory on the left, Library in the center and Code on the right. Memory
+stacks every configured Agent bank in its own row, with the exact shared
+Knowledge neon role icon on the left. The desktop rows have no captions or date
+ruler underneath. Computer
+retains its Darwin, Alexandria and Heimdall satellites on USB-C. Library is an
+independent Knowledge collection and never an Agent satellite.
+
+The native presenter shares a read-only Harness connection across its pages.
+An initial HTML load failure cannot use the page's JavaScript reconnect path,
+so a failed page receives at most one reload per connected backend interval,
+on connection recovery or a failure delivered after reconnection. Healthy pages
+remain resident. This follows the lock Surface's existing recovery contract;
+it does not restart services or create another graph owner.
+
+One Graph pane contains Knowledge, Memory and Code views. Its existing header
+buttons select content inside the same native window, without opening, raising,
+moving or focusing another pane. The Shell owns the selected view through its
+existing pane-selection channel; switching disposes the previous subscriber
+before mounting the next. The pane retains the `knowledge-graph` placement ID
+for compatibility, with one launcher entry. Old Memory and Code presentation
+requests select this same pane; their old placement files are inactive.
+The active view receives the stage's frames over local WebRTC, signaled by the
+existing Shell channel, and owns no Three.js scene, layout or graph fetch. A
+dedicated, labeled Agent dropdown in Memory selects the configured Hindsight
+bank. Knowledge selects
+Executive, Library or an individual subagent without changing desktop orbits.
+Its isolated camera borrows the live cloud and existing stage renderer; an
+on-demand transfer canvas publishes that camera's image. This avoids both a
+second graph implementation and other clouds leaking into a cropped view.
+The final viewer disconnect releases its transfer buffers and stream.
+Memory similarly keeps one presentation-channel owner for all bank rows. Its
+viewer selector forwards controls and frames to the chosen existing row; it
+never replaces the other desktop banks or creates another graph simulation.
+Like Knowledge, its transfer canvas replaces each entire frame with the `copy`
+composite operation, including transparent pixels; source-over blending would
+accumulate old node positions and previously selected banks in the viewer.
+Only an attached viewer acquires Memory's transfer buffer. Each bank retains
+its own selection, filters, camera, native activity scope and cooling state.
+Provider controls pass through the existing Shell owner or the same bounded
+presentation channel. Reader remains separate for content. Stages and viewers
+pause when hidden or locked; provider snapshots refresh on relevant events.
+Code opens with structural nodes and expands exact active symbols. Search,
+record details, Source/Reader navigation and fit controls stay available.
+
+Code anchors its native Project at the center. Native containment and definition
+edges select placement parents, preferring class ownership for methods and the
+record's exact defining file. Exact file/folder paths fill incomplete containment;
+otherwise a record uses the project as a private layout anchor. Cycles are broken
+only in placement ancestry. These fallback constraints never become displayed
+or provider relationships. Expanded symbols retain their containing path without
+lighting ancestors as activity. Native types, colors, IDs and all edges survive.
+
+The Code worker reuses Knowledge's radial-layer calculation, spherical seeds,
+parent springs, collision clearance, root pin and cooling. Code's much deeper
+and larger hierarchy uses parent springs for grouping, without Knowledge's
+recursive angular clipping; applying those nested boundaries to thousands of
+symbols made the final contact fit expand excessively. Calls, imports and other
+cross-links remain visible but do not act as ownership springs. Links follow
+Knowledge's shell-routing rule in the shared GPU beam shader. The full indexed
+graph owns layout, independent of symbol visibility; unchanged physical data
+and upstream coordinate changes do not reheat it. One worker follows the same
+visible-stage lifecycle as Memory. Native upstream coordinates remain available
+in the provider response but do not dictate Code's displayed shape.
+
+All three graph families reuse `knowledge-3d-shaders.ts` for node orbs and
+glowing link ribbons, and `knowledge-3d-labels.ts` for label typography, colored
+plates, dashed leaders and screen-space placement. Provider labels show exact
+hovered, selected or returned activity records even in overview; close-up
+context is bounded to twelve labels total. Label textures are reused and update
+only when camera, data or emphasis changes, with no added idle animation loop.
+Provider adapters supply native colors, identities and
+layout inputs, not fabricated Article taxonomy. Memory retains the owner's preferred
+organic, activity-spaced chronological tube. Chronological ranks fix x while
+stable-ID transverse seeds, bounded repulsion, weighted native relationship
+springs, collision spacing and transverse gravity produce irregular coils;
+no fixed radius, pitch or turn count dictates the shape. Turns do not encode
+days or repeated meaning. Quiet gaps compress and busy periods receive more
+space. Actual dates remain in record details and the viewer's range controls;
+removing the desktop ruler does not change chronology. Filters retain the full
+bank's layout and rank scale; undated records remain a separate position.
+
+Selection or an inclusive local-calendar date range opens a monotone focus lens:
+nearby chronology stretches and distant spacing remains compact. Fit restores
+the complete overview using the row's actual aspect ratio. Search emphasizes
+matching visible records without changing coordinates. Native orbs expose more
+detail on approach, with at most twelve reusable, screen-separated close-up
+labels; no records are aggregated away. The shared ribbons remain gently bowed,
+static threads across time. Its
+overview shows each visible record's two strongest native ties; selecting or
+hovering a record adds every incident link whose endpoints pass the current
+filter. This is disclosed presentation detail, not a provider graph limit:
+counts, search and record details still use the complete native graph. The
+timeline's longitudinal positions represent chronology; native relationship
+springs influence transverse spacing. Spatial proximity alone does not attest
+semantic similarity or any relationship.
+
+Each bank row in the existing Memory stage owns one bounded full-bank layout
+worker, allowing only one cooling step in flight per bank. Physical data changes replace that worker;
+unchanged refreshes, filtering, search and focus preserve its positions and
+cooling. Focus lenses transform only displayed coordinates, never simulation
+input. Hidden stages pause scheduling and disposal terminates the worker.
+Position updates upload to a GPU texture; instanced ribbons read
+their endpoints there, avoiding CPU work proportional to every curved segment.
+Unchanged physical inputs preserve geometry, activity paint touches
+only affected nodes, and provider rendering is demand-driven with a 60 Hz ceiling.
+Visible idle Code views rotate through the existing orbit camera once every
+two minutes; each Memory row spins around its chronological x-axis once every
+ninety seconds. This display-only motion uses the same render loop at 30 Hz
+while idle and never reheats a layout or rewrites node coordinates. Pointer
+interaction, selected records, Memory search/focus, camera flights and code
+transitions pause it; hidden/locked stages and reduced-motion preference stop
+it. Memory fit includes the full axial sweep, while shared labels and picking
+follow the rendered transform. Viewers mirror the same motion; Agent icons stay
+fixed. Buffer copying still replaces every frame rather than accumulating it.
+Overview threads dim with distance and inspection focus. Knowledge and Code
+retain their own layouts and the same shared assets. Adjacent links and search
+emphasis are inspection context, never evidence of agent traversal.
+
+The existing activity stream uses `memory:<bank>` and `code:<project>` scopes.
+Recall lights actual returned memory IDs; retain/consolidation events follow
+confirmed native changes. A read-only Codex journal adapter observes new public
+MCP call/result records and repository file-change events. It emits only fixed
+operation labels and returned qualified identities, never reasoning, messages,
+arguments, source contents or command output. Search results, reads, file changes
+and interrupted operations remain distinct; availability and graph adjacency do
+not prove use. Unknown/unmapped symbols are not guessed. The optional Code
+listener and provider are fail-open for the Harness, with cleanup paired to its
+lifetime. Derived code coverage can be incomplete, particularly dynamic bindings.
 
 The activation compiler exposes one canonical packet and a provider serialization
 of the same explicitly constructed sections. The provider system message contains
 the Agent identity and selected Tool/Skill instructions, plus Task/Runbook
 sections only when executing a Task. The descriptive catalog and
-complete Immediate Observations form user-data messages, followed by the current
+native conversation context form user-data messages, followed by the current
 Objective, observations, bindings and retrieved Knowledge in the next user
 message. Each Article occurs once in
 that request; prior dialogue cannot extend current authority. The displayed packet retains the documented
@@ -1419,7 +1741,7 @@ provider's separate conversation boundary preserves reusable prompt checkpoints.
 The descriptive assigned-Task catalog is compiled from the same fresh accepted
 snapshot into an earlier user-data Bindings message. The current Bindings retain
 the clock, Scene and all changing facts without duplicating that catalog. Long
-Immediate Observations are serialized as consecutive user-data messages, with
+Conversation context is serialized as consecutive user-data messages, with
 boundaries after complete paragraphs using a 2 Ki-character chunk target that
 doubles as history grows to keep at most 24 chunks. Concatenating
 their contents reproduces the complete original conversation section exactly;
@@ -1455,7 +1777,7 @@ as an expandable matrix of Tasks and their ordered steps. Stable event IDs
 suppress replay overlap; exact run and call IDs keep repeated and interleaved
 Tool invocations attached to their own results. The compiler exposes its own
 ordered Thinking Packet sections as a bounded public display copy, including
-actual accepted context and Immediate Observations. Tool inputs and returned
+actual accepted context and conversation context. Tool inputs and returned
 evidence render as named, expandable fields. Provider measurements belong to the
 action or response produced by the same exact run and executor step, including
 the `task.complete` response. Model lifecycle events do not create numbered matrix
@@ -1487,8 +1809,7 @@ sample completeness, exclusions, at most eight findings and three evidence
 references per finding, plus observed duration sample statistics. Cancelled,
 interrupted, review, started and undispatched states do not enter failure
 denominators. Historical findings do not change current health or establish
-root cause; returned Tool receipts do not prove semantic success. Heimdall's
-existing Check reports these diagnostics without another Task or repair loop.
+root cause; returned Tool receipts do not prove semantic success. The existing status Tool reports these diagnostics without a separate Check Task.
 The existing trace owner caps event size at 64 KiB and history at 2 MiB / 500 events.
 The popup retains at most 160 events in memory, including the current Task
 heading and Thinking Packet throughout a long run; shortened content is labeled.
@@ -1499,13 +1820,20 @@ Native Wayland on-demand keyboard focus admits Tab/Enter after interaction,
 without exclusive focus or another input owner. No second trace service,
 persistence store, polling lane or inference is added.
 Mutable shell HTML uses `Cache-Control: no-cache` on both fresh and conditional
-responses. The WebKit host explicitly requests revalidation at initial load and
-Surface retarget; hashed static assets and local presentation preferences keep
+responses. Stage entrypoints revalidate on load and Surface retarget; hashed
+static assets and local presentation preferences keep
 their normal caching. This fixes a proven persistent stale-entrypoint cache that
 otherwise survived presenter restart after a development build.
 
-Selected-model tokenization supplies the occupancy meter with text counts plus
-the measured packet overhead. Before every inference, including subsequent Tool
+The Executive occupancy meter measures the native DeepSeek session's messages
+and Tool schemas through the selected model's actual chat template. Successful
+counts are reused for the same session revision and model configuration. The
+meter uses that asynchronous measurement. Native automatic compaction uses
+DeepSeek token-meter pressure, anchored to provider usage when compatible and
+otherwise estimated by upstream. Exact preflight counting remains the final
+request-capacity guard, with native recovery for a confirmed overflow.
+Conversations awaiting native migration use measured text with explicitly
+estimated overhead. Before every inference, including subsequent Tool
 steps, the runtime counts the actual templated request including any image.
 Unavailable text counting uses a conservative UTF-8 byte bound; unavailable
 multimodal counting fails clearly instead of guessing. No separate tokenizer is
@@ -1543,8 +1871,8 @@ without another cache, index, worker or scheduler.
 
 Gemma 4 has an explicit model-family projection at the existing provider boundary.
 Its installed server template serializes system/turn/thinking tokens. A short
-system clarification distinguishes the current Objective from prior Immediate
-Observations and subsequent Tool results. Per-Task effort remains authoritative;
+system clarification distinguishes the current Objective from historical
+conversation and subsequent Tool results. Per-Task effort remains authoritative;
 Low adds concise-reasoning guidance, not another reasoning selector. The native
 JSON schema decoder restricts public action names to the Task's authorized set.
 Interactive answers use the ordinary `task.complete` public summary for both
@@ -1552,14 +1880,53 @@ typed Chat and speech. Obsidience keeps the existing JSON action
 protocol and argument/effect validation; this is not a parallel native Tool-call
 loop. Other model families retain their existing provider format.
 
-Architecture references (patterns only; no imported code or new dependencies):
+Related architecture references:
 
 - [Google ADK context compaction](https://adk.dev/context/compaction/):
   token pressure and retention of recent uncompressed dialogue.
 - [Hindsight memory practices](https://hindsight.vectorize.io/best-practices):
   exact source identity, scoped evidence, and correction-aware consolidation.
-  Obsidience keeps fast retrieval free of generative reflection and durable
-  synthesis inside its existing Compact/Promote Tasks and Review boundary.
+  Hindsight now owns historical observation memory through the native Cordis
+  port. Fast retrieval stays free of generative reflection; DeepSeek native compaction
+  owns active context, and Alexandria Curate plus Review own durable wiki
+  recommendations. Consolidated memories appear in the separate Memory view.
+  Hindsight has no Article placement authority; its native edges remain inside
+  that provider view. The existing
+  `observations.memory.ready` trigger activates Alexandria's existing Curate
+  Task (`Tasks/curate`), alongside its scheduled wiki-maintenance work. The
+  shared compiler narrows a memory event to its bound Source before creating
+  its prompt, graph packet and capability set: maintenance scans and retaining
+  another observation are unavailable. It can request one existing Link Task
+  with an individual observation from that Source and a fully read current
+  ordinary Knowledge Article. Create/update recommendations remain Review-only;
+  this event cannot archive or change Agent branches. A no-change completion
+  requires the complete bound Source and a topic search. Article refs claimed as
+  evidence require complete current reads; unrelated hits do not force a read.
+  Memory-event searches filter to the Agent's checked-out
+  ordinary Knowledge before lexical and vector limits, so executable definitions
+  cannot displace wiki results. Unrelated maintenance or a rejected draft cannot stand
+  in for curation. Manual and scheduled Curate keep their maintenance scope.
+  A memory Curate packet distinguishes the Source bank owner from the executing
+  Agent and shows the latter's accepted Knowledge checkout. Memory subject tags
+  and linked paths are provenance, not placement or access grants. Scope-hidden
+  reads say that the Article is unavailable in this Agent's readable scope.
+  Evidence-bound completion schemas require explicit failed status on their
+  non-success branch; omitting it cannot bypass the no-change contract. Without
+  a proposal or authored acceptance gate, Review is not a valid terminal choice.
+  Exact receipt-attested scope rejections before proposal staging permit the
+  existing bounded Heimdall retry, without replaying a staged or published edit.
+  Normal Markdown Source
+  citations, accepted through Review, supply wiki evidence links. Provider records
+  are not injected into the Knowledge graph and no duplicate store is added.
+  Native memory consolidation runs automatically when enabled by its bank
+  configuration; reconnecting the port preserves owner pauses and reviewed
+  extraction/consolidation instructions. Maintenance can hold processing and
+  memory-event Curate admission while retaining new turns in the durable outbox.
+  Delivery can remain paused independently after a rebuild until an ongoing
+  extraction model is chosen. Recall and graph inspection remain available;
+  wiki recommendations and memory links require Review. See
+  [the memory port](obsidience/harness/memory/README.md)
+  for the implemented ownership, deployment and recovery contracts.
 - [Gemma 4 prompt formatting](https://ai.google.dev/gemma/docs/core/prompt-formatting-gemma4):
   native system turns, server-owned control tokens, and Task-selected thinking.
 
@@ -1581,9 +1948,21 @@ still propagates to the caller and creates no assistant dialogue or replacement
 Task. Realtime remains enabled. The model lease releases its ownership even when
 default-model reconciliation is interrupted.
 
-Model and reasoning effort are per-Task execution settings. Automatic routing
-selects responsive Gemma for Executive and the fully GPU-resident Qwen3.8 9B
-Distill for specialist Agents. Hardware is a set of independent component
+Flash Next disposable preparation stops at a compiler-owned stable message
+boundary before query-dependent context and activation metadata. Native owner
+labeling is derived before taking this prefix; actual admission still receives
+the complete fresh packet, memory, recent exchange and owner request. Strata
+retains bounded, exact-prefix message checkpoints, coalescing nearby boundaries
+to avoid fragmenting prefill into short decode windows. Cancellation is checked
+while waiting for prompt progress and keeps the existing STOP/DONE drain before
+another request can enter the engine.
+
+Model and reasoning effort are per-Task execution settings. Automatic or omitted
+model selection uses the installation's `llm_model`; omitted Task reasoning uses
+`task_reasoning_effort` (medium unless configured). Explicit Article and per-run
+owner selections take precedence. Ordinary Executive conversation retains its
+Agent-owned reasoning setting, independently of the Task default.
+Other installed models remain explicitly selectable. Hardware is a set of independent component
 slots, not a global model profile. The fallback configuration places Gemma on
 the RTX 4000 Ada and OmniParser on the RTX 4080 SUPER, while persisted Hardware
 selections remain authoritative; the AMD iGPU remains the USB-C display/media
@@ -1658,11 +2037,73 @@ visible-pane only and does not change component assignment, Task routing, or
 model configuration.
 
 Hardware owns exact microphone input and speaker output for the next Realtime
-start, plus one preferred physical camera for future camera-capable Tools.
+start, plus the preferred physical camera used by `camera.observe`.
 Choices project the live PipeWire and physical V4L2 inventory and never change
 system-wide defaults. Agent video feeds are a separate input class: the TFT ADB
 feed belongs to the Realtime experiment and is never listed or persisted as a
 camera. Video and camera must not share one UI or semantic slot.
+
+The Executive's direct `camera.observe` Skill supplies on-demand physical vision
+for an owner request. Its bounded native V4L2 capture uses installed FFmpeg to
+return one 1280x720 PNG through the existing private Tool-image attachment path.
+It validates the selected physical device before and after capture, serializes
+acquisition, and kills and drains its exact child on cancellation or timeout.
+Input demux and decoder error flags reject corrupted MJPEG startup frames before
+PNG conversion; the first valid frame is used within the same capture deadline.
+An occupied camera returns a blocker without disturbing its current consumer.
+Pixels stay in the activation's ephemeral attachments and are removed before
+durable receipt and trace projection. Camera images describe physical surroundings
+and never create a desktop observation lease. The existing Realtime owner retains
+camera power and microphone lifecycle. Capture is read-only by default. For a
+current owner request to wake or look through the selected OBSBOT, optional
+`wake:true` prepares that exact hardware through the existing power owner,
+then takes a fresh image. An already-fresh running tracker skips native power
+commands. Preparation drains its bounded native operations even on cancellation;
+the separate eight-second image budget waits for actual startup frames. A failed
+wake is not automatically replayed. An explicit start drains any terminal failed
+tracker before replacing it; there is no background restart loop.
+With owner tracking explicitly enabled,
+that same lease owns one continuously drained video stream, CPU YuNet/SFace
+recognition and the sole bounded motor connection. camera.observe consumes a
+fresh image from that owner instead of opening a competing stream; recognition
+metadata belongs to those exact pixels. Otherwise on-demand capture is retained.
+
+Local owner enrollment requires one visible face and twenty quality-qualified,
+consistent samples. It atomically saves only mode-0600 face embeddings, never
+photographs or video. Face recognition and person following are separate. Repeated fresh face
+matches identify the owner; the existing Wi-Fi lab person detector maintains
+the current body through face occlusion. A single unambiguous visible person
+can also be framed without an identity claim, so a returning person's face can
+enter view. Multiple people require a uniquely bound owner target. Face and body
+continuity use one learned framing anchor within the same body. Inference runs
+independently of the serialized motor loop, which refreshes proportional velocity
+from the latest fresh target instead of waiting for discrete pans to finish.
+Small anti-jitter margins, acceleration limits and position-based approach limits
+keep movement bounded. The SDK helper owns actual pose feedback and an independent
+input-expiry stop; queued velocity submission is not reported as verified motion.
+Loss stops following, then returns smoothly to the saved forward pose after four
+seconds; new person detections resume following. Native camera
+AI tracking is off while software owns the motors. Camera power-off or Harness
+shutdown disarms movement and drains capture, inference and the SDK helper.
+Recognition is a personalization estimate, never authentication or permission.
+The paused Kinect/CSI room-sensing service is not a dependency.
+
+The light adapter prechecks every selected bulb identity/state concurrently
+before any write, then saves rollback appearance durably before OFF. Independent
+fixtures receive their single power write and fresh readback concurrently. Both
+bounded pools join within the existing operation lock; cancellation stops pending
+work and uncertain delivery is never retried. All fixture results, including
+failures, are returned before another group operation can enter.
+
+The Executive's direct lights.set Skill controls registered WiZ power through
+bounded local UDP commands and fresh identity/state readbacks. Addresses and MACs
+remain installation-private state. Because these bulbs discard their active
+scene on OFF, the adapter atomically saves verified appearance before OFF and
+reapplies it on ON, checking both power and appearance in fresh readback. Every selected light is checked before a group
+change; each effect is dispatched once and uncertain delivery is retained without
+replay. Group success requires every selected fixture to verify its requested state.
+Partial receipts are preserved by CapabilityDispatch. This grants requested
+on/off control only; occupancy does not schedule lighting changes.
 
 The thinking graph visualizes this actual activation path. The Executive's exact
 packet stays lit while its spoken answer is queued or playing, then retains the
@@ -1700,16 +2141,11 @@ The main maintenance families stay shallow:
 - **Conversation:** the Executive identity owns Chat and speech runs; its
   instructions and direct Skills define its accepted native capability catalog.
   Query retains `Tasks/query` for existing specialist assignments.
-- **Wiki:** Ingest, Curate, Merge, Link, Improve, Archive, Audit,
-  Check.
-- **Research:** Question, Learn, Distill, Model. Learn accepts general
-  `source.added`; Distill accepts Feed items. Neither creates per-item Tasks.
+- **Wiki:** Ingest, Curate, Merge, Link, Improve, and Archive.
+- **Harness:** Audit, Repair, and Model characterization; Heimdall owns Harness and Agent operation.
+- **Research:** Question and Learn. Learn accepts general `source.added`;
+  these reusable outcomes do not create per-item Task definitions.
 - **Generate:** Tool, Skill, Task, Runbook.
-- **Observations:** Compact and Promote as direct Task children. Immediate,
-  Temporary and Durable describe the data lifecycle, not extra Task groups.
-  The observation Tools and paired Skills are also direct children of their
-  Observations Library group. Shared parent membership controls graph and
-  Reader presentation while preserving exact callable and persisted Task IDs.
 
 Curate performs one bounded scheduled inspection. When its Runbook detects a
 high-signal maintenance lead, it may activate the exact accepted Merge or Link
@@ -1750,15 +2186,7 @@ letting an ordinary click fail or overwrite another complete replacement.
 Review decision and execution finalization are order-independent: deciding all
 proposals from an exact run while it is still finishing completes the Task and
 the late `task.complete` result may not restore stale `review` state.
-Feed publication and its required retention use one bounded group of these same Article proposals.
-Each member pins its exact base and the group pins membership, metadata and body
-hashes. One Review card describes every create, update and archive; a stale member
-blocks the whole decision. Validation resolves the complete candidate graph before
-publication. The existing Article lock gives graph readers one coherent publication,
-and the ordinary decision ledger records all members in one SQLite transaction.
-A bounded preimage journal in staging recovers an interrupted group before startup
-reconciliation or indexing; an unrecognized newer edit fails closed. Source and
-Review remain the existing authorities, with no second publisher or scheduler.
+
 
 The accepted Task taxonomy also classifies the review object: a proposal staged
 by the exact Link Task is a first-class Link review, while every other proposal
@@ -1880,46 +2308,41 @@ Source integrity, and the run ledger. The native shell UI is a thin projection.
   not reheat unchanged neighbours.
   One shared cloud implementation, `knowledge-3d-cloud.ts`, renders Executive
   and satellite graphs through the same `knowledge-3d.ts` layout. Orbit and
-  display scale do not change local physics. Brain-level angular relaxation
-  outlives edge-spring cooling, uses simultaneous sibling updates and bounded
-  substeps, and escapes coplanar saddles in a geometry-derived frame. Angular
-  coverage is tested independently of shell and collision validity; fewer than
-  four root branches do not require a full-rank three-dimensional distribution.
-  Semantic depth also determines a shared spherical layer in each 3D cloud:
-  every direct Brain branch occupies the first layer, and each deeper declared
-  level follows in order. The first layer retains the original close spacing
-  of 1.4 taxonomy spring lengths, subject to collision and packing floors.
-  Cube-root increments beyond that anchor preserve the spherical
-  cloud when branch depths differ, with packing and node clearance as floors.
-  Private simulation depth follows exact parent chains,
-  so the 2D renderer's common Article paint tier does not move a shallow Article
-  to a deep shell. The layer radius reserves radial clearance for node
-  sizes and spherical surface space for its population. Crowding expands the
-  whole layer and carries later layers outward without changing ancestry.
-  One final coupled constraint predicts d3's damped integration and resolves
-  contacts as great-circle motions on the assigned shells. The outward
-  parent-child cap, recursive crown boundaries and avoidance spheres are solved
-  together, so a later radial correction cannot undo collision clearance.
-  New article and branch seeds use the same parent-derived shells before the
-  first frame. Valid retained states keep exact positions, velocities, cooling,
-  solver progress and expanded-layer capacity across presentation updates.
-  Crown membership follows exact parent ancestry at every fork. Current sibling
-  directions define moving angular boundaries; descendant avoidance demand at
-  each layer supplies a bounded capacity bias. Entire crowns receive gentle
-  angular spreading, then individual nodes resolve full avoidance-radius
-  clearance. Only Brain is pinned; there are no fixed or camera-facing sectors.
-  Direct-fan packing reserves space in each parent's outward cap. Persistent
-  capacity violations may enlarge the lowest affected whole layer and propagate
-  clearance outward, never moving an unchanged inner layer or a lone node.
-  Cooling alone does not finish layout. Eight consecutive cold, low-motion
-  ticks with valid shell, contact, outward and territory residuals mark it
-  settled. Work remains bounded: twelve constraint passes per tick, at most
-  eight capacity expansions per layer, and an 880-tick geometric budget.
-  Unresolved terminal states are explicitly needs-capacity or stalled, exposed
-  through cloud diagnostics and a one-shot warning, not reported as settled.
-  This remains inside the existing scene-owned d3 tick; semantic spring
-  strengths, separate 2D physics, review effects and graph authority are unchanged.
-  Branch coherence cannot guarantee disjoint screen projections from every angle.
+  display scale do not change local physics. Brain stays at the origin.
+  Every direct Brain child starts at the same inner radius. Only after that
+  first layer does each branch divide the remaining distance by its own depth.
+  With common inner radius r and outer radius R, depth d on a branch of depth D
+  uses r + (R-r)*(d-1)/(D-1). A childless first-level Article stays at r.
+  Intermediate Articles stay with their actual layer alongside continuing
+  subnodes. The deepest descendant layers share the same outer radius.
+  Radius is automatic. The shared layout derives the whole sphere's size from
+  population, glyph clearance and the space required by every branch layer.
+  Parent-child clearance supplies a lower bound. On the final ordinary cooling
+  tick, any remaining node contact pressure expands the sphere by the smallest
+  common factor required by the settled bearings. Pure Article additions retain
+  the previous required radius and grow as needed; removals, smaller glyphs or
+  reduced clearance can reclaim space. Branch clearance is the sole Layout
+  slider: it scales padding around nodes and branches, and the automatic radius
+  follows. Its default 1 preserves the accepted spacing. There is no Graph radius
+  slider or saved physical-size override. Old radius and Link distance values
+  are ignored by the 3D layout.
+  Glyph sizes, beam widths and camera scale remain independent of this growth;
+  saved presentation scale still preserves each graph's visual identity.
+  Camera rotation and role nameplates belong only to the main graph.
+  One recursive branch rule builds subtree membership and a footprint profile
+  for each radial layer. A branch inherits its continuing children's demand;
+  an inner node's larger glyph stops reserving space beyond that node's layer.
+  Sibling charge and moving boundaries share the available arc by that layer's
+  inherited width. Outer Articles also use spherical force relaxation: continuous
+  neighbor repulsion continues beyond contact, with range and strength derived
+  from radius and population. The radial constraint retains only motion along
+  the shell, and moving branch boundaries keep that motion in the proper branch.
+  Springs, contact forces and the final radial constraint use the existing
+  d3-force-3d cooling schedule. The final contact fit adds no settling pass,
+  idle audit, fixed bearings, named-branch cases or separate solver clock.
+  Compatible refreshes retain positions, velocities, fitted radius and cooling.
+  Separate 2D physics, Review and thinking paths keep their existing owners.
+  A rotating 3D projection can still put distinct branches in front of each other.
   Pending Link additions spring into their eventual visual layout and glow in
   the actual link gradient, with an awaiting-review legend. This bounded preview
   belongs only to the Scene: its physical edge union and degree-sized radii match
@@ -1953,7 +2376,8 @@ Source integrity, and the run ledger. The native shell UI is a thin projection.
   One bounded descriptor catalog supplies both Source labels and the deterministic
   ADMECH Knowledge mirror. The root and application descriptor files become their
   own folder condensations; fixed observed facts enrich only actual schema nodes.
-  Authored workstation knowledge remains under Workstation Observations.
+  Authored workstation procedures belong under Runbooks/Operations; explanatory
+  configuration and dated incident evidence belongs in Architecture/Shell.
   System captures live separately in `evidence/system/` and do not create a System
   branch. Knowledge Markdown directly exposes `vault/`; Evidence exposes raw
   captures, manual imports and Alexandria handoffs; Project Files exposes code.
@@ -1975,7 +2399,7 @@ Source integrity, and the run ledger. The native shell UI is a thin projection.
   Applications contains one leaf per application. Its sub-descriptors contribute
   cited sections to that Article, so their Source checkout resolves to the same
   application rather than creating child Articles. Physical descriptors stay in
-  place and unrelated workstation Observations remain excluded. The publisher,
+  place and authored procedure/architecture Articles remain excluded. The publisher,
   not the renderer, owns this shallow projection and its protected destinations.
 - **Library** shows shared accepted Tasks and Tool+Skill pairs. Tasks may be
   assigned; Tool/Skill availability is derived from assigned Task dependencies.
@@ -2002,8 +2426,16 @@ subject/name dictionary.
 
 ## Realtime Executive
 
-The Realtime button controls the speech connection and session infrastructure.
-It keeps audio available between requests and has no Task, Runbook, Thinking
+Chat owns the Wake word, Realtime and Mute controls, Executive readiness and
+live command transcript. The bottom bar remains one row. Wake word is the default:
+the existing STT listens for the exact word Computer and admits only subsequent
+command text. Earlier words never enter Chat, the command buffer or interruption
+frames. A name-only trigger permits an eight-second pause before command speech.
+After the final command, the gate closes. Realtime accepts ordinary speech without
+repeating the name; Mute closes the microphone. Both modes use one worker and
+conversation. Mode changes drain the current turn and reject old revision events.
+
+The speech connection keeps audio available between requests and has no Task, Runbook, Thinking
 Packet, or reasoning-model selection of its own. Each final transcript enters
 the same Agent-owned session and native DeepSeek loop as typed Chat. The Executive
 identity owns standing instructions, the direct Skill catalog, execution model
@@ -2017,15 +2449,30 @@ Pipecat's upstream `LocalAudioTransport` owns the selected local input and
 output. Obsidience does not add a browser audio client, audio WebSocket, or
 custom capture/playback processor.
 
-The first recognized partial transcript starts disposable preparation after its
+When model work finishes, the existing model owner notifies the Conversation
+owner to prepare the selected Executive conversation and native Tool schemas.
+Voice reply-format instructions follow the shared prompt and native Tool schemas,
+so typed Chat and speech reuse the same cached instruction prefix without
+changing their respective response formats.
+
+Standby can restore the configured Executive model on idle hardware. Its one
+discarded provider token prepares the actual prompt without an Agent run or Tool
+effect. Real model work preempts this owned preparation; there is no idle polling.
+Readiness is reported only after preparation succeeds.
+
+The first recognized command partial starts disposable preparation after its
 exact NeMo interruption has drained preceding work. The Conversation owner
 coalesces changing partials into one cancellable warmup through the shared model
 provider. It borrows only the idle, already resident llama.cpp model and renders
 the same Executive context and native Tool schemas as final execution. This
 build emits one token even for a zero-token request; preparation therefore caps
-generation at one token and discards it. No DeepSeek Agent run, Tool dispatch,
-public reply, conversation write, Observation materialization or compaction
-occurs. Read-only context projection applies normal retention selection without
+generation at one token and discards it. Supporting native engines enforce the
+full input budget in that same preparation request and acknowledge the exact
+count, avoiding a separate template/tokenizer preflight. Preparation has no
+recoverable-page projection or retry; an explicit pre-enqueue budget refusal
+skips warming. Other engines retain their existing exact preflight. No DeepSeek
+Agent run, Tool dispatch, public reply, conversation write, Observation
+materialization or compaction occurs. Read-only context projection applies normal retention selection without
 deleting expired Articles. Final speech, new Chat, STOP and lifecycle teardown
 cancel and drain preparation. Ordinary model leases preempt it, while unavailable
 hardware or context pressure simply skips it. Final admission recompiles the
@@ -2037,6 +2484,37 @@ applies only when VAD is not hearing speech: ASR can pause between word updates
 while the speaker continues. Its timer must not manufacture a VAD stop during
 that interval. Partial events carry the worker's exact speech sequence so a new
 utterance cannot warm against an earlier interruption generation.
+
+NeMo transcription runs in one awaited worker thread so inference cannot hold
+the same event loop that schedules PCM writes. Its streaming model lock also
+covers VAD cache reset and model replacement; cancellation drains the in-flight
+native call before releasing that lock. The pinned upstream patch and source
+identity are recorded in `artifacts.lock.json`.
+
+Echo cancellation uses the selected physical speaker monitor as its reference,
+including other applications on that speaker. For the paired UMA-8 VocalFusion
+DSP profile, Realtime owns two direct non-lingering monitor-to-USB playback links
+through one native PipeWire client. Startup attests exact device, node and port
+identities, active client-owned stereo links and unmuted unity reference gain;
+the paired endpoints share a clock group. The worker opens stereo UMA-8 capture
+and selects the left channel inside the existing input frame before metering,
+VAD and ASR, without another queue or audio owner. This unit's right channel
+retains more echo and must not be folded into mono. A hardware setup
+failure is explicit. Other microphone selections retain the PipeWire WebRTC
+module. Backend status distinguishes `uma8`, `webrtc` and `none`, and the same
+Realtime cleanup releases the exact module or link owner. The sole speech input
+stays on its selected cleaned source during wake listening and replies; Pocket
+writes directly to the selected speaker. No per-reply raw/AEC source switching or
+second microphone consumer is needed. The worker's Pulse streams forbid fallback
+to other devices. Realtime subscribes to native audio-device events and checks
+the admitted UMA-8 endpoint and reference-link object serials on device changes.
+Loss drains the existing worker/reference owner and clears readiness while
+preserving the requested listening mode. Return of a complete selected endpoint
+generation permits one acquisition through the normal startup path; explicit
+off and shutdown supersede recovery. There is no idle polling or restart loop.
+A bound Pocket synthesis failure crosses
+the worker protocol as a delivery error tied to the current playback/generation;
+it cannot erase the committed reply, replay speech or stop the speech session.
 
 Pocket synthesis uses one lock around its shared model. During each stream a
 temporary PyTorch forward hook cooperatively stops its native latent producer
@@ -2052,7 +2530,7 @@ speech chunk. Only a bounded, normalized envelope and playback identity cross th
 existing graph activity stream. Levels update shader uniforms through its existing
 frame loop, with a short attack/release and stale-level decay; they do not trigger
 React graph reconstruction. Generation and playback identity reject late samples
-after interruption. Playback completion starts the graph's existing linger, while
+after interruption. Playback completion starts the graph's 420 ms eased fade, while
 STOP, failure, disconnect and hidden/locked presentation stop the speech pulse.
 The latest playback state joins activity reconnect snapshots, separately from
 retained Thinking Packet history. No PCM, audio history, second capture pipeline,
@@ -2063,7 +2541,7 @@ projects its provisional VAD edge as `capture_active`. That edge is visual
 feedback only; NeMo's confirmed speech edge still owns interruption and final
 transcripts alone select work. The shell's single `ShellApi` subscribes to the
 existing `/ws/realtime` stream and shares that presentation with every Surface.
-The recognition strip consumes partial text on arrival and renders a bounded
+The Chat pane consumes gated partial text on arrival and renders a bounded
 recent level history as native QML waveform bars, inspired by Voxtype's compact
 oldest-left/newest-right envelope. No Voxtype runtime or audio subsystem is
 imported. The earlier two-second HTTP polling delayed otherwise-live words;
@@ -2076,10 +2554,9 @@ sleeps it. While Realtime is on, that SDK command disables the camera's 120-seco
 no-video auto-sleep timer; off restores it. The camera's real hardware state owns
 its microphone state.
 
-Each final transcript executes its selected work Task through the one activation
-compiler, model lease, Tool path, ledger, graph activity, and ordinary
-`task.complete`. That terminal result's public summary is the answer delivered
-to Chat or spoken by Pocket. Completed work leaves the speech connection ready
+Each final transcript enters the same Executive Agent-owned DeepSeek loop as
+Chat, through the existing compiler, model lease, capability owner and ledger.
+Accepted native text or structured completion supplies the public reply. Completed work leaves the speech connection ready
 for the next request. Speech onset cancels Pocket playback and the in-flight
 Task generation. Backchannels may be
 filtered without granting semantic authority to the speech layer.
@@ -2093,22 +2570,42 @@ At session start, Realtime validates and freezes the selected microphone,
 speaker, and Pocket voice. Hardware changes made while it runs are saved for
 later and never mutate the active audio graph.
 
-The speech owner retains explicit enabled intent in its existing same-login
-runtime directory. Explicit Stop clears it; Harness shutdown preserves it.
-Harness startup restores that intent through the same speech and hardware owners
-before opening scheduler admission. Missing or invalid intent leaves speech off,
-and a failed restore reports its error without a retry loop. In that error state,
-speech is inactive and the scheduler uses ordinary hardware admission. This runtime marker
-does not survive reboot or become conversation, Task, or Knowledge state.
+The speech owner retains the selected wake, realtime or off mode in its existing
+same-login runtime directory. Explicit Mute writes off; Harness shutdown preserves
+intent. Missing intent starts Wake word. Legacy enabled intent restores Realtime.
+A failed restore reports its error without a retry loop. The marker does not
+become conversation, Task or Knowledge state.
 
-An idle Realtime connection does not close all specialist admission. Startup,
-shutdown, actual foreground demand and the existing GPU reservations still gate
-conflicting work. No extra model is made resident merely to enable concurrency.
+Arming Wake word during active model work waits for its release without requesting a foreground interruption.
+
+An accepted wake or recognized command speech requests foreground priority
+through the existing scheduler interruption port. The speech owner pauses new
+specialist admission during that capture, then bridges final dispatch to the
+existing conversation task. Wake expiry, speech end, cancellation, mode changes,
+and worker teardown release capture demand; final task completion wakes the
+scheduler. Passive room VAD and idle wake listening do not reserve foreground.
+
+Wake listening reserves the existing STT device through the sole model owner,
+with an explicit yield callback. Conflicting specialist work first drains the
+speech worker and releases its device, then acquires the model lease. The last
+work-release event restores Wake listening and Executive preparation. One accepted
+reply may wait for that restoration; its generation must still match. STOP and
+new input discard it. Realtime retains its hard speech reservation. Neither mode
+adds a scheduler, polling loop, model choice or parallel microphone owner.
 An Executive may delegate an accepted Research Question or Learn through its
 existing Tool; the controller binds the original user request and creator run.
 A source-backed finding returns independently of later wiki publication unless
 that activation explicitly requested `await_publication`. Neither routing nor
 handoff creates hierarchy or widens an Agent's searchable Knowledge.
+
+Routine lookup uses the Executive's existing native web Tools in the same
+conversation and Action Trace. Missing public facts do not create a Task or
+knowledge-gap event. Standing guidance remains in the Agent identity; the native
+decision protocol follows the current request and context so earlier dialogue
+does not override it. Search returns leads; fetch supplies the source evidence.
+An Executive fetch binds its supporting Source to the current run through the
+existing capture-provenance check, preventing duplicate Learn work. Explicit
+Source intake and delegated research keep their existing event paths.
 
 ## Definition of done
 
@@ -2185,22 +2682,30 @@ architecture descriptions from masquerading as implemented capabilities.
 Speech stop or worker failure never enqueues finalization of the still-selected
 conversation. It drains only boundaries already requested by New conversation.
 
-The Compact lifecycle rejects incomplete summaries at append, commit and
-historical selection. Invalid older summaries do not advance the active
-sequence boundary; exact SQLite dialogue remains recoverable. Required sections
-are Goal, Constraints and corrections, Verified state, and Outstanding, each
-nonempty. Structural validity does not establish semantic truth.
+Native compaction rejects failed, empty or truncated summaries and unbalanced Tool spans; original session events remain recoverable. A summary is historical context, not verified present state.
 
 
 Executive targeting: the model resolves current explicit targets and bounded
 conversation in its normal Task response. An unclear target requires a concise
 clarification; a current go-ahead requests input only when its referent is clear.
 Computer Tools retain exact observed geometry and Surface revision at dispatch.
+Before and after capture, and before using an image point, the Harness requests
+a native Scene refresh through the existing Shell window adapter. The adapter
+serializes event-driven and requested reads, publishes all current Surface
+snapshots, then acknowledges their revisions. The Scene client waits for those
+revisions on its original connection, rejecting lock, cancellation, revision
+regression and unavailable publication. This prevents an unchanged cached Scene
+from certifying itself while native geometry has moved. An unrelated Surface
+revision can be rebound only when every other exact target field is unchanged.
 A geometry-only change on the same window/connection/focus/power, before any
 activation or input, admits one new observation and model-selected point through
 computer.act's correction_allowed result. The stale point is never sent; a
-second geometry change ends the attempt. This does not permit retry of delivered
-or uncertain input. All other input failures restrict the remaining Task to
+second geometry change ends the attempt. A late native geometry rejection may
+use that same allowance only when the adapter attests that the pointer helper
+has not started, the receipt says not_dispatched, no activation occurred, and
+the fresh exact target/process still matches apart from geometry. This does not
+permit retry after pointer positioning, delivered input or uncertain input.
+All other input failures restrict the remaining Task to
 task.complete and retain the actual Tool error. Target mismatch diagnostics name
 changed fields without exposing their private values. Image age, process-start,
 lock, original connection, pointer position and occlusion guards remain intact.
@@ -2256,3 +2761,43 @@ planner owns their timing and curves. A captured packet replay lit its exact
 23 Articles and all 43 eligible cross-links, with no outside-packet link or
 extra Article. Evidence and rollback:
 the installation's local acceptance archive.
+
+
+GPU admission measures available VRAM through the model owner's demand-driven
+NVML client. It accounts for exact managed releases, uses cached estimates from
+the installed llama.cpp fit-print tool or the configured vLLM memory reservation,
+and rechecks actual free space before launch. Estimates preserve selected model,
+context, precision and GPU layout. A capacity shortfall retains the exact queued
+occurrence through the existing resource-wait path and is shown as Waiting: GPU
+memory. Optional owner-enabled Edge GPU-helper reclamation is bounded, identity
+checked and verified by a fresh memory reading; it never terminates the browser
+or tab renderers and does not create another scheduler or background monitor.
+
+
+Maintenance ownership and recovery, 2026-09-14: Alexandria's Curate candidates exclude Agent branches and executable definitions. Wiki freshness/evidence leads use Improve. Heimdall inspects accepted Agent/capability definitions without extra wiki checkout, private peer Observations, or executable grants. Operational Model retains its stable Task identity but moves to Harness taxonomy and Heimdall; its Runbook no longer inherits Darwin's Research procedure.
+
+The existing harness.repair Tool distinguishes retry from settlement. Complete read-only task.inspect/vault.maintenance/review.inspect receipts include attested legacy definitions. Exact pre-stage scope/target-collision rejections are not committed proposals. Repair can retain an already admitted Curate child, settle a now-invalid maintenance lead, and retire a removed external model event with its immutable manifest and proven pre-dispatch benchmark rejections. It preserves old runs and advances one FIFO head atomically; a settled parent never implies downstream completion. General Ingest now constrains proposals to create/update with complete body, omitting arbitrary metadata and generic source fields. The exact legacy no-body archive rejection has one correction-specific retry, with its own durable receipt; other effects and exhausted failures retain their gates. Event-driven continuation and Review notifications remain the existing owners.
+
+
+Graph operation presentation, 2026-09-14: the existing activity owner publishes
+bounded ephemeral operation identities alongside packet history and speech.
+Committed Tool dispatch, returned Article refs, intentional Reader requests,
+owner edits/checkouts, and pending/decided Reviews drive exact endpoint halos.
+Read/search/list, Tool, pending, committed and failed outcomes have distinct
+accents and explicit public labels; returned means a response, not verified
+real-world success. Routine GETs and redraws remain passive. Concurrent
+operations share the existing per-cloud sweep and shader clock; cross-links
+require both endpoints in one original operation/packet group. The union must
+never create relationships between independent operations or light ancestors
+as consulted Articles. Packet glow still attests included instructions, and
+speech retains its packet, called Tools and measured orb envelope until actual
+playback ends. The conversation defers its graph completion edge until reply
+commitment and speech handoff, so output preparation cannot extinguish the path.
+Run-bound results preserve their actual status while held; completion releases
+them into the Scene's shared 420 ms eased beam/node fade. Independent edit and
+Review notices retain six-second settlement. Native and web selection edges
+start a separate 340 ms eased sweep on the same geometry and frame clock; old
+selections retract from their current progress as the new path grows. Late read
+responses never replay superseded selections, and Tool extensions do not restart
+an agent's existing sweep. Bounded reconnect snapshots and disconnect clearing
+prevent stale activity. Operations are presentation evidence, never replay authority.

@@ -27,12 +27,6 @@
       "license": "Apache-2.0",
       "integration": "Installed Python dependency; one in-process Linux inotify observer for Source incoming closed-write and atomic-move events. No upstream daemon or polling service."
     },
-    "feedparser": {
-      "repository": "https://github.com/kurtmckee/feedparser",
-      "version": "6.0.14",
-      "license": "BSD-2-Clause",
-      "integration": "Installed Python dependency; web.feed parses preserved RSS/Atom XML into bounded research leads. Existing Source, Task and Inbox owners are unchanged."
-    },
     "nemotron_speech_streaming_en_0_6b": {
       "repository": "https://huggingface.co/nvidia/nemotron-speech-streaming-en-0.6b",
       "revision": "ebe59e5a817142986528bbbee5dba8db7b38ed50",
@@ -115,7 +109,7 @@
       "repository": "https://github.com/microsoft/AutoSaddler",
       "revision": "30e20ce004486c58e7ee97c66182a8d0d41ec90e",
       "license": "MIT",
-      "integration": "Design references only: exact paired case/repetition matching, immutable baseline/candidate identity, held-out regression evaluation and causal diagnosis. Locally implemented in harness/execution/evaluation.py and refinement.py over the existing executor, Task-selected provider, Source files and Review ledger. No upstream source copied and no AutoSaddler engine, provider SDK, candidate Git store or scheduler installed. Acceptance requires complete coverage, all candidate cases passing, no pass-to-fail regression and strict training improvement."
+      "integration": "Design reference for the independently implemented Runbook evaluator in execution/evaluation.py and refinement.py. Exact paired coverage, immutable identities, independent held-out criteria, no regressions and strict improvement remain required. The separate native Executive integration uses the upstream engine as recorded in autosaddler_v2."
     },
     "cpython_sqlite3_compatibility": {
       "repository": "https://github.com/python/cpython",
@@ -133,17 +127,277 @@
     },
     "deepseek_harness": {
       "repository": "https://github.com/deepseek-ai/deepseek-harness",
-      "revision": "c291e7961a515f6d7af9304e7fd1d257929aef26",
-      "version": "CLI 0.1.5-rc.1; agent-loop, agent, llm and tools 0.1.5-rc.2; Cordis 4.0.2",
+      "revision": "639ed015397290b3745d163aafe02ffee4aa3f84",
+      "version": "CLI and native packages 0.2.0-rc.2; Cordis 4.0.4",
       "license": "MIT",
       "dependency_lock": "obsidience/harness/execution/deepseek/package-lock.json",
-      "integration": "Pinned npm distribution drives Executive conversation through the supported dsh profile launcher. Obsidience provides Cordis model, prompt, capability and application ports. SQLite remains the conversation and receipt owner; upstream sessions are ephemeral, with no disk image store. Scheduled Tasks retain the Python model loop and share CapabilityDispatch. The inspected source revision and npm distributions are distinct artifacts, not asserted byte-identical."
+      "integration": "Pinned npm distribution drives Executive conversation through the supported dsh profile launcher. Obsidience provides Cordis model, prompt, capability and application ports. The upstream JSONL session persistence plugin owns one native Executive conversation per Obsidience conversation ID. SQLite retains its public Chat projection and authoritative capability receipts. Obsidience supplies session migration and accepted-outcome projection. The pinned dsh-compaction-basic and dsh-token-meter 0.2.0-rc.2 plugins own automatic pressure, summary checkpoints and manual compaction through the same model reservation. Current images stay ephemeral and interrupted effects are never replayed. Scheduled Tasks retain the Python model loop and share CapabilityDispatch. The inspected source revision and npm distributions are distinct artifacts, not asserted byte-identical. Native V4 producer-owned sources and first-class Tool results are projected without changing model-facing history. The offline migrate_v3.mjs utility uses upstream format and persistence APIs; it preserves predecessor files and records the bounded Obsidience bootstrap attribution correction. Manual compaction cancellation and application finalization drain before persistence teardown."
     },
     "jsonschema": {
       "repository": "https://github.com/python-jsonschema/jsonschema",
       "version": "4.25.1",
       "license": "MIT",
       "integration": "Validate the complete code-owned argument schema before native Tool dispatch, including conditional variants and limits beyond the model-facing DeepSeek schema vocabulary."
+    },
+    "d3_force_3d": {
+      "repository": "https://github.com/vasturiano/d3-force-3d",
+      "version": "3.0.6",
+      "license": "MIT",
+      "integration": "Existing installed 3D force engine: taxonomy and relationship springs, sibling-branch charge and node collision. One recursive branch rule derives layer-specific angular space from descendants and distributes outer Articles through local contact plus continuous spherical neighbor repulsion using the installed many-body force. The sphere fits population and physical clearance automatically, with a common first layer and intermediate Articles at their actual depth. The radialout tree example is a design reference; no second renderer or graph runtime is added.",
+      "reference": "https://vasturiano.github.io/3d-force-graph/example/tree/",
+      "dependency_lock": "obsidience/ui/pnpm-lock.yaml"
+    },
+    "nvidia_ml_py": {
+      "repository": "https://pypi.org/project/nvidia-ml-py/",
+      "version": "13.610.43",
+      "license": "BSD-3-Clause",
+      "wheel_sha256": "f13c72698edef492f985cc225f14faafe68ae065a2e407f45bdf6f4b9b43fde8",
+      "integration": "NVIDIA maintained NVML bindings for demand-driven free VRAM and deduplicated compute/graphics process accounting under the existing model owner. One owned NVML lifetime, no polling service or model/runtime change."
+    },
+    "llama_memory_estimator": {
+      "repository": "https://github.com/ggml-org/llama.cpp",
+      "revision": "b21e4de74567f5eef213765c9476a843c2e43f0d",
+      "license": "MIT",
+      "integration": "Installed llama-fit-params --fit-print on estimates full GPU model/context/compute memory from the exact configured profile; cached by artifact/profile/launcher identity. Does not fit down context, change precision, run inference or offload layers. Existing vLLM profiles retain their configured GPU utilization budgets."
+    },
+    "autosaddler_v2": {
+      "repository": "https://github.com/microsoft/AutoSaddler",
+      "revision": "6a2b7a9ab2412a8fe384fd5471d2a49b03a60013",
+      "version": "0.2.0",
+      "license": "MIT",
+      "integration": "Pinned upstream AutoSaddler V2 engine, component-map candidates and durable optimization journal. Obsidience supplies Executive and specialist evaluators, receipt-bound contract cases, training-only prompts and the existing model reservation provider. Heimdall Audit is the sole improvement Task. Native session retries and bounded candidate budgets apply to isolated evaluations. Owner-authorized validated instruction bodies publish through the existing Review writer after completed Audit receipt checks. Code and unsupported cases require Review; no live action replay, extra scheduler or provider SDK is installed."
+    },
+    "gemma4_template_scan_correction": {
+      "path": "obsidience/scripts/patches/gemma4-template-linear-scans.patch",
+      "upstream_template_sha256": "aa3185dfc65051046349995de1cfc2fbb275491b9a3832b71595f1ff5b31d61b",
+      "installed_template_sha256": "3b84d7cdc74c0bbc454bfe7eec0bf7e1b8e6f1652376fff6714e65be01003ca7",
+      "integration": "Small patch to the already installed Gemma chat template: use the immediate next message when it is not a Tool result, and stop both forward scans after resolution. Uses the pinned llama.cpp Jinja loop controls. Prompt bytes were identical for the complete migrated dialogue, Tool exchange and assistant continuation probes. No tokenizer, model, reasoning, schema, special-token or context-setting change. Apply only to the exact recorded template preimage."
+    },
+    "hindsight": {
+      "repository": "https://github.com/vectorize-io/hindsight",
+      "version": "0.10.0",
+      "license": "MIT",
+      "package": "hindsight-api-slim[local-onnx]==0.10.0",
+      "integration": "Separate local PostgreSQL/pgvector memory server; CPU ONNX embedding and FlashRank reranking. Native Cordis service provides bounded recall through the Obsidience port. Supported async retain operation IDs, webhooks, memory graph/list APIs and immutable Source handoffs replace the ordinary Temporary-memory writer. The read-only Memory pane consumes native graph identities separately from accepted Articles. DeepSeek owns live conversation/context; Alexandria Curate and owner Review own durable wiki recommendations. Memory inference borrows preemptible idle capacity from the existing model owner. No coding-agent git-history importer, second wiki or generative reflect call is mounted.",
+      "cordis_reference": {
+        "package": "@vectorize-io/hindsight-coding-agents",
+        "version": "0.6.1",
+        "usage": "Supported Cordis integration patterns inspected; its opinionated coding wiki/runtime is not installed or copied."
+      },
+      "wheel_sha256": "6f7a11fb43735bcc8164d3bee84622690bfa081ca02aaa88e3b88ef72ef3eca3",
+      "validated_environment": {
+        "python": "3.13.14",
+        "postgresql": "18.6",
+        "pgvector": "0.8.6",
+        "onnxruntime": "1.30.0"
+      },
+      "patches": [
+        {
+          "path": "obsidience/scripts/patches/hindsight/0001-render-graphs-outside-event-loop.patch",
+          "purpose": "Run native read-only graph projection, schema validation and JSON serialization in a worker thread; retain the exact SQL, public schema, nodes, edges, dates and ownership.",
+          "files": [
+            {
+              "path": "hindsight_api/engine/memory_engine.py",
+              "preimage_sha256": "770ea9011dec620c6c6584f8889ccf73740f9489586e5745fd0164fd636eafba",
+              "installed_sha256": "45264e93e97fedcef32acdf3d1ea903a81ab006cde04e4561fd98627efa97e67"
+            },
+            {
+              "path": "hindsight_api/api/http.py",
+              "preimage_sha256": "d50e3e0617784bdeb6043334bbb06fc9f61e6f6384ed14964c276284e5c27dc1",
+              "installed_sha256": "93a6df6ef68f3fe3fdb0dafb8baba22bac4ce7383fb2360132c26d1495490cfc"
+            }
+          ]
+        },
+        {
+          "path": "obsidience/scripts/patches/hindsight/0002-bound-cpu-reranking-and-cancellation.patch",
+          "purpose": "Expose a local FlashRank ONNX intra-op thread setting with spinning disabled when configured; carry the existing request cancellation token into CPU microbatch checkpoints. Preserve the reranker model, 512-token limit, candidate budgets, scoring pipeline and prior graph patch. Apply after 0001. Batch size uses the existing native configuration option.",
+          "files": [
+            {
+              "path": "hindsight_api/engine/cross_encoder.py",
+              "preimage_sha256": "d076e7a0c61d7c3b62fd1ce226622c2a7251cbd8dfb11e39fe4bcbce52b8e0fd",
+              "installed_sha256": "f5912c17d19ae61519bb8f289221547b372b843e2d16ca9f68ff9b34f5a2e9ef"
+            },
+            {
+              "path": "hindsight_api/engine/search/reranking.py",
+              "preimage_sha256": "42fe7ac0afddbf68e0fde7f91745286378327349a94e7afb5382787f68c69b90",
+              "installed_sha256": "b1cc7b507cf1a3d2f752aa2410a63eecb824b3f50756d9e9a44d8757ee938ec1"
+            },
+            {
+              "path": "hindsight_api/engine/memory_engine.py",
+              "preimage_sha256": "45264e93e97fedcef32acdf3d1ea903a81ab006cde04e4561fd98627efa97e67",
+              "installed_sha256": "76b5254caef80bbbc5770c1b1501075709102fc367bd14fb8497911e4d5dcbfb"
+            }
+          ]
+        },
+        {
+          "path": "obsidience/scripts/patches/hindsight/0003-openrouter-daily-quota-reset.patch",
+          "purpose": "Honor OpenRouter daily free-quota epoch-millisecond reset metadata through the existing native ProviderRateLimitResetError and deferred-operation scheduler. Preserve recall, queue identity and retry budget; no additional timer or provider.",
+          "files": [
+            {
+              "path": "hindsight_api/engine/providers/openai_compatible_llm.py",
+              "preimage_sha256": "c1939d85f076bd711989249807a231f95563a97c5896f11cd30f8e838d71f791",
+              "installed_sha256": "bbd7e870c6e160b988a0b84bba7909bc3646d01fe45781b594c57b4bc8de4e20"
+            }
+          ]
+        }
+      ]
+    },
+    "flashrank": {
+      "repository": "https://github.com/PrithivirajDamodaran/FlashRank",
+      "version": "0.2.10",
+      "license": "Apache-2.0",
+      "integration": "CPU ONNX reranker for the optional local Hindsight server, in its isolated environment."
+    },
+    "codebase_memory_mcp": {
+      "repository": "https://github.com/DeusData/codebase-memory-mcp",
+      "version": "0.10.8",
+      "license": "MIT",
+      "integration": "Optional read-only Code pane consumes the existing local MCP provider native /api/layout graph and positions. Public Codex and Claude Code tool receipts supply exact activity identities through a bounded journal adapter. The derived index stays outside Vault and Source; no graph store, MCP owner, model, ADR or installer hook is added. Obsidience uses its existing Three.js renderer, not a copied upstream UI.",
+      "license_source": "https://github.com/DeusData/codebase-memory-mcp/blob/main/LICENSE"
+    },
+    "nodeterm": {
+      "repository": "https://github.com/eneskirca/nodeterm",
+      "revision": "17ee12adaa6b4a43b0ad5ce452a62070d20a09cc",
+      "version": "0.4.0",
+      "license": "BUSL-1.1",
+      "license_source": "https://github.com/eneskirca/nodeterm/blob/main/LICENSE",
+      "integration": "Optional Terminal-pane AGENT CANVAS provider. The unmodified Server Edition runs as obsidience-shell-agent-canvas.service on loopback 127.0.0.1:8770 from an immutable generation under ~/.local/opt/obsidience-agent-canvas; nodeterm owns its canvas state, password login and dedicated tmux server (tmux -L node-terminal), whose sessions survive service restarts by upstream KillMode=process contract. The Shell only presents the page in a WebEngineView with a named persistent profile. Local build deviation: the server bundle marks ssh2's optional cpu-features native module external (ssh2 loads it inside try/catch). Personal, non-hosted use under the Additional Use Grant; no nodeterm code is copied into Obsidience."
+    },
+    "nemo_voice_agent": {
+      "repository": "https://github.com/NVIDIA/NeMo",
+      "revision": "b17490a705707c09700166d764b3842ab7c1fd4d",
+      "license": "Apache-2.0",
+      "source_path": "/var/lib/ai/src/obsidience-nemo-speech",
+      "integration": "Existing Pipecat ASR and turn-taking dependency. Local patch moves blocking transcription off the audio event loop; one lock retains streaming-cache, VAD-reset and model-replacement serialization, and cancellation drains in-flight native work. No additional recognizer or audio owner.",
+      "local_patch": "obsidience/harness/realtime/speech/nemo-stt-playback.patch",
+      "local_patch_sha256": "39b69bf7dfe698e5e4fb6942c508e5c3a61e15eaa97ad7112866aefd2a3f4355",
+      "patched_stt_sha256": "7364f7e01026e23c33c8551c5206a0d0d686ed08cd68ea3fc2f9c55fafd9cbce"
+    },
+    "ffmpeg_camera_capture": {
+      "repository": "https://git.ffmpeg.org/ffmpeg.git",
+      "version": "9.0.1",
+      "system_package": "ffmpeg 2:9.0.1-4.2",
+      "license": "GPL-3.0-or-later",
+      "path": "/usr/bin/ffmpeg",
+      "sha256": "bd8d09b44ae1c4a42e3295ae015e30fcb7d2b72c5abf0633b052bbfbb009dc18",
+      "integration": "Installed native executable through a bounded V4L2 video-only adapter. One selected physical camera frame in memory, CPU PNG conversion, joined child cancellation, no daemon, audio capture, power control or copied upstream source."
+    },
+    "opencv_owner_recognition": {
+      "repository": "https://github.com/opencv/opencv_zoo",
+      "revision": "47534e27c9851bb1128ccc0102f1145e27f23f98",
+      "dependency": "opencv-python-headless==4.13.0.92",
+      "integration": "CPU YuNet detection and SFace embeddings under the existing Realtime camera lease. Owner opt-in enrollment stores private embeddings only; frames remain ephemeral. No authentication or GPU model.",
+      "models": {
+        "face_detection_yunet_2023mar.onnx": {
+          "license": "MIT",
+          "sha256": "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4"
+        },
+        "face_recognition_sface_2021dec.onnx": {
+          "license": "Apache-2.0",
+          "sha256": "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79"
+        }
+      }
+    },
+    "wifi_lab_camera_reuse": {
+      "source": "obsidience-wifi-lab/live-sensing-20260929/vision.py and native-gimbal.cpp",
+      "integration": "Optional pure CPU PersonDetector/ImageTracker reuse for continuous person framing, with owner identification kept separate. Persistent OBSBOT SDK motor connection adapted from the local helper. Does not start room sensing, Kinect or CSI. Light inventory is private configuration; bounded WiZ power control preserves verified appearance separately.",
+      "person_model": {
+        "name": "Ultralytics YOLOv10n ONNX",
+        "license": "AGPL-3.0",
+        "sha256": "a77dd863933f184a19e84361c64b788228a7c7dacc2c78939239a96ad3efca3b"
+      },
+      "vision_source_sha256": "5742bee5569eda005c106d80e74f8032c2183e9a568bb59e27a3bdc7bf0d57d4",
+      "sdk": {
+        "name": "OBSBOT Device SDK",
+        "version": "2.1.0_8",
+        "source": "Existing local vendor SDK; no vendor binaries copied into project source",
+        "integration": "One parent-owned persistent Tiny2Lite motor helper; continuous proportional velocity control, actual pose feedback, bounded local motor range and stop on expired input. Native AI stays disabled while software owns the motors."
+      }
+    },
+    "llama_cpp_executive_jinja_scope": {
+      "repository": "https://github.com/ggml-org/llama.cpp",
+      "revision": "f0480101800d33a72ed58fa86a8a6be01b54bd52",
+      "version": "b10078+obsidience-jinja-scope",
+      "license": "MIT",
+      "path": "/var/lib/ai/opt/llama.cpp-b10078-obsidience-jinja-scope",
+      "patch": "obsidience/scripts/patches/llama-cpp-jinja-filter-scope.patch",
+      "patch_sha256": "f7fbc3d3eb39f3717a23a96fcf313881ba86b87ae7327d6cbd70b711d4b27d3e",
+      "library_sha256": "10a81b8662763ceca859641efad933a397cb6b97c21a47bdf6595b68d68b39d7",
+      "integration": "Only common/jinja/runtime.cpp moves the unused per-item context copy into the filtered-loop branch, matching current upstream for_statement behavior. Exact real-request parsed JSON parity verified. All other installed artifacts, including target/draft execution and CUDA kernels, match the original b10078 bytes. No template, tokenizer, model, context, precision or GPU changes."
+    },
+    "llama_cpp_executive_admission": {
+      "repository": "https://github.com/ggml-org/llama.cpp",
+      "revision": "f0480101800d33a72ed58fa86a8a6be01b54bd52",
+      "version": "b10078+obsidience-jinja-scope+exact-input-admission",
+      "license": "MIT",
+      "path": "/var/lib/ai/opt/llama.cpp-b10078-obsidience-admission-20261005",
+      "patch": "obsidience/scripts/patches/llama-cpp-exact-input-admission.patch",
+      "patch_sha256": "8adb1422cd51bd4ffff4b48da4f828ad0ce3e5546c646e759f146163917e5fb2",
+      "server_library_sha256": "0feceeec8b48e92c703815418be932f217be122cd07210ad6c8c032573d3074b",
+      "integration": "Builds on the separately recorded Jinja scope correction. Adds an optional exact input_token_limit check after complete native tokenization and media expansion but before task creation or queue admission. Explicit pre_enqueue overflow and accepted count/limit headers let the native Executive avoid duplicate preflight rendering/tokenization. Only a verified pre-enqueue refusal can project earlier recoverable read pages and retry once; no retry after admitted inference. Only the server implementation library differs from the Jinja-scope runtime. CUDA kernels, common library, model, template, F16 KV, 65536-token saved profile, MTP3 and vision settings remain unchanged. Experimental MTP-cap, ExLlamaV3 and BeeLlama changes are not installed."
+    },
+    "strata_dualgpu_ada": {
+      "repository": "https://github.com/Hardin22/Strata-DualGPU",
+      "revision": "03a5ec955ba152a5f499a18a0f2f2ac192309c28",
+      "version": "0.1.38",
+      "license": "MIT",
+      "source_path": "/var/lib/ai/src/obsidience-strata-evaluation-20261005/dualgpu",
+      "path": "/var/lib/ai/src/obsidience-strata-evaluation-20261005/dualgpu/build-sm89-latency-final/strata",
+      "sha256": "dcca93e271b362a999dce1bccb13b5fa38005ac27fe23a772bb9aaeb71597d65",
+      "build": "Release GCC15.3/CUDA13.4, compute_89/sm_89; 57 Ada cubins. Primary prefill ring reservation, bounded/coalesced tail-message checkpoints and ownership-aware prompt chunk sizing patches; upstream AVX512 CPU dispatch.",
+      "integration": "Existing ModelRuntime supervises loopback8096 with exact manifest receipts, dual UUID ordering and speech reservation. Patched upstream server implements exact whole-request input_tokens and pre-enqueue input_token_limit including images, plus disconnect cancellation checked during prefill every100ms with the existing STOP/DONE drain. No second agent/session/tool owner.",
+      "patch_evidence": "/home/wissenschafter/backups/obsidience-strata-dualgpu-20261005T190856Z/strata-admission.patch",
+      "memory_patch_evidence": "/home/wissenschafter/backups/obsidience-strata-dualgpu-20261005T190856Z/engine-memory-stage/primary-prefill-ring.patch",
+      "latency_patch_evidence": [
+        "/home/wissenschafter/backups/obsidience-flash-latency-20261005T205352Z/engine-stage/tail-message-checkpoints.patch",
+        "/home/wissenschafter/backups/obsidience-flash-latency-20261005T205352Z/coalesce-checkpoints.patch",
+        "/home/wissenschafter/backups/obsidience-flash-latency-20261005T205352Z/own-buffers-stage/own-buffers.patch",
+        "/home/wissenschafter/backups/obsidience-flash-latency-20261005T205352Z/prompt-cancellation.patch",
+        "/home/wissenschafter/backups/obsidience-flash-latency-20261005T205352Z/launcher-reserve.patch"
+      ]
+    },
+    "obsidience_flash_next_swift15": {
+      "repository": "https://huggingface.co/ukisai/Swift-1.5-Qwen3.8-Flash-Next-GSQ-RCO-GGUF",
+      "revision": "b22d729eae29b5796f76fb70f91aef549b9fc52c",
+      "license": "Swift Open License v1.0; Qwen Community License1.0 base",
+      "quantization": "IQ3_XXS",
+      "manifest": "/var/lib/ai/models/obsidience-flash-next-20261005/strata-manifest.json",
+      "files": {
+        "Swift-Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00001-of-00002.gguf": "3bddaa667c750f63baca766df9433e1afd35a139f401c5ca5e7ff560ceff3d23",
+        "Swift-Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00002-of-00002.gguf": "b0b15f782af71eb471909d2f3313b2927c324962f86c084325c247cd411a0160",
+        "mmproj-Qwen3.8-Flash-Next-BF16.gguf": "cd1140f4abba943ce8d9fa92fed8407e389954d26907efde7b72153c75bd8a60"
+      },
+      "integration": "Owner-selected nongaming Executive profile on both Ada GPUs. Full512-expert model, original verified MTP proposals,64Kcontext/int8KV; GPU experts plus full pinned CPU complement; PLE memory mapped. Saved Gemma remains separate gaming rollback."
+    },
+    "obsidience_flash_next_original_candidate": {
+      "repository": "https://huggingface.co/ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF",
+      "revision": "ed59f92082b1e93c0e96d60a8b11aab089b52f09",
+      "license": "Qwen Community License1.0 base; preserve publisher notices",
+      "quantization": "IQ3_S",
+      "path": "/var/lib/ai/models/obsidience-flash-next-20261005/original-iq3-s",
+      "integration": "Downloaded, packed and qualified comparison alternative; inactive. Exact file receipts and benchmark evidence in /home/wissenschafter/backups/obsidience-strata-dualgpu-20261005T190856Z"
+    },
+    "obsidience_flash_next_stock_mtp": {
+      "repository": "https://huggingface.co/Qwen/Qwen3.8-Flash-Next",
+      "revision": "de4b8e4d43b917e7706784d8bb445c9af86a3540",
+      "license": "Qwen Community License1.0",
+      "path": "/var/lib/ai/models/obsidience-flash-next-20261005/mtp/rt",
+      "integration": "Range-verified official MTP tensors packed to native Q2 expert/dense artifacts;40525-token English proposal subset. Target verifies proposals against its complete vocabulary."
+    },
+    "hassil": {
+      "repository": "https://github.com/OHF-Voice/hassil",
+      "version": "3.12.1",
+      "license": "Apache-2.0",
+      "wheel_sha256": "d12553cccf2548a86cfedd28c8f3171690f5e8c064470c2b66170cc5848ecdef",
+      "integration": "Whole affirmative single light on/off and browser media-pause command parsing in the existing Executive controller; CapabilityDispatch retains grants, cancellation, receipts and fresh device or media-session verification. Named media phrases only filter current metadata. No Home Assistant server, conversation owner or model."
+    },
+    "searxng": {
+      "repository": "https://github.com/searxng/searxng",
+      "image": "docker.io/searxng/searxng@sha256:2a8660b510454a7f9f052e614b69c18b102a4c5c751f87076cc67cf5e14c6c44",
+      "version": "2026.10.7-6671d89be",
+      "revision": "6671d89bede8c9fc108b17bb98916170f5657650",
+      "license": "AGPL-3.0-or-later",
+      "integration": "Unmodified upstream container run as the rootless Podman Quadlet user service obsidience-searxng (~/.config/containers/systemd/obsidience-searxng.container), published only on 127.0.0.1:8888 with a read-only local settings.yml enabling the JSON API. The existing web.search Capability queries it over HTTP and keeps DDGS as fallback; no SearXNG code is copied or linked."
     }
   }
 }

@@ -11,6 +11,14 @@ Quickshell presents native controls and panes, and a WebKit presenter displays
 the shared React/Three.js knowledge graph. Cordis's explicit dependency and
 lifecycle principles govern integration across these boundaries.
 
+Knowledge remains the accepted wiki. Optional **Memory** and **Code** graphs on the Samsung stage and in separate
+viewer panes show
+Hindsight's native per-Agent memories and codebase-memory-mcp's derived code
+index separately. Open them from the pane launcher, move them between Surfaces,
+and use Follow to watch exact returned records and source changes. The graph
+views share existing rendering dependencies and preserve native provider owners.
+See [graph adapters](obsidience/harness/graphs/README.md) for setup and limits.
+
 Read [DESIGN.md](DESIGN.md) for the ontology and execution laws, and
 [the Shell documentation](obsidience/shell/README.md) before native desktop setup.
 
@@ -19,14 +27,14 @@ Read [DESIGN.md](DESIGN.md) for the ontology and execution laws, and
 This repository distributes a reviewed starter graph in
 [`obsidience/defaults/vault/`](obsidience/defaults/vault/), separate from the live
 Vault. It includes the Executive, Alexandria, Darwin and Heimdall; their reusable
-capability library; project architecture; and empty subjects and observation
-folders. It contains no previous owner's computer inventory or personal knowledge.
+capability library, project architecture and ordinary knowledge subjects. It contains no previous owner's computer inventory or personal knowledge.
 
 From the repository root, prepare the Python and native Executive dependencies:
 
 ```sh
 python -m venv .venv
 .venv/bin/python -m pip install -r obsidience/harness/requirements.txt
+.venv/bin/python -m pip install --no-deps -r obsidience/harness/execution/deepseek/requirements-optimization.txt
 npm --prefix obsidience/harness/execution/deepseek ci --ignore-scripts --no-audit --no-fund
 ./obsidience/scripts/obsidience init
 ```
@@ -40,7 +48,7 @@ and update workflow.
 The live `obsidience/vault/`, `obsidience/evidence/`, and `obsidience/state/` trees
 are ignored by the application repository. This includes conversations, local
 preferences, Sources and Inbox, archives and proposals, runtime databases,
-connections, model assignments and device state. Article approvals commit only
+model assignments and device state. Article approvals commit only
 inside the separate local Vault repository.
 
 ## Configure this installation
@@ -63,7 +71,7 @@ installation's monitor, storage or service settings blindly. Machine-specific
 operating instructions belong in the ignored `AGENTS.local.md`.
 
 Durable Auto-curate and periodic schedules are not inherited from the development
-machine. Empty runtime observation folders retain their ordinary local writers.
+machine. Historical observations belong to the optional Hindsight provider.
 The optional voice/session unlock capability is documented in the library but
 is not granted by the starter Executive; enabling it is a local owner's choice.
 
@@ -92,7 +100,7 @@ existing check when needed, and do not add tests or run broad suites unless aske
 ```text
 Chat / speech → Executive identity + context → DeepSeek model / Tool loop
 Specialist work → Task → Runbook → Skill → Tool
-Feed / explicit research → immutable Source → Darwin → Inbox → Alexandria
+Explicit research / Source intake → immutable Source → Darwin → Inbox → Alexandria
 Accepted Article changes → Review / local audit → graph + retrieval
 ```
 
@@ -123,7 +131,7 @@ without running Tools or committing a request early.
 | `obsidience/defaults/vault/` | Reviewed, distributable starter Articles |
 | `obsidience/vault/` | Ignored live Articles and local audit repository |
 | `obsidience/evidence/` | Ignored immutable Sources, Inbox and evidence |
-| `obsidience/state/` | Ignored SQLite, connections, settings and runtime artifacts |
+| `obsidience/state/` | Ignored SQLite, settings and runtime artifacts |
 | `obsidience/scripts/` | Development and runtime entry points |
 | `obsidience/tests/` | Existing behavior and architecture checks |
 
