@@ -34,6 +34,15 @@
       "sha256": "283638054c44f6794e74fe9af9048d78a6d9d6c058c12131856c7859a62ac9cd",
       "size": 2473041920
     },
+    "smart_turn_v3_2_cpu": {
+      "repository": "https://huggingface.co/pipecat-ai/smart-turn-v3",
+      "revision": "f766f81d3cfdf7737ac64aad813d91bbfd56bf93",
+      "license": "BSD-2-Clause",
+      "path": "/var/lib/ai/models/obsidience-realtime/smart-turn/smart-turn-v3.2-cpu.onnx",
+      "sha256": "2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f",
+      "size": 8679182,
+      "integration": "Drop-in ONNX for Pipecat's LocalSmartTurnAnalyzerV3 in the speech worker's Smart Turn gate (CPU), replacing the bundled v3.1 (sha256 fb68d55c2d542ce79e44b12013bfd571e90df8594ab096d757198e851b0c6594) after offline replay; realtime_smart_turn_model = \"bundled\" selects v3.1."
+    },
     "pocket_tts_config": {
       "path": "/var/lib/ai/models/obsidience-realtime/pocket-tts/english.yaml",
       "sha256": "0faf97431dec482bf87a47390ab20e73b9181f90e6255e4ce6f593af79f51523",

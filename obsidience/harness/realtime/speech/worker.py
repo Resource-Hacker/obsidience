@@ -80,9 +80,11 @@ from .cues import CueAudioFrame, CueMarker, ReplyFinished, load_assets, CHUNK_BY
 SAMPLE_RATE = 16_000
 TTS_SAMPLE_RATE = 24_000
 TRANSCRIPT_IDLE_SECS = 0.7
-# Smart Turn v3.1 (Pipecat's bundled ONNX, CPU) judges each Silero pause from
-# the audio. NeMo resets its ASR context on the VAD stop edge, so it receives
-# that edge only once the turn ends; shorter pauses stay inside one utterance.
+# Smart Turn (CPU ONNX) judges each Silero pause from the audio. NeMo resets
+# its ASR context on the VAD stop edge, so it receives that edge only once the
+# turn ends; shorter pauses stay inside one utterance. v3.2 (artifacts.lock)
+# replaced Pipecat's bundled v3.1 after replay; "bundled" selects v3.1 again.
+SMART_TURN_MODEL = "/var/lib/ai/models/obsidience-realtime/smart-turn/smart-turn-v3.2-cpu.onnx"
 SMART_TURN_VAD_STOP_SECS = 0.2
 # Silence that ends a turn the model judged incomplete, and the longer bound
 # while the recognized text cannot end a turn yet (no words yet, a dangling
@@ -96,6 +98,12 @@ ASR_TAIL_SECS = 0.7
 _DANGLING_END = re.compile(
     r"(?:^|\s)(?:what's|whats|what is|you said|the|a|an|and|or|but|to|of|for|with|my|your)$",
 )
+# Complete short replies the model can score incomplete ("Yes." 0.14): when the
+# recognized text is exactly one of these, the turn ends at the model's verdict.
+SHORT_REPLIES = frozenset({
+    "yes", "no", "yeah", "yep", "nope", "okay", "ok", "sure", "stop", "thanks",
+    "thank you", "never mind", "nevermind", "cancel", "correct", "right",
+})
 WAKE_COMMAND_WAIT_SECS = 8
 # The wake word is an address, not any mention: it must start the speech
 # segment or follow a pause in recognized words, optionally after hey/ok/okay.
@@ -127,16 +135,30 @@ def _speech_pcm(samples: np.ndarray) -> bytes:
     return np.rint(boosted * 32767.0).astype("<i2").tobytes()
 
 
+def _turn_words(text: str) -> str:
+    return " ".join(re.findall(r"[a-z0-9']+", text.lower().replace("’", "'")))
+
+
 def turn_text_pending(text: str) -> bool:
     """True while recognized text cannot end a turn: no words, or a dangling end."""
-    words = " ".join(re.findall(r"[a-z0-9']+", text.lower().replace("’", "'")))
+    words = _turn_words(text)
     return not words or _DANGLING_END.search(words) is not None
 
 
-def smart_turn_analyzer(pending):
-    """Load Smart Turn v3.1 on CPU, or None to keep the fixed pause endpoint.
+def turn_text_short_reply(text: str) -> bool:
+    """True when recognized text is exactly one complete short reply."""
+    return _turn_words(text) in SHORT_REPLIES
 
-    ``pending()`` reports whether the recognized command text cannot end a turn.
+
+def smart_turn_analyzer(pending, short_reply, model_path: str | None = None):
+    """Load Smart Turn on CPU, or None to keep the fixed pause endpoint.
+
+    A missing or unloadable model is reported once and keeps the fixed pause.
+
+    ``model_path`` None selects Pipecat's bundled v3.1 ONNX.
+
+    ``pending()`` reports whether the recognized command text cannot end a turn;
+    ``short_reply()`` whether it is exactly one complete short reply.
     """
     try:
         from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
@@ -145,23 +167,27 @@ def smart_turn_analyzer(pending):
             """Bound the model's verdict by silence and by the recognized text."""
 
             def __init__(self) -> None:
-                super().__init__(params=SmartTurnParams(
+                super().__init__(smart_turn_model_path=model_path, params=SmartTurnParams(
                     # Upstream ends any turn after this much silence past the VAD stop.
                     stop_secs=SMART_TURN_PENDING_SECS - SMART_TURN_VAD_STOP_SECS,
                     # Silero confirms onset 100 ms late; keep the first syllable.
                     pre_speech_ms=300,
                 ))
                 self._vetoed = False
+                # The model has judged this pause (its early end point).
+                self._judged = False
 
             def append_audio(self, buffer: bytes, is_speech: bool) -> EndOfTurnState:
                 state = super().append_audio(buffer, is_speech)
                 if is_speech:
-                    self._vetoed = False
+                    self._vetoed = self._judged = False
                 elif state is EndOfTurnState.INCOMPLETE and self._speech_triggered:
                     silence = self._silence_ms / 1000 + SMART_TURN_VAD_STOP_SECS
                     # A complete verdict held for late ASR words ends once they
-                    # arrive; an incomplete one ends at the silence fallback.
-                    if ((self._vetoed or silence >= SMART_TURN_FALLBACK_SECS)
+                    # arrive, a judged pause once its late text is a complete
+                    # short reply; an incomplete one ends at the silence fallback.
+                    if ((self._vetoed or silence >= SMART_TURN_FALLBACK_SECS
+                         or (self._judged and short_reply()))
                             and not pending()):
                         self._clear(EndOfTurnState.COMPLETE)
                         state = EndOfTurnState.COMPLETE
@@ -174,14 +200,17 @@ def smart_turn_analyzer(pending):
 
             def _process_speech_segment(self, audio_buffer):
                 state, result = super()._process_speech_segment(audio_buffer)
+                self._judged = True
                 if state is EndOfTurnState.COMPLETE and pending():
                     self._vetoed = True
                     state = EndOfTurnState.INCOMPLETE
+                elif state is EndOfTurnState.INCOMPLETE and short_reply() and not pending():
+                    state = EndOfTurnState.COMPLETE
                 return state, result
 
             def _clear(self, turn_state: EndOfTurnState) -> None:
                 super()._clear(turn_state)
-                self._vetoed = False
+                self._vetoed = self._judged = False
 
         return SmartTurnGate()
     except Exception as exc:
@@ -700,7 +729,14 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
         """True while the command text cannot end a turn: no words, a dangling
         end, or only the wake-word address (Realtime keeps it in the text)."""
         text = self._user_speaking_buffer
-        return turn_text_pending(text) or _WAKE_LEAD.fullmatch(self._wake_pattern.sub("", text)) is not None
+        address = self._wake_pattern.sub("", text)
+        # A bare "okay" or "hey" is not an address without the wake word.
+        return turn_text_pending(text) or (address != text and _WAKE_LEAD.fullmatch(address) is not None)
+
+    def turn_short_reply(self) -> bool:
+        """True when the command text, without the wake-word address, is
+        exactly one complete short reply ("yes", "never mind")."""
+        return turn_text_short_reply(self._wake_pattern.sub(" ", self._user_speaking_buffer))
 
     def _reply_playing(self) -> bool:
         return self._bot_speaking or bool(self._playback is not None and self._playback._reply_active)
@@ -1286,8 +1322,12 @@ async def run(args: argparse.Namespace) -> None:
     input_timing = SpeechInputTiming()
     from obsidience.harness.config import CONFIG
 
+    short_replies = CONFIG.extras.get("realtime_short_replies", True) is not False
     # Read at each Silero pause, after the pipeline (and turn_taking) exists.
-    turn_analyzer = (smart_turn_analyzer(lambda: turn_taking.turn_pending())
+    model = str(CONFIG.extras.get("realtime_smart_turn_model", SMART_TURN_MODEL))
+    turn_analyzer = (smart_turn_analyzer(lambda: turn_taking.turn_pending(),
+                                         lambda: short_replies and turn_taking.turn_short_reply(),
+                                         model_path=None if model == "bundled" else model)
                      if CONFIG.extras.get("realtime_smart_turn", True) is not False else None)
     transport = NeMoLocalAudioTransport(
         LocalAudioTransportParams(
