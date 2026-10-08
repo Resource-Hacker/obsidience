@@ -342,8 +342,13 @@ def _activation_packet(task: Note, agent: Note | None, spine: dict,
                        conversation: str = "", *,
                        accepted_resolver: Resolver | None = None,
                        provider_sections: dict[str, str] | None = None,
-                       public_sections: dict[str, str] | None = None) -> tuple[str, list[str]]:
-    """Compile the one semantic packet consumed and displayed for every leaf Task."""
+                       public_sections: dict[str, str] | None = None,
+                       pinned: list[Note] | tuple[Note, ...] = ()) -> tuple[str, list[str]]:
+    """Compile the one semantic packet consumed and displayed for every leaf Task.
+
+    pinned is the Agent identity's own required context, compiled once into the
+    stable system section in its authored order.
+    """
     runbooks: list[Note] = spine["runbooks"]
     skills: list[Note] = [] if task.kind == "agent" else spine["skills"]
     operation = str(activation.bindings.get("computer_outcome", ""))
@@ -384,6 +389,9 @@ def _activation_packet(task: Note, agent: Note | None, spine: dict,
             f"### [[{runbook.ref}]] — {runbook.title}\n{_instruction_text(runbook, operation)}"
             for runbook in runbooks
         ) if runbooks else "",
+        "pinned": "## Required Context\nRequired accepted context (no capability grants):\n\n" + "\n\n".join(
+            f"### [[{note.ref}]] — {note.title}\n{note.body.strip()}" for note in pinned
+        ) if pinned else "",
         "bindings": "## Bindings\n" + (bindings if activation.bindings else "None."),
         "knowledge": "## Relevant Knowledge\n" + (brief or "None."),
         "conversation": _conversation_section(conversation),
@@ -439,7 +447,7 @@ def _activation_packet(task: Note, agent: Note | None, spine: dict,
             # A real user-message boundary after the stable spine lets the
             # runtime retain an SWA checkpoint across changing Objectives.
             "provider_system": "\n\n".join(sections[key] for key in (
-                "header", "identity", "task", "tools", "skills", "runbook",
+                "header", "identity", "task", "tools", "skills", "runbook", "pinned",
             )),
             "provider_reference": reference,
             "provider_user": "\n\n".join(section for section in (
@@ -575,6 +583,14 @@ async def compile_activation(
         })
     required = _required_context(task, requested_agent, resolved_spine, res, scoped_knowledge)
     exclude.update(note.ref for note in required)
+    # The identity's own required context is identical on every activation, so
+    # it belongs to the stable system section rather than similarity retrieval
+    # or the per-activation brief.
+    from ..knowledge.links import metadata_ref
+    pinned_refs = ({metadata_ref(raw) for raw in requested_agent.meta.get("required_context", [])}
+                   if _is_agent_identity(requested_agent) else set())
+    pinned = [note for note in required if note.ref in pinned_refs]
+    required = [note for note in required if note.ref not in pinned_refs]
     retrieval_started = time.perf_counter()
     knowledge_accounting: dict = {}
     brief, context_refs = await asyncio.to_thread(
@@ -595,6 +611,7 @@ async def compile_activation(
         brief = "Required accepted context (no capability grants):\n\n" + "\n\n".join(
             f"### [[{note.ref}]] — {note.title}\n{note.body.strip()}" for note in required) + "\n\n" + brief
         context_refs = [note.ref for note in required] + context_refs
+    context_refs = [note.ref for note in pinned] + context_refs
 
     observations = ""  # Historical memory is supplied by the Hindsight port.
     provider_sections: dict[str, str] = {}
@@ -602,7 +619,7 @@ async def compile_activation(
     packet, packet_refs = _activation_packet(
         task, requested_agent, resolved_spine, activation, observations, brief,
         conversation_context, accepted_resolver=res, provider_sections=provider_sections,
-        public_sections=public_sections,
+        public_sections=public_sections, pinned=pinned,
     )
     selected_refs = packet_refs
     selected_refs.extend(ref for ref in context_refs if ref not in selected_refs)
