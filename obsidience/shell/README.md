@@ -240,12 +240,17 @@ listener retry loop or compositor restart is needed for ordinary QML changes.
 - `obsidience-shell-knowledge.service`;
 - `obsidience-shell-notifications.service`.
 
-The graph presenter belongs to the Shell session. It requires the Shell host
-and wants the Harness for startup, with ordering and the existing HTML readiness
-check. Stopping or restarting the Harness must leave the resident graph alive:
-its existing API and activity connections recover when the provider returns.
-Keep the last accepted graph through that outage; a clean dependency stop must
-not strand the presenter after a development restart.
+The graph presenter belongs to the Shell session. It only wants the Shell host
+and the Harness for startup, with ordering and the existing HTML readiness
+check; the session target likewise only wants the host, because `Requires=`
+would propagate a host restart through the target to every member.
+Restarting the Shell host or the Harness must leave the resident graph alive:
+its pages reconnect, refetch the Shell command token and recover their API and
+activity connections when the provider returns. `session/restart-shell`
+therefore restarts only the host and the window adapter; reload the presenter
+itself only for `qml/graph-stage.qml` or UI build changes. Keep the last
+accepted graph through an outage; a clean dependency stop must not strand the
+presenter after a development restart.
 
 The live session, Harness, Vault, UI, and Source projection all use the one
 canonical project at `/home/wissenschafter/Projects/obsidience` and the shared

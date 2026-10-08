@@ -1,8 +1,8 @@
 [Unit]
 Description=Obsidience shared graph stage
-Requires=obsidience-shell-host.service
-# The resident graph reconnects when its data provider restarts.
-Wants=obsidience-harness-dev.service
+# The resident graph outlives Shell host and Harness restarts: its pages
+# reconnect to both and refetch the per-boot Shell command token.
+Wants=obsidience-shell-host.service obsidience-harness-dev.service
 After=obsidience-shell-host.service obsidience-harness-dev.service
 PartOf=obsidience-shell-session.target
 StartLimitIntervalSec=30

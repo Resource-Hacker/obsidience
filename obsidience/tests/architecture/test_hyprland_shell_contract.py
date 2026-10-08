@@ -145,9 +145,9 @@ def test_shell_restart_preserves_or_recovers_the_secure_lock() -> None:
     assert '"${ipc[@]}" lock' in lock
     assert '"$script_dir/session-lock" status' in restart
     assert 'state" == "secure" || "$state" == "locking"' in restart
-    assert "restart obsidience-shell-session.target" in restart
+    assert "restart obsidience-shell-session.target" not in restart
     assert "obsidience-shell-host.service" in restart
-    assert "obsidience-shell-knowledge.service" in restart
+    assert "obsidience-shell-knowledge.service" not in restart
     assert "obsidience-shell-window-adapter.service" in restart
     assert "ExecStartPost=" in service
     assert "/session/session-lock recover" in service

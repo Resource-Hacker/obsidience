@@ -17,9 +17,13 @@ if [[ "$compositor_state" != "1" ]]; then
     fi
 fi
 
-/usr/bin/systemctl --user restart obsidience-shell-session.target
+# Reload the host and its window adapter only. The graph presenter, agent
+# canvas and notifications keep running and reconnect; graph-stage.qml changes
+# need a restart of the graph presenter unit itself.
+/usr/bin/systemctl --user restart \
+    obsidience-shell-host.service \
+    obsidience-shell-window-adapter.service
 /usr/bin/systemctl --user is-active --quiet \
     obsidience-shell-session.target \
     obsidience-shell-host.service \
-    obsidience-shell-knowledge.service \
     obsidience-shell-window-adapter.service

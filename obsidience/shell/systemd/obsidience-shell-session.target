@@ -1,6 +1,8 @@
 [Unit]
 Description=Obsidience desktop shell session
-Requires=obsidience-shell-host.service
+# Wants, not Requires: Requires= would propagate a host restart to this
+# target and from it to every PartOf member, including the graph presenter.
+Wants=obsidience-shell-host.service
 After=wayland-session@Hyprland.target
 BindsTo=wayland-session@Hyprland.target
 PartOf=wayland-session@Hyprland.target
