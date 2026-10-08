@@ -1,6 +1,6 @@
 --- a/hindsight_api/engine/memory_engine.py
 +++ b/hindsight_api/engine/memory_engine.py
-@@ -11615,10 +11615,19 @@
+@@ -12880,10 +12880,19 @@
              # Keep only direct links between visible nodes
              direct_links = [
                  link for link in links if link["from_unit_id"] in unit_id_set and link["to_unit_id"] in unit_id_set
@@ -22,7 +22,7 @@
              entity_name = row["canonical_name"]
 --- a/hindsight_api/api/http.py
 +++ b/hindsight_api/api/http.py
-@@ -5359,11 +5359,19 @@
+@@ -5618,11 +5618,19 @@
                  tags_match=tags_match,
                  document_id=document_id,
                  chunk_id=chunk_id,

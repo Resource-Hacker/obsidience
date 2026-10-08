@@ -175,16 +175,16 @@
     },
     "hindsight": {
       "repository": "https://github.com/vectorize-io/hindsight",
-      "version": "0.10.0",
+      "version": "0.10.2",
       "license": "MIT",
-      "package": "hindsight-api-slim[local-onnx]==0.10.0",
+      "package": "hindsight-api-slim[local-onnx]==0.10.2",
       "integration": "Separate local PostgreSQL/pgvector memory server; CPU ONNX embedding and FlashRank reranking. Native Cordis service provides bounded recall through the Obsidience port. Supported async retain operation IDs, webhooks, memory graph/list APIs and immutable Source handoffs replace the ordinary Temporary-memory writer. The read-only Memory pane consumes native graph identities separately from accepted Articles. DeepSeek owns live conversation/context; Alexandria Curate and owner Review own durable wiki recommendations. Memory inference borrows preemptible idle capacity from the existing model owner. No coding-agent git-history importer, second wiki or generative reflect call is mounted.",
       "cordis_reference": {
         "package": "@vectorize-io/hindsight-coding-agents",
         "version": "0.6.1",
         "usage": "Supported Cordis integration patterns inspected; its opinionated coding wiki/runtime is not installed or copied."
       },
-      "wheel_sha256": "6f7a11fb43735bcc8164d3bee84622690bfa081ca02aaa88e3b88ef72ef3eca3",
+      "wheel_sha256": "5f05c1017813000e8c46da941ad5cdd7b3d288d864bd985690f8c4f9555f7f64",
       "validated_environment": {
         "python": "3.13.14",
         "postgresql": "18.6",
@@ -198,13 +198,13 @@
           "files": [
             {
               "path": "hindsight_api/engine/memory_engine.py",
-              "preimage_sha256": "770ea9011dec620c6c6584f8889ccf73740f9489586e5745fd0164fd636eafba",
-              "installed_sha256": "45264e93e97fedcef32acdf3d1ea903a81ab006cde04e4561fd98627efa97e67"
+              "preimage_sha256": "a29452cbe3d98599dbef96d260569713bdf673a0c8df02774bc98c1745dd4f3d",
+              "installed_sha256": "13599f5258e370f21ef640caf38b4280da30bd92e497f474ef6c325958723e10"
             },
             {
               "path": "hindsight_api/api/http.py",
-              "preimage_sha256": "d50e3e0617784bdeb6043334bbb06fc9f61e6f6384ed14964c276284e5c27dc1",
-              "installed_sha256": "93a6df6ef68f3fe3fdb0dafb8baba22bac4ce7383fb2360132c26d1495490cfc"
+              "preimage_sha256": "74970ce46d5f3666692c14c9b0668c6226a0f3a505d92cedd3ddbccfbef40bcc",
+              "installed_sha256": "04b943021b46517fdcbe698b6b4cb8cc2742db8f6cd5db800104f367067b172b"
             }
           ]
         },
@@ -214,18 +214,18 @@
           "files": [
             {
               "path": "hindsight_api/engine/cross_encoder.py",
-              "preimage_sha256": "d076e7a0c61d7c3b62fd1ce226622c2a7251cbd8dfb11e39fe4bcbce52b8e0fd",
-              "installed_sha256": "f5912c17d19ae61519bb8f289221547b372b843e2d16ca9f68ff9b34f5a2e9ef"
+              "preimage_sha256": "2e1e43b95261dc3be2fbfe60f5a5ba493035a8de34f7740dbd5255a4b02d51b2",
+              "installed_sha256": "0550285eaad1e01046596acb6ca6b4dfaa1b25e37fb025a4bf9ad64522898af1"
             },
             {
               "path": "hindsight_api/engine/search/reranking.py",
-              "preimage_sha256": "42fe7ac0afddbf68e0fde7f91745286378327349a94e7afb5382787f68c69b90",
-              "installed_sha256": "b1cc7b507cf1a3d2f752aa2410a63eecb824b3f50756d9e9a44d8757ee938ec1"
+              "preimage_sha256": "272b442b8f1ce88539fad9d1fd0bd95f8dbd80cf61a2a291476ef13323d5d52e",
+              "installed_sha256": "c053948fe568b73a5b83feb2153c84e52f1ac10a7d24be67e032a285bd133372"
             },
             {
               "path": "hindsight_api/engine/memory_engine.py",
-              "preimage_sha256": "45264e93e97fedcef32acdf3d1ea903a81ab006cde04e4561fd98627efa97e67",
-              "installed_sha256": "76b5254caef80bbbc5770c1b1501075709102fc367bd14fb8497911e4d5dcbfb"
+              "preimage_sha256": "13599f5258e370f21ef640caf38b4280da30bd92e497f474ef6c325958723e10",
+              "installed_sha256": "f3373d370f6c77c356fd474ce5020ddb05ffbb3731a6b211dfbf5190562be039"
             }
           ]
         },
@@ -235,8 +235,8 @@
           "files": [
             {
               "path": "hindsight_api/engine/providers/openai_compatible_llm.py",
-              "preimage_sha256": "c1939d85f076bd711989249807a231f95563a97c5896f11cd30f8e838d71f791",
-              "installed_sha256": "bbd7e870c6e160b988a0b84bba7909bc3646d01fe45781b594c57b4bc8de4e20"
+              "preimage_sha256": "6f94a136999fa799391e7b62b10bd65a03f23a1cb20b78760c7ed442ab9caf7b",
+              "installed_sha256": "2514f66d6a204c5d8c0dd6c68711ca2e47e6bbfdc1a98331debc99fde9bf4e5b"
             }
           ]
         }

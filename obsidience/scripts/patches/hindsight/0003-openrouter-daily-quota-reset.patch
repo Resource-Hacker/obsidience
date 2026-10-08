@@ -1,10 +1,9 @@
 --- a/hindsight_api/engine/providers/openai_compatible_llm.py
 +++ b/hindsight_api/engine/providers/openai_compatible_llm.py
-@@ -625,6 +625,25 @@
-                     reset_seconds.append(seconds)
+@@ -700,6 +700,25 @@
          if reset_seconds:
              retry_candidates.append(now + timedelta(seconds=max(reset_seconds)))
-+
+ 
 +    # OpenRouter's free daily quota reports its reset as epoch milliseconds
 +    # inside the structured error body. Honor it only for that exact quota marker.
 +    body = getattr(e, "body", None)
@@ -23,6 +22,7 @@
 +                    quota_retry_at = None
 +                if quota_retry_at is not None and quota_retry_at > now:
 +                    retry_candidates.append(quota_retry_at)
- 
++
      body_text = _status_error_body_text(e)
      body_retry_at: datetime | None = None
+     reset_match = _RATE_LIMIT_RESET_AT_RE.search(body_text)

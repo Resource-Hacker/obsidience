@@ -1,14 +1,14 @@
 --- a/hindsight_api/engine/cross_encoder.py
 +++ b/hindsight_api/engine/cross_encoder.py
-@@ -8,6 +8,7 @@
- 
+@@ -9,6 +9,7 @@
  import asyncio
+ import contextvars
  import logging
 +import os
+ import time
  import warnings
  from abc import ABC, abstractmethod
- from concurrent.futures import ThreadPoolExecutor
-@@ -16,6 +17,7 @@
+@@ -18,6 +19,7 @@
  import aiohttp
  
  from .._cross_loop import CrossLoopSemaphore
@@ -16,7 +16,7 @@
  from ..config import (
      DEFAULT_LITELLM_API_BASE,
      DEFAULT_RERANKER_ALIBABA_MODEL,
-@@ -115,6 +117,15 @@
+@@ -160,6 +162,15 @@
              provider=self.provider_name,
          )
  
@@ -32,7 +32,7 @@
      async def _predict(self, pairs: list[tuple[str, str]]) -> list[float]:
          """Score ``pairs`` without retry — what each backend in this module implements.
  
-@@ -1005,11 +1016,15 @@
+@@ -1364,11 +1375,15 @@
          # Configure ONNX session options before Ranker creates the session.
          # When cpu_mem_arena=False (default), ONNX won't pre-allocate an arena
          # that grows monotonically, keeping RSS bounded after rerank batches.
@@ -50,7 +50,7 @@
          else:
              session_options = None
  
-@@ -1036,7 +1051,10 @@
+@@ -1395,7 +1410,10 @@
                      break
              if model_file:
                  self._ranker.session = ort.InferenceSession(model_file, sess_options=session_options)
@@ -62,7 +62,7 @@
  
          # Initialize shared executor
          if FlashRankCrossEncoder._executor is None:
-@@ -1050,7 +1068,7 @@
+@@ -1409,7 +1427,7 @@
          else:
              logger.info("Reranker: FlashRank provider initialized (using existing executor)")
  
@@ -71,7 +71,7 @@
          """Synchronous predict — each query group, in bounded batches.
  
          FlashRank scores every passage of a request in one ONNX forward pass, and
-@@ -1062,9 +1080,9 @@
+@@ -1421,9 +1439,9 @@
          one long candidate inflates the sequence length for every other one.
  
          Splitting into ``batch_size`` chunks bounds the peak the same way the
@@ -84,7 +84,7 @@
          """
          if not pairs:
              return []
-@@ -1085,6 +1103,8 @@
+@@ -1444,6 +1462,8 @@
                  global_indices = [idx for idx, _ in indexed_texts]
  
                  for start in range(0, len(indexed_texts), self.batch_size):
@@ -93,7 +93,7 @@
                      batch = indexed_texts[start : start + self.batch_size]
  
                      # Build passages list for FlashRank. Ids are batch-local, so
-@@ -1102,10 +1122,22 @@
+@@ -1461,10 +1481,22 @@
                          global_idx = global_indices[start + local_idx]
                          all_scores[global_idx] = score
  
@@ -118,48 +118,48 @@
          Score query-document pairs using FlashRank.
 --- a/hindsight_api/engine/search/reranking.py
 +++ b/hindsight_api/engine/search/reranking.py
-@@ -6,6 +6,7 @@
- import math
+@@ -8,6 +8,7 @@
+ from dataclasses import dataclass
  from datetime import datetime, timezone
  
 +from ...cancellation import CancellationToken
+ from ..cross_encoder import RerankTimeoutError, _served_provider
  from .types import MergedCandidate, ScoredResult
  
- UTC = timezone.utc
-@@ -342,7 +343,9 @@
+@@ -361,7 +362,9 @@
              ) from e
          self._initialized = True
  
--    async def rerank(self, query: str, candidates: list[MergedCandidate]) -> list[ScoredResult]:
+-    async def rerank(self, query: str, candidates: list[MergedCandidate]) -> RerankResult:
 +    async def rerank(
 +        self, query: str, candidates: list[MergedCandidate], cancellation: CancellationToken | None = None
-+    ) -> list[ScoredResult]:
++    ) -> RerankResult:
          """
          Rerank candidates using cross-encoder scores.
  
-@@ -383,7 +386,10 @@
-             pairs.append([query, doc_text])
- 
-         # Get cross-encoder scores
--        scores = await self.cross_encoder.predict(pairs)
-+        if cancellation is not None:
-+            scores = await self.cross_encoder.predict_cancellable(pairs, cancellation)
-+        else:
-+            scores = await self.cross_encoder.predict(pairs)
- 
-         # Normalize scores to [0, 1] range.
-         # External API rerankers (Cohere, Jina, llama.cpp/Qwen, etc.) return
+@@ -414,7 +417,10 @@
+         token = _served_provider.set(None)
+         try:
+             try:
+-                scores = await self.cross_encoder.predict(pairs)
++                if cancellation is not None:
++                    scores = await self.cross_encoder.predict_cancellable(pairs, cancellation)
++                else:
++                    scores = await self.cross_encoder.predict(pairs)
+             except RerankTimeoutError as exc:
+                 logger.warning(f"Reranking: {exc}; ranking the remainder by RRF order")
+                 unscored = {i for i, score in enumerate(exc.scores) if score is None}
 --- a/hindsight_api/engine/memory_engine.py
 +++ b/hindsight_api/engine/memory_engine.py
-@@ -8336,7 +8336,10 @@
+@@ -9360,7 +9360,10 @@
  
                      # Ensure reranker is initialized (for lazy initialization mode)
                      await reranker_instance.ensure_initialized()
--                    scored_results = await reranker_instance.rerank(query, merged_candidates)
-+                    scored_results = await reranker_instance.rerank(
+-                    reranked = await reranker_instance.rerank(query, merged_candidates)
++                    reranked = await reranker_instance.rerank(
 +                        query, merged_candidates,
 +                        cancellation=request_context.cancellation if request_context is not None else None,
 +                    )
-                 else:
-                     # "rrf" / "interleave": skip the cross-encoder and keep the fusion order
-                     # (rrf_score is descending by fusion position for both). The cross-encoder
+                     scored_results = reranked.results
+                     # Copied off the call that produced these scores. Do not read
+                     # cross_encoder.provider_name here: on a failover chain that
