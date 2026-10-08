@@ -38,6 +38,8 @@ from nemo.agents.voice_agent.pipecat.services.nemo.stt import (
 from nemo.agents.voice_agent.pipecat.services.nemo.turn_taking import (
     NeMoTurnTakingService,
 )
+from pipecat.audio.turn.base_turn_analyzer import EndOfTurnState
+from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.utils import calculate_audio_volume
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams, VADState
@@ -78,6 +80,22 @@ from .cues import CueAudioFrame, CueMarker, ReplyFinished, load_assets, CHUNK_BY
 SAMPLE_RATE = 16_000
 TTS_SAMPLE_RATE = 24_000
 TRANSCRIPT_IDLE_SECS = 0.7
+# Smart Turn v3.1 (Pipecat's bundled ONNX, CPU) judges each Silero pause from
+# the audio. NeMo resets its ASR context on the VAD stop edge, so it receives
+# that edge only once the turn ends; shorter pauses stay inside one utterance.
+SMART_TURN_VAD_STOP_SECS = 0.2
+# Silence that ends a turn the model judged incomplete, and the longer bound
+# while the recognized text cannot end a turn yet (no words yet, a dangling
+# end such as "what's" or "the", or only the wake-word address).
+SMART_TURN_FALLBACK_SECS = 1.8
+SMART_TURN_PENDING_SECS = 3.0
+# NeMo emits a final word up to about 0.7 s of audio after Silero's last voiced
+# frame (the old fixed pause covered it). An earlier end of turn decodes the
+# rest of that tail from silence before NeMo resets, instead of waiting for it.
+ASR_TAIL_SECS = 0.7
+_DANGLING_END = re.compile(
+    r"(?:^|\s)(?:what's|whats|what is|you said|the|a|an|and|or|but|to|of|for|with|my|your)$",
+)
 WAKE_COMMAND_WAIT_SECS = 8
 # The wake word is an address, not any mention: it must start the speech
 # segment or follow a pause in recognized words, optionally after hey/ok/okay.
@@ -107,6 +125,69 @@ def _speech_pcm(samples: np.ndarray) -> bytes:
     )
     boosted = np.where(magnitude > TTS_PEAK_KNEE, protected, boosted)
     return np.rint(boosted * 32767.0).astype("<i2").tobytes()
+
+
+def turn_text_pending(text: str) -> bool:
+    """True while recognized text cannot end a turn: no words, or a dangling end."""
+    words = " ".join(re.findall(r"[a-z0-9']+", text.lower().replace("’", "'")))
+    return not words or _DANGLING_END.search(words) is not None
+
+
+def smart_turn_analyzer(pending):
+    """Load Smart Turn v3.1 on CPU, or None to keep the fixed pause endpoint.
+
+    ``pending()`` reports whether the recognized command text cannot end a turn.
+    """
+    try:
+        from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
+
+        class SmartTurnGate(LocalSmartTurnAnalyzerV3):
+            """Bound the model's verdict by silence and by the recognized text."""
+
+            def __init__(self) -> None:
+                super().__init__(params=SmartTurnParams(
+                    # Upstream ends any turn after this much silence past the VAD stop.
+                    stop_secs=SMART_TURN_PENDING_SECS - SMART_TURN_VAD_STOP_SECS,
+                    # Silero confirms onset 100 ms late; keep the first syllable.
+                    pre_speech_ms=300,
+                ))
+                self._vetoed = False
+
+            def append_audio(self, buffer: bytes, is_speech: bool) -> EndOfTurnState:
+                state = super().append_audio(buffer, is_speech)
+                if is_speech:
+                    self._vetoed = False
+                elif state is EndOfTurnState.INCOMPLETE and self._speech_triggered:
+                    silence = self._silence_ms / 1000 + SMART_TURN_VAD_STOP_SECS
+                    # A complete verdict held for late ASR words ends once they
+                    # arrive; an incomplete one ends at the silence fallback.
+                    if ((self._vetoed or silence >= SMART_TURN_FALLBACK_SECS)
+                            and not pending()):
+                        self._clear(EndOfTurnState.COMPLETE)
+                        state = EndOfTurnState.COMPLETE
+                # Upstream keeps every frame while a turn stays incomplete; the
+                # model reads only the last eight seconds.
+                horizon = time.time() - self._params.pre_speech_ms / 1000 - self._params.max_duration_secs
+                while self._speech_triggered and self._audio_buffer and self._audio_buffer[0][0] < horizon:
+                    self._audio_buffer.pop(0)
+                return state
+
+            def _process_speech_segment(self, audio_buffer):
+                state, result = super()._process_speech_segment(audio_buffer)
+                if state is EndOfTurnState.COMPLETE and pending():
+                    self._vetoed = True
+                    state = EndOfTurnState.INCOMPLETE
+                return state, result
+
+            def _clear(self, turn_state: EndOfTurnState) -> None:
+                super()._clear(turn_state)
+                self._vetoed = False
+
+        return SmartTurnGate()
+    except Exception as exc:
+        emit("turn_detector_unavailable", fallback_pause_secs=TRANSCRIPT_IDLE_SECS,
+             error=type(exc).__name__)
+        return None
 
 
 def classify_wake(text: str, address: int | None, scanned: int, pattern: re.Pattern,
@@ -200,6 +281,8 @@ class NeMoLocalAudioInputTransport(LocalAudioInputTransport):
         self._last_level_at = 0.0
         self._capture_active = False
         self._last_voiced_ns: int | None = None
+        # With a turn analyzer, Silero's stop edge waits here for its verdict.
+        self._held_stop: VADUserStoppedSpeakingFrame | None = None
 
     async def _vad_analyze(self, audio_frame: InputAudioRawFrame) -> VADState:
         state = await super()._vad_analyze(audio_frame)
@@ -209,11 +292,27 @@ class NeMoLocalAudioInputTransport(LocalAudioInputTransport):
 
     async def push_frame(self, frame: Frame, direction=FrameDirection.DOWNSTREAM) -> None:
         if direction is FrameDirection.DOWNSTREAM and isinstance(frame, VADUserStartedSpeakingFrame):
+            if self._held_stop is not None:
+                # Speech resumed inside the turn: NeMo never saw the pause.
+                self._held_stop = None
+                return
             frame.metadata["obsidience_onset_ns"] = time.monotonic_ns()
         elif direction is FrameDirection.DOWNSTREAM and isinstance(frame, VADUserStoppedSpeakingFrame):
-            frame.metadata["obsidience_endpoint_ns"] = time.monotonic_ns()
-            frame.metadata["obsidience_last_voiced_ns"] = self._last_voiced_ns
+            if self._params.turn_analyzer is not None and frame is not self._held_stop:
+                frame.metadata["obsidience_last_voiced_ns"] = self._last_voiced_ns
+                self._held_stop = frame
+                return
+            self._held_stop = None
+            endpoint_ns = frame.metadata["obsidience_endpoint_ns"] = time.monotonic_ns()
+            last_voiced_ns = frame.metadata.setdefault("obsidience_last_voiced_ns", self._last_voiced_ns)
+            if self._params.turn_analyzer is not None and type(last_voiced_ns) is int:
+                elapsed = (endpoint_ns - last_voiced_ns) / 1e9
+                frame.metadata["obsidience_asr_tail_frames"] = max(0, round((ASR_TAIL_SECS - elapsed) / 0.02))
         await super().push_frame(frame, direction)
+
+    async def _handle_prediction_result(self, result) -> None:
+        # Metrics are disabled; never send per-pause metrics frames through ASR.
+        return
 
     async def push_audio_frame(self, frame: InputAudioRawFrame) -> None:
         if self._input_channel == "left":
@@ -245,6 +344,9 @@ class NeMoLocalAudioInputTransport(LocalAudioInputTransport):
         if not emulated and self._capture_active != self._user_speaking:
             self._capture_active = self._user_speaking
             emit("input_capture", active=self._capture_active)
+        if vad_state == VADState.QUIET and not emulated and self._held_stop is not None:
+            # The turn analyzer (or its silence bound, or lost input) ended the turn.
+            await self.push_frame(self._held_stop)
 
 
 class NeMoLocalAudioTransport(LocalAudioTransport):
@@ -451,6 +553,15 @@ class UtteranceNeMoSTTService(NemoSTTService):
                         direction,
                     )
             return
+        if isinstance(frame, VADUserStoppedSpeakingFrame):
+            tail = frame.metadata.get("obsidience_asr_tail_frames", 0)
+            if tail > 0:
+                # Complete whole 80 ms batches so every silent frame is decoded.
+                tail += -(len(self.audio_buffer) + tail) % self._params.buffer_size
+                for _ in range(tail):
+                    await super().process_audio_frame(
+                        InputAudioRawFrame(b"\0" * 640, SAMPLE_RATE, 1), direction,
+                    )
         await super().process_frame(frame, direction)
         if isinstance(frame, VADUserStoppedSpeakingFrame):
             # NeMo resets its caches on this same edge. Partial batches belong
@@ -468,13 +579,15 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
     def __init__(self, *, timing: SpeechInputTiming | None = None,
                  playback: PlaybackCommands | None = None,
                  mode: str = "realtime", mode_revision: int = 0,
-                 wake_word: str = "Computer", **kwargs: Any) -> None:
+                 wake_word: str = "Computer", smart_turn: bool = False,
+                 **kwargs: Any) -> None:
         # STT audio and VAD share its system-frame FIFO, but transcription
         # frames use a separate downstream queue. Consume text inline so a
         # VAD stop cannot overtake recognized words before finalization.
         super().__init__(enable_direct_mode=True, **kwargs)
         self._timing = timing
         self._playback = playback
+        self._smart_turn = smart_turn
         self._transcript_timeout: asyncio.Task[None] | None = None
         self.mode = mode
         self.mode_revision = mode_revision
@@ -583,6 +696,12 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
             self._wake_confirm = self.create_task(self._confirm_wake(), name="wake-confirm")
         return command
 
+    def turn_pending(self) -> bool:
+        """True while the command text cannot end a turn: no words, a dangling
+        end, or only the wake-word address (Realtime keeps it in the text)."""
+        text = self._user_speaking_buffer
+        return turn_text_pending(text) or _WAKE_LEAD.fullmatch(self._wake_pattern.sub("", text)) is not None
+
     def _reply_playing(self) -> bool:
         return self._bot_speaking or bool(self._playback is not None and self._playback._reply_active)
 
@@ -681,6 +800,9 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
     async def _close_unvoiced_transcript(self, direction: FrameDirection) -> None:
         try:
             await asyncio.sleep(TRANSCRIPT_IDLE_SECS)
+            if self._smart_turn and self.turn_pending():
+                # The same bound as a VAD pause that ends on a dangling word.
+                await asyncio.sleep(SMART_TURN_PENDING_SECS - TRANSCRIPT_IDLE_SECS)
             if self._user_speaking_buffer.strip() and not self._vad_user_speaking:
                 # A gap in recognized words is not silence while VAD still
                 # hears speech. Keep the fallback for late, unvoiced ASR only.
@@ -713,6 +835,19 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
             return
         if isinstance(frame, (EndFrame, CancelFrame)):
             await self._close_wake()
+        if (isinstance(frame, VADUserStoppedSpeakingFrame) and self._smart_turn
+                and frame.metadata.get("obsidience_asr_tail_frames", 0) > 0
+                and any(c.isalnum() for c in self._user_speaking_buffer) and self.turn_pending()):
+            # The decoded ASR tail ended mid-phrase ("turn the"). NeMo has reset,
+            # but the turn stays open: later words join this text, or the
+            # transcript fallback ends it at the same pending bound.
+            self._vad_user_speaking = False
+            await self._cancel_transcript_timeout()
+            await self.push_frame(frame, direction)
+            self._transcript_timeout = self.create_task(
+                self._close_unvoiced_transcript(direction), name="nemo-transcript-endpoint",
+            )
+            return
         if isinstance(frame, VADUserStoppedSpeakingFrame):
             if self.mode == "wake" and not self._wake_open and self._wake_pending:
                 # Silence after a trailing name confirms it as an address.
@@ -1149,6 +1284,11 @@ async def run(args: argparse.Namespace) -> None:
 
     playback = PlaybackCommands()
     input_timing = SpeechInputTiming()
+    from obsidience.harness.config import CONFIG
+
+    # Read at each Silero pause, after the pipeline (and turn_taking) exists.
+    turn_analyzer = (smart_turn_analyzer(lambda: turn_taking.turn_pending())
+                     if CONFIG.extras.get("realtime_smart_turn", True) is not False else None)
     transport = NeMoLocalAudioTransport(
         LocalAudioTransportParams(
             input_device_index=pulse_devices[0],
@@ -1161,10 +1301,12 @@ async def run(args: argparse.Namespace) -> None:
                 params=VADParams(
                     confidence=0.2,
                     start_secs=0.10,
-                    stop_secs=TRANSCRIPT_IDLE_SECS,
+                    stop_secs=(SMART_TURN_VAD_STOP_SECS if turn_analyzer is not None
+                               else TRANSCRIPT_IDLE_SECS),
                     min_volume=0.0,
                 ),
             ),
+            turn_analyzer=turn_analyzer,
             audio_in_sample_rate=SAMPLE_RATE,
             audio_out_sample_rate=TTS_SAMPLE_RATE,
             audio_out_10ms_chunks=4,
@@ -1191,6 +1333,7 @@ async def run(args: argparse.Namespace) -> None:
         mode=args.mode,
         mode_revision=args.mode_revision,
         wake_word=args.wake_word,
+        smart_turn=turn_analyzer is not None,
         use_vad=True,
         use_diar=False,
         max_buffer_size=2,

@@ -5,3 +5,6 @@ llm_model = "obsidience-gemma"
 git_commit = true  # Local Vault audit only; never the application repository.
 # vault_dir = "/absolute/path/to/your/local/vault"
 # db_path = "/absolute/path/to/your/local/state/obsidience.sqlite3"
+# Speech endpointing: Smart Turn v3.1 judges each pause (CPU); false restores
+# the fixed 700 ms pause. A model that fails to load also falls back to it.
+# realtime_smart_turn = true
