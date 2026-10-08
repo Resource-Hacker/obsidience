@@ -272,18 +272,6 @@ Scope {
         return top ? top.zOrder + 1 : 10
     }
 
-    function presentPane(placement) {
-        if (!placement) {
-            return
-        }
-        placement.presentOn(
-            placement.surfaceId,
-            placement.x,
-            placement.y,
-            nextZOrder(placement.surfaceId)
-        )
-    }
-
     function presentPaneOn(placement, targetSurfaceId, x, y) {
         if (!placement) {
             return

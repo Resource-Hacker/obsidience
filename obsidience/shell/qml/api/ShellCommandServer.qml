@@ -151,10 +151,6 @@ QtObject {
         return typeof value === "number" && Number.isFinite(value)
     }
 
-    function clamp(value, minimum, maximum) {
-        return Math.max(minimum, Math.min(maximum, value))
-    }
-
     function cleanDragToken(value) {
         return typeof value === "string"
             && /^[A-Za-z0-9._:-]{1,96}$/.test(value) ? value : ""

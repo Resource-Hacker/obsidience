@@ -194,17 +194,6 @@ QtObject {
         return true
     }
 
-    function previewResize(nextWidth, nextHeight) {
-        width = Math.max(360, Math.round(nextWidth))
-        height = Math.max(240, Math.round(nextHeight))
-    }
-
-    function commitResize() {
-        tileBounds = null
-        revision += 1
-        writeState()
-    }
-
     function present() {
         open = true
         zOrder += 1
