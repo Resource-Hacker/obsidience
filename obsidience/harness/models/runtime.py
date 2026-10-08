@@ -625,7 +625,8 @@ def _healthy(spec: ModelSpec, timeout: float = 0.35) -> bool:
                 if not isinstance(health, dict) or health.get("loaded") is not True or health.get("model") != spec.id:
                     return False
             # A healthy reused port may belong to another model owner.
-            response = client.get(spec.base_url + "/models", timeout=timeout)
+            response = client.get(spec.base_url + "/models", timeout=timeout,
+                                  headers=model_auth_headers())
             response.raise_for_status()
             payload = response.json()
         models = payload.get("data") if isinstance(payload, dict) else None
