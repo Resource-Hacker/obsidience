@@ -14,9 +14,6 @@ out/
 /AGENTS.local.md
 /DESIGN.local.md
 /README.local.md
-/DEEPSEEK_CORDIS_RESEARCH.md
-/EXECUTIVE_ROUTING_RESEARCH.md
-/ROUTER_LOCAL_BENCHMARK.md
 .env
 .env.*
 !.env.example
