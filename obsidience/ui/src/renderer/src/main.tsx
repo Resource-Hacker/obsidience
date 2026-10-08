@@ -7,6 +7,12 @@ async function render(): Promise<void> {
   if (surface) document.documentElement.dataset.obsidienceSurface = surface;
   const Component = surface === "knowledge"
     ? (await import("./surfaces/knowledge-desktop")).KnowledgeDesktopSurface
+    : surface === "stage"
+    ? (await import("./surfaces/graph-stage")).GraphStage
+    : surface === "graph"
+    ? (await import("./surfaces/graph-viewer")).GraphPaneSurface
+    : surface === "memory" || surface === "code"
+    ? (await import("./surfaces/provider-graph")).ProviderGraphSurface
     : (await import("./App")).default;
 
   createRoot(document.getElementById("root")!).render(

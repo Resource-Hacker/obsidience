@@ -1,4 +1,4 @@
-/** Thin Obsidience host for Obsidience's unchanged graph tuning records. */
+/** Per-graph presentation settings and saved profiles. */
 
 import {
   DEFAULT_KNOWLEDGE_3D_TUNING,
@@ -41,7 +41,11 @@ export function graphTuningProfilesFor(
   graphId: string,
 ): GraphTuningProfiles {
   const current = store[graphId];
-  if (current?.profiles[current.active]) return current;
+  if (current?.profiles[current.active]) return {
+    ...current,
+    profiles: Object.fromEntries(Object.entries(current.profiles)
+      .map(([name, tuning]) => [name, clampKnowledge3dTuning(tuning)])),
+  };
   return {
     active: DEFAULT_GRAPH_TUNING_PROFILE,
     profiles: { [DEFAULT_GRAPH_TUNING_PROFILE]: loadGraphTuning(graphId) },
@@ -101,11 +105,10 @@ const EXECUTIVE_TUNING: Knowledge3dTuning = clampKnowledge3dTuning({
   ...DEFAULT_KNOWLEDGE_3D_TUNING,
   sweepSeconds: 1.6, sweepMaxSeconds: 5, sweepSpeed: 3,
   ring2dPeers: 1, ring2dBranches: 1, ring2dArticles: 1,
-  shellBase: 22, shellStep: 9,
   chargeStrength: 30, velocityDecay: 0.35,
   nodeGlow: 1, tendrilWidth: 12, branchWidth: 8, articleWidth: 4,
   crossWidth: 10, branchOpacity: 0.75, crossOpacity: 0.2,
-  dashFrequency: 0.32, crossCurve: 0.2, linkDistance: 1,
+  dashFrequency: 0.32, linkDistance: 1,
   sizeCore: 1.25, sizeBranch: 1, sizeSubnode: 1, sizeChild: 1, sizeArticle: 1.5,
   streakSpeed: 0.4, streakSpan: 0.05, streakCount: 1,
   yawSpeed: 0.05, labelDistance: 1,
@@ -120,10 +123,10 @@ const GUARDIAN_TUNING: Knowledge3dTuning = clampKnowledge3dTuning({
   ...DEFAULT_KNOWLEDGE_3D_TUNING,
   sweepSeconds: 1.6, sweepMaxSeconds: 5, sweepSpeed: 0.7,
   ring2dPeers: 1, ring2dBranches: 1, ring2dArticles: 1,
-  shellBase: 22, shellStep: 9, chargeStrength: 30, velocityDecay: 0.35,
+  chargeStrength: 30, velocityDecay: 0.35,
   nodeGlow: 0.6, tendrilWidth: 12, branchWidth: 8, articleWidth: 2,
   crossWidth: 6, branchOpacity: 0.75, crossOpacity: 0.75,
-  dashFrequency: 0.28, crossCurve: 0.22, linkDistance: 1,
+  dashFrequency: 0.28, linkDistance: 1,
   sizeCore: 1, sizeBranch: 1, sizeSubnode: 1, sizeChild: 1, sizeArticle: 1,
   streakSpeed: 1, streakSpan: 0.06, streakCount: 2,
   yawSpeed: 0.1, labelDistance: 1,
@@ -138,10 +141,10 @@ const CURATOR_TUNING: Knowledge3dTuning = clampKnowledge3dTuning({
   ...DEFAULT_KNOWLEDGE_3D_TUNING,
   sweepSeconds: 1.6, sweepMaxSeconds: 5, sweepSpeed: 0.7,
   ring2dPeers: 1, ring2dBranches: 1, ring2dArticles: 1,
-  shellBase: 22, shellStep: 9, chargeStrength: 30, velocityDecay: 0.35,
+  chargeStrength: 30, velocityDecay: 0.35,
   nodeGlow: 0.6, tendrilWidth: 24, branchWidth: 20, articleWidth: 4,
   crossWidth: 16, branchOpacity: 0.75, crossOpacity: 0.25,
-  dashFrequency: 0.28, crossCurve: 0.4, linkDistance: 1,
+  dashFrequency: 0.28, linkDistance: 1,
   sizeCore: 1, sizeBranch: 1, sizeSubnode: 1, sizeChild: 1, sizeArticle: 1,
   streakSpeed: 1, streakSpan: 0.06, streakCount: 2,
   yawSpeed: 0.2, labelDistance: 1,
@@ -156,10 +159,10 @@ const RESEARCHER_TUNING: Knowledge3dTuning = clampKnowledge3dTuning({
   ...DEFAULT_KNOWLEDGE_3D_TUNING,
   sweepSeconds: 1.6, sweepMaxSeconds: 5, sweepSpeed: 1,
   ring2dPeers: 1, ring2dBranches: 1, ring2dArticles: 1,
-  shellBase: 15, shellStep: 10, chargeStrength: 30, velocityDecay: 0.35,
+  chargeStrength: 30, velocityDecay: 0.35,
   nodeGlow: 0.6, tendrilWidth: 24, branchWidth: 20, articleWidth: 4,
   crossWidth: 6, branchOpacity: 0.75, crossOpacity: 0.5,
-  dashFrequency: 0.28, crossCurve: 0.6,
+  dashFrequency: 0.28,
   sizeCore: 2, sizeBranch: 1, sizeSubnode: 1, sizeChild: 1, sizeArticle: 1,
   streakSpeed: 1, streakSpan: 0.06, streakCount: 2,
   yawSpeed: 0.05, labelDistance: 1,
@@ -174,10 +177,10 @@ const LIBRARY_TUNING: Knowledge3dTuning = clampKnowledge3dTuning({
   ...DEFAULT_KNOWLEDGE_3D_TUNING,
   sweepSeconds: 1.6, sweepMaxSeconds: 5, sweepSpeed: 0.7,
   ring2dPeers: 1, ring2dBranches: 1, ring2dArticles: 1,
-  shellBase: 22, shellStep: 9, chargeStrength: 30, velocityDecay: 0.35,
+  chargeStrength: 30, velocityDecay: 0.35,
   nodeGlow: 0.6, tendrilWidth: 12, branchWidth: 8, articleWidth: 2,
   crossWidth: 6, branchOpacity: 0.75, crossOpacity: 0.1,
-  dashFrequency: 0.5, crossCurve: 0.6, linkDistance: 1,
+  dashFrequency: 0.5, linkDistance: 1,
   sizeCore: 2, sizeBranch: 1, sizeSubnode: 1, sizeChild: 1, sizeArticle: 1,
   streakSpeed: 0.5, streakSpan: 0.01, streakCount: 0,
   yawSpeed: 0.05, labelDistance: 1,

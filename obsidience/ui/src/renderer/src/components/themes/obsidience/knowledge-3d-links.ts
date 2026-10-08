@@ -2,6 +2,30 @@
  *  Coordinates are in the cloud's local space, before orbit/scale. */
 export const KNOWLEDGE_CROSS_SEGMENTS = 32;
 
+/** GPU form of the same route for instanced provider ribbons. Stable endpoint
+ * order, antipodal tangent, exact attachments and sag correction match below. */
+export const KNOWLEDGE_SHELL_ROUTE_GLSL = `
+vec3 knowledgeShellPoint(vec3 a, vec3 b, float t) {
+  if (t <= 0.0) return a;
+  if (t >= 1.0) return b;
+  float ra = length(a), rb = length(b);
+  vec3 u = ra > 1e-8 ? a / ra : rb > 1e-8 ? b / rb : vec3(1.0, 0.0, 0.0);
+  vec3 end = rb > 1e-8 ? b / rb : u;
+  float cosine = clamp(dot(u, end), -1.0, 1.0);
+  vec3 tangent = end - cosine * u;
+  float tangentLength = length(tangent);
+  float angle = atan(tangentLength, cosine);
+  if (tangentLength > 1e-8) tangent /= tangentLength;
+  else {
+    vec3 basis = abs(u.x) <= abs(u.y) && abs(u.x) <= abs(u.z) ? vec3(1.0, 0.0, 0.0)
+      : abs(u.y) <= abs(u.z) ? vec3(0.0, 1.0, 0.0) : vec3(0.0, 0.0, 1.0);
+    tangent = normalize(basis - dot(basis, u) * u);
+  }
+  float radius = mix(ra, rb, t) * (1.0 + 1e-6) / cos(angle / ${KNOWLEDGE_CROSS_SEGMENTS}.0);
+  return (cos(angle * t) * u + sin(angle * t) * tangent) * radius;
+}
+`;
+
 /** Call with endpoints in stable ID order; reverse the samples for a reversed
  *  rendered edge. This also gives antipodal links one stable side to go around.
  *  Equal endpoint radii follow their shell; different radii transition smoothly

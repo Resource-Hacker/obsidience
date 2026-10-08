@@ -20,6 +20,8 @@ interface Turn {
 interface ContextUsage {
   conversation_id: string;
   used_tokens: number;
+  count_method: string;
+  measurement_scope: string;
   capacity_tokens: number;
   percent: number;
   compact_at: number;
@@ -60,6 +62,8 @@ export function ChatPaneBody() {
             turns?: Turn[];
             turn?: Turn;
             used_tokens?: number;
+            count_method?: string;
+            measurement_scope?: string;
             capacity_tokens?: number;
             percent?: number;
             compact_at?: number;
@@ -77,6 +81,8 @@ export function ChatPaneBody() {
             const next: ContextUsage = {
               conversation_id: message.conversation_id,
               used_tokens: message.used_tokens ?? 0,
+              count_method: message.count_method ?? "unavailable",
+              measurement_scope: message.measurement_scope ?? "",
               capacity_tokens: message.capacity_tokens ?? 0,
               percent: message.percent ?? 0,
               compact_at: message.compact_at ?? 80,
@@ -167,13 +173,17 @@ export function ChatPaneBody() {
       </div>
       <div className="shrink-0 border-t border-cyan-300/15 p-2">
         <div className="mb-1.5 flex items-center gap-2 font-mono text-[9px] uppercase tracking-[0.1em] text-cyan-200/45"
-          title={`Immediate Observations: ${context?.used_tokens ?? 0} / ${context?.capacity_tokens ?? 0} tokens`}>
-          <span>Immediate</span>
+          title={context?.count_method === "runtime"
+            ? `Model context: ${context.used_tokens} / ${context.capacity_tokens} tokens`
+            : "Model context measurement unavailable"}>
+          <span>Context</span>
           <div className="h-1 min-w-12 flex-1 overflow-hidden rounded-full bg-cyan-950/80">
             <div className="h-full bg-cyan-300/60 transition-[width]"
-              style={{ width: `${Math.max(0, Math.min(100, context?.percent ?? 0))}%` }} />
+              style={{ width: `${context?.count_method === "runtime" ? Math.max(0, Math.min(100, context.percent)) : 0}%` }} />
           </div>
-          <span>{Math.round(context?.percent ?? 0)}%</span>
+          <span>{context?.count_method === "runtime"
+            ? `${context.measurement_scope === "native_session" ? "" : "~"}${Math.round(context.percent)}%`
+            : "—"}</span>
           <span className="text-cyan-200/30">Compact at</span>
           <select value={compactAt}
             onChange={(event) => changeCompactThreshold(Number(event.target.value))}

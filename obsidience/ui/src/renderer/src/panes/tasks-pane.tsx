@@ -27,7 +27,7 @@ interface TaskTreeNode {
 }
 
 const AGENT_ROLES: ReadonlyArray<{ id: CheckoutAgent; label: string }> = [
-  { id: "executive", label: "JARVIS" },
+  { id: "executive", label: "Computer" },
   { id: "guardian", label: "Heimdall" },
   { id: "curator", label: "Alexandria" },
   { id: "researcher", label: "Darwin" },
@@ -84,7 +84,10 @@ function AgentSummary({ assignees, agents }: { assignees: string[]; agents: Agen
   return (
     <div title={label} aria-label={`Agent assignment: ${label}`}
       className="flex w-[140px] items-center justify-center gap-1">
-      {AGENT_ROLES.map(({ id, label: agentLabel }) => {
+      {AGENT_ROLES.map(({ id, label: fallbackLabel }) => {
+        const agentLabel = id === "executive"
+          ? agents.find((agent) => agent.ref === "Agents/Executive/Executive")?.title ?? fallbackLabel
+          : fallbackLabel;
         const assigned = assignedRoles.has(id);
         return (
           <span key={id} role="img"

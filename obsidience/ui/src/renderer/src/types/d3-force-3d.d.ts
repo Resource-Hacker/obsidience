@@ -49,7 +49,9 @@ declare module "d3-force-3d" {
 
   export interface ForceManyBody {
     (alpha: number): void;
+    initialize(nodes: ForceSimulationNode[], random: () => number, dimensions: number): void;
     strength(strength: number | ((node: never) => number)): ForceManyBody;
+    distanceMin(distance: number): ForceManyBody;
     distanceMax(distance: number): ForceManyBody;
     theta(theta: number): ForceManyBody;
   }
@@ -57,6 +59,7 @@ declare module "d3-force-3d" {
 
   export interface ForceCollide {
     (alpha: number): void;
+    initialize(nodes: ForceSimulationNode[], random: () => number, dimensions: number): void;
     radius(accessor: number | ((node: never) => number)): ForceCollide;
     strength(strength: number): ForceCollide;
     iterations(iterations: number): ForceCollide;
@@ -83,6 +86,7 @@ declare module "d3-force-3d" {
     (alpha: number): void;
     x?(accessor: number | ((node: never) => number)): ForceAxis;
     y?(accessor: number | ((node: never) => number)): ForceAxis;
+    z?(accessor: number | ((node: never) => number)): ForceAxis;
     strength(strength: number | ((node: never) => number)): ForceAxis;
   }
   export function forceX(
@@ -90,5 +94,8 @@ declare module "d3-force-3d" {
   ): ForceAxis;
   export function forceY(
     y?: number | ((node: never) => number),
+  ): ForceAxis;
+  export function forceZ(
+    z?: number | ((node: never) => number),
   ): ForceAxis;
 }

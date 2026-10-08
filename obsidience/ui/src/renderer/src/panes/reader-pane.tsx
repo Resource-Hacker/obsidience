@@ -64,6 +64,7 @@ import {
   type ReaderModuleId,
   type ReaderModulePlacement,
 } from "@/lib/reader-docking";
+import { configureShellGraph, presentShellGraph } from "@/lib/shell-client";
 
 interface TaskDraft {
   title: string;
@@ -455,28 +456,28 @@ function subjectExplorerNodes(group: GraphNavigationGroup, namespace: string): M
 function libraryProjection(nodes: GraphNode[], group: GraphNavigationGroup): ExplorerNode[] {
   const allowed = new Set(group.article_refs ?? []);
   nodes = nodes.filter((node) => allowed.has(node.id));
-  return group.subjects.filter((subject) => !subject.parent_id).map((subject) => {
-    const kind = subject.id === "@library/Tasks" ? "task" : "tool";
-    const members = [...nodes.filter((node) => node.kind === kind ||
-      (kind === "task" && node.tags?.includes("task-taxonomy")))].sort((left, right) =>
-      (left.order ?? Number.MAX_SAFE_INTEGER) - (right.order ?? Number.MAX_SAFE_INTEGER)
-      || left.title.localeCompare(right.title));
-    const children = graphProjectionRoots(
-      members.map((node) => node.id),
-      nodes,
-      `library:${kind}`,
-    );
-    return {
-      key: `library-shelf:${subject.id}`,
-      name: subject.title,
-      path: subject.id,
-      folder: children.length > 0,
-      ref: subject.id,
-      kind: "knowledge",
-      virtual: true,
-      children,
-    };
-  });
+  const subjects = subjectExplorerNodes(group, "library-subject");
+  const absorbed = new Set(group.subjects.flatMap((subject) => subject.article_ref ? [subject.article_ref] : []));
+  const shelfKinds = new Map<string, string>([
+    ["@library/Tools", "tool"], ["@library/Tasks", "task"], ["@library/Runbooks", "runbook"],
+  ]);
+  for (const [ref, kind] of shelfKinds) {
+    const members = nodes.filter((node) => node.kind === kind || (kind === "task" && node.tags?.includes("task-taxonomy")));
+    subjects.get(ref)?.children.push(...graphProjectionRoots(members.map((node) => node.id), nodes, `library:${kind}`));
+  }
+  for (const declared of group.subjects) {
+    if (!declared.path) continue;
+    const parent = subjects.get(declared.id);
+    const identity = nodes.find((node) => node.id === declared.article_ref);
+    if (parent && identity?.kind === "agent") parent.kind = "agent";
+    for (const node of nodes.filter((node) => node.kind === "knowledge" && !absorbed.has(node.id)
+      && node.id.slice(0, node.id.lastIndexOf("/")) === declared.path)) {
+      const projected = graphProjectionNode(node.id, new Map(nodes.map((node) => [node.id, node])), "library:knowledge");
+      if (projected) parent?.children.push(projected);
+    }
+  }
+  return group.subjects.filter((subject) => !subject.parent_id)
+    .map((subject) => subjects.get(subject.id) as ExplorerNode).filter(Boolean);
 }
 
 function agentProjection(group: GraphNavigationGroup, nodes: GraphNode[], files: VaultFile[]): ExplorerNode[] {
@@ -514,14 +515,15 @@ function agentProjection(group: GraphNavigationGroup, nodes: GraphNode[], files:
 
   const localPrefix = `Agents/${agentName}/`;
   const subjectArticleRefs = new Set(group.subjects.flatMap((row) => row.article_ref ? [row.article_ref] : []));
-  for (const node of nodes.filter((candidate) => candidate.id.startsWith(localPrefix)
-    && candidate.kind === "knowledge" && candidate.id !== identityRef && !subjectArticleRefs.has(candidate.id))) {
+  for (const node of nodes.filter((candidate) => candidate.kind === "knowledge"
+    && candidate.id !== identityRef && !subjectArticleRefs.has(candidate.id))) {
     const localPath = node.id.slice(localPrefix.length);
     const segment = localPath.split("/", 1)[0]
       .toLowerCase().replaceAll("_", "-").replaceAll(" ", "-");
-    const subject = localPath.startsWith("Observations/Temporary Observations/")
-      ? subjects.get(`@sat/${agentName}/temporary-observations`)
-      : subjects.get(`@sat/${agentName}/${segment}`) ?? subjects.get(`@sat/${agentName}/observations`);
+    const directory = node.id.slice(0, node.id.lastIndexOf("/"));
+    const declared = group.subjects.find((row) => row.path === directory);
+    const subject = subjects.get(declared?.id ?? node.parent_id ?? "")
+      ?? (node.id.startsWith(localPrefix) ? subjects.get(`@sat/${agentName}/${segment}`) : undefined);
     const projected = graphProjectionNode(node.id, new Map(nodes.map((item) => [item.id, item])), `${agentName}:local`);
     if (subject && projected) subject.children.push(projected);
   }
@@ -581,7 +583,7 @@ function executiveProjection(files: VaultFile[], nodes: GraphNode[], group: Grap
   }
 
   const byId = new Map(peers.map((node) => [node.id, node]));
-  subject("@agent/Subagents")?.children.push(...peers
+  subject("@agent/Specialists")?.children.push(...peers
     .filter((node) => node.kind === "agent" && node.id.startsWith("Agents/")
       && node.id !== "Agents/Executive/Executive")
     .map((node) => graphProjectionNode(node.id, byId, "executive:subagents"))
@@ -1933,7 +1935,7 @@ export function ReaderPaneBody({ docking }: { docking: ReaderDockingProps }) {
     }
   }
 
-  const load = useCallback(async (ref: string) => {
+  const load = useCallback(async (ref: string, activity = false) => {
     sourceRequest.current += 1;
     setSelectedRef(ref);
     setSelectedSourceKey(null);
@@ -1979,7 +1981,7 @@ export function ReaderPaneBody({ docking }: { docking: ReaderDockingProps }) {
     setNote(null);
     try {
       const [nextNote, tasks, graph, nextWikiActions, modelCatalog] = await Promise.all([
-        api.article(ref), api.tasks(), api.graph(), api.wikiActions(), api.models(),
+        api.article(ref, activity), api.tasks(), api.graph(), api.wikiActions(), api.models(),
       ]);
       const nextAgents = graph.nodes.filter((node) =>
         node.kind === "agent" || node.id === "Agents/Executive/Executive")
@@ -2024,7 +2026,7 @@ export function ReaderPaneBody({ docking }: { docking: ReaderDockingProps }) {
     }
   }, []);
 
-  useEffect(() => onOpenReader(load), [load]);
+  useEffect(() => onOpenReader((ref) => { void load(ref, true); }), [load]);
   useEffect(() => onOpenSourceFile(openSource), [openSource]);
   useEffect(() => {
     if (!selectedSourceKey) return;
@@ -2628,6 +2630,23 @@ export function ReaderPaneBody({ docking }: { docking: ReaderDockingProps }) {
     );
   }
 
+  const openAgentMemory = async () => {
+    const generation = sourceRequest.current;
+    setError(null);
+    try {
+      const response = await fetch(`${API_BASE}/api/graphs/memory/banks`, { cache: "no-store" });
+      if (!response.ok) throw new Error(`Memory banks unavailable (${response.status})`);
+      const data = await response.json() as { banks: Array<{ id: string; agent_ref: string }> };
+      const bank = data.banks.find((entry) => entry.agent_ref === note.ref);
+      if (!bank) throw new Error("This Agent's memory bank is unavailable");
+      if (sourceRequest.current !== generation) return;
+      configureShellGraph("memory", { bank: bank.id });
+      presentShellGraph("memory");
+    } catch (cause) {
+      if (sourceRequest.current === generation) setError(String(cause));
+    }
+  };
+
   const childRefs = note.children ?? articleNode?.children ?? [];
   const childLabel = CHILD_LABELS[note.kind] ?? "Children";
   const indexArticle = childRefs.length > 0;
@@ -2640,9 +2659,9 @@ export function ReaderPaneBody({ docking }: { docking: ReaderDockingProps }) {
         <div className={`mx-auto w-full pb-8 ${indexArticle ? "max-w-[920px]" : "max-w-[78ch]"}`}>
           <div className="mb-5 flex flex-wrap items-start justify-between gap-3 border-b border-cyan-300/10 pb-4">
             <div className="min-w-[220px] flex-1">
-              {(indexArticle || articleReadOnly) && !editing ? (
+              {(indexArticle || articleReadOnly || note.kind === "agent") && !editing ? (
                 <p className="mb-1.5 font-mono text-[8px] uppercase tracking-[0.24em] text-cyan-300/45">
-                  {note.managed_by === "system" ? "Generated from System evidence · read only" : articleReadOnly ? "Read only" : "Knowledge index"}
+                  {note.managed_by === "system" ? "Generated from System evidence · read only" : articleReadOnly ? "Read only" : note.kind === "agent" ? `Agent · ${note.meta.role || "Agent"}` : "Knowledge index"}
                 </p>
               ) : null}
               {editing ? (
@@ -2672,6 +2691,17 @@ export function ReaderPaneBody({ docking }: { docking: ReaderDockingProps }) {
               ) : null}
             </div>
             <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+              {note.kind === "agent" ? (
+                <button type="button" onClick={() => void openAgentMemory()}
+                  className="flex items-center gap-1 rounded border border-cyan-300/25 px-2 py-1 font-mono text-[8px] uppercase tracking-[0.12em] text-cyan-200/70 hover:border-cyan-300/50 hover:text-cyan-50">
+                  <Database size={9} /> Memory
+                </button>
+              ) : null}
+              {note.managed_by === "hindsight" && note.auto_curate ? (
+                <span className="font-mono text-[8px] uppercase tracking-[0.12em] text-cyan-200/70">
+                  ✓ Auto-curate · Hindsight
+                </span>
+              ) : null}
               {!articleReadOnly && note.auto_curate_supported ? (
                 <AutoCurateControl enabled={Boolean(note.auto_curate)} busy={curationBusy}
                   onChange={(enabled) => void toggleAutoCurate(enabled)} />

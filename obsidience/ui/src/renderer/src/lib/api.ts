@@ -115,7 +115,7 @@ export interface Proposal {
   file: string; title: string; action: string; target: string; agent: string;
   task: string; reason: string; proposed_at: string; body_preview: string;
   run_id?: string; approvable: boolean; blocked_reason: string;
-  review_class: "article" | "link";
+  review_class: "article" | "link" | "health";
   link_changes: { added: string[]; removed: string[] } | null;
   link_evidence: { ref: string; change: "added" | "removed";
     derivation: "proposed_wikilink" | "accepted_wikilink";
@@ -444,7 +444,7 @@ export const api = {
   }),
   // Review readback must reach the authority after its committed decision.
   graph: () => json<GraphSnapshot>("/api/graph", { cache: "no-store" }),
-  article: (ref: string) => json<NoteDoc>(`/api/articles/${encodeURI(ref)}`),
+  article: (ref: string, activity = false) => json<NoteDoc>(`/api/articles/${encodeURI(ref)}${activity ? "?activity=true" : ""}`),
   files: () => json<VaultFile[]>("/api/files"),
   sourceFiles,
   sourceFile: (key: string) => json<SourceDoc>(
@@ -549,6 +549,7 @@ export const api = {
   }),
   runs: () => json<Array<Record<string, unknown>>>("/api/runs"),
   reviews: () => json<Proposal[]>("/api/reviews"),
+  acknowledgeReview: (name: string) => json(`/api/reviews/${encodeURIComponent(name)}/acknowledge`, { method: "POST" }),
   approve: (name: string) => json(`/api/reviews/${encodeURIComponent(name)}/approve`, { method: "POST" }),
   reject: (name: string, reason = "") => json(
     `/api/reviews/${encodeURIComponent(name)}/reject?reason=${encodeURIComponent(reason)}`, { method: "POST" }),

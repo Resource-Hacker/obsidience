@@ -1,18 +1,13 @@
 // Pure math + policy for the 3D knowledge scene. Everything WebGL-free so
 // the contracts stay unit-testable under jsdom (which has no GL context).
 //
-// Owner-directed 2026-07-31 (third revision, reference: vasturiano's
-// 3d-force-graph): the model is a LIVE physics simulation — d3-force-3d
-// (the exact engine behind that reference) with link springs on the
-// taxonomy tree, weak springs on attested cross-links, many-body charge
-// repulsion and one coupled spherical solver for avoidance, outward edges,
-// shared depth shells and recursive moving crown territories radiating from the
-// pinned Brain as a ball. Seeds are normalized onto their shared layers
-// before the first frame and visibly spread/wobble angularly into place
-// as the simulation cools; the scene ticks until cooling AND geometric
-// convergence (or an explicit bounded failure), then the ball only rotates. Rendering stays
-// 2D-parity (the sprite shader replicating the flat canvas painter) with
-// the depth glow attenuated, and the ambient 2D/3D toggle remains.
+// The same d3-force-3d engine as vasturiano's radialout example: taxonomy
+// springs, weak relationship springs, charge and collision choose the angles.
+// First-level peers share an inner radius; each branch divides the remaining
+// distance across its descendants. One radius constraint fits the tree
+// without fixed directions or expanding depth layers. Moving sibling bisectors
+// keep each descendant inside its branch in one force pass.
+// The existing scene owns cooling and rendering; the 2D layout is independent.
 
 import {
   forceCollide,
@@ -234,10 +229,6 @@ export interface Knowledge3dTuning {
   ring2dPeers: number;
   ring2dBranches: number;
   ring2dArticles: number;
-  /** Depth-1 shell distance (world units). */
-  shellBase: number;
-  /** Per-depth shell increment (world units). */
-  shellStep: number;
   /** Many-body repulsion magnitude. */
   chargeStrength: number;
   /** d3 velocity decay — lower is springier. */
@@ -257,14 +248,10 @@ export interface Knowledge3dTuning {
   crossOpacity: number;
   /** Cross-link dash cycles per world unit. */
   dashFrequency: number;
-  /** Cross-link curvature: midpoint bulge as a fraction of the span. */
-  /** Retained for saved tuning compatibility; links now follow their shells. */
-  crossCurve: number;
-  /** Overall spring rest multiplier: the ACTUAL distance of every
-   *  parent-child link (brain-branch, branch-subnode, subnode-child,
-   *  child-article) — owner 2026-08-04: shells alone never compressed
-   *  the real link lengths. */
+  /** Legacy 2D link spacing; 3D radius is fitted from the live branches. */
   linkDistance: number;
+  /** Padding around 3D nodes and branches; the sphere fits this clearance. */
+  branchClearance: number;
   sizeCore: number;
   sizeBranch: number;
   sizeSubnode: number;
@@ -282,16 +269,10 @@ export interface Knowledge3dTuning {
   lineArticles: number;
   lineBranches: number;
   linePeers: number;
-  /** Word-label offset multiplier — how far label plates sit from their
-   *  node (1 = the classic placement). */
+  /** Legacy 2D label setting; the 3D hover label follows the pointer. */
   labelDistance: number;
-  /** Satellite orbit (per-subagent knowledge balls, owner 2026-08-03):
-   *  radius of the tilted circle the agent's ball rides around the main
-   *  ball (world units), angular speed (rad/s), and the shell scale that
-   *  makes the satellite a genuinely smaller ball. All three are INERT on
-   *  the main ball — its Tune 3D panel hides the Orbit group. */
-  /** Whole-graph render scale: group transform + matched sprite/beam
-   *  pixel scaling, no physics rebuild. Works for main and satellites. */
+  /** Saved presentation scale, retained for profile and satellite appearance.
+   *  Physical radius is fitted automatically from the branch population. */
   graphScale: number;
   /** Per-tier node shader variants (each indexes its options list). */
   subjectStyle: number;
@@ -326,12 +307,8 @@ export const DEFAULT_KNOWLEDGE_3D_TUNING: Knowledge3dTuning = {
   ring2dPeers: 1,
   ring2dBranches: 1,
   ring2dArticles: 1,
-  shellBase: 22,
-  shellStep: 9,
-  // Owner 2026-08-04: no slider — pinned to the old range midpoints.
-  // ballScale is slider-less too (second round: it read identically to
-  // Graph scale and confused the tuner — Graph scale is THE size control;
-  // satellites keep the standard smaller physics underneath).
+  // The shared solver has fixed motion settings. Satellites retain their
+  // smaller presentation baseline; physical spacing is fitted automatically.
   chargeStrength: 30,
   velocityDecay: 0.35,
   nodeGlow: 0.6,
@@ -342,8 +319,8 @@ export const DEFAULT_KNOWLEDGE_3D_TUNING: Knowledge3dTuning = {
   branchOpacity: 0.75,
   crossOpacity: 0.75,
   dashFrequency: 0.28,
-  crossCurve: 0.22,
   linkDistance: 1,
+  branchClearance: 1,
   sizeCore: 1,
   sizeBranch: 1,
   sizeSubnode: 1,
@@ -392,19 +369,17 @@ export interface Knowledge3dTuningField {
   description?: string;
   /** Hidden for the main (non-orbiting) graph in the tuning pane. */
   satelliteOnly?: true;
+  /** Scene-wide controls owned by the main graph. */
+  mainOnly?: true;
 }
 
 /** Slider metadata for the front-end panel; clamping uses the same table
  *  so a stale persisted value can never leave the sanctioned range. */
 export const KNOWLEDGE_3D_TUNING_FIELDS: readonly Knowledge3dTuningField[] = [
-  // Whole-graph render scale (owner 2026-08-03): a pure visual transform on
-  // the cloud's group — nodes, beams, and spacing scale together with NO
-  // physics rebuild, so the main ball or any satellite resizes live.
-  { key: "graphScale", label: "Graph scale", group: "Layout", min: 0.4, max: 2, step: 0.05, description: "Visual zoom for this whole graph: nodes, spacing, and beams scale together with no physics rebuild." },
-  { key: "linkDistance", label: "Link distance", group: "Layout", min: 0.4, max: 2, step: 0.05, description: "Length of every parent-child link: brain to branch, branch to sub-branch, down to the article spokes. The real spacing control - rebuilds in place." },
-  { key: "yawSpeed", label: "Rotation speed", group: "Motion", min: 0, max: 0.2, step: 0.005, description: "Idle camera rotation around the graph. Pauses while dragging or focused on a satellite." },
-  { key: "automaticSweepSpeed", label: "Automatic speed", group: "Thinking", min: 0, max: 1, step: 1, toggle: true, description: "Match this agent's thinking sweep to the measured fast-context retrieval duration. Turn this off to use Animation speed." },
-  { key: "sweepSpeed", label: "Animation speed", group: "Thinking", min: 0.1, max: 3, step: 0.05, description: "Manual speed of the thinking animation. Used when Automatic speed is off or no live retrieval measurement exists." },
+  { key: "branchClearance", label: "Branch clearance", group: "Layout", min: 0.5, max: 2, step: 0.05, description: "Space around nodes and branches. Lower values pack the sphere closer; higher values make it grow. Article and node sizes stay the same." },
+  { key: "yawSpeed", label: "Rotation speed", group: "Motion", mainOnly: true, min: 0, max: 0.2, step: 0.005, description: "Camera rotation around all graphs. Pauses while dragging or focused on a satellite." },
+  { key: "automaticSweepSpeed", label: "Automatic speed", group: "Thinking", min: 0, max: 1, step: 1, toggle: true, description: "Reveal the packet at a readable pace, keep paths flowing through speech, and fade when playback ends. Turn this off to set the reveal speed." },
+  { key: "sweepSpeed", label: "Animation speed", group: "Thinking", min: 0.1, max: 3, step: 0.05, description: "Speed of the continuous path reveal when Automatic speed is off. Speech never skips unfinished links." },
   { key: "tendrilWidth", label: "Tendril width", group: "Thinking", min: 1, max: 24, step: 0.5, description: "Width of the lit beam from the core out to a top-level branch while thinking." },
   { key: "branchWidth", label: "Branch width", group: "Beams", min: 1, max: 20, step: 0.5, description: "Width of the widest structural beams; deeper arms thin down to the article line width." },
   { key: "articleWidth", label: "Article line width", group: "Beams", min: 1, max: 4, step: 0.25, description: "Width the depth taper lands on at the article-level arms." },
@@ -428,14 +403,13 @@ export const KNOWLEDGE_3D_TUNING_FIELDS: readonly Knowledge3dTuningField[] = [
   { key: "coreStyle", label: "AI core", group: "Nodes", min: 0, max: 4, step: 1, options: ["Plasma filaments", "Calm core", "Vortex", "Pulsar", "Data block"], description: "Style of the central core: plasma variants for agents, the geometric Data block for the shared library." },
   // WoW-nameplate-style role glyphs (owner 2026-08-03): read from the MAIN
   // record only; one toggle governs every ball's plate.
-  { key: "rolePlates", label: "Role nameplates", group: "Nodes", min: 0, max: 1, step: 1, toggle: true, description: "Float each agent's neon role glyph over its ball, always facing you - see who does what at a glance." },
+  { key: "rolePlates", label: "Role nameplates", group: "Nodes", mainOnly: true, min: 0, max: 1, step: 1, toggle: true, description: "Show the role glyph above every graph." },
   { key: "crossWidth", label: "Link width", group: "Beams", min: 1, max: 16, step: 0.5, description: "Width of the curved article-to-article link beams." },
   { key: "crossOpacity", label: "Link opacity", group: "Beams", min: 0, max: 1, step: 0.05, description: "Opacity of the curved article links at rest." },
   { key: "dashFrequency", label: "Dash frequency", group: "Beams", min: 0.05, max: 0.8, step: 0.01, description: "Density of the checkered dashes along article links." },
   { key: "streakSpeed", label: "Light speed", group: "Beams", min: 0.1, max: 4, step: 0.1, description: "Travel speed of the light streaks riding the article links." },
   { key: "streakSpan", label: "Light length", group: "Beams", min: 0.01, max: 0.2, step: 0.005, description: "Length of each traveling light streak." },
   { key: "streakCount", label: "Light count", group: "Beams", min: 0, max: 8, step: 1, description: "Light streaks per article link. Zero disables them (rebuilds the geometry)." },
-  { key: "labelDistance", label: "Label distance", group: "Labels", min: 0.6, max: 2.5, step: 0.05, description: "How far hover labels sit from their nodes." },
   { key: "lineArticles", label: "Article", group: "Beams", min: 0, max: 1, step: 1, toggle: true, description: "Keep article spokes visible at rest. They always light while thinking rides them." },
   { key: "lineBranches", label: "Branch", group: "Beams", min: 0, max: 1, step: 1, toggle: true, description: "Keep the deeper structural tubes visible at rest." },
   { key: "linePeers", label: "Brain", group: "Beams", min: 0, max: 1, step: 1, toggle: true, description: "Keep the core-to-branch spokes visible at rest. Normally only the thinking path lights them." },
@@ -465,12 +439,16 @@ export function clampKnowledge3dTuning(value: unknown): Knowledge3dTuning {
       tuning[field.key] = Math.min(field.max, Math.max(field.min, raw));
     }
   }
+  // Old physical radius/link-distance values no longer override automatic fit.
+  // The briefly exposed graphRadius key represented presentation scale;
+  // migrate that separately without resizing glyphs.
+  const savedScale = source.graphScale ?? source.graphRadius;
+  if (typeof savedScale === "number" && Number.isFinite(savedScale)) {
+    tuning.graphScale = Math.min(2, Math.max(0.4, savedScale));
+  }
   return tuning;
 }
 
-/** Depth shells: the simulation's radial force targets (weak — the springs
- *  and collisions shape the ball; this only keeps hierarchy depth reading
- *  outward from the middle and the silhouette frame-sized). */
 /** Per-tier node size multiplier (owner 2026-08-04): feeds BOTH the
  *  sprite radius and the physics radius, so sized nodes keep honest
  *  collision/spring floors. */
@@ -488,9 +466,7 @@ export function knowledge3dNodeSizeMultiplier(
   return tuning.sizeArticle;
 }
 
-/** Minimum hierarchy-layer spacing and taxonomy spring rest length.
- *  A crowded layer expands as a whole; individual branches cannot trade
- *  semantic depth for extra radial space. */
+/** Base spacing control; 3D divides the whole ball across each branch. */
 export const KNOWLEDGE_3D_LINK_BASE_PX = 14;
 
 export function knowledge3dLinkRest(
@@ -508,8 +484,9 @@ export function knowledge3dMaxShell(
  *  disc so the tight ball still breathes. */
 export function knowledge3dAvoidanceRadius(node: {
   radius: number;
-}): number {
-  return node.radius * 1.4 + 2.75;
+}, clearance = 1): number {
+  // Scale only the surrounding padding. At 1, preserve the accepted layout.
+  return node.radius * 1.4 + 2.75 + (clearance - 1) * (node.radius * 0.4 + 2.75);
 }
 /** Nodes seed OUTSIDE their neighborhoods so the cooling simulation reads
  *  as gravity pulling the ball together. */
@@ -533,7 +510,7 @@ export interface KnowledgeForceNode extends ForceSimulationNode {
   id: string;
   depth?: number;
   role?: KnowledgeHierarchyRole | string;
-  /** Exact placement parent; defines private 3D depth and the outward cap. */
+  /** Exact placement parent; defines private 3D depth and branch membership. */
   parentId?: string | null;
   /** World-unit disc radius (avoidance derives from it). */
   radius: number;
@@ -566,491 +543,278 @@ export function knowledge3dLinkDistance(
   );
 }
 
-/** One radius per semantic depth, anchored near the original settled
- *  Brain-to-branch distance (about 1.4 taxonomy spring lengths). Cube-root
- *  increments beyond that first layer retain a rounder whole cloud without
- *  allowing deeper descendants to expand the empty space around Brain.
- *  Visible-node clearance and surface packing may expand whole layers.
- *  Half the surface remains free for angular settling and uneven branches.
- *  Only membership, depth, glyph size and spacing affect these radii. */
-export function knowledge3dDepthRadii(
+/** Every Brain branch starts on one shared inner radius. Each branch divides
+ * the remaining radius across its own depth; earlier Articles keep their layer.
+ * Population and glyph clearance size the WHOLE ball once, not separate crowns.
+ */
+export interface Knowledge3dRadialLayout {
+  radius: number;
+  radii: ReadonlyMap<string, number>;
+  clearances: ReadonlyMap<string, number>;
+  depths: ReadonlyMap<string, number>;
+  fractions: ReadonlyMap<string, number>;
+  footprints: ReadonlyMap<string, ReadonlyMap<number, number>>;
+}
+
+export function knowledge3dRadialLayout(
   nodes: readonly KnowledgeForceNode[],
-  tuning: Knowledge3dTuning = DEFAULT_KNOWLEDGE_3D_TUNING,
-): ReadonlyMap<number, number> {
-  const layers = new Map<number, { largest: number; area: number }>();
-  for (const node of nodes) {
-    const depth = isBallRoot(node) ? 0 : (node.depth ?? 3);
-    const size = knowledge3dAvoidanceRadius(node);
-    const layer = layers.get(depth) ?? { largest: 0, area: 0 };
-    layer.largest = Math.max(layer.largest, size);
-    layer.area += size * size;
-    layers.set(depth, layer);
-  }
-  const radii = new Map<number, number>([[0, 0]]);
+  branchClearance = 1,
+): Knowledge3dRadialLayout {
   const byId = new Map(nodes.map(node => [node.id, node]));
-  const fans = new Map<number, Map<string, number>>();
+  const clearances = new Map(nodes.map(node => [node.id, knowledge3dAvoidanceRadius(node, branchClearance)]));
+  const ancestry = new Map<string, { depth: number; branch: string }>();
+  for (const node of nodes) {
+    if (isBallRoot(node)) ancestry.set(node.id, { depth: 0, branch: node.id });
+  }
+  for (const node of nodes) {
+    const path: KnowledgeForceNode[] = [], seen = new Set<string>();
+    let at: KnowledgeForceNode | undefined = node;
+    while (at && !ancestry.has(at.id) && !seen.has(at.id)) {
+      seen.add(at.id);
+      path.push(at);
+      at = at.parentId ? byId.get(at.parentId) : undefined;
+    }
+    let parent = at ? ancestry.get(at.id) : undefined;
+    for (const member of path.reverse()) {
+      const depth = parent ? parent.depth + 1 : 1;
+      const branch = parent && parent.depth > 0 ? parent.branch : member.id;
+      parent = { depth, branch };
+      ancestry.set(member.id, parent);
+    }
+  }
+  const branchDepth = new Map<string, number>();
+  for (const { depth, branch } of ancestry.values()) {
+    branchDepth.set(branch, Math.max(depth, branchDepth.get(branch) ?? 0));
+  }
+  const firstLayer = 1 / Math.max(1, ...branchDepth.values());
+  const fractions = new Map<string, number>();
+  for (const node of nodes) {
+    const { depth, branch } = ancestry.get(node.id)!;
+    const remainingDepth = (branchDepth.get(branch) ?? 1) - 1;
+    const fraction = depth === 0 ? 0 : firstLayer + (remainingDepth > 0
+      ? (1 - firstLayer) * (depth - 1) / remainingDepth : 0);
+    fractions.set(node.id, fraction);
+  }
+  const layers = [...new Set(fractions.values())].sort((a, b) => a - b);
+  const footprints = new Map(nodes.map(node => [node.id, new Map<number, number>()]));
+  for (const node of [...nodes].sort((a, b) => ancestry.get(b.id)!.depth - ancestry.get(a.id)!.depth)) {
+    const fraction = fractions.get(node.id)!;
+    const profile = footprints.get(node.id)!;
+    for (const layer of layers) {
+      // Once past a node's layer, only its continuing descendants need room.
+      const footprint = Math.max(profile.get(layer) ?? 0,
+        fraction > 0 && fraction >= layer ? (clearances.get(node.id)! / fraction) ** 2 : 0);
+      profile.set(layer, footprint);
+      const parent = node.parentId ? footprints.get(node.parentId) : undefined;
+      if (parent) parent.set(layer, (parent.get(layer) ?? 0) + footprint);
+    }
+  }
+  // A branch inherits its children's required area, including earlier layers.
+  // Reserve 40% of the surface for physical clearance discs, leaving room at
+  // branch boundaries. There is no saved size or fixed radius floor.
+  const footprint = nodes.filter(node => !node.parentId || !byId.has(node.parentId))
+    .reduce((sum, node) => sum + (footprints.get(node.id)!.get(layers[0]) ?? 0), 0);
+  let radius = Math.sqrt(footprint / 1.6);
   for (const node of nodes) {
     const parent = node.parentId ? byId.get(node.parentId) : undefined;
-    if (!parent || isBallRoot(parent)) continue;
-    const depth = node.depth ?? 3;
-    if ((parent.depth ?? 3) + 1 !== depth) continue;
-    const groups = fans.get(depth) ?? new Map<string, number>();
-    groups.set(parent.id, (groups.get(parent.id) ?? 0) + knowledge3dAvoidanceRadius(node) ** 2);
-    fans.set(depth, groups);
+    if (!parent) continue;
+    const step = fractions.get(node.id)! - fractions.get(parent.id)!;
+    if (step > 0) radius = Math.max(radius,
+      (clearances.get(node.id)! + clearances.get(parent.id)!) / step);
   }
-  const step = knowledge3dLinkRest(tuning);
-  const firstRadius = Math.max(
-    step * 1.4,
-    (layers.get(0)?.largest ?? 0) + (layers.get(1)?.largest ?? 0),
-    Math.sqrt((layers.get(1)?.area ?? 0) / 2),
-  );
-  let previousRadius = 0;
-  let previousSize = layers.get(0)?.largest ?? 0;
-  for (const depth of [...layers.keys()].filter(depth => depth > 0).sort((a, b) => a - b)) {
-    const layer = layers.get(depth)!;
-    const radius = Math.max(
-      firstRadius + step * Math.cbrt(depth - 1),
-      previousRadius + previousSize + layer.largest,
-      Math.sqrt(layer.area / 2),
-      // The outward cap has area 2*pi*(R^2 - parentR*R).
-      // Reserve half of it for the direct fan's avoidance footprints.
-      ...[...(fans.get(depth) ?? [])].map(([id, area]) => {
-        const parentRadius = radii.get(byId.get(id)!.depth ?? 3) ?? 0;
-        return (parentRadius + Math.sqrt(parentRadius ** 2 + 4 * area)) / 2;
-      }),
-    );
-    radii.set(depth, radius);
-    previousRadius = radius;
-    previousSize = layer.largest;
-  }
-  return radii;
+  return {
+    radius,
+    radii: new Map([...fractions].map(([id, fraction]) => [id, radius * fraction])),
+    clearances,
+    depths: new Map([...ancestry].map(([id, { depth }]) => [id, depth])),
+    fractions,
+    footprints,
+  };
 }
 
-// Coupled geometric constraints for one knowledge cloud. No renderer, timer,
-// graph authority, or second integrator: the existing d3 tick owns this force.
-
-export interface SphericalNode {
-  id: string;
-  parentId?: string | null;
-  depth?: number;
-  role?: string;
-  radius: number;
-  x?: number; y?: number; z?: number;
-  vx?: number; vy?: number; vz?: number;
-}
-
-export interface SphericalResiduals {
-  maxShellError: number;
-  maxOverlap: number;
-  maxOutwardViolation: number;
-  maxTerritoryViolation: number;
-  maxStepDisplacement: number;
-}
-
-export type SphericalStatus = "settling" | "settled" | "needs-capacity" | "stalled";
-
-export interface SphericalLayerState {
-  depth: number;
-  radius: number;
-  inputKey: string;
-  expansions: number;
-}
-
-export interface SphericalState {
-  signature: string;
-  ticks: number;
-  stableTicks: number;
-  status: SphericalStatus;
-  layers: SphericalLayerState[];
-  residuals: SphericalResiduals;
-}
-
-export interface SphericalOptions {
-  velocityDecay: number;
-  alphaMin: number;
-  radii: ReadonlyMap<number, number>;
-  avoidance: (node: SphericalNode) => number;
-  /** Force inputs, excluding paint. Used only to retain solver continuity. */
-  signature: string;
-  previous?: SphericalState;
-}
-
-export interface SphericalConstraint {
-  (alpha: number): void;
-  capture(): SphericalState;
-  needsTick(): boolean;
-}
-
-const EPS = 1e-10;
-const PASSES = 12;
-const MAX_TURN = 0.16;
-const STABLE_TICKS = 8;
-const MAX_TICKS = 880;
-const MAX_EXPANSIONS = 8;
-const clamp = (x: number, lo = -1, hi = 1): number => Math.max(lo, Math.min(hi, x));
-const finite = (x: number | undefined): number => Number.isFinite(x) ? x! : 0;
-const isRoot = (n: SphericalNode): boolean => n.role === "root" || n.depth === 0;
-const zeroResiduals = (): SphericalResiduals => ({
-  maxShellError: 0, maxOverlap: 0, maxOutwardViolation: 0,
-  maxTerritoryViolation: 0, maxStepDisplacement: 0,
-});
-
-/** Exact minimum angle between two avoidance spheres on fixed shells.
- * Infinity is an explicitly impossible pair; a zero-radius Brain is handled
- * without dividing by its shell radius. */
-export function sphericalClearanceAngle(ri: number, rj: number, distance: number): number {
-  if (![ri, rj, distance].every(Number.isFinite) || Math.min(ri, rj, distance) < 0)
-    throw new RangeError("Shell radii and separation must be finite and nonnegative");
-  if (distance <= Math.abs(ri - rj)) return 0;
-  if (distance > ri + rj || ri * rj === 0) return Infinity;
-  return Math.acos(clamp((ri * ri + rj * rj - distance * distance) / (2 * ri * rj)));
-}
-
-/** Jointly solve contacts, outward edges and recursively nested territories
- * on the spheres themselves. A contact is never repaired radially and then
- * undone by a subsequent normalization. */
-export function createSphericalConstraint(
-  input: readonly SphericalNode[], options: SphericalOptions,
-): SphericalConstraint {
-  const nodes = [...input].sort((a, b) => a.id.localeCompare(b.id));
-  const n = nodes.length;
-  const index = new Map(nodes.map((node, i) => [node.id, i]));
-  const depth = nodes.map(node => isRoot(node) ? 0 : (node.depth ?? 3));
-  const avoid = nodes.map(node => Math.max(EPS, options.avoidance(node)));
-  const parent = new Int32Array(n).fill(-1);
-  const children: number[][] = Array.from({ length: n }, () => []);
-  const members: number[][] = Array.from({ length: n }, () => []);
-  const memberships: { fork: number; owner: number }[][] = Array.from({ length: n }, () => []);
-  // Only attested, acyclic chains terminating at a Brain own a territory.
-  for (let i = 0; i < n; i++) {
-    if (isRoot(nodes[i])) continue;
-    let current = i;
-    const seen = new Set<number>();
-    while (current >= 0 && !isRoot(nodes[current]) && !seen.has(current)) {
-      seen.add(current);
-      const p = index.get(nodes[current].parentId ?? "") ?? -1;
-      if (p < 0 || depth[p] + 1 !== depth[current]) { current = -1; break; }
-      current = p;
+/** Only distance from Brain is constrained. D3's links, charge and collision
+ * forces choose the angles, as in radialout. Predict its damped step so
+ * every integrated node stays on its assigned radius, including the first frame.
+ */
+function forceKnowledgeRadialOut(
+  nodes: readonly KnowledgeForceNode[], layout: Knowledge3dRadialLayout,
+  velocityDecay: number,
+): (alpha: number) => void {
+  const retainedVelocity = 1 - velocityDecay;
+  const project = (node: KnowledgeForceNode, initial: boolean): void => {
+    const radius = layout.radii.get(node.id) ?? 0;
+    if (!radius) return;
+    const x = (node.x ?? 0) + (initial ? 0 : (node.vx ?? 0) * retainedVelocity);
+    const y = (node.y ?? 0) + (initial ? 0 : (node.vy ?? 0) * retainedVelocity);
+    const z = (node.z ?? 0) + (initial ? 0 : (node.vz ?? 0) * retainedVelocity);
+    const length = Math.hypot(x, y, z);
+    const scale = length > 1e-10 ? radius / length : 0;
+    const px = length > 1e-10 ? x * scale : radius;
+    const py = y * scale, pz = z * scale;
+    if (initial) {
+      node.x = px; node.y = py; node.z = pz;
+    } else {
+      node.vx = (px - (node.x ?? 0)) / retainedVelocity;
+      node.vy = (py - (node.y ?? 0)) / retainedVelocity;
+      node.vz = (pz - (node.z ?? 0)) / retainedVelocity;
     }
-    if (current >= 0 && isRoot(nodes[current])) {
-      parent[i] = index.get(nodes[i].parentId!)!;
-      children[parent[i]].push(i);
+  };
+  for (const node of nodes) project(node, true);
+  return (alpha: number) => {
+    for (const node of nodes) project(node, false);
+    if (alpha > KNOWLEDGE_3D_ALPHA_MIN || !layout.radius) return;
+    // At the final ordinary tick, fit any remaining physical contact pressure
+    // with one scalar expansion. This is the minimum scale for these bearings;
+    // no extra solver pass, idle audit or growth loop is needed.
+    const predicted = nodes.map(node => [
+      (node.x ?? 0) + (node.vx ?? 0) * retainedVelocity,
+      (node.y ?? 0) + (node.vy ?? 0) * retainedVelocity,
+      (node.z ?? 0) + (node.vz ?? 0) * retainedVelocity,
+    ]);
+    let scale = 1;
+    for (let i = 0; i < nodes.length; i += 1) {
+      for (let j = i + 1; j < nodes.length; j += 1) {
+        const a = predicted[i], b = predicted[j];
+        const distance = Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+        if (distance > 1e-8) scale = Math.max(scale,
+          (layout.clearances.get(nodes[i].id)! + layout.clearances.get(nodes[j].id)!) / distance);
+      }
     }
-  }
-  for (let i = 0; i < n; i++) {
-    for (let at = i; at >= 0; at = parent[at]) members[at].push(i);
-    let owner = i;
-    for (let fork = parent[i]; fork >= 0; owner = fork, fork = parent[fork]) {
-      // A branch root owns its direction; its descendants fit the crown.
-      if (owner !== i && children[fork].length > 1) memberships[i].push({ fork, owner });
+    if (scale > 1) {
+      layout.radius *= scale;
+      layout.radii = new Map([...layout.radii].map(([id, radius]) => [id, radius * scale]));
+      for (const node of nodes) project(node, false);
     }
-  }
-  const forks = children.map((list, i) => list.length > 1 ? i : -1).filter(i => i >= 0)
-    .sort((a, b) => depth[a] - depth[b] || a - b);
-  const ascending = nodes.map((_, i) => i).sort((a, b) => depth[a] - depth[b] || a - b);
-  const layerDepths = [...options.radii.keys()].sort((a, b) => a - b);
-  const previousLayers = new Map(options.previous?.layers.map(layer => [layer.depth, layer]) ?? []);
-  const layers: SphericalLayerState[] = layerDepths.map(d => {
-    // Descendants cannot change an unchanged inner layer's capacity record.
-    const inputKey = JSON.stringify([options.radii.get(d), nodes.filter((_, i) => depth[i] <= d)
-      .map(node => [node.id, node.parentId, node.depth, node.role, options.avoidance(node)])]);
-    const previous = previousLayers.get(d);
-    const carry = previous?.inputKey === inputKey && Number.isFinite(previous.radius)
-      && previous.radius >= options.radii.get(d)!;
-    return { depth: d, inputKey, radius: carry ? previous!.radius : options.radii.get(d)!,
-      expansions: carry ? previous!.expansions : 0 };
+  };
+}
+
+const radialLayouts = new WeakMap<ForceSimulation<KnowledgeForceNode>, Knowledge3dRadialLayout>();
+
+/** One recursive branch rule: descendants determine space at each radial layer.
+ * Siblings share moving boundaries; outer Articles use local contact spacing.
+ * Membership and demand are built once, with the ordinary D3 cooling loop.
+ */
+function forceKnowledgeBranchSeparation(
+  nodes: readonly KnowledgeForceNode[], radial: Knowledge3dRadialLayout,
+  velocityDecay: number, chargeStrength: number,
+): ((alpha: number) => void) & { initialize: (members: KnowledgeForceNode[], random: () => number, dimensions: number) => void } {
+  const byId = new Map(nodes.map(node => [node.id, node]));
+  const indexById = new Map(nodes.map((node, index) => [node.id, index]));
+  const children = new Map<string, KnowledgeForceNode[]>();
+  const members = new Map(nodes.map(node => [node.id, [] as number[]]));
+  nodes.forEach((node, index) => {
+    if (node.parentId && byId.has(node.parentId)) {
+      const siblings = children.get(node.parentId) ?? [];
+      siblings.push(node);
+      children.set(node.parentId, siblings);
+    }
+    const seen = new Set<string>();
+    let branch: KnowledgeForceNode | undefined = node;
+    while (branch && !seen.has(branch.id)) {
+      seen.add(branch.id);
+      members.get(branch.id)!.push(index);
+      branch = branch.parentId ? byId.get(branch.parentId) : undefined;
+    }
   });
-  const layerByDepth = new Map(layers.map(layer => [layer.depth, layer]));
-  const radii = new Float64Array(n);
-  const demand = new Float64Array(n);
-  const directions = new Float64Array(n * 3);
-  const before = new Float64Array(n * 3);
-  const damping = clamp(1 - options.velocityDecay, 0, 1);
-  const cellSize = avoid.reduce((largest, radius) => Math.max(largest, radius), 1) * 2;
-  const tolerance = Math.max(1e-5, avoid.reduce((smallest, radius) => Math.min(smallest, radius), 1) * 1e-3);
-  const motionTolerance = Math.max(1e-4, tolerance * 2);
-  const signature = options.signature;
-  const same = options.previous?.signature === signature;
-  let ticks = same ? options.previous!.ticks : 0;
-  let stableTicks = same ? options.previous!.stableTicks : 0;
-  let status: SphericalStatus = same ? options.previous!.status : "settling";
-  let residuals = same ? { ...options.previous!.residuals } : zeroResiduals();
-  let capacityDepth = Infinity;
-
-  function updateCapacity(): void {
-    let lastRadius = 0, lastSize = 0;
-    for (const layer of layers) {
-      const size = Math.max(0, ...avoid.filter((_, i) => depth[i] === layer.depth));
-      if (layer.depth > 0) layer.radius = Math.max(layer.radius, lastRadius + lastSize + size);
-      lastRadius = layer.radius; lastSize = size;
-    }
-    for (let i = 0; i < n; i++) radii[i] = layerByDepth.get(depth[i])?.radius ?? 0;
-    for (let i = 0; i < n; i++) {
-      const area = new Map<number, number>();
-      for (const j of members[i]) area.set(depth[j], (area.get(depth[j]) ?? 0) + avoid[j] ** 2);
-      demand[i] = Math.sqrt(Math.max(EPS, ...[...area].map(([d, a]) =>
-        a / Math.max(EPS, layerByDepth.get(d)!.radius ** 2))));
-    }
-  }
-  updateCapacity();
-
-  function normalize(i: number, x: number, y: number, z: number): void {
-    let length = Math.hypot(x, y, z);
-    if (length < EPS || !Number.isFinite(length)) {
-      let hash = 2166136261;
-      for (const char of nodes[i].id) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619);
-      const phase = (hash >>> 0) / 4294967296 * Math.PI * 2;
-      y = ((Math.imul(hash, 1597334677) >>> 0) / 4294967296) * 2 - 1;
-      const span = Math.sqrt(Math.max(0, 1 - y * y));
-      x = span * Math.cos(phase); z = span * Math.sin(phase); length = 1;
-    }
-    directions[i * 3] = x / length;
-    directions[i * 3 + 1] = y / length;
-    directions[i * 3 + 2] = z / length;
-  }
-  function dot(i: number, j: number): number {
-    return clamp(directions[i * 3] * directions[j * 3]
-      + directions[i * 3 + 1] * directions[j * 3 + 1]
-      + directions[i * 3 + 2] * directions[j * 3 + 2]);
-  }
-  function tangent(i: number, x: number, y: number, z: number): [number, number, number] {
-    const k = i * 3, along = x * directions[k] + y * directions[k + 1] + z * directions[k + 2];
-    x -= along * directions[k]; y -= along * directions[k + 1]; z -= along * directions[k + 2];
-    let length = Math.hypot(x, y, z);
-    if (length < EPS) {
-      const axis = [Math.abs(directions[k]), Math.abs(directions[k + 1]), Math.abs(directions[k + 2])];
-      const a = axis.indexOf(Math.min(...axis));
-      const u = directions[k + a];
-      x = Number(a === 0) - u * directions[k];
-      y = Number(a === 1) - u * directions[k + 1];
-      z = Number(a === 2) - u * directions[k + 2];
-      length = Math.hypot(x, y, z);
-    }
-    return [x / length, y / length, z / length];
-  }
-  function turn(i: number, t: readonly number[], angle: number): void {
-    const k = i * 3, c = Math.cos(angle), s = Math.sin(angle);
-    normalize(i, directions[k] * c + t[0] * s,
-      directions[k + 1] * c + t[1] * s, directions[k + 2] * c + t[2] * s);
-  }
-  function toward(i: number, x: number, y: number, z: number, angle: number): void {
-    turn(i, tangent(i, x, y, z), Math.min(MAX_TURN, angle));
-  }
-  // Rotate a crown together, preserving its internal radii and relative angles.
-  function rotateCrown(i: number, t: readonly number[], angle: number): void {
-    const k = i * 3, ux = directions[k], uy = directions[k + 1], uz = directions[k + 2];
-    const ax = uy * t[2] - uz * t[1], ay = uz * t[0] - ux * t[2], az = ux * t[1] - uy * t[0];
-    const c = Math.cos(angle), s = Math.sin(angle);
-    for (const j of members[i]) {
-      const q = j * 3, x = directions[q], y = directions[q + 1], z = directions[q + 2];
-      const along = (ax * x + ay * y + az * z) * (1 - c);
-      normalize(j, x * c + (ay * z - az * y) * s + ax * along,
-        y * c + (az * x - ax * z) * s + ay * along,
-        z * c + (ax * y - ay * x) * s + az * along);
-    }
-  }
-  function spreadCrowns(alpha: number): void {
-    for (const fork of forks) {
-      const siblings = children[fork];
-      for (let relaxation = 0; relaxation < (isRoot(nodes[fork]) ? 4 : 1); relaxation++) {
-        // A coplanar repulsive system has an exact stationary saddle. Break only
-        // that degeneracy, in a frame derived from the crown, never the camera.
-        if (siblings.length >= (isRoot(nodes[fork]) ? 4 : 3)) {
-          let nx = 0, ny = 0, nz = 0, largest = 0;
-          for (let a = 0; a < siblings.length; a++) for (let b = 0; b < a; b++) {
-            const i = siblings[a] * 3, j = siblings[b] * 3;
-            const x = directions[i + 1] * directions[j + 2] - directions[i + 2] * directions[j + 1];
-            const y = directions[i + 2] * directions[j] - directions[i] * directions[j + 2];
-            const z = directions[i] * directions[j + 1] - directions[i + 1] * directions[j];
-            const length = Math.hypot(x, y, z);
-            if (length > largest) { largest = length; nx = x / length; ny = y / length; nz = z / length; }
-          }
-          if (largest > EPS && siblings.every(i => Math.abs(nx * directions[i * 3]
-            + ny * directions[i * 3 + 1] + nz * directions[i * 3 + 2]) < 0.001)) {
-            siblings.forEach((i, slot) => {
-              const sign = slot % 2 ? -1 : 1;
-              rotateCrown(i, tangent(i, nx * sign, ny * sign, nz * sign), 0.035);
-            });
-          }
-        }
-        // Evaluate one complete fork before moving any sibling. Sequential
-        // force evaluation gives symmetric crowns a spurious persistent torque.
-        const moves: { i: number; tangent: number[]; angle: number }[] = [];
-        for (const i of siblings) {
-          let x = 0, y = 0, z = 0;
-          for (const j of siblings) {
-            if (i === j) continue;
-            const c = dot(i, j), denominator = Math.max(0.04, 2 - 2 * c);
-            const weight = clamp(demand[j] / Math.max(EPS, demand[i]), 0.25, 4) / denominator;
-            x -= directions[j * 3] * weight;
-            y -= directions[j * 3 + 1] * weight;
-            z -= directions[j * 3 + 2] * weight;
-          }
-          const along = x * directions[i * 3] + y * directions[i * 3 + 1] + z * directions[i * 3 + 2];
-          const length = Math.hypot(x - along * directions[i * 3],
-            y - along * directions[i * 3 + 1], z - along * directions[i * 3 + 2]);
-          if (length > EPS) moves.push({i, tangent: tangent(i, x, y, z),
-            angle: Math.min(0.025, (isRoot(nodes[fork]) ? 0.03 : 0.015 * alpha) * length / Math.sqrt(siblings.length))});
-        }
-        // The root scaffold stays active after edge cooling; nested crowns
-        // retain their elastic cooling inside the moving territories.
-        for (const move of moves) rotateCrown(move.i, move.tangent, move.angle);
+  const clearance = nodes.map(node => radial.clearances.get(node.id)!);
+  const forks = [...children].filter(([, siblings]) => siblings.length > 1)
+    .sort(([a], [b]) => (byId.get(b)!.depth ?? 0) - (byId.get(a)!.depth ?? 0))
+    .map(([parent, siblings]) => ({
+      siblings,
+      branches: siblings.some(node => children.has(node.id)) ? siblings.map(node => ({
+        index: indexById.get(node.id)!,
+        layers: [...radial.footprints.get(node.id)!].map(([layer, footprint]) => ({
+          width: Math.sqrt(footprint),
+          members: members.get(node.id)!.filter(index => radial.fractions.get(nodes[index].id) === layer),
+        })),
+      })) : [],
+      // One sibling force at every fork. Inherited area gives crowded branches
+      // room; terminal siblings distribute evenly within that room.
+      charge: forceManyBody().strength((node: KnowledgeForceNode) =>
+        -chargeStrength * (members.get(parent)!.length - 1)
+          * radial.footprints.get(node.id)!.get(radial.fractions.get(node.id)!)!
+          / radial.footprints.get(parent)!.get(radial.fractions.get(node.id)!)!),
+    }));
+  const retainedVelocity = 1 - velocityDecay;
+  const outer = nodes.filter(node => radial.fractions.get(node.id) === 1);
+  const neighborDistance = radial.radius * Math.sqrt(8 / Math.max(1, outer.length));
+  // Spherical force relaxation: outer Articles repel even when their contact
+  // discs no longer touch. The radial constraint removes outward motion and
+  // the branch pass below keeps the remaining tangential motion in its branch.
+  const surfaceCharge = forceManyBody()
+    .strength(-neighborDistance * neighborDistance * 0.3)
+    .distanceMin(neighborDistance * 0.5)
+    .distanceMax(neighborDistance * 3);
+  // Every outer Article gets the same local neighbor-spacing rule. Half of
+  // the sphere's area is reserved for these contact discs, leaving room for
+  // branch borders. This fills empty patches without fixed angular targets.
+  const surfaceSpacing = forceCollide()
+    .radius((node: KnowledgeForceNode) => Math.max(radial.clearances.get(node.id)!,
+      radial.radius * Math.sqrt(2 / Math.max(1, outer.length))))
+    .iterations(COLLIDE_ITERATIONS);
+  const force = (alpha: number): void => {
+    for (const fork of forks) fork.charge(alpha);
+    if (outer.length > 1) surfaceCharge(alpha);
+    if (outer.length > 1) surfaceSpacing(alpha);
+    const directions = nodes.map(node => {
+      const x = (node.x ?? 0) + (node.vx ?? 0) * retainedVelocity;
+      const y = (node.y ?? 0) + (node.vy ?? 0) * retainedVelocity;
+      const z = (node.z ?? 0) + (node.vz ?? 0) * retainedVelocity;
+      const radius = Math.hypot(x, y, z) || 1;
+      return [x / radius, y / radius, z / radius, radius];
+    });
+    const projected = directions.map(direction => direction.slice());
+    const clearBoundary = (indices: readonly number[], nx: number, ny: number, nz: number, offset: number): void => {
+      for (const index of indices) {
+        const [x, y, z, radius] = projected[index];
+        const margin = Math.max(-0.98, Math.min(0.98, offset + Math.min(0.2, clearance[index] / radius)));
+        const side = Math.max(-1, Math.min(1, x * nx + y * ny + z * nz));
+        if (side >= margin) continue;
+        const tangentScale = Math.sqrt((1 - margin * margin) / Math.max(1e-8, 1 - side * side));
+        projected[index][0] = (x - nx * side) * tangentScale + nx * margin;
+        projected[index][1] = (y - ny * side) * tangentScale + ny * margin;
+        projected[index][2] = (z - nz * side) * tangentScale + nz * margin;
       }
-    }
-  }
-  function boundaries(solve: boolean): void {
-    for (const i of ascending) {
-      const p = parent[i];
-      if (p >= 0 && radii[p] > 0 && radii[i] > 0) {
-        const c = dot(i, p), floor = radii[p] / radii[i];
-        const missing = Math.max(0, radii[p] - radii[i] * c);
-        if (solve && missing > tolerance * 0.1) toward(i, directions[p * 3],
-          directions[p * 3 + 1], directions[p * 3 + 2],
-          Math.acos(c) - Math.acos(clamp(floor)));
-        else if (!solve) {
-          residuals.maxOutwardViolation = Math.max(residuals.maxOutwardViolation, missing);
-          if (missing > tolerance) capacityDepth = Math.min(capacityDepth, depth[i]);
-        }
-      }
-      for (const { fork, owner } of memberships[i]) for (const other of children[fork]) {
-        if (other === owner || radii[i] <= 0) continue;
-        let x = directions[owner * 3] - directions[other * 3];
-        let y = directions[owner * 3 + 1] - directions[other * 3 + 1];
-        let z = directions[owner * 3 + 2] - directions[other * 3 + 2];
-        const length = Math.hypot(x, y, z);
-        if (length < EPS) continue; // Contacts separate coincident fork roots.
-        x /= length; y /= length; z /= length;
-        // Capacity-weighted moving bisector. The bounded bias preserves each
-        // root's ownership while giving larger crowns more angular area.
-        const bias = 0.8 * length * 0.5 * (demand[owner] - demand[other])
-          / Math.max(EPS, demand[owner] + demand[other]);
-        const marginAngle = Math.asin(clamp(-bias)) + Math.asin(clamp(avoid[i] / radii[i], 0, 1));
-        const floor = Math.sin(Math.min(Math.PI / 2, marginAngle));
-        const c = clamp(x * directions[i * 3] + y * directions[i * 3 + 1] + z * directions[i * 3 + 2]);
-        const missing = Math.max(0, floor - c) * radii[i];
-        if (solve && missing > tolerance * 0.1) toward(i, x, y, z, Math.acos(c) - Math.acos(floor));
-        else if (!solve) {
-          residuals.maxTerritoryViolation = Math.max(residuals.maxTerritoryViolation, missing);
-          if (missing > tolerance) capacityDepth = Math.min(capacityDepth, depth[i]);
-        }
-      }
-    }
-  }
-  function contacts(solve: boolean): void {
-    // World-space broad phase only finds candidates. Narrow-phase corrections
-    // are great-circle rotations on the assigned shells, never radial pushes.
-    const size = cellSize;
-    const grid = new Map<string, number[]>();
-    const key = (x: number, y: number, z: number): string => `${x},${y},${z}`;
-    for (let i = 0; i < n; i++) {
-      const k = i * 3, r = radii[i];
-      const gx = Math.floor(directions[k] * r / size), gy = Math.floor(directions[k + 1] * r / size);
-      const gz = Math.floor(directions[k + 2] * r / size);
-      for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
-        for (const j of grid.get(key(gx + dx, gy + dy, gz + dz)) ?? []) {
-          const required = avoid[i] + avoid[j];
-          if (Math.abs(r - radii[j]) >= required) continue;
-          const c = dot(i, j);
-          const distance = Math.sqrt(Math.max(0, r * r + radii[j] ** 2 - 2 * r * radii[j] * c));
-          const overlap = Math.max(0, required - distance);
-          if (!solve) {
-            residuals.maxOverlap = Math.max(residuals.maxOverlap, overlap);
-            if (overlap > tolerance) capacityDepth = Math.min(capacityDepth, Math.max(depth[i], depth[j]));
-          } else if (overlap > tolerance * 0.1) {
-            const minimum = sphericalClearanceAngle(r, radii[j], required);
-            if (!Number.isFinite(minimum)) continue;
-            const angle = Math.min(MAX_TURN, minimum - Math.acos(c) + 1e-7);
-            const ti = tangent(i, -directions[j * 3], -directions[j * 3 + 1], -directions[j * 3 + 2]);
-            const tj = c > 1 - 1e-10 ? ti.map(value => -value)
-              : tangent(j, -directions[i * 3], -directions[i * 3 + 1], -directions[i * 3 + 2]);
-            const weight = radii[j] ** 2 / (r * r + radii[j] ** 2);
-            turn(i, ti, angle * weight); turn(j, tj, angle * (1 - weight));
+    };
+    // Inner forks settle first; their enclosing branch has the final boundary.
+    for (const { branches } of forks) {
+      for (let i = 0; i < branches.length; i += 1) {
+        for (let j = i + 1; j < branches.length; j += 1) {
+          const a = branches[i], b = branches[j];
+          const left = directions[a.index], right = directions[b.index];
+          const nx = left[0] - right[0], ny = left[1] - right[1], nz = left[2] - right[2];
+          const length = Math.hypot(nx, ny, nz);
+          if (length < 1e-8) continue;
+          // Divide the arc by inherited width, so a crowded branch can use
+          // nearby room without entering its smaller neighbor's clearance.
+          const angle = 2 * Math.asin(Math.min(1, length / 2));
+          for (let layer = 0; layer < a.layers.length; layer += 1) {
+            const left = a.layers[layer], right = b.layers[layer];
+            // Ended branches reserve no space beyond their last layer.
+            if (!left.width || !right.width) continue;
+            const offset = Math.sin(angle * (0.5 - left.width / (left.width + right.width)));
+            clearBoundary(left.members, nx / length, ny / length, nz / length, offset);
+            clearBoundary(right.members, -nx / length, -ny / length, -nz / length, -offset);
           }
         }
       }
-      const bin = key(gx, gy, gz), list = grid.get(bin) ?? [];
-      list.push(i); grid.set(bin, list);
     }
-  }
-  function measure(step: number): void {
-    residuals = zeroResiduals(); residuals.maxStepDisplacement = step;
-    capacityDepth = Infinity;
-    contacts(false); boundaries(false);
-  }
-  function read(initial: boolean): void {
-    for (let i = 0; i < n; i++) {
-      const node = nodes[i], k = i * 3;
-      before[k] = finite(node.x); before[k + 1] = finite(node.y); before[k + 2] = finite(node.z);
-      normalize(i, before[k] + (initial ? 0 : finite(node.vx) * damping),
-        before[k + 1] + (initial ? 0 : finite(node.vy) * damping),
-        before[k + 2] + (initial ? 0 : finite(node.vz) * damping));
-    }
-  }
-  // Initialization projects radius only; valid carried positions AND velocities
-  // remain byte-identical through a paint-only rebuild.
-  read(true);
-  for (let i = 0; i < n; i++) {
-    const node = nodes[i], r = radii[i];
-    if (Math.abs(Math.hypot(finite(node.x), finite(node.y), finite(node.z)) - r) <= 1e-7) continue;
-    node.x = directions[i * 3] * r; node.y = directions[i * 3 + 1] * r; node.z = directions[i * 3 + 2] * r;
-  }
-  if (!same) measure(Infinity);
-
-  const force = ((alpha: number): void => {
-    ticks++;
-    read(false);
-    spreadCrowns(alpha);
-    for (let pass = 0; pass < PASSES; pass++) {
-      boundaries(true); contacts(true);
-      if (pass % 3 === 2) {
-        measure(0);
-        if (Math.max(residuals.maxOverlap, residuals.maxOutwardViolation,
-          residuals.maxTerritoryViolation) <= tolerance * 0.25) break;
-      }
-    }
-    measure(0);
-    // Local capacity failures expand a WHOLE layer, never a single node and
-    // never an unchanged inner layer. The finite retry policy is observable.
-    if (alpha <= options.alphaMin && ticks % 32 === 0 && capacityDepth < Infinity) {
-      const layer = layerByDepth.get(capacityDepth);
-      if (layer && layer.depth > 0 && layer.expansions < MAX_EXPANSIONS) {
-        layer.radius *= 1.08; layer.expansions++;
-        updateCapacity(); stableTicks = 0;
-        for (let pass = 0; pass < PASSES; pass++) { boundaries(true); contacts(true); }
-        measure(0);
-      }
-    }
-    let step = 0;
-    for (let i = 0; i < n; i++) {
-      const node = nodes[i], k = i * 3, r = radii[i];
-      const x = directions[k] * r, y = directions[k + 1] * r, z = directions[k + 2] * r;
-      residuals.maxShellError = Math.max(residuals.maxShellError, Math.abs(Math.hypot(x, y, z) - r));
-      step = Math.max(step, Math.hypot(x - before[k], y - before[k + 1], z - before[k + 2]));
-      if (damping > EPS) {
-        node.vx = (x - before[k]) / damping;
-        node.vy = (y - before[k + 1]) / damping;
-        node.vz = (z - before[k + 2]) / damping;
-      } else {
-        node.x = x; node.y = y; node.z = z;
-        node.vx = node.vy = node.vz = 0;
-      }
-    }
-    residuals.maxStepDisplacement = step;
-    const valid = Math.max(residuals.maxShellError, residuals.maxOverlap, residuals.maxOutwardViolation,
-      residuals.maxTerritoryViolation) <= tolerance;
-    stableTicks = valid && step <= motionTolerance ? stableTicks + 1 : 0;
-    status = alpha <= options.alphaMin && stableTicks >= STABLE_TICKS ? "settled"
-      : ticks >= MAX_TICKS && alpha <= options.alphaMin
-        ? (valid ? "stalled" : "needs-capacity") : "settling";
-  }) as SphericalConstraint;
-  force.capture = () => ({ signature, ticks, stableTicks, status,
-    layers: layers.map(layer => ({ ...layer })), residuals: { ...residuals } });
-  force.needsTick = () => status === "settling";
-  return force;
+    nodes.forEach((node, index) => {
+      if (isBallRoot(node)) return;
+      const [x, y, z, radius] = projected[index];
+      node.vx = (x * radius - (node.x ?? 0)) / retainedVelocity;
+      node.vy = (y * radius - (node.y ?? 0)) / retainedVelocity;
+      node.vz = (z * radius - (node.z ?? 0)) / retainedVelocity;
+    });
+  };
+  return Object.assign(force, {
+    initialize(_members: KnowledgeForceNode[], random: () => number, dimensions: number): void {
+      for (const fork of forks) fork.charge.initialize(fork.siblings, random, dimensions);
+      surfaceCharge.initialize(outer, random, dimensions);
+      surfaceSpacing.initialize(outer, random, dimensions);
+    },
+  });
 }
-
-
-const sphericalConstraints = new WeakMap<ForceSimulation<KnowledgeForceNode>, SphericalConstraint>();
 
 /** One canonical physical signature for refresh and solver continuity. */
 export function knowledge3dPhysicsSignature(
@@ -1058,7 +822,7 @@ export function knowledge3dPhysicsSignature(
   tuning: Knowledge3dTuning,
 ): string {
   return JSON.stringify([
-    tuning.chargeStrength, tuning.velocityDecay, tuning.linkDistance,
+    tuning.chargeStrength, tuning.velocityDecay, tuning.linkDistance, tuning.branchClearance,
     [...nodes].sort((a, b) => a.id.localeCompare(b.id)).map(node => [
       node.id, node.depth, node.role, node.parentId, node.radius,
     ]),
@@ -1070,20 +834,19 @@ export function knowledge3dPhysicsSignature(
 
 export function captureKnowledge3dLayout(
   simulation: ForceSimulation<KnowledgeForceNode>,
-): SphericalState | undefined {
-  return sphericalConstraints.get(simulation)?.capture();
+): Knowledge3dRadialLayout | undefined {
+  return radialLayouts.get(simulation);
 }
 
-/** Alpha is a cooling schedule, not evidence that the geometry is valid. */
+/** Use the ordinary scene-owned D3 cooling schedule. */
 export function knowledge3dSimulationNeedsTick(
   simulation: ForceSimulation<KnowledgeForceNode>,
 ): boolean {
-  return simulation.alpha() > KNOWLEDGE_3D_ALPHA_MIN
-    || (sphericalConstraints.get(simulation)?.needsTick() ?? false);
+  return simulation.alpha() > KNOWLEDGE_3D_ALPHA_MIN;
 }
 
 /** Build the live simulation: springs, charge, collision, radial hierarchy
- *  and moving branch territories. Brain is pinned at the origin; the scene
+ *  with one shared outer radius. Brain is pinned at the origin; the scene
  *  owns the tick cadence. d3-force uses a deterministic internal LCG, so identical
  *  inputs replay identically. */
 export function createKnowledgeForceSimulation(
@@ -1091,31 +854,15 @@ export function createKnowledgeForceSimulation(
   links: readonly KnowledgeForceLink[],
   tuning: Knowledge3dTuning = DEFAULT_KNOWLEDGE_3D_TUNING,
   dimensions: 2 | 3 = 3,
-  previousLayout?: SphericalState,
+  minimumRadius = 0,
 ): ForceSimulation<KnowledgeForceNode> {
-  if (dimensions === 3) {
-    // The 2D projection gives Articles a common terminal paint tier. That
-    // value cannot define 3D distance: private physics depth comes from the
-    // exact parent chain, including shallow Articles. Preserve the existing
-    // fallback for incomplete/cyclic inputs without traversing them forever.
-    const byId = new Map(nodes.map(node => [node.id, node]));
-    const depths = new Map(nodes.filter(isBallRoot).map(node => [node.id, 0]));
-    for (const node of nodes) {
-      const path: KnowledgeForceNode[] = [], seen = new Set<string>();
-      let ancestor: KnowledgeForceNode | undefined = node;
-      while (ancestor && !depths.has(ancestor.id) && !seen.has(ancestor.id)) {
-        seen.add(ancestor.id);
-        path.push(ancestor);
-        ancestor = ancestor.parentId ? byId.get(ancestor.parentId) : undefined;
-      }
-      if (!ancestor || !depths.has(ancestor.id)) continue;
-      let depth = depths.get(ancestor.id)!;
-      for (const member of path.reverse()) {
-        member.depth = ++depth;
-        depths.set(member.id, depth);
-      }
-    }
+  // Physical depth follows exact ancestry, not the 2D terminal paint tier.
+  const radial = dimensions === 3 ? knowledge3dRadialLayout(nodes, tuning.branchClearance) : undefined;
+  if (radial && minimumRadius > radial.radius) {
+    radial.radius = minimumRadius;
+    radial.radii = new Map([...radial.fractions].map(([id, fraction]) => [id, fraction * minimumRadius]));
   }
+  if (radial) for (const node of nodes) node.depth = radial.depths.get(node.id);
   for (const node of nodes) {
     if (isBallRoot(node)) {
       node.x = 0;
@@ -1144,7 +891,8 @@ export function createKnowledgeForceSimulation(
         .id((node: KnowledgeForceNode) => node.id)
         .distance((link: ResolvedLink) =>
           link.taxonomy
-            ? knowledge3dLinkDistance(
+            ? radial ? Math.abs(radial.radii.get(link.source.id)! - radial.radii.get(link.target.id)!)
+              : knowledge3dLinkDistance(
                 Math.max(link.source.depth ?? 3, link.target.depth ?? 3),
                 link.source.radius,
                 link.target.radius,
@@ -1158,15 +906,15 @@ export function createKnowledgeForceSimulation(
     )
     .force(
       "charge",
-      forceManyBody()
+      dimensions === 3 ? null : forceManyBody()
         .strength(-tuning.chargeStrength)
         .distanceMax(knowledge3dLinkRest(tuning) * 3),
     )
     .force(
       "collide",
-      dimensions === 3 ? null : forceCollide()
+      forceCollide()
         .radius((node: KnowledgeForceNode) =>
-          knowledge3dAvoidanceRadius(node),
+          radial ? radial.clearances.get(node.id)! : knowledge3dAvoidanceRadius(node),
         )
         .iterations(COLLIDE_ITERATIONS),
     )
@@ -1182,26 +930,19 @@ export function createKnowledgeForceSimulation(
       "outwardHemisphere",
       dimensions === 3 ? null : forceKnowledgeLeafHemisphere(nodes, dimensions),
     );
-  if (dimensions === 3) {
-    const constraint = createSphericalConstraint(nodes, {
-      radii: knowledge3dDepthRadii(nodes, tuning),
-      avoidance: knowledge3dAvoidanceRadius,
-      velocityDecay: tuning.velocityDecay,
-      alphaMin: KNOWLEDGE_3D_ALPHA_MIN,
-      signature: knowledge3dPhysicsSignature(nodes, links, tuning),
-      previous: previousLayout,
-    });
-    // Last in d3's force order: solve contacts, outwardness and recursive
-    // crown boundaries together against the SAME predicted integration.
-    simulation.force("depthLayers", constraint);
-    sphericalConstraints.set(simulation, constraint);
+  if (radial) {
+    simulation.force("branchSeparation", forceKnowledgeBranchSeparation(
+      nodes, radial, tuning.velocityDecay, tuning.chargeStrength,
+    ));
+    simulation.force("dagRadial", forceKnowledgeRadialOut(nodes, radial, tuning.velocityDecay));
+    radialLayouts.set(simulation, radial);
   }
   return simulation;
 }
 
 /** Legacy Cartesian outward boundary retained for the separate 2D layout.
  * Its elastic shallow correction and hard backstop are unchanged. The 3D
- * factory uses the coupled spherical solver instead. */
+ * factory uses the normalized radialout layout instead. */
 export function forceKnowledgeLeafHemisphere(
   nodes: readonly KnowledgeForceNode[],
   dimensions: 2 | 3 = 3,
@@ -1272,15 +1013,9 @@ export function knowledge3dShellRadius(
   tuning: Knowledge3dTuning = DEFAULT_KNOWLEDGE_3D_TUNING,
 ): number {
   if (depth <= 0) return 0;
-  // Raw level law — dagLevelDistance semantics (vasturiano radialout):
-  // no cap, the Link distance slider spaces every level uniformly.
+  // Legacy depth helper used by the separate 2D seed layout.
+  // Actual 3D layers come from knowledge3dRadialLayout.
   return knowledge3dLinkRest(tuning) * depth;
-}
-
-function isBallSubject(node: {
-  role?: string;
-}): boolean {
-  return node.role === "section";
 }
 
 function isBallRoot(node: {
@@ -1290,202 +1025,30 @@ function isBallRoot(node: {
   return node.role === "root" || (node.depth ?? 3) === 0;
 }
 
-/** Deterministic spherical targets: depth-1 branches keep their 2D azimuth
- *  (so the six peers keep their sectors when viewed head-on) but tilt out
- *  of the screen plane with a stable per-id sign/magnitude, covering the
- *  full sphere; every descendant radiates outward from Brain within its
- *  parent's cone at its depth shell. Identical inputs give identical
- *  bytes. Run relaxKnowledge3dBall over the result for the avoidance
- *  radius. */
-/** Evenly spaced branch directions for N depth-1 peers: pole anchors
- *  (first up, second down — the owner's ordering law) plus a
- *  deterministic Thomson-style repulsion for the rest. Six converge to
- *  the octahedron, seven to the pentagonal bipyramid. */
-export function knowledge3dBranchDirections(
-  count: number,
-): ReadonlyArray<readonly [number, number, number]> {
-  if (count <= 0) return [];
-  if (count === 1) return [[0, 1, 0]];
-  const points: Array<[number, number, number]> = [
-    [0, 1, 0],
-    [0, -1, 0],
-  ];
-  // Deterministic golden-spiral init for the free points, biased to the
-  // equatorial band so the relaxation starts spread out.
-  for (let index = 2; index < count; index += 1) {
-    const free = count - 2;
-    const y = ((index - 2 + 0.5) / free - 0.5) * 0.8;
-    const radial = Math.sqrt(Math.max(0.05, 1 - y * y));
-    const angle = (index - 2) * 2.399963229728653;
-    points.push([
-      Math.cos(angle) * radial,
-      y,
-      Math.sin(angle) * radial,
-    ]);
-  }
-  // Pairwise repulsion on the sphere, poles pinned. 160 rounds is far
-  // past convergence for the ≤ 20 peers a real vault carries.
-  for (let round = 0; round < 160; round += 1) {
-    const step = 0.12;
-    for (let a = 2; a < points.length; a += 1) {
-      let fx = 0;
-      let fy = 0;
-      let fz = 0;
-      for (let b = 0; b < points.length; b += 1) {
-        if (a === b) continue;
-        const dx = points[a][0] - points[b][0];
-        const dy = points[a][1] - points[b][1];
-        const dz = points[a][2] - points[b][2];
-        const distanceSq = Math.max(1e-4, dx * dx + dy * dy + dz * dz);
-        const inverse = 1 / (distanceSq * Math.sqrt(distanceSq));
-        fx += dx * inverse;
-        fy += dy * inverse;
-        fz += dz * inverse;
-      }
-      let nx = points[a][0] + fx * step;
-      let ny = points[a][1] + fy * step;
-      let nz = points[a][2] + fz * step;
-      const length = Math.hypot(nx, ny, nz) || 1;
-      points[a] = [nx / length, ny / length, nz / length];
-    }
-  }
-  return points;
-}
-
+/** Stable, unstructured 3D seeds. No pole anchors or geometric branch slots:
+ * the force engine and moving sibling boundaries form the tree.
+ */
 export function knowledge3dBallTargets(
   nodes: readonly Knowledge3dBallNode[],
   hub: { x: number; y: number },
   tuning: Knowledge3dTuning = DEFAULT_KNOWLEDGE_3D_TUNING,
 ): Float32Array {
+  void hub;
+  const { radii } = knowledge3dRadialLayout(nodes, tuning.branchClearance);
   const targets = new Float32Array(nodes.length * 3);
-  const directions = new Float32Array(nodes.length * 3);
-  const indexById = new Map(nodes.map((node, index) => [node.id, index]));
-  const physicalNodes: KnowledgeForceNode[] = nodes.map(node => ({ ...node }));
-  const physicalById = new Map(physicalNodes.map(node => [node.id, node]));
-  for (const node of physicalNodes) {
-    if (isBallRoot(node)) { node.depth = 0; continue; }
-    let at: KnowledgeForceNode | undefined = node;
-    let depth = 0;
-    const seen = new Set<string>();
-    while (at && !isBallRoot(at) && !seen.has(at.id)) {
-      seen.add(at.id); depth++;
-      at = at.parentId ? physicalById.get(at.parentId) : undefined;
-    }
-    if (at && isBallRoot(at)) node.depth = depth;
-  }
-  const seedRadii = knowledge3dDepthRadii(physicalNodes, tuning);
-  // Depth-1 branch law (owner 2026-08-04, second round: a fixed axis
-  // table stranded the seventh peer on a lone diagonal beside four
-  // coplanar axes): the first branch anchors straight UP, the second
-  // straight DOWN, and every remaining peer relaxes to an EVENLY spaced
-  // direction via a deterministic Thomson-style repulsion with the two
-  // poles held fixed — six peers converge to the octahedron, seven to
-  // the pentagonal bipyramid, any N stays balanced. Encounter-ordered,
-  // no randomness: identical vaults seed identical skeletons.
-  const peerSlot = new Map<string, number>();
-  for (const node of nodes) {
-    if (isBallRoot(node)) continue;
-    const parentIndex =
-      node.parentId != null ? indexById.get(node.parentId) : undefined;
-    if (parentIndex === undefined || isBallRoot(nodes[parentIndex])) {
-      peerSlot.set(node.id, peerSlot.size);
-    }
-  }
-  const peerDirections = knowledge3dBranchDirections(peerSlot.size);
-  // Leaf siblings fan deterministically across the parent's outward cap
-  // on their common Brain-centered shell, with equal-area angular slots.
-  const leafSlot = new Map<string, { index: number; count: number }>();
-  {
-    const leavesByParent = new Map<string, string[]>();
-    for (const node of nodes) {
-      if (isBallSubject(node) || isBallRoot(node)) continue;
-      if (node.parentId == null) continue;
-      const siblings = leavesByParent.get(node.parentId) ?? [];
-      siblings.push(node.id);
-      leavesByParent.set(node.parentId, siblings);
-    }
-    for (const siblings of leavesByParent.values()) {
-      siblings.sort();
-      siblings.forEach((id, index) =>
-        leafSlot.set(id, { index, count: siblings.length }),
-      );
-    }
-  }
-  // Parents always sit at a shallower depth, so processing in depth order
-  // guarantees a child sees its parent's direction.
-  const order = nodes
-    .map((_, index) => index)
-    .sort((a, b) => (physicalNodes[a].depth ?? 99) - (physicalNodes[b].depth ?? 99));
-  for (const index of order) {
-    const node = nodes[index];
-    if (isBallRoot(node)) continue; // Brain pinned at the ball's center.
-    const parentIndex =
-      node.parentId != null ? indexById.get(node.parentId) : undefined;
-    const parentIsHub =
-      parentIndex === undefined || isBallRoot(nodes[parentIndex]);
-    let dx: number;
-    let dy: number;
-    let dz: number;
-    if (parentIsHub) {
-      const slot = peerSlot.get(node.id) ?? 0;
-      const direction = peerDirections[Math.min(slot, peerDirections.length - 1)];
-      dx = direction[0];
-      dy = direction[1];
-      dz = direction[2];
-    } else {
-      const px = directions[parentIndex * 3];
-      const py = directions[parentIndex * 3 + 1];
-      const pz = directions[parentIndex * 3 + 2];
-      // Orthonormal basis perpendicular to the parent direction.
-      const reference = Math.abs(py) < 0.9 ? [0, 1, 0] : [1, 0, 0];
-      let ux = py * reference[2] - pz * reference[1];
-      let uy = pz * reference[0] - px * reference[2];
-      let uz = px * reference[1] - py * reference[0];
-      const uLength = Math.hypot(ux, uy, uz) || 1;
-      ux /= uLength;
-      uy /= uLength;
-      uz /= uLength;
-      const vx = py * uz - pz * uy;
-      const vy = pz * ux - px * uz;
-      const vz = px * uy - py * ux;
-      const slot = leafSlot.get(node.id);
-      if (slot && parentIndex !== undefined) {
-        const radius = seedRadii.get(physicalNodes[index].depth ?? 3)!;
-        const parentRadius = seedRadii.get(physicalNodes[parentIndex].depth ?? 3)!;
-        const minimumCosine = Math.min(1, parentRadius / radius);
-        const cosine = minimumCosine + (1 - minimumCosine) * (slot.index + 0.5) / slot.count;
-        const gamma = hash01(node.parentId ?? node.id, 41) * Math.PI * 2
-          + slot.index * 2.399963229728653;
-        const sine = Math.sqrt(Math.max(0, 1 - cosine * cosine));
-        dx = px * cosine + (ux * Math.cos(gamma) + vx * Math.sin(gamma)) * sine;
-        dy = py * cosine + (uy * Math.cos(gamma) + vy * Math.sin(gamma)) * sine;
-        dz = pz * cosine + (uz * Math.cos(gamma) + vz * Math.sin(gamma)) * sine;
-      } else {
-        // Cones narrow with depth so subject subtrees stay coherent bundles.
-        const depth = node.depth ?? 3;
-        const cone = Math.max(0.22, 0.85 - 0.16 * (depth - 1));
-        const beta = cone * (0.35 + 0.6 * hash01(node.id, 29));
-        const gamma = hash01(node.id, 31) * Math.PI * 2;
-        const sinBeta = Math.sin(beta);
-        dx = px * Math.cos(beta) + (ux * Math.cos(gamma) + vx * Math.sin(gamma)) * sinBeta;
-        dy = py * Math.cos(beta) + (uy * Math.cos(gamma) + vy * Math.sin(gamma)) * sinBeta;
-        dz = pz * Math.cos(beta) + (uz * Math.cos(gamma) + vz * Math.sin(gamma)) * sinBeta;
-      }
-    }
-    const length = Math.hypot(dx, dy, dz) || 1;
-    directions[index * 3] = dx / length;
-    directions[index * 3 + 1] = dy / length;
-    directions[index * 3 + 2] = dz / length;
-    const shell = seedRadii.get(physicalNodes[index].depth ?? 3)!;
-    targets[index * 3] = directions[index * 3] * shell;
-    targets[index * 3 + 1] = directions[index * 3 + 1] * shell;
-    targets[index * 3 + 2] = directions[index * 3 + 2] * shell;
-  }
+  nodes.forEach((node, index) => {
+    const radius = radii.get(node.id) ?? 0;
+    const z = hash01(node.id, 29) * 2 - 1;
+    const angle = hash01(node.id, 31) * Math.PI * 2;
+    const circle = Math.sqrt(1 - z * z);
+    targets[index * 3] = radius * circle * Math.cos(angle);
+    targets[index * 3 + 1] = radius * circle * Math.sin(angle);
+    targets[index * 3 + 2] = radius * z;
+  });
   return targets;
 }
 
-/** Legacy radial seed expansion. The live 3D constructor immediately
- * restores common shell radii before rendering; settling is angular. */
+/** The constructor restores normalized branch radii before rendering. */
 export function seedKnowledge3dPositions(targets: Float32Array): Float32Array {
   const positions = new Float32Array(targets.length);
   for (let index = 0; index < targets.length; index += 1) {
@@ -2331,14 +1894,53 @@ export function knowledge3dPathSpec(
   };
 }
 
-/** 3D sweep progress in PLAN units (owner 2026-08-02, final form): ONE
- *  constant animation-progress SPEED — no minimum duration, no thinking
- *  hold, no arrive window. Timers re-paced the fronts mid-route and made
- *  the animation visibly wait; the sweep now simply runs from the moment
- *  the path arrives at `speedPerSec` plan-units/second until the whole
- *  route (plus the solid front's tail run-out) is filled. Phase only
- *  gates existence (null clears); `progressAtPhaseStart` keeps the clock
- *  continuous and monotonic across the thinking→speaking flip. */
+/** Extend a live route without moving its existing timing coordinates.
+ * Newly supplied links begin ahead of the current head, even when their
+ * freshly normalized route would otherwise fall behind it. */
+export function extendKnowledge3dPathSpec(
+  previous: Knowledge3dPathSpec | null,
+  next: Knowledge3dPathSpec,
+  progress: number,
+): Knowledge3dPathSpec {
+  if (!previous?.edgeSpans.size) return next;
+  const starts = [
+    ...[...next.edgeSpans].filter(([key]) => !previous.edgeSpans.has(key)).map(([, span]) => span.from),
+    ...[...next.nodeArrival].filter(([id]) => !previous.nodeArrival.has(id)).map(([, arrival]) => arrival),
+  ];
+  // Route-only ancestors are absent from nodeArrival. Recover their arrival
+  // from the retained beams so a second extension cannot outrun its junction.
+  const reached = new Map(previous.nodeArrival);
+  for (const [key, span] of previous.edgeSpans) {
+    if (span.meet) continue;
+    const [source, target] = key.split("|");
+    for (const [id, arrival] of [[source, span.fromSource ? span.from : span.to],
+      [target, span.fromSource ? span.to : span.from]] as const) {
+      reached.set(id, Math.min(reached.get(id) ?? Infinity, arrival));
+    }
+  }
+  let offset = starts.length ? Math.max(0, progress - Math.min(...starts)) : 0;
+  for (const [key, span] of next.edgeSpans) {
+    if (previous.edgeSpans.has(key)) continue;
+    const [source, target] = key.split("|");
+    const origins = span.meet ? [source, target] : [span.fromSource ? source : target];
+    for (const id of origins) offset = Math.max(offset, (reached.get(id) ?? 0) - span.from);
+  }
+  const edgeSpans = new Map([...next.edgeSpans].map(([key, span]) => [key,
+    previous.edgeSpans.get(key) ?? { ...span, from: span.from + offset, to: span.to + offset },
+  ]));
+  const nodeArrival = new Map([...next.nodeArrival].map(([id, arrival]) => [id,
+    previous.nodeArrival.get(id) ?? arrival + offset,
+  ]));
+  return {
+    edgeSpans, nodeArrival,
+    firstNodeProgress: previous.firstNodeProgress,
+    firstArticleProgress: previous.firstArticleProgress,
+    maxProgress: Math.max(0, ...[...edgeSpans.values()].map(span => span.to), ...nodeArrival.values()),
+  };
+}
+
+/** Continuous progress through the real route, including the trailing fill.
+ *  Speech changes neither the speed nor the remaining distance. */
 export function knowledgeSweepProgress3d(
   phase: KnowledgeFocusPhase,
   msInPhase: number,

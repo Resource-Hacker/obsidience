@@ -35,7 +35,7 @@ function sameTuning(left: Knowledge3dTuning, right: Knowledge3dTuning): boolean 
 
 export function TuningPaneBody() {
   const [options, setOptions] = useState<GraphOption[]>([
-    { id: MAIN_GRAPH_ID, label: "JARVIS (Executive)", order: 0 },
+    { id: MAIN_GRAPH_ID, label: "Computer (Executive)", order: 0 },
     { id: LIBRARY_GRAPH_ID, label: "Library", order: 5 },
   ]);
   const [graphId, setGraphId] = useState(MAIN_GRAPH_ID);
@@ -67,7 +67,7 @@ export function TuningPaneBody() {
       setOptions([
         {
           id: MAIN_GRAPH_ID,
-          label: `${graph.nodes.find((node) => node.id === "Agents/Executive/Executive")?.title ?? "JARVIS"} (Executive)`,
+          label: `${graph.nodes.find((node) => node.id === "Agents/Executive/Executive")?.title ?? "Computer"} (Executive)`,
           order: 0,
         },
         ...agents.values(),
@@ -88,6 +88,7 @@ export function TuningPaneBody() {
   const sections = useMemo(() => groupKnowledgeTuningFields(
     KNOWLEDGE_3D_TUNING_FIELDS
       .filter((field) => graphId !== MAIN_GRAPH_ID || !field.satelliteOnly)
+      .filter((field) => graphId === MAIN_GRAPH_ID || !field.mainOnly)
       .map((field) => graphId !== LIBRARY_GRAPH_ID && LIBRARY_NODE_STYLE_KEYS.has(field.key)
         ? { ...field, max: 3, options: field.options?.slice(0, 4) }
         : field),

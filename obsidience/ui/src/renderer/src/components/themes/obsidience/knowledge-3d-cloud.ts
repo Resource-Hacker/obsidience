@@ -4,7 +4,7 @@
 // executive ball and every satellite build through createKnowledge3dCloud
 // with their own tuning records; the ONLY differences are flags:
 //   - satellites orbit/spin (updateOrbit) and render SMALLER via a pure
-//     group render transform (ballScale × graphScale) — physics run at
+//     group render transform (ballScale × saved graphScale) — physics run at
 //     FULL scale for every cloud, so collision floors, link rests, and
 //     the radialout stratification are numerically identical everywhere
 //     (the old shrunk-physics satellites let the unscaled collision
@@ -21,12 +21,12 @@ import {
   captureKnowledge3dLayout,
   knowledge3dSimulationNeedsTick,
   knowledge3dPhysicsSignature,
-  type SphericalState,
+  type Knowledge3dRadialLayout,
   KNOWLEDGE_3D_HOVER_ARTICLE_LEVEL,
   KNOWLEDGE_3D_REHEAT_ALPHA,
   KNOWLEDGE_3D_WORLD_SPAN,
   knowledge3dRevealWindow,
-  knowledge3dShellRadius,
+  knowledge3dSweepTail,
   knowledge3dNodeSizeMultiplier,
   createKnowledgeForceSimulation,
   knowledge3dBallTargets,
@@ -47,13 +47,16 @@ import {
 } from "./knowledge-3d";
 import type { ForceSimulation } from "d3-force-3d";
 import { KNOWLEDGE_CROSS_SEGMENTS as CROSS_SEGMENTS, writeKnowledgeCrossRoute } from "./knowledge-3d-links";
+import { KNOWLEDGE_LINK_APPROVAL_DURATION_MS } from "./knowledge-3d-shaders";
+export { KNOWLEDGE_LINK_APPROVAL_DURATION_MS };
 
 /** Leaf sprites carry the plasma-orb halo and star flare, so the quad
  *  extends well past the disc (owner 2026-08-02: the 3D articles are the
  *  same jewel-star plasma orbs as the 2D map). */
 const LEAF_SPRITE_EXTENT = 3.2;
 
-export const KNOWLEDGE_LINK_APPROVAL_DURATION_MS = 4000;
+export const KNOWLEDGE_ACTIVITY_FADE_MS = 420;
+const SELECTION_TRANSITION_MS = 340;
 
 /** Transient Review paint over the separate scene presentation model. */
 export interface Knowledge3dRelationEffect {
@@ -152,6 +155,7 @@ export function knowledge3dCloudPhysicsSignature(tuning: Knowledge3dTuning): str
     tuning.lineBranches,
     tuning.linePeers,
     tuning.linkDistance,
+    tuning.branchClearance,
     tuning.sizeCore,
     tuning.sizeBranch,
     tuning.sizeSubnode,
@@ -166,7 +170,7 @@ export interface Knowledge3dSimulationState {
   signature: string;
   alpha: number;
   tuning: Knowledge3dTuning;
-  layout?: SphericalState;
+  radius?: number;
 }
 
 export interface Knowledge3dCloud {
@@ -179,7 +183,7 @@ export interface Knowledge3dCloud {
   tickIfHot(): boolean;
   captureSimNodes(): ReadonlyMap<string, KnowledgeForceNode>;
   captureSimulation(): Knowledge3dSimulationState;
-  layoutDiagnostics(): SphericalState | undefined;
+  layoutDiagnostics(): Knowledge3dRadialLayout | undefined;
   applyTuning(tuning: Knowledge3dTuning, pixelRatio: number): void;
   applyRelationEffects(effects: readonly Knowledge3dRelationEffect[], now: number): void;
   updateOrbit(tuning: Knowledge3dTuning, timeSeconds: number): void;
@@ -198,13 +202,17 @@ export interface Knowledge3dCloud {
     glow: number,
     flowAge: number,
     headSpan?: number,
+    opacity?: number,
   ): void;
+  /** Selection shares the real beam geometry and Scene clock; old paths retract. */
+  driveSelection(spec: Knowledge3dPathSpec | null, id: string, now: number): boolean;
   /** Node ignition as the SOLID front passes arrivals; the optional
    *  focus set gates which nodes may light at all (main-ball law). */
   applyFocusReveal(
     spec: Knowledge3dPathSpec | null,
     solidFront: number,
-    focus?: { active: boolean; nodeIds: ReadonlySet<string> } | null,
+    focus?: { active: boolean; nodeIds: ReadonlySet<string>;
+      accents?: ReadonlyMap<string, { color: string; mode: number }>; opacity?: number } | null,
   ): void;
   nodeWorldPosition(rawId: string, out: THREE.Vector3): boolean;
   sortSprites(cameraPosition: THREE.Vector3): void;
@@ -225,13 +233,6 @@ export function createKnowledge3dCloud(
   const tuning = input.tuning;
   const renderBallScale = (live: Knowledge3dTuning): number =>
     isMain ? live.graphScale : live.graphScale * live.ballScale;
-  const carriedScale = (depth: number | undefined): number => {
-    if (!previous) return 1;
-    const d = Math.max(1, depth ?? 3);
-    const from = knowledge3dShellRadius(d, previous.tuning);
-    const to = knowledge3dShellRadius(d, tuning);
-    return from > 1e-6 ? to / from : 1;
-  };
   const group = new THREE.Group();
   const disposables: Array<{ dispose(): void }> = [];
 
@@ -254,21 +255,20 @@ export function createKnowledge3dCloud(
   );
   const simNodes: KnowledgeForceNode[] = nodes.map((node, index) => {
     const carried = previous?.nodes.get(node.id);
-    const scale = carried ? carriedScale(node.depth) : 1;
     return {
       id: node.id,
       depth: node.depth,
       role: node.role,
       parentId: node.parentId,
       radius: nodeRadius(node),
-      x: carried?.x !== undefined ? carried.x * scale : seeded[index * 3],
+      x: carried?.x !== undefined ? carried.x : seeded[index * 3],
       y:
         carried?.y !== undefined
-          ? carried.y * scale
+          ? carried.y
           : seeded[index * 3 + 1],
       z:
         carried?.z !== undefined
-          ? carried.z * scale
+          ? carried.z
           : seeded[index * 3 + 2],
       vx: carried?.vx ?? 0,
       vy: carried?.vy ?? 0,
@@ -288,14 +288,24 @@ export function createKnowledge3dCloud(
       || a.target.localeCompare(b.target) || Number(a.taxonomy) - Number(b.taxonomy));
   // d3 iterates nodes and links in input order. Keep its private order stable
   // when a proposed spring becomes accepted; render buffers retain their order.
+  // Pure additions keep the already-required radius as a floor. A slightly
+  // different contact fit must not shrink the sphere as Knowledge is added.
+  // Removals, hierarchy changes, smaller glyphs or clearance can reclaim space.
+  const minimumRadius = previous && simNodes.length > previous.nodes.size
+    && tuning.branchClearance >= previous.tuning.branchClearance
+    && [...previous.nodes].every(([id, old]) => {
+      const index = indexById.get(id);
+      const node = index === undefined ? undefined : simNodes[index];
+      return node && node.parentId === old.parentId && node.radius >= old.radius;
+    }) ? previous.radius ?? 0 : 0;
   const simulation: ForceSimulation<KnowledgeForceNode> =
     createKnowledgeForceSimulation([...simNodes].sort((a, b) => a.id.localeCompare(b.id)),
-      links, tuning, 3, previous?.layout);
+      links, tuning, 3, minimumRadius);
   // A proposed spring can change degree-sized glyphs and their layer spacing.
   // Keep the last painted state until the first ordinary simulation tick.
   // Fresh nodes or changed ancestry/spacing still require initial projection;
   // the comparison uses the semantic depths normalized by the force factory.
-  if (previous && previous.tuning.linkDistance === tuning.linkDistance
+  if (previous
       && previous.nodes.size === simNodes.length
       && simNodes.every((node) => {
         const carried = previous.nodes.get(node.id);
@@ -310,12 +320,16 @@ export function createKnowledge3dCloud(
   }
   const signature = knowledge3dPhysicsSignature(simNodes, links, tuning);
   if (previous && previous.nodes.size > 0) {
+    // Paint-only refreshes retain the final contact fit as well as cooling.
+    const layout = captureKnowledge3dLayout(simulation);
+    if (signature === previous.signature && layout && previous.radius !== undefined) {
+      layout.radius = previous.radius;
+      layout.radii = new Map([...layout.fractions].map(([id, fraction]) => [id, fraction * layout.radius]));
+    }
     simulation.alpha(
       signature === previous.signature
         ? previous.alpha
-        : previous.tuning.linkDistance !== tuning.linkDistance
-          ? Math.max(KNOWLEDGE_3D_REHEAT_ALPHA, 0.5)
-          : KNOWLEDGE_3D_REHEAT_ALPHA,
+        : KNOWLEDGE_3D_REHEAT_ALPHA,
     );
   }
   const positions = new Float32Array(nodes.length * 3);
@@ -393,6 +407,11 @@ export function createKnowledge3dCloud(
   const focusAttribute = new THREE.BufferAttribute(focusLevels, 1);
   focusAttribute.setUsage(THREE.DynamicDrawUsage);
   geometry.setAttribute("aFocus", focusAttribute);
+  const activityLevels = new Float32Array(nodes.length * 4);
+  const activityAttribute = new THREE.BufferAttribute(activityLevels, 4);
+  activityAttribute.setUsage(THREE.DynamicDrawUsage);
+  geometry.setAttribute("aActivity", activityAttribute);
+  let activityAccents: ReadonlyMap<string, { color: string; mode: number }> | undefined;
   geometry.setAttribute("aSeed", new THREE.BufferAttribute(seeds, 1));
   geometry.setAttribute("aCurate", new THREE.BufferAttribute(curates, 1));
   const drawIndex = new THREE.BufferAttribute(
@@ -412,6 +431,7 @@ export function createKnowledge3dCloud(
   const subnodeStyleUniform = { value: input.tuning.subnodeStyle };
   const ringStyleUniform = { value: input.tuning.ringStyle };
   const pointUniforms = {
+    uActivityOpacity: { value: 1 },
     uPerspective: deps.sharedUniforms.uPerspective,
     uPulse: deps.sharedUniforms.uPulse,
     uSpeechLevel: isMain ? deps.sharedUniforms.uSpeechLevel : { value: 0 },
@@ -628,6 +648,7 @@ export function createKnowledge3dCloud(
   }
 
   const inertPathUniforms = {
+    uPathOpacity: { value: 1 },
     uBeamP: { value: -1 },
     uSolidP: { value: -1 },
     uGlow: { value: 0 },
@@ -1096,6 +1117,26 @@ export function createKnowledge3dCloud(
   let hoverSubtree: Set<string> | null = null;
   let hoveredIndex = -1;
   const revealLevels = new Float32Array(nodes.length);
+  const selectionLevels = new Float32Array(nodes.length);
+  const selectionLayers = new Map<string, {
+    spec: Knowledge3dPathSpec; amount: number; from: number; target: number; started: number;
+    nodeLevels: Map<string, number>; nodeFrom: Map<string, number>;
+    meshes: THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial>[];
+  }>();
+  let selectionId = "";
+  const disposeSelection = (layer: { meshes: THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial>[] }) => {
+    for (const mesh of layer.meshes) {
+      group.remove(mesh);
+      // Shared live geometry belongs to the cloud. Dispose only this overlay's
+      // path attribute; deleting shared GPU buffers would disturb other paths.
+      for (const name of Object.keys(mesh.geometry.attributes)) {
+        if (name !== "aP") mesh.geometry.deleteAttribute(name);
+      }
+      mesh.geometry.setIndex(null);
+      mesh.geometry.dispose();
+      mesh.material.dispose();
+    }
+  };
   const fillHoverFlags = (set: BeamSet): void => {
     const attribute = set.geometry.getAttribute(
       "aHover",
@@ -1128,7 +1169,7 @@ export function createKnowledge3dCloud(
           : inSubtree && !nodes[i].subject
             ? KNOWLEDGE_3D_HOVER_ARTICLE_LEVEL
             : 0;
-      const level = Math.max(revealLevels[i], hoverLevel);
+      const level = Math.max(revealLevels[i], selectionLevels[i], hoverLevel);
       if (Math.abs(focusLevels[i] - level) > 0.01) {
         focusLevels[i] = level;
         dirty = true;
@@ -1155,16 +1196,6 @@ export function createKnowledge3dCloud(
       copySimPositions();
       positionAttribute.needsUpdate = true;
       syncAllPositions();
-      if (!knowledge3dSimulationNeedsTick(simulation)) {
-        const layout = captureKnowledge3dLayout(simulation);
-        if (layout && layout.status !== "settled") {
-          // One terminal warning, not an endless idle solve or false success.
-          console.warn("Knowledge layout did not converge", {
-            agentId, status: layout.status, ticks: layout.ticks,
-            residuals: layout.residuals,
-          });
-        }
-      }
       return true;
     },
     captureSimNodes() {
@@ -1176,7 +1207,7 @@ export function createKnowledge3dCloud(
         signature,
         alpha: simulation.alpha(),
         tuning,
-        layout: captureKnowledge3dLayout(simulation),
+        radius: captureKnowledge3dLayout(simulation)?.radius,
       };
     },
     layoutDiagnostics() {
@@ -1302,16 +1333,107 @@ export function createKnowledge3dCloud(
       }
       if (!spec) this.drivePathTimeline(-1, -1, 0, -1);
     },
-    drivePathTimeline(beamProgress, solidProgress, glow, flowAge, headSpan) {
+    drivePathTimeline(beamProgress, solidProgress, glow, flowAge, headSpan, opacity = 1) {
       inertPathUniforms.uBeamP.value = beamProgress;
       inertPathUniforms.uSolidP.value = solidProgress;
       inertPathUniforms.uGlow.value = glow;
       inertPathUniforms.uFlowAge.value = flowAge;
+      inertPathUniforms.uPathOpacity.value = opacity;
       if (headSpan !== undefined) {
         inertPathUniforms.uHeadSpan.value = headSpan;
       }
     },
+    driveSelection(spec, id, now) {
+      const nextId = spec ? id : "";
+      if (nextId !== selectionId) {
+        selectionId = nextId;
+        for (const [key, layer] of selectionLayers) {
+          layer.from = layer.amount;
+          layer.target = key === nextId ? 1 : 0;
+          layer.started = now;
+          layer.nodeFrom = new Map(layer.nodeLevels);
+        }
+        if (spec && !selectionLayers.has(nextId)) {
+          const meshes = [spokes, branches].map((set) => {
+            const geometry = new THREE.BufferGeometry();
+            for (const [name, attribute] of Object.entries(set.geometry.attributes)) geometry.setAttribute(name, attribute);
+            geometry.setIndex(set.geometry.index);
+            const path = new Float32Array(set.keys.length * 4).fill(-1);
+            set.keys.forEach((key, index) => {
+              const span = spec.edgeSpans.get(key);
+              if (!span) return;
+              const from = span.fromSource ? span.from : span.to;
+              const to = span.fromSource ? span.to : span.from;
+              path.set([from, from, to, to], index * 4);
+            });
+            geometry.setAttribute("aP", new THREE.BufferAttribute(path, 1));
+            const base = set.mesh.material as THREE.ShaderMaterial;
+            const material = new THREE.ShaderMaterial({
+              uniforms: { ...base.uniforms, uBeamP: { value: -1 }, uSolidP: { value: -1 },
+                uGlow: { value: 0 }, uFlowAge: { value: -1 }, uOpacity: { value: 0 },
+                uHeadSpan: { value: Math.max(0.02, spec.firstArticleProgress * 0.07) }, uPathOpacity: { value: 1 } },
+              defines: { KNOWLEDGE_SELECTION: 1 }, vertexShader: deps.beamVertexShader,
+              fragmentShader: deps.taxonomyFragmentShader, transparent: true,
+              depthWrite: false, depthTest: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
+            });
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.frustumCulled = false;
+            group.add(mesh);
+            return mesh;
+          });
+          selectionLayers.set(nextId, { spec, amount: 0, from: 0, target: 1, started: now, meshes,
+            nodeLevels: new Map(), nodeFrom: new Map() });
+        }
+      }
+      selectionLevels.fill(0);
+      let moving = false;
+      for (const [key, layer] of selectionLayers) {
+        const t = Math.min(1, Math.max(0, (now - layer.started) / SELECTION_TRANSITION_MS));
+        const eased = t * t * (3 - 2 * t);
+        layer.amount = layer.from + (layer.target - layer.from) * eased;
+        if (t === 1 && layer.target === 0) {
+          disposeSelection(layer);
+          selectionLayers.delete(key);
+          continue;
+        }
+        moving ||= t < 1;
+        const end = layer.spec.maxProgress + knowledge3dSweepTail(layer.spec);
+        const progress = layer.amount * end;
+        const solid = progress - layer.spec.firstNodeProgress;
+        for (const mesh of layer.meshes) {
+          mesh.material.uniforms.uBeamP.value = Math.min(progress, layer.spec.maxProgress);
+          mesh.material.uniforms.uSolidP.value = solid > 0 ? solid : -1;
+          mesh.material.uniforms.uPathOpacity.value = Math.min(1, layer.amount * 4);
+        }
+        const window = knowledge3dRevealWindow(layer.spec.firstArticleProgress);
+        for (const [ref, arrival] of layer.spec.nodeArrival) {
+          const index = indexById.get(ref);
+          const remaining = (layer.nodeFrom.get(ref) ?? 0) * (1 - eased);
+          const level = layer.target === 0 ? remaining : Math.max(remaining,
+            Math.max(0, Math.min(1, (solid - arrival) / window)));
+          layer.nodeLevels.set(ref, level);
+          if (index !== undefined) selectionLevels[index] = Math.max(selectionLevels[index], level);
+        }
+      }
+      applyHoverLevels();
+      return moving;
+    },
     applyFocusReveal(spec, solidFront, focus) {
+      const opacity = focus?.opacity ?? 1;
+      pointUniforms.uActivityOpacity.value = opacity;
+      // Only operation changes upload color/mode attributes. The Scene's
+      // existing clock draws the pulse; no physics or palette mutation.
+      if (activityAccents !== focus?.accents) {
+        activityAccents = focus?.accents;
+        activityLevels.fill(0);
+        for (const [id, accent] of activityAccents ?? []) {
+          const index = indexById.get(id);
+          if (index === undefined) continue;
+          const color = deps.parseColor(accent.color);
+          activityLevels.set([color.r, color.g, color.b, accent.mode], index * 4);
+        }
+        activityAttribute.needsUpdate = true;
+      }
       const revealWindow = knowledge3dRevealWindow(
         spec?.firstArticleProgress ?? 1,
       );
@@ -1345,7 +1467,8 @@ export function createKnowledge3dCloud(
           // plan-less selection): lit fully, exactly the pre-plan law.
           reveal = 1;
         }
-        if (Math.abs(revealLevels[i] - reveal) > 0.01) {
+        reveal *= opacity;
+        if (Math.abs(revealLevels[i] - reveal) > 0.001) {
           revealLevels[i] = reveal;
           dirty = true;
         }
@@ -1383,6 +1506,7 @@ export function createKnowledge3dCloud(
     },
     dispose(scene) {
       clearReview();
+      for (const layer of selectionLayers.values()) disposeSelection(layer);
       scene.remove(group);
       for (const disposable of disposables) disposable.dispose();
     },

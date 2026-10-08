@@ -6,6 +6,8 @@
  *  tendrils distinct from hierarchy edges. */
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { GraphPublisher } from "@/surfaces/graph-stream";
+import type { ProviderNode } from "@/surfaces/provider-graph-scene";
 import {
   Knowledge3dScene,
   type Knowledge3dLabelMeta,
@@ -16,8 +18,6 @@ import {
   computeKnowledgeSweepPlan,
   knowledgeAgentNodeId,
   knowledge3dPathSpec,
-  knowledge3dSweepTail,
-  knowledgeSweepProgress3d,
   parseKnowledgeAgentNodeId,
   type Knowledge3dPathSpec,
   type Knowledge3dTuning,
@@ -43,6 +43,7 @@ import {
   announceKnowledgeActivity,
   api,
   onKnowledgeActivity,
+  onOpenReader,
   openReader,
   type GraphNavigation,
   type GraphLink,
@@ -62,11 +63,15 @@ import {
 import { projectedAutoCuratedRefs } from "./graph-curation";
 import { articleDisplayAliases, graphArticleIds, projectedArticleLinks, visibleArticleLinks, withoutTaxonomyLinks } from "./graph-links";
 import { ActionTracePopup } from "./action-trace-popup";
+import { currentOperations, operationDeadline, operationAccent, operationStatus,
+  type GraphOperation, type GraphActivityAccent } from "./graph-activity";
 import { KNOWLEDGE_LINK_APPROVAL_DURATION_MS } from "@/components/themes/obsidience/knowledge-3d-cloud";
 import { previewLinkReviewCloud, projectLinkReviewEffects, recordLinkApproval, type LinkApproval } from "./graph-link-review";
+import { claimShellKnowledgePresenter, onShellReaderSelection, type GraphSource } from "@/lib/shell-client";
 
 const ROOT_ID = "@vault";
-const FOCUS_LINGER_MS = 6_000;
+const FOCUS_LINGER_MS = 650; // Let the completion pulse finish before the Scene fades.
+const READABLE_SWEEP_SECONDS = 1.6; // Initial branch travel; relationship tails keep this pace.
 
 interface ActivityWireEntry {
   run_id?: string;
@@ -81,9 +86,11 @@ interface ActivityWireEntry {
 }
 
 interface ActivityWireMessage extends ActivityWireEntry {
-  type?: "activity" | "snapshot" | "playback";
+  type?: "activity" | "snapshot" | "playback" | "operation";
   entries?: ActivityWireEntry[];
   playback?: SpeechPlayback;
+  operation?: GraphOperation;
+  operations?: GraphOperation[];
 }
 
 interface SpeechPlayback {
@@ -182,7 +189,7 @@ function isArticleEndpoint(node: GraphNode): boolean {
   return node.kind !== "agent";
 }
 
-function buildThinkingRoute(cloud: GraphCloud, refs: readonly string[]): ThinkingRoute | null {
+function buildThinkingRoute(cloud: GraphCloud, refs: readonly string[], refGroups: readonly (readonly string[])[] = [refs]): ThinkingRoute | null {
   const byId = new Map(cloud.nodes.map((node) => [node.id, node]));
   const targets = [...new Set(refs)].filter((ref) => byId.has(ref));
   if (targets.length === 0) return null;
@@ -216,6 +223,9 @@ function buildThinkingRoute(cloud: GraphCloud, refs: readonly string[]): Thinkin
   // hierarchy waypoint is not evidence that another Article entered the packet.
   for (const edge of edges) {
     if (edge.taxonomy || !nodeIds.has(edge.source) || !nodeIds.has(edge.target)) continue;
+    // Same-run packet and returned refs share context. Separate runs and owner
+    // operations never acquire connections merely by appearing together.
+    if (!refGroups.some((group) => group.includes(edge.source) && group.includes(edge.target))) continue;
     activeEdgeIds.add(edge.id);
   }
   const positions = new Map(cloud.nodes.map((node) => [node.id, { x: node.x, y: node.y }]));
@@ -289,10 +299,18 @@ function NodeActionMenu({ menu, title, canEdit, onSelect, onRead, onClose, onCle
 export function GraphBackdrop({
   visible = true,
   lockMode = false,
+  sharePresentation = false,
+  graphScope = MAIN_GRAPH_ID,
+  presentationSource = "knowledge",
+  onPresentationConsumers,
   hub = DEFAULT_KNOWLEDGE_HUB_ANCHOR,
 }: {
   visible?: boolean;
   lockMode?: boolean;
+  sharePresentation?: boolean;
+  graphScope?: string;
+  presentationSource?: GraphSource;
+  onPresentationConsumers?: (count: number) => void;
   hub?: KnowledgeLayoutAnchor;
 } = {}) {
   const [graph, setGraph] = useState<VaultGraphSnapshot>({
@@ -300,9 +318,16 @@ export function GraphBackdrop({
     navigation: { groups: [] },
   });
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [publisher, setPublisher] = useState<GraphPublisher | null>(null);
+  useEffect(() => lockMode ? undefined : claimShellKnowledgePresenter(presentationSource === "library" ? "library" : "knowledge"), [lockMode, presentationSource]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [readerSelection, setReaderSelection] = useState<{ ref: string; graphId: string } | null>(null);
   const [nodeMenu, setNodeMenu] = useState<NodeMenuState | null>(null);
+  useEffect(() => {
+    setHoveredId(null); setSelectedId(null); setReaderSelection(null); setNodeMenu(null);
+  }, [graphScope]);
   const [activity, setActivity] = useState<ActiveThinking | null>(null);
+  const [operations, setOperations] = useState<GraphOperation[]>([]);
   const [traceInspectionSince, setTraceInspectionSince] = useState<number | null>(null);
   const [traceDismissedSince, setTraceDismissedSince] = useState<number | null>(null);
   const [sceneKey, setSceneKey] = useState(0);
@@ -312,6 +337,8 @@ export function GraphBackdrop({
   const activityKey = useRef(0);
   const lingerTimer = useRef<number | null>(null);
   const activityTransaction = useRef<KnowledgeActivity | null>(null);
+  const finishedRuns = useRef(new Map<string, number>()); // Per-run presentation expiry.
+  const [clearedRuns, setClearedRuns] = useState<ReadonlySet<string>>(new Set());
   const playback = useRef<SpeechPlayback>({ status: "idle", level: 0, run_id: "", playback_id: "" });
   const speechEnvelope = useRef({ level: 0, updatedAt: 0 });
   const testTimers = useRef<number[]>([]);
@@ -323,16 +350,47 @@ export function GraphBackdrop({
   const [linkApprovals, setLinkApprovals] = useState<LinkApproval[]>([]);
   const proposalStarts = useRef(new Map<string, number>());
 
+  // One finite expiry deadline; the existing Scene still owns animation frames.
+  useEffect(() => {
+    const settled = operations.filter((entry) => operationDeadline(entry));
+    if (!settled.length) return;
+    const deadline = Math.min(...settled.map(operationDeadline));
+    const timer = window.setTimeout(() => setOperations((current) => currentOperations(current)),
+      Math.max(1, deadline - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [operations]);
+
+  useEffect(() => {
+    const select = (ref: string, graphId: string) => setReaderSelection((previous) =>
+      previous?.ref === ref && previous.graphId === (graphId || MAIN_GRAPH_ID) ? previous
+        : ref ? { ref, graphId: graphId || MAIN_GRAPH_ID } : null);
+    const closeWeb = onOpenReader(select);
+    const closeNative = onShellReaderSelection(select);
+    return () => { closeWeb(); closeNative(); };
+  }, []);
+
   function speechHolds(next: KnowledgeActivity): boolean {
     return playback.current.status !== "idle" && Boolean(next.runId)
       && next.runId === playback.current.run_id && (next.graphId ?? MAIN_GRAPH_ID) === MAIN_GRAPH_ID;
   }
 
-  function settleActivity(next: KnowledgeActivity, completedAt = next.at ?? Date.now()): void {
+  function finishRun(runId: string | undefined, at = Date.now(), lingerMs = FOCUS_LINGER_MS): void {
+    if (!runId || finishedRuns.current.has(runId)) return;
+    const expiresAt = at + lingerMs;
+    finishedRuns.current.set(runId, expiresAt);
+    if (finishedRuns.current.size > 100) finishedRuns.current.delete(finishedRuns.current.keys().next().value!);
+    // This is a finite presentation tail, never a change to the operation's
+    // outcome or the Harness's ownership of its run.
+    setOperations(current => currentOperations(current.map(entry => entry.run_id === runId
+      ? { ...entry, expires_at: expiresAt } : entry)));
+  }
+
+  function settleActivity(next: KnowledgeActivity): void {
     if (lingerTimer.current !== null) window.clearTimeout(lingerTimer.current);
     lingerTimer.current = null;
     if (speechHolds(next)) return;
-    const remaining = Math.max(0, FOCUS_LINGER_MS - Math.max(0, Date.now() - completedAt));
+    const deadline = finishedRuns.current.get(next.runId ?? "") ?? (next.at ?? Date.now()) + FOCUS_LINGER_MS;
+    const remaining = Math.max(0, deadline - Date.now());
     const clear = () => {
       if (activityTransaction.current !== next || speechHolds(next)) return;
       setActivity(null);
@@ -364,6 +422,7 @@ export function GraphBackdrop({
     if (!lockMode) return;
     setHoveredId(null);
     setSelectedId(null);
+    setReaderSelection(null);
     setNodeMenu(null);
   }, [lockMode]);
 
@@ -383,7 +442,7 @@ export function GraphBackdrop({
     let socket: WebSocket | null = null;
     let retry: number | null = null;
     let recent: ActivityWireEntry[] = [];
-    const applyPlayback = (next?: SpeechPlayback) => {
+    const applyPlayback = (next?: SpeechPlayback, restore = true) => {
       if (!next || !["idle", "pending", "speaking"].includes(next.status)
         || !Number.isFinite(next.level) || typeof next.run_id !== "string"
         || typeof next.playback_id !== "string") return;
@@ -394,13 +453,21 @@ export function GraphBackdrop({
         level: next.status === "speaking" ? Math.max(0, Math.min(1, next.level)) : 0,
         updatedAt: performance.now(),
       };
-      if (previous.status === next.status && previous.playback_id === next.playback_id) return;
+      if (previous.status === next.status && previous.playback_id === next.playback_id && previous.run_id === next.run_id) return;
+      if (next.status === "speaking" && next.run_id) {
+        setActivity(current => current?.runId === next.run_id ? { ...current, phase: "speaking" } : current);
+      }
+      if (next.status === "idle" && next.playback_id && next.playback_id === previous.playback_id
+        && next.run_id === previous.run_id) {
+        // Release at audio end; the Scene finishes any remaining links before fading.
+        finishRun(next.run_id, Date.now(), 0);
+      }
       const transaction = activityTransaction.current;
       if (next.status !== "idle" && next.run_id) {
         if (transaction && speechHolds(transaction)) {
           if (lingerTimer.current !== null) window.clearTimeout(lingerTimer.current);
           lingerTimer.current = null;
-        } else {
+        } else if (restore) {
           const transaction = latestActivityTransaction(recent, next.run_id);
           if (transaction.length) {
             resetActivity();
@@ -413,9 +480,11 @@ export function GraphBackdrop({
           if (lingerTimer.current !== null) window.clearTimeout(lingerTimer.current);
           lingerTimer.current = null;
           activityTransaction.current = null;
+          setClearedRuns(current => new Set([...current, previous.run_id].slice(-100)));
+          setOperations(current => current.filter(entry => entry.run_id !== previous.run_id));
           setActivity(null);
         } else if (transaction.phase === "query_completed") {
-          settleActivity(transaction, Date.now());
+          settleActivity(transaction);
         }
       }
     };
@@ -458,13 +527,24 @@ export function GraphBackdrop({
           } else if (message.type === "snapshot" && Array.isArray(message.entries)) {
             resetActivity(); // Replace stale display state with the current stream snapshot.
             recent = message.entries.slice(-100);
-            applyPlayback(message.playback);
+            applyPlayback(message.playback, false);
+            setOperations(currentOperations((message.operations ?? []).map(entry => {
+              const expiresAt = finishedRuns.current.get(entry.run_id);
+              return expiresAt === undefined ? entry : { ...entry, expires_at: expiresAt };
+            })));
             message.entries.forEach(reviewChanged);
             latestActivityTransaction(message.entries,
               playback.current.status !== "idle" ? playback.current.run_id : "",
             ).forEach(announceKnowledgeActivity);
           } else if (message.type === "playback") {
             applyPlayback(message.playback);
+          } else if (message.type === "operation" && message.operation) {
+            const operation = message.operation;
+            const expiresAt = finishedRuns.current.get(operation.run_id);
+            const presented = expiresAt === undefined ? operation
+              : { ...operation, expires_at: expiresAt };
+            setOperations((current) => currentOperations([...current, presented]));
+            if (operation.refresh) window.dispatchEvent(new Event("obsidience:graph-refresh"));
           }
         } catch { /* malformed activity frames are ignored */ }
       };
@@ -472,6 +552,7 @@ export function GraphBackdrop({
         socket = null;
         if (!stopped) {
           resetActivity(); // A lost stream is not evidence that a graph is still thinking.
+          setOperations([]);
           applyPlayback({ status: "idle", level: 0, run_id: "", playback_id: "" });
           retry = window.setTimeout(connect, 1_000);
         }
@@ -487,6 +568,14 @@ export function GraphBackdrop({
   }, []);
 
   useEffect(() => onKnowledgeActivity((next: KnowledgeActivity) => {
+    // Each specialist can finish independently of the foreground packet.
+    // Voice remains animated through queued and playing audio, until playback ends.
+    if (next.phase === "query_completed" && !speechHolds(next)) finishRun(next.runId, next.at);
+    if (next.phase === "cleared" && next.runId) {
+      const runId = next.runId;
+      setClearedRuns(current => new Set([...current, runId].slice(-100)));
+      setOperations(current => current.filter(entry => entry.run_id !== runId));
+    }
     const previous = activityTransaction.current;
     // Background work cannot replace the Executive packet during its reply.
     if (previous && speechHolds(previous) && next.runId !== previous.runId) return;
@@ -538,14 +627,14 @@ export function GraphBackdrop({
     if (next.phase === "speaking") {
       setActivity((current) => ({
         refs: next.refs.length > 0 ? next.refs : (same ? current?.refs ?? [] : []),
-        phase: "speaking", key: same && current ? current.key : ++activityKey.current,
+        phase: speechHolds(next) && playback.current.status === "pending" ? "thinking" : "speaking", key: same && current ? current.key : ++activityKey.current,
         query: next.query, retrievalMs: next.retrievalMs ?? (same ? current?.retrievalMs : undefined),
         graphId: next.graphId, runId: next.runId,
         startedAt: same && current ? current.startedAt : next.at ?? Date.now(),
       }));
       return;
     }
-    setActivity((current) => current ? { ...current, phase: "speaking" } : null);
+    setActivity((current) => current ? { ...current, phase: speechHolds(next) && playback.current.status === "pending" ? "thinking" : "speaking" } : null);
     settleActivity(next);
   }), []);
 
@@ -553,6 +642,7 @@ export function GraphBackdrop({
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       setSelectedId(null);
+      setReaderSelection(null);
       setNodeMenu(null);
     };
     window.addEventListener("keydown", onKeyDown);
@@ -694,7 +784,8 @@ export function GraphBackdrop({
     const branchOf = (id: string): string | null => (id.includes("/") ? id.split("/", 1)[0] : null);
     const primitiveFolders = ["Tools", "Skills", "Runbooks", "Tasks"];
     const folders = [...new Set(notes
-      .filter((node) => !agentIdentities.includes(node) && !node.id.startsWith("Agents/Executive/"))
+      .filter((node) => !agentIdentities.includes(node) && !node.id.startsWith("Agents/Executive/")
+        && !node.id.startsWith("@"))
       .map((n) => branchOf(n.id)).filter(Boolean))] as string[];
     const branches = folders
       .filter((folder) => folder !== "Library" && folder !== "@library"
@@ -702,7 +793,7 @@ export function GraphBackdrop({
         && !executiveSubjects.some((subject) => subject.id === `@branch/${folder}`))
       .sort();
     const folderPaths = [...new Set(notes.flatMap((node) => {
-      if (agentIdentities.includes(node) || primitiveKindOf(node)) return [];
+      if (agentIdentities.includes(node) || primitiveKindOf(node) || node.id.startsWith("@")) return [];
       const parts = node.id.split("/").slice(0, -1);
       if (parts.length < 2 || parts[0] === "Agents") return [];
       return parts.slice(1).map((_part, index) => parts.slice(0, index + 2).join("/"));
@@ -724,13 +815,9 @@ export function GraphBackdrop({
       if (container) return container;
       const primitiveKind = primitiveKindOf(node);
       if (primitiveKind) return `@branch/${primitiveFolderByKind[primitiveKind]}`;
-      if (node.kind === "agent") return "@agent/Subagents";
+      if (node.kind === "agent") return "@agent/Specialists";
       if (node.parent_id) return node.parent_id;
       if (node.id.startsWith("Agents/Executive/Architecture/")) return "@agent/Architecture";
-      if (node.id.startsWith("Agents/Executive/Subagents/")) return "@agent/Subagents";
-      if (node.id.startsWith("Agents/Executive/Observations/Temporary Observations/")) {
-        return "@agent/Temporary Observations";
-      }
       if (node.id.startsWith("Agents/Executive/Observations/")) return "@agent/Observations";
       const directory = node.id.split("/").slice(0, -1).join("/");
       if (directory.includes("/")) return `@branch/${directory}`;
@@ -749,7 +836,7 @@ export function GraphBackdrop({
       })),
       ...executiveSubjects.map((subject, index) => ({
         id: subject.id,
-        degree: subject.id === "@agent/Subagents"
+        degree: subject.id === "@agent/Specialists"
           ? agentIdentities.length
           : executivePrimitives.filter((node) =>
             subject.id === `@branch/${primitiveFolderByKind[primitiveKindOf(node) ?? ""]}`).length,
@@ -891,14 +978,12 @@ export function GraphBackdrop({
         const primitiveKind = primitiveKindOf(node);
         if (primitiveKind) return satelliteSubjectId(primitiveFolderByKind[primitiveKind].toLowerCase());
         if (otherAgentMembers.includes(node)) return satelliteSubjectId("other-agents");
+        if (node.parent_id) return node.parent_id;
         const folder = node.id.split("/").slice(0, -1).join("/");
         const subject = satelliteSubjects.find((item) => item.path === folder);
         if (subject) return subject.id;
         if (name === "Darwin" && node.id.startsWith("Sources/")) {
           return satelliteSubjectId("sources");
-        }
-        if (node.id.startsWith(`Agents/${name}/Observations/Temporary Observations/`)) {
-          return satelliteSubjectId("temporary-observations");
         }
         return satelliteSubjectId("observations");
       };
@@ -1022,7 +1107,7 @@ export function GraphBackdrop({
         kind: "note" as never,
         label: node.title,
         role: (libraryContainers.has(node.id) ? "section" : "claim") as never,
-        parentId: libraryParents.get(node.id) ??
+        parentId: libraryParents.get(node.id) ?? node.parent_id ??
           librarySubjects.find((subject) => subject.path === node.id.split("/").slice(0, -1).join("/"))?.id ??
           librarySubjectByKind.get(primitiveKindOf(node) ?? node.kind) ?? libraryRoot,
         order: index,
@@ -1191,73 +1276,80 @@ export function GraphBackdrop({
       ref === executiveRef && (!activity?.graphId || activity.graphId === MAIN_GRAPH_ID)
         ? ROOT_ID : displayAliases.get(ref) ?? ref);
   }, [activity?.refs, activity?.graphId, displayAliases, graph.navigation]);
-  const mainRoute = useMemo(() => {
-    if (!activity || (activity.graphId && activity.graphId !== MAIN_GRAPH_ID)) return null;
-    return buildThinkingRoute(model, renderedActivityRefs);
-  }, [activity, model, renderedActivityRefs]);
-  const effectiveSweepSpeed = useMemo(() => {
-    if (
-      tuning.automaticSweepSpeed < 0.5
-      || !mainRoute
-      || !activity?.retrievalMs
-      || activity.retrievalMs <= 0
-    ) return tuning.sweepSpeed;
-    const pathSpec = mainRoute.pathSpec;
-    const routeProgress = pathSpec.maxProgress + knowledge3dSweepTail(pathSpec);
-    // Deliberately no elapsed-time clamp: the measured fast-context duration
-    // is the animation rate. The manual slider owns speed only when automatic
-    // mode is unchecked.
-    return routeProgress / (activity.retrievalMs / 1_000);
-  }, [activity?.retrievalMs, mainRoute, tuning.automaticSweepSpeed, tuning.sweepSpeed]);
-  const effectiveTuning = useMemo(
-    () => effectiveSweepSpeed === tuning.sweepSpeed
-      ? tuning
-      : { ...tuning, sweepSpeed: effectiveSweepSpeed },
-    [effectiveSweepSpeed, tuning],
-  );
-  const [focusProgress, setFocusProgress] = useState(0);
-  const focusProgressRef = useRef(0);
-  useEffect(() => {
-    if (!activity || !mainRoute) {
-      focusProgressRef.current = 0;
-      setFocusProgress(0);
-      return;
-    }
-    if (!visible) return;
-    const startedAt = performance.now();
-    const base = focusProgressRef.current;
-    const pathSpec = mainRoute.pathSpec;
-    const tick = (now: number) => {
-      const value = knowledgeSweepProgress3d(
-        activity.phase,
-        now - startedAt,
-        base,
-        effectiveSweepSpeed,
-        pathSpec.maxProgress,
-        knowledge3dSweepTail(pathSpec),
-      );
-      focusProgressRef.current = value;
-      setFocusProgress((previous) =>
-        Math.abs(previous - value) > 0.004 || value >= pathSpec.maxProgress
-          ? value
-          : previous);
-    };
-    tick(startedAt);
-    let frame = window.requestAnimationFrame(function animate(now) {
-      tick(now);
-      frame = window.requestAnimationFrame(animate);
+  const operationClouds = useMemo(() => {
+    const executiveRef = graph.navigation.groups.find((group) => group.id === "executive")?.root_ref;
+    const graphIds = new Map(graph.navigation.groups.flatMap((group) => {
+      const id = group.id === "executive" ? MAIN_GRAPH_ID
+        : group.id === "library" ? "library" : group.root_ref.split("/")[1];
+      return [[group.id, id], [group.root_ref, id]] as [string, string][];
+    }));
+    const clouds = [{ agentId: MAIN_GRAPH_ID, ...model }, ...model.satellites];
+    return clouds.map((cloud) => {
+      const refsByRun = new Map<string, Set<string>>();
+      const addRefs = (identity: string, refs: string[]) => {
+        const group = refsByRun.get(identity) ?? new Set<string>();
+        for (const ref of refs) group.add(ref);
+        refsByRun.set(identity, group);
+      };
+      const accents = new Map<string, GraphActivityAccent>();
+      let key: string | number = "";
+      const hasPacket = activity && (activity.graphId ?? MAIN_GRAPH_ID) === cloud.agentId;
+      if (hasPacket) {
+        key = activity.runId ? `run:${activity.runId}` : `packet:${activity.startedAt}`;
+        addRefs(String(key), renderedActivityRefs);
+      }
+      for (const entry of operations) {
+        // Owner browsing follows the current selection immediately. A later
+        // Reader response is evidence for its legend, not another path replay.
+        if (entry.kind === "read" && !entry.run_id) continue;
+        if (entry.graph_id !== "*" && (graphIds.get(entry.graph_id) ?? entry.graph_id) !== cloud.agentId) continue;
+        if (entry.kind === "context" && hasPacket && entry.run_id === activity.runId) continue;
+        const refs = entry.refs.map((ref) => ref === executiveRef && cloud.agentId === MAIN_GRAPH_ID
+          ? ROOT_ID : displayAliases.get(ref) ?? ref);
+        const identity = entry.run_id ? `run:${entry.run_id}` : `operation:${entry.id}`;
+        addRefs(identity, refs);
+        // A new Tool extends the running sweep instead of restarting all of
+        // that agent's already illuminated Tools from the Brain.
+        if (!key) key = identity;
+        const accent = operationAccent(entry);
+        if (accent) for (const ref of refs) accents.set(ref, accent);
+      }
+      const refGroups = [...refsByRun.values()].map(group => [...group]);
+      const runIds = [...refsByRun.keys()].filter(identity => identity.startsWith("run:"));
+      const phase = runIds.length
+        ? (runIds.every(identity => finishedRuns.current.has(identity.slice(4))
+          || (playback.current.status === "speaking" && playback.current.run_id === identity.slice(4))) ? "speaking" as const : "thinking" as const)
+        : hasPacket ? activity.phase : "thinking" as const;
+      return { agentId: cloud.agentId, key: `${cloud.agentId}:${key}`, phase, accents,
+        route: buildThinkingRoute(cloud, refGroups.flat(), refGroups) };
     });
-    return () => window.cancelAnimationFrame(frame);
-  }, [activity?.key, activity?.phase, effectiveSweepSpeed, mainRoute, visible]);
-  const gatedMainNodeIds = useMemo(() => {
-    if (!mainRoute) return new Set<string>();
-    const pathSpec = mainRoute.pathSpec;
-    const gateProgress = focusProgress - pathSpec.firstNodeProgress + 1e-6;
-    const allNodeIds = new Set([...mainRoute.nodeIds, ...pathSpec.nodeArrival.keys()]);
-    if (gateProgress >= pathSpec.maxProgress) return allNodeIds;
-    return new Set([...allNodeIds].filter(
-      (id) => (pathSpec.nodeArrival.get(id) ?? 1) <= gateProgress));
-  }, [focusProgress, mainRoute]);
+  }, [activity, operations, model, renderedActivityRefs, displayAliases, graph.navigation]);
+  const scopedCloud = graphScope === MAIN_GRAPH_ID ? presentation
+    : presentation.satellites.find(cloud => cloud.agentId === graphScope);
+  const agentSatellites = useMemo(() => graphScope === MAIN_GRAPH_ID
+    ? presentation.satellites.filter(cloud => cloud.agentId !== "library") : [], [presentation.satellites, graphScope]);
+  const scopedTuning = graphScope === MAIN_GRAPH_ID ? tuning
+    : model.satellites.find(cloud => cloud.agentId === graphScope)?.tuning ?? tuning;
+  const scopedId = (id: string) => graphScope === MAIN_GRAPH_ID ? id : knowledgeAgentNodeId(graphScope, id);
+  const localId = (id: string | null) => {
+    if (!id) return null;
+    const parsed = parseKnowledgeAgentNodeId(id);
+    return graphScope === MAIN_GRAPH_ID ? (parsed.agentId === "library" ? null : id)
+      : parsed.agentId === graphScope ? parsed.nodeId : null;
+  };
+  const mainActivity = operationClouds.find(cloud => cloud.agentId === graphScope) ?? operationClouds[0];
+  const mainRoute = mainActivity.route;
+  const mainPhase = mainRoute ? mainActivity.phase : null;
+  const effectiveSweepSpeed = useMemo(() => scopedTuning.automaticSweepSpeed >= 0.5 && mainRoute
+    ? 1 / READABLE_SWEEP_SECONDS
+    : scopedTuning.sweepSpeed,
+  [mainRoute, scopedTuning.automaticSweepSpeed, scopedTuning.sweepSpeed]);
+  const effectiveTuning = useMemo(
+    () => effectiveSweepSpeed === scopedTuning.sweepSpeed
+      ? scopedTuning
+      : { ...scopedTuning, sweepSpeed: effectiveSweepSpeed },
+    [effectiveSweepSpeed, scopedTuning],
+  );
   const satelliteRoutes = useMemo(() => {
     if (satelliteTest) return [{
       agentId: satelliteTest.agentId,
@@ -1266,29 +1358,28 @@ export function GraphBackdrop({
       key: satelliteTest.key,
       hold: false,
     }];
-    if (!activity?.graphId || activity.graphId === MAIN_GRAPH_ID) return [];
-    const satellite = model.satellites.find((entry) => entry.agentId === activity.graphId);
-    if (!satellite) return [];
-    const route = buildThinkingRoute(satellite, renderedActivityRefs);
-    const automaticSpeed = (
-      route
-      && satellite.tuning.automaticSweepSpeed >= 0.5
-      && activity.retrievalMs
-      && activity.retrievalMs > 0
-    ) ? (
-      route.pathSpec.maxProgress + knowledge3dSweepTail(route.pathSpec)
-    ) / (activity.retrievalMs / 1_000) : undefined;
-    return route ? [{
-      agentId: satellite.agentId,
-      spec: route.pathSpec,
-      nodeIds: route.nodeIds,
-      key: activity.key,
-      hold: true,
-      speed: automaticSpeed,
-    }] : [];
-  }, [activity, model.satellites, satelliteTest, renderedActivityRefs]);
+    return operationClouds.slice(1).flatMap(({ agentId, route, key, phase, accents }) => {
+      if (!route) return [];
+      const satellite = model.satellites.find((entry) => entry.agentId === agentId)!;
+      const speed = satellite.tuning.automaticSweepSpeed >= 0.5
+        ? 1 / READABLE_SWEEP_SECONDS : undefined;
+      return [{ agentId, spec: route.pathSpec, nodeIds: route.nodeIds, accents, key, phase, hold: true, speed }];
+    });
+  }, [activity, model.satellites, satelliteTest, operationClouds]);
 
   const selected = selectedId ? parseKnowledgeAgentNodeId(selectedId) : null;
+  const selectionPath = useMemo(() => {
+    if (!readerSelection || lockMode) return null;
+    const group = graph.navigation.groups.find((entry) => entry.id === readerSelection.graphId
+      || entry.root_ref === readerSelection.graphId);
+    const agentId = group ? group.id === "executive" ? MAIN_GRAPH_ID
+      : group.id === "library" ? "library" : group.root_ref.split("/")[1] : readerSelection.graphId;
+    const cloud = agentId === MAIN_GRAPH_ID ? model : model.satellites.find((entry) => entry.agentId === agentId);
+    const ref = agentId === MAIN_GRAPH_ID && readerSelection.ref === graph.navigation.groups.find((g) => g.id === "executive")?.root_ref
+      ? ROOT_ID : displayAliases.get(readerSelection.ref) ?? readerSelection.ref;
+    const route = cloud ? buildThinkingRoute(cloud, [ref]) : null;
+    return route ? { agentId, id: ref, spec: route.pathSpec } : null;
+  }, [readerSelection, lockMode, model, graph.navigation, displayAliases]);
   const cameraFocus = selected ? {
     agentId: selected.agentId,
     nodeId: selected.nodeId,
@@ -1298,15 +1389,17 @@ export function GraphBackdrop({
     setSelectedId(id);
     setNodeMenu(null);
     selectGraph(parsed.agentId ?? MAIN_GRAPH_ID);
+    setReaderSelection({ ref: parsed.nodeId, graphId: parsed.agentId ?? MAIN_GRAPH_ID });
     if (read) openReader(graph.nodes.find((node) => node.id === parsed.nodeId)?.article_ref ?? parsed.nodeId,
       parsed.agentId ?? MAIN_GRAPH_ID);
   };
   const clearSelection = () => {
     setSelectedId(null);
+    setReaderSelection(null);
     setNodeMenu(null);
-    selectGraph(MAIN_GRAPH_ID);
+    selectGraph(graphScope);
   };
-  const highlightedId = lockMode ? null : hoveredId ?? selectedId;
+  const highlightedId = lockMode ? null : hoveredId;
   const menuParsed = nodeMenu ? parseKnowledgeAgentNodeId(nodeMenu.id) : null;
   const menuNode = menuParsed
     ? graph.nodes.find((node) => node.id === menuParsed.nodeId) ?? null
@@ -1317,62 +1410,116 @@ export function GraphBackdrop({
       if (id && !ordered.includes(id)) ordered.push(id);
     };
     add(hoveredId);
-    add(selectedId);
-    if (activity) {
-      for (const ref of renderedActivityRefs) {
-        if (!activity.graphId || activity.graphId === MAIN_GRAPH_ID) add(ref);
-        if (activity.graphId && activity.graphId !== MAIN_GRAPH_ID) add(knowledgeAgentNodeId(activity.graphId, ref));
-      }
-      for (const id of gatedMainNodeIds) add(id);
-      for (const route of satelliteRoutes) {
-        for (const id of route.nodeIds) add(knowledgeAgentNodeId(route.agentId, id));
-      }
-    }
+    add(selectionPath ? selectionPath.agentId === MAIN_GRAPH_ID ? selectionPath.id
+      : knowledgeAgentNodeId(selectionPath.agentId, selectionPath.id) : selectedId);
     return lockMode ? [] : ordered;
-  }, [activity, gatedMainNodeIds, hoveredId, lockMode, renderedActivityRefs, satelliteRoutes, selectedId]);
+  }, [hoveredId, lockMode, selectedId, selectionPath]);
 
   const relationEffects = useMemo(() => projectLinkReviewEffects(
     linkProposals.entries, linkApprovals, graph.links, displayAliases,
     [{ agentId: "main", nodes: presentation.nodes, edges: presentation.edges }, ...presentation.satellites], performance.now(),
     proposalStarts.current,
   ), [linkProposals, linkApprovals, graph.links, displayAliases, presentation]);
-  const pendingLinkCount = new Set(relationEffects.filter((effect) => effect.phase === "pending").map((effect) => effect.id)).size;
-  const approvedLinkCount = new Set(relationEffects.filter((effect) => effect.phase === "approved").map((effect) => effect.id)).size;
+  const scopedEffects = useMemo(() => graphScope === MAIN_GRAPH_ID
+    ? relationEffects.filter(effect => effect.graphId !== "library")
+    : relationEffects.filter(effect => effect.graphId === graphScope)
+      .map(effect => ({ ...effect, graphId: MAIN_GRAPH_ID })), [relationEffects, graphScope]);
+  const scopedLabels = useMemo(() => new Map([...presentation.labelMetadata].flatMap(([id, meta]) => {
+    const parsed = parseKnowledgeAgentNodeId(id);
+    return graphScope === MAIN_GRAPH_ID ? (parsed.agentId === "library" ? [] : [[id, meta] as const])
+      : parsed.agentId === graphScope ? [[parsed.nodeId, meta] as const] : [];
+  })), [presentation.labelMetadata, graphScope]);
+  const pendingLinkCount = new Set(scopedEffects.filter((effect) => effect.phase === "pending").map((effect) => effect.id)).size;
+  const approvedLinkCount = new Set(scopedEffects.filter((effect) => effect.phase === "approved").map((effect) => effect.id)).size;
+
+  const viewCatalog = useMemo(() => {
+    const nodes: ProviderNode[] = [];
+    const clouds = scopedCloud ? [{ agentId: graphScope, nodes: scopedCloud.nodes, edges: scopedCloud.edges }, ...agentSatellites] : [];
+    for (const cloud of clouds) for (const node of cloud.nodes) {
+      const id = cloud.agentId === MAIN_GRAPH_ID ? node.id : knowledgeAgentNodeId(cloud.agentId, node.id);
+      const article = graph.nodes.find(article => article.id === node.id);
+      const meta = presentation.labelMetadata.get(id);
+      nodes.push({id, name: meta?.label || titles.current.get(id) || node.id,
+        kind: article?.kind || node.role, color: meta?.accent || "#67e8f9",
+        ref: article?.article_ref || node.id, graph_id: cloud.agentId});
+    }
+    return {nodes, count: nodes.length, links: clouds.reduce((count, cloud) => count + cloud.edges.length, 0),
+      graphs: clouds.map(cloud => ({id: cloud.agentId, name: cloud.agentId === MAIN_GRAPH_ID ? "Executive"
+        : cloud.agentId === "library" ? "Library" : cloud.agentId, count: cloud.nodes.length, links: cloud.edges.length}))};
+  }, [graph.nodes, presentation, scopedCloud, graphScope, model.satellites, agentSatellites]);
+  useEffect(() => publisher?.publishCatalog(viewCatalog), [publisher, viewCatalog]);
+  useEffect(() => publisher?.publishState({connected: true, graphId: graphScope,
+    selected: viewCatalog.nodes.find(node => node.id === selectedId) || null,
+    hover: viewCatalog.nodes.find(node => node.id === hoveredId) || null,
+    latest: operations.length ? {label: operations.at(-1)!.label, status: operations.at(-1)!.status} : undefined,
+  }), [publisher, viewCatalog, selectedId, hoveredId, operations, graphScope]);
 
   return (
     <div className="absolute inset-0">
       <Knowledge3dScene
-          key={sceneKey}
-          nodes={presentation.nodes}
-          edges={presentation.edges}
+          sharePresentation={sharePresentation && !lockMode}
+          presentationSource={presentationSource}
+          primaryGraphId={graphScope}
+          onPresentationReady={setPublisher}
+          onPresentationConsumers={onPresentationConsumers}
+          onPresentationCommand={command => {
+            if (command.action === "select" && command.id) {
+              const id = viewCatalog.nodes.some(node => node.id === command.id) ? command.id : scopedId(command.id);
+              if (viewCatalog.nodes.some(node => node.id === id)) selectNode(id, false);
+            }
+            else if (command.action === "clear" || command.action === "fit") clearSelection();
+            else if (command.action === "refresh") window.dispatchEvent(new Event("obsidience:graph-refresh"));
+          }}
+          key={`${sceneKey}:${graphScope}`}
+          nodes={scopedCloud?.nodes ?? []}
+          edges={scopedCloud?.edges ?? []}
           hub={hub}
           focusNodeIds={mainRoute?.nodeIds ?? new Set<string>()}
           pathSpec={mainRoute?.pathSpec ?? null}
-          focusActive={Boolean(activity)}
-          focusPhase={activity ? activity.phase : null}
-          speechEnvelope={visible && !lockMode ? speechEnvelope : undefined}
+          focusActive={Boolean(mainPhase)}
+          focusKey={mainActivity.key}
+          clearedActivityKeys={new Set([...clearedRuns].flatMap(runId => operationClouds.map(cloud => `${cloud.agentId}:run:${runId}`)))}
+          focusPhase={mainPhase}
+          activityAccents={mainActivity.accents}
+          selectionPath={graphScope === MAIN_GRAPH_ID ? (selectionPath?.agentId === "library" ? null : selectionPath)
+            : selectionPath?.agentId === graphScope ? {...selectionPath, agentId: MAIN_GRAPH_ID} : null}
+          speechEnvelope={visible && !lockMode && graphScope === MAIN_GRAPH_ID ? speechEnvelope : undefined}
           visible={visible}
           reducedMotion={false}
           adapterPreference="system"
           animationProfile="maximum"
-          hoveredNodeId={highlightedId}
-          labelIds={labelIds}
-          activeLabelNodeIds={lockMode ? new Set<string>() : gatedMainNodeIds}
-          labelMetadata={presentation.labelMetadata}
+          hoveredNodeId={localId(highlightedId)}
+          labelIds={labelIds.flatMap(id => { const local = localId(id); return local ? [local] : []; })}
+          showActivityLabels={!lockMode}
+          labelMetadata={scopedLabels}
           tuning={effectiveTuning}
-          satellites={presentation.satellites}
-          relationEffects={relationEffects}
-          satelliteSweeps={satelliteRoutes}
-          cameraFocus={lockMode ? null : cameraFocus}
+          satellites={agentSatellites}
+          satelliteSweeps={graphScope === MAIN_GRAPH_ID ? satelliteRoutes.filter(route => route.agentId !== "library") : []}
+          relationEffects={scopedEffects}
+          cameraFocus={lockMode ? null : graphScope === MAIN_GRAPH_ID ? (cameraFocus?.agentId === "library" ? null : cameraFocus)
+            : cameraFocus?.agentId === graphScope ? {...cameraFocus, agentId: MAIN_GRAPH_ID} : null}
           onBackgroundClick={lockMode ? undefined : clearSelection}
-          onHover={lockMode ? undefined : setHoveredId}
+          onHover={lockMode ? undefined : id => setHoveredId(id ? scopedId(id) : null)}
           onNodeAction={(kind, id, at) => {
             if (lockMode) return;
-            if (kind === "click") selectNode(id, true);
-            else setNodeMenu({ id, x: at.x, y: at.y });
+            if (kind === "click") selectNode(scopedId(id), true);
+            else setNodeMenu({ id: scopedId(id), x: at.x, y: at.y });
           }}
           onContextLost={() => setSceneKey((k) => k + 1)}
       />
+      {!lockMode && visible && operations.some((entry) => entry.kind !== "context") ? (
+        <div role="status" aria-live="polite" aria-label="Knowledge activity"
+          className="pointer-events-none absolute right-5 top-5 z-20 max-w-[24rem] rounded-md border border-cyan-300/15 bg-[#030a10]/85 px-3 py-2 font-mono text-[11px] shadow-lg">
+          {operations.filter((entry) => entry.kind !== "context").slice(-4).reverse().map((entry) => (
+            <div key={entry.id} className="flex items-baseline gap-2 py-0.5" style={{ color: operationAccent(entry)?.color }}>
+              <span aria-hidden="true">{entry.status === "running" ? "◉" : "◇"}</span>
+              <span className="truncate">{entry.label}</span>
+              <span className="ml-auto shrink-0 opacity-70">{operationStatus(entry)}</span>
+              {entry.omitted_refs > 0 ? <span className="shrink-0">+{entry.omitted_refs} omitted</span> : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
       {!lockMode && visible && (pendingLinkCount > 0 || approvedLinkCount > 0 || linkProposals.truncated) ? (
         <div role="status" aria-live="polite" data-testid="link-review-status"
           className="pointer-events-none absolute bottom-5 left-5 z-20 rounded-md border border-slate-500/25 bg-[#030a10]/85 px-3 py-2 font-mono text-[11px] shadow-lg">

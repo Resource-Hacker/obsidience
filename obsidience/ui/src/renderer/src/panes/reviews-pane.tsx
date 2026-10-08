@@ -40,7 +40,8 @@ export function ReviewsPaneBody() {
     setActionError(null);
     setDeciding(name);
     try {
-      if (ok) await api.approve(name);
+      if (proposals.find((p) => p.file === name)?.review_class === "health") await api.acknowledgeReview(name);
+      else if (ok) await api.approve(name);
       else await api.reject(name, "rejected from review pane");
       await refresh();
     } catch (e) {
@@ -81,9 +82,10 @@ export function ReviewsPaneBody() {
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2">
         {proposals.map((p) => {
           const isLink = p.review_class === "link";
+          const isHealth = p.review_class === "health";
           return (
           <article key={p.file} className={`overflow-hidden rounded-lg border bg-[#020a12]/78 ${
-            isLink
+            isHealth ? "border-amber-300/35" : isLink
               ? "border-violet-300/20 shadow-[inset_2px_0_rgba(196,181,253,0.22)]"
               : "border-cyan-300/12 shadow-[inset_2px_0_rgba(34,211,238,0.1)]"
           }`}>
@@ -99,7 +101,7 @@ export function ReviewsPaneBody() {
                   isLink ? "text-violet-200/80" : "text-amber-200/65"
                 }`}>
                   {isLink ? <Link2 size={10} aria-hidden="true" /> : null}
-                  {isLink ? "Link proposal" : `${p.action} article proposal`}
+                  {isHealth ? "Recovery needs attention" : isLink ? "Link proposal" : `${p.action} article proposal`}
                 </span>
                 <span className="mt-1 block font-mono text-[14px] font-semibold leading-5 text-cyan-50">
                   {p.title || cleanLeaf(p.target)}
@@ -135,17 +137,17 @@ export function ReviewsPaneBody() {
                 </span>
               </button>
               <div className="flex shrink-0 gap-1">
-                <button type="button" onClick={() => void decide(p.file, true)} title={p.blocked_reason || "Approve proposal"}
+                {!isHealth && <button type="button" onClick={() => void decide(p.file, true)} title={p.blocked_reason || "Approve proposal"}
                   aria-label={`Approve ${p.title}`}
                   disabled={deciding !== null || !p.approvable}
                   className="flex h-7 w-7 items-center justify-center rounded border border-emerald-300/35 text-emerald-300 hover:bg-emerald-300/10 disabled:opacity-30">
                   <Check size={13} />
-                </button>
-                <button type="button" onClick={() => void decide(p.file, false)} title="Reject proposal"
-                  aria-label={`Reject ${p.title}`}
+                </button>}
+                <button type="button" onClick={() => void decide(p.file, false)} title={isHealth ? "Acknowledge notification" : "Reject proposal"}
+                  aria-label={`${isHealth ? "Acknowledge" : "Reject"} ${p.title}`}
                   disabled={deciding !== null}
-                  className="flex h-7 w-7 items-center justify-center rounded border border-rose-300/35 text-rose-300 hover:bg-rose-300/10 disabled:opacity-30">
-                  <X size={13} />
+                  className={`flex h-7 items-center justify-center rounded border px-2 font-mono text-[9px] disabled:opacity-30 ${isHealth ? "border-amber-300/35 text-amber-200" : "border-rose-300/35 text-rose-300 hover:bg-rose-300/10"}`}>
+                  {isHealth ? "Acknowledge" : <X size={13} />}
                 </button>
               </div>
             </div>
@@ -161,7 +163,7 @@ export function ReviewsPaneBody() {
                 ))}
                 <p className={`mb-3 font-mono text-[9px] uppercase tracking-[0.2em] ${
                   isLink ? "text-violet-200/50" : "text-cyan-300/45"
-                }`}>{isLink ? "Article after link" : "Proposed article"}</p>
+                }`}>{isHealth ? "Recovery details" : isLink ? "Article after link" : "Proposed article"}</p>
                 <div className="max-h-[28rem] overflow-y-auto pr-2">
                   <ArticleMarkdown content={p.body_preview} variant="reader" onNavigate={openReader} />
                 </div>
@@ -174,7 +176,7 @@ export function ReviewsPaneBody() {
           <div className="rounded-lg border border-cyan-300/10 bg-[#020a12]/55 px-5 py-6 text-center">
             <p className="font-mono text-[13px] text-cyan-100/65">Queue is clear</p>
             <p className="mx-auto mt-2 max-w-sm text-[11px] leading-5 text-cyan-200/35">
-              Agent proposals will appear here as readable notes, ready for owner approval or rejection.
+              Article proposals and recovery problems needing your attention appear here.
             </p>
           </div>
         ) : null}

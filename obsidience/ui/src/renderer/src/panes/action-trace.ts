@@ -86,7 +86,7 @@ function trialFromWire(value: unknown): TraceTrial | null {
       || typeof trial.case_id !== "string" || !/^[A-Za-z0-9_.-]{1,64}$/.test(trial.case_id)
       || typeof trial.split !== "string" || !["train", "holdout"].includes(trial.split)
       || typeof trial.variant !== "string" || !["baseline", "candidate"].includes(trial.variant)
-      || !Number.isSafeInteger(trial.repetition) || Number(trial.repetition) < 1 || Number(trial.repetition) > 3) return null;
+      || !Number.isSafeInteger(trial.repetition) || Number(trial.repetition) < 1 || Number(trial.repetition) > 5) return null;
   return trial as unknown as TraceTrial;
 }
 
@@ -282,7 +282,8 @@ function actionTitle(entry: ActionTraceEntry): string {
     "task.inspect": "Inspect a task", "review.inspect": "Inspect pending reviews",
     "computer.click": "Click a control", "window.activate": "Focus an application",
     "window.place": "Place an application", "application.launch": "Open an application",
-    "observations.temporary.read": "Read recent observations",
+    "observations.recall": "Recall Hindsight observations",
+    "observations.retain": "Retain a Hindsight observation",
   };
   if (entry.payload.kind === "packet") return "Thinking Packet";
   if (entry.payload.kind === "model") return ({ waiting: "Waiting for model availability", started: "Preparing the next response",

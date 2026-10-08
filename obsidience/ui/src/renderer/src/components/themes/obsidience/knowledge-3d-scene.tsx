@@ -1,3 +1,5 @@
+import type { GraphSource } from "@/lib/shell-client";
+import { GraphPublisher, type GraphControl } from "@/surfaces/graph-stream";
 // Real-time 3D knowledge model (three.js). Owner-directed 2026-07-31: the
 // model IS the 2D radial map lifted into 3D space. Node positions are the
 // deterministic 2D layout verbatim (plus a bounded per-node depth), and the
@@ -9,11 +11,16 @@
 // Consolidation (owner 2026-08-04): the MAIN executive ball is built by the
 // SAME createKnowledge3dCloud cloud implementation as every satellite
 // (main: true — raw node ids, no orbit transform, no ballScale shrink).
-// This module owns what is genuinely scene-global: the shader sources, the
+// This module owns what is genuinely scene-global: the
 // camera/orbit/pointer surface, the sweep timeline clock, role nameplates,
 // orbit rings, screen-space labels, and the per-frame loop.
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
+import {
+  POINT_DEPTH_FRAGMENT_SHADER, POINT_VERTEX_SHADER, POINT_FRAGMENT_SHADER,
+  BEAM_VERTEX_SHADER, TAXONOMY_PATH_FRAGMENT_SHADER, CROSS_PATH_FRAGMENT_SHADER,
+  PARTICLE_VERTEX_SHADER, PARTICLE_FRAGMENT_SHADER,
+} from "./knowledge-3d-shaders";
 import {
   KNOWLEDGE_3D_INITIAL_DOLLY,
   KNOWLEDGE_3D_INITIAL_POLAR,
@@ -27,6 +34,8 @@ import {
   knowledge3dFramedDistance,
   knowledge3dWebglPowerPreference,
   knowledge3dSweepTail,
+  knowledgeAgentNodeId,
+  extendKnowledge3dPathSpec,
   knowledgeSweepProgress3d,
   parseKnowledgeAgentNodeId,
   type Knowledge3dPathSpec,
@@ -50,6 +59,7 @@ import {
   createKnowledge3dDeliveryComet,
   createKnowledge3dCloud,
   KNOWLEDGE_LINK_APPROVAL_DURATION_MS,
+  KNOWLEDGE_ACTIVITY_FADE_MS,
   knowledge3dCloudPhysicsSignature,
   type Knowledge3dOrbitRing,
   type Knowledge3dRenderEdge,
@@ -71,6 +81,12 @@ export type {
 export { KNOWLEDGE_LINK_APPROVAL_DURATION_MS };
 
 export interface Knowledge3dSceneProps {
+  sharePresentation?: boolean;
+  presentationSource?: import("@/lib/shell-client").GraphSource;
+  primaryGraphId?: string;
+  onPresentationReady?: (publisher: GraphPublisher | null) => void;
+  onPresentationCommand?: (command: GraphControl) => void;
+  onPresentationConsumers?: (count: number) => void;
   nodes: Knowledge3dRenderNode[];
   edges: Knowledge3dRenderEdge[];
   hub: { x: number; y: number };
@@ -82,9 +98,14 @@ export interface Knowledge3dSceneProps {
    *  start-to-finish. */
   pathSpec: Knowledge3dPathSpec | null;
   focusActive: boolean;
-  /** thinking → tendrils reach out; speaking → they arrive and the
-   *  articles light up; null → no query path. */
+  /** Stable run identity; an extension of the same packet keeps its clock. */
+  focusKey: string | number;
+  clearedActivityKeys?: ReadonlySet<string>;
+  /** Speech retains the continuous route clock; null releases the path. */
   focusPhase: KnowledgeFocusPhase;
+  /** Exact operation endpoints: read, Tool, pending, committed, failed. */
+  activityAccents?: ReadonlyMap<string, { color: string; mode: number }>;
+  selectionPath?: { agentId: string; id: string; spec: Knowledge3dPathSpec } | null;
   /** Speaker PCM envelope; read by the existing frame loop, never graph physics. */
   speechEnvelope?: { current: { level: number; updatedAt: number } };
   visible: boolean;
@@ -96,7 +117,7 @@ export interface Knowledge3dSceneProps {
   animationProfile: GraphicsAnimationProfile;
   hoveredNodeId: string | null;
   labelIds: readonly string[];
-  activeLabelNodeIds: ReadonlySet<string>;
+  showActivityLabels: boolean;
   labelMetadata: ReadonlyMap<string, Knowledge3dLabelMeta>;
   /** Live operator tuning from the ambient slider panel. */
   tuning: Knowledge3dTuning;
@@ -114,8 +135,11 @@ export interface Knowledge3dSceneProps {
   satelliteSweeps?: ReadonlyArray<{
     agentId: string;
     spec: Knowledge3dPathSpec;
-    key: number;
-    /** Measured retrieval-derived speed; absent means use the graph slider. */
+    key: string | number;
+    phase?: KnowledgeFocusPhase;
+    nodeIds?: ReadonlySet<string>;
+    accents?: ReadonlyMap<string, { color: string; mode: number }>;
+    /** Readable automatic reveal speed; absent means use the graph slider. */
     speed?: number;
     /** Task sweeps HOLD after the run (path stays lit, dashes streaming)
      *  until the backdrop clears them at Task end; test sweeps clear on the
@@ -158,664 +182,6 @@ const FOV_DEGREES = 45;
 const HOVER_RADIUS_PX = 26;
 /** Whole-path neon pulse duration once the solid fill completes. */
 const PATH_GLOW_SECONDS = 0.55;
-
-/** Depth prepass for node occlusion (owner 2026-08-03): only the SOLID
- *  orb disc (and the Brain sphere) writes depth — never the soft glow —
- *  so the cross-link streak comets are properly hidden behind nodes no
- *  matter how translucent the node's visible pass renders. */
-const POINT_DEPTH_FRAGMENT_SHADER = `
-varying vec4 vStyle;
-varying float vDiscFrac;
-uniform float uArticleStyle;
-uniform float uCoreStyle;
-uniform float uSubjectStyle;
-uniform float uSubnodeStyle;
-float roundedBoxDistance(vec2 point, float halfSize, float corner) {
-  vec2 q = abs(point) - vec2(halfSize - corner);
-  return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - corner;
-}
-void main() {
-  vec2 p = (gl_PointCoord - 0.5) * 2.0 / max(vDiscFrac, 1e-4);
-  float variant = vStyle.x < 0.5
-    ? uArticleStyle
-    : (vStyle.x < 1.2
-      ? uSubjectStyle
-      : (vStyle.x < 1.5 ? uSubnodeStyle : uCoreStyle));
-  bool squareNode = vStyle.x < 1.5 && variant > 3.5;
-  float solid = vStyle.x > 1.5 ? 0.9 : 1.0;
-  if (squareNode) {
-    float corner = variant < 4.5 ? 0.16 : 0.045;
-    if (roundedBoxDistance(p, solid * 0.82, corner) > 0.0) discard;
-  } else if (length(p) > solid) discard;
-  gl_FragColor = vec4(0.0);
-}
-`;
-
-const POINT_VERTEX_SHADER = `
-attribute float aRadius;
-attribute float aExtent;
-attribute float aGlowScale;
-attribute vec3 aCore;
-attribute vec3 aDark;
-attribute vec4 aRing;
-attribute vec4 aGlow;
-attribute vec4 aStyle; // (subject, ringScale, ringWidthPx, baseAlpha)
-attribute float aFocus;
-attribute float aSeed;
-attribute float aCurate;
-uniform float uPerspective;
-uniform float uPulse;
-uniform float uSpeechLevel;
-uniform float uTime;
-uniform float uGlowScale;
-uniform float uModelScale;
-varying vec3 vCore;
-varying vec3 vDark;
-varying vec4 vRing;
-varying vec4 vGlow;
-varying vec4 vStyle;
-varying float vGlowScale;
-varying float vDiscFrac;
-varying float vRadiusPx;
-varying float vFocus;
-varying float vTwinkle;
-varying float vSeed;
-varying float vCurate;
-varying float vSpeech;
-void main() {
-  vCore = aCore;
-  vDark = aDark;
-  vRing = aRing;
-  vGlow = aGlow;
-  vStyle = aStyle;
-  vGlowScale = aGlowScale;
-  vFocus = aFocus;
-  vSeed = aSeed;
-  vCurate = aCurate;
-  vSpeech = step(1.5, aStyle.x) * uSpeechLevel;
-  // Article orbs TWINKLE as RARE, FAST events (owner 2026-08-02, second
-  // round: the constant shimmer read as nothing — an individual twinkle
-  // must be noticeable during the idle spin). Time is cut into per-node
-  // cells (~7-13 s); roughly half the cells fire one short pulse
-  // (~0.4-0.6 s rise-and-fall) at a hashed offset, peaking at a hashed
-  // 25-75% of the selected brightness; otherwise the orb rests dark.
-  float cellLen = 7.0 + aSeed * 6.0;
-  float cellTime = uTime / cellLen + aSeed * 17.0;
-  float cellHash = fract(
-    sin((floor(cellTime) + aSeed * 91.7) * 12.9898) * 43758.5453
-  );
-  float pulseCenter = 0.2 + cellHash * 0.6;
-  float pulseHalf = 0.25 / cellLen;
-  float pulse = max(
-    0.0,
-    1.0 - abs(fract(cellTime) - pulseCenter) / pulseHalf
-  );
-  pulse = pulse * pulse * (3.0 - 2.0 * pulse);
-  vTwinkle =
-    step(0.5, cellHash) * pulse * (0.25 + 0.5 * fract(cellHash * 7.31));
-  vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-  // 2D parity: active/hovered discs grow ~2.5px, not a multiplicative bloom.
-  float swell = 1.0 + aFocus * (0.10 + 0.06 * uPulse);
-  swell *= 1.0 + 0.32 * vSpeech;
-  float radiusPx = aRadius * uModelScale * swell * uPerspective / max(1.0, -mvPosition.z);
-  float size = clamp(radiusPx * aExtent * 2.0, 1.5, 1200.0);
-  vRadiusPx = max(radiusPx, 0.75);
-  vDiscFrac = (radiusPx * 2.0) / size;
-  gl_PointSize = size;
-  gl_Position = projectionMatrix * mvPosition;
-}
-`;
-
-// Procedural replica of the 2D painter's node pass, composited source-over
-// exactly like canvas: depth glow, then ring stroke, then the gradient disc.
-const POINT_FRAGMENT_SHADER = `
-uniform float uTime;
-uniform float uGlowScale;
-varying vec3 vCore;
-varying vec3 vDark;
-varying vec4 vRing;
-varying vec4 vGlow;
-varying vec4 vStyle;
-varying float vGlowScale;
-varying float vDiscFrac;
-varying float vRadiusPx;
-varying float vFocus;
-varying float vTwinkle;
-varying float vSeed;
-varying float vCurate;
-varying float vSpeech;
-uniform float uArticleStyle;
-uniform float uCoreStyle;
-uniform float uSubjectStyle;
-uniform float uSubnodeStyle;
-uniform float uRingStyle;
-float roundedBoxDistance(vec2 point, float halfSize, float corner) {
-  vec2 q = abs(point) - vec2(halfSize - corner);
-  return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - corner;
-}
-void main() {
-  vec2 p = (gl_PointCoord - 0.5) * 2.0 / max(vDiscFrac, 1e-4);
-  float r = length(p);
-  float aa = 1.6 / vRadiusPx;
-  float nodeVariant = vStyle.x < 0.5
-    ? uArticleStyle
-    : (vStyle.x < 1.2
-      ? uSubjectStyle
-      : (vStyle.x < 1.5 ? uSubnodeStyle : uCoreStyle));
-  bool squareNode = vStyle.x < 1.5 && nodeVariant > 3.5;
-  // Leaves shimmer ambiently via the twinkle floor; a real focus (the
-  // thinking sweep, hover) always wins. Subjects never twinkle.
-  float boost = vStyle.x > 0.5 ? vFocus : max(vFocus, vTwinkle);
-  float effAlpha = mix(vStyle.w, 1.0, boost);
-  vec3 acc = vec3(0.0);
-  float accA = 0.0;
-  // One ring calculation for subjects and auto-curated Article leaves.
-  // An unmarked Brain remains a bare floating ball of light.
-  float ringA = 0.0;
-  if (vCurate > 0.5 || (vStyle.x > 0.5 && vStyle.x < 1.5)) {
-      float halfW = (vStyle.z * 0.5) / vRadiusPx;
-      float ringDistance = squareNode
-        ? abs(roundedBoxDistance(p, vStyle.y, nodeVariant < 4.5 ? 0.18 : 0.06))
-        : abs(r - vStyle.y);
-      ringA = vRing.a * (1.0 - smoothstep(halfW, halfW + aa, ringDistance));
-      // Ring style variants (owner 2026-08-03): 0 solid, 1 dashed,
-      // 2 double, 3 none. An auto-curated node's ring must stay visible
-      // (the marker contract), so its spinning perforation overrides
-      // "None" back to a solid base.
-      if (uRingStyle > 2.5) {
-        ringA = vCurate > 0.5 ? ringA : 0.0;
-      } else if (uRingStyle > 1.5) {
-        float innerDistance = squareNode
-          ? abs(roundedBoxDistance(
-              p,
-              vStyle.y * 0.78,
-              nodeVariant < 4.5 ? 0.14 : 0.045))
-          : abs(r - vStyle.y * 0.78);
-        float inner = vRing.a *
-          (1.0 - smoothstep(halfW, halfW + aa, innerDistance));
-        ringA = max(ringA, inner * 0.6);
-      } else if (uRingStyle > 0.5 && vCurate < 0.5) {
-        float cell = fract(atan(p.y, p.x) * 1.2732395 - vSeed * 37.0);
-        float dash = smoothstep(0.0, 0.06, cell) *
-          (1.0 - smoothstep(0.62, 0.68, cell));
-        ringA *= dash;
-      }
-      if (vCurate > 0.5) {
-        // Auto-curated node: the ring itself is PERFORATED and SPINS
-        // (owner 2026-08-03, replacing the orbiting comet) — eight
-        // rotating dashes at a 68% duty cycle, ~0.9 rad/s. The dash
-        // count must stay an INTEGER: the atan branch cut jumps the
-        // angle by 2π = exactly 8 cells, so fract() stays seamless
-        // across it. The spin rate is 4125 cells/hour (1.1458333/s) so
-        // the hourly uTime wrap lands on a whole cell instead of
-        // snapping every curated ring at once. Phase is seed-hashed so
-        // a curated fan never spins in lockstep.
-        float cell = fract(
-          atan(p.y, p.x) * 1.2732395 - uTime * 1.1458333 - vSeed * 37.0);
-        float dash = smoothstep(0.0, 0.06, cell) *
-          (1.0 - smoothstep(0.62, 0.68, cell));
-        ringA *= dash;
-      }
-  }
-  if (vStyle.x > 0.5) {
-    // Depth glow: gradient from 0.25r (palette glow) to glowScale*r (clear).
-    float glowT = clamp((r - 0.25) / max(vGlowScale - 0.25, 1e-3), 0.0, 1.0);
-    float glowA = vGlow.a * uGlowScale * (1.0 - glowT) * (1.0 + 0.45 * vSpeech);
-    acc = vGlow.rgb * glowA;
-    accA = glowA;
-    acc = vRing.rgb * ringA + acc * (1.0 - ringA);
-    accA = ringA + accA * (1.0 - ringA);
-    vec3 disc;
-    float discA;
-    if (vStyle.x > 1.5) {
-      // The core is a translucent plasma BALL, never a flat spiral or a
-      // solid disc; uCoreStyle picks the variant (owner 2026-08-03,
-      // WeakAuras-style style list). The plasma variants keep the
-      // spherical depth falloff + bright see-through core identity; the
-      // Data block variant is the sanctioned exception (owner 2026-08-04:
-      // the shared library's core is deliberately GEOMETRIC so Library
-      // never reads as an agent's plasma ball).
-      if (uCoreStyle > 3.5) {
-        // Data block: an isometric neon data cube in the node's own
-        // tint — hexagon silhouette, three shaded faces meeting at the
-        // front corner, scan rows climbing the sides.
-        vec2 q = vec2(p.x, -p.y);
-        float R = 0.78;
-        float apothem = R * 0.8660254;
-        float hexDist = max(
-          abs(q.x),
-          max(
-            abs(0.5 * q.x + 0.8660254 * q.y),
-            abs(0.5 * q.x - 0.8660254 * q.y)
-          )
-        );
-        float inside = 1.0 - smoothstep(apothem - aa, apothem + aa, hexDist);
-        // Face sectors around the front corner (rays at 30/150/270 in
-        // y-up space): top face bright, right medium, left dark.
-        float s1 = 0.8660254 * q.y - 0.5 * q.x;
-        float s2 = 0.8660254 * q.y + 0.5 * q.x;
-        bool topFace = s1 > 0.0 && s2 > 0.0;
-        float face = topFace ? 0.95 : (q.x < 0.0 ? 0.38 : 0.62);
-        face += topFace
-          ? 0.05 * sin(uTime * 0.8)
-          : 0.09 * (0.5 + 0.5 * sin(q.y * 16.0 - uTime * 2.0));
-        // Neon edges: the silhouette plus the three corner rays.
-        float lw = max(0.05, aa * 1.5);
-        float edge = 1.0 - smoothstep(lw * 0.5, lw, abs(hexDist - apothem));
-        vec2 d1 = vec2(0.8660254, 0.5);
-        vec2 d2 = vec2(-0.8660254, 0.5);
-        vec2 d3 = vec2(0.0, -1.0);
-        float t1 = clamp(dot(q, d1), 0.0, R);
-        float t2 = clamp(dot(q, d2), 0.0, R);
-        float t3 = clamp(dot(q, d3), 0.0, R);
-        edge = max(edge, 1.0 - smoothstep(lw * 0.5, lw, length(q - d1 * t1)));
-        edge = max(edge, 1.0 - smoothstep(lw * 0.5, lw, length(q - d2 * t2)));
-        edge = max(edge, 1.0 - smoothstep(lw * 0.5, lw, length(q - d3 * t3)));
-        edge *= 1.0 - smoothstep(apothem + lw, apothem + lw * 2.0, hexDist);
-        // Soft halo past the silhouette keeps the additive glow the rest
-        // of the scene wears.
-        float halo = exp(-max(0.0, hexDist - apothem) * 9.0) *
-          (1.0 - inside) * 0.3;
-        float faceA = inside * (0.34 + 0.3 * face) * effAlpha;
-        float edgeA = edge * (0.85 + 0.15 * boost) * effAlpha;
-        float haloA = halo * effAlpha;
-        discA = min(1.0, faceA + edgeA + haloA);
-        vec3 faceColor = mix(vCore, vec3(1.0), 0.12) * (0.35 + 0.65 * face);
-        vec3 edgeColor = mix(vCore, vec3(1.0), 0.7);
-        disc = (faceColor * faceA + edgeColor * edgeA +
-          mix(vCore, vec3(1.0), 0.4) * haloA) / max(discA, 1e-4);
-      } else {
-      float depth = sqrt(max(0.0, 1.0 - r * r));
-      float plasmaCore = exp(-r * r * 3.0);
-      float brightness;
-      if (uCoreStyle < 0.5) {
-        // Plasma filaments: the classic cellular churn.
-        vec2 q = p * 1.6;
-        float n1 = sin(q.x * 3.1 + uTime * 1.3) * sin(q.y * 3.7 - uTime * 1.1);
-        float n2 = sin((q.x + q.y) * 2.3 - uTime * 1.7) *
-          sin((q.x - q.y) * 2.9 + uTime * 1.4);
-        float n3 = sin(q.x * 6.3 - uTime * 2.2) * sin(q.y * 5.7 + uTime * 2.6);
-        float churn = 0.5 + 0.25 * n1 + 0.15 * n2 + 0.10 * n3;
-        brightness = clamp(plasmaCore * 0.9 + churn * depth * 0.95, 0.0, 1.0);
-      } else if (uCoreStyle < 1.5) {
-        // Calm core: the bare translucent ball, no turbulence.
-        brightness = clamp(plasmaCore * 1.05 + depth * 0.5, 0.0, 1.0);
-      } else if (uCoreStyle < 2.5) {
-        // Vortex: the churn coordinates swirl harder toward the center.
-        float ang = (1.0 - r) * 3.2 + uTime * 0.9;
-        vec2 q = mat2(cos(ang), -sin(ang), sin(ang), cos(ang)) * p * 1.9;
-        float n1 = sin(q.x * 4.1 + uTime * 1.6) * sin(q.y * 4.7 - uTime * 1.2);
-        float n2 = sin((q.x + q.y) * 3.1 - uTime * 2.0) *
-          sin((q.x - q.y) * 2.7 + uTime * 1.5);
-        float churn = 0.52 + 0.3 * n1 + 0.18 * n2;
-        brightness = clamp(plasmaCore * 0.85 + churn * depth, 0.0, 1.0);
-      } else {
-        // Pulsar: calm ball + expanding radial rings (phase snaps once an
-        // hour with the uTime wrap, same accepted tradeoff as the churn).
-        float wave = 0.5 + 0.5 * sin(r * 14.0 - uTime * 2.4);
-        brightness = clamp(
-          plasmaCore + depth * 0.35 + wave * wave * depth * 0.55, 0.0, 1.0);
-      }
-      brightness = min(1.0, brightness * (1.0 + 0.3 * vSpeech));
-      disc = mix(vec3(0.45, 0.75, 1.0), vec3(1.0), brightness);
-      discA = brightness * (1.0 - smoothstep(0.88, 1.02, r)) * effAlpha;
-      }
-    } else {
-      // Subject disc variants per tier (owner 2026-08-03): branch nodes
-      // ride uSubjectStyle, deeper sub-branch nodes uSubnodeStyle.
-      // 0 Classic disc, 1 Plasma orb, 2 Gem, 3 Hollow. Obsidience adds
-      // 4 Rounded square and 5 Data tile for the Library satellite.
-      float variant = nodeVariant;
-      float t = clamp((length(p - vec2(-0.28, -0.32)) - 0.08) / 0.92, 0.0, 1.0);
-      vec3 classic = t < 0.28
-        ? mix(vec3(0.941, 0.976, 1.0), vCore, t / 0.28)
-        : mix(vCore, vDark, (t - 0.28) / 0.72);
-      float edge = 1.0 - smoothstep(1.0 - aa, 1.0 + aa, r);
-      if (variant < 0.5) {
-        disc = classic;
-        discA = edge * effAlpha;
-      } else if (variant < 1.5) {
-        // Plasma orb: translucent glow ball in the branch tint.
-        float halo = exp(-r * r * 1.2);
-        disc = mix(vCore, vec3(1.0), halo * 0.55);
-        discA = max(halo * 0.85, edge * 0.25) * edge * effAlpha;
-      } else if (variant < 2.5) {
-        // Gem: the classic disc with a white-hot heart and a faint flare.
-        float heart = exp(-r * r * 5.0);
-        float flare = (1.0 - smoothstep(0.02, 0.1, min(abs(p.x), abs(p.y))))
-          * (1.0 - smoothstep(0.2, 1.0, r)) * 0.3;
-        disc = mix(classic, vec3(1.0), clamp(heart + flare, 0.0, 0.85));
-        discA = edge * effAlpha;
-      } else if (variant < 3.5) {
-        // Hollow: the ring carries the node; only a whisper of fill.
-        disc = classic;
-        discA = edge * 0.14 * effAlpha;
-      } else {
-        // Library square nodes retain the same palette/depth language while
-        // changing the actual sprite silhouette. Rounded square is a filled
-        // glass tile; Data tile is a sharper hollow frame with scan rows.
-        float corner = variant < 4.5 ? 0.16 : 0.045;
-        float boxDistance = roundedBoxDistance(p, 0.82, corner);
-        float boxInside = 1.0 - smoothstep(-aa, aa, boxDistance);
-        float boxEdge = 1.0 - smoothstep(aa * 0.35, aa * 1.8, abs(boxDistance));
-        if (variant < 4.5) {
-          float heart = exp(-dot(p, p) * 4.2);
-          disc = mix(classic, vec3(1.0), heart * 0.48);
-          discA = boxInside * effAlpha;
-        } else {
-          float rows = smoothstep(0.76, 0.96, abs(sin(p.y * 17.0 - uTime * 1.8)));
-          disc = mix(vDark, vCore, 0.5 + rows * 0.35);
-          discA = max(boxEdge, boxInside * (0.12 + rows * 0.12)) * effAlpha;
-        }
-      }
-    }
-    acc = disc * discA + acc * (1.0 - discA);
-    accA = discA + accA * (1.0 - discA);
-  } else {
-    // Article leaves: uArticleStyle picks the orb variant (owner
-    // 2026-08-03, WeakAuras-style style list). 0 Jewel star is the classic
-    // halo + white-hot core + four-point flare (owner 2026-08-02, same as
-    // the 2D map); 1 Plasma orb drops the flare; 2 Classic disc is the 2D
-    // gradient disc + dark rim with no additive halo; 3 Ember is a
-    // tighter, warmer plasma. Focus (the thinking sweep) boosts them all.
-    if (uArticleStyle > 3.5) {
-      float corner = uArticleStyle < 4.5 ? 0.16 : 0.045;
-      float boxDistance = roundedBoxDistance(p, 0.78, corner);
-      float boxInside = 1.0 - smoothstep(-aa, aa, boxDistance);
-      float boxEdge = 1.0 - smoothstep(aa * 0.35, aa * 1.8, abs(boxDistance));
-      float halo = exp(-max(0.0, boxDistance) * 5.5) * (1.0 - boxInside);
-      if (uArticleStyle < 4.5) {
-        float heart = exp(-dot(p, p) * 7.0);
-        float flare = (1.0 - smoothstep(0.018, 0.09, min(abs(p.x), abs(p.y))))
-          * (1.0 - smoothstep(0.25, 1.2, r));
-        float jewelA = clamp(boxInside + halo * 0.52 + flare * 0.45, 0.0, 1.0)
-          * effAlpha;
-        vec3 jewel = mix(vCore, vec3(1.0), clamp(heart + flare * 0.5, 0.0, 0.88));
-        acc = jewel * jewelA;
-        accA = jewelA;
-      } else {
-        float rows = smoothstep(0.78, 0.96, abs(sin(p.y * 18.0 - uTime * 2.0)));
-        float pixelA = max(boxEdge, boxInside * (0.48 + rows * 0.22)) * effAlpha;
-        acc = mix(vDark, vCore, 0.62 + rows * 0.25) * pixelA;
-        accA = pixelA;
-      }
-    } else if (uArticleStyle > 1.5 && uArticleStyle < 2.5) {
-      float t = clamp((length(p - vec2(-0.28, -0.32)) - 0.08) / 0.92, 0.0, 1.0);
-      vec3 flat3 = t < 0.28
-        ? mix(vec3(0.941, 0.976, 1.0), vCore, t / 0.28)
-        : mix(vCore, vDark, (t - 0.28) / 0.72);
-      float flatA = (1.0 - smoothstep(1.0 - aa, 1.0 + aa, r)) * effAlpha;
-      acc = flat3 * flatA;
-      accA = flatA;
-    } else {
-      bool ember = uArticleStyle > 2.5;
-      vec3 haloTint = mix(vCore, vec3(1.0), 0.25);
-      float halo = ember
-        ? exp(-r * r * 1.7) * (0.38 + boost * 0.55)
-        : exp(-r * r * 0.85) * (0.28 + boost * 0.5);
-      float coreT = smoothstep(0.0, ember ? 0.42 : 0.62, r);
-      vec3 orb = mix(ember ? vec3(1.0, 0.97, 0.9) : vec3(1.0, 1.0, 0.98),
-        vCore, coreT);
-      float disc = ember
-        ? 1.0 - smoothstep(0.55, 0.9, r)
-        : 1.0 - smoothstep(0.78, 1.05, r);
-      float flare = uArticleStyle < 0.5
-        ? (1.0 - smoothstep(0.015, 0.085, min(abs(p.x), abs(p.y))))
-          * (1.0 - smoothstep(0.3, 2.6, r)) * (0.35 + boost * 0.4)
-        : 0.0;
-      float orbA = clamp(disc + halo + flare, 0.0, 1.0) * effAlpha;
-      vec3 orbColor =
-        (orb * disc + haloTint * (halo + flare) * (1.0 - disc)) /
-        max(disc + (halo + flare) * (1.0 - disc), 1e-4);
-      acc = orbColor * orbA;
-      accA = orbA;
-    }
-    if (vCurate > 0.5) {
-      acc = vRing.rgb * ringA + acc * (1.0 - ringA);
-      accA = ringA + accA * (1.0 - ringA);
-    }
-  }
-  if (accA <= 0.004) discard;
-  vec3 color = acc / max(accA, 1e-4);
-  color = mix(color, vec3(1.0), boost * 0.45);
-  gl_FragColor = vec4(color, accA);
-}
-`;
-
-// Links render as screen-space BEAM quads, not GL lines: each segment is
-// extruded perpendicular to its screen direction in the vertex shader and
-// shaded with a bright core plus a soft glow falloff (additive), so the
-// connectors read as light beams. Widths/opacities ride live tuning
-// uniforms.
-const BEAM_VERTEX_SHADER = `
-attribute vec3 aStart;
-attribute vec3 aEnd;
-attribute float aSide;
-attribute float aEnd01;
-attribute vec3 aColor;
-attribute float aArc;
-attribute float aWidth;
-attribute float aP;
-attribute float aDormant;
-attribute float aHover;
-#ifdef KNOWLEDGE_REVIEW_EFFECT
-attribute vec2 aReview;
-varying vec2 vReview;
-#endif
-uniform vec2 uViewportPx;
-uniform float uWidthPx;
-uniform float uFloorPx;
-uniform float uGlow;
-varying vec3 vColor;
-varying float vAcross;
-varying float vArc;
-varying float vP;
-varying float vDormant;
-varying float vHover;
-void main() {
-  vP = aP;
-  vDormant = aDormant;
-  vHover = aHover;
-  vec4 clipA = projectionMatrix * modelViewMatrix * vec4(aStart, 1.0);
-  vec4 clipB = projectionMatrix * modelViewMatrix * vec4(aEnd, 1.0);
-  vec2 pixA = (clipA.xy / max(abs(clipA.w), 1e-4)) * uViewportPx * 0.5;
-  vec2 pixB = (clipB.xy / max(abs(clipB.w), 1e-4)) * uViewportPx * 0.5;
-  vec2 direction = pixB - pixA;
-  float len = max(length(direction), 1e-3);
-  direction /= len;
-  // aWidth is the depth-taper coordinate: 0 = the top arm at the full
-  // width slider, 1 = the article-level arm at its own live width slider
-  // (both uniforms, so neither slider needs a geometry rebuild). The
-  // completion pulse SWELLS on-path beams to nearly double width (owner
-  // 2026-08-02: the whole beam pulses with bloom around it, not just the
-  // center line).
-  float beamGlow = uGlow;
-#ifdef KNOWLEDGE_REVIEW_EFFECT
-  vReview = aReview;
-  beamGlow = aReview.x > 0.5
-    ? sin(clamp((aReview.y - 1.35) / 0.55, 0.0, 1.0) * 3.14159265)
-    : (aReview.y >= 0.8 ? 0.2 + 0.08 * cos((aReview.y - 0.8) * 3.14159265) : 0.0);
-#endif
-  float swell = aP >= 0.0 ? 1.0 + beamGlow * 0.9 : 1.0;
-  vec2 normalPx = vec2(-direction.y, direction.x) *
-    (mix(uWidthPx, uFloorPx, aWidth) * swell * 0.5 * aSide);
-  vec4 clip = mix(clipA, clipB, aEnd01);
-  clip.xy += (normalPx / (uViewportPx * 0.5)) * clip.w;
-  vColor = aColor;
-  vAcross = aSide;
-  vArc = aArc;
-  gl_Position = clip;
-}
-`;
-
-// Shared active-path timeline (owner 2026-08-02): every beam fragment
-// carries its plan-progress coordinate vP (-1 off-path). The BEAM head
-// (uBeamP) travels the path first, revealing/brightening the hollow tube;
-// the SOLID center line (uSolidP) launches once the head clears the first
-// node and fills behind its own comet; when the fill completes the whole
-// path pulses NEON (uGlow); then segmented dashes stream one direction
-// (uFlowAge) — information flowing — in the beam's own gradient colors.
-// On terminal cross-links vP is V-shaped, so both fronts naturally read
-// as two comets departing the endpoints and meeting at the middle.
-const PATH_TIMELINE_GLSL = `
-  float head = 1.0 - smoothstep(0.0, uHeadSpan, uBeamP - vP);
-  float alpha = max(uOpacity, 0.55) * band;
-  vec3 color = mix(vColor, vec3(1.0), head * 0.6);
-  float coreA = 0.0;
-  if (uSolidP >= vP) {
-    float solidHead = 1.0 - smoothstep(0.0, uHeadSpan, uSolidP - vP);
-    coreA = core * (0.85 + solidHead * 0.15);
-    color = mix(color, vec3(1.0), core * (0.25 + solidHead * 0.5));
-  }
-  if (uFlowAge >= 0.0) {
-    float dashOn =
-      fract(vArc * uDashFreq - uFlowAge * 0.9) <= 0.55 ? 1.0 : 0.0;
-    coreA = core * mix(0.25, 0.95, dashOn);
-    color = mix(vColor, vec3(1.0), core * dashOn * 0.35);
-  }
-  // Completion pulse: the vertex shader swells the quad, and the whole
-  // widened envelope lights with a soft bloom falloff around the beam
-  // (owner 2026-08-02: the full beam pulses, not just the center line).
-  color = mix(color, vec3(1.0), uGlow * 0.6);
-  float bloom = uGlow * (1.0 - smoothstep(0.0, 1.0, t)) * 0.85;
-  float a = min(1.0, (alpha + coreA) * (1.0 + uGlow * 0.6) + bloom);
-  gl_FragColor = vec4(color, a);
-`;
-
-// Taxonomy beams (Brain spokes, structural arms, article spokes) —
-// hollow-beam profile: a flat translucent TUBE with a crisply feathered
-// silhouette. Dormant beams paint the tube ONLY (owner 2026-08-02: the
-// bright center line is reserved for the thinking animation, so the
-// chosen path is unmistakable); invisible-at-rest beams (aDormant 0)
-// exist purely for the path timeline.
-const TAXONOMY_PATH_FRAGMENT_SHADER = `
-uniform float uOpacity;
-uniform float uDashFreq;
-uniform float uBeamP;
-uniform float uSolidP;
-uniform float uGlow;
-uniform float uFlowAge;
-uniform float uHeadSpan;
-varying vec3 vColor;
-varying float vAcross;
-varying float vArc;
-varying float vP;
-varying float vDormant;
-varying float vHover;
-void main() {
-  float t = abs(vAcross);
-  float band = (1.0 - smoothstep(0.88, 1.0, t)) * 0.24;
-  float core = 1.0 - smoothstep(0.14, 0.24, t);
-  if (vP < 0.0 || uBeamP < vP) {
-    // Hover preview (owner 2026-08-02): the hovered node's WHOLE subtree
-    // shows its beam links down to the end articles — including the
-    // at-rest-invisible Brain spokes and article arms — as tubes with a
-    // soft center hint.
-    if (vHover > 0.5) {
-      gl_FragColor = vec4(
-        mix(vColor, vec3(1.0), core * 0.2),
-        max(uOpacity, 0.5) * min(1.0, band + core * 0.35)
-      );
-      return;
-    }
-    if (vDormant < 0.5) discard;
-    gl_FragColor = vec4(vColor, uOpacity * band);
-    return;
-  }
-${PATH_TIMELINE_GLSL}
-}
-`;
-
-// Article cross-links: gently curved beams in the REVERSED gradient,
-// checkered by arc length while dormant; the active path rides the same
-// shared timeline as the taxonomy beams.
-const CROSS_PATH_FRAGMENT_SHADER = `
-uniform float uOpacity;
-uniform float uDashFreq;
-#ifndef KNOWLEDGE_REVIEW_EFFECT
-uniform float uBeamP;
-uniform float uSolidP;
-uniform float uGlow;
-uniform float uFlowAge;
-uniform float uHeadSpan;
-#else
-varying vec2 vReview;
-#endif
-varying vec3 vColor;
-varying float vAcross;
-varying float vArc;
-varying float vP;
-varying float vDormant;
-void main() {
-  float t = abs(vAcross);
-  float band = (1.0 - smoothstep(0.88, 1.0, t)) * 0.24;
-  float core = 1.0 - smoothstep(0.14, 0.24, t);
-#ifdef KNOWLEDGE_REVIEW_EFFECT
-  bool pending = vReview.x < 0.5;
-  if (!pending && vReview.y >= ${(KNOWLEDGE_LINK_APPROVAL_DURATION_MS / 1000).toFixed(1)}) discard;
-  float uBeamP = pending && vReview.y >= 0.8 ? 2.0 : vReview.y / (pending ? 0.6 : 0.9);
-  float uSolidP = pending && vReview.y >= 0.8 ? 2.0
-    : (vReview.y - (pending ? 0.2 : 0.45)) / (pending ? 0.6 : 0.9);
-  float uGlow = pending
-    ? (vReview.y >= 0.8 ? 0.2 + 0.08 * cos((vReview.y - 0.8) * 3.14159265) : 0.0)
-    : sin(clamp((vReview.y - 1.35) / 0.55, 0.0, 1.0) * 3.14159265);
-  float uFlowAge = -1.0;
-  float uHeadSpan = 0.08;
-  if (uBeamP < vP) discard;
-#endif
-  if (vP < 0.0 || uBeamP < vP) {
-    // Dormant: static checkered dashes at the tuned opacity.
-    if (fract(vArc * uDashFreq) > 0.55) discard;
-    float profile = min(1.0, band + core);
-    gl_FragColor =
-      vec4(mix(vColor, vec3(1.0), core * 0.2), uOpacity * profile);
-    return;
-  }
-${PATH_TIMELINE_GLSL}
-#ifdef KNOWLEDGE_REVIEW_EFFECT
-  if (!pending) gl_FragColor.a *= 1.0 - smoothstep(1.9,
-    ${(KNOWLEDGE_LINK_APPROVAL_DURATION_MS / 1000).toFixed(1)}, vReview.y);
-#endif
-}
-`;
-
-// Elongated silver streaks streaming along the cross-link curves: each is
-// clipped interval on the beam's exact polyline. Segmenting the tail prevents
-// it from cutting through the layer while streaming still costs zero CPU
-// once the ball settles.
-const PARTICLE_VERTEX_SHADER = `
-attribute vec3 aStart;
-attribute vec3 aEnd;
-attribute vec2 aRange;
-attribute float aPhase;
-attribute float aSpeed;
-attribute float aTip;
-uniform float uTime;
-uniform float uSpeedScale;
-uniform float uStreakSpan;
-varying float vTip;
-varying float vVisible;
-void main() {
-  float head = fract(uTime * aSpeed * uSpeedScale + aPhase);
-  float tail = max(0.0, head - uStreakSpan);
-  float start = max(aRange.x, tail);
-  float end = min(aRange.y, head);
-  vVisible = end > start ? 1.0 : 0.0;
-  float t = clamp(mix(start, end, aTip), aRange.x, aRange.y);
-  vTip = clamp((t - tail) / max(0.00001, head - tail), 0.0, 1.0);
-  float local = (t - aRange.x) / (aRange.y - aRange.x);
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(mix(aStart, aEnd, local), 1.0);
-}
-`;
-
-const PARTICLE_FRAGMENT_SHADER = `
-varying float vTip;
-varying float vVisible;
-void main() {
-  if (vVisible < 0.5) discard;
-  gl_FragColor = vec4(0.86, 0.93, 1.0, 0.2 + 0.65 * vTip);
-}
-`;
 
 interface CssRgba {
   r: number;
@@ -874,6 +240,7 @@ export function parseKnowledgeCssColor(css: string): CssRgba {
 export function Knowledge3dScene(props: Knowledge3dSceneProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const propsRef = useRef(props);
+  const syncPresentation = useRef<() => void>(() => {});
   propsRef.current = props;
 
   useEffect(() => {
@@ -954,12 +321,17 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
     // and the glow/flow clock derive from it every frame. The beam
     // uniforms live per-cloud; this is the one JS-side clock driving them.
     let appliedPathSpec: Knowledge3dPathSpec | null | undefined = undefined;
+    let requestedPathSpec: Knowledge3dPathSpec | null = null;
     let tendrilPhase: KnowledgeFocusPhase = null;
     let tendrilPhaseStartedAt = 0;
     let tendrilProgressAtPhaseStart = 0;
     let tendrilProgress = 0;
     let solidProgress = 0;
     let glowStartedAt = -1;
+    let mainFadeStartedAt = -1;
+    let retainedFocus: Pick<Knowledge3dSceneProps, "pathSpec" | "focusNodeIds" | "activityAccents" | "focusPhase" | "focusKey" | "tuning"> | null = null;
+    let appliedFocusKey: string | number | null = null;
+    let selectionMoving = false;
 
     // Scene-global uniform objects shared into every cloud: the viewport,
     // the perspective/pulse/time trio the point shaders read, and the ONE
@@ -993,29 +365,51 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
     // another ball's fall (owner 2026-08-03).
     const satelliteClouds = new Map<string, Knowledge3dCloud>();
     let builtSatellites: ReadonlyArray<Knowledge3dCloudInput> | undefined;
-    // Role nameplates (owner 2026-08-03): a WoW-style glyph sprite floats
-    // over every ball — THREE.Sprite always faces the camera (fixed
-    // orientation) and sits on the spin axis, so orbit/spin never skew it.
-    const rolePlates = new Map<string, THREE.Sprite>();
-    let mainPlate: THREE.Sprite | null = null;
-    function createRolePlate(agentId: string): THREE.Sprite {
+    // Role nameplates float over each ball. Library opts into a local Y turn;
+    // other glyphs retain their camera-facing sprite behavior.
+    type RolePlate = THREE.Sprite | THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
+    const rolePlates = new Map<string, RolePlate>();
+    let mainPlate: RolePlate | null = null;
+    let libraryPlatePhase = 0;
+    function createRolePlate(agentId: string): RolePlate {
+      const role = knowledgeRoleForAgent(agentId);
       const texture = new THREE.CanvasTexture(
-        paintKnowledgeRoleIcon(knowledgeRoleForAgent(agentId), 128),
+        paintKnowledgeRoleIcon(role, 128),
       );
       texture.colorSpace = THREE.SRGBColorSpace;
-      const material = new THREE.SpriteMaterial({
+      const appearance = {
         map: texture,
         transparent: true,
         opacity: 0.85,
         depthTest: false,
         depthWrite: false,
-      });
-      const sprite = new THREE.Sprite(material);
+      };
+      if (role === "library") {
+        const plate = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({
+          ...appearance, side: THREE.DoubleSide, forceSinglePass: true,
+        }));
+        const parentRotation = new THREE.Quaternion(), cameraRotation = new THREE.Quaternion();
+        const turn = new THREE.Quaternion(), axis = new THREE.Vector3(0, 1, 0);
+        // Each presentation has its own camera. Remove the cloud's rotation
+        // before applying that camera's facing direction and the icon's turn.
+        plate.onBeforeRender = (_renderer, _scene, viewCamera) => {
+          if (plate.parent) plate.parent.getWorldQuaternion(parentRotation);
+          else parentRotation.identity();
+          viewCamera.getWorldQuaternion(cameraRotation);
+          plate.quaternion.copy(parentRotation.invert()).multiply(cameraRotation)
+            .multiply(turn.setFromAxisAngle(axis, libraryPlatePhase));
+          plate.updateWorldMatrix(false, false);
+        };
+        plate.renderOrder = 90;
+        return plate;
+      }
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial(appearance));
       sprite.renderOrder = 90;
       return sprite;
     }
-    function disposeRolePlate(sprite: THREE.Sprite): void {
+    function disposeRolePlate(sprite: RolePlate): void {
       sprite.parent?.remove(sprite);
+      if (sprite instanceof THREE.Mesh) sprite.geometry.dispose();
       sprite.material.map?.dispose();
       sprite.material.dispose();
     }
@@ -1029,8 +423,10 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
     const sweepStates = new Map<
       string,
       {
-        key: number;
+        key: string | number;
         startedAt: number;
+        progress: number;
+        progressAtStart: number;
         glowStartedAt: number;
         pulseKey: number;
         pulseStartedAt: number;
@@ -1040,6 +436,9 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
          *  must re-apply to the NEW object or the lit path and launch
          *  pulse die mid-flash. */
         cloud: Knowledge3dCloud;
+        sweep: NonNullable<Knowledge3dSceneProps["satelliteSweeps"]>[number];
+        spec: Knowledge3dPathSpec;
+        fadeStartedAt: number;
       }
     >();
     // Frame-gate memory: in-flight sweeps/comets earn 60 fps, a HELD Task
@@ -1213,7 +612,7 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
       return projected;
     }
 
-    function pickNearest(clientX: number, clientY: number): string | null {
+    function pickNearest(clientX: number, clientY: number, graphId?: string): string | null {
       const bounds = renderer.domElement.getBoundingClientRect();
       if (!bounds.width || !bounds.height) return null;
       const px = (clientX - bounds.left) / bounds.width;
@@ -1222,6 +621,7 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
       let best: string | null = null;
       let bestDistance = HOVER_RADIUS_PX;
       for (const [id, point] of projected) {
+        if (graphId && (parseKnowledgeAgentNodeId(id).agentId ?? propsRef.current.primaryGraphId ?? "main") !== graphId) continue;
         const distance = Math.hypot(
           (point.x - px) * bounds.width,
           (point.y - py) * bounds.height,
@@ -1327,6 +727,105 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
     let lastTick = performance.now();
     const emptyProjection = new Map<string, { x: number; y: number }>();
 
+    // Open viewers borrow the live clouds and this renderer. Their isolated
+    // camera pass adds no second graph, simulation or WebGL context. A 2D
+    // transfer canvas supplies its frames to WebRTC and releases on close.
+    type Preview = {canvas: HTMLCanvasElement; camera: THREE.PerspectiveCamera;
+      publisher: GraphPublisher; cloud: () => Knowledge3dCloud | null | undefined;
+      count: number; zoom: number; unforward?: () => void};
+    const previews = new Map<string, Preview>();
+    const previewCenter = new THREE.Vector3();
+    const primaryId = propsRef.current.primaryGraphId ?? "main";
+    function consumerCount() {
+      propsRef.current.onPresentationConsumers?.([...previews.values()].reduce((sum, preview) => sum + preview.count, 0));
+    }
+    function positionPreview(preview: Preview, cloud: Knowledge3dCloud) {
+      const input = cloud === mainCloud ? propsRef.current.tuning
+        : propsRef.current.satellites?.find(entry => entry.agentId === cloud.agentId)?.tuning ?? propsRef.current.tuning;
+      cloud.group.getWorldPosition(previewCenter);
+      const radius = (cloud.layoutDiagnostics()?.radius ?? knowledge3dMaxShell(input)) * cloud.group.scale.x;
+      const distance = (radius + 20 * input.graphScale) / Math.sin(FOV_DEGREES * Math.PI / 360) * preview.zoom;
+      preview.camera.position.setFromSphericalCoords(distance, clampKnowledge3dPolar(orbit.polar), orbit.azimuth).add(previewCenter);
+      preview.camera.lookAt(previewCenter); preview.camera.updateMatrixWorld();
+    }
+    function createPreview(id: string, source: GraphSource, cloud: Preview["cloud"]): Preview {
+      const canvas = document.createElement("canvas"); canvas.width = canvas.height = 1;
+      const preview = {canvas, camera: new THREE.PerspectiveCamera(FOV_DEGREES, 1, 0.1, 10000), cloud, count: 0, zoom: 1} as Preview;
+      previews.set(id, preview);
+      preview.publisher = new GraphPublisher(source, canvas, command => {
+        const {action, x = 0, y = 0, dx = 0, dy = 0} = command;
+        if (action === "orbit") {
+          orbit.azimuth -= dx * 6; orbit.polar = clampKnowledge3dPolar(orbit.polar - dy * 5);
+          orbit.interactingUntil = performance.now() + 1200;
+        } else if (action === "zoom") preview.zoom = Math.max(0.35, Math.min(3, preview.zoom * Math.exp(dy * 0.3)));
+        else if (action === "hover" || action === "click") {
+          const target = preview.cloud(); let picked: string | null = null;
+          if (target) {
+            positionPreview(preview, target);
+            const points = new Map<string, {x: number; y: number}>(); target.projectInto(points, preview.camera);
+            let best = HOVER_RADIUS_PX / 1024;
+            for (const [node, point] of points) {
+              const distance = Math.hypot(point.x - x, point.y - y);
+              if (distance < best) { best = distance; picked = node; }
+            }
+          }
+          if (action === "hover") propsRef.current.onHover?.(picked);
+          else propsRef.current.onPresentationCommand?.(picked ? {action: "select", id: picked} : {action: "clear"});
+        } else if (action === "fit") {
+          preview.zoom = 1; propsRef.current.onPresentationCommand?.({action: "clear"});
+        } else if (action === "leave") propsRef.current.onHover?.(null);
+        else propsRef.current.onPresentationCommand?.(command);
+        frameDeadline = 0;
+      }, () => { frameDeadline = 0; }, count => {
+        preview.count = count; const size = count ? 1024 : 1;
+        if (canvas.width !== size) canvas.width = canvas.height = size;
+        consumerCount();
+      });
+      return preview;
+    }
+    const primaryPreview = propsRef.current.sharePresentation
+      ? createPreview(primaryId, propsRef.current.presentationSource ?? "knowledge", () => mainCloud) : null;
+    const publisher = primaryPreview?.publisher ?? null;
+    propsRef.current.onPresentationReady?.(publisher);
+    function syncPreviewPorts() {
+      if (!publisher) return;
+      const live = new Set([primaryId]);
+      for (const {agentId: id} of propsRef.current.satellites ?? []) {
+        live.add(id);
+        if (!previews.has(id)) {
+          const preview = createPreview(id, `knowledge:${id}` as GraphSource, () => satelliteClouds.get(id));
+          preview.unforward = publisher.forwardTo(preview.publisher);
+        }
+      }
+      for (const [id, preview] of previews) if (!live.has(id)) {
+        preview.unforward?.(); preview.publisher.dispose(); previews.delete(id);
+      }
+    }
+    syncPresentation.current = syncPreviewPorts;
+    syncPreviewPorts();
+    function renderPreviews() {
+      const active = [...previews.values()].filter(preview => preview.publisher.hasViewers && preview.cloud());
+      if (!active.length) return;
+      const visibility = scene.children.map(child => [child, child.visible] as const);
+      const side = Math.min(width, height, 1024);
+      renderer.setViewport(0, 0, side, side); renderer.setScissor(0, 0, side, side); renderer.setScissorTest(true);
+      viewportUniform.value.set(side * pixelRatio, side * pixelRatio);
+      uniforms.uPerspective.value = side * pixelRatio / (2 * Math.tan(FOV_DEGREES * Math.PI / 360));
+      for (const preview of active) {
+        const cloud = preview.cloud()!; positionPreview(preview, cloud);
+        for (const [child] of visibility) child.visible = child === cloud.group;
+        renderer.clear(true, true, true); renderer.render(scene, preview.camera);
+        const transfer = preview.canvas.getContext("2d")!;
+        transfer.globalCompositeOperation = "copy";
+        transfer.drawImage(renderer.domElement, 0, renderer.domElement.height - side * pixelRatio,
+          side * pixelRatio, side * pixelRatio, 0, 0, preview.canvas.width, preview.canvas.height);
+        preview.publisher.frame();
+      }
+      for (const [child, visible] of visibility) child.visible = visible;
+      renderer.setScissorTest(false); renderer.setViewport(0, 0, width, height);
+      viewportUniform.value.set(width * pixelRatio, height * pixelRatio); updatePerspectiveUniform();
+    }
+
     function frame(now: number): void {
       if (disposed) return;
       rafId = requestAnimationFrame(frame);
@@ -1362,7 +861,8 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
       const speechTarget = envelope && now - envelope.updatedAt < 250 ? envelope.level : 0;
       const interval = knowledge3dFrameIntervalMs({
         focusActive:
-          current.focusActive || speechTarget > 0 || uniforms.uSpeechLevel.value > 0.001 ||
+          current.focusActive || retainedFocus !== null || speechTarget > 0 || uniforms.uSpeechLevel.value > 0.001 ||
+          mainFadeStartedAt >= 0 || selectionMoving ||
           simActive || lastSweepHot || approvalActive ||
           deliveryComets.size > 0 || (current.deliveries?.length ?? 0) > 0 ||
           current.cameraFocus != null,
@@ -1378,6 +878,10 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
       const dt = Math.min(0.2, (now - lastTick) / 1000);
       frameDeadline = nextDeadline;
       lastTick = now;
+      // Active render time only: 30 seconds per turn, with the existing
+      // visibility gate and bounded resume delta. Match Memory icons' motion preference.
+      if (!current.reducedMotion)
+        libraryPlatePhase = (libraryPlatePhase + dt * Math.PI * 2 / 30) % (Math.PI * 2);
       // A quick attack follows consonants; a short release bridges 40 ms PCM
       // samples. Silence, STOP and a stalled stream return the orb to rest.
       const speechTau = speechTarget > uniforms.uSpeechLevel.value ? 0.025 : 0.085;
@@ -1409,8 +913,7 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
       uniforms.uTime.value = shaderTime;
       // Live tuning rides the cloud's own uniform writes — node glow,
       // styles, the whole-graph render transform (group scale + matched
-      // uModelScale + screen-px beam widths), dash frequency, streaks,
-      // and the settled-curve resync on a Link curve change.
+      // uModelScale + screen-px beam widths), dash frequency and streaks.
       mainCloud?.applyTuning(tuning, pixelRatio);
 
       // Tick the live physics while hot, then go dormant: the cooled ball
@@ -1427,7 +930,7 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
       // Main ball's executive nameplate rides the same toggle.
       const platesOn = tuning.rolePlates >= 0.5;
       if (platesOn && !mainPlate) {
-        mainPlate = createRolePlate("main");
+        mainPlate = createRolePlate(current.primaryGraphId ?? "main");
       } else if (!platesOn && mainPlate) {
         disposeRolePlate(mainPlate);
         mainPlate = null;
@@ -1438,7 +941,7 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
           mainCloud.group.add(mainPlate);
         }
         // Above the outermost shell; group scale multiplies this.
-        const top = knowledge3dMaxShell(tuning) + 13;
+        const top = (mainCloud.layoutDiagnostics()?.radius ?? knowledge3dMaxShell(tuning)) + 13;
         mainPlate.position.set(0, top, 0);
         mainPlate.scale.setScalar(18);
       }
@@ -1466,13 +969,13 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
           if (plate) {
             if (plate.parent !== cloud.group) cloud.group.add(plate);
             // Satellite physics run at FULL scale and the group render
-            // transform carries graphScale × ballScale, so the plate's
+            // transform carries saved graphScale × ballScale, so the plate's
             // local offset margin and scale divide ballScale back out —
             // the world-space glyph stays keyed to graphScale exactly
             // once, same as before the consolidation.
             const ballScale = Math.max(0.05, input.tuning.ballScale);
             const satTop =
-              knowledge3dMaxShell(input.tuning) + 9 / ballScale;
+              (cloud.layoutDiagnostics()?.radius ?? knowledge3dMaxShell(input.tuning)) + 9 / ballScale;
             plate.position.set(0, satTop, 0);
             plate.scale.setScalar(12 / ballScale);
           }
@@ -1513,12 +1016,9 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
         }
       }
 
-      // Path timeline (owner 2026-08-02): the beam head travels the plan
-      // first; the solid center line launches once the head clears the
-      // first node out of the Brain and fills at the same constant speed;
-      // the whole path pulses NEON when the fill completes; then the
-      // segmented flow streams start-to-finish — all at the single
-      // "Animation speed" rate, with no minimum duration or hold.
+      // The beam head leads the solid fill on one readable clock. Flow
+      // continues through speaking. Only reaching the final link triggers
+      // the neon pulse; speech edges never fast-forward a moving front.
       // Hover-subtree preview: recompute the descendant set and the beam
       // flags only when the hovered node changes.
       if (current.hoveredNodeId !== hoverAppliedId) {
@@ -1543,7 +1043,42 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
             : null,
         );
       }
-      const spec = current.pathSpec;
+      const selection = current.selectionPath;
+      selectionMoving = mainCloud?.driveSelection(selection?.agentId === "main" ? selection.spec : null,
+        selection?.id ?? "", now) ?? false;
+      for (const [agentId, cloud] of satelliteClouds) {
+        selectionMoving = cloud.driveSelection(selection?.agentId === agentId ? selection.spec : null,
+          selection?.id ?? "", now) || selectionMoving;
+      }
+      if (retainedFocus && current.clearedActivityKeys?.has(String(retainedFocus.focusKey))) {
+        retainedFocus = null;
+        mainFadeStartedAt = -1;
+      }
+      if (current.pathSpec && current.focusActive && !current.clearedActivityKeys?.has(String(current.focusKey))) {
+        const sameRun = retainedFocus?.focusKey === current.focusKey;
+        const pathSpec = sameRun && requestedPathSpec === current.pathSpec
+          ? retainedFocus!.pathSpec
+          : extendKnowledge3dPathSpec(sameRun ? retainedFocus!.pathSpec : null, current.pathSpec, tendrilProgress);
+        requestedPathSpec = current.pathSpec;
+        retainedFocus = { ...current, pathSpec };
+        mainFadeStartedAt = -1;
+      } else if (retainedFocus?.pathSpec && mainFadeStartedAt < 0
+        && tendrilProgress >= retainedFocus.pathSpec.maxProgress + knowledge3dSweepTail(retainedFocus.pathSpec)) {
+        mainFadeStartedAt = now;
+      }
+      const fadeT = mainFadeStartedAt < 0 ? 0 : Math.min(1, (now - mainFadeStartedAt) / KNOWLEDGE_ACTIVITY_FADE_MS);
+      const pathOpacity = 1 - fadeT * fadeT * (3 - 2 * fadeT);
+      if (fadeT === 1) { retainedFocus = null; mainFadeStartedAt = -1; }
+      const focus = retainedFocus ?? current;
+      const spec = focus.pathSpec;
+      if (retainedFocus && focus.focusKey !== appliedFocusKey) {
+        appliedFocusKey = focus.focusKey;
+        tendrilProgress = 0;
+        solidProgress = 0;
+        tendrilProgressAtPhaseStart = 0;
+        tendrilPhaseStartedAt = now;
+        glowStartedAt = -1;
+      }
       if (spec !== appliedPathSpec) {
         appliedPathSpec = spec;
         mainCloud?.applyPathSpec(spec ?? null);
@@ -1565,28 +1100,25 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
           glowStartedAt = -1;
         }
       }
-      if (current.focusPhase !== tendrilPhase) {
+      if (focus.focusPhase !== tendrilPhase) {
         tendrilPhaseStartedAt = now;
         tendrilProgressAtPhaseStart =
-          current.focusPhase === null ? 0 : tendrilProgress;
-        tendrilPhase = current.focusPhase;
+          focus.focusPhase === null ? 0 : tendrilProgress;
+        tendrilPhase = focus.focusPhase;
       }
-      if (!spec || tendrilPhase === null || !current.focusActive) {
+      if (!spec || tendrilPhase === null || !retainedFocus) {
         tendrilProgress = 0;
         solidProgress = 0;
         glowStartedAt = -1;
         mainCloud?.drivePathTimeline(-1, -1, 0, -1);
       } else {
-        // ONE master clock at ONE constant speed (owner 2026-08-02: no
-        // minimum duration — timers re-paced the fronts and made the
-        // animation visibly wait): the beam front is the master progress
-        // capped at the route end; the solid front trails it by exactly
-        // the first-node lag and finishes during the tail run-out.
+        // Keep beam and trailing fill on the same continuous clock, including
+        // any remaining route after a short reply has already ended.
         tendrilProgress = knowledgeSweepProgress3d(
           tendrilPhase,
           now - tendrilPhaseStartedAt,
           tendrilProgressAtPhaseStart,
-          tuning.sweepSpeed,
+          focus.tuning.sweepSpeed,
           spec.maxProgress,
           // Run-out covers the solid front's lag PLUS the ignition ramp
           // so the deepest article (arrival == maxProgress) completes.
@@ -1617,14 +1149,17 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
           glow,
           flowAge,
           Math.max(0.02, spec.firstArticleProgress * 0.07),
+          pathOpacity,
         );
       }
       sharedParticleTime.value = shaderTime;
       // Nodes ignite as the SOLID line reaches them (owner 2026-08-02),
       // gated by the focus set so only the active route may light.
       mainCloud?.applyFocusReveal(spec ?? null, solidProgress, {
-        active: current.focusActive,
-        nodeIds: current.focusNodeIds,
+        active: Boolean(retainedFocus),
+        nodeIds: focus.focusNodeIds,
+        accents: focus.activityAccents,
+        opacity: pathOpacity,
       });
       uniforms.uPulse.value = 0.5 + 0.5 * Math.sin(now / 300);
 
@@ -1637,14 +1172,28 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
       const sweeps = current.satelliteSweeps ?? [];
       let satelliteSweepHot = false;
       let satelliteSweepHeld = false;
-      for (const [agentId] of sweepStates) {
-        if (!sweeps.some((entry) => entry.agentId === agentId)) {
+      const fadingSweeps = [];
+      for (const [agentId, state] of sweepStates) {
+        if (current.clearedActivityKeys?.has(String(state.key))) {
           satelliteClouds.get(agentId)?.applyPathSpec(null);
           satelliteClouds.get(agentId)?.applyFocusReveal(null, 0);
           sweepStates.delete(agentId);
+          continue;
+        }
+        if (!sweeps.some((entry) => entry.agentId === agentId)) {
+          if (state.fadeStartedAt < 0 && state.progress >= state.spec.maxProgress + knowledge3dSweepTail(state.spec)) state.fadeStartedAt = now;
+          if (state.fadeStartedAt < 0 || now - state.fadeStartedAt < KNOWLEDGE_ACTIVITY_FADE_MS) fadingSweeps.push(state.sweep);
+          else {
+            satelliteClouds.get(agentId)?.applyPathSpec(null);
+            satelliteClouds.get(agentId)?.applyFocusReveal(null, 0);
+            sweepStates.delete(agentId);
+          }
+        } else {
+          state.fadeStartedAt = -1;
         }
       }
-      for (const sweep of sweeps) {
+      for (const sweep of [...sweeps, ...fadingSweeps]) {
+        if (current.clearedActivityKeys?.has(String(sweep.key))) continue;
         const cloud = satelliteClouds.get(sweep.agentId);
         if (!cloud) continue;
         let state = sweepStates.get(sweep.agentId);
@@ -1652,19 +1201,34 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
           state = {
             key: sweep.key,
             startedAt: now,
+            progress: 0,
+            progressAtStart: 0,
             glowStartedAt: -1,
             pulseKey: sweep.pulseKey ?? 0,
             pulseStartedAt: -1,
             cloud,
+            sweep,
+            spec: sweep.spec,
+            fadeStartedAt: -1,
           };
           sweepStates.set(sweep.agentId, state);
-          cloud.applyPathSpec(sweep.spec);
+          cloud.applyPathSpec(state.spec);
         } else if (state.cloud !== cloud) {
           // The cloud was rebuilt under a live sweep: re-arm the path on
           // the fresh geometry (the timeline clock keeps running).
           state.cloud = cloud;
-          cloud.applyPathSpec(sweep.spec);
+          cloud.applyPathSpec(state.spec);
         }
+        if (state.sweep.spec !== sweep.spec) {
+          state.spec = extendKnowledge3dPathSpec(state.spec, sweep.spec, state.progress);
+          cloud.applyPathSpec(state.spec);
+          state.progressAtStart = state.progress;
+          state.startedAt = now;
+          if (state.progress - state.spec.firstNodeProgress < state.spec.maxProgress) state.glowStartedAt = -1;
+        }
+        state.sweep = sweep;
+        const fadeT = state.fadeStartedAt < 0 ? 0 : Math.min(1, (now - state.fadeStartedAt) / KNOWLEDGE_ACTIVITY_FADE_MS);
+        const opacity = 1 - fadeT * fadeT * (3 - 2 * fadeT);
         if ((sweep.pulseKey ?? 0) !== state.pulseKey) {
           state.pulseKey = sweep.pulseKey ?? 0;
           state.pulseStartedAt = now;
@@ -1673,17 +1237,18 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
           (current.satellites ?? []).find(
             (input) => input.agentId === sweep.agentId,
           )?.tuning ?? tuning;
-        const tail = knowledge3dSweepTail(sweep.spec);
+        const tail = knowledge3dSweepTail(state.spec);
         const progress = knowledgeSweepProgress3d(
-          "thinking",
+          sweep.phase ?? "thinking",
           now - state.startedAt,
-          0,
+          state.progressAtStart,
           sweep.speed ?? cloudTuning.sweepSpeed,
-          sweep.spec.maxProgress,
+          state.spec.maxProgress,
           tail,
         );
-        const solid = progress - sweep.spec.firstNodeProgress;
-        if (state.glowStartedAt < 0 && solid >= sweep.spec.maxProgress - 1e-4) {
+        state.progress = progress;
+        const solid = progress - state.spec.firstNodeProgress;
+        if (state.glowStartedAt < 0 && solid >= state.spec.maxProgress - 1e-4) {
           state.glowStartedAt = now;
         }
         let glow = 0;
@@ -1708,13 +1273,18 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
           }
         }
         cloud.drivePathTimeline(
-          Math.min(progress, sweep.spec.maxProgress),
-          solid > 1e-4 ? Math.min(solid, sweep.spec.maxProgress) : -1,
+          Math.min(progress, state.spec.maxProgress),
+          solid > 1e-4 ? Math.min(solid, state.spec.maxProgress) : -1,
           glow,
           flowAge,
+          undefined,
+          opacity,
         );
-        cloud.applyFocusReveal(sweep.spec, solid);
-        if (flowAge < 0 || state.pulseStartedAt >= 0) {
+        cloud.applyFocusReveal(state.spec, solid, {
+          active: true, nodeIds: sweep.nodeIds ?? new Set(sweep.spec.nodeArrival.keys()), accents: sweep.accents,
+          opacity,
+        });
+        if (flowAge < 0 || state.pulseStartedAt >= 0 || state.fadeStartedAt >= 0) {
           satelliteSweepHot = true;
         } else if (sweep.hold) {
           satelliteSweepHeld = true;
@@ -1838,16 +1408,31 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
           }
         });
       }
-      const labelsNeeded =
-        current.labelIds.length > 0 || current.activeLabelNodeIds.size > 0;
+      // Labels follow the same admitted path and frame clock as their beams.
+      const activeLabelNodeIds = new Set<string>();
+      if (current.showActivityLabels && retainedFocus && spec) {
+        for (const [id, arrival] of spec.nodeArrival) {
+          if (focus.focusNodeIds.has(id) && arrival <= solidProgress) activeLabelNodeIds.add(id);
+        }
+      }
+      for (const [agentId, state] of current.showActivityLabels ? sweepStates : []) {
+        for (const [id, arrival] of state.spec.nodeArrival) {
+          if ((!state.sweep.nodeIds || state.sweep.nodeIds.has(id))
+            && arrival <= state.progress - state.spec.firstNodeProgress) {
+            activeLabelNodeIds.add(knowledgeAgentNodeId(agentId, id));
+          }
+        }
+      }
+      const labelIds = [...new Set([...current.labelIds, ...activeLabelNodeIds])];
       labelLayer.update(
-        labelsNeeded ? projectAll() : emptyProjection,
-        current.labelIds,
-        current.activeLabelNodeIds,
+        labelIds.length ? projectAll() : emptyProjection,
+        labelIds,
+        activeLabelNodeIds,
         current.labelMetadata,
-        current.focusActive,
+        Boolean(retainedFocus),
         now,
       );
+      renderPreviews();
       renderer.clear(true, true, true);
       renderer.render(scene, camera);
       renderer.clearDepth();
@@ -1857,8 +1442,12 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
 
     return () => {
       disposed = true;
+      syncPresentation.current = () => {};
       cancelAnimationFrame(rafId);
       observer.disconnect();
+      for (const preview of previews.values()) { preview.unforward?.(); preview.publisher.dispose(); }
+      previews.clear();
+      propsRef.current.onPresentationReady?.(null);
       renderer.domElement.removeEventListener("pointerdown", onPointerDown);
       renderer.domElement.removeEventListener("pointermove", onHoverMove);
       renderer.domElement.removeEventListener("contextmenu", onContextMenu);
@@ -1884,6 +1473,8 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
     // Mount-once: everything dynamic reads through propsRef.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => syncPresentation.current(), [props.satellites]);
 
   return (
     <div
