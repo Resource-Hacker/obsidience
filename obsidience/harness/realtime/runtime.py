@@ -105,6 +105,8 @@ class ProvisionalReply:
     authority's own unsupported-claim check passes for it. A later Tool call
     or rejected completion stops the audio through the ordinary playback
     cancellation; acceptance then voices only the unspoken remainder.
+    The first sentence opens one worker reply; later sentences and the
+    remainder are appended to it, so playback continues without a gap.
     Nothing here is persisted, published as Chat text or used as evidence.
     """
 
@@ -118,12 +120,9 @@ class ProvisionalReply:
         self._live = False
         self._text = ""
         self._offered = 0
-        # Raw text handed to the worker, verified text waiting for the chunk
-        # in flight, that chunk's playback, and the accepted reply's outcome.
+        # Raw text handed to the worker and the open worker reply's playback.
         self.sent = ""
-        self.pending = ""
         self.playback_id: str | None = None
-        self.final: dict[str, str] | None = None
 
     def begin_step(self, *, eligible: bool) -> None:
         self._live = eligible and not self.halted
@@ -507,18 +506,15 @@ class RealtimeSessionManager:
 
     async def speak(self, payload: dict) -> None:
         reply, self._provisional = self._provisional, None
-        if reply is not None and (reply.sent or reply.pending):
-            text, heard = str(payload.get("text", "")), reply.sent + reply.pending
+        if reply is not None and reply.sent and reply.playback_id is not None:
+            text, heard = str(payload.get("text", "")), reply.sent
             if (payload.get("generation") == reply.generation == self.conversation._generation
                     and payload.get("run_id") == reply.timing["run_id"]
                     and text.startswith(heard) and self._phase in READY_PHASES):
-                # The accepted reply continues the early audio: voice only the
+                # The accepted reply continues the early audio: append only the
                 # unspoken remainder, then its ordinary outcome cue.
-                reply.pending += text[len(heard):]
-                reply.final = {"outcome": str(payload.get("outcome") or "")}
-                self._provisional = reply
-                if reply.playback_id is None:
-                    await self._provisional_flush(reply)
+                await self._provisional_send(reply, text[len(heard):],
+                                             outcome=str(payload.get("outcome") or ""))
                 return
             # Different public text supersedes the early audio (new worker epoch).
         payload = {**payload, "text": speakable_text(str(payload.get("text", "")))}
@@ -559,37 +555,36 @@ class RealtimeSessionManager:
         if (reply is not self._provisional or reply.generation != self.conversation._generation
                 or self._phase not in READY_PHASES):
             return False
-        reply.pending += chunk
-        if reply.playback_id is None:
-            await self._provisional_flush(reply)
+        await self._provisional_send(reply, chunk)
         return reply is self._provisional
 
-    async def _provisional_flush(self, reply: ProvisionalReply) -> None:
-        """Hand waiting text to the worker once the previous chunk has played.
+    async def _provisional_send(self, reply: ProvisionalReply, text: str, *,
+                                outcome: str | None = None) -> None:
+        """Hand one early chunk to the worker; ``outcome`` closes the reply.
 
-        A worker `speak` supersedes any reply still playing, so early chunks
-        are chained on the worker's own end-of-playback signal.
+        The first chunk opens a worker reply (``speak`` with ``open``); later
+        chunks and the accepted remainder are ``speak_append`` under the same
+        worker epoch, queued behind the audio already playing. Early chunks
+        carry no outcome; only the accepted remainder's closes with its cue.
         """
-        if reply is not self._provisional or reply.generation != self.conversation._generation:
+        if reply.generation != self.conversation._generation:
             return
-        text, reply.pending = reply.pending, ""
-        final = reply.final
-        if final is not None:
+        final = outcome is not None
+        if final and self._provisional is reply:
             self._provisional = None  # The worker's ordinary completion owns the rest.
-        if not text.strip():
-            cue = {"completed": "complete", "failed": "error"}.get(final["outcome"]) if final else None
-            if cue:
-                await self.cue(cue)
-            return
-        first = not reply.sent
-        payload = self._prepare_playback({
-            "type": "speak", "generation": reply.generation, "text": speakable_text(text),
-            "outcome": final["outcome"] if final else "",
+        spoken = speakable_text(text) if text.strip() else ""
+        if reply.playback_id is None:
             # Only the first chunk carries the turn's speech timing identity.
-            **(reply.timing if first else {"run_id": reply.timing["run_id"]}),
-        })
+            payload = self._prepare_playback({
+                "type": "speak", "generation": reply.generation, "text": spoken,
+                "outcome": outcome or "", **({} if final else {"open": True}), **reply.timing,
+            })
+            reply.playback_id = payload["playback_id"]
+        else:
+            payload = {"type": "speak_append", "generation": reply.generation,
+                       "playback_id": reply.playback_id, "text": spoken,
+                       "outcome": outcome or "", **({} if final else {"open": True})}
         reply.sent += text
-        reply.playback_id = payload["playback_id"]
         try:
             await self._send_worker(payload, provisional=True)
         except Exception as exc:
@@ -601,8 +596,7 @@ class RealtimeSessionManager:
 
     async def _provisional_retract(self, reply: ProvisionalReply) -> None:
         playing = reply.playback_id is not None
-        reply.sent = reply.pending = ""
-        reply.final = reply.playback_id = None
+        reply.sent, reply.playback_id = "", None
         if playing and reply is self._provisional and reply.generation == self.conversation._generation:
             try:
                 await self._send_worker({"type": "cancel", "generation": reply.generation,
@@ -672,9 +666,8 @@ class RealtimeSessionManager:
         process = self._process
         if process is None or process.returncode is not None or process.stdin is None:
             return
-        # A later chunk of early speech keeps the first chunk's timing edges.
-        continuation = provisional and payload.get("type") == "speak" and "turn_id" not in payload
-        if payload.get("type") in {"speak", "cancel", "stop"} and not continuation:
+        # An appended chunk (speak_append) keeps the open reply's playback and timing.
+        if payload.get("type") in {"speak", "cancel", "stop"}:
             if payload["type"] == "speak":
                 if not payload.get("playback_id") or payload["playback_id"] != self._playback_id:
                     payload = self._prepare_playback(payload)
@@ -1199,19 +1192,19 @@ class RealtimeSessionManager:
                     self._record_playback_timing(worker_event)
                     continue
                 if event_type == "output_audio":
-                    reply = self._provisional
-                    if (reply is not None and reply.playback_id is not None
-                            and worker_event.get("status") == "idle"
-                            and worker_event.get("playback_id") == reply.playback_id
-                            and worker_event.get("generation") == reply.generation):
-                        # The early chunk has played; the next one may start.
-                        # Continuing speech publishes no idle gap to the graph.
-                        reply.playback_id = None
-                        if not reply.pending.strip():
-                            self._record_output_audio(worker_event)
-                        await self._provisional_flush(reply)
-                        continue
                     self._record_output_audio(worker_event)
+                    continue
+                if event_type == "speak_append_ignored":
+                    # The worker's reply was superseded (interruption, mode change)
+                    # or closed; an accepted reply is then voiced in full.
+                    reply = self._provisional
+                    if reply is not None and reply.playback_id == worker_event.get("playback_id"):
+                        self._provisional = None
+                    trace.emit("speech", "Early reply chunk ignored by the speech worker", [json.dumps({
+                        "event": "speech.append_ignored",
+                        "generation": worker_event.get("generation"),
+                        "reason": str(worker_event.get("reason") or "")[:32],
+                    }, sort_keys=True)])
                     continue
                 if event_type == "playback_error":
                     if (type(worker_event.get("generation")) is not int

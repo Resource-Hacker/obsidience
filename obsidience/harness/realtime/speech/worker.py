@@ -455,24 +455,23 @@ class SpeechTimingAudioOutput(LocalAudioOutputTransport):
                     self._playback._ready_cue_binding = None
                 self._cue_binding = None
         elif direction is FrameDirection.DOWNSTREAM and isinstance(frame, ReplyFinished):
-            binding = frame.binding
-            if (binding.get("generation"), binding.get("epoch")) == (self._playback.generation, self._playback.epoch):
-                self._playback._reply_active = False
-                self._playback.cancel_cues()
-            if (not self._reply_failed
-                    and (binding.get("generation"), binding.get("epoch")) == (self._playback.generation, self._playback.epoch)):
-                name = "error" if not frame.successful or binding.get("outcome") == "failed" else "complete" if binding.get("outcome") == "completed" else None
-                if name:
-                    await self._playback.queue_cue(name, binding["generation"])
+            name = self._playback.reply_finished(frame.binding, frame.successful)
+            if name and not self._reply_failed:
+                await self._playback.queue_cue(name, frame.binding["generation"])
         # Upstream queues this marker with PCM and forwards it only when its
         # output task reaches it. Binding at process_frame would race old audio.
         if direction is FrameDirection.DOWNSTREAM and isinstance(frame, TTSStartedFrame):
+            binding = frame.metadata.get("obsidience_output")
+            if not _same_reply(binding, self._binding):
+                # An appended chunk keeps its reply's write-failure state.
+                self._reply_failed = False
             self._timing = frame.metadata.get("obsidience_timing")
-            self._binding = frame.metadata.get("obsidience_output")
+            self._binding = binding
             self._first_write = False
-            self._reply_failed = False
         elif direction is FrameDirection.DOWNSTREAM and isinstance(frame, (TTSStoppedFrame, BotStoppedSpeakingFrame)):
-            self._output_level("idle", 0.0)
+            # A chunk already appended behind this one continues without an idle gap.
+            if not (isinstance(frame, TTSStoppedFrame) and self._playback.reply_continues(self._binding)):
+                self._output_level("idle", 0.0)
         await super().push_frame(frame, direction)
 
     def _output_level(self, status: str, level: float) -> None:
@@ -533,6 +532,11 @@ class SpeechTimingAudioOutput(LocalAudioOutputTransport):
             rms = float(np.sqrt(np.mean(samples * samples))) / 32768.0 if samples.size else 0.0
             self._output_level("speaking", min(1.0, 3.0 * rms ** 0.65))
         return written
+
+
+def _same_reply(a, b) -> bool:
+    return (isinstance(a, dict) and isinstance(b, dict)
+            and all(a.get(key) == b.get(key) for key in ("generation", "epoch", "playback_id")))
 
 
 def emit(kind: str, **payload: Any) -> None:
@@ -978,6 +982,8 @@ class PocketTTSService(TTSService):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         if isinstance(frame, TTSSpeakFrame):
+            if self._playback is not None and not self._playback.accepts(frame):
+                return  # A superseded chunk queued behind synthesis is never voiced.
             self._timing = frame.metadata.get("obsidience_timing")
             self._output_binding = frame.metadata.get("obsidience_output")
         await super().process_frame(frame, direction)
@@ -1067,12 +1073,25 @@ class PocketTTSService(TTSService):
 
 
 class PlaybackCommands:
-    """One pending Task reply, invalidated before preparation or synthesis."""
+    """One pending Task reply, invalidated before preparation or synthesis.
+
+    A reply opened with ``open`` accepts ``speak_append`` chunks under the same
+    generation and epoch: they queue behind it for the one serialized Pocket
+    producer, so playback continues without a gap or an interruption. Its
+    outcome cue follows only the final chunk.
+    """
 
     def __init__(self) -> None:
         self.generation = -1
         self.epoch = 0
-        self._queued: tuple[int, int, str, dict | None, str, str | None] | None = None
+        # FIFO of (generation, epoch, text, timing, playback_id, outcome, open).
+        self._queued: list[tuple[int, int, str, dict | None, str, str | None, bool]] = []
+        # The open reply accepting appends, its unfinished chunks, a final
+        # outcome waiting for the last chunk, and any unsuccessful chunk.
+        self._reply: tuple[int, int, str] | None = None
+        self._chunks = 0
+        self._closing: str | None = None
+        self._chunk_failed = False
         self._preparing: asyncio.Task | None = None
         self._controller_ready = asyncio.Event()
         self._startup_pending = True
@@ -1131,7 +1150,8 @@ class PlaybackCommands:
         self._reply_active = False
         self.generation = self.generation + 1 if generation is None else generation
         self.epoch += 1
-        self._queued = None
+        self._queued = []
+        self._reply, self._chunks, self._closing = None, 0, None
         if generation is not None:
             self._controller_ready.set()
         return True
@@ -1178,11 +1198,76 @@ class PlaybackCommands:
         self.epoch += 1
         timing = self._timing_context(command)
         self.record_timing("speech_received", timing)
-        self._queued = (generation, self.epoch, text, timing, command.get("playback_id", "startup"), command.get("outcome"))
+        playback_id = command.get("playback_id", "startup")
+        opened = command.get("open") is True and isinstance(playback_id, str)
+        self._reply = (generation, self.epoch, playback_id) if opened else None
+        self._chunks, self._closing, self._chunk_failed = 1, None, False
+        self._queued = [(generation, self.epoch, text, timing, playback_id,
+                         None if opened else command.get("outcome"), opened)]
+        self._start_preparing(task)
+
+    async def speak_append(self, task: PipelineTask, command: dict) -> None:
+        """Queue one more chunk of the open reply, or report why it is ignored."""
+        generation, playback_id = command.get("generation"), command.get("playback_id")
+        text = " ".join(str(command.get("text", "")).split())[:4_000]
+        opened = command.get("open") is True
+        if self._reply is None or self._reply != (generation, self.epoch, playback_id):
+            emit("speak_append_ignored",
+                 generation=generation if type(generation) is int else None,
+                 playback_id=(playback_id if isinstance(playback_id, str) and 0 < len(playback_id) <= 96
+                              and all(c.isascii() and (c.isalnum() or c in "-_:.") for c in playback_id)
+                              else None),
+                 reason="closed" if self._reply is None else "superseded")
+            return
+        if not opened:
+            self._reply = None  # The final chunk closes the reply.
+        outcome = None if opened else command.get("outcome")
+        if text:
+            self._reply_active = True
+            self._chunks += 1
+            self._queued.append((generation, self.epoch, text, None, playback_id, outcome, opened))
+            self._start_preparing(task)
+        elif not opened:
+            # Nothing left to say: the outcome cue follows the last chunk.
+            if self._chunks:
+                self._closing = outcome
+            else:
+                name = self._closing_cue(outcome)
+                if name:
+                    await self.queue_cue(name, generation)
+
+    def _start_preparing(self, task: PipelineTask) -> None:
         if self._preparing is None or self._preparing.done():
             self._preparing = asyncio.create_task(
                 self._prepare(task), name="speech-playback-prepare",
             )
+
+    def _closing_cue(self, outcome) -> str | None:
+        return ("error" if self._chunk_failed or outcome == "failed"
+                else "complete" if outcome == "completed" else None)
+
+    def reply_continues(self, binding) -> bool:
+        """True while another chunk of this reply is queued behind it."""
+        return (isinstance(binding, dict) and self._chunks > 1
+                and (binding.get("generation"), binding.get("epoch")) == (self.generation, self.epoch))
+
+    def reply_finished(self, binding: dict, successful: bool) -> str | None:
+        """Account one played chunk of the current reply; return its closing cue."""
+        if (binding.get("generation"), binding.get("epoch")) != (self.generation, self.epoch):
+            return None
+        self._chunk_failed |= not successful
+        self._chunks = max(0, self._chunks - 1)
+        if self._chunks:
+            return None
+        self._reply_active = False
+        self.cancel_cues()
+        if binding.get("open"):
+            if self._closing is None:
+                return None  # More text may still be appended.
+            outcome, self._closing = self._closing, None
+        else:
+            outcome = binding.get("outcome")
+        return self._closing_cue(outcome)
 
     async def startup(self, task: PipelineTask, text: str) -> None:
         # Speak once the pipeline starts. Reconnecting speech sends no initial
@@ -1197,9 +1282,8 @@ class PlaybackCommands:
 
     async def _prepare(self, task: PipelineTask) -> None:
         try:
-            while self._queued is not None:
-                generation, epoch, text, timing, playback_id, outcome = self._queued
-                self._queued = None
+            while self._queued:
+                generation, epoch, text, timing, playback_id, outcome, opened = self._queued.pop(0)
                 # Capture already uses the resident AEC feed, including while
                 # waiting for a wake word or hearing other speaker playback.
                 if (generation, epoch) != (self.generation, self.epoch):
@@ -1209,7 +1293,8 @@ class PlaybackCommands:
                 frame.metadata["obsidience_playback"] = (generation, epoch)
                 frame.metadata["obsidience_timing"] = timing
                 frame.metadata["obsidience_output"] = {
-                    "generation": generation, "epoch": epoch, "playback_id": playback_id, "outcome": outcome,
+                    "generation": generation, "epoch": epoch, "playback_id": playback_id,
+                    "outcome": outcome, "open": opened,
                 }
                 await task.queue_frame(frame)
         except Exception as exc:
@@ -1281,6 +1366,8 @@ async def command_loop(
                 await playback.cue(task, command)
             elif kind == "speak":
                 playback.speak(task, command)
+            elif kind == "speak_append":
+                await playback.speak_append(task, command)
             elif kind == "cancel":
                 if not playback.invalidate(
                     command.get("generation"), preserve_ready=command.get("stop_playback", True) is False,

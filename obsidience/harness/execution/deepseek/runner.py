@@ -250,7 +250,8 @@ async def run_native_session(task, model, messages, allowed, ctx, agent_name, ef
     # acceptance (owner decision 2026-10-08); the speech owner binds the turn.
     voice = None
     if (evaluation is None and command is None and task.kind == 'agent'
-            and task.ref == 'Agents/Executive/Executive' and params.get('event') == 'voice.activation'):
+            and task.ref == 'Agents/Executive/Executive' and params.get('event') == 'voice.activation'
+            and CONFIG.extras.get('realtime_early_speech', True) is not False):
         from ...capabilities.task.complete import public_claim_error
         from ...conversation.runtime import RUNTIME as conversation
         if conversation.speech is not None:
