@@ -10,7 +10,7 @@ from obsidience.harness.knowledge import scope
 
 def test_every_registered_tool_has_a_distinct_argument_contract():
     schema=registry.action_schema(list(registry.REGISTRY))
-    assert len(schema['anyOf'])==len(registry.REGISTRY)==34
+    assert len(schema['anyOf'])==len(registry.REGISTRY)==35
     byname={row['properties']['tool']['enum'][0]:row['properties']['args'] for row in schema['anyOf']}
     assert byname['application.launch']['required']==['application']
     assert byname['application.launch']['properties']['application']['enum']

@@ -1154,7 +1154,7 @@ class CapabilityDispatch:
             }
             observation = json.dumps(result_object, sort_keys=True)
         elif (name in {"camera.observe", "computer.observe", "computer.act"}
-              or name == "tv.control" and args.get("action") not in {"on", "off"}) and "vision" not in self.model.capabilities:
+              or name == "tv.control" and args.get("action") not in {"on", "off", "find"}) and "vision" not in self.model.capabilities:
             observation = json.dumps({
                 "observation": {
                     "status": "unavailable",
