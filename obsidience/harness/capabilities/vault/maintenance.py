@@ -309,6 +309,10 @@ def _maintenance_candidates(context: dict | None = None) -> dict:
                 + (0.06 if same_parent else 0.0)
                 + (0.07 if shared_neighbors else 0.0),
             )
+            if score < 0.76:
+                # Medium lexical leads produced mostly unrelated pairs; Link
+                # spends ~4 minutes per lead, so only high-confidence leads run.
+                continue
             candidate_key = hashlib.sha256(f"missing_link\n{source}".encode()).hexdigest()[:20]
             semantic_shared_neighbors = adjacency[left.ref] & adjacency[right.ref]
             rows.append({
