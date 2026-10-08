@@ -20,6 +20,7 @@ import time
 import threading
 import uuid
 from dataclasses import dataclass, replace
+from datetime import datetime
 
 from . import activity as knowledge_activity
 from . import trace as action_trace
@@ -438,11 +439,23 @@ def _activation_packet(task: Note, agent: Note | None, spine: dict,
             if "runtime_context" in provider_bindings:
                 native_context = dict(provider_bindings["runtime_context"])
                 if "local_clock" in native_context:
-                    volatile_bindings["local_clock"] = native_context.pop("local_clock")
+                    clock = native_context.pop("local_clock")
+                    if isinstance(clock, dict) and isinstance(clock.get("iso"), str):
+                        # Minute precision, like its readable time, keeps the
+                        # context identical between speech preparation and
+                        # final admission within the same minute.
+                        try:
+                            clock = {**clock, "iso": datetime.fromisoformat(clock["iso"]).isoformat(
+                                timespec="minutes")}
+                        except ValueError:
+                            pass
+                    volatile_bindings["local_clock"] = clock
                 if native_context:
                     provider_bindings["runtime_context"] = native_context
                 else:
                     del provider_bindings["runtime_context"]
+        provider_binding_text = ("## Bindings\n" + json.dumps(provider_bindings, default=str, sort_keys=True)
+                                 if catalog is not None or task.kind == "agent" else sections["bindings"])
         provider_sections.update({
             # A real user-message boundary after the stable spine lets the
             # runtime retain an SWA checkpoint across changing Objectives.
@@ -452,10 +465,12 @@ def _activation_packet(task: Note, agent: Note | None, spine: dict,
             "provider_reference": reference,
             "provider_user": "\n\n".join(section for section in (
                 sections["objective"] if task.kind != "agent" else "", observations if identity else "",
-                ("## Bindings\n" + json.dumps(provider_bindings, default=str, sort_keys=True)
-                 if catalog is not None or task.kind == "agent" else sections["bindings"]), sections["knowledge"],
+                provider_binding_text, sections["knowledge"],
                 sections["begin"] if task.kind != "agent" else "",
             ) if section),
+            # The native Executive context orders these parts itself.
+            "provider_bindings": provider_binding_text,
+            "provider_knowledge": sections["knowledge"],
             # The Executive's fixed closing instruction belongs to its cached
             # system message rather than every turn's runtime context.
             "provider_begin": sections["begin"] if task.kind == "agent" else "",
@@ -715,13 +730,15 @@ def activation_messages(task: Note, activation: dict, *, agent_name: str,
     reference = str(activation.get("provider_reference") or "")
     if native_session:
         # One runtime-context message. Each user-message start forces a prompt
-        # batch split and an SWA checkpoint copy. Preparation renders only its
-        # stable leading text (often none), so its warm prefix still matches;
-        # query-dependent Knowledge, the live Scene and activation metadata
-        # follow only in the real request.
+        # batch split and an SWA checkpoint copy. Standby preparation renders
+        # only its stable leading text (often none). Otherwise the
+        # query-independent live Bindings and the small minute clock precede
+        # query-dependent Knowledge (recalled memory follows this message), so
+        # a context prepared from a speech partial differs from the final one
+        # as late, and the engine re-evaluates as little, as possible.
         sections = [reference, request]
         if not preparation_prefix:
-            sections += [activation["provider_user"], metadata]
+            sections += [activation["provider_bindings"], metadata, activation["provider_knowledge"]]
         if content := "\n\n".join(filter(None, sections)):
             messages.append({"role": "user", "content": content})
         return messages
