@@ -147,8 +147,13 @@ async def set_compaction_threshold(value: int) -> None:
     await BRIDGE.close()
 
 
-async def compact(conversation_id: str, spec) -> dict:
-    """Use native idle-session maintenance and the existing model reservation."""
+async def compact(conversation_id: str, spec, *, idle_threshold: float | None = None) -> dict:
+    """Use native idle-session maintenance and the existing model reservation.
+
+    idle_threshold (a fraction of the model context) selects idle-edge
+    maintenance: Tool-result pruning, then a summary only while the request
+    stays at or above it. Without it, the manual Compact summarizes now.
+    """
     from ...config import CONFIG
     from ...models import runtime as model_runtime
     from . import model
@@ -166,7 +171,8 @@ async def compact(conversation_id: str, spec) -> dict:
         await lease.__aenter__()
         acquired = True
         await BRIDGE.send({'method': 'start', 'params': {
-            'run': run, 'session_id': conversation_id, 'compact': True,
+            'run': run, 'session_id': conversation_id,
+            'compact': True if idle_threshold is None else {'threshold': idle_threshold},
             'cwd': str(CONFIG.project_root), 'effort': native.get('reasoning_effort', 'none'),
             'system': '\n'.join(block['text'] for message in native['messages']
                                 if message['role'] == 'system' for block in message['content']

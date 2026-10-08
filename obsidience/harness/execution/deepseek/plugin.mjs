@@ -136,6 +136,24 @@ export function apply(ctx) {
       { surfaceOp: { op: 'replace', startSeq: seq, endSeq: seq }, sourceEventSeqs: [seq] });
     }
   }
+  // Idle-edge maintenance below the foreground pressure threshold. Like
+  // upstream's pressure path, the mounted Tool-result pruner runs first and a
+  // summary follows only if the request is still at or above the limit. Step
+  // pressure and overflow recovery inside a turn remain upstream's.
+  async function compactIdle(agent, limitTokens, signal) {
+    const pressure = () => ctx.tokenMeter.measure(agent.session).totalTokens;
+    if (pressure() < limitTokens) return null;
+    const pruner = ctx.get('toolResultPruner');
+    const pruned = pruner && await agent.runMaintenance(async maintenance => {
+      maintenance.throwIfAborted();
+      signal.throwIfAborted();
+      const result = pruner.pruneSession(agent.session);
+      await ctx.sessions.flush(agent.session);
+      return result.pruned.length ? result : null;
+    });
+    if (pressure() < limitTokens) return pruned;
+    return await ctx.compaction.compactNow(agent, signal) ?? pruned;
+  }
   async function inspectStored(id) {
     const live = sessions.get(id);
     if (live) {
@@ -269,7 +287,10 @@ export function apply(ctx) {
           await ctx.sessions.flush(handle.agent.session);
         });
       } else if (config.compact) {
-        state.compaction = await ctx.compaction.compactNow(handle.agent, state.maintenance.signal);
+        state.compaction = config.compact === true
+          ? await ctx.compaction.compactNow(handle.agent, state.maintenance.signal)
+          : await compactIdle(handle.agent, config.compact.threshold * config.model.context_tokens,
+            state.maintenance.signal);
       } else {
         if (config.session_id) {
           excludeInterruptedReplies(handle.agent.session);
