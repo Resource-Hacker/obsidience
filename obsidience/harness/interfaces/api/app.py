@@ -2605,7 +2605,9 @@ async def chat_ws(ws: WebSocket):
             if not text:
                 continue
             try:
-                await conversation_runtime.RUNTIME.submit(text, source="text", wait=False)
+                await conversation_runtime.RUNTIME.submit(
+                    text, source="text", wait=False,
+                    memory_writeback=msg.get("memory_writeback") is not False)
             except (ValueError, RuntimeError) as exc:
                 queue.put_nowait({"type": "error", "text": str(exc)[:512]})
 

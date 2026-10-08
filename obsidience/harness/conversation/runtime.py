@@ -305,9 +305,13 @@ class ConversationRuntime:
 
     async def submit(
         self, text: str, *, source: Literal["text", "realtime"] = "text", wait: bool = True,
-        speech_timing: dict | None = None,
+        speech_timing: dict | None = None, memory_writeback: bool = True,
     ) -> dict[str, Any]:
-        """Bind one exact user turn, independent of microphone state."""
+        """Bind one exact user turn, independent of microphone state.
+
+        memory_writeback=False keeps an owner-controlled diagnostic turn out of
+        Hindsight; the turn is otherwise ordinary.
+        """
         received_ns = time.monotonic_ns()
         clean = text.strip() if source == "text" else " ".join(text.split())
         if not clean:
@@ -322,7 +326,8 @@ class ConversationRuntime:
             self._steering = TurnSteering(user_turn["id"], self._publish_active_turn)
             turn_task = asyncio.create_task(
                 self._run_turn(clean, self._generation, user_turn, source=source,
-                               received_ns=received_ns, speech_timing=speech_timing),
+                               received_ns=received_ns, speech_timing=speech_timing,
+                               memory_writeback=memory_writeback),
                 name=f"obsidience-conversation-turn-{user_turn['id']}",
             )
             self._turn_task = turn_task
@@ -341,6 +346,7 @@ class ConversationRuntime:
         self, text: str, generation: int, user_turn: dict, *,
         source: Literal["text", "realtime"],
         received_ns: int | None = None, speech_timing: dict | None = None,
+        memory_writeback: bool = True,
     ) -> dict[str, Any]:
         from ..execution.scheduler import foreground_admission
 
@@ -430,9 +436,10 @@ class ConversationRuntime:
                 reply_to=str(user_turn["id"]),
             )
             trace.latency("answer_committed", run_id=str(result.get("run_id") or ""))
-            from ..memory.hindsight import MEMORY
-            MEMORY.completed("Agents/Executive/Executive", text, reply,
-                             source="conversation:" + str(user_turn["conversation_id"]), identifier=str(user_turn["id"]))
+            if memory_writeback:
+                from ..memory.hindsight import MEMORY
+                MEMORY.completed("Agents/Executive/Executive", text, reply,
+                                 source="conversation:" + str(user_turn["conversation_id"]), identifier=str(user_turn["id"]))
             if source == "realtime" and result.get("voice_confirmation") != "cue_only":
                 await self._speak_public(reply, generation, turn_id=str(user_turn["id"]),
                                          run_id=str(result.get("run_id") or ""),

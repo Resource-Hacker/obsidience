@@ -79,6 +79,13 @@ _PROPOSAL_ARGUMENT_REJECTIONS = frozenset({
     "Proposal rejected: Merge archive must target one of its exact bound duplicate candidates.",
     "Proposal rejected: Merge archive requires one distinct retained candidate update staged by this execution first.",
     "Proposal rejected: Merge retained Article must belong to its exact bound duplicate candidates.",
+    "Proposal rejected: Memory recommendation must cite its bound batch or observation Source.",
+    "Proposal rejected: New memory recommendation citations must exactly match its bound batch or observation Sources.",
+    # System ownership is asserted before staging; keep the pre-2026-10-07 wording for old runs.
+    "Proposal rejected: System inventory is read-only and follows its schema; write authored workstation "
+    "configuration and incidents under Architecture/Shell and procedures under Runbooks/Operations.",
+    "Proposal rejected: System inventory is read-only and follows its schema; write authored workstation "
+    "knowledge under Workstation Operations.",
 })
 
 
