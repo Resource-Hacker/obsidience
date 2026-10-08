@@ -165,8 +165,11 @@ def wire_messages(messages: list[dict], images: dict, objective: str = '', *,
         accepted.append(message)
     messages = accepted
     # Settlement records belong to the native audit log, not the dialogue.
-    # Keep current runtime context outside the most recent exchange so a short
-    # follow-up remains adjacent to the actual offer/question it refers to.
+    # Current runtime context goes immediately before the current owner
+    # request. Removing the superseded context shifts only the previous
+    # exchange; older history keeps its cached prefix, and standby preparation
+    # warms through the previous reply. That reply (an offer a short follow-up
+    # may accept) stays directly ahead of the context and the request.
     messages = [message for message in messages if message_producer(message)
                 not in {'obsidience.outcome', 'obsidience.expired-context'}]
     messages = _settled_commands(messages)
@@ -177,7 +180,7 @@ def wire_messages(messages: list[dict], images: dict, objective: str = '', *,
     owner_turns = [i for i, message in enumerate(messages)
                    if message.get('source', {}).get('kind') == 'user'
                    or message_producer(message) == 'obsidience.continuation']
-    position = owner_turns[-2] if len(owner_turns) > 1 else owner_turns[-1] if owner_turns else len(messages)
+    position = owner_turns[-1] if owner_turns else len(messages)
     messages[position:position] = current
     # Preparation warms through the stable context text, which can be empty;
     # the pending owner message marks the boundary either way.
