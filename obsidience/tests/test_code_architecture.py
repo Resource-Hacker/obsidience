@@ -25,7 +25,6 @@ def test_package_tree_exposes_the_runtime_shape() -> None:
     assert {
         "capabilities",
         "computer",
-        "connections",
         "conversation",
         "execution",
         "host",
