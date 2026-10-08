@@ -1,0 +1,155 @@
+#!/usr/bin/env python3
+"""Deploy the committed working tree to the live services, or roll it back.
+
+The live services run from this checkout, so a deploy is: require committed
+state, wait for an idle moment, restart only the owners whose files changed
+since the last deployed commit, verify health, and record the commit. A
+rollback reverts the commits since the previous deploy and deploys that.
+
+    obsidience/scripts/deploy            # deploy HEAD
+    obsidience/scripts/deploy --dry-run  # show what would restart
+    obsidience/scripts/deploy --rollback # revert to the previous deploy
+
+Gemma (obsidience/scripts/llm.sh) is never restarted automatically.
+"""
+import argparse
+import json
+import pathlib
+import sqlite3
+import subprocess
+import sys
+import time
+import urllib.request
+
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+STATE = ROOT / "obsidience" / "state"
+RECORD, LOG = STATE / "deploy.json", STATE / "deploys.jsonl"
+API = "http://127.0.0.1:8765"
+RESTART_SHELL = ROOT / "obsidience" / "shell" / "session" / "restart-shell"
+
+
+def git(*args: str) -> str:
+    return subprocess.run(["git", "-C", str(ROOT), *args], check=True,
+                          capture_output=True, text=True).stdout.strip()
+
+
+def get(path: str) -> dict:
+    with urllib.request.urlopen(API + path, timeout=3) as response:
+        return json.load(response)
+
+
+def ledger(sql: str) -> list:
+    uri = f"file:{STATE / 'obsidience.sqlite3'}?mode=ro"
+    with sqlite3.connect(uri, uri=True) as db:
+        return db.execute(sql).fetchall()
+
+
+def targets(changed: list[str]) -> list[str]:
+    owners = []
+    if any(p.startswith("obsidience/harness/") for p in changed):
+        owners.append("harness")
+    if any(p.startswith("obsidience/shell/") for p in changed):
+        owners.append("shell")
+    if any(p.startswith("obsidience/ui/") for p in changed):
+        owners.append("ui")
+    return owners
+
+
+def wait_idle(limit: float = 300) -> None:
+    deadline = time.monotonic() + limit
+    while time.monotonic() < deadline:
+        try:
+            realtime = get("/api/realtime")
+            busy = (realtime.get("playback", {}).get("status") not in (None, "idle")
+                    or realtime.get("phase") in {"thinking", "speaking"})
+        except OSError:
+            busy = False  # The Harness is down; nothing to interrupt.
+        busy = busy or ledger("SELECT count(*) FROM runs WHERE status='running' "
+                              "AND task_ref LIKE 'Agents/Executive/%'")[0][0] > 0
+        if not busy:
+            return
+        time.sleep(3)
+    sys.exit("No idle moment within the wait limit; nothing restarted.")
+
+
+def wait_ready(limit: float = 90) -> None:
+    deadline = time.monotonic() + limit
+    while time.monotonic() < deadline:
+        try:
+            if get("/api/realtime").get("ready") is True:
+                return
+        except OSError:
+            pass
+        time.sleep(2)
+    sys.exit("The Harness did not report ready; inspect journalctl --user -u obsidience-harness-dev.")
+
+
+def restart(owner: str) -> None:
+    if owner == "harness":
+        subprocess.run(["systemctl", "--user", "restart", "obsidience-harness-dev.service"], check=True)
+        wait_ready()
+    elif owner == "shell":
+        subprocess.run([str(RESTART_SHELL)], check=True)
+    elif owner == "ui":
+        subprocess.run(["npm", "--prefix", str(ROOT / "obsidience" / "ui"), "run", "build"], check=True)
+        subprocess.run(["systemctl", "--user", "restart", "obsidience-shell-knowledge.service"], check=True)
+
+
+def failures_since(started: float) -> list[str]:
+    rows = ledger("SELECT entry FROM trace_events ORDER BY seq DESC LIMIT 200")
+    found = []
+    for (entry,) in rows:
+        try:
+            item = json.loads(entry)
+        except (TypeError, ValueError):
+            continue
+        stamp = item.get("at", 0) / 1000
+        line = str(item.get("line", ""))
+        if stamp >= started and (item.get("channel") == "error" or "turn failed" in line):
+            found.append(f"{item.get('channel')}: {line} {item.get('detail', '')}"[:240])
+    return found
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--rollback", action="store_true")
+    args = parser.parse_args()
+    if git("status", "--porcelain", "--untracked-files=no"):
+        sys.exit("Tracked changes are uncommitted; commit them before deploying.")
+    last = json.loads(RECORD.read_text()).get("commit") if RECORD.is_file() else None
+    if args.rollback:
+        history = [json.loads(line) for line in LOG.read_text().splitlines()] if LOG.is_file() else []
+        if len(history) < 2:
+            sys.exit("No previous deploy is recorded.")
+        previous = history[-2]["commit"]
+        if args.dry_run:
+            print("would revert", git("log", "--oneline", f"{previous}..HEAD"))
+            return
+        git("revert", "--no-edit", f"{previous}..HEAD")
+    head = git("rev-parse", "HEAD")
+    changed = git("diff", "--name-only", f"{last}..{head}").splitlines() if last else ["obsidience/harness/", "obsidience/shell/", "obsidience/ui/"]
+    owners = targets(changed)
+    if "obsidience/scripts/llm.sh" in changed:
+        print("Note: llm.sh changed; restart obsidience-gemma.service deliberately (not automatic).")
+    print(f"deploy {last and last[:7]} -> {head[:7]}; restart: {', '.join(owners) or 'nothing'}")
+    if args.dry_run:
+        return
+    started = time.time()
+    if owners:
+        wait_idle()
+        for owner in owners:
+            restart(owner)
+        time.sleep(5)
+    failures = failures_since(started)
+    for line in failures:
+        print("trace failure:", line)
+    entry = {"commit": head, "previous": last, "at": started, "owners": owners, "failures": len(failures)}
+    RECORD.write_text(json.dumps(entry) + "\n")
+    with LOG.open("a") as log:
+        log.write(json.dumps(entry) + "\n")
+    print("deployed" if not failures else "deployed with trace failures; consider --rollback")
+
+
+if __name__ == "__main__":
+    main()
