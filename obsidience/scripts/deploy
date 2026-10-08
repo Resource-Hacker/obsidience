@@ -72,7 +72,7 @@ def wait_idle(limit: float = 900) -> None:
     sys.exit("No idle moment within the wait limit; nothing restarted.")
 
 
-def wait_ready(limit: float = 90) -> None:
+def wait_ready(limit: float = 300) -> None:
     deadline = time.monotonic() + limit
     while time.monotonic() < deadline:
         try:
