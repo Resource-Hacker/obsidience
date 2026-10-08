@@ -225,17 +225,19 @@ def test_metadata_only_sync_reuses_embedding_and_cached_matrix(
     assert ledger._vector_cache["knowledge"] is cache_before
 
 
-def test_body_change_after_embedding_cutoff_updates_only_fts(
+def test_body_change_after_former_embedding_cutoff_reencodes(
     isolated_index,
 ) -> None:
+    # Chunked embeddings cover the whole body; text past the former
+    # 4,000-character cutoff is now embedded.
     ledger, state, encoder = isolated_index
     prefix = "a" * 4000
     state["notes"] = [_note(body=prefix + " oldtailtoken")]
     ledger.sync()
     ledger._vector_corpus("knowledge")
     embedding_before = ledger.db.execute(
-        "SELECT hash,dim,vec FROM embeddings WHERE ref='Knowledge/alpha'"
-    ).fetchone()
+        "SELECT hash,dim,vec FROM embeddings WHERE ref='Knowledge/alpha' ORDER BY chunk"
+    ).fetchall()
     cache_before = ledger._vector_cache["knowledge"]
     revision_before = ledger._vector_revision
     encoder.calls.clear()
@@ -243,17 +245,18 @@ def test_body_change_after_embedding_cutoff_updates_only_fts(
     state["notes"] = [_note(body=prefix + " newtailtoken")]
     ledger.sync()
 
-    assert encoder.calls == []
+    assert encoder.calls == [tuple(indexer._embedding_texts("Alpha", prefix + " newtailtoken"))]
     assert ledger.fts("oldtailtoken", 1, "knowledge") == []
     assert ledger.fts("newtailtoken", 1, "knowledge")[0][0] == "Knowledge/alpha"
     assert (
         ledger.db.execute(
-            "SELECT hash,dim,vec FROM embeddings WHERE ref='Knowledge/alpha'"
-        ).fetchone()
-        == embedding_before
+            "SELECT hash,dim,vec FROM embeddings WHERE ref='Knowledge/alpha' ORDER BY chunk"
+        ).fetchall()
+        != embedding_before
     )
-    assert ledger._vector_revision == revision_before
-    assert ledger._vector_cache["knowledge"] is cache_before
+    assert ledger._vector_revision == revision_before + 1
+    ledger._vector_corpus("knowledge")
+    assert ledger._vector_cache["knowledge"] is not cache_before
 
 
 @pytest.mark.parametrize("change", ["body", "title", "model"])

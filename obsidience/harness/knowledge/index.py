@@ -10,6 +10,7 @@ import fcntl
 import hashlib
 import json
 import math
+import re
 import sqlite3
 import threading
 import time
@@ -66,7 +67,8 @@ CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
   ref UNINDEXED, title, body, tokenize='porter unicode61'
 );
 CREATE TABLE IF NOT EXISTS embeddings(
-  ref TEXT PRIMARY KEY, hash TEXT, dim INTEGER, vec BLOB
+  ref TEXT NOT NULL, chunk INTEGER NOT NULL DEFAULT 0, hash TEXT, dim INTEGER, vec BLOB,
+  PRIMARY KEY(ref,chunk)
 );
 CREATE TABLE IF NOT EXISTS runs(
   id TEXT PRIMARY KEY, task_ref TEXT, objective TEXT NOT NULL DEFAULT '',
@@ -346,8 +348,75 @@ def _embedding_model_hash() -> str:
     return digest.hexdigest()
 
 
-def _embedding_text(title: str, body: str) -> str:
-    return f"{title}\n{body[:4000]}"
+def _embedding_text(title: str, text: str) -> str:
+    return f"{title}\n{text}"
+
+
+# At most about 400 bge-small tokens: 1,600 characters is 340 tokens at the
+# 2026-10-08 Vault's median density (420 at p90), inside the model's 512-token
+# window with the title prefix.
+_CHUNK_CHARS = 1_600
+_CHUNK_OVERLAP_CHARS = 240  # a short trailing paragraph repeats in the next chunk
+_HEADING = re.compile(r"#{1,6}\s")
+
+
+def embedding_chunks(body: str) -> list[tuple[int, int]]:
+    """Markdown-aware chunk spans of ``body`` (character offsets, end exclusive).
+
+    A body that fits one chunk is embedded whole, exactly as before chunking.
+    Longer bodies break at headings and paragraphs; an oversized paragraph
+    breaks at lines, then words. Chunk vectors are max-pooled per Article.
+    """
+    if len(body) <= _CHUNK_CHARS:
+        return [(0, len(body))]
+    blocks: list[list] = []  # [start, end, starts with a heading]
+    current = None
+    offset = 0
+    for line in body.splitlines(keepends=True):
+        text = line.strip()
+        line_start, line_end = offset + len(line) - len(line.lstrip()), offset + len(line.rstrip())
+        offset += len(line)
+        if not text:
+            current = None
+        elif current is None or _HEADING.match(text):
+            current = [line_start, line_end, bool(_HEADING.match(text))]
+            blocks.append(current)
+        else:
+            current[1] = line_end
+    if not blocks:
+        return [(0, len(body))]
+    pieces: list[tuple[int, int, bool]] = []
+    for start, end, heading in blocks:
+        while end - start > _CHUNK_CHARS:
+            cut = body.rfind("\n", start + 1, start + _CHUNK_CHARS)
+            if cut <= start:
+                cut = body.rfind(" ", start + 1, start + _CHUNK_CHARS)
+            if cut <= start:
+                cut = start + _CHUNK_CHARS
+            pieces.append((start, cut, heading))
+            start, heading = cut, False
+            while start < end and body[start].isspace():
+                start += 1
+        pieces.append((start, end, heading))
+    spans: list[tuple[int, int]] = []
+    start, end, last = pieces[0][0], pieces[0][1], pieces[0][0]
+    for piece_start, piece_end, heading in pieces[1:]:
+        if piece_end - start <= _CHUNK_CHARS and not (
+            heading and end - start >= _CHUNK_CHARS // 2
+        ):
+            end, last = piece_end, piece_start
+            continue
+        spans.append((start, end))
+        overlap = (not heading and last > start and end - last <= _CHUNK_OVERLAP_CHARS
+                   and piece_end - last <= _CHUNK_CHARS)
+        start = last if overlap else piece_start
+        end, last = piece_end, piece_start
+    spans.append((start, end))
+    return spans
+
+
+def _embedding_texts(title: str, body: str) -> list[str]:
+    return [_embedding_text(title, body[start:end]) for start, end in embedding_chunks(body)]
 
 
 from contextvars import ContextVar
@@ -378,7 +447,7 @@ class Index:
         self._vector_revision = 0
         self._vector_cache: dict[
             str | None,
-            tuple[tuple[int, int], tuple[str, ...], np.ndarray],
+            tuple[tuple[int, int], tuple[str, ...], np.ndarray, np.ndarray, np.ndarray],
         ] = {}
 
     def _invalidate_vector_cache_locked(self) -> None:
@@ -387,6 +456,16 @@ class Index:
 
     def _migrate(self) -> None:
         """Keep the development ledger forward-compatible without a framework."""
+        if "chunk" not in {row[1] for row in self.db.execute("PRAGMA table_info(embeddings)")}:
+            # One vector per Article becomes chunk 0. A short Article's single
+            # chunk embeds the same text, so its stored hash stays valid.
+            self.db.executescript(
+                "BEGIN; ALTER TABLE embeddings RENAME TO embeddings_article; "
+                + _SCHEMA  # idempotent; recreates only the chunked embeddings table
+                + "INSERT INTO embeddings(ref,chunk,hash,dim,vec) "
+                "SELECT ref,0,hash,dim,vec FROM embeddings_article; "
+                "DROP TABLE embeddings_article; COMMIT;"
+            )
         continuation_columns = {row[1] for row in self.db.execute("PRAGMA table_info(task_continuations)")}
         if "await_publication" not in continuation_columns:
             # Existing waits retain their reviewed publication contract. New
@@ -469,7 +548,11 @@ class Index:
                 ref: (title, body)
                 for ref, title, body in self.db.execute("SELECT ref, title, body FROM notes_fts")
             }
-            stored_vectors = dict(self.db.execute("SELECT ref, hash FROM embeddings"))
+            stored_vectors: dict[str, tuple[str, ...]] = {}
+            for ref, chunk_hash in self.db.execute(
+                "SELECT ref, hash FROM embeddings ORDER BY ref, chunk"
+            ):
+                stored_vectors[ref] = (*stored_vectors.get(ref, ()), chunk_hash)
 
         retrievable = {
             n.ref for n in notes
@@ -498,22 +581,26 @@ class Index:
         vectors = {}
         if embed and retrievable:
             model_hash = _embedding_model_hash()
+            chunk_texts = {
+                n.ref: _embedding_texts(n.title, n.body) for n in notes if n.ref in retrievable
+            }
             vector_hashes = {
-                n.ref: hashlib.sha256(
-                    f"{model_hash}\0{_embedding_text(n.title, n.body)}".encode()
-                ).hexdigest()
-                for n in notes if n.ref in retrievable
+                ref: tuple(
+                    hashlib.sha256(f"{model_hash}\0{text}".encode()).hexdigest()
+                    for text in texts
+                )
+                for ref, texts in chunk_texts.items()
             }
             to_embed = [
-                n for n in notes if n.ref in retrievable
+                n.ref for n in notes if n.ref in retrievable
                 and stored_vectors.get(n.ref) != vector_hashes[n.ref]
             ]
             if to_embed:
-                vectors = dict(zip(
-                    (n.ref for n in to_embed),
-                    embed_texts([_embedding_text(n.title, n.body) for n in to_embed]),
-                    strict=True,
-                ))
+                encoded = embed_texts([text for ref in to_embed for text in chunk_texts[ref]])
+                offset = 0
+                for ref in to_embed:
+                    vectors[ref] = encoded[offset:offset + len(chunk_texts[ref])]
+                    offset += len(chunk_texts[ref])
 
         # Publish the complete replacement once. Searches retain the previous
         # complete index during encoding; an encoder failure changes no rows.
@@ -542,16 +629,18 @@ class Index:
                             (n.ref, *new_text),
                         )
                 if n.ref in vectors:
-                    v = vectors[n.ref]
-                    self.db.execute(
-                        "INSERT OR REPLACE INTO embeddings(ref,hash,dim,vec) VALUES(?,?,?,?)",
-                        (n.ref, vector_hashes[n.ref], len(v), v.tobytes()),
+                    self.db.execute("DELETE FROM embeddings WHERE ref=?", (n.ref,))
+                    self.db.executemany(
+                        "INSERT INTO embeddings(ref,chunk,hash,dim,vec) VALUES(?,?,?,?,?)",
+                        [(n.ref, chunk, chunk_hash, len(v), v.tobytes())
+                         for chunk, (chunk_hash, v) in enumerate(
+                             zip(vector_hashes[n.ref], vectors[n.ref], strict=True))],
                     )
                 elif n.ref in stored_vectors and (
                     new_text is None
                     or (not embed and (
                         old_text is None
-                        or _embedding_text(*old_text) != _embedding_text(*new_text)
+                        or _embedding_texts(*old_text) != _embedding_texts(*new_text)
                     ))
                 ):
                     self.db.execute("DELETE FROM embeddings WHERE ref=?", (n.ref,))
@@ -608,7 +697,8 @@ class Index:
     def _vector_corpus(
         self,
         kind: str | None,
-    ) -> tuple[tuple[str, ...], np.ndarray]:
+    ) -> tuple[tuple[str, ...], np.ndarray, np.ndarray, np.ndarray]:
+        """Article refs, chunk matrix, each Article's first row, and chunk numbers."""
         with self.lock:
             # data_version detects other connections; local changes explicitly
             # invalidate the cache. This token is private, not a graph revision.
@@ -616,23 +706,27 @@ class Index:
             revision = (self._vector_revision, data_version)
             cached = self._vector_cache.get(kind)
             if cached and cached[0] == revision:
-                return cached[1], cached[2]
+                return cached[1:]
             rows = self.db.execute(
-                "SELECT embeddings.ref, embeddings.vec FROM embeddings "
+                "SELECT embeddings.ref, embeddings.chunk, embeddings.vec FROM embeddings "
                 "JOIN notes ON notes.ref=embeddings.ref "
                 + ("WHERE notes.kind=? " if kind is not None else "")
-                + "ORDER BY embeddings.ref",
+                + "ORDER BY embeddings.ref, embeddings.chunk",
                 (kind,) if kind is not None else (),
             ).fetchall()
-            refs = tuple(row[0] for row in rows)
+            first = [i for i, row in enumerate(rows) if i == 0 or row[0] != rows[i - 1][0]]
+            refs = tuple(rows[i][0] for i in first)
+            starts = np.array(first, dtype=np.intp)
+            chunks = np.array([row[1] for row in rows], dtype=np.intp)
             matrix = (
-                np.stack([np.frombuffer(row[1], dtype=np.float32) for row in rows])
+                np.stack([np.frombuffer(row[2], dtype=np.float32) for row in rows])
                 if rows
                 else np.empty((0, 0), dtype=np.float32)
             )
-            matrix.setflags(write=False)
-            self._vector_cache[kind] = (revision, refs, matrix)
-            return refs, matrix
+            for array in (matrix, starts, chunks):
+                array.setflags(write=False)
+            self._vector_cache[kind] = (revision, refs, matrix, starts, chunks)
+            return refs, matrix, starts, chunks
 
     def vector(
         self,
@@ -641,8 +735,14 @@ class Index:
         kind: str | None = None,
         *,
         eligible_refs: set[str] | None = None,
+        best_chunks: dict[str, int] | None = None,
     ) -> list[tuple[str, float]]:
-        refs, mat = self._vector_corpus(kind)
+        """Rank Articles by their best chunk cosine (max-pooling).
+
+        ``best_chunks``, when given, receives each returned Article's best chunk
+        number (an index into ``embedding_chunks`` of the indexed body).
+        """
+        refs, mat, starts, chunks = self._vector_corpus(kind)
         if not refs:
             return []
         eligible = None
@@ -651,9 +751,15 @@ class Index:
             if not len(eligible):
                 return []
         qv = embed_texts([query])[0]
-        sims = mat @ qv
+        chunk_sims = mat @ qv
+        sims = np.maximum.reduceat(chunk_sims, starts)
         order = (np.argsort(-sims)[:k] if eligible is None
                  else eligible[np.argsort(-sims[eligible])[:k]])
+        if best_chunks is not None:
+            ends = (*starts[1:], len(chunk_sims))
+            for i in order:
+                row = starts[i] + int(np.argmax(chunk_sims[starts[i]:ends[i]]))
+                best_chunks[refs[i]] = int(chunks[row])
         return [(refs[i], float(sims[i])) for i in order]
 
     # ---------- graph ----------

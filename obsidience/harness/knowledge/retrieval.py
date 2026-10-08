@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 
 from ..config import CONFIG
 from .format import ARTICLE_TYPES, lifecycle_metadata
-from .index import INDEX
+from .index import INDEX, embedding_chunks
 from .vault import SOURCE_DIRS, SYSTEM_DIRS, Note, Resolver, iter_notes, load_note
 
 RRF_ORIGINAL_WEIGHT = 2.0
@@ -26,19 +26,20 @@ FAST_CONTEXT_ACCOUNTING_LIMIT = 32
 # Interactive fast context admits a direct hit only with strong dense cosine.
 # Lexical-only evidence and folder-index Articles (hubs that resemble most
 # requests) are not admitted directly. Calibrated 2026-10-08 for
-# BAAI/bge-small-en-v1.5 on 599 owner utterances and 15 knowledge questions;
-# retune if the embedder changes.
+# BAAI/bge-small-en-v1.5 on 599 owner utterances and 15 knowledge questions,
+# and rechecked for best-chunk (max-pooled) cosine on 609 utterances; retune
+# if the embedder or chunk size changes.
 FAST_CONTEXT_MIN_SIMILARITY = 0.70
 PREWARM_QUERY = "Obsidience activation knowledge"
 
 # ---------- fusion ----------
 
-def rrf_fuse(lanes: list[tuple[float, list[tuple[str, float]]]], k: int | None = None) -> list[str]:
+def rrf_fuse(lanes: list[tuple[float, list[tuple]]], k: int | None = None) -> list[str]:
     """Weighted reciprocal-rank fusion: lanes are (weight, results)."""
     k = k or CONFIG.rrf_k
     scores: dict[str, float] = {}
     for weight, lane in lanes:
-        for rank, (ref, _s) in enumerate(lane):
+        for rank, (ref, *_score) in enumerate(lane):
             scores[ref] = scores.get(ref, 0.0) + weight / (k + rank + 1)
     return [r for r, _ in sorted(scores.items(), key=lambda kv: -kv[1])]
 
@@ -51,16 +52,24 @@ def _lanes_for(
     *,
     eligible_refs: set[str] | None = None,
     relevant_only: bool = False,
-) -> list[tuple[float, list[tuple[str, float]]]]:
+) -> list[tuple[float, list[tuple]]]:
+    """Lexical (ref, bm25) and dense (ref, best chunk cosine, best chunk) lanes."""
     filters = {"eligible_refs": eligible_refs} if eligible_refs is not None else {}
     lexical = INDEX.fts(query, k, kind, **filters)
-    dense = INDEX.vector(query, k, kind, **filters)
+    best_chunks: dict[str, int] = {}
+    dense = INDEX.vector(query, k, kind, **filters, best_chunks=best_chunks)
     if relevant_only:
         keep = {ref for ref, score in dense
                 if score >= FAST_CONTEXT_MIN_SIMILARITY and not _folder_index(ref)}
         lexical = [hit for hit in lexical if hit[0] in keep]
         dense = [hit for hit in dense if hit[0] in keep]
+    dense = [(ref, score, best_chunks[ref]) if ref in best_chunks else (ref, score)
+             for ref, score in dense]
     return [(weight, lexical), (weight, dense)]
+
+
+def _best_chunks(lanes: list[tuple[float, list[tuple]]]) -> dict[str, int]:
+    return {hit[0]: hit[2] for _weight, lane in lanes for hit in lane if len(hit) > 2}
 
 
 def _folder_index(ref: str) -> bool:
@@ -111,7 +120,7 @@ def search(query: str, k: int | None = None, *, scope: dict | None = None,
     """Fast interactive search: lexical+dense weighted RRF, with no model pass."""
     k = k or CONFIG.search_k
     if scope is None and allowed_refs is None:
-        ranked = rrf_fuse(_lanes_for(query, RRF_ORIGINAL_WEIGHT, k))[:k]
+        lanes = _lanes_for(query, RRF_ORIGINAL_WEIGHT, k)
         accepted = None
     else:
         scope = normalize_search_scope(scope or {})
@@ -123,16 +132,27 @@ def search(query: str, k: int | None = None, *, scope: dict | None = None,
                     and (allowed_refs is None or note.ref in allowed_refs)}
         if not accepted:
             return []
-        ranked = rrf_fuse(_lanes_for(query, RRF_ORIGINAL_WEIGHT, k, scope.get("kind"),
-                                     eligible_refs=set(accepted)))[:k]
+        lanes = _lanes_for(query, RRF_ORIGINAL_WEIGHT, k, scope.get("kind"),
+                           eligible_refs=set(accepted))
+    ranked = rrf_fuse(lanes)[:k]
+    best_chunks = _best_chunks(lanes)
     out = []
     for ref in ranked[:12]:
         note = accepted.get(ref) if accepted is not None else load_note(ref + ".md")
         if note:
             out.append({"ref": ref, "title": note.title, "kind": note.kind,
-                        "snippet": note.body[slice(*passage_range(note.body, query, 280))]})
+                        "snippet": note.body[slice(*hit_passage(note.body, query, best_chunks.get(ref), 280))]})
     return out
 
+
+def hit_passage(body: str, query: str, chunk: int | None, maximum: int = 1200) -> tuple[int, int]:
+    """Choose a hit's passage inside its best embedding chunk when it has one."""
+    spans = embedding_chunks(body)
+    if chunk is None or not 0 <= chunk < len(spans):
+        return passage_range(body, query, maximum)
+    start, end = spans[chunk]
+    first, last = passage_range(body[start:end], query, maximum)
+    return start + first, start + last
 
 
 def passage_range(body: str, query: str, maximum: int = 1200) -> tuple[int, int]:
@@ -244,12 +264,12 @@ def fast_context_with_refs(
     context_resolver = Resolver(accepted_notes)
     k = max(CONFIG.search_k, limit)
     ranked: list[str] = []
-    for ref in rrf_fuse(
-        _lanes_for(query, RRF_ORIGINAL_WEIGHT, k, "knowledge",
-                   eligible_refs={ref for ref, note in accepted_by_ref.items()
-                                  if ref not in exclude and _eligible_knowledge(note, now)},
-                   relevant_only=relevant_only)
-    ):
+    lanes = _lanes_for(query, RRF_ORIGINAL_WEIGHT, k, "knowledge",
+                       eligible_refs={ref for ref, note in accepted_by_ref.items()
+                                      if ref not in exclude and _eligible_knowledge(note, now)},
+                       relevant_only=relevant_only)
+    best_chunks = _best_chunks(lanes)
+    for ref in rrf_fuse(lanes):
         note = accepted_by_ref.get(ref)
         if ref not in exclude and _eligible_knowledge(note, now):
             ranked.append(ref)
@@ -308,7 +328,7 @@ def fast_context_with_refs(
     included: list[str] = []
     packed: dict[str, tuple[str, int]] = {}
     budget_stop_ref: str | None = None
-    passages = {ref: passage_range(accepted_by_ref[ref].body, query)
+    passages = {ref: hit_passage(accepted_by_ref[ref].body, query, best_chunks.get(ref))
                 for ref in dict.fromkeys([*ordered, *ranked, *graph_origins])}
     used = 0
     for ref in ordered:
