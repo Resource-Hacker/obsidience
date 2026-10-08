@@ -315,7 +315,7 @@ def public_claim_error(summary: str, context: dict) -> str | None:
     is spoken; it inspects text only and never routes or acts.
     """
     if context.get("_tv_control_failed") and re.search(
-            r"\b(?:I(?:['’]ll| will)|we(?:['’]ll| will))\s+(?:try|retry|reconnect|check).*\b(?:again|later|moment|shortly|soon|now)\b",
+            r"\b(?:I(?:['’]ll| will)|we(?:['’]ll| will))\s+(?:try|retry|reconnect|check|keep trying).*\b(?:again|later|moment|shortly|soon|now|find)\b",
             summary, re.I):
         return "TV control failed and no retry is scheduled. Report the current blocker without promising a later action."
     return _unlock_claim_error(summary, context) or _effect_claim_error(summary, context)

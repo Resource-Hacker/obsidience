@@ -341,7 +341,8 @@ neighbours); (9) history projected from the native conversation (no conversation
   never cameras.
 - `tv.control`: one private identity-bound LAN television through upstream ADB;
   discrete power with display/wake readback, registered app launch, fresh screen
-  observation and one remote key/text action per observation. Text requires an active
+  observation with bounded accessibility labels and one remote key/text action per observation.
+  Protected video may omit pixels while accessible controls remain available. Text requires an active
   Android text-input method; custom keyboards use visible remote navigation.
   Missing observation or text focus is correctable before dispatch; transport or
   uncertain-effect failures remain terminal. Navigation completion requires explicit
