@@ -38,6 +38,9 @@ NOTICE = ("Historical, unverified Hindsight memory. These are reported facts or 
 # (delta edits over consolidated observations, at most once per six hours per
 # model) with its own configured provider chain. Curate compares each new page
 # version with accepted Knowledge; a page is never accepted truth by itself.
+DIGEST_SECONDS = 3600
+DIGEST_ITEMS = 15
+DIGEST_RECENT_DAYS = 14
 MENTAL_MODELS = (
     ("owner-preferences", "Owner preferences and standing permissions",
      "Which standing preferences, constraints, corrections and explicit permissions has the owner "
@@ -127,6 +130,9 @@ class Hindsight:
         self.model_seen = {}
         # The latest read of each page version; the Executive prompt shows it.
         self.model_pages = {}
+        # Recall-built stand-ins for pages Hindsight's reflect could not generate.
+        # Prompt-only: never captured as Sources or handed to Curate.
+        self.digest_pages = {}
         self.models_due = False
         self.model_error = ""
         # Process-local, content-free telemetry; Hindsight remains the memory owner.
@@ -545,6 +551,7 @@ class Hindsight:
                 # Executive prompt independently of Curate's queue.
                 self.model_pages[(bank, identifier)] = await self.api(
                     "GET", f"{bank}/mental-models/{identifier}", params={"detail": "content"})
+        await self._digest_missing_pages(bank)
         for identifier, _name, _query in MENTAL_MODELS:
             refreshed = (listed.get(identifier) or {}).get("last_refreshed_at")
             if not refreshed or self.model_seen.get((bank, identifier)) == refreshed:
@@ -556,11 +563,59 @@ class Hindsight:
                 return  # Scheduler rejection never acknowledges a page version.
             self.model_seen[(bank, identifier)] = model.get("last_refreshed_at")
 
+    async def _digest_missing_pages(self, bank):
+        """Build a recall digest for each page that has no content (no LLM call).
+
+        Free models can fail reflect's tool protocol; consolidated observations
+        still exist. A digest is rebuilt at most hourly and replaced only when its
+        text changes, so the cached prompt section stays stable.
+        """
+        now = time.time()
+        for identifier, name, query in MENTAL_MODELS:
+            page = self.model_pages.get((bank, identifier))
+            if page and str(page.get("content") or "").strip():
+                self.digest_pages.pop((bank, identifier), None)
+                continue
+            digest = self.digest_pages.get((bank, identifier))
+            if digest and now - digest["built_at"] < DIGEST_SECONDS:
+                continue
+            if identifier == "recent-decisions":
+                # Recency, not similarity: the newest consolidated observations.
+                start = datetime.fromtimestamp(now - DIGEST_RECENT_DAYS * 86400, timezone.utc).isoformat()
+                data = await self.api("GET", bank + "/memories/list", params={
+                    "type": "observation", "limit": DIGEST_ITEMS, "start_date": start,
+                    "time_field": "updated_at"})
+                rows = list(reversed(data.get("items", [])))  # oldest first reads as a timeline
+            else:
+                data = await self.api("POST", bank + "/memories/recall", json={
+                    "query": query, "budget": "mid", "max_tokens": 1200, "prefer_observations": True})
+                rows = data.get("results", [])
+            lines = []
+            for row in rows[:DIGEST_ITEMS]:
+                text = " ".join(str(row.get("text") or "").split())
+                if not text:
+                    continue
+                when = str(row.get("occurred_start") or row.get("mentioned_at") or "")[:10]
+                lines.append(f"- {when + ': ' if when else ''}{text}")
+            content = "\n".join(lines)
+            if digest and digest["content"] == content:
+                digest["built_at"] = now
+                continue
+            self.digest_pages[(bank, identifier)] = {
+                "id": identifier, "name": name + " (recall digest)", "content": content,
+                "last_refreshed_at": datetime.now().astimezone().isoformat(), "built_at": now}
+
     def pages(self, agent_ref):
-        """The Agent's cached mental-model pages that have content (no I/O)."""
+        """The Agent's pages with content (no I/O): a real page, else its recall digest."""
         bank = next((b for b, ref in self.banks.items() if ref == agent_ref), None)
-        return [page for identifier, _name, _query in MENTAL_MODELS
-                if (page := self.model_pages.get((bank, identifier))) and str(page.get("content") or "").strip()]
+        pages = []
+        for identifier, _name, _query in MENTAL_MODELS:
+            page = self.model_pages.get((bank, identifier))
+            if not (page and str(page.get("content") or "").strip()):
+                page = self.digest_pages.get((bank, identifier))
+            if page and str(page.get("content") or "").strip():
+                pages.append(page)
+        return pages
 
     def _hand_off_model(self, bank, model):
         """Capture one changed page version as an attested Source and activate Curate."""
