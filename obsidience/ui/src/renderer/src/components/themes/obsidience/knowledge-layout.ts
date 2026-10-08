@@ -690,10 +690,7 @@ function relaxKnowledgeLineClearance(
   const segments: Array<{ child: number; parent: number }> = [];
   positions.forEach((node, child) => {
     if (!node.parentId) return;
-    if (
-      node.role === "claim" ||
-      node.role === "temporary"
-    ) {
+    if (node.role === "claim") {
       return;
     }
     const parent = indexById.get(node.parentId);
@@ -717,7 +714,6 @@ function relaxKnowledgeLineClearance(
     const deepSection = node.role === "section" && (node.depth ?? 0) >= 2;
     if (
       node.role !== "claim" &&
-      node.role !== "temporary" &&
       node.role !== "entity" &&
       !deepSection
     ) {
@@ -795,7 +791,6 @@ function relaxKnowledgeLineClearance(
     const deepSection = node.role === "section" && (node.depth ?? 0) >= 2;
     if (
       node.role !== "claim" &&
-      node.role !== "temporary" &&
       node.role !== "entity" &&
       !deepSection
     ) {
@@ -855,7 +850,7 @@ function compactKnowledgeLayout(
   });
   const isLeaf = (index: number) => {
     const role = positions[index].role;
-    return role === "claim" || role === "temporary" || role === "entity";
+    return role === "claim" || role === "entity";
   };
   const mobile = (index: number) => {
     const node = positions[index];

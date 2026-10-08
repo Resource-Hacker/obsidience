@@ -216,7 +216,7 @@ function Packet({ entry }: { entry: ActionTraceEntry }) {
           "Objective": "The exact request for this run", "Tools": "Actions the agent may use",
           "Skills": "How to use those actions", "Runbook": "The procedure to follow",
           "Bindings": "Current facts and constraints", "Relevant Knowledge": "Relevant accepted articles",
-          "Immediate Observations": "Conversation and recent observations",
+          "Native conversation context": "Earlier conversation",
         };
         let content: TraceValue = traceText(section.text).replace(/^## [^\n]+\n/, "");
         if (section.key === "bindings") {

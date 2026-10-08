@@ -9,11 +9,10 @@ export type KnowledgeHierarchyRole =
   | "root"
   | "section"
   | "entity"
-  | "claim"
-  | "temporary";
+  | "claim";
 
 export function isKnowledgeLeafRole(
   role: KnowledgeHierarchyRole | undefined,
-): role is "claim" | "temporary" {
-  return role === "claim" || role === "temporary";
+): role is "claim" {
+  return role === "claim";
 }
