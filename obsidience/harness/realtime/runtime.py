@@ -501,6 +501,12 @@ class RealtimeSessionManager:
                 if payload.get("type") == "speak" else None
             )
             self._playback_timing_stages.clear()
+            if payload["type"] == "speak":
+                # Separates Harness handoff delay from the worker's receipt.
+                trace.latency("speech_sent", **{
+                    key: payload[key] for key in ("generation", "speech_sequence", "turn_id", "run_id")
+                    if key in payload
+                })
         try:
             process.stdin.write((json.dumps(payload) + "\n").encode())
             await process.stdin.drain()

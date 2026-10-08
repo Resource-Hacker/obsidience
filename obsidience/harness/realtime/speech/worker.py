@@ -161,10 +161,25 @@ class SpeechInputTiming:
         if not any(row["stage"] == "first_partial" for row in self._stages):
             self._stages.append({"stage": "first_partial", "monotonic_ns": time.monotonic_ns()})
 
+    def endpoint(self, last_voiced_ns: int | None = None, endpoint_ns: int | None = None) -> None:
+        """Record the last VAD speech frame and the end-of-turn decision."""
+        if not self._active:
+            return
+        self._stages = [row for row in self._stages
+                        if row["stage"] not in {"last_voiced", "end_of_turn"}]
+        onset = next((row["monotonic_ns"] for row in self._stages
+                      if row["stage"] == "speech_onset"), 0)
+        if type(last_voiced_ns) is int and last_voiced_ns >= onset:
+            self._stages.append({"stage": "last_voiced", "monotonic_ns": last_voiced_ns})
+        self._stages.append({"stage": "end_of_turn", "monotonic_ns": endpoint_ns
+                             if type(endpoint_ns) is int else time.monotonic_ns()})
+
     def finish(self) -> dict[str, Any]:
         if not self._active:
             self.onset()
-        stages = self._stages + [{"stage": "speech_final", "monotonic_ns": time.monotonic_ns()}]
+        # The first partial can follow the last voiced frame of a short command.
+        stages = sorted(self._stages, key=lambda row: row["monotonic_ns"])
+        stages.append({"stage": "speech_final", "monotonic_ns": time.monotonic_ns()})
         self._stages = []
         self._active = False
         return {"speech_sequence": self.sequence, "stages": stages}
@@ -182,10 +197,20 @@ class NeMoLocalAudioInputTransport(LocalAudioInputTransport):
         self._input_channel = input_channel
         self._last_level_at = 0.0
         self._capture_active = False
+        self._last_voiced_ns: int | None = None
+
+    async def _vad_analyze(self, audio_frame: InputAudioRawFrame) -> VADState:
+        state = await super()._vad_analyze(audio_frame)
+        if state == VADState.SPEAKING:
+            self._last_voiced_ns = time.monotonic_ns()
+        return state
 
     async def push_frame(self, frame: Frame, direction=FrameDirection.DOWNSTREAM) -> None:
         if direction is FrameDirection.DOWNSTREAM and isinstance(frame, VADUserStartedSpeakingFrame):
             frame.metadata["obsidience_onset_ns"] = time.monotonic_ns()
+        elif direction is FrameDirection.DOWNSTREAM and isinstance(frame, VADUserStoppedSpeakingFrame):
+            frame.metadata["obsidience_endpoint_ns"] = time.monotonic_ns()
+            frame.metadata["obsidience_last_voiced_ns"] = self._last_voiced_ns
         await super().push_frame(frame, direction)
 
     async def push_audio_frame(self, frame: InputAudioRawFrame) -> None:
@@ -649,7 +674,9 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
                 await self.push_frame(
                     VADUserStoppedSpeakingFrame(), direction=FrameDirection.UPSTREAM,
                 )
-                await self.queue_frame(VADUserStoppedSpeakingFrame(), direction)
+                stop = VADUserStoppedSpeakingFrame()
+                stop.metadata["obsidience_endpoint_ns"] = time.monotonic_ns()
+                await self.queue_frame(stop, direction)
         except asyncio.CancelledError:
             return
         finally:
@@ -678,6 +705,9 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
                     await self._open_wake(command)
             await self._reset_wake_scan(segment_start=True)
             self._mode_waiting_for_stop = False
+            if self._timing is not None and self._user_speaking_buffer.strip():
+                self._timing.endpoint(frame.metadata.get("obsidience_last_voiced_ns"),
+                                      frame.metadata.get("obsidience_endpoint_ns"))
         if (self._timing is not None and (
                 isinstance(frame, (EndFrame, CancelFrame)) or (
                     isinstance(frame, VADUserStoppedSpeakingFrame)

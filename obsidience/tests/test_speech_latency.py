@@ -178,8 +178,8 @@ def test_endpoint_waits_for_continued_speech_then_closes_once_at_shared_budget(m
     asyncio.run(scenario())
     assert len(events) == 1
     stages = events[0]['speech_timing']['stages']
-    assert [row['stage'] for row in stages] == ['speech_onset','first_partial','speech_final']
-    assert stages[0]['monotonic_ns'] < stages[1]['monotonic_ns'] < stages[2]['monotonic_ns']
+    assert [row['stage'] for row in stages] == ['speech_onset','first_partial','end_of_turn','speech_final']
+    assert stages[0]['monotonic_ns'] < stages[1]['monotonic_ns'] < stages[2]['monotonic_ns'] < stages[3]['monotonic_ns']
     assert events[0]['text'] == 'Hello there and pause'
 
 

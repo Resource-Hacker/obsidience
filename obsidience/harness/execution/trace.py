@@ -30,8 +30,8 @@ LATENCY_STAGES = frozenset({
     "input_final", "preparation", "admission", "selection", "activation", "model_wait",
     "model_preflight", "model_first_public", "model_complete", "model_release", "answer_committed",
     "command_verified",
-    "speech_received", "aec_ready", "first_pcm", "first_output_write",
-    "speech_onset", "first_partial", "speech_final",
+    "speech_sent", "speech_received", "aec_ready", "first_pcm", "first_output_write",
+    "speech_onset", "first_partial", "last_voiced", "end_of_turn", "speech_final",
     "speech_prefill_started", "speech_prefill_completed", "speech_prefill_cancelled",
 })
 _PRIVATE_KEYS = {
@@ -424,9 +424,12 @@ def input_speech_timing(value: object) -> dict | None:
             or not 0 < value["speech_sequence"] < 2**31):
         return None
     rows = value.get("stages")
-    if not isinstance(rows, list) or not 1 <= len(rows) <= 3:
+    if not isinstance(rows, list) or not 1 <= len(rows) <= 5:
         return None
-    allowed = {"speech_onset": 0, "first_partial": 1, "speech_final": 2}
+    # Mid-utterance edges are time-ordered among themselves: a short command's
+    # first partial can follow its last voiced frame or the endpoint decision.
+    allowed = {"speech_onset": 0, "first_partial": 1, "last_voiced": 1, "end_of_turn": 1,
+               "speech_final": 2}
     stages = []
     previous_stage, previous_ns = -1, 0
     now = time.monotonic_ns()
@@ -434,7 +437,8 @@ def input_speech_timing(value: object) -> dict | None:
         if not isinstance(row, dict):
             return None
         stage, instant = row.get("stage"), row.get("monotonic_ns")
-        if (not isinstance(stage, str) or stage not in allowed or allowed[stage] <= previous_stage
+        if (not isinstance(stage, str) or stage not in allowed or allowed[stage] < previous_stage
+                or any(seen["stage"] == stage for seen in stages)
                 or type(instant) is not int or not previous_ns <= instant <= now
                 or instant <= 0):
             return None
