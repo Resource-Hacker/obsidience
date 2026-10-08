@@ -2390,6 +2390,28 @@ async def update_task(ref: str, payload: dict):
     return {"task": note.ref, "updated": True, "dependencies": readiness}
 
 
+@app.post("/api/tasks/{ref:path}/cancel")
+async def cancel_occurrences(ref: str, payload: dict | None = None):
+    """Owner cancellation of a Task's unresolved head and waiting occurrences."""
+    note = load_note(ref + ".md") or resolver(include_system=False).resolve(ref)
+    if not note or note.kind != "task" or note.ref.startswith(("_", ".")):
+        raise HTTPException(404, f"task not found: {ref}")
+    payload = payload or {}
+    reason, expected, event = payload.get("reason"), payload.get("expected_last_run"), payload.get("event")
+    if set(payload) - {"reason", "expected_last_run", "event"}:
+        raise HTTPException(400, "only reason, expected_last_run and event are accepted")
+    if not isinstance(reason, str) or not reason.strip() or len(reason) > 500:
+        raise HTTPException(400, "reason is required and limited to 500 characters")
+    if not isinstance(expected, str) or not expected:
+        raise HTTPException(400, "expected_last_run must name the Task's current last run")
+    if event is not None and (not isinstance(event, str) or not event):
+        raise HTTPException(400, "event must be an exact event name")
+    try:
+        return scheduler.cancel_task_occurrences(note, reason=reason, expected_last_run=expected, event=event)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
 @app.post("/api/tasks/{ref:path}/run")
 async def run_now(ref: str, payload: dict | None = None):
     note = load_note(ref + ".md") or resolver(include_system=False).resolve(ref)

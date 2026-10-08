@@ -927,6 +927,123 @@ def settle_retired_model_occurrence(note: Note) -> dict | None:
         return None
 
 
+def cancel_task_occurrences(note: Note, *, reason: str, expected_last_run: str, event: str | None = None) -> dict:
+    """Owner disposition: cancel the unresolved head and matching queued occurrences.
+
+    One FIFO transaction records one immutable receipt per cancelled occurrence,
+    so admission never sees a partially cancelled queue. Original runs, Tool
+    receipts and effects are retained; nothing is replayed.
+    """
+    from ..knowledge import review
+    from ..knowledge.format import loads
+    from ..knowledge.vault import _NOTE_WRITE_LOCK
+
+    reason = reason.strip() if isinstance(reason, str) else ""
+    if not 1 <= len(reason) <= 500:
+        raise ValueError("A cancellation reason of at most 500 characters is required.")
+    if not isinstance(expected_last_run, str) or not expected_last_run:
+        raise ValueError("The Task's current last run is required.")
+    if event is not None and (not isinstance(event, str) or not event):
+        raise ValueError("The event filter must be an exact event name.")
+    if note.kind != "task":
+        raise ValueError("Only Tasks have occurrences.")
+    summary = f"Cancelled by owner: {reason.rstrip('.')}. Original runs, receipts and effects retained; no work replayed."
+    result = {}
+    with _NOTE_WRITE_LOCK:
+        try:
+            pending_review = any(
+                (str(meta.get("task", "")).strip("[]") == note.ref or meta.get("run_id") == expected_last_run)
+                and not review._has_group_decision(path.name, meta)
+                for path in CONFIG.staging_dir.glob("*.md")
+                for meta, _body in [loads(path.read_text(encoding="utf-8"))])
+        except (OSError, ValueError):
+            raise ValueError("Pending review state could not be validated.") from None
+        if pending_review:
+            raise ValueError("This Task has a pending Review; resolve it before cancelling.")
+
+        def cancel(state: dict) -> None:
+            if note.ref in _running or state.get("status") in {"running", "review"} or INDEX.db.execute(
+                    "SELECT 1 FROM runs WHERE task_ref=? AND status IN ('running','pending') LIMIT 1",
+                    (note.ref,)).fetchone():
+                raise ValueError("The Task is running or awaiting Review; nothing was cancelled.")
+            if state.get("last_run") != expected_last_run:
+                raise ValueError("The Task changed; refresh its last run before cancelling.")
+            queue = state.get("event_queue", [])
+            if not isinstance(queue, list) or any(not isinstance(item, dict) for item in queue):
+                raise ValueError("The Task queue cannot be validated.")
+            params = state.get("params")
+            head = (state.get("status") in {"pending", "failed", "blocked"} and isinstance(params, dict)
+                    and (event is None or params.get("event") == event))
+            matched = [item for item in queue if event is None or item.get("event") == event]
+            remaining = [item for item in queue if not (event is None or item.get("event") == event)]
+            if not head and not matched:
+                raise ValueError("No unresolved occurrence matches; nothing was cancelled.")
+            now = time.time()
+            stamp = time.strftime("%Y-%m-%dT%H:%M:%S")
+            receipts = []
+            for position, occurrence in ([("head", params)] if head else []) + [("queued", item) for item in matched]:
+                activation_id = (state.get("activation_id") if position == "head" else None) or (
+                    "activation-" + hashlib.sha256((note.ref + "\0" + INDEX._occurrence_key(
+                        note.ref, occurrence, expected_last_run if position == "head" else "",
+                    )).encode()).hexdigest()[:24])
+                if INDEX.db.execute(
+                    "SELECT 1 FROM task_continuations WHERE target_task_ref=? AND target_activation_key=? "
+                    "AND status NOT IN ('completed','failed','cancelled') LIMIT 1",
+                    (note.ref, str(occurrence.get("activation_key", ""))),
+                ).fetchone():
+                    raise ValueError("An unresolved continuation awaits this occurrence; nothing was cancelled.")
+                params_hash = hashlib.sha256(json.dumps(occurrence, sort_keys=True).encode()).hexdigest()
+                receipt_id = "cancelled-" + hashlib.sha256(
+                    "\0".join((note.ref, activation_id, params_hash, repr(now))).encode()).hexdigest()[:32]
+                if INDEX.db.execute("SELECT 1 FROM runs WHERE id=?", (receipt_id,)).fetchone():
+                    raise ValueError("Cancellation receipt identity already exists; nothing was cancelled.")
+                trace = json.dumps([{"controller_disposition": {
+                    "kind": "owner_cancelled", "reason": reason, "occurrence": position,
+                    "activation_id": activation_id, "activation_key": str(occurrence.get("activation_key", "")),
+                    "event": str(occurrence.get("event", "")), "params_sha256": params_hash,
+                    "previous_run_id": expected_last_run if position == "head" else "",
+                    "tools_executed": False, "effect_applied": False, "previous_effects_retained": True,
+                }}], sort_keys=True)
+                INDEX.record_run(overwrite=False, commit=False, id=receipt_id, task_ref=note.ref,
+                                 objective="Owner cancellation of a stale Task occurrence", agent="owner",
+                                 started=now, finished=now, status="cancelled", summary=summary, trace=trace,
+                                 activation_id=activation_id)
+                row = INDEX.db.execute("SELECT activation_key,state FROM task_activations WHERE id=? AND task_ref=?",
+                                       (activation_id, note.ref)).fetchone()
+                material = {**(json.loads(row[1]) if row else {"activation_id": activation_id, "params": occurrence}),
+                            "status": "cancelled", "last_run": receipt_id, "summary": summary, "status_updated": stamp}
+                material.pop("blocked_reason", None)
+                INDEX.db.execute(
+                    "INSERT INTO task_activations(id,task_ref,activation_key,state,created_at,updated_at) "
+                    "VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state,updated_at=excluded.updated_at",
+                    (activation_id, note.ref, row[0] if row else INDEX._occurrence_key(note.ref, occurrence),
+                     json.dumps(material, sort_keys=True, default=str), now, now))
+                receipts.append(receipt_id)
+            if head:
+                state.update(status="pending" if remaining else "cancelled", last_run=receipts[0],
+                             summary=summary, status_updated=stamp)
+                state.pop("blocked_reason", None)
+                if remaining:
+                    state["params"] = remaining.pop(0)
+                    state["triggered_at"] = stamp
+            if remaining:
+                state["event_queue"] = remaining
+            else:
+                state.pop("event_queue", None)
+            result.update(task=note.ref, status=state["status"], previous_run_id=expected_last_run,
+                          head_cancelled=head, queued_cancelled=len(matched), cancelled=len(receipts),
+                          receipts=receipts, remaining_queue=len(remaining),
+                          promoted=head and state["status"] == "pending")
+
+        INDEX.mutate_task_runtime(note.ref, cancel)
+    action_trace.emit("status", "Task occurrences cancelled by owner", [json.dumps({
+        "task": result["task"], "cancelled": result["cancelled"], "status": result["status"],
+    }, sort_keys=True)])
+    if result["promoted"]:
+        wake_scheduler()
+    return result
+
+
 def foreground_pending() -> bool:
     """Controller demand, never a model-supplied Task parameter."""
     return _foreground_admissions > 0
