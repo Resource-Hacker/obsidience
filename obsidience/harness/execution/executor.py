@@ -1603,8 +1603,7 @@ async def _execute_session(
                     model=dispatch.model,
                     allowed_tools=decision_tools,
                     task_context=task_context,
-                    **({"proposal_mode": "ingest"} if decision_context.get("event") == "observations.memory.ready" or decision_context.get("task") in {
-                           "Tasks/ingest", "Tasks/observations/durable/promote"}
+                    **({"proposal_mode": "ingest"} if decision_context.get("event") == "observations.memory.ready" or decision_context.get("task") == "Tasks/ingest"
                        else {"proposal_mode": "link"} if decision_context.get("task") == "Tasks/link" else {}),
                     **({"completion_no_change": True}
                        if completion_requires_no_change(decision_context) and not task.meta.get("acceptance") else {}),
@@ -2084,7 +2083,7 @@ async def _run_execution(task: Note, depth: int = 0, reasoning_effort: str | Non
             response_contract=str((runtime_params or {}).get("response_contract") or ""),
             active_exclusions=active_exclusions,
         )
-        if (task.kind != "agent" and not task.ref.startswith("Tasks/observations/")
+        if (task.kind != "agent"
                 and params.get("event") != "observations.memory.ready"
                 and not params.get("observation_source") and _is_agent_identity(agent)):
             from ..memory.hindsight import MEMORY

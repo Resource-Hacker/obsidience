@@ -1596,7 +1596,7 @@ def _update_article(ref: str, payload: dict):
     note = None if target_ref.startswith("@") else load_note(target_ref + ".md")
     if note:
         if note.runtime_observation:
-            raise HTTPException(409, "runtime Observations are maintained by Compact and Promote")
+            raise HTTPException(409, "runtime Observations are lifecycle-owned")
         if note.kind == "task" and str(note.meta.get("status", "draft")) == "running":
             raise HTTPException(409, "cannot edit a running task")
         meta = dict(note.meta)

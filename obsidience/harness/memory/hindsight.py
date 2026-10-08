@@ -267,10 +267,8 @@ class Hindsight:
         return True
 
     def completed(self, agent_ref, user, assistant, *, source, identifier, timestamp=None):
-        # Do not feed recalled memories, promotion summaries or compaction back
-        # into extraction. Only the accepted public transaction enters here.
-        if source.startswith("task:Tasks/observations/"):
-            return False
+        # Only the accepted public transaction enters extraction, never
+        # recalled memories or compaction summaries.
         # Executive conversation turns call this on the event loop between the
         # committed answer and speech, and ignore the result. Their outbox insert
         # runs on the single FIFO writer (per-conversation order, same uuid5

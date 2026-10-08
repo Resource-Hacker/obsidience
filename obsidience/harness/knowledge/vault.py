@@ -611,7 +611,7 @@ def move_vault_item(source: str, destination_parent: str, new_name: str | None =
     for old_path in source_files:
         note = load_note(old_path.relative_to(CONFIG.vault_dir))
         if note and note.runtime_observation:
-            raise ValueError("runtime Observations are maintained by Compact and Promote and cannot be moved")
+            raise ValueError("runtime Observations are lifecycle-owned and cannot be moved")
         if note and note.kind == "task" and str(note.meta.get("status", "draft")) == "running":
             raise ValueError("a running task cannot be moved")
 

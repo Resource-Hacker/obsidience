@@ -34,14 +34,14 @@ def test_wiki_maintenance_cannot_rewrite_runtime_observations(monkeypatch, tmp_p
     target = "Agents/Executive/Observations/live.md"
     write_note(target, {"kind": "knowledge", "title": "Live observation", flag: True}, "Private runtime context.")
     assert maintenance._maintenance_candidates()["checked_articles"] == 0
-    with pytest.raises(ValueError, match="Compact and Promote"):
+    with pytest.raises(ValueError, match="lifecycle-owned"):
         propose.stage_proposal({"target": target, "action": "update", "title": "Live observation", "body": "Edited."}, {})
     write_note("_staging/old.md", {"proposal": True, "action": "update", "target": target, "kind": "knowledge", "title": "Live observation"}, "Edited.")
-    with pytest.raises(ValueError, match="Compact and Promote"):
+    with pytest.raises(ValueError, match="lifecycle-owned"):
         review.approve("old.md")
-    with pytest.raises(HTTPException, match="Compact and Promote"):
+    with pytest.raises(HTTPException, match="lifecycle-owned"):
         server.update_article(target.removesuffix(".md"), {"title": "Edited", "body": "Edited."})
-    with pytest.raises(ValueError, match="Compact and Promote"):
+    with pytest.raises(ValueError, match="lifecycle-owned"):
         move_vault_item(target, "Agents/Executive", "Renamed")
-    with pytest.raises(ValueError, match="Compact and Promote"):
+    with pytest.raises(ValueError, match="lifecycle-owned"):
         move_vault_item("Agents/Executive/Observations", "Agents/Executive", "Renamed")

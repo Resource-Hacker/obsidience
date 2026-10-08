@@ -436,7 +436,7 @@ def stage_proposal(args: dict, context: dict, *, validate_only: bool = False) ->
         if not citations - preserved <= {source["citation"]}:
             raise ValueError("New memory recommendation citations must exactly match its bound mental-model Source")
     if existing_target and existing_target.runtime_observation:
-        raise ValueError("runtime Observations are maintained by Compact and Promote, not wiki proposals")
+        raise ValueError("runtime Observations are lifecycle-owned, not wiki proposals")
 
     review_class = review_class_for_task(str(context.get("task", "")))
     link_resolver = Resolver(iter_notes()) if review_class == "link" else None

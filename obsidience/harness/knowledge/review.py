@@ -644,7 +644,7 @@ def _approve(name: str) -> dict:
     if review_class not in REVIEW_CLASSES or review_class != expected_review_class:
         raise ValueError("proposal review class does not match its accepted Task")
     if existing and existing.runtime_observation:
-        raise ValueError("runtime Observations are maintained by Compact and Promote, not wiki proposals")
+        raise ValueError("runtime Observations are lifecycle-owned, not wiki proposals")
     conflicts = []
     for pending in CONFIG.staging_dir.glob("*.md"):
         if pending == path:
