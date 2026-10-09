@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 import re
 import shlex
+import socket
 import subprocess
 import threading
 import time
@@ -982,6 +983,8 @@ def _inventory():
         raise ValueError('Invalid TV serial binding')
     if not re.fullmatch(r'[A-Za-z0-9_. -]{1,100}', row['model']):
         raise ValueError('Invalid TV model binding')
+    if 'mac' in row and not re.fullmatch(r'(?:[0-9a-f]{2}:){5}[0-9a-f]{2}', row['mac']):
+        raise ValueError('Invalid TV MAC binding')
     apps = row['apps']
     if (not isinstance(apps, dict) or len(apps) > 30 or any(
             not re.fullmatch(r'[a-z][a-z0-9_]{0,30}', k)
@@ -1053,6 +1056,33 @@ def _power(row, cancel):
     raw = _shell(row, cancel, 'getprop ro.serialno; getprop ro.product.oemmodel; ' + _POWER_READ)
     _identity(row, raw)
     return _parse_power(raw)
+
+
+# Requests that need the screen wake the TV from network standby; reads and volume never do.
+WAKES_SCREEN = ('on', 'play', 'open', 'launch')
+
+
+def _wake_on_lan(row):
+    """One magic packet to the TV's Wi-Fi (measured 2026-10-09: answers ping after 1.3 s, screen on)."""
+    packet = b'\xff' * 6 + bytes.fromhex(row['mac'].replace(':', '')) * 16
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        for target in ('255.255.255.255', row['ip']):
+            sock.sendto(packet, (target, 9))
+
+
+def _after_wake(row, cancel, read):
+    """Wake the TV, then the identity preamble once ADB answers again (within 20 s)."""
+    _wake_on_lan(row)
+    deadline = time.monotonic() + 20
+    while True:
+        try:
+            _adb(row, cancel, connect=True, timeout=4)
+            return _preamble(row, cancel, read, timeout=4)
+        except OSError as error:
+            if isinstance(error, InterruptedError) or time.monotonic() >= deadline:
+                raise
+            _wait(cancel, 1)
 
 
 def _preamble(row, cancel, read, timeout=8):
@@ -1265,14 +1295,15 @@ def _execute(args, context):
             raise ValueError('An earlier TV effect is uncertain; stop effects and report it')
         # Volume and mute need no screen, so their first audio read replaces the power read.
         audible = action in ('volume', 'volume_up', 'volume_down', 'mute', 'unmute')
-        link = _agent.current()
+        connected = _agent.current()
         # The agent's connection lives on the transport whose identity was verified when it
         # connected, in this TV boot. Reads and target states skip the ADB preamble once this
         # boot's policy is applied; other effects keep the per-call identity check.
-        fast = (_ask('state') if link is not None and (
-            action == 'observe' or action in (*TARGETS, 'notice') and _POLICY_BOOT['id'] == link.boot) else None)
+        fast = (_ask('state') if connected is not None and (
+            action == 'observe' or action in (*TARGETS, 'notice') and _POLICY_BOOT['id'] == connected.boot) else None)
+        woke = False
         if fast is not None:
-            boot = link.boot
+            boot = connected.boot
             if audible:
                 return _reach(row, cancel, context, boot, None, args, audio=_agent_audio(fast))
             state = _agent_power(fast)
@@ -1283,9 +1314,14 @@ def _execute(args, context):
             except OSError as error:
                 if isinstance(error, InterruptedError):
                     raise
-                # Reconnect only the transport and read again; never replay an input or restart the ADB server.
-                _adb(row, cancel, connect=True, timeout=4)
-                tail, boot, ad = _preamble(row, cancel, read)
+                if action in WAKES_SCREEN and row.get('mac'):
+                    # Network standby: the TV's Wi-Fi answers ARP but not ADB. Wake it, then reach it again.
+                    tail, boot, ad = _after_wake(row, cancel, read)
+                    woke = True
+                else:
+                    # Reconnect only the transport and read again; never replay an input or restart the ADB server.
+                    _adb(row, cancel, connect=True, timeout=4)
+                    tail, boot, ad = _preamble(row, cancel, read)
             # The agent connects (and is provisioned) on this freshly verified transport; ADB serves until then.
             _agent.session(row, cancel, boot, _pushed(row))
             if action != 'observe':
@@ -1337,7 +1373,8 @@ def _execute(args, context):
             if state == desired:
                 _remember_power(state)
                 return {'status': 'completed', 'delivery': 'verified', 'action': action,
-                        'power': state, 'effect_applied': False}
+                        'power': state, 'effect_applied': woke,
+                        **({'woke': 'wake-on-lan from network standby'} if woke else {})}
             command = 'input keyevent KEYCODE_WAKEUP' if action == 'on' else 'input keyevent KEYCODE_SLEEP'
         elif action == 'launch':
             package = row['apps'][args['app']]
