@@ -5,15 +5,15 @@ import asyncio
 import hashlib
 import json
 
-from .model import admitted_events, request_payload
-from .runner import memory_message, recall_query, recall_reply, tool_schemas
-from .. import trace as action_trace
-from ..executor import activation_messages, compile_activation
-from ...conversation.evidence import historical_evidence
-from ...conversation.context import project_conversation
-from ...conversation.selection import admit_executive
-from ...models import llm, runtime as model_runtime
-from ...models.context import ContextBudgetExceeded, PROMPT_SAFETY_TOKENS, TaskContext, count_payload
+from .native import admitted_events, request_payload
+from .native_turn import memory_message, recall_query, recall_reply, tool_schemas
+from . import trace as action_trace
+from .executor import activation_messages, compile_activation
+from ..conversation.evidence import historical_evidence
+from ..conversation.context import project_conversation
+from ..conversation.selection import admit_executive
+from ..models import llm, runtime as model_runtime
+from ..models.context import ContextBudgetExceeded, PROMPT_SAFETY_TOKENS, TaskContext, count_payload
 
 # Digests of the latest speech-partial warm sent for the selected conversation:
 # its whole request, runtime context and recalled memory. Never prompt content.
@@ -68,8 +68,8 @@ async def prepare(conversation, text: str, response_contract: str, *, idle: bool
         from .commands import recognize_command
         command = recognize_command(text, ['lights.set', 'tv.control', 'media.pause', 'task.complete'])
         if command is not None:
-            from ..executor import resolve_spine
-            from ...knowledge.vault import resolver
+            from .executor import resolve_spine
+            from ..knowledge.vault import resolver
             spine = resolve_spine(agent, resolver(include_system=False))
             if command['name'] in spine.get('tools', []):
                 # This exact complete prefix currently needs no model. A later
@@ -84,7 +84,8 @@ async def prepare(conversation, text: str, response_contract: str, *, idle: bool
         # allow its full prefix to finish instead of repeatedly discarding it.
         async with asyncio.timeout(60 if idle else 10):
             conversation_id = conversation.conversation_id
-            from .sessions import refresh, prefill_messages
+            from .loops import sessions
+            refresh, prefill_messages = sessions().refresh, sessions().prefill_messages
             native = await refresh(conversation_id)
             # Standby stops at the stable compiler prefix: its Scene, clock,
             # Knowledge and memory would be stale by the next request. A speech
@@ -92,7 +93,7 @@ async def prepare(conversation, text: str, response_contract: str, *, idle: bool
             stable_only = bool(native) and idle
             recall = None
             if native and not idle:
-                from ...memory.hindsight import MEMORY
+                from ..memory.hindsight import MEMORY
                 # The final transcript's turn follows the same latest exchange.
                 recall = asyncio.create_task(MEMORY.recall(agent.ref, recall_query(text, conversation_id),
                                                            speculative=True),

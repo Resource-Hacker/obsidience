@@ -761,11 +761,11 @@ async def lifespan(app: FastAPI):
         await asyncio.to_thread(retrieval.prewarm_fast_context)
         resources.push_async_callback(model_runtime.shutdown)
         model_events = await model_runtime.initialize()
-        from ...execution.deepseek.bridge import BRIDGE
-        await BRIDGE.start()
-        resources.push_async_callback(BRIDGE.close)
-        from ...execution.deepseek.sessions import reconcile as reconcile_native_conversation
-        await reconcile_native_conversation(CONVERSATION)
+        from ...execution.loops import sessions as executive_sessions
+        conversation_log = executive_sessions()
+        await conversation_log.start()
+        resources.push_async_callback(conversation_log.stop)
+        await conversation_log.reconcile(CONVERSATION)
         resources.push_async_callback(shell_scene.SCENE.stop)
         shell_scene.SCENE.start()
         intake = SourceIntake()

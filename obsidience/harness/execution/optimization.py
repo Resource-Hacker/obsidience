@@ -208,7 +208,8 @@ def model_contract(note, agent_ref: str) -> dict:
 def _revision() -> str:
     root = Path(__file__).parents[1]
     paths = [Path(__file__), root / 'execution/deepseek/optimization.py',
-             root / 'execution/deepseek/runner.py', root / 'execution/deepseek/model.py',
+             root / 'execution/deepseek/runner.py', root / 'execution/native.py', root / 'execution/native_turn.py',
+             root / 'execution/capability_core.py',
              root / 'execution/deepseek/plugin.mjs', root / 'execution/deepseek/package-lock.json',
              root / 'execution/deepseek/bridge.py', root / 'capabilities/harness/optimize.py',
              root / 'execution/executor.py', root / 'execution/evaluation.py', root / 'execution/trace.py',

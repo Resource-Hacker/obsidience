@@ -6,7 +6,7 @@ import re
 
 from hassil import Intents, recognize_all
 
-from ...capabilities.lights.set import TARGETS
+from ..capabilities.lights.set import TARGETS
 
 
 @lru_cache(maxsize=1)
@@ -29,7 +29,7 @@ def _clock_command(text):
         return None
     if not any(recognize_all(text, _clock_intents())):
         return None
-    from ...conversation.context_bindings import local_clock
+    from ..conversation.context_bindings import local_clock
     return {'name': 'task.complete', 'args': {
         'status': 'completed', 'summary': f"It is {local_clock()['time']}."}}
 

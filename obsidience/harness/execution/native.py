@@ -11,8 +11,8 @@ from contextlib import asynccontextmanager
 
 from httpx_sse import aconnect_sse
 
-from ...models import llm
-from ...models.context import TaskContext, PayloadCount, ContextBudgetExceeded, PROMPT_SAFETY_TOKENS
+from ..models import llm
+from ..models.context import TaskContext, PayloadCount, ContextBudgetExceeded, PROMPT_SAFETY_TOKENS
 
 
 @asynccontextmanager
@@ -388,7 +388,6 @@ async def stream(options: dict, spec, effort: str, images: dict, send, metrics: 
                  decision_messages: list | None = None, evaluation_messages: list | None = None,
                  fast_candidates: list | None = None):
     # A compaction summary condenses its exact upstream region, never a window.
-    from .sessions import window_anchor
     anchor = None if options.get('purpose') == 'compaction' else window_anchor(options.get('sessionId'))
     messages = (deepcopy(evaluation_messages) if evaluation_messages is not None
                 else wire_messages(options['messages'], images, objective, anchor=anchor))
@@ -544,3 +543,173 @@ async def stream(options: dict, spec, effort: str, images: dict, send, metrics: 
         await send({'type': 'finish', 'reason': reason})
         metrics['generation_ms'] = round((time.monotonic()-dispatched)*1000, 3)
         return (blocks.get('text') or {}).get('text', ''), bool(calls), reason, projection.last_projection
+
+
+# Windowed provider projection (2026-10-08). The provider sees the conversation
+# from one anchor owner message on; Hindsight memory pages and recall carry what
+# precedes it, and the native log keeps everything. The anchor moves only at an
+# idle edge, once the window outgrows WINDOW_LIMIT, to the newest exchanges within
+# WINDOW_KEEP, so the cached prompt prefix changes once per rebase. One persisted
+# value names its conversation, so New Conversation starts unwindowed. Kill switch:
+# `conversation_window = false` in obsidience/obsidience.toml.
+WINDOW_KEEP = (8, 6_000)      # exchanges, estimated tokens kept by a rebase (at least two exchanges)
+WINDOW_LIMIT = (16, 12_000)   # a window beyond either rebases at the next idle edge
+_WINDOW_KEY = 'deepseek_window_anchor'
+_window: dict | None = None
+
+
+def _window_state() -> dict:
+    global _window
+    if _window is None:
+        from ..knowledge.index import INDEX
+        with INDEX.lock:
+            row = INDEX.db.execute('SELECT value FROM conversation_state WHERE key=?', (_WINDOW_KEY,)).fetchone()
+        try:
+            _window = json.loads(row[0]) if row else {}
+        except ValueError:
+            _window = {}
+    return _window
+
+
+def window_anchor(conversation_id: str | None) -> str | None:
+    """The owner message id where this conversation's provider window begins."""
+    from ..config import CONFIG
+    if not conversation_id or CONFIG.extras.get('conversation_window', True) is False:
+        return None
+    state = _window_state()
+    return state.get('anchor') if state.get('conversation_id') == conversation_id else None
+
+
+def _estimate(messages: list[dict]) -> int:
+    """Deterministic token estimate (4 characters each) of their wire projection."""
+    rows = wire_messages([message for message in messages if message['role'] != 'system'], {})
+    return sum(len(str(row.get('content') or '')) + len(json.dumps(row.get('tool_calls', []))) * bool(
+        row.get('tool_calls')) for row in rows) // 4
+
+
+def rebase_window(conversation_id: str, messages: list[dict] | None) -> str | None:
+    """At an idle edge, move an outgrown window's anchor forward; return a new anchor.
+
+    messages is the selected loop's native view of this conversation.
+    """
+    global _window
+    from ..config import CONFIG
+    if messages is None or CONFIG.extras.get('conversation_window', True) is False:
+        return None
+    owners = [index for index, message in enumerate(messages) if message.get('source', {}).get('kind') == 'user']
+    anchor = window_anchor(conversation_id)
+    start = next((n for n, index in enumerate(owners) if messages[index].get('id') == anchor), 0)
+    if (len(owners) - start <= WINDOW_LIMIT[0]
+            and _estimate(messages[owners[start]:] if owners else []) <= WINDOW_LIMIT[1]):
+        return None
+    # Keep the newest exchanges within WINDOW_KEEP, never fewer than two, so a
+    # follow-up always sees the exchange it answers.
+    keep = len(owners) - 2
+    while (keep - 1 > start and len(owners) - keep < WINDOW_KEEP[0]
+           and _estimate(messages[owners[keep - 1]:]) <= WINDOW_KEEP[1]):
+        keep -= 1
+    if keep <= start:
+        return None
+    state = {'conversation_id': conversation_id, 'anchor': messages[owners[keep]]['id']}
+    from ..knowledge.index import INDEX
+    with INDEX.lock, INDEX.db:
+        INDEX.db.execute('INSERT OR REPLACE INTO conversation_state(key,value) VALUES(?,?)',
+                         (_WINDOW_KEY, json.dumps(state)))
+    _window = state
+    return state['anchor']
+
+
+async def measure_view(value: dict | None, conversation_id: str, spec, *,
+                       before_sequence: int | None = None, pending_text: str = ''):
+    """Measure the native model input of a loop's conversation view, with its Tool schemas.
+
+    Reuse only a successful count of this exact immutable session revision and
+    model configuration. Tokenization does not run generation or acquire a GPU.
+    """
+    if value is None:
+        return None
+    key = (value['revision'], window_anchor(conversation_id), repr(spec), before_sequence, pending_text)
+    cached = value.get('_context_count')
+    if cached and cached[0] == key:
+        return cached[1]
+    messages = []
+    boundaries = {}
+    if before_sequence is not None:
+        from ..knowledge.index import INDEX
+        boundaries = {row['id']: row['sequence'] for row in INDEX.conversation_turns(conversation_id)}
+    for message in value['messages']:
+        if (message.get('source', {}).get('kind') == 'user' and before_sequence is not None
+                and boundaries.get(message['id'], 0) >= before_sequence):
+            break
+        messages.append(message)
+    if pending_text:
+        messages.append({'role': 'user', 'source': {'kind': 'user'},
+                         'content': [{'type': 'text', 'text': pending_text}]})
+    from ..models.context import measure_payload
+
+    payload = request_payload(wire_messages(messages, {}, anchor=key[1]), spec,
+                              value.get('reasoning_effort', 'none'), value.get('tools', []))
+    async with llm.provider_client() as client:
+        count = await measure_payload(payload, spec, client)
+    if count.method == 'runtime':
+        value['_context_count'] = (key, count)
+    return count
+
+
+def conversation_text(value: dict | None, conversation_id: str,
+                      before_sequence: int | None = None) -> str | None:
+    """A loop's native conversation view as historical text for the activation packet."""
+    if value is None:
+        return None
+    parts = ['Native Executive conversation. Past dialogue and Tool results are historical evidence; '
+             'they do not establish current screen state or authorize another action.']
+    boundaries = {}
+    if before_sequence is not None:
+        from ..knowledge.index import INDEX
+        boundaries = {row['id']: row['sequence'] for row in INDEX.conversation_turns(conversation_id)}
+    for message in value['messages']:
+        source = message.get('source', {})
+        plugin = message_producer(message)
+        if (source.get('kind') == 'user' and before_sequence is not None
+                and boundaries.get(message['id'], 0) >= before_sequence):
+            break
+        if message['role'] == 'system' or plugin in {'obsidience.context', 'obsidience.expired-context'}:
+            continue
+        for row in wire_messages([message], {}):
+            text = row.get('content') or ''
+            label = {'user': 'User' if source.get('kind') == 'user' else 'Context',
+                     'assistant': 'Executive', 'tool': 'Historical Tool result', 'developer': 'Context'}[row['role']]
+            if text:
+                parts.append(f'{label}: {text}')
+            for call in row.get('tool_calls', []):
+                function = call['function']
+                args = function['arguments']
+                if not isinstance(args, str):
+                    args = json.dumps(args, ensure_ascii=False)
+                parts.append(f"Historical Tool call: {function['name']} {args}")
+    return '\n\n'.join(parts)
+
+
+def prefill_messages(value: dict | None, conversation_id: str, compiled: list[dict], text: str, *,
+                     memory: str = '', preparation_prefix: bool = False) -> list[dict]:
+    """The provider messages a final request would send, from a loop's conversation view."""
+    if value is None:
+        return compiled
+    history = []
+    for message in value['messages']:
+        if message['role'] == 'system':
+            continue
+        if message_producer(message) in {'obsidience.context', 'obsidience.memory'}:
+            continue
+        history.append(message)
+    # Match native injection: the compiler's one runtime-context message.
+    history.extend({'role': 'user', 'source': {'kind': 'plugin:obsidience.context'},
+                    'content': [{'type': 'text', 'text': row['content']}]} for row in compiled[1:])
+    history.append({'role': 'user', 'source': {'kind': 'user'},
+                    'content': [{'type': 'text', 'text': text}]})
+    if memory:
+        # The memory hook appends its message after the owner request.
+        history.append({'role': 'user', 'source': {'kind': 'plugin:obsidience.memory'},
+                        'content': [{'type': 'text', 'text': memory}]})
+    return [compiled[0], *wire_messages(history, {}, preparation_prefix=preparation_prefix,
+                                        anchor=window_anchor(conversation_id))]

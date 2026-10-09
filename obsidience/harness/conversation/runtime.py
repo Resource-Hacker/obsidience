@@ -135,9 +135,9 @@ class ConversationRuntime:
 
         The changed prefix is then re-warmed by standby preparation below.
         """
-        from ..execution.deepseek.sessions import rebase_window
+        from ..execution.loops import sessions
         try:
-            anchor = rebase_window(self._conversation.conversation_id)
+            anchor = sessions().rebase_window(self._conversation.conversation_id)
         except Exception as exc:
             trace.emit("measurement", "Conversation window rebase skipped", [type(exc).__name__])
             return
@@ -152,11 +152,11 @@ class ConversationRuntime:
         Each native revision is attempted once, so a compaction that leaves
         the pressure high waits for the next turn instead of repeating.
         """
-        from ..execution.deepseek.sessions import view
+        from ..execution.loops import sessions
         if IDLE_COMPACTION_RATIO <= 0:
             return False
         conversation_id = self._conversation.conversation_id
-        current = view(conversation_id)
+        current = sessions().view(conversation_id)
         if current is None:
             return False
         pressure = (current.get("pressure") or {}).get("totalTokens")
@@ -174,7 +174,8 @@ class ConversationRuntime:
 
     async def _compact_idle(self, conversation_id: str) -> dict[str, Any]:
         """Background maintenance: no Chat busy state, and no error notice."""
-        from ..execution.deepseek.sessions import compact, view
+        from ..execution.loops import sessions
+        compact, view = sessions().compact, sessions().view
         generation = self._generation
         self._compacting = True
         try:
@@ -185,7 +186,7 @@ class ConversationRuntime:
             return result
         except Exception as exc:
             trace.emit("measurement", "Idle conversation compaction skipped", [type(exc).__name__])
-            return {"status": "failed", "backend": "deepseek"}
+            return {"status": "failed", "backend": sessions().BACKEND}
         finally:
             current = view(conversation_id)
             self._idle_compaction_attempted = (conversation_id, current.get("revision") if current else None)
@@ -216,7 +217,7 @@ class ConversationRuntime:
             self._prefill_task = asyncio.create_task(self._prepare_speech(), name="obsidience-speech-prefill")
 
     async def _prepare_speech(self) -> None:
-        from ..execution.deepseek.prefill import prepare
+        from ..execution.prefill import prepare
 
         try:
             while self._prefill_latest is not None:
@@ -412,8 +413,8 @@ class ConversationRuntime:
                 await self.finalize_observation_session(
                     outgoing, session_boundary="chat.new_conversation",
                 )
-            from ..execution.deepseek.bridge import BRIDGE
-            await BRIDGE.control('close', session_id=outgoing)
+            from ..execution.loops import sessions
+            await sessions().close(outgoing)
             result = await self._conversation.new_conversation()
             await self.publish_context()
             self._warm_state = "waiting"
@@ -504,8 +505,8 @@ class ConversationRuntime:
             admission_started = time.monotonic()
             task, params, event = admit_executive(text, "voice" if source == "realtime" else "text")
             trace.latency("admission", duration_ms=(time.monotonic() - admission_started) * 1000)
-            from ..execution.deepseek.commands import recognize_command
-            from ..execution.deepseek.runner import discard_recall, prefetch_recall
+            from ..execution.commands import recognize_command
+            from ..execution.native_turn import discard_recall, prefetch_recall
             if recognize_command(text, ["lights.set", "tv.control", "media.pause", "task.complete"]) is None:
                 # The native memory hook recalls for this exact request after the
                 # agent starts; begin it now so it overlaps preparation and compile.
@@ -662,8 +663,8 @@ class ConversationRuntime:
         )
 
     def _context_threshold(self) -> int:
-        from ..execution.deepseek.sessions import compaction_threshold
-        return compaction_threshold()
+        from ..execution.loops import sessions
+        return sessions().compaction_threshold()
 
     async def context_status(
         self,
@@ -675,7 +676,8 @@ class ConversationRuntime:
     ) -> dict[str, Any]:
         """Measure the selected model's native conversation input."""
         from .context import project_conversation
-        from ..execution.deepseek.sessions import measure_context
+        from ..execution.loops import sessions
+        measure_context = sessions().measure_context
 
         exact_conversation_id = conversation_id or self._conversation.conversation_id
         projection = project_conversation(
@@ -712,7 +714,7 @@ class ConversationRuntime:
             "compact_at": self._context_threshold(),
             "compacting": self._compacting,
             "compaction_count": projection["compaction_count"],
-            "compaction_backend": "deepseek",
+            "compaction_backend": sessions().BACKEND,
             "latest_sequence": projection["latest_sequence"],
         }
 
@@ -776,8 +778,8 @@ class ConversationRuntime:
             raise ValueError(
                 f"context threshold must be {MIN_CONTEXT_THRESHOLD}-{MAX_CONTEXT_THRESHOLD}"
             )
-        from ..execution.deepseek.sessions import set_compaction_threshold
-        await set_compaction_threshold(value)
+        from ..execution.loops import sessions
+        await sessions().set_compaction_threshold(value)
         return await self.publish_context()
 
     async def compact_conversation(self, *, force: bool, conversation_id: str | None = None,
@@ -797,18 +799,20 @@ class ConversationRuntime:
             )
             self._turn_task = task
             task.add_done_callback(lambda _task: self.prepare_idle())
+        from ..execution.loops import sessions
         if not wait:
-            return {"status": "started", "backend": "deepseek"}
+            return {"status": "started", "backend": sessions().BACKEND}
         try:
             return await task
         except asyncio.CancelledError:
             current = asyncio.current_task()
             if task.cancelled() and current is not None and current.cancelling() == 0:
-                return {"status": "interrupted", "backend": "deepseek"}
+                return {"status": "interrupted", "backend": sessions().BACKEND}
             raise
 
     async def _compact_conversation(self, conversation_id: str) -> dict[str, Any]:
-        from ..execution.deepseek.sessions import compact
+        from ..execution.loops import sessions
+        compact = sessions().compact
         generation = self._generation
         self._compacting = True
         self._conversation.publish({"type": "start", "source": "compact"})
@@ -817,7 +821,7 @@ class ConversationRuntime:
             return await compact(conversation_id, self._context_model())
         except Exception as exc:
             self._conversation.publish({"type": "error", "text": str(exc)[:512]})
-            return {"status": "failed", "backend": "deepseek"}
+            return {"status": "failed", "backend": sessions().BACKEND}
         finally:
             self._compacting = False
             if self._turn_task is asyncio.current_task():
@@ -827,9 +831,9 @@ class ConversationRuntime:
                 self.request_context_refresh()
 
     async def prepare_conversation_context(self, user_turn: dict[str, Any], *, context_task_ref: str | None = None) -> str:
-        from ..execution.deepseek.sessions import refresh
+        from ..execution.loops import sessions
         from .context import project_conversation
-        await refresh(str(user_turn['conversation_id']))
+        await sessions().refresh(str(user_turn['conversation_id']))
         return project_conversation(self._conversation, conversation_id=str(user_turn['conversation_id']),
                                     before_sequence=int(user_turn['sequence']))['body']
 
@@ -1029,7 +1033,8 @@ class ConversationRuntime:
         if not exact:
             raise ValueError("Session finalization requires a conversation identity")
         self._ledger().complete_observation_finalization(exact)
-        return {"status": "finalized", "conversation_id": exact, "backend": "deepseek"}
+        from ..execution.loops import sessions
+        return {"status": "finalized", "conversation_id": exact, "backend": sessions().BACKEND}
 
     async def finalize_pending(
         self,

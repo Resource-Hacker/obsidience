@@ -722,7 +722,7 @@ def activation_messages(task: Note, activation: dict, *, agent_name: str,
                         response_contract: str = "", active_exclusions=frozenset(),
                         preparation_prefix: bool = False) -> list[dict]:
     """Render one canonical provider prompt for execution or disposable prefill."""
-    from .deepseek.runner import PROTOCOL as NATIVE_PROTOCOL
+    from .native_turn import PROTOCOL as NATIVE_PROTOCOL
     from ..conversation.runtime import VOICE_TRANSPORT_CONTRACT
     agent = task.kind == "agent"
     native_session = agent and bool(activation["params"].get("conversation_id"))
@@ -1663,7 +1663,8 @@ async def _run_execution(task: Note, depth: int = 0, reasoning_effort: str | Non
             agent.ref if _is_agent_identity(agent) else "Agents/Executive/Executive",
         )
         if task.kind == "agent":
-            activation_evidence["executive_engine"] = "deepseek"
+            from .loops import selected as executive_loop
+            activation_evidence["executive_engine"] = executive_loop()
         emit_state(
             "run", f"{agent_name} started {task.title}", "running",
             f"model: {model_spec.label}; reasoning: {effort}",
@@ -1771,8 +1772,8 @@ async def _run_execution(task: Note, depth: int = 0, reasoning_effort: str | Non
         session_lease, pending_lease = pending_lease, None
         session_runner = _execute_session
         if task.kind == "agent":
-            from .deepseek.runner import run_native_session
-            session_runner = run_native_session
+            from .loops import run_session
+            session_runner = run_session()
         trace, status, summary = await session_runner(
             task, model_spec, messages, allowed, ctx, agent_name, effort,
             interruption_event=interruption_event,

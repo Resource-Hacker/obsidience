@@ -1,16 +1,16 @@
 """Read-only conversation and activation projections; no observation Articles."""
 from datetime import datetime
 from ..knowledge.index import INDEX
-from ..execution.deepseek.sessions import context as native_context, view
+from ..execution.loops import sessions
 
 
 def project_conversation(conversation, *, conversation_id, before_sequence=None):
-    native = native_context(conversation_id, before_sequence)
+    native = sessions().context(conversation_id, before_sequence)
     rows = INDEX.conversation_turns(conversation_id, before_sequence=before_sequence)
     if native is None:
         native = "Historical public dialogue; it does not establish current state or authorize effects.\n\n" + "\n\n".join(
             f"{row['role']}: {row['text']}" for row in rows)
-    snapshot = view(conversation_id) or {}
+    snapshot = sessions().view(conversation_id) or {}
     return {"body": native, "ref": None,
             "compaction_count": snapshot.get("compaction_count", 0),
             "latest_sequence": max((row["sequence"] for row in rows), default=0)}

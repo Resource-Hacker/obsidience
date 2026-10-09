@@ -11,12 +11,12 @@ from pathlib import Path
 import httpx
 from jsonschema import Draft202012Validator
 
-from ...capabilities.registry import READ_ONLY_CAPABILITIES, _argument_schemas
-from ...capabilities.lights.set import TARGETS as LIGHT_TARGETS
-from ...computer.applications import APPLICATIONS, canonical_application_id
-from ...knowledge.vault import load_note
-from ...models.context import PROMPT_SAFETY_TOKENS
-from ...models.llm import CHAT_TIMEOUT_SECONDS
+from ..capabilities.registry import READ_ONLY_CAPABILITIES, _argument_schemas
+from ..capabilities.lights.set import TARGETS as LIGHT_TARGETS
+from ..computer.applications import APPLICATIONS, canonical_application_id
+from ..knowledge.vault import load_note
+from ..models.context import PROMPT_SAFETY_TOKENS
+from ..models.llm import CHAT_TIMEOUT_SECONDS
 
 MAX_CANDIDATES = 10
 _LABELS = "ABCDEFGHIJK"
