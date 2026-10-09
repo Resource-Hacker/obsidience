@@ -67,7 +67,7 @@ def test_changed_article_keeps_edge_to_unchanged_target(graph_index):
     write("Knowledge/seed", "Revised [[Knowledge/target]]")
     assert ledger.sync() == {"total": 2, "added": 0, "updated": 1, "removed": 0}
 
-    assert encoded == ["seed\nRevised [[Knowledge/target]]\n"]
+    assert encoded == ["title: seed | text: Revised [[Knowledge/target]]\n"]
     assert ledger.db.execute(
         "SELECT * FROM embeddings WHERE ref='Knowledge/target'"
     ).fetchone() == target_before
@@ -105,7 +105,7 @@ def test_new_target_resolves_preexisting_link_without_reencoding_seed(graph_inde
     write("Knowledge/target", "New target")
     ledger.sync()
 
-    assert encoded == ["target\nNew target\n"]
+    assert encoded == ["title: target | text: New target\n"]
     assert _edges(ledger) == {("Knowledge/seed", "Knowledge/target")}
     assert _context_refs() == ["Knowledge/seed", "Knowledge/target"]
 
@@ -159,7 +159,7 @@ def test_retrieval_metadata_removes_both_lanes_and_neighbor_then_restores(
 
     write("Knowledge/target", "uniquequery")
     ledger.sync()
-    assert encoded == ["target\nuniquequery\n"]
+    assert encoded == ["title: target | text: uniquequery\n"]
     assert ledger.fts("uniquequery", 1)[0][0] == "Knowledge/target"
     assert _context_refs() == ["Knowledge/seed", "Knowledge/target"]
 
