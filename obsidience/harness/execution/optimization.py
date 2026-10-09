@@ -207,11 +207,11 @@ def model_contract(note, agent_ref: str) -> dict:
 
 def _revision() -> str:
     root = Path(__file__).parents[1]
-    paths = [Path(__file__), root / 'execution/deepseek/optimization.py',
-             root / 'execution/deepseek/runner.py', root / 'execution/native.py', root / 'execution/native_turn.py',
+    paths = [Path(__file__), root / 'execution/adk/optimization.py',
+             root / 'execution/adk/runner.py', root / 'execution/native.py', root / 'execution/native_turn.py',
              root / 'execution/capability_core.py',
-             root / 'execution/deepseek/plugin.mjs', root / 'execution/deepseek/package-lock.json',
-             root / 'execution/deepseek/bridge.py', root / 'capabilities/harness/optimize.py',
+             root / 'execution/adk/plugin.py', root / 'execution/adk/tools.py', root / 'requirements.lock.txt',
+             root / 'execution/adk/sessions.py', root / 'capabilities/harness/optimize.py',
              root / 'execution/executor.py', root / 'execution/evaluation.py', root / 'execution/trace.py',
              root / 'capabilities/registry.py', root / 'capabilities/task/complete.py',
              root / 'models/llm.py', root / 'models/context.py', root / 'models/runtime.py']
@@ -269,7 +269,7 @@ def prepare(specification: dict) -> dict:
                 'optimizer_contract': model_contract(audit, refinement.HEIMDALL),
                 'evaluator_revision': _revision(), 'upstream_revision': UPSTREAM_REVISION,
                 'origin': {key: origin.get(key) for key in ('id', 'task_ref', 'status', 'summary')},
-                'scope': 'Frozen Tool reconstruction through the native DeepSeek Executive; no live effects.'}
+                'scope': 'Frozen Tool reconstruction through the ADK Executive loop; no live effects.'}
     case_id = refinement._store('executive/cases', document)
     return {'case_id': case_id, 'source_path': _source_path('cases', case_id), 'scope': document['scope']}
 
@@ -386,12 +386,12 @@ async def optimize(case_id: str, context: dict) -> dict:
     from importlib.metadata import distribution
     provenance = json.loads(distribution('autosaddler').read_text('direct_url.json') or '{}')
     if provenance.get('vcs_info', {}).get('commit_id') != UPSTREAM_REVISION:
-        raise ValueError('Install the pinned AutoSaddler revision from requirements-optimization.txt')
+        raise ValueError('Install the pinned AutoSaddler revision from obsidience/harness/requirements-optimization.txt')
     if case_id in _ACTIVE:
         raise ValueError('This optimization case already has an active owner')
     _ACTIVE.add(case_id)
     try:
-        from .deepseek.optimization import run
+        from .adk.optimization import run
         # Cancellation is joined, including while the native provider is
         # generating. The foreground does not wait for an evaluation response.
         worker = asyncio.create_task(run(case_id, document, audit, context))
@@ -496,7 +496,7 @@ def review_blocker(note, accepted_resolver=None) -> str | None:
         run = INDEX.run(report['audit_run_id'])
         if not run or run.get('status') not in {'completed', 'review'} or not receipts:
             raise ValueError('The owning Audit has not finished with complete Tool evidence')
-        from .deepseek.optimization import comparison
+        from .adk.optimization import comparison
         if comparison(document, report['observations'], report['seed_id'], report['selected_id']) != report['comparison']:
             raise ValueError('Executive candidate comparison does not match the recorded outcomes')
         result = {**_report_result(marker['report_id'], report), 'proposal': Path(note.path).name}

@@ -1,4 +1,4 @@
-"""ADK Executive activation: same contract as ``deepseek.runner.run_native_session``.
+"""ADK Executive activation: the Executive's model/Tool loop.
 
 ADK's Runner sequences model steps and Tools and appends session events. The
 controller here starts each invocation with the turn's message (runtime
@@ -6,11 +6,17 @@ context, owner request, recall), and continues the same turn with a new
 invocation only for owner clarifications or controller feedback (a rejected
 completion, an empty or malformed step). Explicit HassIL commands bypass the
 model and append their exact records to the same conversation log.
+
+A run without a conversation (an instruction evaluation trial or a run with no
+Chat binding) keeps one in-memory ADK session for this activation only. An
+evaluation trial also skips Hindsight recall, and its handler answers every
+admitted Tool call: no capability dispatch, receipt or writeback.
 """
 from __future__ import annotations
 
 import asyncio
 import json
+import uuid
 from copy import deepcopy
 
 from google.genai import types
@@ -72,18 +78,21 @@ async def _settle_interrupted(session_id: str, run: str, turn_id: str) -> None:
 async def run_adk_session(task, model, messages, allowed, ctx, agent_name, effort,
                           interruption_event=None, *, initial_lease=None, evaluation=None,
                           fast_lane=True):
-    if evaluation is not None:
-        raise ValueError('Instruction evaluation trials still run on the DeepSeek loop')
     from google.adk.agents import LlmAgent
     from google.adk.agents.run_config import RunConfig, StreamingMode
     from google.adk.apps import App
     from google.adk.runners import Runner
+    from google.adk.sessions import InMemorySessionService
     from ..commands import recognize_command
     from ..executor import TurnState
 
+    if evaluation is not None:
+        if ctx or initial_lease is not None:
+            raise ValueError('Native evaluation requires a fresh context and its own model lease')
+        ctx.update(run_id='trial-' + uuid.uuid4().hex, objective=evaluation.case['objective'])
     plugin = ExecutivePlugin(task, model, allowed, ctx, agent_name, effort, system=messages[0]['content'],
                              interruption_event=interruption_event, initial_lease=initial_lease,
-                             fast_lane=fast_lane)
+                             fast_lane=fast_lane, evaluation=evaluation)
     ex, state, trace, run = plugin.ex, plugin.state, plugin.trace, plugin.run
     ctx['_foreground_interruption_event'] = interruption_event
     for key in ('_reflex_proposal', '_reflex_command_verified', '_reflex_command_result', '_voice_confirmation'):
@@ -119,7 +128,14 @@ async def run_adk_session(task, model, messages, allowed, ctx, agent_name, effor
     runner = None
     settled = False
     try:
-        session = await sessions.open_session(session_id, turn_id)
+        if conversation_id:
+            store = sessions.service()
+            session = await sessions.open_session(session_id, turn_id)
+        else:
+            # This activation's log only: never persisted, gone with the run.
+            store = InMemorySessionService()
+            session = await store.create_session(app_name=sessions.APP, user_id=sessions.USER,
+                                                 session_id=session_id)
         if command is not None:
             settled = True  # The command records carry their own settlement.
             await _run_command(plugin, command, session_id, turn_id)
@@ -139,7 +155,7 @@ async def run_adk_session(task, model, messages, allowed, ctx, agent_name, effor
                 parts = [sessions.part(row['content'], 'user', run=run) for row in messages[1:]]
                 query = messages[-1]['content']
             if not continuation:
-                recalled = await turn_recall(ctx, query, emit=plugin.emit, run=run,
+                recalled = await turn_recall(ctx, query, emit=plugin.emit, run=run, evaluation=evaluation,
                                              context_text=messages[1]['content'] if len(messages) > 1 else '')
                 if recalled['memories']:
                     parts.append(sessions.part(json.dumps(recalled, ensure_ascii=False, separators=(',', ':')),
@@ -148,7 +164,7 @@ async def run_adk_session(task, model, messages, allowed, ctx, agent_name, effor
                              tools=capability_tools(allowed, plugin),
                              disallow_transfer_to_parent=True, disallow_transfer_to_peers=True)
             runner = Runner(app=App(name=sessions.APP, root_agent=agent, plugins=[plugin]),
-                            session_service=sessions.service())
+                            session_service=store)
             request = {'system': messages[0]['content'], 'tools': tool_schemas(allowed), 'effort': effort}
             delta = None if session.state.get(sessions.REQUEST_STATE) == request else {sessions.REQUEST_STATE: request}
             message = types.Content(role='user', parts=parts)
@@ -205,6 +221,3 @@ async def run_adk_session(task, model, messages, allowed, ctx, agent_name, effor
                     await runner.close()
                 if conversation_id:
                     await sessions.refresh(conversation_id)
-                else:
-                    await sessions.service().delete_session(app_name=sessions.APP, user_id=sessions.USER,
-                                                            session_id=session_id)

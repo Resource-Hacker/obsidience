@@ -1,7 +1,8 @@
-"""AutoSaddler V2 scenario ports over Obsidience's native Executive and model owner.
+"""AutoSaddler V2 scenario ports over Obsidience's ADK Executive loop and model owner.
 
 Imported only by harness.optimize. The upstream engine owns candidate search;
 Obsidience owns model reservations, frozen operation results and publication.
+Executive trials run ``run_adk_session`` in an isolated in-memory ADK session.
 """
 from __future__ import annotations
 
@@ -25,7 +26,7 @@ from ...knowledge.vault import Resolver
 from ...models import llm, runtime
 from .. import executor, optimization, refinement, trace as action_trace
 from ..evaluation import FrozenTrial, compare_observations
-from .runner import run_native_session
+from .runner import run_adk_session
 
 
 def _latency_sensitive(document: dict) -> bool:
@@ -144,7 +145,7 @@ class NativeEvaluator:
                     action_trace.emit('status', 'AutoSaddler native Executive trial started')
                     try:
                         async with asyncio.timeout(90):
-                            runner = run_native_session if task.kind == 'agent' else executor._execute_session
+                            runner = run_adk_session if task.kind == 'agent' else executor._execute_session
                             trace, status, summary = await runner(
                                 task, model, messages, sorted(set(spine['tools']) | {'task.complete'}),
                                 trial_context, agent.title, self.document['model_contract']['reasoning_effort'],
@@ -177,7 +178,7 @@ class NativeEvaluator:
                         score=None if error else float(result['passed']), evaluator_fingerprint=self.fingerprint,
                         objectives={'duration_ms': result['duration_ms'], 'tool_count': trial.tool_count},
                         output=output, trace=output, cost=cost, metadata={'result': result,
-                            'engine': 'deepseek' if task.kind == 'agent' else 'specialist'})
+                            'engine': 'adk' if task.kind == 'agent' else 'specialist'})
                     context.attempt_sink.complete(attempt_id, observation, cost)
                     observations.append(observation)
                     action_trace.emit('status', 'AutoSaddler trial ' + ('passed' if result['passed'] else 'did not pass'))

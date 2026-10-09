@@ -5,7 +5,10 @@ what ADK has no equivalent for: the model lease around each step, the shared
 native provider projection, step and operation budgets, owner steering at
 step boundaries, the finite-choice lane, early speech, argument validation with
 three strikes, the run's narrowing dispatch policy and the completion authority
-for plain text. Every effect goes through ``capability_core.run_capability``.
+for plain text. Every effect goes through ``capability_core.run_capability``,
+except in an instruction evaluation trial: there the trial's handler answers
+each admitted call from frozen results or a contract validator (no dispatch,
+receipt or writeback), and a captured provider prompt replaces the history.
 """
 from __future__ import annotations
 
@@ -73,12 +76,13 @@ class ExecutivePlugin(BasePlugin):
     """One Executive activation's loop policy and capability state."""
 
     def __init__(self, task, spec, allowed, ctx, agent_name, effort, *, system: str,
-                 interruption_event=None, initial_lease=None, fast_lane=True):
+                 interruption_event=None, initial_lease=None, fast_lane=True, evaluation=None):
         super().__init__(name='obsidience_executive')
         from ..executor import TurnState
         self.spec, self.effort, self.system, self.agent_name = spec, effort, system, agent_name
-        self.max_steps = TurnState.budget(None)
-        self.emit = TurnState.emitter(None)
+        self.evaluation = evaluation
+        self.max_steps = TurnState.budget(evaluation)
+        self.emit = TurnState.emitter(evaluation)
         self.trace = ctx.setdefault('trace', [])
         self.run = ctx['run_id']
         self.ctx = ctx
@@ -152,6 +156,8 @@ class ExecutivePlugin(BasePlugin):
         """One admitted call through the capability core; rendered as the Tool result."""
         from .. import executor
         async with self._calls:  # One Tool at a time, like the native single-call step.
+            if self.evaluation is not None:
+                return await self._simulate(name, args)
             if self.lease_prefetch is not None:
                 # Model-resource Tools release it through the core.
                 self.ex.model, self.ex.active_lease = await self.adopt_lease()
@@ -184,6 +190,23 @@ class ExecutivePlugin(BasePlugin):
                     'attachmentId': identifier, 'mediaType': 'image/png', 'bytes': len(raw),
                     'width': int.from_bytes(raw[16:20], 'big'), 'height': int.from_bytes(raw[20:24], 'big')}})
             return {'content': blocks}
+
+    async def _simulate(self, name: str, args: dict) -> dict:
+        """An evaluation trial's answer to one admitted call; the model still chose it."""
+        started = time.monotonic()
+        result = await self.evaluation.handle(name, deepcopy(args))
+        self.ex.step += 1
+        self.trace.append({'tool': name, 'args': deepcopy(args), 'obs': result.get('observation', ''),
+                           'simulated': True, **({'completion_evidence': result['completion_evidence']}
+                                               if 'completion_evidence' in result else {})})
+        self.emit('tool', name + ' returned', fields={'step': self.ex.step, 'payload': {
+            'kind': 'tool', 'name': name, 'phase': 'result', 'status': 'returned',
+            'arguments': args, 'result': result.get('observation', ''),
+            'duration_ms': round((time.monotonic() - started) * 1000, 3)}})
+        if result.get('done'):
+            self.ex.done = True
+            self.ex.status, self.ex.summary = result['status'], result['summary']
+        return _text(result.get('observation', ''))
 
     async def operate(self, name: str, args: dict) -> list[dict]:
         """A controller-originated call (plain-text completion, explicit command)."""
@@ -222,6 +245,10 @@ class ExecutivePlugin(BasePlugin):
         wire = native.wire_messages(history, self.images, self.ctx['objective'],
                                     anchor=native.window_anchor(conversation_id))
         payload = native.request_payload(wire, self.spec, self.effort, tool_schemas(self.advertised))
+        if (captured := getattr(self.evaluation, 'wire_messages', None)) is not None:
+            # A contract trial evaluates the exact captured provider prompt, which
+            # already carries its model-family guidance; never append it twice.
+            payload['messages'] = deepcopy(captured)
         menu = None
         if self.fast_lane:
             from ..fast_lane import candidates
@@ -278,7 +305,8 @@ class ExecutivePlugin(BasePlugin):
         parts = llm_response.content.parts if llm_response.content and llm_response.content.parts else []
         if llm_response.partial:
             text = ''.join(value.text for value in parts if value.text and not value.thought)
-            if text and 'first_public_delta_ms' not in step['metrics']:
+            if ((text or any(value.function_call for value in parts))
+                    and 'first_public_delta_ms' not in step['metrics']):
                 step['metrics']['first_public_delta_ms'] = round((time.monotonic() - step['dispatched']) * 1000, 3)
             if text and self.voice is not None:
                 await self.voice.feed({'type': 'text-delta', 'text': text})
@@ -312,6 +340,9 @@ class ExecutivePlugin(BasePlugin):
                                cached_input_tokens=usage.cached_content_token_count or 0,
                                output_tokens=usage.candidates_token_count or 0)
             metrics['generation_ms'] = round((time.monotonic() - step['dispatched']) * 1000, 3)
+            if (text or calls) and 'first_public_delta_ms' not in metrics:
+                # A Tool call LiteLLM delivers whole is first public output when it arrives.
+                metrics['first_public_delta_ms'] = metrics['generation_ms']
         self.images.clear()
         discard_consumed_images(self.ex.messages)
         if self.model_steps == 1:
