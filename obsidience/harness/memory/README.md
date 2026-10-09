@@ -160,15 +160,13 @@ HINDSIGHT_API_CONSOLIDATION_MAX_COMPLETION_TOKENS=3584
 HINDSIGHT_API_WORKER_ID=obsidience-hindsight
 HINDSIGHT_API_WORKER_MAX_SLOTS=1
 HINDSIGHT_API_WORKER_CONSOLIDATION_RESERVED_SLOTS=0
-HINDSIGHT_API_EMBEDDINGS_PROVIDER=onnx
-HINDSIGHT_API_EMBEDDINGS_ONNX_MODEL_PATH=<existing BGE model_optimized.onnx>
-HINDSIGHT_API_EMBEDDINGS_ONNX_TOKENIZER_NAME_OR_PATH=<existing BGE tokenizer directory>
-HINDSIGHT_API_EMBEDDINGS_ONNX_MODEL_ID=qdrant/bge-small-en-v1.5-onnx-q
-HINDSIGHT_API_EMBEDDINGS_ONNX_DIMENSIONS=384
-HINDSIGHT_API_EMBEDDINGS_ONNX_POOLING=cls
-HINDSIGHT_API_EMBEDDINGS_ONNX_NORMALIZE=true
-HINDSIGHT_API_EMBEDDINGS_ONNX_QUERY_PREFIX=
-HINDSIGHT_API_EMBEDDINGS_ONNX_PASSAGE_PREFIX=
+HINDSIGHT_API_EMBEDDINGS_PROVIDER=openai
+HINDSIGHT_API_EMBEDDINGS_OPENAI_BASE_URL=http://127.0.0.1:8791/v1
+HINDSIGHT_API_EMBEDDINGS_OPENAI_MODEL=embeddinggemma-2-bf16-68bae29d
+HINDSIGHT_API_EMBEDDINGS_OPENAI_BATCH_SIZE=8
+HINDSIGHT_API_EMBEDDINGS_MAX_INPUT_TOKENS=6000
+HINDSIGHT_API_EMBEDDINGS_QUERY_PREFIX='task: search result | query: '
+HINDSIGHT_API_EMBEDDINGS_PASSAGE_PREFIX='title: none | text: '
 HINDSIGHT_API_RERANKER_PROVIDER=flashrank
 HINDSIGHT_API_RERANKER_FLASHRANK_MODEL=ms-marco-MiniLM-L-12-v2
 HINDSIGHT_API_RERANKER_FLASHRANK_CACHE_DIR=<private model cache>
@@ -184,10 +182,16 @@ OMP_NUM_THREADS=2
 TOKENIZERS_PARALLELISM=false
 ```
 
-Use the existing pinned BGE artifact rather than downloading a second copy:
-revision `52398278842ec682c6f32300af41344b1c0b0bb2`, ONNX SHA256
-`51f1bd0addd6e859e42c2c8021a5e5461385bb676a649f4b269aa445449f2431`.
-Keep the CLS pooling, normalization and empty prefixes paired with this model.
+Embeddings come from the one resident EmbeddingGemma 2 service
+(`obsidience-embeddings.service`, `obsidience/scripts/embed.sh`) that the
+Knowledge index also uses; Hindsight loads no embedding model of its own. The
+wrapper exports `HINDSIGHT_API_EMBEDDINGS_OPENAI_API_KEY` from the
+`obsidience-model-api-key` credential (otherwise the provider would send the LLM
+key). Keep the query/passage prefixes paired with this model (quote them: the
+trailing spaces matter); vectors are 768-d. Changing the embedder or dimension
+means exporting every bank and importing it into a new empty database
+(`hindsight-admin export-bank` / `import-bank`; no LLM work), which re-embeds and
+re-derives semantic links but gives memories new ids; mental-model ids are kept.
 Skipping the startup LLM probe breaks the startup dependency cycle with the
 Harness; it does not skip validation of actual extraction requests.
 Retain uses the upstream strict-schema option for its native extraction output.

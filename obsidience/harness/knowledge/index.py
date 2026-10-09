@@ -1,7 +1,7 @@
 """SQLite index: notes table + FTS5 + embeddings (brute-force cosine, fine at vault scale).
 
-Embeddings via fastembed (same lib/model family as the old authority); reuses the
-machine's offline model dir when present, otherwise downloads once.
+Embeddings come from the local EmbeddingGemma 2 service (one resident model,
+shared with Hindsight); this module applies the model's task prefixes.
 """
 
 from __future__ import annotations
@@ -18,7 +18,6 @@ import uuid
 from collections import Counter
 from collections.abc import Callable
 from functools import cache
-from importlib.metadata import version
 from pathlib import Path
 
 import numpy as np
@@ -183,7 +182,7 @@ CREATE TABLE IF NOT EXISTS deferred_observation_finalizations(
 );
 """
 
-_embedder = None
+_embed_client = None
 _embed_lock = threading.Lock()
 
 
@@ -319,44 +318,62 @@ def _binding_shortcuts(notes: list[Note], direct_links: list[dict]) -> list[dict
     return [shortcuts[key] for key in sorted(shortcuts)]
 
 
-def _get_embedder():
-    global _embedder
+def _embedder():
+    global _embed_client
     with _embed_lock:
-        if _embedder is None:
-            from fastembed import TextEmbedding
-            cache = CONFIG.embed_cache_dir
-            kwargs = {"cache_dir": cache} if cache and Path(cache).exists() else {}
-            _embedder = TextEmbedding(model_name=CONFIG.embed_model, **kwargs)
-    return _embedder
+        if _embed_client is None:
+            import httpx
+            from ..models.runtime import model_auth_headers
+            _embed_client = httpx.Client(base_url=CONFIG.embed_url, timeout=120, trust_env=False,
+                                         headers=model_auth_headers())
+    return _embed_client
+
+
+# Texts per request. The CPU service embeds a request whole, so small requests
+# keep an interactive query from queueing behind a long re-embed (<=0.6 s at 8).
+_EMBED_BATCH = 8
 
 
 def embed_texts(texts: list[str]) -> np.ndarray:
-    vecs = np.array(list(_get_embedder().embed(texts)), dtype=np.float32)
+    """Unit vectors for exactly these texts (already carrying their task prefix)."""
+    rows: list[list[float]] = []
+    for start in range(0, len(texts), _EMBED_BATCH):
+        response = _embedder().post("/v1/embeddings", json={"input": texts[start:start + _EMBED_BATCH]})
+        response.raise_for_status()
+        rows += [item["embedding"] for item in sorted(response.json()["data"], key=lambda item: item["index"])]
+    vecs = np.array(rows, dtype=np.float32)
     norms = np.linalg.norm(vecs, axis=1, keepdims=True)
     return vecs / np.clip(norms, 1e-9, None)
 
 
 @cache
 def _embedding_model_hash() -> str:
-    """Fingerprint the loaded FastEmbed artifact once per process."""
-    model = _get_embedder().model
-    root = Path(model._model_dir)
-    digest = hashlib.sha256(f"{model.model_name}\0{version('fastembed')}".encode())
-    for path in sorted(root.rglob("*")):
-        if path.is_file():
-            digest.update(str(path.relative_to(root)).encode())
-            with path.open("rb") as stream:
-                digest.update(hashlib.file_digest(stream, "sha256").digest())
-    return digest.hexdigest()
+    """Fingerprint the served model once per process.
+
+    The service alias names the exact GGUF (its SHA256 prefix); the metadata
+    adds its parameter count, type and size. The serving context is not identity.
+    """
+    response = _embedder().get("/v1/models")
+    response.raise_for_status()
+    served = [{"id": model.get("id"), "meta": {key: value for key, value in (model.get("meta") or {}).items()
+                                               if key != "n_ctx"}}
+              for model in response.json()["data"]]
+    return hashlib.sha256(json.dumps(served, sort_keys=True).encode()).hexdigest()
 
 
+# EmbeddingGemma 2 task prefixes (model card): Articles are titled search
+# documents, searches are retrieval queries.
 def _embedding_text(title: str, text: str) -> str:
-    return f"{title}\n{text}"
+    return f"title: {title} | text: {text}"
 
 
-# At most about 400 bge-small tokens: 1,600 characters is 340 tokens at the
-# 2026-10-08 Vault's median density (420 at p90), inside the model's 512-token
-# window with the title prefix.
+def query_embedding_text(query: str) -> str:
+    return f"task: search result | query: {query}"
+
+
+# 1,600 characters is at most ~770 EmbeddingGemma 2 tokens (median 260) on the
+# 2026-10-09 Vault, well inside its 8K window. Larger units ranked worse there
+# (search MRR 0.892 at 1,600, 0.872 at 3,200, whole Articles lower still).
 _CHUNK_CHARS = 1_600
 _CHUNK_OVERLAP_CHARS = 240  # a short trailing paragraph repeats in the next chunk
 _HEADING = re.compile(r"#{1,6}\s")
@@ -681,7 +698,7 @@ class Index:
             eligible = np.array([i for i, ref in enumerate(refs) if ref in eligible_refs], dtype=np.intp)
             if not len(eligible):
                 return []
-        qv = embed_texts([query])[0]
+        qv = embed_texts([query_embedding_text(query)])[0]
         chunk_sims = mat @ qv
         sims = np.maximum.reduceat(chunk_sims, starts)
         order = (np.argsort(-sims)[:k] if eligible is None

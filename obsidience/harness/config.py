@@ -24,9 +24,8 @@ class Config:
     llm_temperature: float = 0.4
     max_steps: int = 24  # tool-loop cap per session
 
-    # Embeddings (fastembed; project alias points at the installed offline cache)
-    embed_model: str = "BAAI/bge-small-en-v1.5"
-    embed_cache_dir: str = str(PRODUCT_ROOT / "state" / "models" / "retrieval-cache")
+    # Embeddings: the local EmbeddingGemma 2 service (obsidience-embeddings.service)
+    embed_url: str = "http://127.0.0.1:8791"
 
     # Retrieval / activation packet
     search_k: int = 24

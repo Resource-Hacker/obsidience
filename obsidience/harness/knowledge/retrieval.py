@@ -25,11 +25,12 @@ FAST_CONTEXT_ACCOUNTING_LIMIT = 32
 # RRF is rank-only, so it nominates Articles even when nothing is relevant.
 # Interactive fast context admits a direct hit only with strong dense cosine.
 # Lexical-only evidence and folder-index Articles (hubs that resemble most
-# requests) are not admitted directly. Calibrated 2026-10-08 for
-# BAAI/bge-small-en-v1.5 on 599 owner utterances and 15 knowledge questions,
-# and rechecked for best-chunk (max-pooled) cosine on 609 utterances; retune
-# if the embedder or chunk size changes.
-FAST_CONTEXT_MIN_SIMILARITY = 0.70
+# requests) are not admitted directly. Recalibrated 2026-10-09 for
+# EmbeddingGemma 2 (768-d, task prefixes, best 1,600-char chunk) on 684 owner
+# utterances and 39 labeled knowledge questions: 0.75 attaches to 5.8% of
+# utterances and admits 77% of labeled targets, matching bge-small's 0.70
+# (5.6% and 72%). Retune if the embedder or chunk size changes.
+FAST_CONTEXT_MIN_SIMILARITY = 0.75
 PREWARM_QUERY = "Obsidience activation knowledge"
 
 # ---------- fusion ----------

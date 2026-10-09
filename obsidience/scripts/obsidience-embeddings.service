@@ -1,0 +1,24 @@
+[Unit]
+Description=Obsidience EmbeddingGemma 2 text embedder (CPU)
+ConditionPathExists=/var/lib/ai/models/obsidience-embeddinggemma-2/embeddinggemma-2-BF16.gguf
+After=basic.target
+
+[Service]
+Type=exec
+WorkingDirectory=/home/wissenschafter/Projects/obsidience
+ExecStart=/home/wissenschafter/Projects/obsidience/obsidience/scripts/embed.sh
+# Started means serving: clients ordered After= this unit never race the load.
+ExecStartPost=/usr/bin/curl -fsS -o /dev/null --retry 60 --retry-delay 1 --retry-all-errors --max-time 2 http://127.0.0.1:8791/health
+LoadCredentialEncrypted=obsidience-model-api-key:/home/wissenschafter/.config/credentials/obsidience-model-api-key.cred
+Restart=on-failure
+RestartSec=3
+KillSignal=SIGINT
+TimeoutStartSec=90
+TimeoutStopSec=30
+Slice=app.slice
+CPUWeight=100
+IOWeight=100
+UMask=0077
+
+[Install]
+WantedBy=default.target
