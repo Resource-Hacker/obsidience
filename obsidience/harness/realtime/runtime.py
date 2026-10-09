@@ -201,6 +201,7 @@ class RealtimeSessionManager:
         self._audio_monitor: asyncio.Task[None] | None = None
         self._audio_reconnect_pending = False
         self._audio_reconnect_attempt: tuple | None = None
+        self._stall_task: asyncio.Task | None = None
         self._transport_ready = False
         self._phase: RealtimePhase = "off"
         self._mode = "wake"
@@ -404,6 +405,33 @@ class RealtimeSessionManager:
             # graph stays explicit rather than repeatedly loading the worker.
             self._last_error = f"Audio reconnection failed: {exc}"[:MAX_EVENT_TEXT]
             await self._publish("state", reason="audio_reconnect_failed")
+
+    async def _capture_stalled(self, seconds: Any) -> None:
+        """The worker's capture delivered no frames: end it explicitly, like a lost device.
+
+        A stalled UMA-8 keeps its endpoint generation, so recovery waits for a new one
+        (a reconnect); reopening the hung device would only stall again.
+        """
+        async with self._lock:
+            if self._closed or self._desired_mode == "off":
+                return
+            uma8 = self._audio_source == media_runtime.UMA8_SOURCE
+            generation = None
+            if uma8:
+                _intact, generation = await asyncio.to_thread(
+                    media_runtime.uma8_reference_state, self._audio_sink,
+                )
+                self._audio_reconnect_pending = True
+                self._audio_reconnect_attempt = generation
+            self._phase = "error"
+            self._transport_ready = False
+            self._last_error = (
+                f"The microphone stopped delivering audio ({seconds} s without frames)"
+                + ("; the UMA-8 USB device has stalled. Unplug and reconnect it." if uma8 else ".")
+            )[:MAX_EVENT_TEXT]
+            trace.emit("error", "Microphone capture stalled", [self._last_error])
+            await self._publish("state", reason="audio_stalled")
+        await self.stop(preserve_requested=True, audio_lost=True)
 
     def _ensure_audio_monitor(self) -> None:
         if self._audio_monitor is None or self._audio_monitor.done():
@@ -1267,6 +1295,11 @@ class RealtimeSessionManager:
                                 and self._live_transcript.get("final") is True):
                             self._live_transcript = None
                         await self._publish("runtime", reason="capture_active")
+                    continue
+                if event_type == "input_stalled":
+                    if self._stall_task is None or self._stall_task.done():
+                        self._stall_task = asyncio.create_task(
+                            self._capture_stalled(worker_event.get("seconds")), name="obsidience-capture-stall")
                     continue
                 if event_type == "input_level":
                     if self._mode == "wake" and not self._wake_open:

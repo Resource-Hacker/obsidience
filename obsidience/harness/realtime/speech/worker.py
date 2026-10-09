@@ -51,6 +51,7 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     InterimTranscriptionFrame,
+    StartFrame,
     StartInterruptionFrame,
     SystemFrame,
     TranscriptionFrame,
@@ -123,6 +124,10 @@ TTS_PEAK_CEILING = 0.95
 # Silence before the next sentence of one streamed reply (owner, 2026-10-08:
 # gapless sentences ran together). Whole 40 ms output chunks.
 SENTENCE_PAUSE_SECS = 0.2
+# Only cleanup stops the input stream, so a capture that delivers no frames has
+# stalled: the UMA-8 has hung with its PCM still RUNNING and no kernel error
+# (2026-10-06, 2026-10-09). It is reported, never silently waited out.
+CAPTURE_STALL_SECS = 5.0
 _SENTENCE_PAUSE_PCM = b"\0" * (round(SENTENCE_PAUSE_SECS * TTS_SAMPLE_RATE * 2 / CHUNK_BYTES) * CHUNK_BYTES)
 _SENTENCE_END = re.compile(r"[.!?…][\"'”’)\]*_]*$")
 
@@ -313,10 +318,37 @@ class NeMoLocalAudioInputTransport(LocalAudioInputTransport):
         super().__init__(*args, **kwargs)
         self._input_channel = input_channel
         self._last_level_at = 0.0
+        self._last_frame_at = 0.0
+        self._stall_watch: asyncio.Task | None = None
         self._capture_active = False
         self._last_voiced_ns: int | None = None
         # With a turn analyzer, Silero's stop edge waits here for its verdict.
         self._held_stop: VADUserStoppedSpeakingFrame | None = None
+
+    async def start(self, frame: StartFrame) -> None:
+        await super().start(frame)
+        self._last_frame_at = time.monotonic()
+        if self._stall_watch is None:
+            self._stall_watch = self.create_task(self._watch_capture(), name="capture-stall-watch")
+
+    async def cleanup(self) -> None:
+        if self._stall_watch is not None:
+            await self.cancel_task(self._stall_watch)
+            self._stall_watch = None
+        await super().cleanup()
+
+    def _audio_in_callback(self, in_data, frame_count, time_info, status):
+        # Stamped on PortAudio's thread: a busy event loop is not a stalled device.
+        self._last_frame_at = time.monotonic()
+        return super()._audio_in_callback(in_data, frame_count, time_info, status)
+
+    async def _watch_capture(self) -> None:
+        while True:
+            await asyncio.sleep(1.0)
+            silent = time.monotonic() - self._last_frame_at
+            if silent >= CAPTURE_STALL_SECS:
+                emit("input_stalled", seconds=round(silent, 1))
+                return
 
     async def _vad_analyze(self, audio_frame: InputAudioRawFrame) -> VADState:
         state = await super()._vad_analyze(audio_frame)
