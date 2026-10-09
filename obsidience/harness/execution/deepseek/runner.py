@@ -12,7 +12,7 @@ from copy import deepcopy
 from .bridge import BRIDGE
 from .. import native as native_model
 from ..native_turn import (
-    argument_diagnostic, command_summary, cue_only, settle_model_step, steering_context, tool_schemas, turn_recall, unavailable_text,
+    adopt_fast_lane, argument_diagnostic, command_summary, cue_only, settle_model_step, steering_context, tool_schemas, turn_recall, unavailable_text,
 )
 from ...config import CONFIG
 from ...models.context import TaskContext, discard_consumed_images
@@ -332,13 +332,7 @@ async def run_native_session(task, model, messages, allowed, ctx, agent_name, ef
                 if model_steps == 1:
                     ctx['prompt_tokens'] = metrics['prompt_tokens']
                 trace.append({'provider_metrics': metrics})
-                detail = metrics.get('fast_lane') or {}
-                label = detail.get('selected_label', '')
-                if (menu and detail.get('status') == 'selected' and len(label) == 1
-                        and 0 <= ord(label) - ord('B') < len(menu)):
-                    proposal = menu[ord(label) - ord('B')]
-                    if proposal['name'] in {'lights.set', 'application.launch', 'session.unlock'}:
-                        ctx['_reflex_proposal'] = deepcopy(proposal)
+                adopt_fast_lane(menu, metrics, ctx)
                 state.emit_model(f'{agent_name} model returned', 'result', fields, metrics=metrics)
                 if 'before_input_tokens' in projection:
                     trace.append({'context_projection': projection})

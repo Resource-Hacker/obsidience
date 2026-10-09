@@ -7,7 +7,7 @@ import uuid
 
 from .bridge import BRIDGE
 from ..native import (
-    conversation_text, measure_view, prefill_messages as native_prefill_messages,
+    conversation_text, measure_view, reconcile_outcomes, prefill_messages as native_prefill_messages,
     rebase_window as native_rebase_window, window_anchor,
 )
 
@@ -50,17 +50,7 @@ async def refresh(conversation_id: str) -> dict | None:
 
 async def reconcile(conversation) -> None:
     """Finish a missing public projection after native completion survived a crash."""
-    value = await refresh(conversation.conversation_id)
-    for outcome in (value or {}).get('outcomes', []):
-        if outcome.get('status') != 'completed' or not outcome.get('summary'):
-            continue
-        parent = conversation.index.conversation_turn(outcome['reply_to'])
-        if not parent or parent['conversation_id'] != conversation.conversation_id:
-            continue
-        if conversation.index.assistant_reply_for(parent['id']):
-            continue
-        await conversation.append(role='assistant', source=parent['source'], text=outcome['summary'],
-                                  run_id=outcome['run_id'], reply_to=parent['id'])
+    await reconcile_outcomes(conversation, await refresh(conversation.conversation_id))
 
 
 def view(conversation_id: str) -> dict | None:

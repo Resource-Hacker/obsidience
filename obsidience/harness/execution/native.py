@@ -374,6 +374,15 @@ def wire_messages(messages: list[dict], images: dict, objective: str = '', *,
     return result
 
 
+def fast_lane_eligible(spec, effort: str, images: dict, payload: dict) -> bool:
+    """The finite-choice scorer serves only the resident Gemma at reasoning none, without images."""
+    return (spec.family == 'gemma4' and spec.id == 'obsidience-gemma'
+            and spec.runtime.startswith('llama.cpp') and effort == 'none' and not images
+            and not any(isinstance(row.get('content'), list) and any(
+                part.get('type') == 'image_url' for part in row['content'])
+                for row in payload['messages']))
+
+
 def request_payload(messages, spec, effort, tools):
     """One native provider representation for execution and disposable prefill."""
     payload = llm._chat_payload(messages, spec, max_tokens=spec.max_output_tokens,
@@ -411,11 +420,7 @@ async def stream(options: dict, spec, effort: str, images: dict, send, metrics: 
         projection.remember_article_page(index, name, text, '', vault_read_allowed=True)
     async with llm.provider_client() as client:
         scoring_usage = None
-        if (fast_candidates and spec.family == 'gemma4' and spec.id == 'obsidience-gemma'
-                and spec.runtime.startswith('llama.cpp') and effort == 'none' and not images
-                and not any(isinstance(row.get('content'), list) and any(
-                    part.get('type') == 'image_url' for part in row['content'])
-                            for row in payload['messages'])
+        if (fast_candidates and fast_lane_eligible(spec, effort, images, payload)
                 and options.get('purpose') != 'compaction'
                 and options.get('toolChoice', 'auto') in (None, 'auto')
                 and options.get('tool_choice', 'auto') in (None, 'auto')):
@@ -713,3 +718,17 @@ def prefill_messages(value: dict | None, conversation_id: str, compiled: list[di
                         'content': [{'type': 'text', 'text': memory}]})
     return [compiled[0], *wire_messages(history, {}, preparation_prefix=preparation_prefix,
                                         anchor=window_anchor(conversation_id))]
+
+
+async def reconcile_outcomes(conversation, value: dict | None) -> None:
+    """Publish a completed reply whose public turn a crash lost, from a loop's settlement records."""
+    for outcome in (value or {}).get('outcomes', []):
+        if outcome.get('status') != 'completed' or not outcome.get('summary'):
+            continue
+        parent = conversation.index.conversation_turn(outcome['reply_to'])
+        if not parent or parent['conversation_id'] != conversation.conversation_id:
+            continue
+        if conversation.index.assistant_reply_for(parent['id']):
+            continue
+        await conversation.append(role='assistant', source=parent['source'], text=outcome['summary'],
+                                  run_id=outcome['run_id'], reply_to=parent['id'])

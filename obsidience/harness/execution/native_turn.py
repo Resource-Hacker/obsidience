@@ -357,3 +357,14 @@ async def settle_model_step(state, operate, text: str, has_calls: bool, reason: 
     if reason not in {'stop', 'tool-calls'}:
         raise RuntimeError(f'Executive model ended with {reason}; no incomplete Tool is dispatched')
     return None
+
+
+def adopt_fast_lane(menu, metrics: dict, ctx: dict) -> None:
+    """A selected effect proposal may later be confirmed by a cue (never dispatched here)."""
+    detail = metrics.get('fast_lane') or {}
+    label = detail.get('selected_label', '')
+    if (menu and detail.get('status') == 'selected' and len(label) == 1
+            and 0 <= ord(label) - ord('B') < len(menu)):
+        proposal = menu[ord(label) - ord('B')]
+        if proposal['name'] in {'lights.set', 'application.launch', 'session.unlock'}:
+            ctx['_reflex_proposal'] = deepcopy(proposal)
