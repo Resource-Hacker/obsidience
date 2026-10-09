@@ -340,8 +340,12 @@ neighbours); (9) history projected from the native conversation (no conversation
   connection; recognition is personalization, never authentication. Agent video feeds are
   never cameras.
 - `tv.control`: one private identity-bound LAN television through upstream ADB;
-  discrete power with display/wake readback, registered app launch, fresh screen
-  observation with bounded accessibility labels and one remote key/text action per observation.
+  discrete power with display/wake readback, registered app launch, backend state read from
+  Android services (foreground app, audio-service playback, volume/mute, media sessions, text
+  input, content this Harness opened) before any screen image, which is skipped while video
+  plays, bounded accessibility labels and one remote key/text action per observation. Media
+  keys verify their effect from the audio service. The Executive's per-turn metadata renders
+  the last read state with its age, never contacting the TV while building the prompt.
   Protected video may omit pixels while accessible controls remain available. Text requires an active
   Android text-input method; custom keyboards use visible remote navigation.
   Missing observation or text focus is correctable before dispatch; transport or

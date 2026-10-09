@@ -229,7 +229,7 @@ def _argument_schemas() -> dict[str, dict]:
         "session.unlock":obj({}),
         "tv.control":{"anyOf":[obj({"action":{"enum":["on","off","observe"]}},("action",)),
             obj({"action":{"const":"launch"},"app":text(32)},("action","app")),
-            obj({"action":{"const":"key"},"key":{"enum":["up","down","left","right","select","back","home","menu","play","pause","rewind","fast_forward","volume_up","volume_down","mute","enter","delete"]}},("action","key")),
+            obj({"action":{"const":"key"},"key":{"enum":["up","down","left","right","select","back","home","menu","play","pause","rewind","fast_forward","volume_up","volume_down","mute","unmute","enter","delete"]}},("action","key")),
             obj({"action":{"const":"keys"},"keys":{"type":"array","minItems":1,"maxItems":8,"items":{"enum":["up","down","left","right","select","back","home","menu","enter","delete"]}}},("action","keys")),
             obj({"action":{"const":"text"},"text":text(120)},("action","text")),
             obj({"action":{"const":"find"},"query":text(120),"app":text(32)},("action","query")),

@@ -93,22 +93,45 @@ def _media_command(text):
     return {'name': 'media.pause', 'args': {'query': choices.pop()}}
 
 
+# Each literal TV media phrase maps to one remote key with audio-service readback.
+_TV_KEYS = {'TVPause': 'pause', 'TVPlay': 'play', 'TVMute': 'mute', 'TVUnmute': 'unmute'}
+
+
 @lru_cache(maxsize=1)
 def _tv_intents():
+    tv = '[the] (tv|television)'
     return Intents.from_dict({
         'language': 'en',
-        'lists': {'state': {'values': ['on', 'off']}},
-        'intents': {'TVPower': {'data': [{'sentences': [
-            '[please] [the] (tv|television) {state} [please]',
-            '[please] (turn|switch) {state} [the] (tv|television) [please]',
-            '[please] (turn|switch) [the] (tv|television) {state} [please]',
-        ]}]}},
+        'lists': {'state': {'values': ['on', 'off']}, 'direction': {'values': ['up', 'down']}},
+        'intents': {
+            'TVPower': {'data': [{'sentences': [
+                '[please] [the] (tv|television) {state} [please]',
+                '[please] (turn|switch) {state} [the] (tv|television) [please]',
+                '[please] (turn|switch) [the] (tv|television) {state} [please]',
+            ]}]},
+            'TVPause': {'data': [{'sentences': [f'[please] pause {tv} [please]']}]},
+            'TVPlay': {'data': [{'sentences': [f'[please] (play|resume|unpause) {tv} [please]']}]},
+            'TVMute': {'data': [{'sentences': [f'[please] mute {tv} [please]']}]},
+            'TVUnmute': {'data': [{'sentences': [f'[please] unmute {tv} [please]']}]},
+            'TVVolume': {'data': [{'sentences': [
+                f'[please] [turn] {tv} volume {{direction}} [please]',
+                f'[please] turn {tv} {{direction}} [please]',
+                f'[please] turn {{direction}} {tv} [volume] [please]',
+                f'[please] [turn] [the] volume {{direction}} on {tv} [please]',
+                f'[please] turn {{direction}} [the] volume on {tv} [please]',
+            ]}]},
+        },
     })
 
 
 def _tv_command(text):
-    choices = {result.entities['state'].value for result in recognize_all(text, _tv_intents())}
-    return {'name': 'tv.control', 'args': {'action': choices.pop()}} if len(choices) == 1 else None
+    choices = set()
+    for result in recognize_all(text, _tv_intents()):
+        name = result.intent.name
+        choices.add((('action', result.entities['state'].value),) if name == 'TVPower' else
+                    (('action', 'key'), ('key', 'volume_' + result.entities['direction'].value))
+                    if name == 'TVVolume' else (('action', 'key'), ('key', _TV_KEYS[name])))
+    return {'name': 'tv.control', 'args': dict(choices.pop())} if len(choices) == 1 else None
 
 
 def recognize_command(objective, allowed):

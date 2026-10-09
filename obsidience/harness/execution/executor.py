@@ -739,12 +739,19 @@ def activation_messages(task: Note, activation: dict, *, agent_name: str,
         VOICE_TRANSPORT_CONTRACT if agent else "",
     ]))
     # Each Executive turn names only its transport; the rules it selects are fixed.
+    tv_state = ""
+    if agent and "tv.control" in (activation.get("spine") or {}).get("tools", ()):
+        # The TV's last backend state, cached by tv.control itself; rendering
+        # it never contacts the TV, and it is omitted until a call read it.
+        from ..capabilities.tv.control import prompt_line
+        tv_state = prompt_line()
     metadata = "\n".join(filter(None, [
         activation.get("provider_activation") or "## Current activation metadata",
         # A per-turn reminder: the cached system rules alone did not keep
         # spoken replies short and plain.
         "transport: " + ("voice (spoken reply: plain text without Markdown; one or two short "
                          "sentences unless detail is requested)" if response_contract else "text"),
+        tv_state,
         # Owner speech cut off the previous spoken reply (per-turn, never cached).
         str(activation["params"].get("speech_interruption") or ""),
     ])) if agent else ""
@@ -927,6 +934,7 @@ class CapabilityDispatch:
         reflex_proposal = self.ctx.pop("_reflex_proposal", None)
         if name != "task.complete":
             self.ctx.pop("_reflex_command_verified", None)
+            self.ctx.pop("_reflex_command_result", None)
         from .optimization_incidents import snapshot, record as record_decision
         decision_sample = snapshot(self, name, args)
         public_args = {key: value for key, value in args.items() if key != "point"}
@@ -1289,6 +1297,8 @@ class CapabilityDispatch:
             )
             if verified:
                 self.ctx["_reflex_command_verified"] = True
+                # The command reply reports this exact readback (e.g. TV volume).
+                self.ctx["_reflex_command_result"] = result_object
                 callback = self.ctx.get("_verified_command")
                 if callback is not None and not asyncio.current_task().cancelling():
                     _foreground_checkpoint(self.interruption_event, self.ctx)
