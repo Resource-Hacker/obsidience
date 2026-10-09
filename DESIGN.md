@@ -53,7 +53,8 @@ Adopted 2026-09-12 for Harness, Shell, UI and integrations (Article
 - One authority per store, conversation, scheduler, model reservation and desktop input
   path. Reloads never undo delivered effects; keep receipts and uncertain-outcome handling.
 - Prefer maintained upstream components through supported adapters; record adopted code
-  and licenses in `artifacts.lock.json`. No generic framework or language migration.
+  and licenses in `artifacts.lock.json`. Adopt a maintained framework when it makes the system better (one per
+  concern, staged behind a switch with a rollback); the principles live in the Golden ontology.
 
 ## Article ontology
 

@@ -51,8 +51,11 @@ owned work on cancellation and dependency loss.
 Keep one owner for each store, conversation, scheduler, model reservation and
 desktop input path. Preserve committed receipts and never replay uncertain
 effects. Prefer maintained upstream components through supported adapters;
-record adopted code, revisions and licenses in `artifacts.lock.json`. Do not
-add a generic framework or duplicate owner to bypass a missing dependency.
+record adopted code, revisions and licenses in `artifacts.lock.json`. Adopt a
+maintained framework when it makes the system better (one per concern, staged
+behind a switch with a rollback); never add a duplicate owner to bypass a missing
+dependency. The principles live in the Golden ontology
+(`Architecture/Harness/action-ontology`).
 
 ## Ontology and execution
 

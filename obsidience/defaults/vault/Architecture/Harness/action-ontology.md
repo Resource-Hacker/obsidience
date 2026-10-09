@@ -92,6 +92,37 @@ Conversation runs use the same receipts and activation ledger with the Agent ref
 as their owner. Legacy SQLite fields named task_ref retain that exact owner ref;
 they do not imply that an Agent is a Task Article.
 
+## Cordis principles
+
+Every Obsidience component follows Cordis's composition principles, whatever
+runtime or framework hosts it ([A Programming Paradigm for Spatiotemporal
+Composability](https://arxiv.org/abs/2608.25512); adopted 2026-09-12, made
+runtime-independent 2026-10-09). Plugins, services and frameworks are
+implementation roles: they are never Article types and never grant Tools.
+
+1. **Contracts.** A component provides or consumes named service contracts and
+   declares its required dependencies and optional integrations. Consumers
+   depend on the contract, never on another owner's private state.
+2. **Cleanup with acquisition.** Every subscription, listener, timer, worker,
+   client and lease has one lifecycle owner that registers its cleanup when it
+   acquires the resource.
+3. **Availability.** Work runs only while its required dependencies are
+   available. Cancellation, dependency loss or teardown stops and drains owned
+   work; reconnection reuses the same owner and generation checks.
+4. **One authority.** Each durable store, conversation, scheduler, model
+   reservation and desktop input path has one owner. Others delegate through its
+   interface instead of building a parallel path.
+5. **Reversible composition, irreversible world.** Reloading or removing a
+   component never undoes a delivered effect. Keep receipts and uncertain-outcome
+   handling; never replay an uncertain effect.
+6. **Short foreground path.** Keep the live path lean and measure real
+   end-to-end boundaries before claiming a latency gain.
+7. **Best available components.** Adopt a maintained framework or upstream
+   component when it makes the system better: one per concern, through its
+   supported extension points, pinned and recorded with its license in
+   `artifacts.lock.json`. Never add a duplicate owner to bypass an unavailable
+   dependency; migrate in stages behind a switch with a rollback until verified.
+
 ## Structural rules
 
 Task hierarchy expresses reusable scope, not chronological order. Only an

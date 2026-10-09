@@ -37,7 +37,7 @@ The accepted Agent catalog defines available native schemas. Articles remain exp
 4. Preserve one authority for each durable store, conversation, scheduler, model reservation and desktop input path. A component delegates through that interface rather than reaching into another owner's private state or constructing an alternate control path.
 5. Keep registrations and internal lifecycle effects reversible where the host supports it. Removing a plugin cannot undo a delivered click, sent communication, committed Source or accepted Knowledge change. Preserve receipts, uncertain-outcome handling and explicit compensation; hot reload is not rollback of the external world.
 6. Keep the foreground path short: a stable compact instruction prefix, existing reusable clients and model leases, avoid an extra large-model classification call that displaces the Executive conversation cache, and no full registry rebuild merely for presentation. Measure actual end-to-end boundaries before claiming a latency gain.
-7. Prefer a maintained upstream component through its supported adapter. Record adopted code and licenses in the existing reuse manifest. Reference material alone is not an installed dependency, and plugin composition must not become a second generic framework.
+7. Adopt a maintained framework or upstream component when it makes the system better: one per concern, through its supported extension points, pinned and recorded with its license in the existing reuse manifest. Reference material alone is not an installed dependency. These principles are stated runtime-independently in the [Golden ontology](/Architecture/Harness/action-ontology.md).
 
 ## Knowledge provider boundary
 
