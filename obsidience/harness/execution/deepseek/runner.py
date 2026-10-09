@@ -312,7 +312,9 @@ async def run_native_session(task, model, messages, allowed, ctx, agent_name, ef
             discard_observation()
             path = '.'.join(map(str, errors[0].absolute_path)) or 'arguments'
             guidance = json.dumps(native_schema(_argument_schemas()[name]), separators=(',', ':'))
-            diagnostic = f'Invalid {name} {path}: {errors[0].validator} constraint ({errors[0].validator_value!r}). Use this argument structure: {guidance}'
+            sent = json.dumps(args, separators=(',', ':'))[:300]
+            diagnostic = (f'Invalid {name} {path}: {errors[0].validator} constraint ({errors[0].validator_value!r}). '
+                          f'You sent: {sent}. Use this argument structure: {guidance}')
             if name == 'computer.act':
                 diagnostic += (' The previous image was consumed without input. If a click is still needed, '
                                'first observe again and choose a new point. If the goal was already visible, '
