@@ -9,6 +9,7 @@ import math
 import os
 import re
 import signal
+import subprocess
 import time
 import uuid
 from collections import deque
@@ -34,6 +35,9 @@ NEMOTRON_MODEL = Path(
     "nemotron-speech-streaming-en-0.6b.nemo"
 )
 MAX_EVENT_TEXT = 512
+# Root-owned copy of obsidience/scripts/uma8-power-cycle (installation fact).
+UMA8_POWER_CYCLE = "/usr/local/libexec/obsidience-uma8-power-cycle"
+UMA8_POWER_CYCLE_SECS = 600.0
 MAX_EVENTS = 80
 MAX_WORKER_EVENT_BYTES = 16_384
 RUNTIME_LEASE_OWNER = "obsidience-realtime"
@@ -202,6 +206,7 @@ class RealtimeSessionManager:
         self._audio_reconnect_pending = False
         self._audio_reconnect_attempt: tuple | None = None
         self._stall_task: asyncio.Task | None = None
+        self._uma8_power_cycled_at = -UMA8_POWER_CYCLE_SECS
         self._transport_ready = False
         self._phase: RealtimePhase = "off"
         self._mode = "wake"
@@ -427,11 +432,38 @@ class RealtimeSessionManager:
             self._transport_ready = False
             self._last_error = (
                 f"The microphone stopped delivering audio ({seconds} s without frames)"
-                + ("; the UMA-8 USB device has stalled. Unplug and reconnect it." if uma8 else ".")
+                + ("; the UMA-8 USB device has stalled." if uma8 else ".")
             )[:MAX_EVENT_TEXT]
             trace.emit("error", "Microphone capture stalled", [self._last_error])
             await self._publish("state", reason="audio_stalled")
         await self.stop(preserve_requested=True, audio_lost=True)
+        if not uma8:
+            return
+        # Only removing power revives the hung UMA-8. Behind the USB-C dock's
+        # switching hub that is one bounded software power cycle; the reconnect
+        # path then restarts voice on the new endpoint generation. A repeat within
+        # UMA8_POWER_CYCLE_SECS is not cycled again: it stays an explicit fault.
+        now = time.monotonic()
+        recent = now - self._uma8_power_cycled_at < UMA8_POWER_CYCLE_SECS
+        if not recent:
+            self._uma8_power_cycled_at = now
+            result = await asyncio.to_thread(
+                subprocess.run, ("/usr/bin/sudo", "-n", UMA8_POWER_CYCLE),
+                stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30,
+            )
+            detail = (result.stdout or result.stderr).strip()[:200]
+            trace.emit("error" if result.returncode else "event", "UMA-8 power cycle", [detail])
+            if result.returncode == 0:
+                return
+        async with self._lock:
+            if self._audio_reconnect_pending:
+                self._last_error = (
+                    "The UMA-8 stalled again within minutes of an automatic power cycle. Unplug and reconnect it."
+                    if recent else
+                    "The UMA-8 stalled and could not be power-cycled automatically (it needs the USB-C dock). "
+                    "Unplug and reconnect it."
+                )
+                await self._publish("state", reason="audio_stalled")
 
     def _ensure_audio_monitor(self) -> None:
         if self._audio_monitor is None or self._audio_monitor.done():

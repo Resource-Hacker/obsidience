@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# Power-cycle the miniDSP UMA-8 (2752:001c) through its hub port's power switch.
+#
+# The UMA-8 can hang with its capture PCM RUNNING and no kernel error; a USB reset
+# then drops it and only removing power brings it back. The chipset's root ports
+# have no power switching, so this works only behind a hub that really switches
+# per-port power (the self-powered USB-C dock: VIA VL822 2109:2822, Realtek
+# RTS5411 0bda:5411). The kernel's port `disable` attribute clears PORT_POWER.
+# Installed root-owned as /usr/local/libexec/obsidience-uma8-power-cycle and run
+# by Realtime through `sudo -n` after a detected capture stall.
+set -euo pipefail
+
+exec 9>/run/obsidience-uma8-power-cycle.lock
+flock -n 9 || { echo 'UMA-8 power cycle is already running' >&2; exit 75; }
+
+dev=
+for candidate in /sys/bus/usb/devices/*; do
+    if [[ -f $candidate/idVendor && $(<"$candidate/idVendor") == 2752 && $(<"$candidate/idProduct") == 001c ]]; then
+        dev=$candidate
+        break
+    fi
+done
+[[ -n $dev ]] || { echo 'UMA-8 is not connected' >&2; exit 69; }
+
+name=${dev##*/}
+[[ $name == *.* ]] || { echo "UMA-8 is on root port $name, which cannot switch power" >&2; exit 78; }
+hub=${name%.*}
+port=${name##*.}
+hubdir=/sys/bus/usb/devices/$hub
+case "$(<"$hubdir/idVendor"):$(<"$hubdir/idProduct")" in
+    2109:2822|0bda:5411) ;;
+    *) echo "UMA-8 hub $hub does not switch per-port power" >&2; exit 78 ;;
+esac
+control=$hubdir/$hub:1.0/$hub-port$port/disable
+[[ -w $control ]] || { echo "no port power control at $control" >&2; exit 78; }
+
+echo 1 >"$control"
+sleep 2
+echo 0 >"$control"
+for _ in $(seq 1 30); do
+    sleep 0.5
+    if [[ -f /sys/bus/usb/devices/$name/idVendor && $(<"/sys/bus/usb/devices/$name/idVendor") == 2752 ]]; then
+        echo "UMA-8 power-cycled on $name"
+        exit 0
+    fi
+done
+echo "UMA-8 did not return on $name after its power cycle" >&2
+exit 70
