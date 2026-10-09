@@ -13,6 +13,7 @@ import asyncio
 import json
 import os
 import sys
+from contextvars import ContextVar
 
 # LiteLLM must never fetch a remote cost map at import (owner decision 2026-10-09).
 os.environ.setdefault('LITELLM_LOCAL_MODEL_COST_MAP', 'True')
@@ -36,6 +37,62 @@ _LIVE_KINDS = {'plugin:obsidience.context', 'plugin:obsidience.memory'}
 
 _service = None
 _models: dict[tuple, object] = {}
+# The current model step's metrics, set by the plugin before each request; the
+# admission client records the provider's acknowledged input count there.
+ADMISSION: ContextVar[dict | None] = ContextVar('obsidience_admission', default=None)
+
+
+def admitted_input_tokens(response, limit: int) -> int:
+    """The input count llama.cpp acknowledged for this exact guard, else fail closed.
+
+    The engine enforces ``input_token_limit`` before queueing and answers with
+    ``X-LLAMA-Input-Token-Limit`` and ``X-LLAMA-Input-Tokens``; a response
+    without that acknowledgement may not have been guarded.
+    """
+    headers = getattr(response, '_response_headers', None)
+    if headers is None:
+        extra = (getattr(response, '_hidden_params', None) or {}).get('additional_headers') or {}
+        headers = {key.removeprefix('llm_provider-'): value for key, value in extra.items()}
+    headers = {str(key).lower(): str(value) for key, value in dict(headers).items()}
+    count_text = headers.get('x-llama-input-tokens', '')
+    if (headers.get('x-llama-input-token-limit') != str(limit) or not count_text.isascii()
+            or not count_text.isdecimal() or len(count_text) > 10):
+        raise ValueError('Native provider did not acknowledge the exact input-token guard')
+    count = int(count_text)
+    if count > limit or count_text != str(count):
+        raise ValueError('Native provider returned an invalid admitted token count')
+    return count
+
+
+def _admission_client():
+    """ADK's LiteLLM client that verifies llama.cpp's exact input-token admission."""
+    from google.adk.models.lite_llm import LiteLLMClient
+
+    class AdmittedLiteLLMClient(LiteLLMClient):
+        async def acompletion(self, model, messages, tools, **kwargs):
+            import litellm
+            limit = (kwargs.get('extra_body') or {}).get('input_token_limit')
+            try:
+                response = await super().acompletion(model=model, messages=messages, tools=tools, **kwargs)
+            except litellm.BadRequestError as exc:
+                if limit is not None and 'input_token_limit' in str(exc):
+                    # The preflight already projected to an exact count; a refusal
+                    # here is a counting mismatch, so nothing is retried.
+                    raise ValueError(f'The model server refused this request at its exact input-token '
+                                     f'guard ({limit} tokens); nothing was generated') from None
+                raise
+            if limit is not None:
+                try:
+                    count = admitted_input_tokens(response, limit)
+                except ValueError:
+                    if hasattr(response, 'aclose'):
+                        await response.aclose()
+                    raise
+                if (metrics := ADMISSION.get()) is not None:
+                    metrics.update(admitted_input_tokens=count, input_token_guard='acknowledged')
+            return response
+
+    return AdmittedLiteLLMClient()
 _views: dict[str, dict] = {}
 
 
@@ -84,7 +141,7 @@ def model(spec, effort: str):
     Carries what the native transport sends: the served model id (so tool
     results keep the template's native ``tool`` role), output cap,
     temperature, single Tool call per step, template thinking switch and the
-    engine's exact input ceiling.
+    engine's exact input ceiling, whose acknowledgement every response must carry.
     """
     key = (spec.id, spec.base_url, effort)
     if key not in _models:
@@ -101,7 +158,8 @@ def model(spec, effort: str):
         _models[key] = LiteLlm(
             model='openai/' + spec.id, api_base=spec.base_url, api_key=token or 'none',
             max_tokens=spec.max_output_tokens, temperature=CONFIG.llm_temperature,
-            parallel_tool_calls=False, timeout=llm.CHAT_TIMEOUT_SECONDS, extra_body=extra)
+            parallel_tool_calls=False, timeout=llm.CHAT_TIMEOUT_SECONDS, extra_body=extra,
+            **({'llm_client': _admission_client()} if 'input_token_limit' in extra else {}))
     return _models[key]
 
 

@@ -266,7 +266,8 @@ neighbours); (9) history projected from the native conversation (no conversation
 
 - Scheduled, event and delegated Tasks use their accepted Runbooks and the same executor,
   scheduler, receipts and Review, and run on the Executive's ADK loop and plugin (one
-  in-memory session per run). Each step is one native Tool call; a Tool-less reply is
+  in-memory session per run). Each step is one native Tool call (the request requires a
+  call, so the engine's grammar admits only an advertised Tool); a Tool-less reply is
   not a completion (three strikes fail the run) and only `task.complete` finishes. Tool
   results carry the remaining decision budget; a third identical call is refused before
   dispatch. Foreground demand cancels only unfinished inference.
@@ -288,11 +289,14 @@ neighbours); (9) history projected from the native conversation (no conversation
 
 - Before every inference the actual templated request (with images) is counted; engines
   that support it enforce an exact input ceiling before queueing and acknowledge it, and
-  the adapter fails closed without that acknowledgement. Unavailable multimodal counts fail.
+  the adapter fails closed without that acknowledgement (on the ADK route, ADK's LiteLLM
+  client checks the acknowledgement headers of every model step and records the admitted
+  count). Unavailable multimodal counts fail.
 - Under pressure only older pageable `source.read`, `web.fetch` or version-attested
   `vault.read` bodies with exact reread paths may be projected; packet, Objective, receipts
   and latest observation stay complete. Only a verified pre-enqueue overflow permits one
-  projected retry; irreducible overflow is rejected.
+  projected retry (prefill); on the ADK route the preflight already projected to the exact
+  count, so a refusal at the guard fails closed. Irreducible overflow is rejected.
 - Model steps stream through ADK's LiteLlm route; standby preparation and controller
   replies use pinned `httpx-sse` in one API-lifetime pool. Reasoning is discarded; a
   finish state is required; never reconnect or replay partial output.

@@ -6,7 +6,10 @@ hash-pinned in `requirements.lock.txt`) to the local llama.cpp server under the
 neutral served model id, so Tool results keep the template's native `tool`
 role. LiteLLM is imported at startup with `LITELLM_LOCAL_MODEL_COST_MAP=True`.
 Reasoning effort maps to the template thinking switch and reasoning budget;
-reasoning stays private.
+reasoning stays private. ADK's LiteLLM client is replaced by one that fails
+closed unless llama.cpp acknowledges the exact `input_token_limit`
+(`X-LLAMA-Input-Token-Limit`/`X-LLAMA-Input-Tokens`) on every model step and
+records the admitted count with the step's metrics.
 
 - `sessions.py` owns the Executive conversation log: one ADK
   `SqliteSessionService` on `state/adk-sessions.sqlite3`. Events carry
@@ -23,7 +26,8 @@ reasoning stays private.
   narrowing dispatch policy. The Executive's conversation adds the
   finite-choice lane, early speech and plain-text completion. A specialist
   Task advertises per step only the Tools its controller state allows, with
-  the active proposal/completion contract schemas; its Tool results carry the
+  the active proposal/completion contract schemas, and requires a Tool call
+  (`tool_choice: required`); its Tool results carry the
   remaining decision budget, a third identical call is refused before
   dispatch, and only `task.complete` finishes.
 - `tools.py` advertises one `BaseTool` per granted capability with the native

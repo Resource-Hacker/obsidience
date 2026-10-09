@@ -429,6 +429,10 @@ class AgentPlugin(BasePlugin):
             llm_request.config.tools = [types.Tool(function_declarations=[types.FunctionDeclaration(
                 name=schema['name'], description=schema['description'],
                 parameters_json_schema=schema['parameters']) for schema in schemas])]
+            # Every Task decision is one Tool call: the engine's grammar requires
+            # a call to one advertised Tool (reasoning may precede it).
+            llm_request.config.tool_config = types.ToolConfig(function_calling_config=types.FunctionCallingConfig(
+                mode=types.FunctionCallingConfigMode.ANY))
         else:
             schemas = tool_schemas(self.advertised)
         payload = native.request_payload(wire, self.spec, self.effort, schemas, task=self.task_mode)
@@ -492,6 +496,7 @@ class AgentPlugin(BasePlugin):
         llm_request.contents = request_contents(payload['messages'][1:])
         # Foreground demand that arrived during preparation wins over a new request.
         foreground_checkpoint(self.interruption_event, self.ctx)
+        sessions.ADMISSION.set(metrics)
         self._step['dispatched'] = time.monotonic()
         self.generating.set()
         return None
