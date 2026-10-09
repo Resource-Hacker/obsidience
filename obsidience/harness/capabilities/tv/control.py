@@ -656,12 +656,41 @@ def _quote(text):
     return json.dumps(re.sub(r'\s+', ' ', str(text))[:80], ensure_ascii=False)
 
 
+_WARM = {'at': -_agent.RETRY}
+
+
+def _warm():
+    """Connect the TV agent off the turn path; its pushes then keep the tv line current.
+
+    Read-only: identity and boot are verified, nothing is sent to the TV's apps. A TV
+    command holding the lock connects the agent itself, so this never waits for one.
+    """
+    if not _LOCK.acquire(blocking=False):
+        return
+    try:
+        row = _inventory()
+        _tail, boot, _ad = _preamble(row, None, _POWER_READ, timeout=4)
+        if _agent.session(row, None, boot, _pushed(row)) is not None and (reply := _ask('state')) is not None:
+            _LAST['state'] = _from_agent(row, reply, fetch=False)
+    except Exception as error:  # The TV may be off or away; the line stays marked as aged.  # noqa: BLE001
+        _agent.log.info('TV agent warm-up skipped: %s', error)
+    finally:
+        _LOCK.release()
+
+
 def prompt_line(now=None):
     """One compact line of the latest TV state, read without contacting the TV.
 
+    A connected agent pushes every change, so its line is live. Otherwise the line
+    is the last state seen, and its age says it may have changed; rendering then
+    starts a background agent connection (at most once per agent retry interval).
     Age counts wall-clock minute boundaries, like the minute clock, so speech
     preparation and final admission render the same line within one minute.
     """
+    live = _agent.current() is not None
+    if not live and time.monotonic() - _WARM['at'] >= _agent.RETRY:
+        _WARM['at'] = time.monotonic()
+        threading.Thread(target=_warm, name='tv-agent-warm', daemon=True).start()
     state = _LAST['state']
     if state is None:
         return ''
@@ -689,7 +718,9 @@ def prompt_line(now=None):
             parts.append(f"volume {volume['index']}/{volume['max']}" + (' muted' if volume['muted'] else ''))
         if state.get('text_input_active'):
             parts.append('text field active')
-    return f"tv (as of {'this minute' if age <= 0 else f'{age} min ago'}): " + ', '.join(parts).strip()
+    when = ('live' if live else 'as of this minute' if age <= 0
+            else f'last seen {age} min ago; may have changed, observe for what is on now')
+    return f"tv ({when}): " + ', '.join(parts).strip()
 
 
 def _reached(action, level, audio):
