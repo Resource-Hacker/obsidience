@@ -24,7 +24,6 @@ Rectangle {
     property string draft: ""
     property string conversationId: ""
     property var contextUsage: null
-    property int compactAt: 80
     property bool busy: false
     property string activeTurnId: ""
     property bool acceptingClarification: false
@@ -131,11 +130,8 @@ Rectangle {
                 "count_method": String(message.count_method || "unavailable"),
                 "measurement_scope": String(message.measurement_scope || ""),
                 "capacity_tokens": Number(message.capacity_tokens ?? 0),
-                "percent": Number(message.percent ?? 0),
-                "compact_at": Number(message.compact_at ?? 80),
-                "compacting": Boolean(message.compacting ?? false)
+                "percent": Number(message.percent ?? 0)
             }
-            compactAt = contextUsage.compact_at
         } else if (message.type === "start") {
             busy = true
         } else if (message.type === "end") {
@@ -184,29 +180,6 @@ Rectangle {
             "type": "new_conversation"
         }))
         resetting = true
-    }
-
-    function setCompactThreshold(percent) {
-        if (!canMutate() || (contextUsage && contextUsage.compacting)) {
-            return
-        }
-        chatSocket.sendTextMessage(JSON.stringify({
-            "type": "set_compact_threshold",
-            "percent": percent
-        }))
-        compactAt = percent
-    }
-
-    function compactNow() {
-        if (!canMutate() || (contextUsage && contextUsage.compacting)) {
-            return
-        }
-        chatSocket.sendTextMessage(JSON.stringify({"type": "compact"}))
-        if (contextUsage) {
-            const next = Object.assign({}, contextUsage)
-            next.compacting = true
-            contextUsage = next
-        }
     }
 
     Rectangle {
@@ -500,8 +473,8 @@ Rectangle {
         Text {
             id: contextPercent
 
-            anchors.right: compactLabel.left
-            anchors.rightMargin: 12
+            anchors.right: parent.right
+            anchors.rightMargin: 10
             anchors.verticalCenter: immediateLabel.verticalCenter
             width: 34
             text: !root.contextUsage || root.contextUsage.count_method !== "runtime" ? "—"
@@ -512,45 +485,11 @@ Rectangle {
             font.pixelSize: 8
         }
 
-        Text {
-            id: compactLabel
-
-            anchors.right: thresholdBox.left
-            anchors.rightMargin: 6
-            anchors.verticalCenter: immediateLabel.verticalCenter
-            text: "COMPACT AT"
-            color: "#4d7dd3fc"
-            font.family: "JetBrains Mono"
-            font.pixelSize: 8
-        }
-
-        GlowComboBox {
-            id: thresholdBox
-
-            anchors.right: parent.right
-            anchors.rightMargin: 10
-            anchors.top: parent.top
-            anchors.topMargin: 4
-            width: 65
-            height: 25
-            model: [60, 70, 80, 90]
-            currentIndex: model.indexOf(root.compactAt)
-            enabled: root.canMutate() && !(root.contextUsage && root.contextUsage.compacting)
-            fieldColor: "#03101a"
-            foreground: "#cffafe"
-            idleBorderOpacity: 0.15
-            textOpacity: 0.65
-            disabledOpacity: 0.35
-            textPixelSize: 9
-            displayText: currentIndex >= 0 ? String(model[currentIndex]) + "%" : ""
-            onActivated: index => root.setCompactThreshold(model[index])
-        }
-
         TextArea {
             id: draftInput
 
             anchors.left: parent.left
-            anchors.right: compactButton.left
+            anchors.right: sendButton.left
             anchors.top: immediateLabel.bottom
             anchors.bottom: parent.bottom
             anchors.leftMargin: 10
@@ -580,26 +519,6 @@ Rectangle {
                 border.width: 1
                 border.color: draftInput.activeFocus ? "#7367e8f9" : "#3367e8f9"
             }
-        }
-
-        GlowButton {
-            id: compactButton
-
-            anchors.right: sendButton.left
-            anchors.rightMargin: 7
-            anchors.bottom: parent.bottom
-            anchors.bottomMargin: 10
-            width: 86
-            height: 54
-            enabled: root.canMutate() && !(root.contextUsage && root.contextUsage.compacting)
-            text: root.contextUsage && root.contextUsage.compacting ? "COMPACTING…" : "COMPACT"
-            foreground: "#a5f3fc"
-            idleBorderOpacity: 0.20
-            idleTextOpacity: 0.55
-            disabledOpacity: 0.35
-            textPixelSize: 9
-            textLetterSpacing: 1.0
-            onClicked: root.compactNow()
         }
 
         GlowButton {

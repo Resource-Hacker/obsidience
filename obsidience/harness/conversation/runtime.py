@@ -13,7 +13,6 @@ from .selection import EXECUTIVE_REF, admit_executive
 from .evidence import historical_evidence
 from ..execution import trace
 from ..execution import activity as knowledge_activity
-from ..config import CONFIG
 from ..knowledge.index import INDEX
 from ..knowledge.vault import Note, resolver
 from ..models import runtime as model_runtime
@@ -47,16 +46,6 @@ VOICE_TRANSPORT_CONTRACT = (
 )
 MAX_EVENT_TEXT = 512
 MAX_INTERRUPTED_QUOTE = 300
-# Optional idle-edge compaction: at this fraction of the model context it prunes
-# large Tool results, then summarizes older history while pressure stays at or
-# above it. Off by default since the provider window (sessions.rebase_window)
-# bounds the prompt without rewriting the native log; upstream overflow
-# recovery and manual Compact remain. Enable with `idle_compaction_ratio` in
-# obsidience/obsidience.toml.
-IDLE_COMPACTION_RATIO = float(CONFIG.extras.get("idle_compaction_ratio", 0))
-DEFAULT_CONTEXT_THRESHOLD = 80
-MIN_CONTEXT_THRESHOLD = 60
-MAX_CONTEXT_THRESHOLD = 90
 DEFAULT_THINKING_OVERHEAD_TOKENS = 1_500
 
 
@@ -94,13 +83,11 @@ class ConversationRuntime:
         self._generation = 0
         self._last_task_ref = EXECUTIVE_REF
         self._session_finalize_lock = asyncio.Lock()
-        self._compacting = False
         self._thinking_overhead_tokens = DEFAULT_THINKING_OVERHEAD_TOKENS
         self.speech = None
         self._steering: TurnSteering | None = None
         self._prefill_task: asyncio.Task | None = None
         self._prefill_latest: tuple[int, str] | None = None
-        self._idle_compaction_attempted: tuple[str, int | None] | None = None
         self._warm_state = "waiting"
         self._context_refresh_task: asyncio.Task | None = None
         self._context_refresh_requested: tuple[int, str] | None = None
@@ -120,8 +107,6 @@ class ConversationRuntime:
                 or model_runtime.RUNTIME.work_requested):
             return
         self._rebase_window()
-        if self._start_idle_compaction():
-            return
         if self.speech is None or not self.speech.snapshot()["ready"]:
             return
         if self._warm_state == "ready" and self._prefill_latest == (0, ""):
@@ -145,56 +130,6 @@ class ConversationRuntime:
             trace.emit("measurement", "Conversation window rebased", [f"anchor: {anchor}"])
             self.invalidate_readiness()
             self.request_context_refresh()
-
-    def _start_idle_compaction(self) -> bool:
-        """Compact under idle pressure as the lane's own task; owner input cancels it.
-
-        Each native revision is attempted once, so a compaction that leaves
-        the pressure high waits for the next turn instead of repeating.
-        """
-        from ..execution.loops import sessions
-        if IDLE_COMPACTION_RATIO <= 0:
-            return False
-        conversation_id = self._conversation.conversation_id
-        current = sessions().view(conversation_id)
-        if current is None:
-            return False
-        pressure = (current.get("pressure") or {}).get("totalTokens")
-        key = (conversation_id, current.get("revision"))
-        if (type(pressure) not in (int, float) or key == self._idle_compaction_attempted
-                or pressure < IDLE_COMPACTION_RATIO * self._context_model().context_tokens):
-            return False
-        self._idle_compaction_attempted = key
-        self.invalidate_readiness()
-        task = asyncio.create_task(self._compact_idle(conversation_id),
-                                   name="obsidience-conversation-idle-compact")
-        self._turn_task = task
-        task.add_done_callback(lambda _task: self.prepare_idle())
-        return True
-
-    async def _compact_idle(self, conversation_id: str) -> dict[str, Any]:
-        """Background maintenance: no Chat busy state, and no error notice."""
-        from ..execution.loops import sessions
-        compact, view = sessions().compact, sessions().view
-        generation = self._generation
-        self._compacting = True
-        try:
-            result = await compact(conversation_id, self._context_model(),
-                                   idle_threshold=IDLE_COMPACTION_RATIO)
-            trace.emit("measurement", "Idle conversation compaction",
-                       [f"status: {result['status']}", f"pruned: {result.get('pruned', 0)}"])
-            return result
-        except Exception as exc:
-            trace.emit("measurement", "Idle conversation compaction skipped", [type(exc).__name__])
-            return {"status": "failed", "backend": sessions().BACKEND}
-        finally:
-            current = view(conversation_id)
-            self._idle_compaction_attempted = (conversation_id, current.get("revision") if current else None)
-            self._compacting = False
-            if self._turn_task is asyncio.current_task():
-                self._turn_task = None
-            if generation == self._generation and not asyncio.current_task().cancelling():
-                self.request_context_refresh()
 
     def prepare_speech_prefix(self, text: str, sequence: int) -> None:
         """Coalesce partials into one cancellable, non-persistent model warmup.
@@ -662,10 +597,6 @@ class ConversationRuntime:
             task.meta.get("model"), assignee or EXECUTIVE_AGENT_REF,
         )
 
-    def _context_threshold(self) -> int:
-        from ..execution.loops import sessions
-        return sessions().compaction_threshold()
-
     async def context_status(
         self,
         *,
@@ -686,8 +617,8 @@ class ConversationRuntime:
             before_sequence=before_sequence,
         )
         spec = self._context_model(context_task_ref)
-        # Native compaction prices pressure against the adapter's context window.
-        # The provider's exact request guard separately reserves output capacity.
+        # Usage is priced against the model's context window. The provider's
+        # exact request guard separately reserves output capacity.
         capacity = spec.context_tokens
         count = await measure_context(exact_conversation_id, spec,
                                       before_sequence=before_sequence, pending_text=pending_text)
@@ -711,10 +642,6 @@ class ConversationRuntime:
             "measurement_scope": scope,
             "capacity_tokens": capacity,
             "percent": round(min(100.0, used * 100.0 / capacity), 1),
-            "compact_at": self._context_threshold(),
-            "compacting": self._compacting,
-            "compaction_count": projection["compaction_count"],
-            "compaction_backend": sessions().BACKEND,
             "latest_sequence": projection["latest_sequence"],
         }
 
@@ -768,67 +695,6 @@ class ConversationRuntime:
         request = cached_text_count(request_text, spec).tokens
         if prompt > immediate + request:
             self._thinking_overhead_tokens = prompt - immediate - request
-
-    async def set_context_threshold(self, percent: object) -> dict[str, Any]:
-        try:
-            value = int(percent)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("context threshold must be an integer percent") from exc
-        if not MIN_CONTEXT_THRESHOLD <= value <= MAX_CONTEXT_THRESHOLD:
-            raise ValueError(
-                f"context threshold must be {MIN_CONTEXT_THRESHOLD}-{MAX_CONTEXT_THRESHOLD}"
-            )
-        from ..execution.loops import sessions
-        await sessions().set_compaction_threshold(value)
-        return await self.publish_context()
-
-    async def compact_conversation(self, *, force: bool, conversation_id: str | None = None,
-                                   wait: bool = True) -> dict[str, Any]:
-        """Manual control of the native backend; automatic pressure belongs to DeepSeek."""
-        if not force:
-            return {"status": "native_backend_owned"}
-        async with self._lock:
-            if not self.continuation_resume_available():
-                raise RuntimeError("wait for the active Executive turn before compacting")
-            await self._cancel_context_refresh()
-            await self._cancel_speech_prefill()
-            self.invalidate_readiness()
-            task = asyncio.create_task(
-                self._compact_conversation(conversation_id or self._conversation.conversation_id),
-                name="obsidience-conversation-compact",
-            )
-            self._turn_task = task
-            task.add_done_callback(lambda _task: self.prepare_idle())
-        from ..execution.loops import sessions
-        if not wait:
-            return {"status": "started", "backend": sessions().BACKEND}
-        try:
-            return await task
-        except asyncio.CancelledError:
-            current = asyncio.current_task()
-            if task.cancelled() and current is not None and current.cancelling() == 0:
-                return {"status": "interrupted", "backend": sessions().BACKEND}
-            raise
-
-    async def _compact_conversation(self, conversation_id: str) -> dict[str, Any]:
-        from ..execution.loops import sessions
-        compact = sessions().compact
-        generation = self._generation
-        self._compacting = True
-        self._conversation.publish({"type": "start", "source": "compact"})
-        try:
-            await self.publish_context()
-            return await compact(conversation_id, self._context_model())
-        except Exception as exc:
-            self._conversation.publish({"type": "error", "text": str(exc)[:512]})
-            return {"status": "failed", "backend": sessions().BACKEND}
-        finally:
-            self._compacting = False
-            if self._turn_task is asyncio.current_task():
-                self._turn_task = None
-            self._conversation.publish({"type": "end"})
-            if generation == self._generation and not asyncio.current_task().cancelling():
-                self.request_context_refresh()
 
     async def prepare_conversation_context(self, user_turn: dict[str, Any], *, context_task_ref: str | None = None) -> str:
         from ..execution.loops import sessions

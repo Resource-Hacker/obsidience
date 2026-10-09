@@ -2580,18 +2580,6 @@ async def chat_ws(ws: WebSocket):
                 except (ValueError, RuntimeError) as exc:
                     queue.put_nowait({"type": "error", "text": str(exc)[:512]})
                 continue
-            if msg.get("type") == "set_compact_threshold":
-                try:
-                    await conversation_runtime.RUNTIME.set_context_threshold(msg.get("percent"))
-                except (ValueError, RuntimeError) as exc:
-                    queue.put_nowait({"type": "error", "text": str(exc)[:512]})
-                continue
-            if msg.get("type") == "compact":
-                try:
-                    await conversation_runtime.RUNTIME.compact_conversation(force=True, wait=False)
-                except (ValueError, RuntimeError) as exc:
-                    queue.put_nowait({"type": "error", "text": str(exc)[:512]})
-                continue
             text = str(msg.get("text", "")).strip()
             if not text:
                 continue

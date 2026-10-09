@@ -10,9 +10,7 @@ def project_conversation(conversation, *, conversation_id, before_sequence=None)
     if native is None:
         native = "Historical public dialogue; it does not establish current state or authorize effects.\n\n" + "\n\n".join(
             f"{row['role']}: {row['text']}" for row in rows)
-    snapshot = sessions().view(conversation_id) or {}
     return {"body": native, "ref": None,
-            "compaction_count": snapshot.get("compaction_count", 0),
             "latest_sequence": max((row["sequence"] for row in rows), default=0)}
 
 

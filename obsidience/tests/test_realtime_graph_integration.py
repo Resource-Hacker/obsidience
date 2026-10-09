@@ -13,7 +13,7 @@ from obsidience.harness.execution import executor, scheduler
 from obsidience.harness.execution.executor import compile_activation
 from obsidience.harness.conversation.runtime import (
     ConversationRuntime,
-    MAX_CONTEXT_THRESHOLD, MIN_CONTEXT_THRESHOLD, SPEECH_RESPONSE_CONTRACT,
+    SPEECH_RESPONSE_CONTRACT,
 )
 from obsidience.harness.knowledge import index as indexer
 from obsidience.harness.knowledge.tasks import TASK_TAXONOMY_BY_PATH

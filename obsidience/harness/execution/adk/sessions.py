@@ -190,7 +190,7 @@ def publish(session) -> dict:
                 pass
     value = {'id': session.id, 'revision': len(session.events), 'messages': system + messages,
              'tools': request.get('tools', []), 'reasoning_effort': request.get('effort', 'none'),
-             'outcomes': outcomes[-80:], 'compaction_count': 0, 'pressure': None}
+             'outcomes': outcomes[-80:]}
     _views[session.id] = value
     return value
 
@@ -231,18 +231,6 @@ def prefill_messages(conversation_id: str, compiled: list[dict], text: str, *,
 def rebase_window(conversation_id: str) -> str | None:
     value = view(conversation_id)
     return native_rebase_window(conversation_id, value['messages'] if value else None)
-
-
-def compaction_threshold() -> int:
-    return 80  # Stage 1: no ADK summary compaction; the provider window bounds the prompt.
-
-
-async def set_compaction_threshold(value: int) -> None:
-    raise RuntimeError('The ADK Executive loop has no summary compaction; the conversation window bounds its prompt')
-
-
-async def compact(conversation_id: str, spec, *, idle_threshold: float | None = None) -> dict:
-    return {'status': 'unsupported', 'backend': BACKEND, 'conversation_id': conversation_id}
 
 
 async def open_session(conversation_id: str, turn_id: str | None):
