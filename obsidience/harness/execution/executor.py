@@ -17,7 +17,6 @@ import json
 import math
 import re
 import time
-import threading
 import uuid
 from dataclasses import dataclass, field, replace
 from datetime import datetime
@@ -41,19 +40,22 @@ from ..models.context import (
 )
 from ..capabilities.registry import (
     MODEL_RESOURCE_TOOLS,
-    READ_ONLY_CAPABILITIES,
     execute as execute_capability,
     execute_async as execute_capability_async,
 )
 
+from .capability_core import (
+    OBSERVATION_CONTEXT_FIELD as _OBSERVATION_CONTEXT_FIELD,
+    foreground_checkpoint as _foreground_checkpoint,
+    observation_text,
+    publish_working_progress as _publish_working_progress,
+    run_capability,
+)
 from .ledger import runbook_tree_hash
 
 MAX_TASK_DEPTH = 16
 MAX_RUN_TRACE_CHARS = 20_000
 MAX_TRACE_STRING_CHARS = 500
-_PRIVATE_IMAGE_FIELD = "_private_image_png"
-_PRIVATE_OBSERVATION_FIELD = "_private_observation_lease"
-_OBSERVATION_CONTEXT_FIELD = "_computer_observation_lease"
 _NON_BINDING_PARAMETERS = {
     "event",
     "request",
@@ -862,12 +864,6 @@ def _scope_checkpoint(ctx: dict, tool_name: str | None = None) -> None:
             raise PermissionError("The current accepted procedure no longer authorizes this Tool")
 
 
-def _foreground_checkpoint(interruption_event: asyncio.Event | None, ctx: dict) -> None:
-    if interruption_event is not None and interruption_event.is_set():
-        ctx["interruption_reason"] = "foreground_admission"
-        raise asyncio.CancelledError("foreground_admission")
-
-
 async def _foreground_aware_chat(interruption_event: asyncio.Event | None, ctx: dict,
                                  *args, **kwargs):
     """Cancel only unfinished inference; Tool execution stays in its owner task."""
@@ -929,172 +925,72 @@ class CapabilityDispatch:
     done: bool = False
 
     async def dispatch(self, name: str, args: dict, reply: str = "") -> None:
-        from ..capabilities.task.complete import computer_completion_evidence, computer_request_target_error
-        _scope_checkpoint(self.ctx, name)
-        reflex_proposal = self.ctx.pop("_reflex_proposal", None)
-        if name != "task.complete":
-            self.ctx.pop("_reflex_command_verified", None)
-            self.ctx.pop("_reflex_command_result", None)
-        from .optimization_incidents import snapshot, record as record_decision
-        decision_sample = snapshot(self, name, args)
-        public_args = {key: value for key, value in args.items() if key != "point"}
-        call_fields = {"step": self.step + 1}
-        if self.ctx.get("run_id"):
-            call_fields["call_id"] = f"{self.ctx['run_id']}:{self.step + 1}"
-        call_started = time.perf_counter()
-        receipt_started = False
-        receipt_finished = False
-        activity_refs: list[str] = []
-        tool_ref = self.ctx.get("_tool_receipt_articles", {}).get(name, ("", ""))[0]
-        operation_id = "tool:" + str(call_fields.get("call_id", ""))
-
-        def tool_activity(status: str) -> None:
-            if not tool_ref or not self.ctx.get("run_id"):
-                return
-            knowledge_activity.emit_operation(
-                {"vault.read": "read", "vault.search": "search", "vault.list": "list"}.get(name, "tool"),
-                "failed" if status == "error" else status, [tool_ref, *activity_refs],
-                operation_id=operation_id, label=name, graph_id=self.ctx.get("_graph_id", "main"),
-                run_id=str(self.ctx["run_id"]),
-            )
+        """Specialist-loop adapter: messages, repeat policy and step budget around the core."""
         call_sig = f"{name}:sha256:" + hashlib.sha256(json.dumps(args, sort_keys=True).encode()).hexdigest()
-
-        def begin_receipt() -> None:
-            nonlocal receipt_started
-            if not self.ctx.get("_receipt_covered"):
-                return
-            tool_ref, tool_hash = self.ctx["_tool_receipt_articles"].get(name, ("", ""))
-            if not INDEX.begin_tool_call(
-                run_id=self.ctx["run_id"], call_id=call_fields["call_id"], step=self.step + 1,
-                tool=name, signature=call_sig, started=time.time(),
-                read_only=name in READ_ONLY_CAPABILITIES and bool(tool_ref and tool_hash),
-                tool_ref=tool_ref, tool_sha256=tool_hash,
-            ):
-                raise RuntimeError("Tool call already has a dispatch receipt; do not replay")
-            receipt_started = True
-            tool_activity("running")
-
-        def finish_receipt(call_status: str, result: object) -> None:
-            nonlocal receipt_finished
-            if not receipt_started or receipt_finished:
-                return
-            encoded = json.dumps(result, sort_keys=True, default=str).encode()
-            INDEX.finish_tool_call(
-                run_id=self.ctx["run_id"], call_id=call_fields["call_id"], status=call_status,
-                finished=time.time(), duration_ms=(time.perf_counter() - call_started) * 1000,
-                result_sha256=hashlib.sha256(encoded).hexdigest(), result_chars=len(encoded),
-            )
-            receipt_finished = True
-            try:
-                record_decision(decision_sample, self.ctx['run_id'], self.step + 1, result, call_status)
-            except (ValueError, OSError, KeyError, TypeError) as exc:
-                self.emit('error', 'AutoSaddler decision capture unavailable', [str(exc)[:300]])
-        self.emit("tool", f"{self.agent_name} → {name}", [json.dumps(public_args, default=str)], {
-            **call_fields, "payload": {"kind": "tool", "name": name, "phase": "start", "arguments": public_args},
-        })
-
-        def emit_tool_result(line: str, result: object, call_status: str = "returned", channel: str = "result") -> None:
-            operation_status = call_status
-            if call_status == "returned":
-                # An inspection's subject status is not failure of the Tool.
-                if isinstance(result, dict) and name not in {"task.inspect", "harness.status"}:
-                    outcome = result.get("observation", result) if name == "computer.observe" else result
-                    if isinstance(outcome, dict):
-                        reported = outcome.get("status", outcome.get("state"))
-                        if isinstance(reported, str) and reported in {"failed", "error", "unavailable", "blocked", "degraded"}:
-                            operation_status = "failed"
-                        elif reported == "rejected":
-                            operation_status = "rejected"
-                elif name == "vault.propose" and isinstance(result, str) and result.startswith("Proposal rejected:"):
-                    operation_status = "rejected"
-            tool_activity(operation_status)
-            self.emit(channel, line, str(result).splitlines()[:12], {
-                **call_fields, "payload": {"kind": "tool", "name": name, "phase": "result",
-                    "status": call_status,
-                    "duration_ms": round((time.perf_counter() - call_started) * 1_000, 3),
-                    "result": result},
-            })
+        public_args = {key: value for key, value in args.items() if key != "point"}
         public_reply = (
             json.dumps({"tool": name, "args": public_args}, sort_keys=True)
             if name == "computer.act" or "point" in args or self.visual_context_seen else reply
         )
-        self.messages.append({"role": "assistant", "content": public_reply})
-        from ..capabilities.source.read import precondition_error as source_precondition_error
-
-        if source_error := source_precondition_error(name, args, self.ctx):
-            observation = "Tool prerequisite rejected: " + source_error
-            self.trace.append({"tool": name, "args": public_args, "obs": observation,
-                          "sig": call_sig, "not_dispatched": True})
-            emit_tool_result(f"{name} prerequisite rejected", observation, "rejected")
-            self.messages.append({"role": "user", "content": f"Observation:\n{observation}"})
-            self.response_observation_lease = self.response_completion_observation = None
+        blocked = None
+        if name != "task.complete" and self._repeat_blocked(name, args, call_sig):
+            observation = (
+                "You have repeated this exact call three times; the result will not change. "
+                "Vary your approach or call task.complete now with your best status."
+            )
+            if name == "vault.propose" and self.ctx.get("_link_proposal_rejection"):
+                observation = (
+                    "The same Link proposal was rejected twice. Finish failed with the unresolved "
+                    "blocker: " + self.ctx["_link_proposal_rejection"]
+                    + ". A rejected draft is not evidence of a redundant relationship."
+                )
+                # The model has already ignored the same rejection twice.
+                # End this attempt; completion retains the real blocker and
+                # ordinary receipt-bound recovery owns any later retry.
+                self.allowed = ["task.complete"]
+            blocked = (observation, {"repeat_blocked": True, "not_dispatched": True})
+        outcome = await run_capability(
+            self, name, args, execute=execute_capability, execute_async=execute_capability_async,
+            scope_checkpoint=_scope_checkpoint, blocked=blocked,
+            started=lambda: self.messages.append({"role": "assistant", "content": public_reply}))
+        if outcome.kind in {"prerequisite", "completion_rejected"}:
+            self.messages.append({"role": "user", "content": observation_text(outcome.observation)})
+        if outcome.kind != "returned":
             return
-        if name != "computer.act":
-            self.response_observation_lease = None
-        if name == "task.complete":
-            if self.steering is not None:
-                self.steering.close()
-            # Only completion receives this single-response image witness.
-            # Keep it out of shared context during provider or Tool work,
-            # and consume it even when this completion is rejected.
-            completion_context = {**self.ctx, "task_note": self.task}
-            if self.response_completion_observation is not None:
-                completion_context["_computer_response_observation"] = self.response_completion_observation
-            self.response_completion_observation = None
-            try:
-                begin_receipt()
-                decision = await asyncio.to_thread(
-                    execute_capability, name, args, completion_context,
-                )
-                finish_receipt("returned", decision)
-            except asyncio.CancelledError:
-                finish_receipt("interrupted", "Completion interrupted; outcome unknown")
-                emit_tool_result("task.complete interrupted", "Completion interrupted; no accepted result was received.", "interrupted")
-                raise
-            except Exception as exc:
-                finish_receipt("error", f"Tool error: {exc}")
-                emit_tool_result("task.complete error", f"Tool error: {exc}", "error")
-                raise
-            finally:
-                completion_context.pop("_computer_response_observation", None)
-            if not isinstance(decision, dict) or not decision.get("accepted"):
-                if self.steering is not None:
-                    self.steering.activate(self.ctx["run_id"])
-                error = (
-                    str(decision.get("error", "invalid completion result"))
-                    if isinstance(decision, dict)
-                    else "invalid completion result"
-                )
-                observation = f"Completion rejected: {error}."
-                self.trace.append({
-                    "tool": "task.complete",
-                    "args": public_args,
-                    "obs": observation,
-                    "completion_rejected": True,
-                })
-                emit_tool_result("task.complete rejected", observation, "rejected")
-                self.messages.append({"role": "user", "content": f"Observation:\n{observation}"})
-                return
-            self.status = str(decision["status"])
-            self.summary = str(decision["summary"])
-            completion_args = {
-                "status": self.status,
-                "summary": self.summary,
-                "outcome": str(decision.get("outcome", "")),
-                "evidence": list(decision.get("evidence") or []),
-            }
-            if isinstance(decision.get("verification"), dict):
-                completion_args["verification"] = dict(decision["verification"])
-            self.ctx["completion"] = completion_args
-            self.trace.append({
-                "tool": "task.complete",
-                "args": completion_args,
-                "accepted": True,
+        observation = outcome.observation
+        remaining = self.max_steps - self.step - 1
+        # The specialist loop's step budget names its Runbook delivery. The
+        # native Executive loop owns its own decision budget, so its Tool
+        # results carry no specialist notice.
+        nudge = ("" if getattr(self, "prompt_format", "") == "native_wire"
+                 else "\n\n" + _step_budget_notice(remaining))
+        text = observation_text(observation, nudge)
+        self.task_context.latest_result_index = len(self.messages)
+        if outcome.image_png is None:
+            self.task_context.remember_source_page(
+                len(self.messages), str(name), str(observation), nudge,
+                source_read_allowed="source.read" in self.allowed,
+            )
+            self.task_context.remember_article_page(
+                len(self.messages), str(name), str(observation), nudge,
+                vault_read_allowed="vault.read" in self.allowed,
+            )
+            self.messages.append({"role": "user", "content": text})
+        else:
+            self.visual_context_seen = True
+            image_url = "data:image/png;base64," + base64.b64encode(
+                outcome.image_png
+            ).decode("ascii")
+            self.messages.append({
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": text},
+                    {"type": "image_url", "image_url": {"url": image_url}},
+                ],
             })
-            emit_tool_result(f"{self.agent_name} completion accepted for {self.task.title}: {self.status}", completion_args, channel="status")
-            self.done = True
-            return
-        self.response_completion_observation = None
+
+    def _repeat_blocked(self, name: str, args: dict, call_sig: str) -> bool:
+        """The specialist loop's identical-call heuristic (never the native Executive)."""
         repeats = 0
         reads = self.ctx.get("_article_reads", {})
         for item in self.trace:
@@ -1114,306 +1010,21 @@ class CapabilityDispatch:
                             for ref, revision in required.items())):
                 continue
             repeats += 1
-        private_image_png: bytes | None = None
-        private_observation_lease = None
-        result_object: dict | None = None
-        call_status = "rejected"
         state_observation = (
             name == "computer.observe"
             and self.ctx.get("_computer_act_scope") == "state"
         )
-        # Native Agent sequencing belongs to DeepSeek. The legacy Task loop's
-        # identical-call heuristic cannot assume that live evidence is unchanged.
-        # Capability receipts, input leases and the decision budget still apply.
-        # Component recovery selects the next unattempted native operation
-        # from a fresh inspection, so identical arguments do not repeat effects.
-        # Its adapter retains the once-per-operation and per-pass attempt guards.
+        # Native Agent sequencing belongs to its loop. This legacy heuristic
+        # cannot assume that live evidence is unchanged. Component recovery
+        # selects the next unattempted native operation from a fresh inspection,
+        # so identical arguments do not repeat effects.
         hindsight_recovery = (
             name == "harness.repair" and args == {"component": "hindsight"}
             and self.task.ref == "Tasks/repair"
             and isinstance(self.ctx.get("_harness_snapshot"), dict)
         )
-        repeat_blocked = (repeats >= 2 and not state_observation
-                          and not hindsight_recovery and self.task.kind != "agent")
-        if repeat_blocked:
-            observation = (
-                "You have repeated this exact call three times; the result will not change. "
-                "Vary your approach or call task.complete now with your best status."
-            )
-            if name == "vault.propose" and self.ctx.get("_link_proposal_rejection"):
-                observation = (
-                    "The same Link proposal was rejected twice. Finish failed with the unresolved "
-                    "blocker: " + self.ctx["_link_proposal_rejection"]
-                    + ". A rejected draft is not evidence of a redundant relationship."
-                )
-        elif name in {"application.launch", "session.unlock"} and any(
-                row.get("tool") == name and row.get("args") == public_args
-                and row.get("not_dispatched") is not True for row in self.trace):
-            observation = "This operation was already dispatched in this run; use its receipt and never repeat it."
-        elif name not in self.allowed:
-            observation = f"Tool '{name}' is not authorized for this task."
-        elif target_error := computer_request_target_error(name, args, self.ctx):
-            result_object = {
-                "status": "rejected",
-                "delivery": "not_dispatched",
-                "failure": {"code": "controller_target_mismatch", "message": target_error},
-                # Nothing was dispatched; the message names the corrected target.
-                "correction_allowed": True,
-            }
-            observation = json.dumps(result_object, sort_keys=True)
-        elif ((name in {"camera.observe", "computer.observe", "computer.act"}
-               or name == "tv.control" and args.get("action") not in {
-                   "on", "off", "find", "volume", "volume_up", "volume_down", "mute", "unmute", "pause", "resume",
-                   "notice"})
-              and "vision" not in self.model.capabilities):
-            observation = json.dumps({
-                "observation": {
-                    "status": "unavailable",
-                    "failure": {
-                        "code": "model_has_no_vision",
-                        "message": "The Task-selected model cannot receive visual evidence.",
-                        "retryable": False,
-                    },
-                    "action_authorized": False,
-                }
-            }, sort_keys=True)
-        else:
-            call_status = "returned"
-            if name in MODEL_RESOURCE_TOOLS and self.active_lease is not None:
-                lease = self.active_lease
-                self.active_lease = None
-                await lease.__aexit__(None, None, None)
-            try:
-                # asyncio cancellation does not stop a to_thread worker.
-                # The current action reads this event before dispatch and
-                # closes its owning Shell socket if STOP arrives in flight.
-                capability_cancel = threading.Event()
-                self.ctx["_capability_cancel_event"] = capability_cancel
-                if name == "computer.act" and self.response_observation_lease is not None:
-                    self.ctx[_OBSERVATION_CONTEXT_FIELD] = self.response_observation_lease
-                begin_receipt()
-                result = await execute_capability_async(name, args, self.ctx)
-                if isinstance(result, dict):
-                    result = dict(result)
-                    private_observation_lease = result.pop(_PRIVATE_OBSERVATION_FIELD, None)
-                    private_value = result.pop(_PRIVATE_IMAGE_FIELD, None)
-                    if private_value is not None:
-                        if isinstance(private_value, bytes):
-                            private_image_png = private_value
-                        else:
-                            result = {
-                                "observation": {
-                                    "status": "unavailable",
-                                    "failure": {
-                                        "code": "invalid_visual_evidence",
-                                        "message": "The private visual evidence was invalid.",
-                                        "retryable": False,
-                                    },
-                                    "action_authorized": False,
-                                }
-                            }
-                    private_value = None
-                finish_receipt("returned", result)
-                if isinstance(result, dict):
-                    result_object = result
-                elif isinstance(result, str):
-                    try:
-                        parsed_result = json.loads(result)
-                    except (TypeError, ValueError):
-                        parsed_result = None
-                    if isinstance(parsed_result, dict):
-                        result_object = parsed_result
-                if name == "vault.maintenance" and result_object is not None:
-                    self.ctx["_maintenance_snapshot"] = result_object
-                if name == "source.handoff":
-                    source_id = str(self.ctx.get("handoff_source_id", ""))
-                    if not source_id and isinstance(result, str):
-                        match = re.search(
-                            r"source://([0-9a-fA-F-]{36})(?![0-9a-fA-F-])",
-                            result,
-                        )
-                        source_id = match.group(1).lower() if match else ""
-                    caller_run_id = str(
-                        (self.ctx.get("params") or {}).get("created_by_run_id", "")
-                        if isinstance(self.ctx.get("params"), dict)
-                        else ""
-                    )
-                    if source_id:
-                        self.ctx["handoff_source_id"] = source_id
-                        if caller_run_id:
-                            INDEX.bind_continuation_handoff(caller_run_id, source_id)
-                observation = (
-                    result
-                    if isinstance(result, str)
-                    else json.dumps(result, sort_keys=True, default=str)
-                )
-            except asyncio.CancelledError:
-                capability_cancel.set()
-                finish_receipt("interrupted", "Tool interrupted; outcome unknown; do not replay")
-                self.trace.append({
-                    "tool": name, "args": public_args, "sig": call_sig,
-                    "obs": "Interrupted while the Tool was in flight; outcome is unknown. Do not replay.",
-                    "interrupted": True, "must_not_replay": True,
-                })
-                emit_tool_result(f"{name} interrupted", "Interrupted while the Tool was in flight; outcome is unknown. Do not replay.", "interrupted")
-                raise
-            except Exception as exc:  # noqa: BLE001
-                # Failed receipt persistence must end the activation. It
-                # cannot be converted into a model-retryable Tool error.
-                if self.ctx.get("_receipt_covered") and (not receipt_started or not receipt_finished):
-                    if receipt_started:
-                        finish_receipt("error", f"Tool error: {exc}")
-                    raise
-                observation = f"Tool error: {exc}"
-                call_status = "error"
-            finally:
-                self.ctx.pop(_OBSERVATION_CONTEXT_FIELD, None)
-        self.response_observation_lease = None
-        entry = {"tool": name, "args": public_args, "obs": observation[:600], "sig": call_sig}
-        if repeat_blocked:
-            entry["repeat_blocked"] = True
-            entry["not_dispatched"] = True
-            if name == "vault.propose" and self.ctx.get("_link_proposal_rejection"):
-                # The model has already ignored the same rejection twice.
-                # End this attempt; completion retains the real blocker and
-                # ordinary receipt-bound recovery owns any later retry.
-                self.allowed = ["task.complete"]
-        if name == "vault.propose":
-            required = self.ctx.pop("_proposal_read_prerequisite", None)
-            if call_status == "returned" and required:
-                entry["proposal_read_prerequisite"] = required
-        completion_evidence = computer_completion_evidence(
-            name, result_object, image_attached=bool(private_image_png),
-        )
-        if completion_evidence is not None:
-            entry["completion_evidence"] = completion_evidence
-        if (self.ctx.get("_receipt_covered") and receipt_finished and call_status == "returned"
-                and reflex_proposal == {"name": name, "args": args}):
-            # Only the actual receipt-bound result can silence a command reply.
-            # Informational reflexes and failed/uncertain effects remain spoken.
-            verified = (
-                isinstance(result_object, dict) and result_object.get("status") == "completed"
-                and result_object.get("delivery") == "verified"
-                if name in {"lights.set", "tv.control"} else
-                name in {"media.pause", "application.launch", "session.unlock"}
-                and (completion_evidence or {}).get("verified") is True
-            )
-            if verified:
-                self.ctx["_reflex_command_verified"] = True
-                # The command reply reports this exact readback (e.g. TV volume).
-                self.ctx["_reflex_command_result"] = result_object
-                callback = self.ctx.get("_verified_command")
-                if callback is not None and not asyncio.current_task().cancelling():
-                    _foreground_checkpoint(self.interruption_event, self.ctx)
-                    await callback(name, self.ctx["run_id"])
-        if name == "computer.observe" and isinstance(result_object, dict):
-            observed = result_object.get("observation") or {}
-            failure = observed.get("failure") if isinstance(observed, dict) else None
-            if (isinstance(failure, dict) and failure.get("code") == "target_ambiguous"
-                    and self.task.kind != "agent"):
-                # The owner must identify one window. Rewording this same
-                # observation or inspecting an unrelated pane cannot do so.
-                # Retain the real failure and finish with the clarification.
-                # The native Executive may resolve the ambiguity in its next
-                # step; read-only failure dispatched no input to preserve.
-                self.allowed = ["task.complete"]
-        if name == "tv.control" and (not isinstance(result_object, dict)
-                                     or (result_object.get("status") == "failed"
-                                         and result_object.get("correction_allowed") is not True)):
-            # The TV adapter has already exhausted its bounded transport/read
-            # attempt. Preserve the failure and end this turn's effects.
-            self.ctx["_tv_control_failed"] = True
-            self.allowed = ["task.complete"]
-        if name in {"application.launch", "media.pause"} and not (completion_evidence or {}).get("verified"):
-            # The capability owns its bounded wait. Failure or uncertainty ends
-            # effects; a verified launch may continue the owner's procedure.
-            self.allowed = ["task.complete"]
-        if name in {"computer.act", "window.activate", "window.place", "session.unlock"}:
-            if (result_object is not None and result_object.get("status") != "completed"
-                    and result_object.get("correction_allowed") is not True):
-                # A terminal input failure cannot become another attempted
-                # click or a different outcome. Preserve the actual error for
-                # the final public response instead of inviting more Tools.
-                self.allowed = ["task.complete"]
-        if name == "computer.act" or (name == "application.launch" and args.get("url")):
-            # Execution-local state excludes imported or prior-run traces.
-            # A later failed action invalidates the earlier action basis.
-            self.latest_action_evidence = (
-                completion_evidence
-                if isinstance(completion_evidence, dict)
-                and completion_evidence.get("verified") is True
-                else None
-            )
-        if (name in {"computer.act", "computer.observe"} and private_image_png
-                and isinstance(completion_evidence, dict)
-                and completion_evidence.get("verified") is True
-                and self.latest_action_evidence is not None
-                and completion_evidence.get("target") == self.latest_action_evidence.get("target")):
-            self.pending_response_observation = completion_evidence
-        if (
-            name == "computer.observe" and private_image_png
-            and isinstance(completion_evidence, dict)
-            and completion_evidence.get("verified") is True
-            and completion_evidence.get("target", {}).get("kind") == "application"
-            and isinstance(private_observation_lease, dict)
-            and getattr(private_observation_lease.get("capture"), "image_png", None) == private_image_png
-        ):
-            self.pending_observation_lease = private_observation_lease
-        private_observation_lease = None
-        self.trace.append(entry)
-        context_refs = self.ctx.pop("_last_context_refs", []) if name in {"vault.read", "vault.search"} else []
-        activity_refs = [*context_refs, *self.ctx.pop("_last_activity_refs", [])]
-        self.ctx.setdefault("_context_refs", []).extend(ref for ref in context_refs if ref not in self.ctx.get("_context_refs", []))
-        _publish_working_progress(self.ctx, "running")
-        emit_tool_result(f"{name} returned", result_object if result_object is not None else observation, call_status)
-        if self.ctx.pop("_capability_cancelled_after_commit", False) or asyncio.current_task().cancelling():
-            raise asyncio.CancelledError("Tool outcome retained after cancellation")
-        if (
-            name == "task.create"
-            and result_object is not None
-            and result_object.get("waiting_for_result") is True
-            and result_object.get("continuation_id")
-        ):
-            self.status = "waiting"
-            self.summary = (
-                "Waiting for the source-backed result of "
-                f"[[{result_object.get('task', '')}]]."
-            )
-            self.trace[-1]["continuation_id"] = str(result_object["continuation_id"])
-            self.trace[-1]["wait_boundary"] = True
-            self.done = True
-            return
-        _foreground_checkpoint(self.interruption_event, self.ctx)
-        remaining = self.max_steps - self.step - 1
-        # The specialist loop's step budget names its Runbook delivery. The
-        # native Executive loop owns its own decision budget, so its Tool
-        # results carry no specialist notice.
-        nudge = ("" if getattr(self, "prompt_format", "") == "native_wire"
-                 else "\n\n" + _step_budget_notice(remaining))
-        observation_text = f"Observation:\n{observation}{nudge}"
-        self.task_context.latest_result_index = len(self.messages)
-        if private_image_png is None:
-            self.task_context.remember_source_page(
-                len(self.messages), str(name), str(observation), nudge,
-                source_read_allowed="source.read" in self.allowed,
-            )
-            self.task_context.remember_article_page(
-                len(self.messages), str(name), str(observation), nudge,
-                vault_read_allowed="vault.read" in self.allowed,
-            )
-            self.messages.append({"role": "user", "content": observation_text})
-        else:
-            self.visual_context_seen = True
-            image_url = "data:image/png;base64," + base64.b64encode(
-                private_image_png
-            ).decode("ascii")
-            self.messages.append({
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": observation_text},
-                    {"type": "image_url", "image_url": {"url": image_url}},
-                ],
-            })
+        return (repeats >= 2 and not state_observation
+                and not hindsight_recovery and self.task.kind != "agent")
 
 
 @dataclass
@@ -1847,18 +1458,6 @@ def _computer_request_evidence(runtime_params: object) -> dict | None:
             return None
         result["operation"] = operation
     return result
-
-
-def _publish_working_progress(ctx: dict, status: str) -> None:
-    if not ctx.get("_working_context_ref") or not ctx.get("_agent_ref"):
-        return
-    try:
-        from ..conversation.context import project_activation_context
-        project_activation_context(ctx["_agent_ref"], str(ctx["task"]), ctx["_activation_id"],
-                                   ctx.get("params") or {}, ctx.get("trace") or [], status,
-                                   objective=str(ctx.get("objective", "")), context_refs=ctx.get("_context_refs", []))
-    except Exception as exc:
-        action_trace.emit("error", "Working context projection unavailable", [type(exc).__name__])
 
 
 def _runtime_only_answer(task: Note, params: dict, interactive: bool, status: str, trace: list) -> bool:
