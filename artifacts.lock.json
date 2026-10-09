@@ -343,7 +343,7 @@
       "version": "3.12.1",
       "license": "Apache-2.0",
       "wheel_sha256": "d12553cccf2548a86cfedd28c8f3171690f5e8c064470c2b66170cc5848ecdef",
-      "integration": "Whole affirmative single light on/off and browser media-pause command parsing in the existing Executive controller; CapabilityDispatch retains grants, cancellation, receipts and fresh device or media-session verification. Named media phrases only filter current metadata. No Home Assistant server, conversation owner or model."
+      "integration": "Whole affirmative single light on/off and browser media-pause command parsing in the existing Executive controller; the capability core retains grants, cancellation, receipts and fresh device or media-session verification. Named media phrases only filter current metadata. No Home Assistant server, conversation owner or model."
     },
     "searxng": {
       "repository": "https://github.com/searxng/searxng",
@@ -369,7 +369,7 @@
       "version": "2.11.0",
       "license": "Apache-2.0",
       "wheel_sha256": "4774e1fc7bb37727e56142e7d41e9035949ebfc876a2b15d5505969b02798bcd",
-      "integration": "Executive model/Tool loop. One Runner per activation over one SqliteSessionService file (state/adk-sessions.sqlite3) that owns ADK conversations; runs without a conversation, including AutoSaddler evaluation trials, use an in-memory session for that run only. One BasePlugin carries Obsidience loop policy and the shared native projection in before_model_callback; one BaseTool per granted capability runs the shared capability core (receipts, uncertain-effect rules, completion authority). The conversation window and Hindsight recall bound the prompt. No ADK memory, artifact, A2A, Gemini or event-compaction service is used."
+      "integration": "Model/Tool loop of the Executive and every specialist Task. One Runner per activation over one SqliteSessionService file (state/adk-sessions.sqlite3) that owns the Executive conversations; specialist Tasks, runs without a conversation and AutoSaddler evaluation trials use an in-memory session for that run only. One BasePlugin carries Obsidience loop policy for any accountable Agent and the shared native projection in before_model_callback; one BaseTool per granted capability runs the shared capability core (receipts, uncertain-effect rules, completion authority). The conversation window and Hindsight recall bound the prompt. No ADK memory, artifact, A2A, Gemini or event-compaction service is used."
     },
     "google_genai": {
       "repository": "https://github.com/googleapis/python-genai",

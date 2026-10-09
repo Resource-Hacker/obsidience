@@ -27,8 +27,9 @@ bounded window of the conversation; Hindsight recall and observations.recall car
 what precedes it, and nothing is summarized or compacted. Earlier context packets
 are superseded, interrupted partial replies are excluded from model history, and
 old images are consumed rather than reused as current pixels. An interrupted
-Tool call is recorded as outcome unknown and never replayed. Scheduled Tasks
-retain their Python decision loop and share the same capability core.
+Tool call is recorded as outcome unknown and never replayed. Scheduled and queued
+Tasks run on the same ADK loop and capability core, each in a session for its run
+only.
 
 The accepted Agent catalog defines available native schemas. Articles remain explanatory knowledge. Native schema availability does not claim that every Tool or Skill Article body was loaded.
 
@@ -99,8 +100,8 @@ Alexandria owns ordinary wiki curation, including content, links and freshness. 
 
 Heimdall owns AutoSaddler improvement through the existing Audit Task and
 harness.optimize capability. One upstream V2 engine diagnoses and compares
-Executive and specialist instruction candidates. The ADK Executive loop (in an
-isolated in-memory session) and specialist execution supply isolated evaluations; capability contracts grade captured
+Executive and specialist instruction candidates. The ADK loop, in an isolated
+in-memory session per trial, supplies Executive and specialist evaluations; capability contracts grade captured
 completion/proposal decisions independently of the optimizing model. Receipt
 capture, event deduplication, model reservations and publication keep their
 existing owners. AutoSaddler supplies its native session retry policy; candidate

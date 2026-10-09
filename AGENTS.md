@@ -67,7 +67,8 @@ paired Skill, and explicit grant through its execution owner.
 Chat and final speech enter the Executive Agent's Google ADK model/Tool loop.
 Its identity owns standing instructions and direct Skills; there is no
 Executive Task, standing Runbook or preliminary conversational router request.
-Independently queueable specialist work retains Task → Runbook → Skill → Tool.
+Independently queueable specialist work retains Task → Runbook → Skill → Tool
+and runs on the same ADK loop and capability core.
 
 Preserve fresh target binding, observation leases, cancellation, Review,
 completion verification and no replay of uncertain input. A schema advertisement

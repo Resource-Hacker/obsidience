@@ -148,7 +148,7 @@ Executive conversation: Agent identity -> direct Skills -> Tools -> Capabilities
 
 ## Activation and retrieval
 
-Conversation and Tasks share one compiler, retrieval and CapabilityDispatch.
+Conversation and Tasks share one compiler, retrieval, ADK loop and capability core.
 The visible Thinking Packet, each Article once, in order: (1) Agent identity; (2) Task and
 acceptance (Tasks only); (3) immutable Objective; (4) Tool Articles; (5) paired Skills;
 (6) applicable Runbooks (Tasks only); (7) bindings and exclusions, always including the
@@ -265,16 +265,21 @@ neighbours); (9) history projected from the native conversation (no conversation
 ### Specialist Task loop
 
 - Scheduled, event and delegated Tasks use their accepted Runbooks and the same executor,
-  scheduler, receipts and Review. Each response is one provider-constrained JSON action
-  restricted to authorized actions, with bounded finish/parse diagnostics; no
-  Task-specific parsers.
-- Decision schemas follow each proposal contract. Source-bound Learn exposes only
+  scheduler, receipts and Review, and run on the Executive's ADK loop and plugin (one
+  in-memory session per run). Each step is one native Tool call; a Tool-less reply is
+  not a completion (three strikes fail the run) and only `task.complete` finishes. Tool
+  results carry the remaining decision budget; a third identical call is refused before
+  dispatch. Foreground demand cancels only unfinished inference.
+- Each step advertises only the Tools its controller state allows, with schemas that
+  follow the active proposal and completion contract; the complete code-owned contract
+  is validated before dispatch. Source-bound Learn exposes only
   `source.read` and `task.complete` until a complete matching-hash read receipt exists.
   Evidence-bound completions need explicit failed status on non-success branches; Review
   is not a terminal choice without a proposal or acceptance gate. Wikilinks around
   `source://` citations normalize to the Source URI.
 - Model and reasoning effort are per-Task (Article or per-run owner choice, else the
-  installation defaults); the Executive keeps its Agent-owned setting. Reasoning stays
+  installation defaults); the Executive keeps its Agent-owned setting. The LiteLLM route
+  maps effort to the template thinking switch and reasoning budget. Reasoning stays
   private. Model-family templates own control tokens at the provider boundary.
 - Ledger `task_ref`/`runbook_ref` columns record the actual instruction owner (Executive
   identity for conversation).
@@ -288,9 +293,9 @@ neighbours); (9) history projected from the native conversation (no conversation
   `vault.read` bodies with exact reread paths may be projected; packet, Objective, receipts
   and latest observation stay complete. Only a verified pre-enqueue overflow permits one
   projected retry; irreducible overflow is rejected.
-- SSE via pinned `httpx-sse` in one API-lifetime pool; only real deltas renew the
-  inactivity deadline; reasoning is discarded; a finish state and end marker are required;
-  never reconnect or replay partial output.
+- Model steps stream through ADK's LiteLlm route; standby preparation and controller
+  replies use pinned `httpx-sse` in one API-lifetime pool. Reasoning is discarded; a
+  finish state is required; never reconnect or replay partial output.
 - Provider metrics and phase edges are measurements only, never used for retry or
   completion.
 
@@ -737,7 +742,9 @@ packet router, Compact/Promote, Immediate/Temporary/Workstation Observations, cu
 Hindsight categories, the WebKit presenter, PaneCanvas, processing cues, the layered graph
 engine, KWin paths, Xorg bridges and Electron. The DeepSeek Harness Executive loop (Node
 child, npm Cordis composition, JSONL sessions; replaced by ADK 2026-10-09) and
-conversation compaction (idle, manual Compact and its threshold) are retired. Historical Sources, receipts and rows remain
+conversation compaction (idle, manual Compact and its threshold) and the specialist
+Python decision loop (provider-constrained JSON `{tool, args}` actions; replaced by the ADK
+loop 2026-10-09) are retired. Historical Sources, receipts and rows remain
 read-only provenance and never resume collection or replay work.
 
 ## References (patterns only)

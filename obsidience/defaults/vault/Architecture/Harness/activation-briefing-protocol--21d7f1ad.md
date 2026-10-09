@@ -19,19 +19,18 @@ Chat and speech enter the Executive session directly. The compiler supplies the 
 
 Independently queueable Tasks still resolve their authored procedure under
 [Task activation](/Architecture/Harness/task-activation--b30a4642.md).
-Both paths share the compiler and operation/receipt owner; Tasks retain their procedure loop. Knowledge cannot broaden their authority.
+Both paths share the compiler, the ADK model/Tool loop and the operation/receipt owner; a Task keeps its procedure's narrowed Tools and contract schemas. Knowledge cannot broaden their authority.
 
 ## Compiled instructions
 
 The selected Tool, paired Skill and Runbook contribute authored Runtime sections
 and applicable operation sections. Complete reference text remains in Reader.
 Task operation profiles only narrow their accepted capability catalog. The Executive uses native schemas with the complete code-owned argument contract validated before dispatch. Exact section
-hashes and ranges are recorded with the packet. The decoder constrains Tool name,
-argument types, required fields and allowed keys; adapters enforce bounds and
-state-dependent acceptance. Finite nested string/array ceilings stay out of the
-llama.cpp grammar because expanding them exceeds its rule-repetition limit.
-They remain in canonical contracts and adapter checks, with output-token limits
-bounding model generation.
+hashes and ranges are recorded with the packet. Each Task step advertises native
+schemas for only the Tools its controller state allows, shaped by the active
+proposal and completion contract; the complete code-owned argument contract is
+validated before dispatch, and adapters enforce bounds and state-dependent
+acceptance, with output-token limits bounding model generation.
 
 The current Thinking Packet and execution receipts expose the exact objective,
 selected context identities and controller evidence through existing runtime
