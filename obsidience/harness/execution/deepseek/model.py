@@ -106,6 +106,29 @@ def _without_targets(arguments: str) -> str:
 _BUDGET_NOTICE = re.compile(r'\n\nExecution budget: [^\n]*(?=(?:\n' + re.escape(CONSUMED_IMAGE) + r')?\Z)')
 
 
+# An earlier turn's Tool result is history: a long page now only distracts
+# from the dialogue. The current turn keeps its complete results.
+PAST_RESULT_CHARS = 1_500
+
+
+def _past_result(text: str) -> str:
+    if len(text) <= PAST_RESULT_CHARS:
+        return text
+    cut = text.rfind('\n', 0, PAST_RESULT_CHARS)
+    return (text[:cut if cut > 0 else PAST_RESULT_CHARS].rstrip()
+            + '\n[Earlier result shortened; call the Tool again for its full text.]')
+
+
+def _spoken_reply(arguments: str) -> str | None:
+    """The public reply carried by a completed task.complete call, or None."""
+    try:
+        parsed = json.loads(arguments)
+    except (TypeError, ValueError):
+        return None
+    summary = parsed.get('summary') if isinstance(parsed, dict) else None
+    return summary.strip() if isinstance(summary, str) and summary.strip() else None
+
+
 def _without_budget_notice(text: str) -> str:
     """A step-budget notice guides only the live loop that received it."""
     return _BUDGET_NOTICE.sub('', text)
@@ -244,6 +267,10 @@ def wire_messages(messages: list[dict], images: dict, objective: str = '', *,
     result = []
     tool_names = {block['id']: block['name'] for message in messages
                   for block in message['content'] if block['type'] == 'tool-call'}
+    # An earlier turn's reply reads as plain dialogue: the owner's words, then
+    # what the Executive said. Inside a task.complete argument a small model
+    # did not treat it as its own last sentence ("can you do that?" failed).
+    replied = set()
     def content(blocks):
         parts = []
         for block in blocks:
@@ -268,13 +295,16 @@ def wire_messages(messages: list[dict], images: dict, objective: str = '', *,
                         [b for b in blocks if b['type'] == 'tool-result'])
         if tool_results:
             for block in tool_results:
+                if block['toolCallId'] in replied:
+                    continue
                 value = content(block['content'])
                 text = value if isinstance(value, str) else '\n'.join(
                     part['text'] for part in value if part['type'] == 'text')
                 # Earlier turns' results are history. Their step budget was for
                 # a finished loop; the current turn keeps its live notice.
                 result.append({'role': 'tool', 'tool_call_id': block['toolCallId'],
-                               'content': _without_budget_notice(text) if index < owner_index else text})
+                               'content': _past_result(_without_budget_notice(text))
+                               if index < owner_index else text})
                 if isinstance(value, list):
                     # Pair the current image with the actual owner request at
                     # the vision boundary, rather than relying on distant
@@ -322,6 +352,13 @@ def wire_messages(messages: list[dict], images: dict, objective: str = '', *,
                 row['content'] = ('Controller feedback for this execution:\n' + row['content']
                                   + '\n\nContinue the current owner request:\n' + owner_text)
             calls = [b for b in blocks if b['type'] == 'tool-call']
+            if index < owner_index and calls and all(b['name'] == 'task.complete' for b in calls):
+                said = [reply for b in calls if (reply := _spoken_reply(b['arguments']))]
+                if said:
+                    replied.update(b['id'] for b in calls)
+                    text = row['content'] if isinstance(row['content'], str) else ''
+                    row = {'role': 'assistant', 'content': '\n'.join(filter(None, [text, *said]))}
+                    calls = []
             if calls:
                 # Earlier turns' window targets and points are not current
                 # evidence, and a small model copies them as exemplars. Like a
