@@ -3,13 +3,14 @@ type: knowledge
 title: Memory and knowledge lifecycle
 sources:
 - resource: obsidience/harness/memory/hindsight.py
-- resource: obsidience/harness/execution/deepseek/sessions.py
+- resource: obsidience/harness/execution/adk/sessions.py
 - resource: obsidience/harness/conversation/context.py
 - resource: obsidience/harness/knowledge/system.py
 ---
 
 Conversation, historical memory, accepted Knowledge and current inventory have
-different owners. DeepSeek owns the Executive conversation and context compaction.
+different owners. ADK owns the Executive conversation log (`state/adk-sessions.sqlite3`);
+its provider window plus Hindsight recall bound the active context, with no compaction.
 Hindsight owns each Agent's historical facts, experiences and consolidated
 observations. The Vault owns accepted OKF Articles. The System publisher owns
 inventory Articles derived from immutable observed Source versions.

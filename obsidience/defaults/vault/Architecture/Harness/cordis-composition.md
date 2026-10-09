@@ -5,6 +5,7 @@ sources:
 - resource: https://github.com/deepseek-ai/deepseek-harness/blob/c291e7961a515f6d7af9304e7fd1d257929aef26/docs/cordis-primer.md
 - resource: https://arxiv.org/abs/2608.25512
 - resource: DESIGN.md
+- resource: obsidience/harness/execution/adk/README.md
 obsidience:
   owner_maintained: true
 ---
@@ -19,13 +20,15 @@ A plugin is a composable implementation unit that provides or consumes named ser
 
 A model-facing Tool is the code-owned executable interface to a Capability. Its Tool Article describes that interface and its paired Skill explains its use. A plugin can provide the Capability's machinery or a non-model infrastructure service. Installing a plugin never grants Tools: the accepted Agent catalog or Task → Runbook → Skill → Tool bindings identify the permitted capabilities. Knowledge explains the design and cannot grant capabilities by itself.
 
-DeepSeek owns the active conversation and native compaction; Hindsight owns historical observations and scoped recall.
+ADK owns the Executive model/Tool loop, its conversation log and Tool sequencing; the capability core owns receipts, no-replay, completion authority, observation witnesses, the model lease and activity. Hindsight owns historical observations and scoped recall.
 
-Only New Conversation changes the selected conversation ID. The upstream native compaction backend owns summary generation and checkpoint replacement, retaining its balanced recent tail and the full audit log. Earlier context packets are superseded, interrupted partial
-replies are excluded from model history, and old images are consumed rather than
-reused as current pixels. Native recovery records an interrupted Tool's unknown
-outcome without replaying it. Scheduled Tasks retain their Python decision loop
-and share the same CapabilityDispatch operation boundary.
+Only New Conversation changes the selected conversation ID. The provider sees a
+bounded window of the conversation; Hindsight recall and observations.recall carry
+what precedes it, and nothing is summarized or compacted. Earlier context packets
+are superseded, interrupted partial replies are excluded from model history, and
+old images are consumed rather than reused as current pixels. An interrupted
+Tool call is recorded as outcome unknown and never replayed. Scheduled Tasks
+retain their Python decision loop and share the same capability core.
 
 The accepted Agent catalog defines available native schemas. Articles remain explanatory knowledge. Native schema availability does not claim that every Tool or Skill Article body was loaded.
 
@@ -41,8 +44,8 @@ The accepted Agent catalog defines available native schemas. Articles remain exp
 
 ## Knowledge provider boundary
 
-Obsidience supplies application services to DeepSeek through its native Cordis
-adapter. DeepSeek owns the Executive conversation and model/Tool loop;
+Obsidience supplies application services to the Executive's ADK loop as native
+Tools. ADK owns the Executive conversation log and model/Tool loop;
 Obsidience owns accepted Knowledge, scoped retrieval, Source capture, Review,
 capability receipts, model reservations and specialist scheduling. The Shell
 displays those owners' state. `vault.search`, `vault.read` and `vault.list` expose
@@ -50,7 +53,7 @@ the current knowledge owner as native Tools. Fast prefetch uses the same index.
 
 [Tencent's dsh-weknora plugin](https://github.com/Tencent/WeKnora/tree/1ef38fdb8b19347b82d3a99f6f17d75ac09ad606/packages/dsh-weknora)
 uses this knowledge-provider pattern: bounded source passages and document
-reads through DeepSeek's Tool registry. Its optional `weknora_ask` runs a
+reads through a host agent's Tool registry. Its optional `weknora_ask` runs a
 separate server-side answer pipeline. Ordinary Executive retrieval keeps the
 current model reasoning directly over evidence; independently queueable research
 uses existing specialist work. The local BM25/dense RRF index and accepted
@@ -64,22 +67,23 @@ runtime dependency was adopted.
 
 ## Native Tool protocol
 
-The owner accepts DeepSeek's native Tool schema and invocation protocol for the
-Executive-loop migration. The code-owned Tool definition is the executable
-contract: name, parameters, output and implementation. Tool and Skill Articles
-explain the registered capability and its use; they do not impose a second
-machine-call schema or require Obsidience's existing `{tool, args}` response
-format. Keep exact Article-to-Capability provenance and accepted Agent bindings,
-while changing adapters and documentation together when the executable interface
-changes. Ordinary conversational text can use the upstream response stream;
-capability code retains argument validation, receipts, target verification and
-cancellation. DeepSeek now owns the Executive model/Tool loop. The existing
-completion authority validates ordinary final text locally; native task.complete
-remains available for structured terminal status and computer-state verification.
+The code-owned Tool definition is the executable contract: name, parameters,
+output and implementation. The ADK loop advertises one Tool per granted
+capability with that native schema, and the model calls it through the
+provider's native function channel; ADK sequences the calls. Tool and Skill
+Articles explain the registered capability and its use; they do not impose a
+second machine-call schema or a `{tool, args}` text response format. Keep exact
+Article-to-Capability provenance and accepted Agent bindings, while changing
+adapters and documentation together when the executable interface changes.
+Ordinary conversational text uses the model's streamed reply; each Tool call
+runs once through the capability core, which keeps argument validation,
+receipts, no-replay, target verification and cancellation. The completion
+authority validates ordinary final text locally; native task.complete remains
+available for structured terminal status and computer-state verification.
 
 ## Adoption boundary
 
-The Executive uses the DeepSeek CLI and native agent/session/Tool packages pinned in `obsidience/harness/execution/deepseek/package.json` and its lockfile. The current source pins DeepSeek 0.2.0-rc.2 and Cordis 4.0.4. Obsidience supplies the model, prompt, capability and application ports. New work should extend these existing contracts with explicit lifecycle ownership. The rest of the project adopts Cordis composition at real change seams; not every file or Article needs a plugin. Small isolated probe timings are not whole-project or microphone-to-speaker latency claims.
+The Executive uses Google ADK 2.11.0 through its supported extension points: one Runner per activation, one SQLite session service for the conversation log, one plugin for Obsidience's loop policy and native projection, and one Tool per granted capability over the capability core. The model route is ADK's official LiteLlm adapter (LiteLLM 1.101.0) to the local llama.cpp server under the neutral served model name. Both are hash-pinned in `obsidience/harness/requirements.lock.txt` and recorded with their licenses in `artifacts.lock.json`; no ADK memory, artifact, A2A, Gemini or event-compaction service is used. New work should extend these existing contracts with explicit lifecycle ownership. The rest of the project adopts Cordis composition at real change seams; not every file or Article needs a plugin. Small isolated probe timings are not whole-project or microphone-to-speaker latency claims.
 
 ## Relationships
 
@@ -87,7 +91,7 @@ The Executive uses the DeepSeek CLI and native agent/session/Tool packages pinne
 - `governs` [Harness](/Architecture/Harness/Harness.md) — Existing subsystem services retain explicit ownership and cleanup.
 - `governs` [Real-time Executive](/Architecture/Harness/real-time-executive.md) — Chat and speech share one execution owner and standing procedure.
 - `governs` [Task activation](/Architecture/Harness/task-activation--b30a4642.md) — Task procedure selects Tools while infrastructure composition stays behind their contracts.
-- `governs` [Activation packet protocol](/Architecture/Harness/activation-briefing-protocol--21d7f1ad.md) — The packet's DeepSeek model/Tool loop is composed under Cordis's explicit service contracts and lifecycle ownership.
+- `governs` [Activation packet protocol](/Architecture/Harness/activation-briefing-protocol--21d7f1ad.md) — The packet's ADK model/Tool loop is composed under Cordis's explicit service contracts and lifecycle ownership.
 
 ## Maintenance ownership
 
@@ -95,8 +99,8 @@ Alexandria owns ordinary wiki curation, including content, links and freshness. 
 
 Heimdall owns AutoSaddler improvement through the existing Audit Task and
 harness.optimize capability. One upstream V2 engine diagnoses and compares
-Executive and specialist instruction candidates. Native DeepSeek and specialist
-execution supply isolated evaluations; capability contracts grade captured
+Executive and specialist instruction candidates. The ADK Executive loop (in an
+isolated in-memory session) and specialist execution supply isolated evaluations; capability contracts grade captured
 completion/proposal decisions independently of the optimizing model. Receipt
 capture, event deduplication, model reservations and publication keep their
 existing owners. AutoSaddler supplies its native session retry policy; candidate

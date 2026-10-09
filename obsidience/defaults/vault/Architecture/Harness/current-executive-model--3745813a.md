@@ -14,8 +14,9 @@ hardware in this installation before starting inference. Live model catalogs,
 saved residency settings and measured Source manifests supply device layouts,
 context limits and availability. This Article does not attest any machine.
 
-Chat and speech use the same Executive identity and native DeepSeek model/Tool
-loop. There is no preliminary model request to route conversational work.
+Chat and speech use the same Executive identity and ADK model/Tool loop. Its
+model route is ADK's LiteLLM adapter (pinned LiteLLM) to the local llama.cpp
+server under the neutral served model name. There is no preliminary model request to route conversational work.
 A model lease owns the required resources and restores saved assignments after
 release. Speech, vision sensors and model servers remain components, not Agents.
 

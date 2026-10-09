@@ -64,8 +64,8 @@ Articles explain knowledge and procedure; code-owned capability definitions
 supply executable schemas and validation. A Tool requires an exact binding,
 paired Skill, and explicit grant through its execution owner.
 
-Chat and final speech enter the Executive Agent's native DeepSeek model/Tool
-loop. Its identity owns standing instructions and direct Skills; there is no
+Chat and final speech enter the Executive Agent's Google ADK model/Tool loop.
+Its identity owns standing instructions and direct Skills; there is no
 Executive Task, standing Runbook or preliminary conversational router request.
 Independently queueable specialist work retains Task → Runbook → Skill → Tool.
 

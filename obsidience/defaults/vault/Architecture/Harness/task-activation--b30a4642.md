@@ -12,7 +12,7 @@ sources:
 
 A reusable Task Article may be activated manually, by a graph or shell event,
 a schedule, or exact `task.create`. Chat and voice normally enter the
-Agent-owned Executive session and native DeepSeek loop; they activate a specialist
+Agent-owned Executive conversation and ADK loop; they activate a specialist
 Task only when a separately queueable outcome is requested. Each requested occurrence receives an activation identity
 and each attempt has a run identity linked to it. The existing SQLite ledger
 owns those occurrences, their original objectives, bound parameters and receipts.
@@ -58,7 +58,7 @@ The shared Query definition remains for existing specialist question procedures.
 Archive, Audit, and Repair. Research exposes Question, Learn, and Model.
 Generate exposes Tool, Skill, Task, and Runbook. The Executive family remains a Knowledge grouping for independently queueable
 Query work. The universal Executive Task is retired. The [Memory and knowledge lifecycle](/Architecture/Harness/observations.md)
-describes native DeepSeek context compaction and native Hindsight memory.
+describes the ADK conversation window and native Hindsight memory.
 These are provider services; Alexandria's existing Curate and Link Tasks handle
 reviewed wiki recommendations from observations.
 

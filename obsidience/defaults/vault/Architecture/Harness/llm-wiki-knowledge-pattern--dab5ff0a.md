@@ -40,7 +40,7 @@ only under the destination's current policy.
 
 System inventory is a distinct deterministic publisher backed by immutable
 System evidence, not an Agent research Task. Memory curation Sources do not loop
-back into ordinary Learn; curation outputs are not retained back into Hindsight. Capturing Source, compacting dialogue or receiving a
+back into ordinary Learn; curation outputs are not retained back into Hindsight. Capturing Source, recalling memory or receiving a
 handoff does not by itself accept durable claims.
 
 [Golden ontology](/Architecture/Harness/action-ontology.md)

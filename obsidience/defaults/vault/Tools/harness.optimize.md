@@ -10,7 +10,7 @@ obsidience:
 
 ## Runtime
 
-Run the exact `optimization_case` bound to Heimdall Audit with `{"case_id":"<exact SHA256>"}`. Microsoft AutoSaddler V2 owns diagnosis, structured candidate edits, retries, evaluation and selection. Executive trials use DeepSeek; specialist trials use their ordinary executor. All trial operations are intercepted before live dispatch.
+Run the exact `optimization_case` bound to Heimdall Audit with `{"case_id":"<exact SHA256>"}`. Microsoft AutoSaddler V2 owns diagnosis, structured candidate edits, retries, evaluation and selection. Executive trials run the ADK loop in an isolated in-memory session with no Hindsight recall or writeback; specialist trials use their ordinary executor. All trial operations are intercepted before live dispatch.
 
 ## Contract
 

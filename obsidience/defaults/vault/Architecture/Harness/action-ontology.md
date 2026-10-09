@@ -23,7 +23,7 @@ an Article with descendants is their readable index and condensation.
   Article. Assigned Tasks are independently queueable work. A conversational Agent
   carries its standing instructions in its identity and declares its available
   Skills directly. Each Skill binds one Tool. Native capability schemas are
-  available to the DeepSeek Executive loop; an Executive Task or Runbook hub is unnecessary.
+  available to the ADK Executive loop; an Executive Task or Runbook hub is unnecessary.
 - **Task** states a reusable outcome and its acceptance condition.
 - **Runbook** gives reusable ordered or branching operating instructions.
   Task-bound procedures declare an exact Task and Agent. Reference-only
@@ -41,18 +41,19 @@ are not additional Article types.
 
 ## Executable contracts and explanatory Articles
 
-The owner accepts DeepSeek's native Tool schema and invocation protocol for the
-Executive-loop migration. The code-owned Tool definition is the executable
-contract: name, parameters, output and implementation. Tool and Skill Articles
-explain the registered capability and its use; they do not impose a second
-machine-call schema or require Obsidience's existing `{tool, args}` response
-format. Keep exact Article-to-Capability provenance and accepted Agent bindings,
-while changing adapters and documentation together when the executable interface
-changes. Ordinary conversational text can use the upstream response stream;
-capability code retains argument validation, receipts, target verification and
-cancellation. DeepSeek now owns the Executive model/Tool loop. The existing
-completion authority validates ordinary final text locally; native task.complete
-remains available for structured terminal status and computer-state verification.
+The code-owned Tool definition is the executable contract: name, parameters,
+output and implementation. The Executive's ADK loop advertises it as a native
+function declaration, and the model calls it through the provider's native
+function channel. Tool and Skill Articles explain the registered capability and
+its use; they do not impose a second machine-call schema or a `{tool, args}`
+text response format. Keep exact Article-to-Capability provenance and accepted
+Agent bindings, while changing adapters and documentation together when the
+executable interface changes. ADK owns the model/Tool loop, the conversation log
+and Tool sequencing; the capability core retains argument validation, receipts,
+no-replay, target verification, observation witnesses, the model lease and
+cancellation. The completion authority validates ordinary final text locally;
+native task.complete remains available for structured terminal status and
+computer-state verification.
 
 ## Document format
 
@@ -140,9 +141,9 @@ edges may select Agent, Task, Runbook, Skill, or Tool authority.
 
 - `governs` [Task activation](/Architecture/Harness/task-activation--b30a4642.md) — Activation preserves the difference between outcome, procedure, guidance, capability, and execution.
 - `governs` [Activation packet protocol](/Architecture/Harness/activation-briefing-protocol--21d7f1ad.md) — Packet sections retain those semantic roles instead of flattening them into prompt text.
-- `governs` [Real-time Executive](/Architecture/Harness/real-time-executive.md) — The speech connection delivers final transcripts to the Agent-owned session and native DeepSeek loop. It creates no Executive Task.
+- `governs` [Real-time Executive](/Architecture/Harness/real-time-executive.md) — The speech connection delivers final transcripts to the Agent-owned conversation and ADK loop. It creates no Executive Task.
 - `related_to` [LLM-wiki knowledge pattern](/Architecture/Harness/llm-wiki-knowledge-pattern--dab5ff0a.md) — The recursive Article hierarchy is the readable graph representation of this ontology.
-- `governs` [Memory and knowledge lifecycle](/Architecture/Harness/observations.md) — DeepSeek owns native conversation compaction; Hindsight owns scoped historical memory. Curate and Link propose durable wiki recommendations through Review.
+- `governs` [Memory and knowledge lifecycle](/Architecture/Harness/observations.md) — The ADK conversation window bounds the active conversation; Hindsight owns scoped historical memory. Curate and Link propose durable wiki recommendations through Review.
 
 - `governs` [Cordis composition](/Architecture/Harness/cordis-composition.md) — Plugins provide explicit service contracts and own their lifecycle effects; they never become Article kinds or independent Tool grants.
-- `governs` [Executive model selection](/Architecture/Harness/current-executive-model--3745813a.md) — Model and reasoning effort stay execution-owner concerns, so the DeepSeek model/Tool loop and completion authority are governed by this ontology's ownership rule rather than becoming separate Articles or routing authorities.
+- `governs` [Executive model selection](/Architecture/Harness/current-executive-model--3745813a.md) — Model and reasoning effort stay execution-owner concerns, so the ADK model/Tool loop and completion authority are governed by this ontology's ownership rule rather than becoming separate Articles or routing authorities.

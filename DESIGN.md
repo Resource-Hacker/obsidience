@@ -2,7 +2,7 @@
 
 Older dated design notes are archived locally by the installation; consult the archive before reviving a retired design.
 
-Current design as of 2026-10-08, each rule stated once. This file is published:
+Current design as of 2026-10-09, each rule stated once. This file is published:
 installation facts (hardware, outputs, devices, addresses, grants, model files, paths)
 belong only in the ignored `AGENTS.local.md`. Publication rules: `AGENTS.md` and
 `obsidience/defaults/README.md`. Where this file and code disagree, fix this file.
@@ -188,15 +188,17 @@ neighbours); (9) history projected from the native conversation (no conversation
 
 ### Executive native loop
 
-- Chat and final speech enter the Executive's one native DeepSeek Harness session
-  (pinned in `artifacts.lock.json`). A Google ADK loop (`execution/adk`, official
-  LiteLlm route, shared projection, policies and capability core) is staged behind
-  `executive_loop = "adk"`; DeepSeek remains the default and the rollback. Its identity owns standing instructions, `skills`,
-  model and reasoning effort. DeepSeek receives accepted native schemas directly: no
-  preliminary model call, router, request classification, Executive Task or standing
-  Runbook. Schema availability does not mean Articles were read.
-- DeepSeek sequences model/Tool steps; the capability owner keeps argument validation,
-  receipts, fresh target verification, cancellation and completion acceptance. Native
+- Chat and final speech enter the Executive's one Google ADK conversation (`execution/adk`,
+  pinned in `artifacts.lock.json`). The model route is ADK's official `LiteLlm` (LiteLLM,
+  hash-pinned) to the local llama.cpp server under the neutral served model id. Its
+  identity owns standing instructions, `skills`, model and reasoning effort. ADK receives
+  accepted native schemas directly: no preliminary model call, router, request
+  classification, Executive Task or standing Runbook. Schema availability does not mean
+  Articles were read.
+- ADK owns the model/Tool loop, the conversation log and Tool sequencing; one plugin per
+  activation carries the loop policy. The capability core (`execution/capability_core.py`)
+  owns argument validation, receipts, no-replay, fresh target verification, observation
+  witnesses, the model lease, activity, cancellation and completion acceptance. Native
   text is accepted locally by the completion authority; `task.complete` remains for
   structured failure, Review and computer-state verification and is provisional until
   finalization. Read-only failures return to the model; no identical-call heuristic or
@@ -204,23 +206,22 @@ neighbours); (9) history projected from the native conversation (no conversation
   failures but never erase failed or uncertain effects.
 - An empty complete stop gets one controller continuation; a second fails. Truncated,
   output-limited or partial-Tool stops get none.
-- **Conversation**: one native session per conversation ID; only New Conversation rotates
-  it; speech lifetime is not conversation lifetime and speech failure never finalizes it.
-  Upstream JSONL persistence resumes after restart; native recovery never replays an
-  interrupted Tool. SQLite is the public Chat projection, ingress ledger and receipt
-  authority: the user turn is stored before execution; an assistant turn only for a
-  current, completed, nonempty reply; cancelled, failed or stale output never becomes one;
-  rotation never deletes rows. The child uses private pipes and keeps no durable files.
-  Old stores upgrade only offline; never import over a successor or rewind receipts.
+- **Conversation**: one ADK session per conversation ID in `state/adk-sessions.sqlite3`;
+  only New Conversation rotates it; speech lifetime is not conversation lifetime and speech
+  failure never finalizes it. The log persists across restarts; an interrupted Tool call is
+  recorded as outcome unknown and never replayed. SQLite is the public Chat projection,
+  ingress ledger and receipt authority: the user turn is stored before execution; an
+  assistant turn only for a current, completed, nonempty reply; cancelled, failed or stale
+  output never becomes one; rotation never deletes rows. A conversation without a session
+  is seeded from its exact public turns; runs without a conversation use an in-memory
+  session for that run only.
 - **Projection**: completed outcomes render as status/summary; admitted records drop once
   an outcome exists; current runtime context precedes the latest exact exchange; internal
   completion records are audit-only; execution and prewarm share the projection.
-- **Compaction**: upstream `dsh-compaction-basic` through the model lease, no Tool
-  dispatch or speech; bounded recent tail and summary; summaries need nonempty Goal,
-  Constraints and corrections, Verified state and Outstanding; failed, empty, truncated or
-  Tool-unbalanced summaries are rejected and originals stay recoverable; threshold is a
-  60–90% setting. A summary is history, not verified state; an unavailable estimate alone
-  cannot start compaction.
+- **Window**: the provider sees the conversation from one anchor owner message on; the
+  anchor moves only at an idle edge once the window outgrows its bound
+  (`conversation_window`). Hindsight recall and `observations.recall` carry earlier
+  context. There is no summary compaction.
 - **Completion checks**: every computer Tool used needs its own verified receipt; a later
   Tool cannot conceal a failure. Unlock claims need this run's verified `session.unlock`;
   open/launch/navigate claims need verified `application.launch`, `window.activate` or
@@ -256,8 +257,8 @@ neighbours); (9) history projected from the native conversation (no conversation
   tokenizer labels.
 - **Speech preparation**: after a confirmed interruption drains, the first partial starts
   one cancellable warmup on idle resident hardware with the same context and schemas,
-  discarding its single token. It never runs, dispatches, publishes, writes conversation
-  or compacts; final speech, Chat, STOP and teardown cancel it; leases preempt it; busy
+  discarding its single token. It never runs, dispatches, publishes or writes
+  conversation; final speech, Chat, STOP and teardown cancel it; leases preempt it; busy
   hardware skips it. Final admission recompiles the complete request. Standby readiness is
   reported only after preparation succeeds.
 
@@ -538,7 +539,9 @@ full current reads, unrelated hits do not.
 
 - Heimdall Audit uses pinned Microsoft AutoSaddler V2 as the single improvement path
   (`harness.optimize`), sharing the existing loop, reservations, scheduler, writer and
-  Review. Trials intercept every Tool before dispatch and prove decision behaviour only.
+  Review. Trials intercept every Tool before dispatch and prove decision behaviour only;
+  Executive trials run the ADK loop in an isolated in-memory session with no Hindsight
+  recall or writeback.
 - Bounded decision inputs are captured after the actual receipt commits; rejected calls
   and failed work enter Audit's FIFO after Repair, never preempting foreground work; one
   unchanged failure admits one job. Cases are private evaluation Source, need exact
@@ -732,7 +735,9 @@ Connections/Feeds (panes, API, collector, publication/retention, `web.feed`), Di
 News/Top Stories, Check, Lookup, Executive Task/Runbook, request classification and the
 packet router, Compact/Promote, Immediate/Temporary/Workstation Observations, custom
 Hindsight categories, the WebKit presenter, PaneCanvas, processing cues, the layered graph
-engine, KWin paths, Xorg bridges and Electron. Historical Sources, receipts and rows remain
+engine, KWin paths, Xorg bridges and Electron. The DeepSeek Harness Executive loop (Node
+child, npm Cordis composition, JSONL sessions; replaced by ADK 2026-10-09) and
+conversation compaction (idle, manual Compact and its threshold) are retired. Historical Sources, receipts and rows remain
 read-only provenance and never resume collection or replay work.
 
 ## References (patterns only)
@@ -740,7 +745,7 @@ read-only provenance and never resume collection or replay work.
 [Cordis primer](https://github.com/deepseek-ai/deepseek-harness/blob/c291e7961a515f6d7af9304e7fd1d257929aef26/docs/cordis-primer.md)
 and [composability paper](https://arxiv.org/abs/2608.25512);
 [WeKnora dsh-weknora](https://github.com/Tencent/WeKnora/tree/1ef38fdb8b19347b82d3a99f6f17d75ac09ad606/packages/dsh-weknora)
-(its answer pipeline deliberately unused); [ADK compaction](https://adk.dev/context/compaction/);
+(its answer pipeline deliberately unused);
 [Hindsight practices](https://hindsight.vectorize.io/best-practices);
 [Gemma 4 formatting](https://ai.google.dev/gemma/docs/core/prompt-formatting-gemma4);
 [Graphify](https://github.com/Graphify-Labs/graphify/tree/33362d969292b57eda82f3fbd9eb5f3f5bc9bbc2)

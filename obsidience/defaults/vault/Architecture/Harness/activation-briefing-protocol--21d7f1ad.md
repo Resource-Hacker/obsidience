@@ -15,7 +15,7 @@ local model the smallest complete set of Articles and runtime bindings needed
 for one outcome. Graph activity publishes the same Objective and Article refs
 that the model receives.
 
-Chat and speech enter the Executive session directly. The compiler supplies the identity's standing Runtime instructions, bounded conversation, current bindings and relevant Knowledge. The DeepSeek loop receives native schemas from the accepted direct Skill/Tool catalog and chooses the next Tool. There is no preliminary model routing request. Explanatory Tool and Skill bodies can be read when needed; advertising their schemas alone does not add them to the packet's Article refs. Ordinary text is accepted through the same completion authority without a model-generated completion call.
+Chat and speech enter the Executive session directly. The compiler supplies the identity's standing Runtime instructions, bounded conversation, current bindings and relevant Knowledge. The ADK loop receives native schemas from the accepted direct Skill/Tool catalog and chooses the next Tool. There is no preliminary model routing request. Explanatory Tool and Skill bodies can be read when needed; advertising their schemas alone does not add them to the packet's Article refs. Ordinary text is accepted through the same completion authority without a model-generated completion call.
 
 Independently queueable Tasks still resolve their authored procedure under
 [Task activation](/Architecture/Harness/task-activation--b30a4642.md).
@@ -35,7 +35,7 @@ bounding model generation.
 
 The current Thinking Packet and execution receipts expose the exact objective,
 selected context identities and controller evidence through existing runtime
-surfaces. Executive conversation context stays in its DeepSeek session; current
+surfaces. Executive conversation context stays in its ADK conversation log; current
 conversation and activation are not Knowledge Articles. Actual read/search
 results extend the runtime evidence. A displayed thinking path represents supplied
 or read context, not hidden model reasoning. Proposed relationships become durable
@@ -43,7 +43,7 @@ only through ordinary publication. Checkout refresh is passive.
 
 ## Visible packet order
 
-DeepSeek owns the active conversation and native compaction; Hindsight owns historical observations and scoped recall.
+ADK owns the active conversation log and its provider window; Hindsight owns historical observations and scoped recall. There is no compaction.
 
 The Objective is runtime data, not an Article kind. A bound owner request is
 preserved as the complete Objective; without one, the deterministic fallback is

@@ -46,9 +46,9 @@ The same-login intent records wake, realtime or off; missing intent defaults to
 wake, while explicit Mute persists across Harness restarts in that login.
 
 
-Realtime is the speech connection and session infrastructure controlled in Chat. It keeps audio available between requests. Every Chat request and final speech transcript enters the same Executive session and native DeepSeek loop. The Agent carries standing identity instructions, direct Skills, model and reasoning effort; DeepSeek selects native Tool calls directly from the accepted schemas; the compiler supplies context and retrieved Knowledge. The audio connection has no Task or Runbook of its own.
+Realtime is the speech connection and session infrastructure controlled in Chat. It keeps audio available between requests. Every Chat request and final speech transcript enters the same Executive conversation and ADK loop. The Agent carries standing identity instructions, direct Skills, model and reasoning effort; ADK sequences native Tool calls the model selects directly from the accepted schemas; the compiler supplies context and retrieved Knowledge. The audio connection has no Task or Runbook of its own.
 
-DeepSeek owns the active conversation and native compaction; Hindsight owns historical observations and scoped recall.
+ADK owns the active conversation log and its provider window; Hindsight owns historical observations and scoped recall.
 
 Pipecat's upstream `LocalAudioTransport` opens the microphone and speaker selected
 in Settings > AI & Voice through process-scoped Pulse routing. NVIDIA NeMo owns streaming
@@ -63,7 +63,7 @@ model owner admits one cancellable warmup only on idle resident llama.cpp;
 new partials replace pending text. One generated token is explicitly discarded
 because the installed build also generates one when zero is requested. This
 preparation starts no Agent run, dispatches no Tools, writes no conversation or
-Articles, and performs no compaction. Context projection is read-only, including
+Articles. Context projection is read-only, including
 retention selection. Final speech, Chat and STOP cancel it; ordinary model
 leases preempt it. Final admission recompiles the complete corrected request
 and fresh state, and only exact provider prompt prefixes can be reused.
@@ -82,7 +82,7 @@ closure must not abandon those workers or allow overlapping model calls.
 
 At start, Realtime freezes the locally selected microphone, speaker and voice. Optional device lifecycle adapters own any required wake and sleep operations.
 
-Admission validates the accepted Executive identity and exact persisted user turn. The DeepSeek loop exposes the native capabilities granted by direct Skills. The Executive model receives the current Objective, full bounded conversation, current semantic Scene and historical receipts, then chooses the next Tool directly. A target-only correction continues the preceding question and never authorizes an effect by itself. Current visible questions use computer.observe; launch, focus, placement and input require the corresponding requested operation and current Tool evidence.
+Admission validates the accepted Executive identity and exact persisted user turn. The ADK loop exposes the native capabilities granted by direct Skills. The Executive model receives the current Objective, full bounded conversation, current semantic Scene and historical receipts, then chooses the next Tool directly. A target-only correction continues the preceding question and never authorizes an effect by itself. Current visible questions use computer.observe; launch, focus, placement and input require the corresponding requested operation and current Tool evidence.
 The Agent-owned run uses the shared activation compiler, model lease, Tool path, ledger and graph activity. There is no Query/Computer Use classification or reclassification pass.
 Ordinary native text passes the shared completion authority locally, then the accepted
 answer is committed and delivered to Chat or Pocket. Structured task.complete remains
@@ -91,7 +91,6 @@ Packet and its exact refs are the graph animation source. Speech onset may
 cancel Pocket playback and the current execution without closing the
 microphone; NeMo may ignore a backchannel without gaining semantic authority.
 
-DeepSeek owns the active conversation and native compaction; Hindsight owns historical observations and scoped recall.
 
 Idle listening is not a global pause. Actual foreground work, speech startup or
 shutdown, and the existing physical GPU reservations control admission. The
@@ -110,7 +109,7 @@ for follow-up explanation without becoming successful conversation pairs. The Ex
 ## Relationships
 
 - `implements` [Activation packet protocol](/Architecture/Harness/activation-briefing-protocol--21d7f1ad.md) — Every final transcript uses the same compiler, executor and graph-activity path as Task execution.
-- `implements` [Task activation](/Architecture/Harness/task-activation--b30a4642.md) — Spoken and typed requests enter the same Agent-owned session, native DeepSeek loop and capability owner.
+- `implements` [Task activation](/Architecture/Harness/task-activation--b30a4642.md) — Spoken and typed requests enter the same Agent-owned conversation, ADK loop and capability core.
 - `implements` [Golden ontology](/Architecture/Harness/action-ontology.md) — The speech connection delivers final transcripts to the Executive identity; only independently queueable outcomes require Tasks.
 - `depends_on` [Executive model selection](/Architecture/Harness/current-executive-model--3745813a.md) — The Executive identity supplies conversation model and reasoning settings; specialist Tasks retain their own selections.
 - `depends_on` [LLM-wiki knowledge pattern](/Architecture/Harness/llm-wiki-knowledge-pattern--dab5ff0a.md) — Realtime's final transcripts use bounded Thinking Packets and exact Agent Skill/Tool bindings.

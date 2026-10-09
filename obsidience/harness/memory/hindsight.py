@@ -269,7 +269,7 @@ class Hindsight:
 
     def completed(self, agent_ref, user, assistant, *, source, identifier, timestamp=None):
         # Only the accepted public transaction enters extraction, never
-        # recalled memories or compaction summaries.
+        # recalled memories.
         # Executive conversation turns call this on the event loop between the
         # committed answer and speech, and ignore the result. Their outbox insert
         # runs on the single FIFO writer (per-conversation order, same uuid5

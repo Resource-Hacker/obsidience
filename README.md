@@ -77,7 +77,7 @@ role icon.</p>
 ## Highlights
 
 - **Executive voice and chat.** Typed Chat and final speech transcripts enter
-  one native DeepSeek Harness session for the Executive. Its identity Article
+  one Google ADK conversation for the Executive. Its identity Article
   owns its instructions and its direct Skill catalog; there is no router or
   preliminary model call. Realtime speech uses Pipecat transport, NeMo/Nemotron
   streaming recognition and Pocket TTS, and partial speech can prepare a
@@ -113,13 +113,13 @@ Vault. It includes the Executive, Alexandria, Darwin and Heimdall; their reusabl
 capability library, project architecture and ordinary knowledge subjects. It
 contains no previous owner's computer inventory or personal knowledge.
 
-From the repository root, prepare the Python and native Executive dependencies:
+From the repository root, prepare the Python dependencies (the Executive's Google
+ADK loop is a pinned Python requirement) and the AutoSaddler pin:
 
 ```sh
 python -m venv .venv
 .venv/bin/python -m pip install -r obsidience/harness/requirements.txt -c obsidience/harness/requirements.lock.txt
-.venv/bin/python -m pip install --no-deps -r obsidience/harness/execution/deepseek/requirements-optimization.txt
-npm --prefix obsidience/harness/execution/deepseek ci --ignore-scripts --no-audit --no-fund
+.venv/bin/python -m pip install --no-deps -r obsidience/harness/requirements-optimization.txt
 ./obsidience/scripts/obsidience init
 ```
 
@@ -183,7 +183,7 @@ existing check when needed, and do not add tests or run broad suites unless aske
 ## How it works
 
 ```text
-Chat / speech → Executive identity + context → DeepSeek model / Tool loop
+Chat / speech → Executive identity + context → ADK model / Tool loop
 Specialist work → Task → Runbook → Skill → Tool
 Explicit research / Source intake → immutable Source → Darwin → Inbox → Alexandria
 Accepted Article changes → Review / local audit → graph + retrieval

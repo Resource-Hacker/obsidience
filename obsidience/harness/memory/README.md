@@ -1,8 +1,8 @@
 # Local Hindsight memory
 
-`hindsight.py` is the Obsidience port to the supported Hindsight API. The native
-Cordis service is `../execution/deepseek/hindsight.mjs`. It adds bounded recall
-to the existing DeepSeek turn, without a second agent loop or a reflection call.
+`hindsight.py` is the Obsidience port to the supported Hindsight API. The ADK
+Executive loop (`../execution/adk/runner.py`) takes one bounded automatic recall
+for each owner turn, without a second agent loop or a reflection call.
 The official Hindsight coding-agent bundle is a design reference; its Git
 history importer and separate coding wiki are deliberately not mounted.
 
@@ -41,8 +41,9 @@ history importer and separate coding wiki are deliberately not mounted.
    observation Sources, batch manifests and their Article citations remain
    readable history, and already queued observation Link occurrences keep
    their existing execution path.
-5. DeepSeek retains ownership of the continuous conversation and active context.
-   Its native `dsh-compaction-basic` backend manages that context. Automatic recall has a 750 ms deadline; the
+5. The ADK conversation log owns the continuous conversation; its provider
+   window bounds the active context, and recall carries what precedes the
+   window (there is no summary compaction). Automatic recall has a 750 ms deadline; the
    explicit scoped `observations.recall` Tool permits six seconds. Neither
    path calls generative Reflect or treats memory as current screen evidence.
 
@@ -265,8 +266,7 @@ while preserving complete messages and ordered controls. Empty memory filters
 show an explicit empty view instead of retaining an earlier video frame.
 
 Upstream: [installation](https://hindsight.vectorize.io/developer/installation),
-[memory practices](https://hindsight.vectorize.io/best-practices),
-[native DeepSeek integration](https://hindsight.vectorize.io/blog/2026/08/14/deepseek-harness-persistent-memory).
+[memory practices](https://hindsight.vectorize.io/best-practices).
 
 Completed-turn dates use the original conversation timestamp or Task completion
 time, including recovery. The Codex notifier sends only the latest owner input
