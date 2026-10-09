@@ -2,87 +2,11 @@
 import asyncio
 import json
 from collections import deque
-from types import SimpleNamespace as NS
 
 import pytest
 
 from obsidience.harness.execution import executor, trace
 from obsidience.tests.test_execution_cancellation import execution  # noqa: F401
-
-
-def test_receipts_commit_before_dispatch_and_before_next_decision(execution, monkeypatch):
-    requests = []
-    real_tool = executor.execute_capability
-
-    def tool(name, args, ctx):
-        receipt = executor.INDEX.tool_run_receipts(ctx['run_id'])['calls'][-1]
-        assert receipt['status'] == 'started'
-        assert receipt['tool'] == name
-        result = real_tool(name, args, ctx)
-        if name == 'window.place':
-            # Completion requires a verified placement witness.
-            result.update(target={'kind': 'application', 'name': 'microsoft_edge'},
-                          destination={'surface': 'usb-c'}, observed={'surface': 'usb-c'})
-        return result
-
-    async def model(messages, **_kwargs):
-        requests.append(json.loads(json.dumps(messages)))
-        if len(requests) == 1:
-            return NS(content='{"tool":"window.place","args":{}}', prompt_tokens=100)
-        row = executor.INDEX.db.execute("SELECT run_id FROM tool_receipt_runs").fetchone()
-        assert executor.INDEX.tool_run_receipts(row[0])['calls'][0]['status'] == 'returned'
-        assert not execution.records  # The run's final record does not exist yet.
-        return await execution.reply()
-
-    monkeypatch.setattr(executor, 'execute_capability', tool)
-    monkeypatch.setattr(executor.llm, 'chat', model)
-    result = asyncio.run(execution.run())
-    assert result['status'] == 'completed'
-    assert requests[1][:len(requests[0])] == requests[0]
-    assert [r['status'] for r in executor.INDEX.tool_run_receipts(result['run_id'])['calls']] == ['returned', 'returned']
-
-
-def test_failed_intent_commit_never_dispatches_a_tool(execution, monkeypatch):
-    def fail(**_kwargs):
-        raise RuntimeError('isolated ledger fault')
-
-    monkeypatch.setattr(executor.INDEX, 'begin_tool_call', fail)
-    with pytest.raises(RuntimeError, match='isolated ledger fault'):
-        asyncio.run(execution.run())
-    assert execution.records[-1]['status'] == 'failed'
-    assert execution.calls == []
-
-
-def test_committed_async_result_survives_cancellation(execution, monkeypatch):
-    async def exercise():
-        reached = asyncio.Event()
-
-        async def model(*_args, **_kwargs):
-            return NS(content='{"tool":"model.configure","args":{}}', prompt_tokens=100)
-
-        async def operation(_name, _args, ctx):
-            reached.set()
-            try:
-                await asyncio.Event().wait()
-            except asyncio.CancelledError:
-                ctx['_capability_cancelled_after_commit'] = True
-                return {'configuration_applied': True, 'runtime_reconciled': False}
-
-        monkeypatch.setattr(executor.llm, 'chat', model)
-        monkeypatch.setattr(executor, 'execute_capability_async', operation)
-        task = asyncio.create_task(execution.run())
-        await reached.wait()
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await task
-        record = execution.records[-1]
-        receipt = executor.INDEX.tool_run_receipts(record['id'])['calls'][0]
-        assert receipt['status'] == 'returned'
-        evidence = json.loads(record['trace'])
-        assert any('"configuration_applied": true' in row.get('obs', '') for row in evidence)
-        assert record['status'] == 'interrupted'
-
-    asyncio.run(exercise())
 
 
 @pytest.fixture

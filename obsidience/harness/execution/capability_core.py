@@ -69,9 +69,8 @@ class CallOutcome:
 
 @dataclass
 class CapabilityExecution:
-    """One activation's capability state for a loop that owns its own messages.
+    """One activation's capability state; the ADK loop owns its own messages.
 
-    ``CapabilityDispatch`` carries the same fields for the specialist loop.
     ``allowed`` is the run's current dispatch policy: failed or uncertain
     effects narrow it to ``task.complete``. ``step`` numbers calls for receipts.
     """
@@ -105,7 +104,7 @@ async def run_capability(ex, name: str, args: dict, *, execute, execute_async, s
                          blocked: tuple[str, dict] | None = None, started=None) -> CallOutcome:
     """Run one call through the receipt and evidence boundary.
 
-    ``ex`` is a ``CapabilityExecution`` or ``CapabilityDispatch``. The loop
+    ``ex`` is the activation's ``CapabilityExecution``. The loop
     passes the capability executors and scope checkpoint it is bound to, and an
     optional ``blocked`` observation (with extra trace fields) for a call its own
     policy refuses before dispatch. ``started`` runs once the call is announced.

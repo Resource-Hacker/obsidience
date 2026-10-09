@@ -151,18 +151,6 @@ def test_compiler_injects_only_into_interactive_executive_and_preserves_authorit
     assert "Tools/computer.act" not in activation["refs"]
 
 
-@pytest.mark.parametrize("interactive", [True, False])
-def test_executor_forwards_controller_interactive_flag(execution, monkeypatch, interactive):
-    original = executor.compile_activation
-    received = []
-    async def capture(*args, **kwargs):
-        received.append(kwargs["interactive"])
-        return await original(*args, **kwargs)
-    monkeypatch.setattr(executor, "compile_activation", capture)
-    asyncio.run(execution.run(interactive=interactive))
-    assert received == [interactive]
-
-
 def test_historical_projection_preserves_availability_and_counts_but_drops_private_data():
     record = {"run_id": "abc123", "task_ref": "Tasks/query", "status": "completed",
               "evidence_available": True, "effect_dispatched": False, "omitted_tool_count": 2,

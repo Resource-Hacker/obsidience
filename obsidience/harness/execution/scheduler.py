@@ -495,6 +495,9 @@ def retry_blocked_reason(note: Note, run: dict | None = None, *, allow_source_ca
                 "activation_id", "activation_packet", "retrieval_ms", "task_activation", "source_inbox", "created_tasks", "maintenance_candidate",
                 "interactive_turn", "computer_request", "provider_metrics", "context_projection",
                 "interruption_reason", "must_not_replay", "invalid", "parse_error", "finish_reason", "harness_health",
+                # Native protocol records: a call refused before dispatch or a Tool-less reply.
+                "invalid_tool", "not_dispatched", "obs", "native_tool_error", "invalid_native_response",
+                "attempt", "recovery",
             }:
                 return "The previous execution contains an unknown outcome record."
             if (entry.get("must_not_replay") and entry.get("interruption_reason") != "foreground_admission"

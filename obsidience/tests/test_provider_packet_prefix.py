@@ -37,7 +37,7 @@ def test_request_pair_keeps_complete_fixed_spine_before_user_checkpoint(monkeypa
                     {"role": "user", "content": provider["provider_user"]}]
         for spec in (MODELS[EXECUTIVE_MODEL],):
             payload = llm._chat_payload(messages, spec, max_tokens=None, temperature=0,
-                                        reasoning_effort="none", allowed_tools=["vault.read", "task.complete"])
+                                        reasoning_effort="none")
             assert [m["role"] for m in payload["messages"]] == ["system", "user", "user"]
             stable, preceding, current = [m["content"] for m in payload["messages"]]
             for exact in ("EXACT-IDENTITY", "EXACT-TASK", "EXACT-ACCEPTANCE", "EXACT-TOOL", "EXACT-SKILL", "EXACT-RUNBOOK"):

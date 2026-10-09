@@ -2,12 +2,14 @@
 
 Imported only by harness.optimize. The upstream engine owns candidate search;
 Obsidience owns model reservations, frozen operation results and publication.
-Executive trials run ``run_adk_session`` in an isolated in-memory ADK session.
+Executive and specialist trials run ``run_adk_session`` in an isolated
+in-memory ADK session.
 """
 from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 from collections.abc import Mapping
 from dataclasses import replace
@@ -27,6 +29,66 @@ from ...models import llm, runtime
 from .. import executor, optimization, refinement, trace as action_trace
 from ..evaluation import FrozenTrial, compare_observations
 from .runner import run_adk_session
+
+
+# The retired JSON action loop's protocol, verbatim in its decision captures.
+LEGACY_ACTION_PROTOCOL = """\
+## Action protocol
+The provider constrains your public response to one JSON object. Return only:
+{"tool": "<tool-name>", "args": { ... }}
+To finish, call task.complete with the arguments required by its selected
+Tool and Skill contract. Completion requirements depend on the Task. Do not
+assume status and summary alone suffice for an evidence-bound inspection.
+Outcome and evidence belong in separate args fields when the contract requires them.
+Use private reasoning when available, but put no commentary or Markdown in the
+public response. Never invent tool names.
+"""
+_LEGACY_FENCE = re.compile(r"```(?:action|json)?\s*(\{.*?\})\s*```", re.DOTALL)
+
+
+def _legacy_action(text: str) -> dict | None:
+    match = _LEGACY_FENCE.search(text)
+    try:
+        value = json.loads(match.group(1) if match else text.strip(), strict=False)
+    except ValueError:
+        return None
+    if (isinstance(value, dict) and set(value) == {'tool', 'args'} and isinstance(value['tool'], str)
+            and value['tool'].strip() and isinstance(value['args'], dict)):
+        return value
+    return None
+
+
+def native_wire(messages: list[dict], model, effort: str) -> list[dict]:
+    """A specialist decision captured by the retired JSON action loop, in the ADK wire format.
+
+    The capture's exact text is kept: its action protocol becomes the native
+    Task protocol, each recorded action a native Tool call and its Observation
+    that call's result. The Task guidance follows, as on a live request.
+    """
+    from ..native_turn import TASK_PROTOCOL
+    rows, pending = [], None
+    for index, message in enumerate(messages):
+        content = message['content']
+        if pending is not None and not (message['role'] == 'user' and content.startswith('Observation:\n')):
+            raise ValueError('Captured decision has an action without its observation; a fresh capture is required')
+        if message['role'] == 'system':
+            if LEGACY_ACTION_PROTOCOL not in content:
+                raise ValueError('Captured decision uses an unknown action protocol; a fresh capture is required')
+            rows.append({'role': 'system', 'content': content.replace(LEGACY_ACTION_PROTOCOL, TASK_PROTOCOL)})
+        elif pending is not None:
+            rows.append({'role': 'tool', 'tool_call_id': pending, 'content': content})
+            pending = None
+        elif message['role'] == 'assistant' and (action := _legacy_action(content)) is not None:
+            pending = f'call-{index}'
+            rows.append({'role': 'assistant', 'content': '', 'tool_calls': [{
+                'id': pending, 'type': 'function', 'function': {
+                    'name': action['tool'],
+                    'arguments': json.dumps(action['args'], ensure_ascii=False, separators=(',', ':'))}}]})
+        else:
+            rows.append({'role': message['role'], 'content': content})
+    if pending is not None:
+        raise ValueError('Captured decision has an action without its observation; a fresh capture is required')
+    return llm._chat_payload(rows, model, max_tokens=None, temperature=None, reasoning_effort=effort)['messages']
 
 
 def _latency_sensitive(document: dict) -> bool:
@@ -129,10 +191,10 @@ class NativeEvaluator:
                     if not replacements:
                         raise ValueError('The captured prompt does not contain its exact instruction body')
                     trial = DecisionTrial(sample, validate_decision)
-                    if sample.get('prompt_format') == 'native_wire':
-                        # Preserve provider roles and Tool-call/result pairing;
-                        # the ordinary native bootstrap is not a wire replay.
-                        trial.wire_messages = messages
+                    # Preserve provider roles and Tool-call/result pairing; the
+                    # ordinary bootstrap is not a wire replay.
+                    trial.wire_messages = (messages if sample.get('prompt_format') == 'native_wire' else native_wire(
+                        messages, model, self.document['model_contract']['reasoning_effort']))
                 else:
                     trial = NativeTrial(specification)
                 trial_context = {}
@@ -145,8 +207,7 @@ class NativeEvaluator:
                     action_trace.emit('status', 'AutoSaddler native Executive trial started')
                     try:
                         async with asyncio.timeout(90):
-                            runner = run_adk_session if task.kind == 'agent' else executor._execute_session
-                            trace, status, summary = await runner(
+                            trace, status, summary = await run_adk_session(
                                 task, model, messages, sorted(set(spine['tools']) | {'task.complete'}),
                                 trial_context, agent.title, self.document['model_contract']['reasoning_effort'],
                                 interruption_event=self.context.get('_foreground_interruption_event'), evaluation=trial)
@@ -177,8 +238,7 @@ class NativeEvaluator:
                         disposition='execution_error' if error else 'success' if result['passed'] else 'task_failure',
                         score=None if error else float(result['passed']), evaluator_fingerprint=self.fingerprint,
                         objectives={'duration_ms': result['duration_ms'], 'tool_count': trial.tool_count},
-                        output=output, trace=output, cost=cost, metadata={'result': result,
-                            'engine': 'adk' if task.kind == 'agent' else 'specialist'})
+                        output=output, trace=output, cost=cost, metadata={'result': result, 'engine': 'adk'})
                     context.attempt_sink.complete(attempt_id, observation, cost)
                     observations.append(observation)
                     action_trace.emit('status', 'AutoSaddler trial ' + ('passed' if result['passed'] else 'did not pass'))

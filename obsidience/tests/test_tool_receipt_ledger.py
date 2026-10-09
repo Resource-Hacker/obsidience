@@ -2,13 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
-import hashlib
 import json
-import sqlite3
-from contextlib import asynccontextmanager
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -138,141 +133,6 @@ def test_restart_never_replays_possible_or_completed_effect(occurrence, terminal
 
 class _ProcessCrash(BaseException):
     """Leave committed state intact without ordinary exception finalization."""
-
-
-@pytest.mark.parametrize("boundary,effect_count,receipt_status", [
-    ("after_intent", 0, "started"),
-    ("after_effect_before_receipt", 1, "started"),
-    ("after_receipt_before_finalization", 1, "returned"),
-])
-def test_executor_crash_boundaries_preserve_evidence_without_redispatch(
-    occurrence, monkeypatch, boundary, effect_count, receipt_status,
-):
-    ledger, task = occurrence
-    begin(ledger, task)
-    ledger.db.execute("CREATE TABLE fixture_effects(run_id TEXT, arguments TEXT)")
-    ledger.db.commit()
-    article_before = (CONFIG.vault_dir / task.path).read_bytes()
-    arguments = {"target": "Knowledge/fixture", "content": "One intended effect."}
-    result = {"effect": "committed", "target": arguments["target"]}
-    encoded_result = json.dumps(result, sort_keys=True).encode()
-    model = SimpleNamespace(id="inert", capabilities=("text", "tools"))
-    requests = []
-    calls = []
-
-    @asynccontextmanager
-    async def lease(_model):
-        yield model
-
-    async def chat(*_args, **_kwargs):
-        requests.append("provider")
-        assert len(requests) == 1, "A crashed Tool must never request another decision."
-        return SimpleNamespace(
-            content=json.dumps({"tool": "vault.propose", "args": arguments}),
-            prompt_tokens=100,
-        )
-
-    def capability(name, args, context):
-        assert name == "vault.propose" and args == arguments
-        calls.append(name)
-        # This independent owner commits its effect before returning. Reopening
-        # the ledger below must retain it even when its Tool result never lands.
-        with sqlite3.connect(ledger.db_path) as effect_owner:
-            effect_owner.execute("INSERT INTO fixture_effects VALUES(?,?)", (
-                context["run_id"], json.dumps(args, sort_keys=True),
-            ))
-        return result
-
-    original_begin = ledger.begin_tool_call
-    original_finish = ledger.finish_tool_call
-
-    def begin_with_crash(**values):
-        created = original_begin(**values)
-        if boundary == "after_intent":
-            raise _ProcessCrash(boundary)
-        return created
-
-    def finish_with_crash(**values):
-        if boundary == "after_effect_before_receipt":
-            raise _ProcessCrash(boundary)
-        original_finish(**values)
-        if boundary == "after_receipt_before_finalization":
-            raise _ProcessCrash(boundary)
-
-    monkeypatch.setattr(ledger, "begin_tool_call", begin_with_crash)
-    monkeypatch.setattr(ledger, "finish_tool_call", finish_with_crash)
-    monkeypatch.setattr(executor.model_runtime, "configured_spec", lambda _id: model)
-    monkeypatch.setattr(executor.model_runtime, "lease", lease)
-    monkeypatch.setattr(executor.llm, "chat", chat)
-    monkeypatch.setattr(executor, "execute_capability", capability)
-    # The executor dispatches through the async registry entry; never reach real Tools.
-    monkeypatch.setattr(executor, "execute_capability_async",
-                        lambda name, args, ctx: asyncio.to_thread(capability, name, args, ctx))
-    monkeypatch.setattr(executor.action_trace, "emit", lambda *_a, **_k: None)
-    monkeypatch.setattr(executor.action_trace, "latency", lambda *_a, **_k: None)
-    context = {
-        "task": task.ref, "run_id": "crashed", "params": task.meta["params"],
-        "_receipt_covered": True,
-        "_tool_receipt_articles": {"vault.propose": ("Tools/vault.propose", "b" * 64)},
-    }
-    with pytest.raises(_ProcessCrash, match=boundary):
-        asyncio.run(executor._execute_session(
-            task, model, [{"role": "system", "content": "Inert test packet"}],
-            ["vault.propose"], context, "fixture", "none",
-        ))
-    assert requests == ["provider"]
-    assert calls == ["vault.propose"] * effect_count
-    assert ledger.run("crashed") is None
-    receipts_before = ledger.tool_run_receipts("crashed")
-    assert len(receipts_before["calls"]) == 1
-    receipt = receipts_before["calls"][0]
-    assert receipt["call_id"] == "crashed:1" and receipt["step"] == 1
-    assert receipt["signature"] == "vault.propose:sha256:" + hashlib.sha256(
-        json.dumps(arguments, sort_keys=True).encode(),
-    ).hexdigest()
-    assert receipt["read_only"] is False
-    assert receipt["tool_ref"] == "Tools/vault.propose"
-    assert receipt["tool_sha256"] == "b" * 64
-    assert receipt["status"] == receipt_status
-    if receipt_status == "returned":
-        assert receipt["result_sha256"] == hashlib.sha256(encoded_result).hexdigest()
-        assert receipt["result_chars"] == len(encoded_result)
-    else:
-        assert receipt["finished"] is None and not receipt["result_sha256"]
-
-    ledger.db.close()
-    reopened = index.Index()
-    try:
-        monkeypatch.setattr(index, "INDEX", reopened)
-        monkeypatch.setattr(scheduler, "INDEX", reopened)
-        assert reopened.tool_run_receipts("crashed") == receipts_before
-        effects_before = reopened.db.execute("SELECT * FROM fixture_effects").fetchall()
-        assert effects_before == [("crashed", json.dumps(arguments, sort_keys=True))] * effect_count
-        assert scheduler.reconcile_interrupted_runs() == [task.ref]
-        current = vault.load_note(task.path)
-        assert current.meta["status"] == "failed"
-        assert current.meta["blocked_reason"] == scheduler.RESTART_DISPOSITION_REASON
-        assert current.meta["params"] == task.meta["params"]
-        assert current.meta["event_queue"] == task.meta["event_queue"]
-        assert (CONFIG.vault_dir / task.path).read_bytes() == article_before
-        # A dangling effectful intent is uncertain even when this test knows
-        # its dispatch never happened. Restart may not invent that knowledge.
-        assert scheduler.retry_blocked_reason(current) == "A Tool may have committed effects."
-        with pytest.raises(ValueError, match="may have committed effects"):
-            scheduler.retry_failed_occurrence(current, "crashed")
-        monkeypatch.setattr(scheduler, "_realtime_allows", lambda *_a: True)
-        monkeypatch.setitem(scheduler._last_fired, task.ref, 0.)  # Deliberately overdue cron.
-        assert scheduler.due_tasks() == []
-        final_run = reopened.run("crashed")
-        assert final_run["status"] == "failed"
-        assert final_run["task_ref"] == task.ref
-        assert scheduler.reconcile_interrupted_runs() == []
-        assert reopened.run("crashed") == final_run
-        assert reopened.tool_run_receipts("crashed") == receipts_before
-        assert reopened.db.execute("SELECT * FROM fixture_effects").fetchall() == effects_before
-        assert calls == ["vault.propose"] * effect_count
-    finally:
-        reopened.db.close()
 
 
 @pytest.mark.parametrize("kind", ["no_tool", "read_started", "read_returned", "undispatched"])

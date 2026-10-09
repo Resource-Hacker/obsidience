@@ -340,24 +340,3 @@ def action_schema(allowed: list[str], *, completion_no_change: bool = False, com
         choices.append(_schema_object({"tool": {"type": "string", "enum": [name]},
                                        "args": args}, ("tool", "args")))
     return {"anyOf": choices}
-
-
-def decoder_action_schema(allowed: list[str], *, completion_no_change: bool = False, completion_blocked: bool = False,
-                          proposal_mode: str = "") -> dict:
-    """Keep exact argument structure without exponential grammar repetitions.
-
-    llama.cpp expands nested finite string/array bounds into grammar rules.
-    Canonical contracts and adapters retain those bounds; the decoding grammar
-    enforces types, required keys, enums and closed property sets. The request's
-    output-token limit bounds generation before adapter validation.
-    """
-    def structural(value):
-        if isinstance(value, dict):
-            return {key: structural(item) for key, item in value.items()
-                    if key not in {"maxLength", "maxItems", "maxProperties"}}
-        if isinstance(value, list):
-            return [structural(item) for item in value]
-        return value
-    return structural(action_schema(allowed, completion_no_change=completion_no_change,
-                                    completion_blocked=completion_blocked,
-                                    proposal_mode=proposal_mode))

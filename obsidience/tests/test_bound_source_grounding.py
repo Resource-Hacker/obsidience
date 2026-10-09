@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-from copy import deepcopy
 import hashlib
 import json
 from types import SimpleNamespace as NS
@@ -181,34 +180,3 @@ def test_no_change_rejects_malformed_source_citations(capture, evidence):
     assert not result["accepted"] and "evidence is invalid" in result["error"]
 
 
-def test_executor_rejects_hallucinated_fetch_then_reads_exact_source(execution, capture, monkeypatch):
-    execution.task.ref = "Tasks/research/learn"
-    execution.task.title = "Learn"
-    execution.task.meta["params"] = deepcopy(capture.params)
-    execution.tools.extend(["web.fetch", "source.read"])
-    actions = iter([
-        {"tool": "web.fetch", "args": {"url": "https://example.com/unrelated"}},
-        {"tool": "source.read", "args": {"source": CITATION}},
-        {"tool": "web.fetch", "args": {"url": "https://example.com/report"}},
-        {"tool": "task.complete", "args": {"status": "failed", "summary": "Bounded fixture end."}},
-    ])
-
-    async def response(*_args, **_kwargs):
-        return NS(content=json.dumps(next(actions)), prompt_tokens=100)
-
-    def dispatch(name, args, ctx):
-        execution.calls.append((name, args))
-        if name == "source.read":
-            return read.execute(args, ctx)
-        if name == "task.complete":
-            return complete.execute(args, ctx)
-        return "Reporting source fetched."
-
-    monkeypatch.setattr(executor.llm, "chat", response)
-    monkeypatch.setattr(executor, "execute_capability", dispatch)
-    result = asyncio.run(execution.run(interactive=False, runtime_params=None))
-    assert result["status"] == "failed"
-    assert [name for name, _args in execution.calls] == ["source.read", "web.fetch", "task.complete"]
-    rows = json.loads(execution.records[0]["trace"])
-    refused = next(row for row in rows if row.get("not_dispatched"))
-    assert refused["tool"] == "web.fetch" and "activating Source" in refused["obs"]

@@ -238,6 +238,50 @@ def tool_schemas(allowed):
     return schemas
 
 
+# A specialist Task's action protocol. Its procedure, not a conversation, owns
+# the work: each decision is one native Tool call and only task.complete finishes.
+TASK_PROTOCOL = """\
+## Action protocol
+Use the supplied native function Tools for every operation: call exactly one
+Tool per response. To finish, call task.complete with the arguments required by
+its selected Tool and Skill contract. Completion requirements depend on the Task.
+Do not assume status and summary alone suffice for an evidence-bound inspection.
+Outcome and evidence belong in separate arguments when the contract requires them.
+Use private reasoning when available, but never write a Tool call as text or JSON,
+and never invent tool names.
+"""
+
+NO_TOOL_CALL_FEEDBACK = ('No native Tool call was returned. Call exactly one authorized Tool; '
+                         'finish with task.complete.')
+
+
+def task_tool_schemas(names, *, completion_no_change=False, completion_blocked=False, proposal_mode=''):
+    """A specialist step's native schemas: its narrowed Tools under the active contract.
+
+    The proposal and completion modes shape vault.propose and task.complete as the
+    step's contract requires; the complete code-owned schema is still validated
+    before dispatch and the capability owner enforces the contract.
+    """
+    from ..capabilities.registry import action_schema
+    schemas = []
+    for name in sorted(names):
+        choice = action_schema([name], completion_no_change=completion_no_change,
+                               completion_blocked=completion_blocked, proposal_mode=proposal_mode)['anyOf'][0]
+        schemas.append({'name': name, 'description': DESCRIPTIONS[name],
+                        'parameters': native_schema(choice['properties']['args'])})
+    return schemas
+
+
+def step_budget_notice(remaining: int) -> str:
+    """A specialist Task's remaining model decisions, carried with each Tool result."""
+    if remaining == 1:
+        return "Execution budget: 1 model decision remains. FINAL STEP — call task.complete with the actual delivery outcome."
+    return (
+        f"Execution budget: {remaining} model decisions remain, including task.complete. "
+        "Reserve the Runbook's required delivery or publication steps before completion."
+    )
+
+
 def unavailable_text(allowed) -> str:
     """The model-facing result of a call outside the current dispatch policy."""
     return 'Capability unavailable at this boundary; no Tool dispatched.' + (
@@ -323,7 +367,10 @@ def cue_only(status: str, ctx: dict, steered: bool, trace: list) -> bool:
 
 async def settle_model_step(state, operate, text: str, has_calls: bool, reason: str, *,
                             allowed, ctx: dict, trace: list, emit, voice=None) -> str | None:
-    """Apply the completion policy to one finished model step.
+    """Apply the Executive's completion policy to one finished model step.
+
+    ``state`` is the activation's plugin (strikes, failure and its capability
+    execution ``ex``).
 
     Plain text crosses the completion authority (``operate('task.complete')``);
     a textual Tool imitation is never executed; one empty complete stop gets one
@@ -338,9 +385,9 @@ async def settle_model_step(state, operate, text: str, has_calls: bool, reason: 
         else:
             from ..capabilities.task.complete import native_text_arguments
             result = await operate('task.complete', native_text_arguments(text.strip(), ctx))
-        if not state.dispatch.done and voice is not None:
+        if not state.ex.done and voice is not None:
             await voice.retract(halt=True)  # Never voice a rejected reply further.
-        if state.dispatch.done:
+        if state.ex.done:
             return None
         return '\n'.join(block['text'] for block in result if block['type'] == 'text')
     if not has_calls and reason == 'stop':
@@ -348,7 +395,7 @@ async def settle_model_step(state, operate, text: str, has_calls: bool, reason: 
         trace.append({'invalid_native_response': 'empty_public_response',
                       'attempt': state.strikes['empty'], 'recovery': 'failed' if failed else 'continuation'})
         if failed:
-            emit('error', state.dispatch.summary)
+            emit('error', state.ex.summary)
             return None
         # A complete empty response has no action to replay. Prior Tool results
         # stay in history and the next boundary still enforces cancellation and budgets.

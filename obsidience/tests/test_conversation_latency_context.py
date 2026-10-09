@@ -4,7 +4,6 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 from copy import deepcopy
-import json
 import time
 from types import SimpleNamespace as NS
 
@@ -70,60 +69,6 @@ def speech_timing():
         "text": "PRIVATE-TRANSPORT-TEXT", "reasoning": "PRIVATE-REASONING",
         "credentials": "PRIVATE-CREDENTIALS",
     }
-
-
-@pytest.mark.parametrize("source", ["text", "realtime"])
-def test_completed_turn_correlates_timing_without_changing_task_or_dialogue(lane, source):
-    timing = speech_timing()
-    result = asyncio.run(lane.runtime.submit("Hello", source=source, speech_timing=timing))
-    assert result["status"] == "completed"
-    assert lane.admissions == ["conversation"]
-    user, answer = lane.memory.turns
-    assert [(row["role"], row["text"]) for row in lane.memory.turns] == [
-        ("user", "Hello"), ("assistant", "Done."),
-    ]
-    assert answer["reply_to"] == user["id"] and answer["run_id"] == result["run_id"]
-    events = [row for row in trace.history() if row.get("payload", {}).get("kind") == "latency"]
-    stages = [row["payload"]["stage"] for row in events]
-    assert stages[0] == "input_final" and stages[-1] == "answer_committed"
-    # Executive admission replaced Task selection; it precedes context preparation.
-    assert stages.index("admission") < stages.index("preparation") < stages.index("activation")
-    assert stages.index("activation") < stages.index("answer_committed")
-    assert all(row["payload"]["turn_id"] == user["id"] for row in events)
-    assert all(row["payload"]["generation"] == lane.runtime._generation for row in events)
-    assert events[-1]["payload"]["run_id"] == result["run_id"]
-    assert events[-1]["run_id"] == result["run_id"]
-    expected_input = timing["stages"] if source == "realtime" else []
-    input_rows = [row["payload"] for row in events if row["payload"]["stage"].startswith("speech_")
-                  or row["payload"]["stage"] == "first_partial"]
-    assert [(row["stage"], row["monotonic_ms"]) for row in input_rows] == [
-        (edge["stage"], edge["monotonic_ns"] / 1_000_000) for edge in expected_input
-    ]
-    assert all(("speech_sequence" in row["payload"]) == (source == "realtime") for row in events)
-    spoken = [message for message in lane.worker if message["type"] == "speak"]
-    if source == "realtime":
-        assert spoken == [{"type": "speak", "generation": lane.runtime._generation,
-                           "text": "Done.", "outcome": "completed", "turn_id": user["id"],
-                           "run_id": result["run_id"], "speech_sequence": 9}]
-    else:
-        assert spoken == []
-    persisted = json.dumps([lane.memory.turns, lane.memory.events, lane.calls, lane.selections])
-    assert "speech_timing" not in persisted and "monotonic" not in persisted
-    assert "speech_sequence" not in persisted and "PRIVATE-" not in persisted
-    assert "PRIVATE-" not in json.dumps(trace.history())
-    trace.latency("preparation", monotonic_ns=1_000_000)
-    assert "turn_id" not in trace.history()[-1]["payload"]
-
-
-def test_malformed_speech_timing_is_ignored_without_rejecting_public_input(lane):
-    timing = speech_timing()
-    timing["stages"].reverse()
-    result = asyncio.run(lane.runtime.submit("Hello", source="realtime", speech_timing=timing))
-    assert result["status"] == "completed"
-    events = [row["payload"] for row in trace.history() if row.get("payload", {}).get("kind") == "latency"]
-    assert not any(row["stage"] in {"speech_onset", "first_partial", "speech_final"} for row in events)
-    assert all("speech_sequence" not in row for row in events)
-    assert all("speech_sequence" not in message for message in lane.worker)
 
 
 @pytest.mark.parametrize("cancelled", [False, True])

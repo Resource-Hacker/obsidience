@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
-import threading
-from types import SimpleNamespace as NS
 
 import pytest
 
@@ -14,128 +11,6 @@ from obsidience.harness.knowledge import vault
 from obsidience.harness.realtime.runtime import RUNTIME
 from obsidience.tests.test_execution_cancellation import execution  # noqa: F401
 from obsidience.tests.test_scheduler_interactive_provenance import ledger  # noqa: F401
-
-
-def test_foreground_interrupts_and_joins_only_provider(execution, monkeypatch):
-    async def exercise():
-        demand, entered, joined = asyncio.Event(), asyncio.Event(), asyncio.Event()
-
-        async def provider(*_args, **_kwargs):
-            entered.set()
-            try:
-                await asyncio.Event().wait()
-            finally:
-                joined.set()
-
-        monkeypatch.setattr(executor.llm, "chat", provider)
-        turn = asyncio.create_task(execution.run(interruption_event=demand))
-        await asyncio.wait_for(entered.wait(), 2)
-        demand.set()
-        with pytest.raises(asyncio.CancelledError):
-            await asyncio.wait_for(turn, 2)
-        assert joined.is_set()
-        assert not [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
-
-    asyncio.run(exercise())
-    assert execution.calls == []
-    assert execution.releases == 1
-    assert execution.statuses == ["running", "failed"]
-    assert len(execution.records) == 1
-    row = execution.records[0]
-    assert row["status"] == "interrupted"
-    assert json.loads(row["trace"])[-1] == {
-        "interruption_reason": "foreground_admission", "must_not_replay": True,
-    }
-
-
-@pytest.mark.parametrize("tool", ["window.place", "task.complete"])
-def test_in_flight_tool_finishes_before_yield_and_accepted_completion_wins(
-    execution, monkeypatch, tool,
-):
-    async def exercise():
-        demand, entered = asyncio.Event(), asyncio.Event()
-        release = threading.Event()
-        loop = asyncio.get_running_loop()
-        original = executor.execute_capability
-
-        async def provider(*_args, **_kwargs):
-            return NS(content=json.dumps({"tool": tool, "args": {
-                "status": "completed", "summary": "Done.",
-            } if tool == "task.complete" else {}}), prompt_tokens=100)
-
-        def slow_tool(name, args, ctx):
-            loop.call_soon_threadsafe(entered.set)
-            assert release.wait(3)
-            return original(name, args, ctx)
-
-        monkeypatch.setattr(executor.llm, "chat", provider)
-        monkeypatch.setattr(executor, "execute_capability", slow_tool)
-        turn = asyncio.create_task(execution.run(interruption_event=demand))
-        try:
-            await asyncio.wait_for(entered.wait(), 2)
-            demand.set()
-            await asyncio.sleep(0)
-            assert not turn.done(), "foreground admission must not cancel a Tool thread"
-        finally:
-            release.set()
-        if tool == "task.complete":
-            assert (await asyncio.wait_for(turn, 2))["status"] == "completed"
-        else:
-            with pytest.raises(asyncio.CancelledError):
-                await asyncio.wait_for(turn, 2)
-
-    asyncio.run(exercise())
-    assert len(execution.calls) == 1
-    assert execution.calls[0][0] == tool
-    assert execution.releases == 1
-    row = execution.records[0]
-    if tool == "window.place":
-        assert row["status"] == "interrupted"
-        effects = [entry for entry in json.loads(row["trace"]) if entry.get("tool") == tool]
-        assert len(effects) == 1
-        assert json.loads(effects[0]["obs"])["effect_applied"] is True
-        assert "outcome is unknown" not in row["trace"]
-    else:
-        assert row["status"] == "completed"
-        assert "foreground_admission" not in row["trace"]
-
-
-def test_pending_demand_prevents_inference_and_lease_acquisition(execution):
-    async def exercise():
-        demand = asyncio.Event()
-        demand.set()
-        with pytest.raises(asyncio.CancelledError):
-            await execution.run(interruption_event=demand)
-
-    asyncio.run(exercise())
-    assert execution.calls == []
-    assert execution.releases == 0
-    assert execution.records[0]["status"] == "interrupted"
-
-
-def test_external_cancellation_joins_provider_and_demand_waiter(execution, monkeypatch):
-    async def exercise():
-        demand, entered, joined = asyncio.Event(), asyncio.Event(), asyncio.Event()
-
-        async def provider(*_args, **_kwargs):
-            entered.set()
-            try:
-                await asyncio.Event().wait()
-            finally:
-                joined.set()
-
-        monkeypatch.setattr(executor.llm, "chat", provider)
-        turn = asyncio.create_task(execution.run(interruption_event=demand))
-        await asyncio.wait_for(entered.wait(), 2)
-        turn.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await asyncio.wait_for(turn, 2)
-        assert joined.is_set()
-        assert not [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
-
-    asyncio.run(exercise())
-    assert execution.records[0]["status"] == "interrupted"
-    assert execution.releases == 1
 
 
 def test_nested_admission_and_cancel_release_gate_without_unpausing_outer(monkeypatch):

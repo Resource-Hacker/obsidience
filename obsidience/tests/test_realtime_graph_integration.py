@@ -3,13 +3,13 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import replace
-from types import SimpleNamespace
 
 import pytest
 
 from obsidience.harness.conversation import runtime as conversation_runtime
 from obsidience.harness.execution import activity as knowledge_activity
 from obsidience.harness.execution import executor, scheduler
+from obsidience.harness.execution.adk import runner as adk_runner
 from obsidience.harness.execution.executor import compile_activation
 from obsidience.harness.conversation.runtime import (
     ConversationRuntime,
@@ -18,9 +18,7 @@ from obsidience.harness.conversation.runtime import (
 from obsidience.harness.knowledge import index as indexer
 from obsidience.harness.knowledge.tasks import TASK_TAXONOMY_BY_PATH
 from obsidience.harness.knowledge.vault import resolver
-from obsidience.harness.models import llm
 from obsidience.harness.models.context import PayloadCount
-from obsidience.harness.models import runtime as model_runtime
 from obsidience.harness.realtime.runtime import (
     REALTIME_CONFIRMATION,
     RUNTIME,
@@ -227,7 +225,7 @@ def test_scheduled_leaf_uses_one_task_runbook_objective_everywhere(monkeypatch) 
         capture_retrieval,
     )
     monkeypatch.setattr(knowledge_activity, "emit", capture_activity)
-    monkeypatch.setattr(executor, "_execute_session", complete_without_a_model)
+    monkeypatch.setattr(adk_runner, "run_adk_session", complete_without_a_model)
     monkeypatch.setattr(executor.INDEX, "record_run", lambda **fields: runs.append(fields))
     monkeypatch.setattr(executor.INDEX, "sync", lambda **_kwargs: None)
 
@@ -400,157 +398,6 @@ def test_realtime_exposes_the_exact_transcript_given_to_the_task(monkeypatch) ->
         ({"text": "Can you hear me?", "final": True}, False),
     ]
     assert accepted == ["Can you hear me?"]
-
-
-def test_interactive_task_completes_through_normal_tool(monkeypatch):
-    task = resolver().resolve("Tasks/query")
-    model = model_runtime.resolve_model(task.meta.get("model"), "Agents/Executive/Executive")
-    class Lease:
-        async def __aenter__(self): return self
-        async def __aexit__(self, *_args): return None
-    async def reply(*_args, **_kwargs):
-        return llm.ChatReply(content='{"tool":"task.complete","args":{"status":"completed","summary":"Yes, I can hear you."}}', finish_reason="stop", completion_tokens=8)
-    monkeypatch.setattr(llm, "chat", reply)
-    monkeypatch.setattr(model_runtime, "lease", lambda _: Lease())
-    monkeypatch.setattr(model_runtime, "configured_spec", lambda _: model)
-    trace, status, summary = asyncio.run(executor._execute_session(
-        task, model, [{"role":"system","content":llm.PROTOCOL}],
-        ["task.complete"], {"interactive":True, "task":task.ref}, "Executive", "none",
-    ))
-    assert status == "completed" and summary == "Yes, I can hear you."
-    assert trace[-1]["tool"] == "task.complete"
-
-def test_visual_observation_reaches_only_the_ephemeral_model_message(monkeypatch) -> None:
-    # The Executive Operate Task is retired; any Task exercises the session.
-    task = SimpleNamespace(ref="Tasks/fixture/visual", title="Visual", kind="task", meta={})
-    model = model_runtime.resolve_model(
-        task.meta.get("model"), "Agents/Executive/Executive",
-    )
-    assert "vision" in model.capabilities
-
-    class Lease:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *_args):
-            return None
-
-    replies = iter((
-        '{"tool":"computer.observe","args":{"target":{"kind":"pane",'
-        '"name":"reader"},"query":"What is visible?"}}',
-        '{"tool":"task.complete","args":{"summary":"The Reader is showing Source.","status":"completed"}}',
-    ))
-    requests: list[list[dict]] = []
-
-    async def reply(messages, **_kwargs):
-        requests.append(json.loads(json.dumps(messages)))
-        return llm.ChatReply(
-            content=next(replies), finish_reason="stop", completion_tokens=8,
-        )
-
-    def execute_capability(name: str, _args: dict, _ctx: dict):
-        if name == "task.complete":
-            return {"accepted": True, "status": "completed", "summary": _args["summary"]}
-        assert name == "computer.observe"
-        return {
-            "observation": {
-                "status": "observed",
-                "target": {"kind": "pane", "name": "reader"},
-            },
-            "_private_image_png": b"pixels",
-        }
-
-    monkeypatch.setattr(llm, "chat", reply)
-    monkeypatch.setattr(model_runtime, "configured_spec", lambda _model_id: model)
-    monkeypatch.setattr(model_runtime, "lease", lambda _model: Lease())
-    monkeypatch.setattr(executor, "execute_capability", execute_capability)
-    # The executor dispatches through the async registry entry; never reach real Tools.
-    monkeypatch.setattr(executor, "execute_capability_async",
-                        lambda name, args, ctx: asyncio.to_thread(execute_capability, name, args, ctx))
-
-    trace, status, summary = asyncio.run(executor._execute_session(
-        task,
-        model,
-        [{"role": "system", "content": llm.PROTOCOL}],
-        ["computer.observe", "task.complete"],
-        {"interactive": True, "task": task.ref},
-        "Executive",
-        "none",
-    ))
-
-    assert status == "completed"
-    assert summary == "The Reader is showing Source."
-    visual_message = requests[1][-1]
-    assert visual_message["role"] == "user"
-    assert visual_message["content"][0]["type"] == "text"
-    assert visual_message["content"][1] == {
-        "type": "image_url",
-        "image_url": {"url": "data:image/png;base64,cGl4ZWxz"},
-    }
-    persisted = json.dumps(trace)
-    assert "_private_image_png" not in persisted
-    assert "pixels" not in persisted
-
-
-def test_visual_observation_fails_before_capture_for_a_text_only_model(monkeypatch) -> None:
-    # The Executive Operate Task is retired; any Task exercises the session.
-    task = SimpleNamespace(ref="Tasks/fixture/visual", title="Visual", kind="task", meta={})
-    selected = model_runtime.resolve_model(
-        task.meta.get("model"), "Agents/Executive/Executive",
-    )
-    model = replace(selected, capabilities=("text", "reasoning", "tools"))
-
-    class Lease:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *_args):
-            return None
-
-    replies = iter((
-        '{"tool":"computer.observe","args":{"target":{"kind":"focused"},'
-        '"query":"What is visible?"}}',
-        '{"tool":"task.complete","args":{"summary":"Visual evidence is unavailable to this model.","status":"completed"}}',
-    ))
-    requests: list[list[dict]] = []
-
-    async def reply(messages, **_kwargs):
-        requests.append(json.loads(json.dumps(messages)))
-        return llm.ChatReply(
-            content=next(replies), finish_reason="stop", completion_tokens=8,
-        )
-
-    def should_not_capture(name, args, _ctx):
-        if name == "task.complete":
-            return {"accepted": True, "status": "completed", "summary": args["summary"]}
-        raise AssertionError("computer.observe must not capture for a text-only model")
-
-    monkeypatch.setattr(llm, "chat", reply)
-    monkeypatch.setattr(model_runtime, "configured_spec", lambda _model_id: model)
-    monkeypatch.setattr(model_runtime, "lease", lambda _model: Lease())
-    monkeypatch.setattr(executor, "execute_capability", should_not_capture)
-    # The executor dispatches through the async registry entry; never reach real Tools.
-    monkeypatch.setattr(executor, "execute_capability_async",
-                        lambda name, args, ctx: asyncio.to_thread(should_not_capture, name, args, ctx))
-
-    trace, status, _summary = asyncio.run(executor._execute_session(
-        task,
-        model,
-        [{"role": "system", "content": llm.PROTOCOL}],
-        ["computer.observe", "task.complete"],
-        {"interactive": True, "task": task.ref},
-        "Executive",
-        "none",
-    ))
-
-    assert status == "completed"
-    assert "model_has_no_vision" in requests[1][-1]["content"]
-    assert "model_has_no_vision" in trace[0]["obs"]
-
-
-def test_reply_only_protocol_is_not_accepted():
-    assert llm.parse_action('{"reply":"skip verification"}') is None
-    assert not hasattr(llm, "REALTIME_PROTOCOL")
 
 
 @pytest.mark.parametrize("text", ["Hello there", "Move TFT to the Samsung"])

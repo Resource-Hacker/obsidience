@@ -135,6 +135,12 @@ def _without_budget_notice(text: str) -> str:
     return _BUDGET_NOTICE.sub('', text)
 
 
+def split_budget_notice(text: str) -> tuple[str, str]:
+    """A Tool result's text and its trailing step-budget notice ('' when none)."""
+    match = _BUDGET_NOTICE.search(text)
+    return (text[:match.start()], match.group(0)) if match and match.end() == len(text) else (text, '')
+
+
 def _command_record(message: dict) -> dict | None:
     try:
         record = json.loads(message['content'][0]['text'])
@@ -378,10 +384,14 @@ def fast_lane_eligible(spec, effort: str, images: dict, payload: dict) -> bool:
                 for row in payload['messages']))
 
 
-def request_payload(messages, spec, effort, tools):
-    """One native provider representation for execution and disposable prefill."""
+def request_payload(messages, spec, effort, tools, *, task=False):
+    """One native provider representation for execution and disposable prefill.
+
+    A specialist Task (``task``) receives the Task guidance, not the
+    conversational one.
+    """
     payload = llm._chat_payload(messages, spec, max_tokens=spec.max_output_tokens,
-                                temperature=None, reasoning_effort=effort, native_tools=True)
+                                temperature=None, reasoning_effort=effort, native_tools=not task)
     payload.pop('response_format', None)
     payload['tools'] = [{'type': 'function', 'function': tool} for tool in tools]
     payload['parallel_tool_calls'] = False

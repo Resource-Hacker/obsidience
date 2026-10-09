@@ -1,7 +1,6 @@
 """Typed Tool contracts and narrow exact-source instruction compilation."""
 from dataclasses import replace
 import pytest
-import json
 from obsidience.harness.capabilities import registry
 from obsidience.harness.execution import executor
 from obsidience.harness.knowledge.vault import Note, Resolver, resolver
@@ -46,18 +45,6 @@ def test_required_context_fails_closed_when_revoked_or_stale():
         executor._required_context(task,agent,{},Resolver([stale]),{rule.ref})
 
 
-def test_decoder_schema_keeps_tool_structure_without_expanding_size_bound_repetitions():
-    from obsidience.harness.capabilities.registry import action_schema, decoder_action_schema
-    canonical = action_schema(['task.complete', 'task.create'])
-    decoded = decoder_action_schema(['task.complete', 'task.create'])
-    assert 'maxLength' in json.dumps(canonical)
-    assert 'maxLength' not in json.dumps(decoded) and 'maxItems' not in json.dumps(decoded)
-    assert [item['properties']['tool'] for item in canonical['anyOf']] == [item['properties']['tool'] for item in decoded['anyOf']]
-    assert all(item['additionalProperties'] is False and item['required'] == ['tool','args'] for item in decoded['anyOf'])
-    assert 'required' in json.dumps(decoded) and 'enum' in json.dumps(decoded)
-    assert action_schema(['task.complete','task.create']) == canonical
-
-
 def test_shipped_articles_use_native_okf_namespacing():
     from obsidience.harness.config import CONFIG
     from obsidience.harness.knowledge.format import parse, validate_profile
@@ -71,25 +58,3 @@ def test_shipped_articles_use_native_okf_namespacing():
     assert failures == []
 
 
-def test_evidence_bound_completion_schema_requires_fields_without_forcing_success():
-    from obsidience.harness.capabilities.task.complete import completion_requires_no_change
-    from obsidience.harness.models import llm, runtime
-    ctx={'task':'Tasks/link','maintenance_candidate':{'candidate_refs':['A','B']}}
-    assert completion_requires_no_change(ctx)
-    payload=llm._chat_payload([{'role':'user','content':'Finish the inspection.'}],
-        runtime.MODELS[runtime.EXECUTIVE_MODEL], max_tokens=100, temperature=0,
-        reasoning_effort='none', allowed_tools=['task.complete'], completion_no_change=True)
-    branches=payload['response_format']['json_schema']['schema']['anyOf'][0]['properties']['args']['anyOf']
-    success, other=branches
-    assert success['properties']['status']=={'const':'completed'}
-    assert success['properties']['outcome']=={'const':'no_change'}
-    assert {'outcome','evidence'} <= set(success['required'])
-    assert success['properties']['evidence']['minItems']==1
-    # The non-success branch is explicitly failed: without status it would
-    # bypass the evidence contract and default to completed.
-    assert other['properties']['status']=={'const':'failed'}
-    assert 'status' in other['required'] and 'outcome' not in other['required']
-    assert not completion_requires_no_change({'task':'Tasks/query'})
-    assert not completion_requires_no_change({**ctx,'staged_proposals':[{'auto_approved':True,'target':'A.md'}]})
-    assert not completion_requires_no_change({**ctx,'staged_proposals':[{'staged':'','target':'A.md'}]})
-    assert 'outcome' not in registry.argument_schema('task.complete')['required']

@@ -48,7 +48,6 @@ def test_whole_request_count_preserves_template_settings():
     payload = llm._chat_payload(
         [{"role": "user", "content": "test"}], spec,
         max_tokens=128, temperature=0, reasoning_effort="low",
-        allowed_tools=["vault.read", "task.complete"],
     )
 
     def handler(request):
@@ -61,42 +60,6 @@ def test_whole_request_count_preserves_template_settings():
             assert await context.count_payload(payload, spec, client) == 37
 
     asyncio.run(run())
-
-
-def test_gemma_projection_is_selected_by_family_and_does_not_mutate_packet():
-    messages = [{"role": "system", "content": "Task rules"},
-                {"role": "user", "content": "# Thinking Packet\n## Objective\nExact request"}]
-    payload = llm._chat_payload(messages, MODELS[EXECUTIVE_MODEL], max_tokens=None,
-                                temperature=0, reasoning_effort="low",
-                                allowed_tools=["window.place", "task.complete"])
-    assert payload["messages"][1] == messages[1]
-    assert messages[0]["content"] == "Task rules"
-    assert "Reason briefly" in payload["messages"][0]["content"]
-    assert "<|think|>" not in payload["messages"][0]["content"]
-    assert payload["chat_template_kwargs"] == {"enable_thinking": True}
-    schema = payload["response_format"]["json_schema"]["schema"]
-    branches = schema["anyOf"]
-    assert [row["properties"]["tool"]["enum"][0] for row in branches] == ["task.complete", "window.place"]
-    assert all(row["required"] == ["tool", "args"] and not row["additionalProperties"] for row in branches)
-    assert branches[1]["properties"]["args"]["required"] == ["target", "destination"]
-
-
-    # Use an explicit non-Gemma family.
-    other = llm._chat_payload(messages, replace(MODELS[EXECUTIVE_MODEL], family="qwen38"), max_tokens=None,
-                              temperature=0, reasoning_effort="none",
-                              allowed_tools=["window.place", "task.complete"])
-    assert other["messages"] == messages
-    assert other["response_format"]["json_schema"]["schema"] == schema
-
-    unsupported = llm._chat_payload(
-        messages,
-        replace(MODELS[EXECUTIVE_MODEL], supports_json_schema=False),
-        max_tokens=None,
-        temperature=0,
-        reasoning_effort="none",
-        allowed_tools=["window.place"],
-    )
-    assert unsupported["response_format"] == {"type": "json_object"}
 
 
 def test_every_chat_checks_budget_before_generation(monkeypatch):
@@ -177,22 +140,3 @@ def test_activation_packet_preserves_long_exact_objective(monkeypatch):
     assert "## Objective\n" + objective + "\n\n## Tools" in packet
 
 
-@pytest.mark.parametrize("action", [
-    {"reply": "Done."},
-    {"tool": "task.complete", "args": {}, "reply": "Done."},
-    {"tool": "task.complete"},
-    {"tool": "", "args": {}},
-    {"tool": "task.complete", "args": "Done."},
-])
-def test_one_action_protocol_rejects_reply_and_malformed_tool_objects(action):
-    text = json.dumps(action)
-    assert llm.parse_action(text) is None
-    assert llm.action_parse_error(text) != "unknown action parse failure"
-
-
-def test_one_action_protocol_accepts_completion_summary():
-    action = {
-        "tool": "task.complete",
-        "args": {"status": "completed", "summary": "The requested window is in place."},
-    }
-    assert llm.parse_action(json.dumps(action)) == action

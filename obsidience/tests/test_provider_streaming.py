@@ -174,14 +174,6 @@ def test_controller_response_schema_uses_existing_stream_and_token_accounting(mo
     assert payload["chat_template_kwargs"]["enable_thinking"] is False
 
 
-@pytest.mark.parametrize("allowed_tools", [[], ["task.complete"]])
-def test_controller_schema_cannot_share_tool_response_authority(allowed_tools):
-    with pytest.raises(ValueError, match="mutually exclusive"):
-        llm._chat_payload([], MODELS[EXECUTIVE_MODEL], max_tokens=192,
-                          temperature=0, reasoning_effort="none",
-                          allowed_tools=allowed_tools, response_schema={"type": "object"})
-
-
 def test_controller_schema_fails_closed_without_provider_support():
     with pytest.raises(ValueError, match="does not support"):
         llm._chat_payload([], replace(MODELS[EXECUTIVE_MODEL], supports_json_schema=False),

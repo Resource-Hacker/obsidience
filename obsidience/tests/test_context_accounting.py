@@ -214,7 +214,7 @@ def test_compiler_accounting_is_visible_but_provider_payloads_are_identical(monk
             messages = [{"role": role, "content": compiled[key]} for role, key in (
                 ("system", "provider_system"), ("user", "provider_conversation"), ("user", "provider_user"))]
             requests.append(llm._chat_payload(messages, MODELS[model], max_tokens=None, temperature=0,
-                                              reasoning_effort="none", allowed_tools=["task.complete"]))
+                                              reasoning_effort="none"))
         assert requests[0] == requests[1]
         assert "knowledge_accounting" not in json.dumps(requests[1])
 

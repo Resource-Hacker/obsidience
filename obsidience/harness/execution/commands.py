@@ -1,4 +1,4 @@
-"""Literal single-command recognition; CapabilityDispatch still owns effects."""
+"""Literal single-command recognition; the capability core still owns effects."""
 from __future__ import annotations
 
 from functools import lru_cache

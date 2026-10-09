@@ -1,7 +1,8 @@
-"""LLM client (OpenAI-compatible local server) + the JSON action protocol.
+"""LLM client for the OpenAI-compatible local model server.
 
-The model reasons privately and emits one provider-constrained JSON action on
-the public channel: one path, debuggable, and reliable with small local models.
+Builds the model-family request (template switches, private reasoning budget,
+Gemma guidance) shared with the ADK loop's native projection, and streams
+schema-constrained controller replies (AutoSaddler sessions).
 """
 
 from __future__ import annotations
@@ -9,7 +10,6 @@ from __future__ import annotations
 from ..execution import trace as action_trace
 
 import json
-import re
 import asyncio
 from dataclasses import dataclass
 from contextlib import asynccontextmanager
@@ -20,20 +20,6 @@ from httpx_sse import aconnect_sse
 from ..config import CONFIG
 from . import runtime as model_runtime
 from .runtime import ModelSpec
-
-ACTION_RE = re.compile(r"```(?:action|json)?\s*(\{.*?\})\s*```", re.DOTALL)
-
-PROTOCOL = """\
-## Action protocol
-The provider constrains your public response to one JSON object. Return only:
-{"tool": "<tool-name>", "args": { ... }}
-To finish, call task.complete with the arguments required by its selected
-Tool and Skill contract. Completion requirements depend on the Task. Do not
-assume status and summary alone suffice for an evidence-bound inspection.
-Outcome and evidence belong in separate args fields when the contract requires them.
-Use private reasoning when available, but put no commentary or Markdown in the
-public response. Never invent tool names.
-"""
 
 REASONING_BUDGETS = {"none": 0, "low": 1, "medium": 1, "high": 1, "xhigh": 1}
 CHAT_TIMEOUT_SECONDS = 300.0
@@ -109,14 +95,9 @@ def normalize_reasoning_effort(value: object) -> str:
 
 def _chat_payload(messages: list[dict], spec: ModelSpec, *, max_tokens: int | None,
                   temperature: float | None, reasoning_effort: str,
-                  allowed_tools: list[str] | None = None,
-                  response_schema: dict | None = None, completion_no_change: bool = False,
-                  completion_blocked: bool = False,
-                  proposal_mode: str = "", native_tools: bool = False) -> dict:
-    """Build one Task-owned request for the sole executor path."""
+                  response_schema: dict | None = None, native_tools: bool = False) -> dict:
+    """Build one model-family request: native projection, prefill or a controller reply."""
     if response_schema is not None:
-        if allowed_tools is not None:
-            raise ValueError("response_schema and allowed_tools are mutually exclusive")
         if not isinstance(response_schema, dict) or not response_schema:
             raise ValueError("response_schema must be a nonempty JSON schema object")
         if not spec.supports_json_schema:
@@ -165,18 +146,6 @@ def _chat_payload(messages: list[dict], spec: ModelSpec, *, max_tokens: int | No
             "json_schema": {"name": "obsidience_response", "strict": True,
                             "schema": response_schema},
         }
-    if spec.supports_json_schema and allowed_tools is not None:
-        # Use the model spec's verified backend decoder; no new tool-call parser
-        # or Tool authority. The executor still validates every argument/effect.
-        if allowed_tools:
-            from ..capabilities.registry import decoder_action_schema
-            payload["response_format"] = {
-                "type": "json_schema",
-                "json_schema": {"name": "obsidience_action", "strict": True,
-                                "schema": decoder_action_schema(allowed_tools, completion_no_change=completion_no_change,
-                                                                completion_blocked=completion_blocked,
-                                                                proposal_mode=proposal_mode)},
-            }
     if reasoning_effort != "none":
         payload["reasoning_format"] = "auto"
         payload["reasoning_budget_tokens"] = spec.reasoning_budgets[reasoning_effort]
@@ -187,20 +156,14 @@ async def chat(messages: list[dict], max_tokens: int | None = None,
                temperature: float | None = None,
                reasoning_effort: str | None = None,
                model: ModelSpec | None = None,
-               allowed_tools: list[str] | None = None,
                task_context=None,
-               response_schema: dict | None = None, completion_no_change: bool = False,
-               completion_blocked: bool = False,
-               measurements: bool = True, proposal_mode: str = "") -> ChatReply:
+               response_schema: dict | None = None,
+               measurements: bool = True) -> ChatReply:
     effort = normalize_reasoning_effort(reasoning_effort)
     spec = model or model_runtime.resolve_model(None, "Agents/Executive/Executive")
     payload = _chat_payload(
         messages, spec, max_tokens=max_tokens, temperature=temperature,
-        reasoning_effort=effort,
-        allowed_tools=allowed_tools,
-        response_schema=response_schema, completion_no_change=completion_no_change,
-        completion_blocked=completion_blocked,
-        proposal_mode=proposal_mode,
+        reasoning_effort=effort, response_schema=response_schema,
     )
     from .context import PROMPT_SAFETY_TOKENS, TaskContext
 
@@ -304,60 +267,3 @@ async def _stream_reply(client: httpx.AsyncClient, payload: dict,
     if measurements:
         action_trace.latency("model_complete", duration_ms=metrics["generation_ms"])
     return "".join(chunks), finish_reason, completion_tokens
-
-
-def parse_action(text: str) -> dict | None:
-    def valid(obj: object) -> bool:
-        if not isinstance(obj, dict):
-            return False
-        return (
-            set(obj) == {"tool", "args"}
-            and isinstance(obj["tool"], str)
-            and bool(obj["tool"].strip())
-            and isinstance(obj["args"], dict)
-        )
-
-    m = ACTION_RE.search(text)
-    if not m:
-        # tolerate a bare top-level JSON object
-        stripped = text.strip()
-        if stripped.startswith("{") and stripped.endswith("}"):
-            try:
-                # Local models sometimes emit literal newlines inside a long
-                # proposal-body string. They are harmless content but strict
-                # JSON rejects them before the Tool can validate the request.
-                obj = json.loads(stripped, strict=False)
-                return obj if valid(obj) else None
-            except json.JSONDecodeError:
-                return None
-        return None
-    try:
-        obj = json.loads(m.group(1), strict=False)
-    except json.JSONDecodeError:
-        return None
-    return obj if valid(obj) else None
-
-
-def action_parse_error(text: str) -> str:
-    """Return a bounded structural diagnostic without retaining full model output."""
-    if not text.strip():
-        return "empty public response"
-    match = ACTION_RE.search(text)
-    candidate = match.group(1) if match else text.strip()
-    try:
-        obj = json.loads(candidate, strict=False)
-    except json.JSONDecodeError as exc:
-        if not match and "```" in text:
-            return "incomplete action fence or unclosed top-level JSON object"
-        return f"JSON {exc.msg} at line {exc.lineno}, column {exc.colno}"
-    if not isinstance(obj, dict):
-        return "top-level JSON value is not an object"
-    if "tool" not in obj:
-        return "top-level JSON object has no tool field"
-    if not isinstance(obj.get("tool"), str) or not obj["tool"].strip():
-        return "top-level tool field is not a nonempty string"
-    if not isinstance(obj.get("args"), dict):
-        return "top-level JSON object has no args object"
-    if set(obj) != {"tool", "args"}:
-        return "action object contains unexpected fields"
-    return "unknown action parse failure"

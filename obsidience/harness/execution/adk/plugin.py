@@ -1,11 +1,17 @@
-"""The Executive's policy over ADK's model/Tool loop, as one per-activation plugin.
+"""An accountable Agent's policy over ADK's model/Tool loop, as one per-activation plugin.
 
 ADK sequences model steps, Tool calls and session events. This plugin holds
 what ADK has no equivalent for: the model lease around each step, the shared
 native provider projection, step and operation budgets, owner steering at
-step boundaries, the finite-choice lane, early speech, argument validation with
-three strikes, the run's narrowing dispatch policy and the completion authority
-for plain text. Every effect goes through ``capability_core.run_capability``,
+step boundaries, argument validation with three strikes and the run's
+narrowing dispatch policy. The Executive's conversation adds the finite-choice
+lane, early speech and the completion authority for plain text. A specialist
+Task (``task_mode``) keeps its procedure's contract instead: each step
+advertises only the Tools its controller state allows (Source, memory,
+Repair and Audit prerequisites) with the active proposal and completion
+schema, Tool results carry the remaining decision budget, identical repeated
+calls are refused, and only task.complete finishes.
+Every effect goes through ``capability_core.run_capability``,
 except in an instruction evaluation trial: there the trial's handler answers
 each admitted call from frozen results or a contract validator (no dispatch,
 receipt or writeback), and a captured provider prompt replaces the history.
@@ -25,12 +31,47 @@ from google.adk.plugins.base_plugin import BasePlugin
 from google.genai import types
 
 from .. import native
-from ..capability_core import CapabilityExecution, foreground_checkpoint, observation_text, run_capability
-from ..native_turn import (
-    adopt_fast_lane, argument_diagnostic, settle_model_step, tool_schemas, unavailable_text,
+from .. import trace as action_trace
+from ..capability_core import (
+    OBSERVATION_CONTEXT_FIELD, CapabilityExecution, foreground_checkpoint, observation_text, run_capability,
 )
+from ..native_turn import (
+    NO_TOOL_CALL_FEEDBACK, adopt_fast_lane, argument_diagnostic, settle_model_step, step_budget_notice,
+    task_tool_schemas, tool_schemas, unavailable_text,
+)
+from ...config import CONFIG
+from ...models import runtime as model_runtime
 from ...models.context import PROMPT_SAFETY_TOKENS, TaskContext, discard_consumed_images
 from . import sessions
+
+
+def step_budget(evaluation) -> int:
+    """The activation's model decisions: the executor limit, or an evaluation trial's own."""
+    if evaluation is None:
+        return CONFIG.max_steps
+    if type(evaluation.max_steps) is not int or not 1 <= evaluation.max_steps <= CONFIG.max_steps:
+        raise ValueError("Evaluation decision budget must be a positive integer within the executor limit")
+    return evaluation.max_steps
+
+
+def trace_emitter(evaluation):
+    """Public trace emission; every evaluation trial event is marked simulated."""
+    def emit(channel: str, line: str, detail=None, fields=None) -> None:
+        if evaluation is not None:
+            fields = {**(fields or {}), "payload": {
+                **((fields or {}).get("payload") or {}), "simulated": True,
+            }}
+            line = "Simulation · " + line
+        action_trace.emit(channel, line, detail, fields)
+    return emit
+
+
+async def acquire_model(model):
+    """Enter the model owner's lease for this model; the caller releases it."""
+    spec = model_runtime.configured_spec(model.id)
+    lease = model_runtime.lease(spec)
+    await lease.__aenter__()
+    return spec, lease
 
 
 def _text(value: str) -> dict:
@@ -72,27 +113,32 @@ def request_contents(rows: list[dict]) -> list[types.Content]:
     return contents
 
 
-class ExecutivePlugin(BasePlugin):
-    """One Executive activation's loop policy and capability state."""
+class AgentPlugin(BasePlugin):
+    """One activation's loop policy and capability state, for any accountable Agent."""
 
     def __init__(self, task, spec, allowed, ctx, agent_name, effort, *, system: str,
                  interruption_event=None, initial_lease=None, fast_lane=True, evaluation=None):
-        super().__init__(name='obsidience_executive')
-        from ..executor import TurnState
+        super().__init__(name='obsidience_activation')
+        self.task = task
+        # Agent-owned conversation (the Executive) or a specialist Task procedure.
+        self.task_mode = task.kind != 'agent'
         self.spec, self.effort, self.system, self.agent_name = spec, effort, system, agent_name
         self.evaluation = evaluation
-        self.max_steps = TurnState.budget(evaluation)
-        self.emit = TurnState.emitter(evaluation)
+        self.max_steps = step_budget(evaluation)
+        self.emit = trace_emitter(evaluation)
         self.trace = ctx.setdefault('trace', [])
         self.run = ctx['run_id']
         self.ctx = ctx
         # Advertised schemas stay byte-stable for the prompt cache; ex.allowed
         # is the run's dispatch policy, which failed or uncertain effects narrow.
         self.advertised = list(allowed)
+        # A Task step's narrowed Tools; calls outside them are never dispatched.
+        self.decision = list(allowed)
         self.ex = CapabilityExecution(task, spec, ctx, agent_name, self.trace, self.emit, list(allowed),
                                       interruption_event=interruption_event, steering=ctx.get('_steering'),
                                       active_lease=initial_lease)
-        self.state = TurnState(self.ex)
+        # Invalid decisions by kind; reaching a limit fails the activation.
+        self.strikes: dict[str, int] = {}
         self.interruption_event = interruption_event
         self.fast_lane = fast_lane and task.kind == 'agent' and task.ref == 'Agents/Executive/Executive'
         self.images: dict[str, str] = {}
@@ -104,23 +150,75 @@ class ExecutivePlugin(BasePlugin):
         self.lease_prefetch: asyncio.Task | None = None
         self._step: dict | None = None
         self._calls = asyncio.Lock()
+        # Set while the provider generates, so foreground demand can cancel
+        # unfinished inference (never a Tool in flight).
+        self.generating = asyncio.Event()
 
     # Model reservation -------------------------------------------------
     async def adopt_lease(self):
         """Adopt the reservation requested at activation start, or acquire it now."""
-        from ..executor import TurnState
         pending, self.lease_prefetch = self.lease_prefetch, None
         if pending is None:
-            return await TurnState.acquire_model(self.ex.model)
+            return await acquire_model(self.ex.model)
         try:
             return await asyncio.shield(pending)
         except BaseException:
             self.lease_prefetch = pending  # release() cancels or releases it.
             raise
 
+    async def hold_model(self, acquire=None) -> None:
+        """Hold the model lease for the next decision, measuring any wait."""
+        if self.ex.active_lease is None:
+            started = time.monotonic()
+            self.ex.model, self.ex.active_lease = await (
+                acquire() if acquire is not None else acquire_model(self.ex.model))
+            action_trace.latency("model_wait", duration_ms=(time.monotonic() - started) * 1000)
+
+    # Decision mechanics ------------------------------------------------
+    def fail(self, summary: str) -> None:
+        self.ex.done, self.ex.status, self.ex.summary = True, "failed", summary
+
+    def strike(self, kind: str, failure: str, limit: int = 3) -> bool:
+        """Count one invalid decision of this kind; reaching the limit fails the activation."""
+        self.strikes[kind] = self.strikes.get(kind, 0) + 1
+        if self.strikes[kind] < limit:
+            return False
+        self.fail(failure)
+        return True
+
+    @property
+    def steering_pending(self) -> bool:
+        return self.ex.steering is not None and self.ex.steering.pending
+
+    def take_steering(self) -> list[dict] | None:
+        """Owner clarifications void every visual witness not yet consumed."""
+        if not self.steering_pending:
+            return None
+        clarifications = self.ex.steering.take()
+        self.ex.pending_observation_lease = self.ex.pending_response_observation = None
+        discard_consumed_images(self.ex.messages)
+        return clarifications
+
+    def rotate(self) -> None:
+        """Bind pending visual witnesses to exactly the next model response."""
+        ex = self.ex
+        ex.response_observation_lease, ex.pending_observation_lease = ex.pending_observation_lease, None
+        ex.response_completion_observation, ex.pending_response_observation = ex.pending_response_observation, None
+        ex.ctx.pop("_computer_response_observation", None)
+
+    def discard_witnesses(self) -> None:
+        ex = self.ex
+        ex.response_observation_lease = ex.response_completion_observation = None
+        ex.pending_observation_lease = ex.pending_response_observation = None
+        discard_consumed_images(ex.messages)
+
+    def emit_model(self, line: str, phase: str, fields: dict, detail=None, **payload) -> None:
+        self.ex.emit("model", line, detail, {**fields, "payload": {
+            "kind": "model", "phase": phase, "model": self.ex.model.id, **payload}})
+
     def discard_observation(self) -> None:
         self.images.clear()
-        self.state.discard_witnesses()
+        self.discard_witnesses()
 
     # Tool policy -------------------------------------------------------
     async def before_tool_callback(self, *, tool, tool_args, tool_context):
@@ -130,26 +228,27 @@ class ExecutivePlugin(BasePlugin):
         """Policy before dispatch; a returned response answers the call without an effect."""
         self.last_search_refs = None
         foreground_checkpoint(self.interruption_event, self.ctx)
-        if self.ex.step >= self.max_steps:
-            self.state.fail('Executive operation budget exhausted')
+        if self.ex.step >= self.max_steps and not self.ex.done:
+            self.fail('Decision budget exhausted without an accepted completion' if self.task_mode
+                            else 'Executive operation budget exhausted')
         if self.ex.done:
             return _text('Activation already settled; no further effect is dispatched.')
-        if self.state.steering_pending:
+        if self.steering_pending:
             self.discard_observation()
             return _text('Response superseded by a current owner clarification; no Tool dispatched.')
-        if name not in self.ex.allowed:
+        if name not in self.ex.allowed or (self.task_mode and name not in self.decision):
             self.discard_observation()
             self.trace.append({'invalid_tool': name, 'not_dispatched': True,
                                'obs': 'Capability unavailable at this boundary'})
-            self.state.strike('invalid', 'Three invalid or unavailable native Tool calls')
-            return _text(unavailable_text(self.ex.allowed))
+            self.strike('invalid', 'Three invalid or unavailable native Tool calls')
+            return _text(unavailable_text(self.decision if self.task_mode else self.ex.allowed))
         if diagnostic := argument_diagnostic(name, args):
             self.discard_observation()
             self.trace.append({'invalid_tool': name, 'not_dispatched': True, 'obs': diagnostic})
             self.emit('error', f'{name} arguments rejected before dispatch', [diagnostic])
-            self.state.strike('invalid', 'Three invalid native Tool calls; no effect dispatched')
+            self.strike('invalid', 'Three invalid native Tool calls; no effect dispatched')
             return _text(diagnostic)
-        self.state.strikes['invalid'] = 0
+        self.strikes['invalid'] = 0
         return None
 
     async def dispatch(self, name: str, args: dict) -> dict:
@@ -165,9 +264,11 @@ class ExecutivePlugin(BasePlugin):
             # supply read candidates. Old or failed search prose is never parsed.
             queries = ([args.get('query')] if 'query' in args else args.get('queries', [])) if name == 'vault.search' else []
             previous = {query: self.ctx.get('_vault_searches', {}).get(query) for query in queries}
+            blocked = self._repeat_blocked(name, args) if self.task_mode and name != 'task.complete' else None
             outcome = await run_capability(
                 self.ex, name, args, execute=executor.execute_capability,
-                execute_async=executor.execute_capability_async, scope_checkpoint=executor._scope_checkpoint)
+                execute_async=executor.execute_capability_async, scope_checkpoint=executor._scope_checkpoint,
+                blocked=blocked)
             if queries:
                 current = self.ctx.get('_vault_searches', {})
                 fresh = [current.get(query) for query in queries]
@@ -176,13 +277,15 @@ class ExecutivePlugin(BasePlugin):
                     self.last_search_refs = [ref for row in fresh for ref in row['refs']]
             self.ex.step += 1
             if name == 'task.complete' and not self.ex.done:
-                self.state.strike('completion', 'Three rejected completion attempts')
+                self.strike('completion', 'Three rejected completion attempts')
             elif name != 'task.complete':
-                self.state.strikes['completion'] = 0
+                self.strikes['completion'] = 0
             if outcome.kind in {'completed', 'waiting'}:
                 return _text(json.dumps(self.ctx.get('completion') or {'status': self.ex.status}))
-            blocks = [{'type': 'text', 'text': observation_text(outcome.observation)}]
+            blocks = [{'type': 'text', 'text': observation_text(
+                outcome.observation, self._budget_nudge() if outcome.kind == 'returned' else '')}]
             if outcome.image_png is not None:
+                self.ex.visual_context_seen = True
                 raw = outcome.image_png
                 identifier = hashlib.sha256(raw).hexdigest()
                 self.images[identifier] = 'data:image/png;base64,' + base64.b64encode(raw).decode('ascii')
@@ -206,7 +309,79 @@ class ExecutivePlugin(BasePlugin):
         if result.get('done'):
             self.ex.done = True
             self.ex.status, self.ex.summary = result['status'], result['summary']
+        if self.task_mode:
+            # The specialist protocol renders frozen results as live ones.
+            return _text(observation_text(result.get('observation', ''), self._budget_nudge()))
         return _text(result.get('observation', ''))
+
+    def _budget_nudge(self) -> str:
+        """A specialist Tool result names the model decisions that remain."""
+        return '\n\n' + step_budget_notice(self.max_steps - self.model_steps) if self.task_mode else ''
+
+    def _repeat_blocked(self, name: str, args: dict) -> tuple[str, dict] | None:
+        """A specialist's third identical call is refused before dispatch.
+
+        Returns the refusal observation and its trace fields, or None.
+        """
+        call_sig = f"{name}:sha256:" + hashlib.sha256(json.dumps(args, sort_keys=True).encode()).hexdigest()
+        repeats = 0
+        reads = self.ctx.get('_article_reads', {})
+        for item in self.trace:
+            if (name == 'harness.status' and item.get('tool') == 'harness.repair'
+                    and item.get('not_dispatched') is not True):
+                # A recovery consumes its inspection and requires a new one.
+                # Count duplicate reads only since the last attempted repair.
+                repeats = 0
+            if item.get('sig') != call_sig or item.get('repeat_blocked'):
+                continue
+            required = item.get('proposal_read_prerequisite')
+            # Only an attested pre-staging rejection can stop counting as a
+            # repeat, and only after its exact missing revisions were read.
+            if (name == 'vault.propose' and isinstance(required, dict) and required
+                    and all(reads.get(ref, {}).get('complete') is True
+                            and reads[ref].get('article_sha256') == revision
+                            for ref, revision in required.items())):
+                continue
+            repeats += 1
+        # A state-scoped observation and Hindsight recovery legitimately repeat:
+        # live evidence may have changed, and each recovery pass selects the
+        # next unattempted native operation from a fresh inspection.
+        if (repeats < 2 or (name == 'computer.observe' and self.ctx.get('_computer_act_scope') == 'state')
+                or (name == 'harness.repair' and args == {'component': 'hindsight'}
+                    and self.task.ref == 'Tasks/repair' and isinstance(self.ctx.get('_harness_snapshot'), dict))):
+            return None
+        observation = ('You have repeated this exact call three times; the result will not change. '
+                       'Vary your approach or call task.complete now with your best status.')
+        if name == 'vault.propose' and self.ctx.get('_link_proposal_rejection'):
+            observation = ('The same Link proposal was rejected twice. Finish failed with the unresolved '
+                           'blocker: ' + self.ctx['_link_proposal_rejection']
+                           + '. A rejected draft is not evidence of a redundant relationship.')
+            # The model has already ignored the same rejection twice. End this
+            # attempt; completion retains the real blocker and ordinary
+            # receipt-bound recovery owns any later retry.
+            self.ex.allowed = ['task.complete']
+        return observation, {'repeat_blocked': True, 'not_dispatched': True}
+
+    def _decision_tools(self) -> tuple[list[str], dict]:
+        """This Task step's Tools and the active proposal/completion schema modes."""
+        from ...capabilities.source.read import available_tools
+        from ...capabilities.task.complete import (
+            available_tools as completion_tools, completion_prerequisite_error, completion_requires_no_change,
+        )
+        from ..repair import available_tools as repair_tools
+        context = getattr(self.evaluation, 'schema_context', self.ctx)
+        names = completion_tools(repair_tools(available_tools(self.ex.allowed, context), context), context)
+        if context.get('task') == 'Tasks/audit' and (context.get('params') or {}).get('optimization_case'):
+            required = 'task.complete' if context.get('_harness_optimization_attempted') else 'harness.optimize'
+            names = [name for name in names if name == required]
+        modes = {
+            'proposal_mode': ('ingest' if context.get('event') == 'observations.memory.ready'
+                              or context.get('task') == 'Tasks/ingest'
+                              else 'link' if context.get('task') == 'Tasks/link' else ''),
+            'completion_no_change': completion_requires_no_change(context) and not self.task.meta.get('acceptance'),
+            'completion_blocked': bool(completion_prerequisite_error(context)),
+        }
+        return names, modes
 
     async def operate(self, name: str, args: dict) -> list[dict]:
         """A controller-originated call (plain-text completion, explicit command)."""
@@ -219,9 +394,11 @@ class ExecutivePlugin(BasePlugin):
         from ..executor import _scope_checkpoint
         foreground_checkpoint(self.interruption_event, self.ctx)
         _scope_checkpoint(self.ctx)
-        if self.model_steps >= self.max_steps or self.ex.step >= self.max_steps:
-            self.state.fail('Executive decision budget exhausted')
-        return self.ex.done or self.state.steering_pending
+        # An accepted completion on the last step stands; only unfinished work fails.
+        if not self.ex.done and (self.model_steps >= self.max_steps or self.ex.step >= self.max_steps):
+            self.fail('Decision budget exhausted without an accepted completion' if self.task_mode
+                            else 'Executive decision budget exhausted')
+        return self.ex.done or self.steering_pending
 
     async def before_model_callback(self, *, callback_context, llm_request):
         if self.boundary():
@@ -229,10 +406,10 @@ class ExecutivePlugin(BasePlugin):
             # event. The controller then settles or applies the clarification.
             return LlmResponse()
         self.model_steps += 1
-        self.state.rotate()
-        await self.state.hold_model(self.adopt_lease)
+        self.rotate()
+        await self.hold_model(self.adopt_lease)
         fields = {'step': self.ex.step + 1, 'call_id': f'{self.run}:model:{self.model_steps}'}
-        self.state.emit_model(f'{self.agent_name} model started', 'started', fields, engine=sessions.BACKEND)
+        self.emit_model(f'{self.agent_name} model started', 'started', fields, engine=sessions.BACKEND)
         metrics: dict = {}
         self._step = {'fields': fields, 'metrics': metrics, 'started': time.monotonic(), 'menu': None}
         if self.voice is not None:
@@ -244,17 +421,31 @@ class ExecutivePlugin(BasePlugin):
                    *sessions.native_messages(llm_request.contents)]
         wire = native.wire_messages(history, self.images, self.ctx['objective'],
                                     anchor=native.window_anchor(conversation_id))
-        payload = native.request_payload(wire, self.spec, self.effort, tool_schemas(self.advertised))
+        if self.task_mode:
+            # Advertise only this step's Tools, shaped by its active contract.
+            names, modes = self._decision_tools()
+            self.decision = list(names)
+            schemas = task_tool_schemas(names, **modes)
+            llm_request.config.tools = [types.Tool(function_declarations=[types.FunctionDeclaration(
+                name=schema['name'], description=schema['description'],
+                parameters_json_schema=schema['parameters']) for schema in schemas])]
+        else:
+            schemas = tool_schemas(self.advertised)
+        payload = native.request_payload(wire, self.spec, self.effort, schemas, task=self.task_mode)
         if (captured := getattr(self.evaluation, 'wire_messages', None)) is not None:
             # A contract trial evaluates the exact captured provider prompt, which
             # already carries its model-family guidance; never append it twice.
             payload['messages'] = deepcopy(captured)
+            if self.task_mode:
+                # As the specialist loop always did, the trial's own decision
+                # budget follows the captured prompt.
+                payload['messages'].append({'role': 'user', 'content': step_budget_notice(self.max_steps)})
         menu = None
         if self.fast_lane:
             from ..fast_lane import candidates
             menu = candidates(self.ctx['objective'], self.ex.allowed, first_step=self.model_steps == 1,
                               search_refs=self.last_search_refs, trace=self.trace,
-                              steering=self.steered or self.state.steering_pending)
+                              steering=self.steered or self.steering_pending)
         self.last_search_refs = None
         self._step['menu'] = menu
         from ...models import llm
@@ -283,9 +474,13 @@ class ExecutivePlugin(BasePlugin):
             for index, row in enumerate(payload['messages']):
                 if row['role'] == 'tool' and isinstance(row['content'], str):
                     name = names.get(row['tool_call_id'], '')
-                    text = row['content'].removeprefix('Observation:\n')
-                    projection.remember_source_page(index, name, text, '', source_read_allowed=True)
-                    projection.remember_article_page(index, name, text, '', vault_read_allowed=True)
+                    text, nudge = native.split_budget_notice(row['content'].removeprefix('Observation:\n'))
+                    projection.remember_source_page(
+                        index, name, text, nudge,
+                        source_read_allowed='source.read' in self.ex.allowed if self.task_mode else True)
+                    projection.remember_article_page(
+                        index, name, text, nudge,
+                        vault_read_allowed='vault.read' in self.ex.allowed if self.task_mode else True)
             started = time.monotonic()
             capacity = self.spec.context_tokens - self.spec.max_output_tokens - PROMPT_SAFETY_TOKENS
             count = await projection.fit_payload(payload, self.spec, client, capacity)
@@ -295,7 +490,10 @@ class ExecutivePlugin(BasePlugin):
         self.ex.decision_messages[:] = deepcopy(payload['messages'])
         llm_request.config.system_instruction = payload['messages'][0]['content']
         llm_request.contents = request_contents(payload['messages'][1:])
+        # Foreground demand that arrived during preparation wins over a new request.
+        foreground_checkpoint(self.interruption_event, self.ctx)
         self._step['dispatched'] = time.monotonic()
+        self.generating.set()
         return None
 
     async def after_model_callback(self, *, callback_context, llm_response):
@@ -322,6 +520,7 @@ class ExecutivePlugin(BasePlugin):
         return None
 
     async def _finish_step(self, response: LlmResponse, *, from_choice: bool = False) -> None:
+        self.generating.clear()
         step, self._step = self._step, None
         metrics = step['metrics']
         parts = response.content.parts if response.content and response.content.parts else []
@@ -349,7 +548,7 @@ class ExecutivePlugin(BasePlugin):
             self.ctx['prompt_tokens'] = metrics.get('prompt_tokens', 0)
         self.trace.append({'provider_metrics': metrics})
         adopt_fast_lane(step['menu'], metrics, self.ctx)
-        self.state.emit_model(f'{self.agent_name} model returned', 'result', step['fields'], metrics=metrics)
+        self.emit_model(f'{self.agent_name} model returned', 'result', step['fields'], metrics=metrics)
         if self.voice is not None:
             if calls:
                 await self.voice.feed({'type': 'block-start', 'blockType': 'tool-call'})
@@ -358,16 +557,30 @@ class ExecutivePlugin(BasePlugin):
             # A malformed native call never reaches a Tool; the model corrects it.
             self.trace.append({'native_tool_error': str(response.error_code)[:80], 'invalid_tool': 'native Tool'})
             self.emit('error', f'native Tool: {response.error_code}')
-            if not self.state.strike('invalid', 'Three native Tool errors; inspect the Action Trace'):
+            if not self.strike('invalid', 'Three native Tool errors; inspect the Action Trace'):
                 self.feedback = (str(response.error_message or 'The last native Tool call was malformed.')[:300]
-                                 + ' No Tool was dispatched; send one complete native call or answer in text.')
+                                 + (' No Tool was dispatched; send one complete native call.' if self.task_mode
+                                    else ' No Tool was dispatched; send one complete native call or answer in text.'))
             return
-        self.feedback = await settle_model_step(self.state, self.operate, text, bool(calls), reason,
+        if self.task_mode:
+            # Every specialist decision is one Tool call; text never completes a Task.
+            if calls:
+                self.strikes['action'] = 0
+                self.feedback = None
+                return
+            self.trace.append({'invalid_native_response': 'no_tool_call', 'finish_reason': reason})
+            if self.strike('action', 'three consecutive replies without a valid action block'):
+                self.emit('error', f'{self.agent_name} produced no valid action', [self.ex.summary, reason])
+                return
+            self.feedback = NO_TOOL_CALL_FEEDBACK
+            return
+        self.feedback = await settle_model_step(self, self.operate, text, bool(calls), reason,
                                                 allowed=self.advertised, ctx=self.ctx, trace=self.trace,
                                                 emit=self.emit, voice=self.voice)
 
     async def release(self) -> None:
         """Release what this activation acquired: an unadopted reservation and its lease."""
+        self.generating.clear()
         self.images.clear()
         if self.lease_prefetch is not None:
             # An unadopted reservation never outlives its activation.
@@ -376,4 +589,13 @@ class ExecutivePlugin(BasePlugin):
             if not self.lease_prefetch.cancelled() and self.lease_prefetch.exception() is None:
                 await self.lease_prefetch.result()[1].__aexit__(None, None, None)
             self.lease_prefetch = None
-        await self.state.close(measure_release=True)
+        # End the activation: drop its context and witnesses, then release the model.
+        for key in ("_foreground_interruption_event", OBSERVATION_CONTEXT_FIELD, "_computer_response_observation"):
+            self.ctx.pop(key, None)
+        self.ex.latest_action_evidence = None
+        self.discard_witnesses()
+        lease, self.ex.active_lease = self.ex.active_lease, None
+        if lease is not None:
+            started = time.monotonic()
+            await lease.__aexit__(None, None, None)
+            action_trace.latency("model_release", duration_ms=(time.monotonic() - started) * 1000)

@@ -85,6 +85,9 @@ def _load(lane: str, identity: str) -> dict:
 def _code_revision() -> str:
     paths = [Path(__file__), Path(__file__).with_name("evaluation.py"),
              Path(__file__).with_name("executor.py"),
+             Path(__file__).with_name("native.py"), Path(__file__).with_name("native_turn.py"),
+             Path(__file__).with_name("capability_core.py"),
+             Path(__file__).parent / "adk" / "runner.py", Path(__file__).parent / "adk" / "plugin.py",
              Path(__file__).parents[1] / "models" / "llm.py",
              Path(__file__).parents[1] / "models" / "context.py",
              Path(__file__).parents[1] / "models" / "runtime.py",
@@ -336,8 +339,10 @@ def _compare(document: dict, observations: dict) -> dict:
 
 async def evaluate_proposal(name: str, context: dict) -> dict:
     from . import executor, trace as action_trace
+    from .adk.runner import run_adk_session
     from .evaluation import FrozenTrial
-    from ..models import llm, runtime
+    from .native_turn import TASK_PROTOCOL
+    from ..models import runtime
     params = context.get("params") or {}
     if context.get("task") != AUDITOR or not context.get("run_id") or params.get("proposal") != name:
         raise ValueError("Evaluation requires the exact candidate bound to an active Audit")
@@ -371,7 +376,7 @@ async def evaluate_proposal(name: str, context: dict) -> dict:
                     accepted_resolver=frozen, provider_sections=sections)
                 messages = [{"role": "system", "content": "\n\n".join([
                     f"You are {agent.title}, executing one graph-selected Task in Obsidience.",
-                    executor.LAWS, llm.PROTOCOL, sections["provider_system"]])}]
+                    executor.LAWS, TASK_PROTOCOL, sections["provider_system"]])}]
                 if sections["provider_conversation"]:
                     messages.append({"role": "user", "content": sections["provider_conversation"]})
                 messages.append({"role": "user", "content": sections["provider_user"]})
@@ -384,7 +389,7 @@ async def evaluate_proposal(name: str, context: dict) -> dict:
                     action_trace.emit("status", "Trial started")
                     try:
                         async with asyncio.timeout(180):
-                            trace, status, summary = await executor._execute_session(
+                            trace, status, summary = await run_adk_session(
                                 task, model, messages, allowed, trial_context, agent.title,
                                 document["model_contract"]["reasoning_effort"],
                                 interruption_event=context.get("_foreground_interruption_event"), evaluation=trial)

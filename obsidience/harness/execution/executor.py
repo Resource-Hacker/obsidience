@@ -5,16 +5,15 @@
          -> collect evidence -> update Task state
 
 Spine resolution is edge-exact (wikilinks); retrieval only fills the packet's
-Relevant Articles section.
+Relevant Articles section. The compiled activation runs on the ADK model/Tool
+loop (``execution/adk``) for the Executive and every specialist Task alike.
 """
 
 from __future__ import annotations
 
 import asyncio
-import base64
 import hashlib
 import json
-import math
 import re
 import time
 import uuid
@@ -35,22 +34,15 @@ from ..knowledge.dependencies import (
 from ..knowledge.vault import Note, Resolver, mutate_note_metadata, resolver, update_status
 from ..models import llm
 from ..models import runtime as model_runtime
-from ..models.context import (
-    PROMPT_SAFETY_TOKENS, TaskContext, cached_text_count, discard_consumed_images,
-)
+from ..models.context import PROMPT_SAFETY_TOKENS, cached_text_count
+# The capability executors the ADK plugin dispatches through (one patchable seam).
 from ..capabilities.registry import (
     MODEL_RESOURCE_TOOLS,
     execute as execute_capability,
     execute_async as execute_capability_async,
 )
 
-from .capability_core import (
-    OBSERVATION_CONTEXT_FIELD as _OBSERVATION_CONTEXT_FIELD,
-    foreground_checkpoint as _foreground_checkpoint,
-    observation_text,
-    publish_working_progress as _publish_working_progress,
-    run_capability,
-)
+from .capability_core import publish_working_progress as _publish_working_progress
 from .ledger import runbook_tree_hash
 
 MAX_TASK_DEPTH = 16
@@ -722,7 +714,7 @@ def activation_messages(task: Note, activation: dict, *, agent_name: str,
                         response_contract: str = "", active_exclusions=frozenset(),
                         preparation_prefix: bool = False) -> list[dict]:
     """Render one canonical provider prompt for execution or disposable prefill."""
-    from .native_turn import PROTOCOL as NATIVE_PROTOCOL
+    from .native_turn import PROTOCOL as NATIVE_PROTOCOL, TASK_PROTOCOL
     from ..conversation.runtime import VOICE_TRANSPORT_CONTRACT
     agent = task.kind == "agent"
     native_session = agent and bool(activation["params"].get("conversation_id"))
@@ -734,7 +726,7 @@ def activation_messages(task: Note, activation: dict, *, agent_name: str,
          if agent else
          f"You are {agent_name}, executing one graph-selected Task in Obsidience."),
         LAWS,
-        llm.PROTOCOL if not agent else "",
+        TASK_PROTOCOL if not agent else "",
         activation["provider_system"],
         "## Decision protocol\n" + NATIVE_PROTOCOL if agent else "",
         activation.get("provider_begin", "") if agent else "",
@@ -862,532 +854,6 @@ def _scope_checkpoint(ctx: dict, tool_name: str | None = None) -> None:
         dependency = resolve_dependencies(task, current, agent_ref=agent.ref)
         if dependency.get("error") or tool_name not in {tool.title for tool in dependency["tool_articles"]}:
             raise PermissionError("The current accepted procedure no longer authorizes this Tool")
-
-
-async def _foreground_aware_chat(interruption_event: asyncio.Event | None, ctx: dict,
-                                 *args, **kwargs):
-    """Cancel only unfinished inference; Tool execution stays in its owner task."""
-    _foreground_checkpoint(interruption_event, ctx)
-    if interruption_event is None:
-        return await llm.chat(*args, **kwargs)
-    provider = asyncio.create_task(llm.chat(*args, **kwargs))
-    demand = asyncio.create_task(interruption_event.wait())
-    try:
-        await asyncio.wait((provider, demand), return_when=asyncio.FIRST_COMPLETED)
-        _foreground_checkpoint(interruption_event, ctx)
-        return await provider
-    finally:
-        for pending in (provider, demand):
-            if not pending.done():
-                pending.cancel()
-        await asyncio.gather(provider, demand, return_exceptions=True)
-
-
-def _step_budget_notice(remaining: int) -> str:
-    if remaining == 1:
-        return "Execution budget: 1 model decision remains. FINAL STEP — call task.complete with the actual delivery outcome."
-    return (
-        f"Execution budget: {remaining} model decisions remain, including task.complete. "
-        "Reserve the Runbook's required delivery or publication steps before completion."
-    )
-
-
-@dataclass
-class CapabilityDispatch:
-    """One shared operation/receipt boundary, independent of the model loop.
-
-    Callers own model decisions and transfer any held lease around dispatch.
-    Visual witnesses remain single-response values in this execution only.
-    """
-
-    task: Note
-    model: object
-    messages: list[dict]
-    allowed: list[str]
-    ctx: dict
-    agent_name: str
-    step: int
-    trace: list[dict]
-    emit: object
-    task_context: TaskContext
-    max_steps: int
-    interruption_event: asyncio.Event | None = None
-    steering: object = None
-    active_lease: object = None
-    visual_context_seen: bool = False
-    response_observation_lease: object = None
-    response_completion_observation: object = None
-    pending_observation_lease: object = None
-    pending_response_observation: object = None
-    latest_action_evidence: object = None
-    status: str = "failed"
-    summary: str = "No accepted completion"
-    done: bool = False
-
-    async def dispatch(self, name: str, args: dict, reply: str = "") -> None:
-        """Specialist-loop adapter: messages, repeat policy and step budget around the core."""
-        call_sig = f"{name}:sha256:" + hashlib.sha256(json.dumps(args, sort_keys=True).encode()).hexdigest()
-        public_args = {key: value for key, value in args.items() if key != "point"}
-        public_reply = (
-            json.dumps({"tool": name, "args": public_args}, sort_keys=True)
-            if name == "computer.act" or "point" in args or self.visual_context_seen else reply
-        )
-        blocked = None
-        if name != "task.complete" and self._repeat_blocked(name, args, call_sig):
-            observation = (
-                "You have repeated this exact call three times; the result will not change. "
-                "Vary your approach or call task.complete now with your best status."
-            )
-            if name == "vault.propose" and self.ctx.get("_link_proposal_rejection"):
-                observation = (
-                    "The same Link proposal was rejected twice. Finish failed with the unresolved "
-                    "blocker: " + self.ctx["_link_proposal_rejection"]
-                    + ". A rejected draft is not evidence of a redundant relationship."
-                )
-                # The model has already ignored the same rejection twice.
-                # End this attempt; completion retains the real blocker and
-                # ordinary receipt-bound recovery owns any later retry.
-                self.allowed = ["task.complete"]
-            blocked = (observation, {"repeat_blocked": True, "not_dispatched": True})
-        outcome = await run_capability(
-            self, name, args, execute=execute_capability, execute_async=execute_capability_async,
-            scope_checkpoint=_scope_checkpoint, blocked=blocked,
-            started=lambda: self.messages.append({"role": "assistant", "content": public_reply}))
-        if outcome.kind in {"prerequisite", "completion_rejected"}:
-            self.messages.append({"role": "user", "content": observation_text(outcome.observation)})
-        if outcome.kind != "returned":
-            return
-        observation = outcome.observation
-        remaining = self.max_steps - self.step - 1
-        # The specialist loop's step budget names its Runbook delivery. The
-        # native Executive loop owns its own decision budget, so its Tool
-        # results carry no specialist notice.
-        nudge = ("" if getattr(self, "prompt_format", "") == "native_wire"
-                 else "\n\n" + _step_budget_notice(remaining))
-        text = observation_text(observation, nudge)
-        self.task_context.latest_result_index = len(self.messages)
-        if outcome.image_png is None:
-            self.task_context.remember_source_page(
-                len(self.messages), str(name), str(observation), nudge,
-                source_read_allowed="source.read" in self.allowed,
-            )
-            self.task_context.remember_article_page(
-                len(self.messages), str(name), str(observation), nudge,
-                vault_read_allowed="vault.read" in self.allowed,
-            )
-            self.messages.append({"role": "user", "content": text})
-        else:
-            self.visual_context_seen = True
-            image_url = "data:image/png;base64," + base64.b64encode(
-                outcome.image_png
-            ).decode("ascii")
-            self.messages.append({
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": text},
-                    {"type": "image_url", "image_url": {"url": image_url}},
-                ],
-            })
-
-    def _repeat_blocked(self, name: str, args: dict, call_sig: str) -> bool:
-        """The specialist loop's identical-call heuristic (never the native Executive)."""
-        repeats = 0
-        reads = self.ctx.get("_article_reads", {})
-        for item in self.trace:
-            if (name == "harness.status" and item.get("tool") == "harness.repair"
-                    and item.get("not_dispatched") is not True):
-                # A recovery consumes its inspection and requires a new one.
-                # Count duplicate reads only since the last attempted repair.
-                repeats = 0
-            if item.get("sig") != call_sig or item.get("repeat_blocked"):
-                continue
-            required = item.get("proposal_read_prerequisite")
-            # Only an attested pre-staging rejection can stop counting as a
-            # repeat, and only after its exact missing revisions were read.
-            if (name == "vault.propose" and isinstance(required, dict) and required
-                    and all(reads.get(ref, {}).get("complete") is True
-                            and reads[ref].get("article_sha256") == revision
-                            for ref, revision in required.items())):
-                continue
-            repeats += 1
-        state_observation = (
-            name == "computer.observe"
-            and self.ctx.get("_computer_act_scope") == "state"
-        )
-        # Native Agent sequencing belongs to its loop. This legacy heuristic
-        # cannot assume that live evidence is unchanged. Component recovery
-        # selects the next unattempted native operation from a fresh inspection,
-        # so identical arguments do not repeat effects.
-        hindsight_recovery = (
-            name == "harness.repair" and args == {"component": "hindsight"}
-            and self.task.ref == "Tasks/repair"
-            and isinstance(self.ctx.get("_harness_snapshot"), dict)
-        )
-        return (repeats >= 2 and not state_observation
-                and not hindsight_recovery and self.task.kind != "agent")
-
-
-@dataclass
-class TurnState:
-    """Decision mechanics shared by the native Executive and specialist loops.
-
-    Each loop keeps one CapabilityDispatch for its activation, so the model
-    lease and single-response visual witnesses persist there between decisions.
-    Each loop keeps its own protocol: native imitation/empty-response recovery
-    and early speech; specialist JSON actions and per-step Tool narrowing.
-    """
-
-    dispatch: CapabilityDispatch
-    strikes: dict[str, int] = field(default_factory=dict)
-
-    @staticmethod
-    def budget(evaluation) -> int:
-        if evaluation is None:
-            return CONFIG.max_steps
-        if type(evaluation.max_steps) is not int or not 1 <= evaluation.max_steps <= CONFIG.max_steps:
-            raise ValueError("Evaluation decision budget must be a positive integer within the executor limit")
-        return evaluation.max_steps
-
-    @staticmethod
-    def emitter(evaluation):
-        """Public trace emission; every evaluation trial event is marked simulated."""
-        def emit(channel: str, line: str, detail=None, fields=None) -> None:
-            if evaluation is not None:
-                fields = {**(fields or {}), "payload": {
-                    **((fields or {}).get("payload") or {}), "simulated": True,
-                }}
-                line = "Simulation · " + line
-            action_trace.emit(channel, line, detail, fields)
-        return emit
-
-    @staticmethod
-    async def acquire_model(model):
-        spec = model_runtime.configured_spec(model.id)
-        lease = model_runtime.lease(spec)
-        await lease.__aenter__()
-        return spec, lease
-
-    def fail(self, summary: str) -> None:
-        self.dispatch.done, self.dispatch.status, self.dispatch.summary = True, "failed", summary
-
-    def strike(self, kind: str, failure: str, limit: int = 3) -> bool:
-        """Count one invalid decision of this kind; reaching the limit fails the activation."""
-        self.strikes[kind] = self.strikes.get(kind, 0) + 1
-        if self.strikes[kind] < limit:
-            return False
-        self.fail(failure)
-        return True
-
-    @property
-    def steering_pending(self):
-        return self.dispatch.steering is not None and self.dispatch.steering.pending
-
-    def take_steering(self) -> list[dict] | None:
-        """Owner clarifications void every visual witness not yet consumed."""
-        if not self.steering_pending:
-            return None
-        clarifications = self.dispatch.steering.take()
-        self.dispatch.pending_observation_lease = self.dispatch.pending_response_observation = None
-        discard_consumed_images(self.dispatch.messages)
-        return clarifications
-
-    def rotate(self) -> None:
-        """Bind pending visual witnesses to exactly the next model response."""
-        d = self.dispatch
-        d.response_observation_lease, d.pending_observation_lease = d.pending_observation_lease, None
-        d.response_completion_observation, d.pending_response_observation = d.pending_response_observation, None
-        d.ctx.pop("_computer_response_observation", None)
-
-    def discard_witnesses(self) -> None:
-        d = self.dispatch
-        d.response_observation_lease = d.response_completion_observation = None
-        d.pending_observation_lease = d.pending_response_observation = None
-        discard_consumed_images(d.messages)
-
-    async def hold_model(self, acquire=None) -> None:
-        """Hold the model lease for the next decision, measuring any wait."""
-        if self.dispatch.active_lease is None:
-            started = time.monotonic()
-            self.dispatch.model, self.dispatch.active_lease = await (
-                acquire() if acquire is not None else self.acquire_model(self.dispatch.model))
-            action_trace.latency("model_wait", duration_ms=(time.monotonic() - started) * 1000)
-
-    def emit_model(self, line: str, phase: str, fields: dict, detail=None, **payload) -> None:
-        self.dispatch.emit("model", line, detail, {**fields, "payload": {
-            "kind": "model", "phase": phase, "model": self.dispatch.model.id, **payload}})
-
-    async def close(self, *, measure_release: bool) -> None:
-        """End the activation: drop its context and witnesses, then release the model."""
-        d = self.dispatch
-        for key in ("_foreground_interruption_event", _OBSERVATION_CONTEXT_FIELD, "_computer_response_observation"):
-            d.ctx.pop(key, None)
-        d.latest_action_evidence = None
-        self.discard_witnesses()
-        lease, d.active_lease = d.active_lease, None
-        if lease is not None:
-            started = time.monotonic()
-            await lease.__aexit__(None, None, None)
-            if measure_release:
-                action_trace.latency("model_release", duration_ms=(time.monotonic() - started) * 1000)
-
-
-async def _execute_session(
-    task: Note,
-    model: model_runtime.ModelSpec,
-    messages: list[dict],
-    allowed: list[str],
-    ctx: dict,
-    agent_name: str,
-    effort: str,
-    interruption_event: asyncio.Event | None = None,
-    *,
-    evaluation=None,
-    initial_lease=None,
-) -> tuple[list[dict], str, str]:
-    if evaluation is not None and (
-            set(ctx) - {"trace"}
-            or ("trace" in ctx and (not isinstance(ctx["trace"], list) or ctx["trace"]))):
-        raise ValueError("Evaluation requires a fresh context without live Task or receipt bindings")
-    max_steps = TurnState.budget(evaluation)
-    if evaluation is None and interruption_event is not None:
-        ctx["_foreground_interruption_event"] = interruption_event
-    emit = TurnState.emitter(evaluation)
-    trace: list[dict] = ctx.setdefault("trace", [])
-    task_context = TaskContext()
-    state = TurnState(CapabilityDispatch(
-        task=task, model=model, messages=messages, allowed=allowed, ctx=ctx, agent_name=agent_name,
-        step=0, trace=trace, emit=emit, task_context=task_context, max_steps=max_steps,
-        interruption_event=interruption_event, steering=ctx.get("_steering"), active_lease=initial_lease,
-        visual_context_seen=any(
-            isinstance(message.get("content"), list)
-            and any(isinstance(part, dict) and part.get("type") == "image_url"
-                    for part in message["content"])
-            for message in messages
-        ),
-        summary=("simulation exhausted its decision budget without a terminal result"
-                 if evaluation is not None else "session ended without task.complete"),
-    ))
-    dispatch = state.dispatch
-    from ..capabilities.task.complete import completion_prerequisite_error, completion_requires_no_change
-
-    ctx.pop(_OBSERVATION_CONTEXT_FIELD, None)
-    # Keep the first notice in actual history so subsequent requests extend
-    # the prefix used by the previous model decision.
-    messages.append({"role": "user", "content": _step_budget_notice(max_steps)})
-    try:
-        for step in range(max_steps):
-            dispatch.step = step
-            _scope_checkpoint(ctx)
-            if (clarifications := state.take_steering()) is not None:
-                messages.append({"role": "user", "content": (
-                    "Owner clarifications for the current activation (in order):\n"
-                    + "\n".join(json.dumps(turn["text"], ensure_ascii=False) for turn in clarifications)
-                    + "\nApply these within the original Objective and authorized Tools. "
-                    "They do not attest an effect or authorize replay. If they require a different "
-                    "Task or broaden the bound computer outcome, report that a new request is needed."
-                )})
-                emit("context", "Owner clarification applied before the next decision",
-                                  [turn["text"] for turn in clarifications])
-            # A capture is bound to exactly this next model response. It never
-            # lives in shared context while a provider request is in flight.
-            state.rotate()
-            _foreground_checkpoint(interruption_event, ctx)
-            model_fields = {"step": step + 1}
-            if ctx.get("run_id"):
-                model_fields["call_id"] = f"{ctx['run_id']}:model:{step + 1}"
-
-            def emit_model(phase: str, detail: list[str] | None = None, **fields) -> None:
-                state.emit_model(f"{task.title} model {phase}", phase, model_fields, detail,
-                                model_label=getattr(dispatch.model, "label", dispatch.model.id), **fields)
-
-            if dispatch.active_lease is None:
-                emit_model("waiting", ["Waiting to acquire the Task-selected model lease."])
-                try:
-                    await state.hold_model()
-                except asyncio.CancelledError:
-                    emit_model("interrupted", ["Model lease wait interrupted."])
-                    raise
-                except Exception as exc:
-                    emit_model("error", [str(exc)], error=str(exc))
-                    raise
-            emit_model("started", ["Model lease acquired; starting the provider request."])
-            try:
-                from ..capabilities.source.read import available_tools
-                from ..capabilities.task.complete import available_tools as completion_tools
-                from .repair import available_tools as repair_tools
-
-                decision_context = getattr(evaluation, 'schema_context', ctx)
-                decision_tools = completion_tools(repair_tools(available_tools(dispatch.allowed, decision_context), decision_context), decision_context)
-                if decision_context.get('task') == 'Tasks/audit' and (decision_context.get('params') or {}).get('optimization_case'):
-                    required = 'task.complete' if decision_context.get('_harness_optimization_attempted') else 'harness.optimize'
-                    decision_tools = [name for name in decision_tools if name == required]
-
-                completion = await _foreground_aware_chat(
-                    interruption_event, ctx,
-                    messages,
-                    reasoning_effort=effort,
-                    model=dispatch.model,
-                    allowed_tools=decision_tools,
-                    task_context=task_context,
-                    **({"proposal_mode": "ingest"} if decision_context.get("event") == "observations.memory.ready" or decision_context.get("task") == "Tasks/ingest"
-                       else {"proposal_mode": "link"} if decision_context.get("task") == "Tasks/link" else {}),
-                    **({"completion_no_change": True}
-                       if completion_requires_no_change(decision_context) and not task.meta.get("acceptance") else {}),
-                    completion_blocked=bool(completion_prerequisite_error(decision_context)),
-                )
-            except asyncio.CancelledError:
-                emit_model("interrupted", ["Provider request interrupted."])
-                raise
-            except Exception as exc:  # noqa: BLE001 — preserve transport failures in the run ledger
-                state.fail(f"LLM error: {exc}")
-                emit_model("error", [str(exc)], error=str(exc))
-                emit("error", f"{task.title} LLM error", [str(exc)])
-                break
-            finally:
-                discard_consumed_images(messages)
-            try:
-                _foreground_checkpoint(interruption_event, ctx)
-            except asyncio.CancelledError:
-                emit_model("interrupted", ["Provider response discarded for foreground input."])
-                raise
-            provider_metrics = getattr(completion, "provider_metrics", None)
-            if isinstance(provider_metrics, dict):
-                provider_metrics = {
-                    key: value for key, value in provider_metrics.items()
-                    if key in {
-                        "preflight_ms", "first_public_delta_ms", "generation_ms", "cached_input_tokens",
-                    }
-                    and isinstance(value, (int, float)) and not isinstance(value, bool)
-                    and value >= 0 and math.isfinite(value)
-                    and (key != "cached_input_tokens" or isinstance(value, int))
-                }
-                if provider_metrics:
-                    trace.append({"provider_metrics": provider_metrics})
-                    labels = {
-                        "preflight_ms": "Preflight", "first_public_delta_ms": "Public TTFT",
-                        "generation_ms": "Generation", "cached_input_tokens": "Cached input tokens",
-                    }
-                    emit_model("result", [
-                        f"{label}: {provider_metrics[key]}"
-                        + (" ms" if key.endswith("_ms") else "")
-                        for key, label in labels.items() if key in provider_metrics
-                    ], metrics=provider_metrics)
-            else:
-                provider_metrics = {}
-            if not provider_metrics:
-                emit_model("result", ["Provider request returned."])
-            projection = getattr(completion, "context_projection", None)
-            if isinstance(projection, dict) and "before_input_tokens" in projection:
-                trace.append({"context_projection": dict(projection)})
-                emit("context", f"{task.title} earlier read pages projected", [
-                    json.dumps(projection, sort_keys=True),
-                ], {"step": step + 1, "payload": {"kind": "context", "projection": projection}})
-            reply = completion.content
-            if state.steering_pending:
-                # No Tool from the now-outdated response may dispatch. This
-                # consumes the ordinary decision budget rather than extending it.
-                emit("context", "Response superseded by an owner clarification")
-                dispatch.pending_observation_lease = dispatch.pending_response_observation = None
-                continue
-            if step == 0 and completion.prompt_tokens is not None:
-                ctx["prompt_tokens"] = completion.prompt_tokens
-            action = llm.parse_action(reply)
-            if not action:
-                dispatch.response_observation_lease = dispatch.response_completion_observation = None
-                parse_error = llm.action_parse_error(reply)
-                public_invalid = "Invalid visual response; private output omitted." if dispatch.visual_context_seen else reply
-                messages.append({"role": "assistant", "content": public_invalid})
-                trace.append({
-                    "invalid": public_invalid[:400],
-                    "parse_error": parse_error,
-                    "finish_reason": completion.finish_reason,
-                    "completion_tokens": completion.completion_tokens,
-                    "reply_chars": len(reply),
-                    "reply_sha256": hashlib.sha256(reply.encode()).hexdigest(),
-                })
-                if state.strike("action", "three consecutive replies without a valid action block"):
-                    emit(
-                        "error", f"{agent_name} produced no valid action",
-                        [dispatch.summary, parse_error, f"finish: {completion.finish_reason}"],
-                    )
-                    break
-                messages.append({
-                    "role": "user",
-                    "content": (
-                        f"No valid response object found: {parse_error}. Reply with exactly one "
-                        "top-level JSON object containing tool and args. "
-                        "Put no commentary or Markdown in the public response."
-                    ),
-                })
-                continue
-            state.strikes["action"] = 0
-            name, args = action.get("tool"), action.get("args") or {}
-            _scope_checkpoint(ctx, str(name))
-            # The model's normalized image point is an ephemeral input, not a
-            # public action argument or durable trace/signature coordinate.
-            public_args = {key: value for key, value in args.items() if key != "point"}
-            if evaluation is not None:
-                # Every simulated action, including task.complete, stays outside
-                # live preconditions, Capability dispatch and durable Tool receipts.
-                entry = {"tool": name, "args": json.loads(json.dumps(args)), "simulated": True}
-                trace.append(entry)
-                if name not in dispatch.allowed:
-                    state.fail(f"Tool '{name}' is not authorized for this evaluation.")
-                    entry.update(obs=dispatch.summary, not_dispatched=True)
-                    emit("error", dispatch.summary)
-                    break
-                emit("tool", f"{agent_name} → {name}", [json.dumps(public_args)], {
-                    "step": step + 1, "payload": {
-                        "kind": "tool", "name": name, "phase": "start", "arguments": public_args,
-                    },
-                })
-                messages.append({"role": "assistant", "content": reply})
-                try:
-                    result = await evaluation.handle(name, json.loads(json.dumps(args)))
-                except asyncio.CancelledError:
-                    entry.update(interrupted=True, obs="Simulation interrupted before a result was returned.")
-                    emit("status", entry["obs"])
-                    raise
-                if (not isinstance(result, dict)
-                        or set(result) - {"done", "observation", "status", "summary"}
-                        or type(result.get("done")) is not bool
-                        or not isinstance(result.get("observation"), str)
-                        or ("status" in result and (
-                            not isinstance(result["status"], str)
-                            or result["status"] not in {"completed", "failed", "review"}))
-                        or ("summary" in result and not isinstance(result["summary"], str))):
-                    raise ValueError("Evaluation handler returned an invalid result")
-                observation = result["observation"]
-                entry["obs"] = observation
-                emit("result", f"{name} returned a frozen observation", observation.splitlines()[:12], {
-                    "step": step + 1, "payload": {
-                        "kind": "tool", "name": name, "phase": "result",
-                        "status": "returned", "result": observation,
-                    },
-                })
-                _foreground_checkpoint(interruption_event, ctx)
-                if result["done"]:
-                    dispatch.status = result.get("status", "completed")
-                    dispatch.summary = result.get("summary", observation)
-                    break
-                nudge = "\n\n" + _step_budget_notice(max_steps - step - 1)
-                task_context.latest_result_index = len(messages)
-                task_context.remember_source_page(
-                    len(messages), str(name), observation, nudge,
-                    source_read_allowed="source.read" in dispatch.allowed,
-                )
-                task_context.remember_article_page(
-                    len(messages), str(name), observation, nudge,
-                    vault_read_allowed="vault.read" in dispatch.allowed,
-                )
-                messages.append({"role": "user", "content": f"Observation:\n{observation}{nudge}"})
-                continue
-            await dispatch.dispatch(name, args, reply)
-            if dispatch.done:
-                break
-    finally:
-        await state.close(measure_release=False)
-    return trace, dispatch.status, dispatch.summary
 
 
 def _fail_claimed_run(task: Note, run_id: str, summary: str) -> None:
@@ -1708,8 +1174,8 @@ async def _run_execution(task: Note, depth: int = 0, reasoning_effort: str | Non
             model_spec.context_tokens - model_spec.max_output_tokens - PROMPT_SAFETY_TOKENS,
         )
 
-        # The authoritative whole-request guard runs after the model lease in
-        # llm.chat, on every step including Tool results. These feed the idle meter.
+        # The authoritative whole-request guard runs after the model lease in the
+        # ADK plugin, on every step including Tool results. These feed the idle meter.
         prompt_text = "".join(message["content"] for message in messages)
         if task.kind == "agent" and activation["params"].get("conversation_id"):
             prompt_text += str(activation.get("provider_conversation") or "")
@@ -1767,11 +1233,8 @@ async def _run_execution(task: Note, depth: int = 0, reasoning_effort: str | Non
         # Transfer the same-model lease to the existing Tool loop. It releases
         # before model-resource Tools and on every terminal or cancellation path.
         session_lease, pending_lease = pending_lease, None
-        session_runner = _execute_session
-        if task.kind == "agent":
-            from .adk.runner import run_adk_session
-            session_runner = run_adk_session
-        trace, status, summary = await session_runner(
+        from .adk.runner import run_adk_session
+        trace, status, summary = await run_adk_session(
             task, model_spec, messages, allowed, ctx, agent_name, effort,
             interruption_event=interruption_event,
             initial_lease=session_lease,

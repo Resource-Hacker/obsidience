@@ -3,13 +3,12 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
-import re
 from dataclasses import replace
 
 import httpx
 import pytest
 
-from obsidience.harness.models import context, llm
+from obsidience.harness.models import context
 from obsidience.harness.models.runtime import MODELS, EXECUTIVE_MODEL
 
 
@@ -36,54 +35,6 @@ def observed_pages():
                                         source_read_allowed=True)
         messages.append({"role": "user", "content": "Observation:\n" + observation})
     return messages, projection
-
-
-def test_pressure_projects_only_earlier_recoverable_pages_before_one_generation(monkeypatch):
-    messages, projection = observed_pages()
-    original = copy.deepcopy(messages)
-    requests = []
-    capacity = 15000
-    spec = replace(MODELS[EXECUTIVE_MODEL], context_tokens=capacity + 128 + context.PROMPT_SAFETY_TOKENS,
-                   max_output_tokens=128)
-
-    def handler(request):
-        body = json.loads(request.content)
-        requests.append((request.url.path, body))
-        if request.url.path.endswith("input_tokens"):
-            return httpx.Response(200, json={"input_tokens": len(json.dumps(body["messages"]))})
-        assert len(json.dumps(body["messages"])) <= capacity
-        action = '{"tool":"task.complete","args":{"status":"completed","summary":"Done"}}'
-        return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=(
-            'data: ' + json.dumps({"choices": [{"delta": {"content": action}, "finish_reason": "stop"}]})
-            + '\n\ndata: [DONE]\n\n'
-        ))
-
-    client_type = httpx.AsyncClient
-    monkeypatch.setattr(llm.httpx, "AsyncClient", lambda **kwargs: client_type(
-        **kwargs, transport=httpx.MockTransport(handler)))
-    reply = asyncio.run(llm.chat(messages, model=spec, task_context=projection,
-                                 allowed_tools=["source.read", "task.complete"]))
-    assert messages == original, "Projection must not rewrite exact execution history"
-    assert reply.prompt_tokens <= capacity
-    assert reply.context_projection["accounting"] == "runtime"
-    assert reply.context_projection["before_input_tokens"] > capacity
-    assert reply.context_projection["source_pages_projected"] == 3
-    generations = [body for path, body in requests if not path.endswith("input_tokens")]
-    assert len(generations) == 1
-    actual = generations[0]["messages"]
-    # Gemma appends its fixed history guidance to the single system turn.
-    assert actual[0]["content"].startswith(original[0]["content"] + "\n\n")
-    assert actual[1:4] == original[1:4]
-    assert actual[-1] == original[-1]
-    assert [m for m in actual if m["role"] == "assistant"] == [m for m in original if m["role"] == "assistant"]
-    for number, index in enumerate((5, 7, 9), 1):
-        content = actual[index]["content"]
-        assert f"SHA-256: sha256:{number:064x}" in content
-        assert f"source://00000000-0000-0000-0000-{number:012d}" in content
-        assert "Omitted text is not in this request" in content
-        offset = int(re.search(r"and offset (\d+)", content).group(1))
-        assert 2500 < offset < 2500 + len(projection.pages[index].body)
-    assert requests[-2][1]["max_tokens"] == 128
 
 
 @pytest.mark.parametrize("change", ["objective", "latest", "wrong_message", "no_read_tool"])
@@ -247,46 +198,3 @@ def test_multimodal_accounting_failure_stays_closed_and_consumption_is_explicit(
     assert messages == [{"role": "user", "content": "Exact observation"}]
 
 
-def test_executor_attaches_private_image_to_only_the_next_inference(monkeypatch):
-    from contextlib import asynccontextmanager
-    from types import SimpleNamespace as NS
-    from obsidience.harness.execution import executor
-
-    task = NS(ref="Tasks/query", title="Query", meta={})
-    model = NS(id="isolated", capabilities=("text", "vision"))
-    requests = []
-
-    @asynccontextmanager
-    async def lease(_model):
-        yield model
-
-    actions = iter(("computer.observe", "vault.read", "task.complete"))
-
-    async def chat(messages, **_kwargs):
-        requests.append(copy.deepcopy(messages))
-        return llm.ChatReply(content=json.dumps({"tool": next(actions), "args": {}}),
-                             finish_reason="stop", completion_tokens=1)
-
-    def execute(tool, _args, _ctx):
-        if tool == "computer.observe":
-            return {"observation": {"status": "observed"}, "_private_image_png": b"private-pixels"}
-        if tool == "task.complete":
-            return {"accepted": True, "status": "completed", "summary": "Done."}
-        return "Exact document result"
-
-    monkeypatch.setattr(executor.model_runtime, "configured_spec", lambda _: model)
-    monkeypatch.setattr(executor.model_runtime, "lease", lease)
-    monkeypatch.setattr(executor.llm, "chat", chat)
-    monkeypatch.setattr(executor, "execute_capability", execute)
-    # The executor dispatches through the async registry entry; never reach real Tools.
-    monkeypatch.setattr(executor, "execute_capability_async",
-                        lambda name, args, ctx: asyncio.to_thread(execute, name, args, ctx))
-    monkeypatch.setattr(executor.action_trace, "emit", lambda *_args: None)
-    trace, status, _summary = asyncio.run(executor._execute_session(
-        task, model, [{"role": "system", "content": "Fixed packet"}],
-        ["computer.observe", "vault.read", "task.complete"], {}, "Executive", "none",
-    ))
-    assert status == "completed"
-    assert sum(isinstance(m["content"], list) for m in requests[1]) == 1
-    assert all(isinstance(m["content"], str) for m in requests[2])
-    assert "private-pixels" not in json.dumps(trace)

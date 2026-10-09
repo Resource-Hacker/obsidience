@@ -9,7 +9,6 @@ import pytest
 
 from obsidience.harness.execution import trace
 from obsidience.tests.test_action_trace_popup import PANES, UI, node_check, projection_check
-from obsidience.tests.test_evaluation_session import action, trial_runtime  # noqa: F401
 
 REAL_EMIT, REAL_LATENCY = trace.emit, trace.latency
 
@@ -122,38 +121,6 @@ def test_trial_scope_is_task_local_and_cancellation_restores_outer_identity(publ
     assert "trial" not in parallel and "trial" not in released
     assert parallel["run_id"] == released["run_id"] == "audit"
     assert "run_id" not in outside
-
-
-def test_actual_frozen_executor_gets_display_correlation_without_live_receipts(
-        trial_runtime, public_stream, monkeypatch):
-    monkeypatch.setattr(trace, "emit", REAL_EMIT)
-    monkeypatch.setattr(trace, "latency", REAL_LATENCY)
-    owner = trace.bind("audit", "Tasks/audit", "Agents/Heimdall/Heimdall")
-    try:
-        for variant in ("baseline", "candidate"):
-            token = bind_trial(variant)
-            try:
-                asyncio.run(trial_runtime.run([
-                    action("harness.status"), action("task.complete", status="completed", summary="Fixture finished")]))
-            finally:
-                trace.reset(token)
-    finally:
-        trace.reset(owner)
-    events = trace.history()
-    assert all(entry["run_id"] == "audit" and entry["task_ref"] == "Tasks/audit" for entry in events)
-    assert not any(entry.get("payload", {}).get("kind") == "run" for entry in events)
-    assert "run_id" not in trial_runtime.context and "_receipt_covered" not in trial_runtime.context
-    for variant in ("baseline", "candidate"):
-        tools = [entry for entry in events if entry["trial"]["variant"] == variant
-                 and entry.get("payload", {}).get("kind") == "tool"]
-        assert len(tools) == 4
-        for start, returned in (tools[:2], tools[2:]):
-            assert start["call_id"] == returned["call_id"]
-            assert f":{variant}:1:tool:" in start["call_id"]
-        models = [entry for entry in events if entry["trial"]["variant"] == variant
-                  and entry.get("payload", {}).get("kind") == "model"]
-        assert models and all(f":{variant}:1:model:" in entry["call_id"] for entry in models)
-    assert trial_runtime.leases == trial_runtime.releases == 2
 
 
 def test_popup_keeps_trial_pairing_timings_and_simulation_labels_inside_one_audit():

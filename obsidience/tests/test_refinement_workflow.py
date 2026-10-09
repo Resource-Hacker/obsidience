@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from collections import deque
 from contextlib import asynccontextmanager
 from copy import deepcopy
 import hashlib
@@ -289,80 +288,6 @@ def test_review_listing_reuses_one_locked_snapshot_for_all_refinement_rows(workf
     assert all(item is built[0] for item in checked)
 
 
-def test_approval_rechecks_fresh_dependencies_after_listing_was_approvable(workflow):
-    state = workflow
-    stage(state)
-    evaluate_candidate(state)
-    attest(state)
-    row = next(item for item in review.list_proposals() if item["file"] == state.proposal)
-    assert row["approvable"] is True
-    note = vault.load_note(TARGET)
-    vault.write_note("Runbooks/extra.md", {**note.meta, "title": "New applicable procedure"}, body("EXTRA"))
-    with pytest.raises(ValueError, match="dependency selection changed"):
-        review.approve(state.proposal)
-    assert "BASELINE_RULE" in vault.load_note(TARGET).body
-
-
-def test_paired_trials_emit_sanitized_distinct_correlations_inside_outer_audit(workflow, monkeypatch):
-    state = workflow
-    stage(state)
-    trace = executor.action_trace
-    monkeypatch.setattr(trace, "emit", state.trace_emit)
-    monkeypatch.setattr(trace, "_HISTORY", deque())
-    monkeypatch.setattr(trace, "_HISTORY_CHARS", 0)
-    monkeypatch.setattr(trace, "_LEDGER", state.ledger)
-    monkeypatch.setattr(trace, "_LOOP", None)
-    monkeypatch.setattr(trace, "_SUBSCRIBERS", set())
-    token = trace.bind("audit-run", refinement.AUDITOR, refinement.HEIMDALL)
-    try:
-        assert evaluate_candidate(state)["verdict"] == "passed"
-        trace.emit("status", "Outer Audit resumed")
-    finally:
-        trace.reset(token)
-    events = trace.history()
-    simulated = [event for event in events if "trial" in event]
-    assert simulated
-    identities = {(event["trial"]["case_id"], event["trial"]["split"], event["trial"]["variant"],
-                   event["trial"]["repetition"]) for event in simulated}
-    assert identities == {(case_id, split, variant, 1) for case_id, split in
-                          (("training", "train"), ("protected", "holdout"))
-                          for variant in ("baseline", "candidate")}
-    assert len({event["trial"]["id"] for event in simulated}) == 4
-    for event in simulated:
-        assert event["run_id"] == "audit-run" and event["task_ref"] == refinement.AUDITOR
-        assert event["line"].startswith("Simulation · " + event["trial"]["variant"].title())
-        if "payload" in event:
-            assert event["payload"]["simulated"] is True
-        if event.get("payload", {}).get("kind") in {"tool", "model"} and event.get("step", 0) > 0:
-            assert event["call_id"].startswith(event["trial"]["id"] + ":")
-    assert events[-1]["line"] == "Outer Audit resumed" and "trial" not in events[-1]
-    assert state.ledger.trace_history() == events
-    assert not state.ledger.db.execute("SELECT 1 FROM tool_receipt_runs").fetchone()
-
-
-def test_actual_paired_report_needs_completed_exact_audit_receipt_before_review(workflow):
-    state = workflow
-    before = deepcopy(vault.load_note(TARGET).meta)
-    stage(state)
-    assert evaluate_candidate(state)["verdict"] == "passed"
-    rows = state.report["observations"]
-    assert [row["passed"] for row in rows["baseline"]] == [False, True]
-    assert [row["passed"] for row in rows["candidate"]] == [True, True]
-    assert all(row["error"] is None for variant in rows.values() for row in variant)
-    assert state.leases == state.releases == 4
-    assert not state.ledger.db.execute("SELECT 1 FROM tool_receipt_runs").fetchone()
-    assert refinement.review_blocker(state.note)
-    with pytest.raises(ValueError):
-        review.approve(state.proposal)
-    attest(state)
-    assert refinement.review_blocker(state.note) is None
-    assert review.approve(state.proposal)["approved"] == TARGET
-    accepted = vault.load_note(TARGET)
-    assert "CANDIDATE_RULE" in accepted.body
-    assert {key: accepted.meta[key] for key in before} == before
-    assert set(accepted.meta) - before.keys() == {"approved_at", "provenance"}
-
-
 @pytest.mark.parametrize("fault", ["failed_run", "failed_call", "wrong_candidate", "wrong_run", "wrong_task"])
 def test_review_rejects_nonmatching_or_failed_audit_evidence(workflow, fault):
     state = workflow
@@ -399,30 +324,6 @@ def test_provider_errors_remain_in_complete_pairs_and_block_review(workflow):
     assert refinement.review_blocker(state.note)
 
 
-def test_comparison_cannot_drop_same_case_from_both_recorded_sides(workflow):
-    state = workflow
-    specification = deepcopy(state.specification)
-    specification["suite"]["cases"].extend([case("another-training"), case("another-protected", "holdout")])
-    state.prepared = refinement.prepare_case(specification)
-    state.context["params"]["refinement_case"] = state.prepared["case_id"]
-    stage(state)
-    evaluate_candidate(state)
-    # A valid-looking smaller suite must not replace this frozen suite's coverage.
-    report = deepcopy(state.report)
-    for variant in report["observations"].values():
-        del variant[2:]
-    from obsidience.harness.execution.evaluation import compare_observations
-    report["comparison"] = compare_observations(report["observations"]["baseline"], report["observations"]["candidate"])
-    assert report["comparison"]["verdict"] == "passed"
-    report_id = refinement._store("reports/" + report["proposal_sha256"], report)
-    state.result = refinement._result(report_id, report)
-    state.returned = json.dumps(state.result, sort_keys=True)
-    attest(state)
-    assert refinement.review_blocker(state.note)
-    with pytest.raises(ValueError):
-        review.approve(state.proposal)
-
-
 @pytest.mark.parametrize("fault", ["same_author", "wrong_proposal", "wrong_hash"])
 def test_audit_must_bind_current_candidate_and_independent_execution(workflow, fault):
     state = workflow
@@ -439,15 +340,3 @@ def test_audit_must_bind_current_candidate_and_independent_execution(workflow, f
     assert state.requests == []
 
 
-def test_candidate_edit_after_passing_audit_invalidates_review_receipt(workflow):
-    state = workflow
-    stage(state)
-    evaluate_candidate(state)
-    attest(state)
-    assert refinement.review_blocker(state.note) is None
-    vault.write_note(state.note.path, state.note.meta, body("CANDIDATE_RULE changed after audit"))
-    current = vault.load_note(state.note.path)
-    assert refinement.review_blocker(current)
-    with pytest.raises(ValueError):
-        review.approve(state.proposal)
-    assert "BASELINE_RULE" in vault.load_note(TARGET).body

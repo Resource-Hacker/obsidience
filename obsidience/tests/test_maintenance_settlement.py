@@ -12,6 +12,7 @@ from obsidience.harness.capabilities.task import create
 from obsidience.harness.capabilities.vault import maintenance
 from obsidience.harness.config import CONFIG
 from obsidience.harness.execution import assignments, executor, scheduler
+from obsidience.harness.execution.adk import runner as adk_runner
 from obsidience.harness.knowledge import vault
 from obsidience.harness.realtime.runtime import RUNTIME
 from obsidience.harness.models.context import PayloadCount
@@ -386,7 +387,7 @@ def test_real_activation_admission_race_settles_without_replaying_and_preserves_
     monkeypatch.setattr(executor, "cached_text_count", lambda *_: PayloadCount(100))
     monkeypatch.setattr(executor.knowledge_activity, "emit", lambda *_a, **_kw: None)
     monkeypatch.setattr(executor.action_trace, "emit", lambda *_a, **_kw: None)
-    monkeypatch.setattr(executor, "_execute_session", lambda *_a, **_kw: pytest.fail("No provider or Tool may run"))
+    monkeypatch.setattr(adk_runner, "run_adk_session", lambda *_a, **_kw: pytest.fail("No provider or Tool may run"))
 
     async def compile_packet(*_args, **kwargs):
         return {"spine": executor.resolve_spine(note, executor.resolver()), "packet": "Isolated packet", "refs": [note.ref, book.ref], "retrieval_ms": 1.0,

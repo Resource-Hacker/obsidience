@@ -1,14 +1,18 @@
-"""ADK Executive activation: the Executive's model/Tool loop.
+"""ADK activation: the model/Tool loop of the Executive and of every specialist Task.
 
 ADK's Runner sequences model steps and Tools and appends session events. The
-controller here starts each invocation with the turn's message (runtime
-context, owner request, recall), and continues the same turn with a new
-invocation only for owner clarifications or controller feedback (a rejected
-completion, an empty or malformed step). Explicit HassIL commands bypass the
-model and append their exact records to the same conversation log.
+controller here starts each invocation with the activation's message (runtime
+context, owner request, recall; or a Task's compiled packet and its decision
+budget), and continues the same activation with a new invocation only for
+owner clarifications or controller feedback (a rejected completion, an empty,
+malformed or Tool-less step). Explicit HassIL commands bypass the model and
+append their exact records to the same conversation log. Foreground demand
+cancels only unfinished inference; a Tool in flight finishes and records its
+receipt before the activation yields.
 
-A run without a conversation (an instruction evaluation trial or a run with no
-Chat binding) keeps one in-memory ADK session for this activation only. An
+A run without a conversation (a specialist Task, an instruction evaluation
+trial or an Executive run with no Chat binding) keeps one in-memory ADK session
+for this activation only; its receipts, trace and ledger stay in SQLite. An
 evaluation trial also skips Hindsight recall, and its handler answers every
 admitted Tool call: no capability dispatch, receipt or writeback.
 """
@@ -22,16 +26,17 @@ from copy import deepcopy
 from google.genai import types
 
 from . import sessions
-from .plugin import ExecutivePlugin
+from .plugin import AgentPlugin, acquire_model
 from .tools import capability_tools
-from ..native_turn import command_summary, cue_only, steering_context, tool_schemas, turn_recall
+from ..capability_core import foreground_checkpoint
+from ..native_turn import command_summary, cue_only, step_budget_notice, steering_context, tool_schemas, turn_recall
 from ...config import CONFIG
 
 EXECUTIVE = 'Agents/Executive/Executive'
 COMMANDS = ('lights.set', 'tv.control', 'media.pause', 'task.complete')
 
 
-async def _run_command(plugin: ExecutivePlugin, command: dict, session_id: str, turn_id: str) -> None:
+async def _run_command(plugin: AgentPlugin, command: dict, session_id: str, turn_id: str) -> None:
     """Controller-owned execution of one exact command; never a fabricated model span."""
     ex, ctx, run = plugin.ex, plugin.ctx, plugin.run
     await sessions.append(session_id, run, [
@@ -75,6 +80,42 @@ async def _settle_interrupted(session_id: str, run: str, turn_id: str) -> None:
     }), 'plugin:obsidience.outcome', run=run)])
 
 
+async def _invoke(runner, plugin: AgentPlugin, interruption_event, ctx: dict, **request) -> None:
+    """One ADK invocation; foreground demand cancels only unfinished inference.
+
+    A Tool in flight is never cancelled here: the capability core records its
+    receipt and then raises at its own foreground checkpoint, as the step
+    boundary does before another model request.
+    """
+    async def drain():
+        async for _event in runner.run_async(**request):
+            pass
+
+    plugin.generating.clear()
+    if interruption_event is None:
+        await drain()
+        return
+    invocation = asyncio.create_task(drain(), name='obsidience-adk-invocation')
+    demand = asyncio.create_task(interruption_event.wait())
+    generating = None
+    try:
+        await asyncio.wait((invocation, demand), return_when=asyncio.FIRST_COMPLETED)
+        if not invocation.done():
+            generating = asyncio.create_task(plugin.generating.wait())
+            await asyncio.wait((invocation, generating), return_when=asyncio.FIRST_COMPLETED)
+            if not invocation.done():
+                invocation.cancel()
+                await asyncio.gather(invocation, return_exceptions=True)
+                foreground_checkpoint(interruption_event, ctx)
+        await invocation
+    finally:
+        for pending in (invocation, demand, generating):
+            if pending is not None and not pending.done():
+                pending.cancel()
+        await asyncio.gather(*(t for t in (invocation, demand, generating) if t is not None),
+                             return_exceptions=True)
+
+
 async def run_adk_session(task, model, messages, allowed, ctx, agent_name, effort,
                           interruption_event=None, *, initial_lease=None, evaluation=None,
                           fast_lane=True):
@@ -84,16 +125,15 @@ async def run_adk_session(task, model, messages, allowed, ctx, agent_name, effor
     from google.adk.runners import Runner
     from google.adk.sessions import InMemorySessionService
     from ..commands import recognize_command
-    from ..executor import TurnState
 
     if evaluation is not None:
         if ctx or initial_lease is not None:
             raise ValueError('Native evaluation requires a fresh context and its own model lease')
         ctx.update(run_id='trial-' + uuid.uuid4().hex, objective=evaluation.case['objective'])
-    plugin = ExecutivePlugin(task, model, allowed, ctx, agent_name, effort, system=messages[0]['content'],
-                             interruption_event=interruption_event, initial_lease=initial_lease,
-                             fast_lane=fast_lane, evaluation=evaluation)
-    ex, state, trace, run = plugin.ex, plugin.state, plugin.trace, plugin.run
+    plugin = AgentPlugin(task, model, allowed, ctx, agent_name, effort, system=messages[0]['content'],
+                         interruption_event=interruption_event, initial_lease=initial_lease,
+                         fast_lane=fast_lane, evaluation=evaluation)
+    ex, trace, run = plugin.ex, plugin.trace, plugin.run
     ctx['_foreground_interruption_event'] = interruption_event
     for key in ('_reflex_proposal', '_reflex_command_verified', '_reflex_command_result', '_voice_confirmation'):
         ctx.pop(key, None)
@@ -143,7 +183,7 @@ async def run_adk_session(task, model, messages, allowed, ctx, agent_name, effor
             if conversation_id and ex.active_lease is None:
                 # The first step always needs this model. Reserve it while the
                 # turn recalls memory, not after the recall.
-                plugin.lease_prefetch = asyncio.create_task(TurnState.acquire_model(model))
+                plugin.lease_prefetch = asyncio.create_task(acquire_model(model))
             # One turn message: the compiler's runtime context, the owner request
             # (or continuation) and its recall; the projection orders them.
             if conversation_id:
@@ -151,10 +191,14 @@ async def run_adk_session(task, model, messages, allowed, ctx, agent_name, effor
                 parts.append(sessions.part(ctx['objective'], 'plugin:obsidience.continuation', run=run)
                              if continuation else sessions.part(ctx['objective'], 'user', id=turn_id, run=run))
                 query = ctx['objective']
+            elif plugin.task_mode:
+                # A Task's compiled packet and its decision budget; no owner turn.
+                parts = [sessions.part(row['content'], 'plugin:obsidience.task', run=run) for row in messages[1:]]
+                parts.append(sessions.part(step_budget_notice(plugin.max_steps), 'plugin:obsidience.task', run=run))
             else:
                 parts = [sessions.part(row['content'], 'user', run=run) for row in messages[1:]]
                 query = messages[-1]['content']
-            if not continuation:
+            if not continuation and not plugin.task_mode:
                 recalled = await turn_recall(ctx, query, emit=plugin.emit, run=run, evaluation=evaluation,
                                              context_text=messages[1]['content'] if len(messages) > 1 else '')
                 if recalled['memories']:
@@ -168,30 +212,30 @@ async def run_adk_session(task, model, messages, allowed, ctx, agent_name, effor
             request = {'system': messages[0]['content'], 'tools': tool_schemas(allowed), 'effort': effort}
             delta = None if session.state.get(sessions.REQUEST_STATE) == request else {sessions.REQUEST_STATE: request}
             message = types.Content(role='user', parts=parts)
+            # Controller text continues a Task as plain procedure input, not an owner turn.
+            feedback_kind = 'plugin:obsidience.task' if plugin.task_mode else 'plugin:obsidience.steering'
             while True:
                 config = RunConfig(streaming_mode=StreamingMode.SSE,
                                    max_llm_calls=max(1, plugin.max_steps - plugin.model_steps + 1))
-                async for _event in runner.run_async(user_id=sessions.USER, session_id=session_id,
-                                                     new_message=message, state_delta=delta, run_config=config):
-                    pass
+                await _invoke(runner, plugin, interruption_event, ctx, user_id=sessions.USER,
+                              session_id=session_id, new_message=message, state_delta=delta, run_config=config)
                 delta = None
                 if ex.done:
                     break
-                if (clarifications := state.take_steering()) is not None:
+                if (clarifications := plugin.take_steering()) is not None:
                     plugin.steered = True
                     plugin.last_search_refs = None
                     plugin.images.clear()
                     text = steering_context(clarifications)
                     turns = [turn['id'] for turn in clarifications]
                     message = types.Content(role='user', parts=[sessions.part(
-                        text, 'plugin:obsidience.steering', run=run, turns=turns)])
+                        text, feedback_kind, run=run, turns=turns)])
                     continue
                 if plugin.feedback is not None:
                     text, plugin.feedback = plugin.feedback, None
-                    message = types.Content(role='user', parts=[sessions.part(
-                        text, 'plugin:obsidience.steering', run=run)])
+                    message = types.Content(role='user', parts=[sessions.part(text, feedback_kind, run=run)])
                     continue
-                raise RuntimeError('Executive invocation ended without an accepted completion')
+                raise RuntimeError('Activation ended without an accepted completion')
         if cue_only(ex.status, ctx, plugin.steered, trace):
             ctx['_voice_confirmation'] = 'cue_only'
         return trace, ex.status, ex.summary

@@ -40,23 +40,6 @@ def test_compiler_reuses_one_resolver_and_preserves_exact_packet_and_refs(monkey
     assert activation["provider_system"].count("Exact Tool") == 1
 
 
-def test_run_task_passes_its_exact_resolver_to_compiler(execution, monkeypatch):
-    accepted = executor.resolver()
-    builds = []
-    monkeypatch.setattr(executor, "resolver", lambda **_kwargs: builds.append(True) or accepted)
-    compile_packet = executor.compile_activation
-    received = []
-
-    async def capture(*args, **kwargs):
-        received.append(kwargs.get("accepted_resolver"))
-        return await compile_packet(*args, **kwargs)
-
-    monkeypatch.setattr(executor, "compile_activation", capture)
-    assert asyncio.run(execution.run())["status"] == "completed"
-    assert builds == [True]
-    assert received == [accepted]
-
-
 @pytest.mark.parametrize("reference", [None, "Tasks/query", "Tasks/executive/operate"])
 def test_context_model_loads_current_canonical_task_without_vault_scan(monkeypatch, reference):
     runtime = ConversationRuntime(NS())
