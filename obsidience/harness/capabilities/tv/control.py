@@ -64,6 +64,11 @@ LINK_HOSTS = {
 # ignores the link; the same link sent once that home has settled plays. Its
 # plutotv://live-tv entry point plays a channel; the https form can land on Home.
 LINK_NEEDS_SETTLED_APP = {'pluto'}
+# YouTube videos play without ads in SmartTube (org.smarttube.stable, sideloaded
+# 2026-10-08). It accepts YouTube watch links but cannot load live streams
+# (32.63: loadFormatInfo null), so those stay in the official app, which is also
+# the fallback when SmartTube does not start (it breaks when YouTube changes).
+AD_FREE_YOUTUBE = 'smarttube'
 PLUTO_GUIDE = 'https://api.pluto.tv/v2/channels'
 PLUTO_CHANNEL = re.compile(r'https://pluto\.tv/[a-z]{2}/live-tv/([a-z0-9-]{1,80})')
 # The content last opened per app, once playback started: {app, link, title,
@@ -755,7 +760,8 @@ def _bind(candidates, context):
     bound = context.setdefault('_tv_candidates', {})
     for candidate in candidates:
         candidate['id'] = 'c' + str(len(bound) + 1)
-        bound[candidate['id']] = (candidate['app'], candidate.pop('url'), candidate['title'], candidate['by'])
+        bound[candidate['id']] = (candidate['app'], candidate.pop('url'), candidate['title'], candidate['by'],
+                                  candidate.get('duration') == 'live or unknown')
 
 
 _LIVE_WORDS = {'news', 'weather', 'live', 'forecast', 'headlines', *_TOPICS}
@@ -1111,6 +1117,7 @@ def _execute(args, context):
         attempted = context.setdefault('_tv_attempted', set())
         opening = action in ('open', 'play')
         extra = {'query': args['query'].strip(), 'chosen': chosen, 'alternatives': alternatives} if action == 'play' else {}
+        live = action == 'play' and chosen.get('duration') == 'live or unknown'
         if action == 'open':
             if 'id' in args:
                 candidate = (context.get('_tv_candidates') or {}).get(args['id'])
@@ -1118,9 +1125,10 @@ def _execute(args, context):
                     return {'status': 'failed', 'delivery': 'not_dispatched', 'effect_applied': False,
                             'correction_allowed': True,
                             'failure': 'Unknown candidate id; call find in this turn and open one of its ids.'}
-                alias, link, title, _by = candidate
+                alias, link, title, _by, live = candidate
             else:
                 (alias, link), title = _link(args['url'], row['apps']), None
+                live = '/live/' in args['url']
         token = ('power' if action in ('on', 'off') else 'launch:' + args['app'] if action == 'launch'
                  else 'open:' + link if opening else '')
         if token and token in attempted:
@@ -1142,6 +1150,8 @@ def _execute(args, context):
                 raise ValueError('No launchable TV activity for this app')
             command = 'am start -W -n ' + shlex.quote(component)
         elif opening:
+            if alias == 'youtube' and not live and AD_FREE_YOUTUBE in row['apps']:
+                alias = AD_FREE_YOUTUBE
             package = row['apps'][alias]
             channel = PLUTO_CHANNEL.fullmatch(link)
             target = 'plutotv://live-tv/' + channel[1] if alias == 'pluto' and channel else link
@@ -1203,8 +1213,15 @@ def _execute(args, context):
             # Seen on screen: a cold-started Pluto lands on its On Demand home and
             # ignores the link; the same link sent to the running app plays.
             playback = _wait_for_playback(row, cancel, row['apps'][alias], before,
-                                          limit=60.0 if settle else 20.0,
+                                          limit=60.0 if settle else 35.0 if alias == AD_FREE_YOUTUBE else 20.0,
                                           resend=command if settle else None)
+            if playback is None and alias == AD_FREE_YOUTUBE:
+                alias = 'youtube'
+                before = set(_media_players(row, cancel))
+                _shell(row, cancel, _guard(row) + 'am start -W -a android.intent.action.VIEW -d '
+                       + shlex.quote(link) + ' ' + row['apps'][alias])
+                playback = _wait_for_playback(row, cancel, row['apps'][alias], before)
+                extra['fallback'] = 'SmartTube did not start this video; it opened in the official YouTube app.'
         if action in ('on', 'off'):
             deadline = time.monotonic() + 8
             while True:
