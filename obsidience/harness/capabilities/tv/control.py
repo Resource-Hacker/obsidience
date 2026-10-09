@@ -43,9 +43,21 @@ LINK_HOSTS = {
 LINK_NEEDS_SETTLED_APP = {'pluto'}
 PLUTO_GUIDE = 'https://api.pluto.tv/v2/channels'
 PLUTO_CHANNEL = re.compile(r'https://pluto\.tv/[a-z]{2}/live-tv/([a-z0-9-]{1,80})')
-# The content this Harness last opened per app, once playback started:
-# {app, link, title, opened_at, player}, for idempotent repeats and state.
-_OPENED = {}
+# The content last opened per app, once playback started: {app, link, title,
+# opened_at, player}, for idempotent repeats and state. Kept in private state so
+# a Harness restart still knows what the TV is showing.
+_OPENED_PATH = Path(__file__).resolve().parents[3] / 'state' / 'television-opened.json'
+
+
+def _load_opened():
+    try:
+        rows = json.loads(_OPENED_PATH.read_text())
+        return {k: v for k, v in rows.items() if isinstance(v, dict) and v.get('link')} if isinstance(rows, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+_OPENED = _load_opened()
 _PLUTO = {'at': 0.0, 'rows': []}
 # What one Pluto channel airs now, cached until that program ends.
 _AIRING = {}
@@ -857,6 +869,12 @@ def execute(args: dict, context: dict) -> dict:
         if started:
             _OPENED[alias] = {'app': alias, 'link': link, 'title': title, 'opened_at': time.time(),
                               'player': playback}
+            try:
+                temp = _OPENED_PATH.with_suffix('.tmp')
+                temp.write_text(json.dumps(_OPENED))
+                temp.replace(_OPENED_PATH)
+            except OSError:
+                pass  # The record is a convenience; playback already happened.
         # A confirmed playback start needs no slow video screenshot.
         result = _observe(row, cancel, context, state, after_input=True, started=started)
         context['_tv_effect_uncertain'] = False
