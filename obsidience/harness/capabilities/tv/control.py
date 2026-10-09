@@ -203,6 +203,32 @@ def _link(url, apps):
 ZERO_AD_ID = '00000000-0000-0000-0000-000000000000'
 
 
+_POLICY_PATH = Path(__file__).resolve().parents[3] / 'state' / 'television-policy.json'
+_POLICY_BOOT = {'id': None}
+
+
+def _boot_policy(row, cancel):
+    """Re-apply the owner's debloat once per TV boot; Fire OS re-enables some packages at boot."""
+    boot = _shell(row, cancel, 'cat /proc/sys/kernel/random/boot_id').strip()
+    if not boot or _POLICY_BOOT['id'] == boot:
+        return
+    try:
+        policy = json.loads(_POLICY_PATH.read_text())
+    except (OSError, ValueError):
+        _POLICY_BOOT['id'] = boot
+        return
+    name = re.compile(r'[a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)+')
+    disabled = set(re.findall(r'package:(\S+)', _shell(row, cancel, 'pm list packages -d')))
+    commands = [f'pm disable-user --user 0 {p}' for p in policy.get('disable', [])
+                if name.fullmatch(p) and p not in disabled]
+    commands += [f'cmd appops set {p} RUN_ANY_IN_BACKGROUND ignore; cmd appops set {p} RUN_IN_BACKGROUND ignore'
+                 for p in policy.get('background_restrict', []) if name.fullmatch(p)]
+    if commands:
+        # Each command is independent; a protected package's refusal must not stop the rest.
+        _shell(row, cancel, _guard(row) + '{ ' + '; '.join(c + ' >/dev/null 2>&1' for c in commands) + '; true; }')
+    _POLICY_BOOT['id'] = boot
+
+
 def _placeholder_ad_id(row, cancel):
     """Keep the owner-chosen opted-out advertising ID; Fire OS regenerates one at boot."""
     current = _shell(row, cancel, _guard(row) + 'settings get secure advertising_id; '
@@ -728,6 +754,7 @@ def execute(args: dict, context: dict) -> dict:
         state = _power(row, cancel)
         if action != 'observe':
             _placeholder_ad_id(row, cancel)
+            _boot_policy(row, cancel)
         if state['wakefulness'] == 'Dreaming' and action not in ('observe', 'off'):
             # Seen on this TV: an app launched behind the screensaver stays frozen
             # on its splash. Wake ends the screensaver; it changes no content.
