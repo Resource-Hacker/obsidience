@@ -518,7 +518,9 @@ full current reads, unrelated hits do not.
 
 - Local Hindsight behind a native Cordis port owns Memory: per-Agent banks of native
   facts, experiences and observations with entities, original dates and evidence; filters
-  are presentation; memory IDs are never regenerated; no Article placement authority;
+  are presentation; memory IDs are never regenerated for presentation (the owner-approved
+  2026-10-09 EmbeddingGemma 2 migration re-imported every bank once, giving memories and
+  observations new IDs; old IDs survive only in history); no Article placement authority;
   native edges stay in the Memory view. Missing provider configuration fails startup,
   never falls back silently.
 - Recall is bounded (automatic tighter than explicit `observations.recall`); failure never
