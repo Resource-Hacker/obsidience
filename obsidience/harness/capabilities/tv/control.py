@@ -1236,6 +1236,10 @@ def _execute(args, context):
                 _wait(cancel, .15)
         started = opening and playback is not None
         if started:
+            # A new started player of the chosen app is the TV's own readback,
+            # like a volume level: the outcome is verified, not just delivered.
+            delivery = 'verified'
+            context.pop('_tv_navigation_applied', None)
             _OPENED[alias] = {'app': alias, 'link': link, 'title': title, 'opened_at': time.time(),
                               'player': playback}
             try:
@@ -1252,7 +1256,8 @@ def _execute(args, context):
             result['opened'] = {'app': alias, 'link': link, 'title': title}
         return {'status': 'completed', 'delivery': delivery, 'action': action,
                 'effect_applied': True, 'must_not_replay': True,
-                'note': 'Input delivered once; inspect the fresh evidence before claiming the requested outcome.',
+                'note': ('Playback verified from the TV audio state.' if started else
+                         'Input delivered once; inspect the fresh evidence before claiming the requested outcome.'),
                 **extra, **result}
     except (OSError, ValueError, KeyError, IndexError) as error:
         if delivery == 'not_dispatched' and context.get('_tv_effect_uncertain') and not uncertain_before:
