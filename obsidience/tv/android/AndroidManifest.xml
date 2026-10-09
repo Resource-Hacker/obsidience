@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Obsidience TV agent. No INTERNET permission: the Harness reaches it only through
+     ADB's own forward to an abstract Unix socket (see AgentService). versionCode is
+     pinned by obsidience/harness/capabilities/tv/agent.py VERSION. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="org.obsidience.tv"
+    android:versionCode="1"
+    android:versionName="1">
+
+    <uses-sdk android:minSdkVersion="30" android:targetSdkVersion="30" />
+
+    <!-- Resolves foreground window classes to activities of other apps (Android 11 package visibility). -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+
+    <application android:label="@string/app_name" android:allowBackup="false">
+
+        <service android:name=".AgentService"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data android:name="android.accessibilityservice"
+                android:resource="@xml/agent_service" />
+        </service>
+
+        <!-- Enabled only so MediaSessionManager.getActiveSessions admits this app. -->
+        <service android:name=".MediaListener"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+    </application>
+</manifest>

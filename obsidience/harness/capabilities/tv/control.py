@@ -16,6 +16,8 @@ import xml.etree.ElementTree as ET
 
 from PIL import Image
 
+from . import agent as _agent
+
 _LOCK = threading.Lock()
 # Android keycodes for `input keyevent`, the fallback when the virtual remote cannot run.
 KEYS = {name: 'KEYCODE_' + code for name, code in {
@@ -31,6 +33,8 @@ MEDIA_KEYS = {'rewind', 'fast_forward'}
 # Target states, read back from the audio service: the current state is read
 # first, only a difference is acted on, and a mismatch is re-read and retried once.
 TARGETS = ('volume', 'volume_up', 'volume_down', 'mute', 'unmute', 'pause', 'resume')
+# A notice is a short text card the TV agent draws over whatever shows (an accessibility overlay).
+NOTICE_MS = 6000
 # One remote press moves the index by 1 of 100, which is inaudible as a spoken "volume up".
 VOLUME_STEP = 5
 # A virtual remote through Android's own `hid` tool (/dev/uhid), alive while its
@@ -340,6 +344,12 @@ def _remote_write(process, command):
 
 
 def close():
+    """End the TV agent connection and the virtual remote."""
+    _agent.close()
+    _close_remote()
+
+
+def _close_remote():
     """End the virtual remote; closing its stdin removes the device from the TV."""
     process, _REMOTE['process'], _REMOTE['ready'] = _REMOTE['process'], None, False
     if process is None:
@@ -366,7 +376,7 @@ def _remote(row, cancel, boot, check):
     if process is None or process.poll() is not None or _REMOTE['boot'] != boot:
         if process is not None and process.poll() is not None and not _REMOTE['ready']:
             _REMOTE['failed'] = (_REMOTE['boot'], time.monotonic())  # It exited before the TV listed it.
-        close()
+        _close_remote()
         failed = _REMOTE['failed']
         if failed and failed[0] == boot and time.monotonic() - failed[1] < 600:
             return None
@@ -382,7 +392,7 @@ def _remote(row, cancel, boot, check):
                                     'bus': 'usb', 'descriptor': _remote_descriptor()})
         except OSError:
             _REMOTE['failed'] = (boot, time.monotonic())
-            close()
+            _close_remote()
         return None
     if not _REMOTE['ready'] and check:
         # Reports sent before the TV's input reader lists the device could be lost.
@@ -390,7 +400,7 @@ def _remote(row, cancel, boot, check):
             _REMOTE['ready'] = True
         elif time.monotonic() - _REMOTE['started'] > 10:
             _REMOTE['failed'] = (boot, time.monotonic())
-            close()
+            _close_remote()
     return process if _REMOTE['ready'] else None
 
 
@@ -427,7 +437,90 @@ def _audio(row, cancel, command=''):
 
     command (ending in '&& ') runs first in the same guarded shell, so one round trip sets and reads back.
     """
+    if not command and (raw := _ask('state')) is not None:
+        return _agent_audio(raw)
     return _audio_state(_shell(row, cancel, _guard(row) + command + 'dumpsys audio'))
+
+
+def _ask(op, **fields):
+    """One TV agent request, or None when the agent is not connected or failed: the caller uses ADB."""
+    link = _agent.current()
+    if link is None:
+        return None
+    try:
+        return link.request(op, **fields)
+    except (OSError, ValueError):
+        return None
+
+
+def _agent_audio(raw):
+    return {'media_playing': raw['media_playing'], 'volume': raw['volume']}
+
+
+def _agent_power(raw):
+    """The agent's power state in dumpsys power's wakefulness/display terms."""
+    power = raw['power']
+    wake = (('Dreaming' if power['interactive'] else 'Dozing') if power['dreaming']
+            else 'Awake' if power['interactive'] else 'Asleep')
+    return {'wakefulness': wake, 'display': power['display']}
+
+
+def _agent_window(raw):
+    """A focus token shaped like dumpsys window's; the accessibility window id stands in for its hash."""
+    foreground = raw['foreground']
+    return f"Window{{agent-{foreground['window']} u0 {foreground['package']}/{foreground['activity']}}}"
+
+
+def _window(row, cancel):
+    """The focused window token, from the agent when connected, else dumpsys window.
+
+    An observation lease compares tokens of one source; a source change only asks for a fresh observe.
+    """
+    raw = _ask('state')
+    return _agent_window(raw) if raw is not None else _focus(row, cancel)
+
+
+def _from_agent(row, raw, fetch=True):
+    """The backend state from the TV agent, in _state's shape.
+
+    Android anonymizes media players' uids for apps, so playback is read for a registered
+    foreground app only: a started media player is playing (a media session's state lags
+    the player by a moment); a paused player, or a paused session whose app released its
+    player (YouTube does), is paused.
+    """
+    foreground, apps = raw['foreground'], row['apps']
+    package = foreground['package']
+    sessions = [{'package': s['package'], 'active': True,
+                 **{key: s[key] for key in ('state', 'title', 'artist', 'position_ms', 'duration_ms') if key in s}}
+                for s in raw['sessions'] if s['package'] in apps.values()]
+    players = {player['piid']: player['state'] for player in raw['players']}
+    own = next((s.get('state') for s in sessions if s['package'] == package), None)
+    playback = None
+    if package in apps.values():
+        playback = ('playing' if 'started' in players.values() else
+                    'paused' if 'paused' in players.values() or own == 'paused' else None)
+    power, window = _agent_power(raw), _agent_window(raw)
+    state = {
+        'captured_at': time.time(),
+        'power': {**power, 'screen': _screen(power, window)},
+        'foreground': {'app': {v: k for k, v in apps.items()}.get(package, ''), 'package': package,
+                       'activity': foreground['activity'], 'window': window},
+        'playback': playback,
+        'media_playing': raw['media_playing'],
+        'media_sessions': sessions,
+        'volume': raw['volume'],
+        'text_input_active': raw['ime'],
+    }
+    if raw.get('ads_skipped'):
+        state['ads_skipped'] = raw['ads_skipped'][-3:]
+    return _with_opened(state, lambda player: players.get(player) == 'started', fetch)
+
+
+def _pushed(row):
+    """The agent pushes each state change; it replaces the state prompt_line renders, with no TV round trip."""
+    def consume(raw):
+        _LAST['state'] = _from_agent(row, raw, fetch=False)
+    return consume
 
 
 def _audio_state(raw):
@@ -480,9 +573,13 @@ def _sessions(raw, packages):
 def _state(row, cancel, power):
     """The TV's backend state from Android system services (read-only, no screen capture).
 
-    One shell reads the focused window, the audio service (players, volume,
-    mute), media sessions, the input method and the foreground app's uid.
+    The TV agent answers when connected. Otherwise one shell reads the focused window,
+    the audio service (players, volume, mute), media sessions, the input method and
+    the foreground app's uid.
     """
+    if (reply := _ask('state')) is not None:
+        _LAST['state'] = _from_agent(row, reply)
+        return _LAST['state']
     raw = _shell(row, cancel, _guard(row) + (
         "{ f=$(dumpsys window | grep -m1 -E '^ *mCurrentFocus='); echo \"$f\"; echo @@; dumpsys audio; "
         "echo @@; dumpsys media_session; echo @@; dumpsys input_method | grep -m1 -E 'mInputShown='; "
@@ -514,21 +611,33 @@ def _state(row, cancel, power):
         'volume': _volume(audio),
         'text_input_active': bool(re.search(r'\bmInputShown=true\b', ime)),
     }
+    _LAST['state'] = _with_opened(state, lambda player: players.get(player) == (uid, 'started'))
+    return state
+
+
+def _with_opened(state, started, fetch=True):
+    """Add what this Harness opened last; started(player id) tells whether that exact player still plays.
+
+    fetch=False (pushed states) uses only the cached Pluto guide entry and never waits on the network.
+    """
     opened = max(_OPENED.values(), key=lambda item: item['opened_at'], default=None)
     if opened is not None:
         state['last_opened'] = {**{key: opened[key] for key in ('app', 'title', 'link', 'opened_at')},
                                 # The exact player it started still plays in the foreground app.
                                 'still_playing': opened['app'] == state['foreground']['app']
-                                and players.get(opened['player']) == (uid, 'started')}
+                                and started(opened['player'])}
         channel = PLUTO_CHANNEL.fullmatch(opened['link'])
         if opened['app'] == 'pluto' == state['foreground']['app'] and channel:
-            try:
-                airing = _pluto_airing(channel[1])
-            except Exception:  # The public guide is optional context.  # noqa: BLE001
-                airing = None
+            airing = None
+            if fetch:
+                try:
+                    airing = _pluto_airing(channel[1])
+                except Exception:  # The public guide is optional context.  # noqa: BLE001
+                    pass
+            elif (cached := _AIRING.get(channel[1])) and cached['from'] <= time.time() < cached['until']:
+                airing = cached
             if airing:
                 state['last_opened']['airing_now'] = airing
-    _LAST['state'] = state
     return state
 
 
@@ -631,9 +740,12 @@ def _reach(row, cancel, context, boot, power, args, audio=None):
         attempts += 1
         context['_tv_effect_uncertain'] = True
         if level is not None:
-            audio = _audio(row, cancel, f'cmd media_session volume --show --stream 3 --set {level} >/dev/null && ')
+            reply = _ask('volume', level=level)
+            audio = (_agent_audio(reply) if reply is not None else
+                     _audio(row, cancel, f'cmd media_session volume --show --stream 3 --set {level} >/dev/null && '))
         else:
-            _press(row, cancel, boot, ['play' if action == 'resume' else 'pause' if action == 'pause' else 'mute'])
+            if not _agent_effect(action, tv):
+                _press(row, cancel, boot, ['play' if action == 'resume' else 'pause' if action == 'pause' else 'mute'])
             deadline = time.monotonic() + (2.5 if action in ('mute', 'unmute') else 4)
             while not _reached(action, level, audio := _audio(row, cancel)) and time.monotonic() < deadline:
                 _wait(cancel, .2)
@@ -652,6 +764,32 @@ def _reach(row, cancel, context, boot, power, args, audio=None):
         result.update(delivery='acknowledged', note=(
             'Sent twice; the readback still differs. Report the requested state as unverified.'))
     return result
+
+
+def _agent_effect(action, tv):
+    """Mute through the audio service, or pause/resume through the foreground app's media
+    session, when the agent is connected; False leaves the remote key to the caller.
+
+    A request that may have reached the TV counts as sent: the readback decides, and the
+    remote's toggle keys are never pressed after it in the same attempt.
+    """
+    link = _agent.current()
+    if action in ('mute', 'unmute'):
+        request = {'op': 'volume', 'mute': action == 'mute'}
+    elif any(session['package'] == tv['foreground']['package'] for session in tv['media_sessions']):
+        request = {'op': 'transport', 'action': 'play' if action == 'resume' else 'pause',
+                   'package': tv['foreground']['package']}
+    else:
+        return False
+    if link is None:
+        return False
+    try:
+        link.request(**request)
+    except ValueError:  # Refused (no such session): nothing was done.
+        return False
+    except OSError:  # Possibly delivered; read back before anything else is sent.
+        pass
+    return True
 
 
 def reflex_summary(args, result):
@@ -925,13 +1063,13 @@ def _observe(row, cancel, context, power, after_input=False, started=False):
     # App launch may change windows during the first frame. Retry only the
     # read-only capture, never the launch or input that preceded it.
     for _ in range(3 if frame else 0):
-        before = _focus(row, cancel)
+        before = _window(row, cancel)
         try:
             png = _adb(row, cancel, 'exec-out', _guard(row) + 'screencap -p')
         except TimeoutError:
-            after = _focus(row, cancel)
+            after = _window(row, cancel)
             break  # Use accessible controls if the screenshot transport stalls.
-        after = _focus(row, cancel)
+        after = _window(row, cancel)
         if before != after:
             continue
         try:
@@ -950,25 +1088,30 @@ def _observe(row, cancel, context, power, after_input=False, started=False):
     try:
         if not read_controls:
             raise ValueError('controls are not read for playing video')
-        raw = _shell(row, cancel, _guard(row) +
-            "sh -c 'trap \"rm -f /data/local/tmp/obsidience-ui.xml\" EXIT; "
-            "uiautomator dump /data/local/tmp/obsidience-ui.xml >/dev/null && cat /data/local/tmp/obsidience-ui.xml'")
-        if len(raw) <= 512_000 and _focus(row, cancel) == after:
-            for node in ET.fromstring(raw).iter('node'):
-                a = node.attrib
-                if a.get('password') == 'true':
+        # (password, label, view id, focused, selected) of the visible nodes in the active window.
+        tree = _ask('tree', max=400)
+        if tree is not None:
+            # The agent reads the active window like uiautomator dump, in ~30 ms instead of ~3 s.
+            nodes = [(bool(n.get('password')), n.get('text') or n.get('desc') or '', n.get('id', ''),
+                      bool(n.get('focused')), bool(n.get('selected'))) for n in tree['nodes'] if not n.get('hidden')]
+        else:
+            raw = _shell(row, cancel, _guard(row) +
+                "sh -c 'trap \"rm -f /data/local/tmp/obsidience-ui.xml\" EXIT; "
+                "uiautomator dump /data/local/tmp/obsidience-ui.xml >/dev/null && cat /data/local/tmp/obsidience-ui.xml'")
+            nodes = [(a.get('password') == 'true', a.get('text') or a.get('content-desc') or '',
+                      a.get('resource-id', ''), a.get('focused') == 'true', a.get('selected') == 'true')
+                     for a in (node.attrib for node in ET.fromstring(raw).iter('node'))] if len(raw) <= 512_000 else []
+        if _window(row, cancel) == after:
+            for password, label, ident, focused, selected in nodes:
+                if password:
                     continue
-                label = a.get('text') or a.get('content-desc') or ''
-                if label or a.get('focused') == 'true':
-                    controls.append({'label': label[:160],
-                                     'id': a.get('resource-id', '')[:160],
-                                     'focused': a.get('focused') == 'true',
-                                     'selected': a.get('selected') == 'true'})
+                if label or focused:
+                    controls.append({'label': label[:160], 'id': ident[:160], 'focused': focused, 'selected': selected})
                 if len(controls) >= 48:
                     break
     except (OSError, ValueError, ET.ParseError):
         pass
-    if (frame or read_controls) and _focus(row, cancel) != after:
+    if (frame or read_controls) and _window(row, cancel) != after:
         raise ValueError('TV foreground changed during observation; observe again')
     if frame and output is None and not controls:
         raise ValueError('TV provides neither a readable frame nor accessible controls')
@@ -1041,7 +1184,7 @@ def _execute(args, context):
     fields = {'on': [set()], 'off': [set()], 'observe': [set()], 'launch': [{'app'}],
               'key': [{'key'}], 'keys': [{'keys'}], 'text': [{'text'}],
               'find': [{'query'}, {'query', 'app'}], 'play': [{'query'}, {'query', 'app'}],
-              'open': [{'id'}, {'url'}], 'volume': [{'level'}],
+              'open': [{'id'}, {'url'}], 'volume': [{'level'}], 'notice': [{'text'}],
               **{target: [set()] for target in TARGETS if target != 'volume'}}
     if action not in fields or set(args) - {'action'} not in fields[action]:
         raise ValueError('Invalid TV action arguments')
@@ -1058,6 +1201,9 @@ def _execute(args, context):
     if action == 'text' and (not isinstance(args['text'], str)
             or not re.fullmatch(r'[A-Za-z0-9 .,:!?\-]{1,120}', args['text'])):
         raise ValueError('TV search text requires 1-120 simple printable characters')
+    if action == 'notice' and (not isinstance(args['text'], str)
+                               or not re.fullmatch(r'[^\x00-\x1f\x7f]{1,200}', args['text'].strip())):
+        raise ValueError('notice takes 1-200 characters of text')
     if action in ('find', 'play') and (not isinstance(args['query'], str) or not 1 <= len(args['query'].strip()) <= 120
                                        or args.get('app', 'pluto') not in {'pluto', 'youtube'}):
         raise ValueError(f'{action} takes a 1-120 character query and optional app pluto|youtube')
@@ -1088,21 +1234,42 @@ def _execute(args, context):
             raise ValueError('An earlier TV effect is uncertain; stop effects and report it')
         # Volume and mute need no screen, so their first audio read replaces the power read.
         audible = action in ('volume', 'volume_up', 'volume_down', 'mute', 'unmute')
-        read = 'dumpsys audio' if audible else _POWER_READ
-        try:
-            tail, boot, ad = _preamble(row, cancel, read, timeout=4)
-        except OSError as error:
-            if isinstance(error, InterruptedError):
-                raise
-            # Reconnect only the transport and read again; never replay an input or restart the ADB server.
-            _adb(row, cancel, connect=True, timeout=4)
-            tail, boot, ad = _preamble(row, cancel, read)
-        if action != 'observe':
-            _placeholder_ad_id(row, cancel, ad)
-            _boot_policy(row, cancel, boot)
-        if audible:
-            return _reach(row, cancel, context, boot, None, args, audio=_audio_state(tail))
-        state = _parse_power(tail)
+        link = _agent.current()
+        # The agent's connection lives on the transport whose identity was verified when it
+        # connected, in this TV boot. Reads and target states skip the ADB preamble once this
+        # boot's policy is applied; other effects keep the per-call identity check.
+        fast = (_ask('state') if link is not None and (
+            action == 'observe' or action in (*TARGETS, 'notice') and _POLICY_BOOT['id'] == link.boot) else None)
+        if fast is not None:
+            boot = link.boot
+            if audible:
+                return _reach(row, cancel, context, boot, None, args, audio=_agent_audio(fast))
+            state = _agent_power(fast)
+        else:
+            read = 'dumpsys audio' if audible else _POWER_READ
+            try:
+                tail, boot, ad = _preamble(row, cancel, read, timeout=4)
+            except OSError as error:
+                if isinstance(error, InterruptedError):
+                    raise
+                # Reconnect only the transport and read again; never replay an input or restart the ADB server.
+                _adb(row, cancel, connect=True, timeout=4)
+                tail, boot, ad = _preamble(row, cancel, read)
+            # The agent connects (and is provisioned) on this freshly verified transport; ADB serves until then.
+            _agent.session(row, cancel, boot, _pushed(row))
+            if action != 'observe':
+                _placeholder_ad_id(row, cancel, ad)
+                _boot_policy(row, cancel, boot)
+            if audible:
+                return _reach(row, cancel, context, boot, None, args, audio=_audio_state(tail))
+            state = _parse_power(tail)
+        if action == 'notice':
+            reply = _ask('notice', text=args['text'].strip(), ms=NOTICE_MS)
+            if reply is None:
+                return {'status': 'failed', 'delivery': 'not_dispatched', 'effect_applied': False,
+                        'correction_allowed': True, 'failure': 'TV notices need the Obsidience TV agent, which is not connected.'}
+            return {'status': 'completed', 'delivery': 'verified', 'action': action, 'effect_applied': True,
+                    'shown_ms': reply['shown_ms'], 'screen': _screen(state)}
         if state['wakefulness'] == 'Dreaming' and action not in ('observe', 'off'):
             # Seen on this TV: an app launched behind the screensaver stays frozen
             # on its splash. Wake ends the screensaver; it changes no content.
@@ -1178,7 +1345,7 @@ def _execute(args, context):
             names = [args['key']]
         else:
             observed = context.pop('_tv_observation', None)
-            if not observed or time.monotonic() - observed[1] > 60 or _focus(row, cancel) != observed[0]:
+            if not observed or time.monotonic() - observed[1] > 60 or _window(row, cancel) != observed[0]:
                 return {'status': 'failed', 'delivery': 'not_dispatched',
                         'effect_applied': False, 'correction_allowed': True,
                         'failure': 'Observe the current TV screen before each remote key or text entry; no input was sent. You may observe and choose the next action.'}

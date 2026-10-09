@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Obsidience TV</string>
+    <string name="a11y_description">Lets Obsidience on your computer read what the TV shows, control playback and volume, show short notices and skip video ads.</string>
+</resources>

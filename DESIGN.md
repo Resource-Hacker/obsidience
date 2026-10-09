@@ -349,7 +349,13 @@ neighbours); (9) history projected from the native conversation (no conversation
   Keys go through a virtual remote from Android's `hid` tool, with `input keyevent` as the
   fallback. The Executive's per-turn metadata renders the last read state with its age,
   never contacting the TV while building the prompt; a private ledger keeps that state and
-  recent intent outcomes across restarts.
+  recent intent outcomes across restarts. The sideloaded Obsidience TV agent
+  (`obsidience/tv/android`: an accessibility service and a notification listener, no network
+  permission) answers state, the UI tree, volume, media-session transport and on-screen notices,
+  and pushes state changes, over an abstract Unix socket that admits only the ADB shell user.
+  The Harness reaches it through an ADB forward on the identity-verified transport, owns that one
+  connection, caches its pushes for the prompt line and falls back to ADB whenever it is absent.
+  The agent clicks visible skip-ad controls in known video apps (YouTube, Pluto, Tubi).
   Protected video may omit pixels while accessible controls remain available. Text requires an active
   Android text-input method; custom keyboards use visible remote navigation.
   Missing observation or text focus is correctable before dispatch; transport or
