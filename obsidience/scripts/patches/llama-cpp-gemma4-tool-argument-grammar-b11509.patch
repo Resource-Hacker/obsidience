@@ -1,0 +1,165 @@
+--- a/common/parsers/gemma4.cpp	2026-10-09 16:24:04.144491350 -0700
++++ b/common/parsers/gemma4.cpp	2026-10-09 16:24:04.144491350 -0700
+@@ -148,6 +148,139 @@
+ 
+ }
+ 
++// Gemma4 tool arguments use their own dict syntax (bare keys, <|"|>-delimited
++// strings), so json-schema-to-grammar cannot constrain them. Translate the
++// supported JSON-schema subset into GBNF over the same syntax: the closed key
++// set with required keys first, then optional keys, in declaration order; string
++// and number enums/consts; and typed strings, numbers, booleans, nulls, arrays
++// and objects. Anything else keeps the generic gemma4-value. Parsing is
++// unchanged: the generated rules accept a subset of the generic gemma4 dict.
++static std::string gemma4_literal_gbnf(const json & value) {
++    if (value.is_string()) {
++        return gbnf_format_literal("<|\"|>" + value.get<std::string>() + "<|\"|>");
++    }
++    if (value.is_boolean() || value.is_number() || value.is_null()) {
++        return gbnf_format_literal(value.dump());
++    }
++    return "";
++}
++
++static std::string gemma4_schema_gbnf(const json & schema, int depth) {
++    static const std::string generic = "gemma4-value";
++    if (!schema.is_object() || depth > 12) {
++        return generic;
++    }
++    if (schema.contains("const")) {
++        auto literal = gemma4_literal_gbnf(schema.at("const"));
++        return literal.empty() ? generic : literal;
++    }
++    if (schema.contains("enum") && schema.at("enum").is_array() && !schema.at("enum").empty()) {
++        std::string alternatives;
++        for (const auto & value : schema.at("enum")) {
++            auto literal = gemma4_literal_gbnf(value);
++            if (literal.empty()) {
++                return generic;
++            }
++            alternatives += (alternatives.empty() ? "" : " | ") + literal;
++        }
++        return "(" + alternatives + ")";
++    }
++    for (const char * key : {"anyOf", "oneOf"}) {
++        if (schema.contains(key) && schema.at(key).is_array() && !schema.at(key).empty()) {
++            std::string alternatives;
++            for (const auto & branch : schema.at(key)) {
++                alternatives += (alternatives.empty() ? "" : " | ") + gemma4_schema_gbnf(branch, depth + 1);
++            }
++            return "(" + alternatives + ")";
++        }
++    }
++    json types = schema.contains("type") ? schema.at("type") : json();
++    if (types.is_array()) {
++        std::string alternatives;
++        for (const auto & type : types) {
++            json branch = schema;
++            branch["type"] = type;
++            alternatives += (alternatives.empty() ? "" : " | ") + gemma4_schema_gbnf(branch, depth + 1);
++        }
++        return alternatives.empty() ? generic : "(" + alternatives + ")";
++    }
++    std::string type = types.is_string() ? types.get<std::string>()
++        : (schema.contains("properties") ? "object" : "");
++    if (type == "string") {
++        return "gemma4-string";
++    }
++    if (type == "integer") {
++        return "(\"-\"? [0-9]+)";
++    }
++    if (type == "number") {
++        return "gemma4-number";
++    }
++    if (type == "boolean") {
++        return "gemma4-bool";
++    }
++    if (type == "null") {
++        return "gemma4-null";
++    }
++    if (type == "array") {
++        auto item = schema.contains("items") ? gemma4_schema_gbnf(schema.at("items"), depth + 1) : generic;
++        return "(\"[\" space ((" + item + ") (\",\" space (" + item + "))* space)? \"]\")";
++    }
++    if (type == "object") {
++        if (!schema.contains("properties") || !schema.at("properties").is_object()) {
++            return "gemma4-dict";
++        }
++        auto additional = schema.contains("additionalProperties") ? schema.at("additionalProperties") : json(true);
++        if (!(additional.is_boolean() && !additional.get<bool>())) {
++            return "gemma4-dict";  // Open key sets keep the generic dict.
++        }
++        std::set<std::string> required;
++        if (schema.contains("required") && schema.at("required").is_array()) {
++            for (const auto & name : schema.at("required")) {
++                if (name.is_string()) {
++                    required.insert(name.get<std::string>());
++                }
++            }
++        }
++        std::vector<std::string> mandatory, optional;
++        for (const auto & entry : schema.at("properties").items()) {
++            const std::string name = entry.key();
++            const json & property = entry.value();
++            if (name.empty() || name.find_first_of(":}") != std::string::npos) {
++                return "gemma4-dict";  // Not expressible as a gemma4 dict key.
++            }
++            auto member = gbnf_format_literal(name + ":") + " space (" + gemma4_schema_gbnf(property, depth + 1) + ")";
++            (required.count(name) ? mandatory : optional).push_back(member);
++        }
++        if (mandatory.empty() && optional.empty()) {
++            return "(\"{\" space \"}\")";
++        }
++        // Required members in order, then each optional member at most once in
++        // order. A member after the first carries its separating comma.
++        std::string body;
++        for (size_t i = 0; i < mandatory.size(); i++) {
++            body += (i == 0 ? "" : " \",\" space ") + mandatory[i];
++        }
++        if (mandatory.empty()) {
++            // The first present optional member has no leading comma.
++            std::string alternatives;
++            for (size_t first = 0; first < optional.size(); first++) {
++                std::string tail = optional[first];
++                for (size_t next = first + 1; next < optional.size(); next++) {
++                    tail += " (\",\" space " + optional[next] + ")?";
++                }
++                alternatives += std::string(alternatives.empty() ? "" : " | ") + "(" + tail + ")";
++            }
++            body = "(" + alternatives + ")?";
++        } else {
++            for (const auto & member : optional) {
++                body += " (\",\" space " + member + ")?";
++            }
++        }
++        return "(\"{\" space " + body + " space \"}\")";
++    }
++    return generic;
++}
++
+ common_chat_params common_chat_params_init_gemma4(const common_chat_template &    tmpl,
+                                                          const autoparser::generation_params & inputs) {
+     common_chat_params data;
+@@ -257,12 +390,19 @@
+             foreach_function(inputs.tools, [&](size_t tool_index, const json & tool) {
+                 const auto & function = tool.at("function");
+                 std::string  name     = function.at("name");
+-                // TODO @aldehir : need to extend json-schema-to-grammar to produce more than JSON rules
+-                // const auto & params   = function.at("parameters");
++                // Parse with the generic gemma4 dict; constrain generation with
++                // the arguments' own schema (see gemma4_schema_gbnf).
++                auto args = p.ref("gemma4-dict");
++                if (function.contains("parameters")) {
++                    auto schema_gbnf = gemma4_schema_gbnf(function.at("parameters"), 0);
++                    if (schema_gbnf != "gemma4-value" && schema_gbnf != "gemma4-dict") {
++                        args = p.gbnf(args, schema_gbnf);
++                    }
++                }
+ 
+                 tool_choice |= p.rule("tool-" + std::to_string(tool_index), p.tool(p.sequence({
+                     p.tool_open(p.tool_name(p.literal(name)) + p.peek(p.literal("{"))),
+-                    p.tool_args(p.ref("gemma4-dict")),
++                    p.tool_args(args),
+                 })));
+             });
+ 
