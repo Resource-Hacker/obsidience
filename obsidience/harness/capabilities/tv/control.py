@@ -34,7 +34,13 @@ LINK_HOSTS = {
     'netflix': {'netflix.com', 'www.netflix.com'},
     'hulu': {'hulu.com', 'www.hulu.com'},
 }
+# Measured: a cold-started Pluto (splash, spinner, then its On Demand home)
+# ignores the link; the same link sent once that home has settled plays. Its
+# plutotv://live-tv entry point plays a channel; the https form can land on Home.
+LINK_NEEDS_SETTLED_APP = {'pluto'}
 PLUTO_GUIDE = 'https://api.pluto.tv/v2/channels'
+# The last link this Harness opened per app, for idempotent repeats.
+_OPENED = {}
 _PLUTO = {'at': 0.0, 'rows': []}
 _FILLER = {'the', 'a', 'an', 'on', 'tv', 'channel', 'live', 'watch', 'play', 'put', 'some',
            'about', 'please', 'show', 'me', 'of', 'to', 'for', 'and'}
@@ -139,6 +145,37 @@ def _link(url, apps):
     return alias, url
 
 
+ZERO_AD_ID = '00000000-0000-0000-0000-000000000000'
+
+
+def _placeholder_ad_id(row, cancel):
+    """Keep the owner-chosen opted-out advertising ID; Fire OS regenerates one at boot."""
+    current = _shell(row, cancel, _guard(row) + 'settings get secure advertising_id; '
+                     'settings get secure limit_ad_tracking').split()
+    if current != [ZERO_AD_ID, '1']:
+        _shell(row, cancel, _guard(row) + 'settings put secure advertising_id ' + ZERO_AD_ID
+               + ' && settings put secure limit_ad_tracking 1')
+
+
+def _end_screensaver(row, cancel, limit=6.0):
+    _shell(row, cancel, _guard(row) + 'input keyevent KEYCODE_WAKEUP')
+    start = time.monotonic()
+    while time.monotonic() - start < limit:
+        state = _power(row, cancel)
+        try:
+            dreaming = 'DreamActivity' in _focus(row, cancel)
+        except ValueError:
+            dreaming = True
+        if state['wakefulness'] == 'Awake' and not dreaming:
+            return state
+        if cancel is not None:
+            if cancel.wait(.3):
+                raise InterruptedError('TV command cancelled')
+        else:
+            time.sleep(.3)
+    raise ValueError('The TV screensaver did not end')
+
+
 def _media_players(row, cancel):
     """Started media players as {player id: app uid}, from the audio service (read-only text)."""
     raw = _shell(row, cancel, _guard(row) + 'dumpsys audio')
@@ -153,7 +190,7 @@ def _app_uid(row, cancel, package):
     return int(match[1]) if match else None
 
 
-def _wait_for_playback(row, cancel, package, before, limit=20.0):
+def _wait_for_playback(row, cancel, package, before, limit=20.0, resend=None):
     """Wait until the opened app starts a new media player (read-only).
 
     Measured on this TV: Pluto shows a splash and a loading spinner for about
@@ -162,11 +199,33 @@ def _wait_for_playback(row, cancel, package, before, limit=20.0):
     target app is the cheap, protected-video-safe sign that playback began.
     """
     uid = _app_uid(row, cancel, package)
-    start = time.monotonic()
+    start, settled, restarted = time.monotonic(), None, False
     while uid is not None and time.monotonic() - start < limit:
         if any(owner == uid and player not in before
                for player, owner in _media_players(row, cancel).items()):
             return True
+        try:
+            focus = _focus(row, cancel)
+        except ValueError:  # No focused window during app transitions.
+            focus = ''
+        if 'DreamActivity' in focus:
+            # Launching sends no user input, so the idle screensaver can start
+            # mid-launch and freeze the app's splash; end it and keep waiting.
+            _end_screensaver(row, cancel)
+            continue
+        if resend is not None:
+            # Seen on screen: after taking a link Pluto restarts (splash, then
+            # home) and plays about six seconds after home appears; when it
+            # drops the link it just stays on home. Count only a home reached
+            # after that restart, so a stream about to start is not interrupted.
+            starting = 'Splash' in focus or 'EntryPoint' in focus or not focus
+            restarted = restarted or starting
+            if restarted and not starting and (' ' + package + '/') in focus:
+                settled = settled or time.monotonic()
+                if time.monotonic() - settled >= 10:
+                    # The app dropped the link while starting: one more identical send.
+                    _shell(row, cancel, _guard(row) + resend)
+                    resend, settled = None, None
         if cancel is not None:
             if cancel.wait(.5):
                 raise InterruptedError('TV command cancelled')
@@ -406,6 +465,12 @@ def execute(args: dict, context: dict) -> dict:
         # Reconnect only the transport, never replay an input or restart the ADB server.
         _adb(row, cancel, connect=True, timeout=4)
         state = _power(row, cancel)
+        if action != 'observe':
+            _placeholder_ad_id(row, cancel)
+        if state['wakefulness'] == 'Dreaming' and action not in ('observe', 'off'):
+            # Seen on this TV: an app launched behind the screensaver stays frozen
+            # on its splash. Wake ends the screensaver; it changes no content.
+            state = _end_screensaver(row, cancel)
         if action == 'observe':
             return {'status': 'completed', 'power': state, **_observe(row, cancel, context)}
         attempted = context.setdefault('_tv_attempted', set())
@@ -439,13 +504,26 @@ def execute(args: dict, context: dict) -> dict:
             command = 'am start -W -n ' + shlex.quote(component)
         elif action == 'open':
             package = row['apps'][alias]
+            channel = re.fullmatch(r'https://pluto\.tv/[a-z]{2}/live-tv/([a-z0-9-]{1,80})', link)
+            target = 'plutotv://live-tv/' + channel[1] if alias == 'pluto' and channel else link
             # Read-only: the link must resolve to its own app, never a chooser or browser.
             resolved = _shell(row, cancel, _guard(row) + 'cmd package resolve-activity --brief '
-                              '-a android.intent.action.VIEW -d ' + shlex.quote(link) + ' -p ' + package)
+                              '-a android.intent.action.VIEW -d ' + shlex.quote(target) + ' -p ' + package)
             if not resolved.strip().splitlines()[-1].startswith(package + '/'):
                 raise ValueError(f'The {alias} app does not accept this link')
-            command = 'am start -W -a android.intent.action.VIEW -d ' + shlex.quote(link) + ' ' + package
+            # Measured: Pluto's Home ignores a link delivered to its existing task;
+            # a fresh task (NEW_TASK|CLEAR_TASK) runs its entry point with the link.
+            flags = '-f 0x10008000 ' if alias == 'pluto' else ''
+            command = ('am start -W ' + flags + '-a android.intent.action.VIEW -d '
+                       + shlex.quote(target) + ' ' + package)
             before = set(_media_players(row, cancel))
+            uid = _app_uid(row, cancel, package)
+            if (_OPENED.get(alias) == link and uid in _media_players(row, cancel).values()
+                    and ' ' + package + '/' in _focus(row, cancel)):
+                # Already playing exactly this link: nothing to send.
+                return {'status': 'completed', 'delivery': 'verified', 'action': action,
+                        'effect_applied': False, 'playback_started': True, 'already_playing': True,
+                        'opened': {'app': alias, 'link': link}, 'power': state}
         elif action == 'key' and args['key'] in MEDIA_KEYS:
             command = 'input keyevent ' + KEYS[args['key']]
         else:
@@ -480,7 +558,12 @@ def execute(args: dict, context: dict) -> dict:
                     'note': 'Remote key delivered once; playback and volume are not read back.'}
         context['_tv_navigation_applied'] = True
         if action == 'open':
-            playback = _wait_for_playback(row, cancel, row['apps'][alias], before)
+            settle = alias in LINK_NEEDS_SETTLED_APP
+            # Seen on screen: a cold-started Pluto lands on its On Demand home and
+            # ignores the link; the same link sent to the running app plays.
+            playback = _wait_for_playback(row, cancel, row['apps'][alias], before,
+                                          limit=60.0 if settle else 20.0,
+                                          resend=command if settle else None)
         if action in ('on', 'off'):
             deadline = time.monotonic() + 8
             while True:
@@ -500,6 +583,8 @@ def execute(args: dict, context: dict) -> dict:
         result = _observe(row, cancel, context, frame=not (action == 'open' and playback))
         context['_tv_effect_uncertain'] = False
         if action == 'open':
+            if playback:
+                _OPENED[alias] = link
             result['playback_started'] = playback
             result['opened'] = {'app': alias, 'link': link}
         return {'status': 'completed', 'delivery': delivery, 'action': action,
