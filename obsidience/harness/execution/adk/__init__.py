@@ -1,1 +1,1 @@
-"""Google ADK Executive loop, selected by ``executive_loop = "adk"`` (stage 1)."""
+"""Google ADK: the Executive model/Tool loop and its conversation log."""

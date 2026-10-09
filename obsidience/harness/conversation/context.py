@@ -1,11 +1,11 @@
 """Read-only conversation and activation projections; no observation Articles."""
 from datetime import datetime
 from ..knowledge.index import INDEX
-from ..execution.loops import sessions
 
 
 def project_conversation(conversation, *, conversation_id, before_sequence=None):
-    native = sessions().context(conversation_id, before_sequence)
+    from ..execution.adk import sessions
+    native = sessions.context(conversation_id, before_sequence)
     rows = INDEX.conversation_turns(conversation_id, before_sequence=before_sequence)
     if native is None:
         native = "Historical public dialogue; it does not establish current state or authorize effects.\n\n" + "\n\n".join(

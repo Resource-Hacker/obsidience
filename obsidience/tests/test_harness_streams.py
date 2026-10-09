@@ -174,7 +174,7 @@ def test_chat_accepts_and_steers_same_live_turn_without_waiting_for_completion(m
 @pytest.mark.parametrize("failure", ["reconcile", "model", "intake", "realtime", "enqueue"])
 def test_lifespan_startup_failure_unwinds_all_acquired_owners(monkeypatch, isolated_task_ledger, failure):
     from contextlib import asynccontextmanager
-    from obsidience.harness.execution.deepseek import bridge, sessions
+    from obsidience.harness.execution.adk import sessions
     from obsidience.harness.graphs import api as graph_views
     from obsidience.harness.knowledge import intake
     from obsidience.harness.memory import hindsight
@@ -212,7 +212,8 @@ def test_lifespan_startup_failure_unwinds_all_acquired_owners(monkeypatch, isola
             calls.append("graphs.stop")
 
     monkeypatch.setattr(graph_views, "lifespan", graph_views_lifespan)
-    monkeypatch.setattr(bridge, "BRIDGE", SimpleNamespace(start=asynchronous("bridge.start"), close=asynchronous("bridge.close")))
+    monkeypatch.setattr(sessions, "start", asynchronous("sessions.start"))
+    monkeypatch.setattr(sessions, "stop", asynchronous("sessions.stop"))
     monkeypatch.setattr(sessions, "reconcile", asynchronous("native.reconcile"))
     monkeypatch.setattr(tracking, "restore", record("camera.restore"))
     monkeypatch.setattr(tracking, "stop", record("camera.stop"))
@@ -247,7 +248,7 @@ def test_lifespan_startup_failure_unwinds_all_acquired_owners(monkeypatch, isola
     asyncio.run(exercise())
     cleanup = [name for name in calls if name.endswith((".stop", ".shutdown", ".close", ".cancel"))]
     base = ["graphs.stop", "memory.close", "provider.close", "trace.stop"]
-    native = ["bridge.close", "model.shutdown", *base]
+    native = ["sessions.stop", "model.shutdown", *base]
     expected = {
         "reconcile": base,
         "model": ["model.shutdown", *base],

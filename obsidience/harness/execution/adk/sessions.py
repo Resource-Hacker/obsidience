@@ -1,8 +1,8 @@
 """ADK-owned Executive conversations and the official LiteLLM model route.
 
 One ``SqliteSessionService`` (aiosqlite, its own file under ``state/``) owns
-every Executive conversation log while ``executive_loop = "adk"``; SQLite
-``conversation_turns`` stays the public Chat projection and receipt ledger.
+every Executive conversation log; SQLite ``conversation_turns`` stays the
+public Chat projection and receipt ledger.
 Session events carry Obsidience source kinds in ``Part.part_metadata`` so the
 shared native projection (``execution/native.py``) can rebuild the same
 provider window, settled commands and current runtime context from them.
@@ -125,7 +125,7 @@ def native_messages(contents) -> list[dict]:
     """ADK contents (session events or a built request) in the native message vocabulary.
 
     Runtime context and recall belong to the latest owner turn; earlier ones
-    are superseded exactly as the DeepSeek log replaced them.
+    are marked superseded.
     """
     messages = []
     for content in contents:
@@ -236,9 +236,9 @@ def rebase_window(conversation_id: str) -> str | None:
 async def open_session(conversation_id: str, turn_id: str | None):
     """The conversation's session, with public turns it lacks appended in order.
 
-    A new or stale session (turns taken while another loop owned the
-    conversation) receives exact owner/reply pairs from the public ledger, so a
-    loop switch mid-conversation keeps the dialogue.
+    A new or stale session (for example a conversation begun before this log
+    existed) receives exact owner/reply pairs from the public ledger, so the
+    dialogue is kept.
     """
     store = service()
     session = await store.get_session(app_name=APP, user_id=USER, session_id=conversation_id)

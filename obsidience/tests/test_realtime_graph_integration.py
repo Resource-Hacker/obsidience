@@ -100,8 +100,8 @@ class MemoryConversation:
 
 @pytest.fixture(autouse=True)
 def inert_native_executive_session(monkeypatch):
-    """Conversation turns refresh the native DeepSeek session (bridge/dsh); keep it inert."""
-    from obsidience.harness.execution.deepseek import sessions
+    """Conversation turns refresh the ADK conversation log; keep it inert."""
+    from obsidience.harness.execution.adk import sessions
 
     async def refresh(_conversation_id):
         return None

@@ -5,7 +5,7 @@ because it has children; a terminal Task Article is a leaf.  The top-level
 Wiki, Research, Executive, and Harness Articles are Knowledge Articles
 that describe and organize their Task descendants without becoming runnable
 work themselves. Generate remains an outcome family. Historical memory is Hindsight-owned;
-conversation compaction is a native DeepSeek backend operation.
+the ADK conversation log and its provider window are not Tasks.
 """
 
 from __future__ import annotations

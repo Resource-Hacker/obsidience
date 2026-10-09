@@ -19,7 +19,7 @@ def test_harness_manifest_names_the_real_module() -> None:
         "id": "harness",
         "name": "Harness",
         "summary": (
-            "Hosts the DeepSeek Executive composition and reusable Tasks with shared "
+            "Hosts the ADK Executive loop and reusable Tasks with shared "
             "graph, model, capability and receipt owners."
         ),
         "package": "obsidience.harness",

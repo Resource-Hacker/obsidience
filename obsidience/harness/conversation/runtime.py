@@ -120,9 +120,9 @@ class ConversationRuntime:
 
         The changed prefix is then re-warmed by standby preparation below.
         """
-        from ..execution.loops import sessions
+        from ..execution.adk import sessions
         try:
-            anchor = sessions().rebase_window(self._conversation.conversation_id)
+            anchor = sessions.rebase_window(self._conversation.conversation_id)
         except Exception as exc:
             trace.emit("measurement", "Conversation window rebase skipped", [type(exc).__name__])
             return
@@ -348,8 +348,8 @@ class ConversationRuntime:
                 await self.finalize_observation_session(
                     outgoing, session_boundary="chat.new_conversation",
                 )
-            from ..execution.loops import sessions
-            await sessions().close(outgoing)
+            from ..execution.adk import sessions
+            await sessions.close(outgoing)
             result = await self._conversation.new_conversation()
             await self.publish_context()
             self._warm_state = "waiting"
@@ -607,8 +607,8 @@ class ConversationRuntime:
     ) -> dict[str, Any]:
         """Measure the selected model's native conversation input."""
         from .context import project_conversation
-        from ..execution.loops import sessions
-        measure_context = sessions().measure_context
+        from ..execution.adk import sessions
+        measure_context = sessions.measure_context
 
         exact_conversation_id = conversation_id or self._conversation.conversation_id
         projection = project_conversation(
@@ -697,9 +697,9 @@ class ConversationRuntime:
             self._thinking_overhead_tokens = prompt - immediate - request
 
     async def prepare_conversation_context(self, user_turn: dict[str, Any], *, context_task_ref: str | None = None) -> str:
-        from ..execution.loops import sessions
+        from ..execution.adk import sessions
         from .context import project_conversation
-        await sessions().refresh(str(user_turn['conversation_id']))
+        await sessions.refresh(str(user_turn['conversation_id']))
         return project_conversation(self._conversation, conversation_id=str(user_turn['conversation_id']),
                                     before_sequence=int(user_turn['sequence']))['body']
 
@@ -899,8 +899,8 @@ class ConversationRuntime:
         if not exact:
             raise ValueError("Session finalization requires a conversation identity")
         self._ledger().complete_observation_finalization(exact)
-        from ..execution.loops import sessions
-        return {"status": "finalized", "conversation_id": exact, "backend": sessions().BACKEND}
+        from ..execution.adk import sessions
+        return {"status": "finalized", "conversation_id": exact, "backend": sessions.BACKEND}
 
     async def finalize_pending(
         self,

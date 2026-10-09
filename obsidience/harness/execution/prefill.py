@@ -84,8 +84,8 @@ async def prepare(conversation, text: str, response_contract: str, *, idle: bool
         # allow its full prefix to finish instead of repeatedly discarding it.
         async with asyncio.timeout(60 if idle else 10):
             conversation_id = conversation.conversation_id
-            from .loops import sessions
-            refresh, prefill_messages = sessions().refresh, sessions().prefill_messages
+            from .adk import sessions
+            refresh, prefill_messages = sessions.refresh, sessions.prefill_messages
             native = await refresh(conversation_id)
             # Standby stops at the stable compiler prefix: its Scene, clock,
             # Knowledge and memory would be stale by the next request. A speech

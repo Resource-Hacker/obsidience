@@ -425,10 +425,10 @@ def test_harness_restores_speech_before_first_scheduler_tick(monkeypatch):
     monkeypatch.setattr(api.conversation_runtime.RUNTIME, "cancel", nothing)
     monkeypatch.setattr(api.scheduler, "loop", scheduler_loop)
     monkeypatch.setattr(api.scheduler, "shutdown", nothing)
-    # Lifespan owners added since: keep Hindsight, graph views, DeepSeek and
+    # Lifespan owners added since: keep Hindsight, graph views, the ADK log and
     # camera tracking inert (they would reach live services and hardware).
     from contextlib import asynccontextmanager
-    from obsidience.harness.execution.deepseek import bridge, sessions
+    from obsidience.harness.execution.adk import sessions
     from obsidience.harness.graphs import api as graph_views
     from obsidience.harness.memory import hindsight
     from obsidience.harness.realtime import tracking
@@ -443,7 +443,8 @@ def test_harness_restores_speech_before_first_scheduler_tick(monkeypatch):
     monkeypatch.setattr(hindsight.MEMORY, "start", nothing)
     monkeypatch.setattr(hindsight.MEMORY, "close", nothing)
     monkeypatch.setattr(graph_views, "lifespan", no_graph_views)
-    monkeypatch.setattr(bridge, "BRIDGE", SimpleNamespace(start=nothing, close=nothing))
+    monkeypatch.setattr(sessions, "start", nothing)
+    monkeypatch.setattr(sessions, "stop", nothing)
     monkeypatch.setattr(sessions, "reconcile", reconcile)
     monkeypatch.setattr(tracking, "restore", lambda: None)
     monkeypatch.setattr(tracking, "stop", lambda: None)

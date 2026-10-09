@@ -187,7 +187,7 @@ async def discard_recall(prefetch):
 
 
 def native_schema(schema):
-    """Project the code-owned schema to DeepSeek's documented supported vocabulary.
+    """Project the code-owned schema to the plain advertised vocabulary the model template renders.
 
     The complete original schema is still validated before every dispatch.
     """

@@ -1662,9 +1662,6 @@ async def _run_execution(task: Note, depth: int = 0, reasoning_effort: str | Non
             model if model is not None else task.meta.get("model"),
             agent.ref if _is_agent_identity(agent) else "Agents/Executive/Executive",
         )
-        if task.kind == "agent":
-            from .loops import selected as executive_loop
-            activation_evidence["executive_engine"] = executive_loop()
         emit_state(
             "run", f"{agent_name} started {task.title}", "running",
             f"model: {model_spec.label}; reasoning: {effort}",
@@ -1772,8 +1769,8 @@ async def _run_execution(task: Note, depth: int = 0, reasoning_effort: str | Non
         session_lease, pending_lease = pending_lease, None
         session_runner = _execute_session
         if task.kind == "agent":
-            from .loops import run_session
-            session_runner = run_session()
+            from .adk.runner import run_adk_session
+            session_runner = run_adk_session
         trace, status, summary = await session_runner(
             task, model_spec, messages, allowed, ctx, agent_name, effort,
             interruption_event=interruption_event,
