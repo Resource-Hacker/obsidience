@@ -276,6 +276,28 @@ async def open_session(conversation_id: str, turn_id: str | None):
     return session
 
 
+async def close_interrupted_calls(conversation_id: str, invocation_id: str) -> None:
+    """Record every unanswered native call as outcome unknown; it is never replayed."""
+    from ..capability_core import INTERRUPTED, observation_text
+    store = service()
+    session = await store.get_session(app_name=APP, user_id=USER, session_id=conversation_id)
+    if session is None:
+        return
+    calls, answered = {}, set()
+    for event in session.events:
+        for value in (event.content.parts if event.content and event.content.parts else []):
+            if value.function_call is not None:
+                calls[value.function_call.id] = value.function_call.name
+            if value.function_response is not None:
+                answered.add(value.function_response.id)
+    parts = [types.Part(function_response=types.FunctionResponse(id=identifier, name=name, response={
+        'content': [{'type': 'text', 'text': observation_text(INTERRUPTED)}]}))
+        for identifier, name in calls.items() if identifier not in answered]
+    if parts:
+        await store.append_event(session, Event(invocation_id=invocation_id, author=AGENT,
+                                                content=types.Content(role='user', parts=parts)))
+
+
 async def append(conversation_id: str, invocation_id: str, parts: list[types.Part]) -> None:
     """Append one controller-owned user event (settlement or command records)."""
     from google.adk.sessions.base_session_service import GetSessionConfig

@@ -27,6 +27,7 @@ from ..capabilities.registry import MODEL_RESOURCE_TOOLS, READ_ONLY_CAPABILITIES
 PRIVATE_IMAGE_FIELD = "_private_image_png"
 PRIVATE_OBSERVATION_FIELD = "_private_observation_lease"
 OBSERVATION_CONTEXT_FIELD = "_computer_observation_lease"
+INTERRUPTED = "Interrupted while the Tool was in flight; outcome is unknown. Do not replay."
 
 
 def foreground_checkpoint(interruption_event: asyncio.Event | None, ctx: dict) -> None:
@@ -382,10 +383,9 @@ async def run_capability(ex, name: str, args: dict, *, execute, execute_async, s
             finish_receipt("interrupted", "Tool interrupted; outcome unknown; do not replay")
             ex.trace.append({
                 "tool": name, "args": public_args, "sig": call_sig,
-                "obs": "Interrupted while the Tool was in flight; outcome is unknown. Do not replay.",
-                "interrupted": True, "must_not_replay": True,
+                "obs": INTERRUPTED, "interrupted": True, "must_not_replay": True,
             })
-            emit_tool_result(f"{name} interrupted", "Interrupted while the Tool was in flight; outcome is unknown. Do not replay.", "interrupted")
+            emit_tool_result(f"{name} interrupted", INTERRUPTED, "interrupted")
             raise
         except Exception as exc:  # noqa: BLE001
             # Failed receipt persistence must end the activation. It

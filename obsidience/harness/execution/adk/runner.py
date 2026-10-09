@@ -62,6 +62,13 @@ async def _run_command(plugin: ExecutivePlugin, command: dict, session_id: str, 
         }), 'plugin:obsidience.command-outcome', run=run)])
 
 
+async def _settle_interrupted(session_id: str, run: str, turn_id: str) -> None:
+    await sessions.close_interrupted_calls(session_id, run)
+    await sessions.append(session_id, run, [sessions.part(json.dumps({
+        'status': 'interrupted', 'summary': '', 'run_id': run, 'reply_to': turn_id,
+    }), 'plugin:obsidience.outcome', run=run)])
+
+
 async def run_adk_session(task, model, messages, allowed, ctx, agent_name, effort,
                           interruption_event=None, *, initial_lease=None, evaluation=None,
                           fast_lane=True):
@@ -181,13 +188,12 @@ async def run_adk_session(task, model, messages, allowed, ctx, agent_name, effor
     except asyncio.CancelledError:
         if not settled and conversation_id:
             settled = True
-            await asyncio.shield(sessions.append(session_id, run, [sessions.part(json.dumps({
-                'status': 'interrupted', 'summary': '', 'run_id': run, 'reply_to': turn_id,
-            }), 'plugin:obsidience.outcome', run=run)]))
+            await asyncio.shield(_settle_interrupted(session_id, run, turn_id))
         raise
     finally:
         try:
             if not settled and conversation_id:
+                await sessions.close_interrupted_calls(session_id, run)
                 await sessions.append(session_id, run, [sessions.part(json.dumps({
                     'status': ex.status, 'summary': ex.summary, 'run_id': run, 'reply_to': turn_id,
                 }), 'plugin:obsidience.outcome', run=run)])

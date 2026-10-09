@@ -189,7 +189,9 @@ neighbours); (9) history projected from the native conversation (no conversation
 ### Executive native loop
 
 - Chat and final speech enter the Executive's one native DeepSeek Harness session
-  (pinned in `artifacts.lock.json`). Its identity owns standing instructions, `skills`,
+  (pinned in `artifacts.lock.json`). A Google ADK loop (`execution/adk`, official
+  LiteLlm route, shared projection, policies and capability core) is staged behind
+  `executive_loop = "adk"`; DeepSeek remains the default and the rollback. Its identity owns standing instructions, `skills`,
   model and reasoning effort. DeepSeek receives accepted native schemas directly: no
   preliminary model call, router, request classification, Executive Task or standing
   Runbook. Schema availability does not mean Articles were read.

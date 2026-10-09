@@ -370,6 +370,34 @@
       "patch_sha256": "8adb1422cd51bd4ffff4b48da4f828ad0ce3e5546c646e759f146163917e5fb2",
       "server_library_sha256": "0feceeec8b48e92c703815418be932f217be122cd07210ad6c8c032573d3074b",
       "integration": "Rollback engine (selected until 2026-10-08). Builds on the separately recorded Jinja scope correction. Adds an optional exact input_token_limit check after complete native tokenization and media expansion but before task creation or queue admission. Explicit pre_enqueue overflow and accepted count/limit headers let the native Executive avoid duplicate preflight rendering/tokenization. Only a verified pre-enqueue refusal can project earlier recoverable read pages and retry once; no retry after admitted inference. Only the server implementation library differs from the Jinja-scope runtime. CUDA kernels, common library, model, template, F16 KV, 65536-token saved profile, MTP3 and vision settings remain unchanged. Experimental MTP-cap, ExLlamaV3 and BeeLlama changes are not installed."
+    },
+    "google_adk": {
+      "repository": "https://github.com/google/adk-python",
+      "version": "2.11.0",
+      "license": "Apache-2.0",
+      "wheel_sha256": "4774e1fc7bb37727e56142e7d41e9035949ebfc876a2b15d5505969b02798bcd",
+      "integration": "Stage-1 Executive model/Tool loop behind executive_loop = \"adk\" (default deepseek). One Runner per activation over one SqliteSessionService file (state/adk-sessions.sqlite3) that owns ADK conversations; one BasePlugin carries Obsidience loop policy and the shared native projection in before_model_callback; one BaseTool per granted capability runs the shared capability core (receipts, uncertain-effect rules, completion authority). No ADK memory, artifact, A2A, Gemini or event-compaction service is used."
+    },
+    "google_genai": {
+      "repository": "https://github.com/googleapis/python-genai",
+      "version": "2.29.0",
+      "license": "Apache-2.0",
+      "wheel_sha256": "7adda55cb6746fb46d38ad3202c3372840b96eede964b5fb3df1469cd4998570",
+      "integration": "ADK's Content/Part vocabulary only (google-adk dependency); Part.part_metadata carries Obsidience source kinds. No Gemini API client is constructed."
+    },
+    "litellm": {
+      "repository": "https://github.com/BerriAI/litellm",
+      "version": "1.101.0",
+      "license": "MIT",
+      "wheel_sha256": "140ee0997324b8fd2405f7f8c26f42c0f364996dc4030187344a90cf27916667",
+      "integration": "ADK's official LiteLlm model route to the served local model id over its OpenAI-compatible endpoint (same version as Hindsight; installed with hash verification). LITELLM_LOCAL_MODEL_COST_MAP=True; debug info and telemetry off. The model lease, input-token accounting and projection stay with Obsidience."
+    },
+    "aiosqlite": {
+      "repository": "https://github.com/omnilib/aiosqlite",
+      "version": "0.22.1",
+      "license": "MIT",
+      "wheel_sha256": "21c002eb13823fad740196c5a2e9d8e62f6243bd9e7e4a1f87fb5e44ecb4fceb",
+      "integration": "Backend of ADK's SqliteSessionService for the ADK Executive conversation store only."
     }
   }
 }

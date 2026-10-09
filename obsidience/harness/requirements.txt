@@ -12,7 +12,7 @@ croniter>=3
 ddgs==9.15.0
 python-multipart>=0.0.9
 cbor2==5.8.0
-websockets>=15
+websockets>=15,<16
 watchdog==6.0.0
 markdownify==1.2.3
 trafilatura==2.2.0
@@ -21,3 +21,7 @@ psutil==7.2.2
 nvidia-ml-py==13.610.43
 jsonschema==4.25.1
 hassil==3.12.1
+# Executive ADK loop (stage 1, executive_loop = "adk"); official LiteLlm model route.
+google-adk==2.11.0
+litellm==1.101.0
+aiosqlite==0.22.1

@@ -283,6 +283,13 @@ class ExecutivePlugin(BasePlugin):
             if text and self.voice is not None:
                 await self.voice.feed({'type': 'text-delta', 'text': text})
             return None
+        if any(value.thought for value in parts):
+            # Private reasoning never enters the conversation log or history.
+            kept = [value for value in parts if not value.thought]
+            llm_response = llm_response.model_copy(update={
+                'content': types.Content(role='model', parts=kept) if kept else None})
+            await self._finish_step(llm_response)
+            return llm_response
         await self._finish_step(llm_response)
         return None
 
