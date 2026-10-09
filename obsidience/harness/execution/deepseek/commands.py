@@ -93,8 +93,8 @@ def _media_command(text):
     return {'name': 'media.pause', 'args': {'query': choices.pop()}}
 
 
-# Each literal TV media phrase maps to one remote key with audio-service readback.
-_TV_KEYS = {'TVPause': 'pause', 'TVPlay': 'play', 'TVMute': 'mute', 'TVUnmute': 'unmute'}
+# Each literal TV media phrase maps to one target state the TV reads back.
+_TV_ACTIONS = {'TVPause': 'pause', 'TVPlay': 'resume', 'TVMute': 'mute', 'TVUnmute': 'unmute'}
 
 
 @lru_cache(maxsize=1)
@@ -102,8 +102,14 @@ def _tv_intents():
     tv = '[the] (tv|television)'
     return Intents.from_dict({
         'language': 'en',
-        'lists': {'state': {'values': ['on', 'off']}, 'direction': {'values': ['up', 'down']}},
+        'lists': {'state': {'values': ['on', 'off']}, 'direction': {'values': ['up', 'down']},
+                  # Digits or words: "15", "fifteen", "twenty five".
+                  'level': {'range': {'from': 0, 'to': 100}}},
         'intents': {
+            'TVLevel': {'data': [{'sentences': [
+                f'[please] [set|turn] {tv} volume [to] {{level}} [please]',
+                f'[please] [set|turn] [the] volume [to] {{level}} on {tv} [please]',
+            ]}]},
             'TVPower': {'data': [{'sentences': [
                 '[please] [the] (tv|television) {state} [please]',
                 '[please] (turn|switch) {state} [the] (tv|television) [please]',
@@ -129,8 +135,9 @@ def _tv_command(text):
     for result in recognize_all(text, _tv_intents()):
         name = result.intent.name
         choices.add((('action', result.entities['state'].value),) if name == 'TVPower' else
-                    (('action', 'key'), ('key', 'volume_' + result.entities['direction'].value))
-                    if name == 'TVVolume' else (('action', 'key'), ('key', _TV_KEYS[name])))
+                    (('action', 'volume'), ('level', int(result.entities['level'].value))) if name == 'TVLevel' else
+                    (('action', 'volume_' + result.entities['direction'].value),)
+                    if name == 'TVVolume' else (('action', _TV_ACTIONS[name]),))
     return {'name': 'tv.control', 'args': dict(choices.pop())} if len(choices) == 1 else None
 
 
@@ -147,7 +154,8 @@ def recognize_command(objective, allowed):
     text = ' '.join(objective.casefold().split()).rstrip('.!')
     if 'task.complete' in allowed and (clock := _clock_command(text)) is not None:
         return clock
-    if not re.fullmatch(r'[a-z_ ]+', text):
+    # Digits and hyphens appear only in TV volume levels ("15", "twenty-five").
+    if not re.fullmatch(r'[a-z0-9_ -]+', text):
         return None
     if 'tv.control' in allowed and (tv := _tv_command(text)) is not None:
         return tv

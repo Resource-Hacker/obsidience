@@ -1161,8 +1161,10 @@ class CapabilityDispatch:
                 "correction_allowed": True,
             }
             observation = json.dumps(result_object, sort_keys=True)
-        elif (name in {"camera.observe", "computer.observe", "computer.act"}
-              or name == "tv.control" and args.get("action") not in {"on", "off", "find"}) and "vision" not in self.model.capabilities:
+        elif ((name in {"camera.observe", "computer.observe", "computer.act"}
+               or name == "tv.control" and args.get("action") not in {
+                   "on", "off", "find", "volume", "volume_up", "volume_down", "mute", "unmute", "pause", "resume"})
+              and "vision" not in self.model.capabilities):
             observation = json.dumps({
                 "observation": {
                     "status": "unavailable",

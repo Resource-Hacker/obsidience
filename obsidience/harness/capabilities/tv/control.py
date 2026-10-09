@@ -1,6 +1,8 @@
 """One registered TV, upstream ADB, bounded effects, backend state and visual evidence where it helps."""
 from __future__ import annotations
 
+import atexit
+from collections import deque
 import io
 import ipaddress
 import json
@@ -15,19 +17,40 @@ import xml.etree.ElementTree as ET
 from PIL import Image
 
 _LOCK = threading.Lock()
+# Android keycodes for `input keyevent`, the fallback when the virtual remote cannot run.
 KEYS = {name: 'KEYCODE_' + code for name, code in {
     'up': 'DPAD_UP', 'down': 'DPAD_DOWN', 'left': 'DPAD_LEFT', 'right': 'DPAD_RIGHT',
     'select': 'DPAD_CENTER', 'back': 'BACK', 'home': 'HOME', 'menu': 'MENU',
     'play': 'MEDIA_PLAY', 'pause': 'MEDIA_PAUSE', 'rewind': 'MEDIA_REWIND',
-    'fast_forward': 'MEDIA_FAST_FORWARD', 'volume_up': 'VOLUME_UP',
-    'volume_down': 'VOLUME_DOWN', 'mute': 'VOLUME_MUTE',
-    'enter': 'ENTER', 'delete': 'DEL', 'unmute': 'VOLUME_MUTE',
+    'fast_forward': 'MEDIA_FAST_FORWARD', 'mute': 'VOLUME_MUTE',
+    'enter': 'ENTER', 'delete': 'DEL',
 }.items()}
-# Playback and volume keys change no navigation state; they need no observation.
-MEDIA_KEYS = {'play', 'pause', 'rewind', 'fast_forward', 'volume_up', 'volume_down', 'mute', 'unmute'}
-# These outcomes are read back from the audio service. VOLUME_MUTE toggles, so
-# mute and unmute send it only when the readback is not already as requested.
-READBACK_KEYS = MEDIA_KEYS - {'rewind', 'fast_forward'}
+NAV_KEYS = ('up', 'down', 'left', 'right', 'select', 'back', 'home', 'menu', 'enter', 'delete')
+# Seek keys change no navigation state and need no observation; the position is not read back.
+MEDIA_KEYS = {'rewind', 'fast_forward'}
+# Target states, read back from the audio service: the current state is read
+# first, only a difference is acted on, and a mismatch is re-read and retried once.
+TARGETS = ('volume', 'volume_up', 'volume_down', 'mute', 'unmute', 'pause', 'resume')
+# One remote press moves the index by 1 of 100, which is inaudible as a spoken "volume up".
+VOLUME_STEP = 5
+# A virtual remote through Android's own `hid` tool (/dev/uhid), alive while its
+# stdin stays open. Measured 2026-10-08 on this TV: it registers once in 1.5-3 s,
+# then a key is a pipe write instead of a ~1.1 s `input keyevent` JVM start, and
+# its keys reach apps and the audio service like the physical remote's (each
+# VOLUME_UP raised the index). Monkey's network server was rejected: while
+# connected its UiAutomation makes `uiautomator dump` fail, connecting wakes the
+# TV, and it exits on its second client. Usages map through Linux hid-input to
+# Generic.kl: report 1 is the consumer page, report 2 keyboard Enter/Backspace
+# only, so the TV gains no alphabetic keyboard.
+REMOTE_NAME = 'Obsidience TV remote'
+_REMOTE_USAGES = {'menu': (1, 0x40), 'select': (1, 0x41), 'up': (1, 0x42), 'down': (1, 0x43),
+                  'left': (1, 0x44), 'right': (1, 0x45), 'home': (1, 0x223), 'back': (1, 0x224),
+                  'play': (1, 0xB0), 'fast_forward': (1, 0xB3), 'rewind': (1, 0xB4),
+                  # The physical remote's play/pause toggle: sent for pause only while media plays.
+                  'pause': (1, 0xCD), 'mute': (1, 0xE2), 'enter': (2, 0x28), 'delete': (2, 0x2A)}
+_REMOTE = {'process': None, 'boot': None, 'ready': False, 'started': 0.0, 'failed': None, 'cleanup': False}
+# Between keys of one batch, for focus animations (input keyevent took ~1.1 s plus 0.3 s).
+KEY_SPACING = .25
 # Deep links open content directly in their own registered app (Fire OS intent
 # filters, 2026-10-08). A link never opens in another app or the browser.
 LINK_HOSTS = {
@@ -61,10 +84,34 @@ _OPENED = _load_opened()
 _PLUTO = {'at': 0.0, 'rows': []}
 # What one Pluto channel airs now, cached until that program ends.
 _AIRING = {}
-# The latest backend state any tv.control call read in this Harness process;
+# The ledger: the latest backend state plus the last intents with their
+# confirmed outcomes, kept in private state across Harness restarts.
+_LEDGER_PATH = _OPENED_PATH.with_name('television-ledger.json')
+_LEDGER_SIZE = 20
+_LEDGER_LOCK = threading.Lock()
+
+
+def _load_ledger():
+    try:
+        ledger = json.loads(_LEDGER_PATH.read_text())
+    except (OSError, ValueError):
+        return None, []
+    if not isinstance(ledger, dict):
+        return None, []
+    state, intents = ledger.get('state'), ledger.get('intents')
+    # Only a state with the shape prompt_line renders is restored.
+    valid = (isinstance(state, dict) and isinstance(state.get('captured_at'), (int, float))
+             and isinstance(state.get('power'), dict) and isinstance(state['power'].get('screen'), str)
+             and (not state.get('foreground') or {'playback', 'media_sessions'} <= set(state)))
+    return (state if valid else None), [i for i in intents if isinstance(i, dict)] if isinstance(intents, list) else []
+
+
+_restored, _intents = _load_ledger()
+_INTENTS = deque(_intents, maxlen=_LEDGER_SIZE)
+# The latest backend state any tv.control call read (restored from the ledger);
 # the Executive's per-turn metadata renders it without contacting the TV.
 # Each read replaces the whole state, so prompt building never sees a mix.
-_LAST = {'state': None}
+_LAST = {'state': _restored}
 # android.media.session.PlaybackState codes.
 _SESSION_STATES = {0: 'none', 1: 'stopped', 2: 'paused', 3: 'playing', 4: 'fast_forwarding',
                    5: 'rewinding', 6: 'buffering', 7: 'error', 8: 'connecting'}
@@ -125,9 +172,11 @@ def _words(text):
 
 
 def _pluto_matches(query, limit):
-    words = _words(query) - _FILLER
-    topics = {_TOPICS[word] for word in words if word in _TOPICS}  # hurricane -> weather
-    words |= topics
+    """Ranked live channels as (strong, candidate). Strong: the channel name covers the
+    request (every request word, or the whole name), or a topic (hurricane -> weather)."""
+    content = _words(query) - _FILLER
+    topics = {_TOPICS[word] for word in content if word in _TOPICS}  # hurricane -> weather
+    words = content | topics
     scored, names = [], set()
     for row in _pluto_guide():
         name = _words(row['name'])
@@ -136,10 +185,12 @@ def _pluto_matches(query, limit):
                  - (2 if 'local' in row['category'].lower() else 0))
         if score > 0 and row['name'].lower() not in names:
             names.add(row['name'].lower())
-            scored.append((score, row))
+            core = name - _FILLER - {'pluto'}
+            strong = bool(topics & name) or bool(content and core) and (content <= name or core <= content)
+            scored.append((score, strong, row))
     scored.sort(key=lambda item: -item[0])
-    return [{'app': 'pluto', 'kind': 'live channel', 'title': row['name'], 'by': row['category'],
-             'url': 'https://pluto.tv/us/live-tv/' + row['slug']} for _score, row in scored[:limit]]
+    return [(strong, {'app': 'pluto', 'kind': 'live channel', 'title': row['name'], 'by': row['category'],
+                      'url': 'https://pluto.tv/us/live-tv/' + row['slug']}) for _score, strong, row in scored[:limit]]
 
 
 def _youtube_id(url):
@@ -207,9 +258,8 @@ _POLICY_PATH = Path(__file__).resolve().parents[3] / 'state' / 'television-polic
 _POLICY_BOOT = {'id': None}
 
 
-def _boot_policy(row, cancel):
+def _boot_policy(row, cancel, boot):
     """Re-apply the owner's debloat once per TV boot; Fire OS re-enables some packages at boot."""
-    boot = _shell(row, cancel, 'cat /proc/sys/kernel/random/boot_id').strip()
     if not boot or _POLICY_BOOT['id'] == boot:
         return
     try:
@@ -229,10 +279,8 @@ def _boot_policy(row, cancel):
     _POLICY_BOOT['id'] = boot
 
 
-def _placeholder_ad_id(row, cancel):
+def _placeholder_ad_id(row, cancel, current):
     """Keep the owner-chosen opted-out advertising ID; Fire OS regenerates one at boot."""
-    current = _shell(row, cancel, _guard(row) + 'settings get secure advertising_id; '
-                     'settings get secure limit_ad_tracking').split()
     if current != [ZERO_AD_ID, '1']:
         _shell(row, cancel, _guard(row) + 'settings put secure advertising_id ' + ZERO_AD_ID
                + ' && settings put secure limit_ad_tracking 1')
@@ -249,12 +297,111 @@ def _end_screensaver(row, cancel, limit=6.0):
             dreaming = True
         if state['wakefulness'] == 'Awake' and not dreaming:
             return state
-        if cancel is not None:
-            if cancel.wait(.3):
-                raise InterruptedError('TV command cancelled')
-        else:
-            time.sleep(.3)
+        _wait(cancel, .3)
     raise ValueError('The TV screensaver did not end')
+
+
+def _wait(cancel, seconds):
+    if cancel is not None:
+        if cancel.wait(seconds):
+            raise InterruptedError('TV command cancelled')
+    else:
+        time.sleep(seconds)
+
+
+def _remote_index(name):
+    """(report id, array index) of one remote key in the descriptor below."""
+    report, usage = _REMOTE_USAGES[name]
+    return report, [u for r, u in _REMOTE_USAGES.values() if r == report].index(usage) + 1
+
+
+def _remote_descriptor():
+    descriptor = []
+    for report, (page, application) in {1: (0x0C, [0x05, 0x0C, 0x09, 0x01]),
+                                        2: (0x07, [0x05, 0x01, 0x09, 0x06])}.items():
+        usages = [usage for r, usage in _REMOTE_USAGES.values() if r == report]
+        # Application collection, report id, usage page, then a one-byte array of these usages.
+        descriptor += application + [0xA1, 0x01, 0x85, report, 0x05, page, 0x15, 0x01, 0x25, len(usages),
+                                     0x75, 0x08, 0x95, 0x01]
+        for usage in usages:
+            descriptor += [0x0A, usage & 0xFF, usage >> 8]
+        descriptor += [0x81, 0x00, 0xC0]
+    return descriptor
+
+
+def _remote_write(process, command):
+    process.stdin.write((json.dumps({'id': 1, **command}) + '\n').encode())
+    process.stdin.flush()
+
+
+def close():
+    """End the virtual remote; closing its stdin removes the device from the TV."""
+    process, _REMOTE['process'], _REMOTE['ready'] = _REMOTE['process'], None, False
+    if process is None:
+        return
+    try:
+        process.stdin.close()
+    except OSError:
+        pass
+    try:
+        process.wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+
+
+def _remote(row, cancel, boot, check):
+    """The virtual remote for this TV boot, started on demand without waiting for it.
+
+    Returns the process once the TV lists the device (check=True polls that once,
+    ~0.2 s), else None: the caller uses `input keyevent` meanwhile, so a cold
+    start never delays a key. A remote that fails to appear rests ten minutes.
+    """
+    process = _REMOTE['process']
+    if process is None or process.poll() is not None or _REMOTE['boot'] != boot:
+        if process is not None and process.poll() is not None and not _REMOTE['ready']:
+            _REMOTE['failed'] = (_REMOTE['boot'], time.monotonic())  # It exited before the TV listed it.
+        close()
+        failed = _REMOTE['failed']
+        if failed and failed[0] == boot and time.monotonic() - failed[1] < 600:
+            return None
+        if not _REMOTE['cleanup']:
+            atexit.register(close)  # Cleanup paired with the acquisition; EOF also removes it.
+            _REMOTE['cleanup'] = True
+        # The identity guard runs in the same remote shell: the session exists only on this TV.
+        process = subprocess.Popen(['/usr/bin/adb', '-s', row['ip'] + ':5555', 'shell', _guard(row) + 'exec hid -'],
+                                   stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        _REMOTE.update(process=process, boot=boot, ready=False, started=time.monotonic())
+        try:
+            _remote_write(process, {'command': 'register', 'name': REMOTE_NAME, 'vid': 0x1209, 'pid': 0x7476,
+                                    'bus': 'usb', 'descriptor': _remote_descriptor()})
+        except OSError:
+            _REMOTE['failed'] = (boot, time.monotonic())
+            close()
+        return None
+    if not _REMOTE['ready'] and check:
+        # Reports sent before the TV's input reader lists the device could be lost.
+        if REMOTE_NAME in _shell(row, cancel, 'dumpsys input | grep -m1 -F ' + shlex.quote(REMOTE_NAME) + ' || true'):
+            _REMOTE['ready'] = True
+        elif time.monotonic() - _REMOTE['started'] > 10:
+            _REMOTE['failed'] = (boot, time.monotonic())
+            close()
+    return process if _REMOTE['ready'] else None
+
+
+def _press(row, cancel, boot, names):
+    """Send remote keys once, in order; returns how ('remote' or 'input')."""
+    process = _remote(row, cancel, boot, check=True)
+    if process is None:
+        _shell(row, cancel, _guard(row) + ' && sleep 0.3 && '.join('input keyevent ' + KEYS[name] for name in names))
+        return 'input'
+    for n, name in enumerate(names):
+        if n:
+            _wait(cancel, KEY_SPACING)
+        report, index = _remote_index(name)
+        _remote_write(process, {'command': 'report', 'report': [report, index]})
+        _remote_write(process, {'command': 'report', 'report': [report, 0]})
+    return 'remote'
 
 
 def _players(raw):
@@ -270,9 +417,15 @@ def _media_players(row, cancel):
     return {player: uid for player, (uid, state) in _players(raw).items() if state == 'started'}
 
 
-def _audio(row, cancel):
-    """The audio service alone: whether any media plays, and the volume (one quick read)."""
-    raw = _shell(row, cancel, _guard(row) + 'dumpsys audio')
+def _audio(row, cancel, command=''):
+    """The audio service alone: whether any media plays, and the volume (one quick read).
+
+    command (ending in '&& ') runs first in the same guarded shell, so one round trip sets and reads back.
+    """
+    return _audio_state(_shell(row, cancel, _guard(row) + command + 'dumpsys audio'))
+
+
+def _audio_state(raw):
     return {'media_playing': any(status == 'started' for _owner, status in _players(raw).values()),
             'volume': _volume(raw)}
 
@@ -425,43 +578,100 @@ def prompt_line(now=None):
     return f"tv (as of {'this minute' if age <= 0 else f'{age} min ago'}): " + ', '.join(parts).strip()
 
 
-def _media_done(key, before, after):
-    """Whether readback shows the media key's outcome (before is the pre-key state)."""
-    if key == 'pause':
-        return not after['media_playing']
-    if key == 'play':
-        return after['media_playing']
-    volume, prior = after.get('volume'), before.get('volume')
-    if volume is None or prior is None:
+def _reached(action, level, audio):
+    """Whether the audio readback shows the target state."""
+    if action in ('pause', 'resume'):
+        return audio['media_playing'] is (action == 'resume')
+    volume = audio['volume']
+    if volume is None:
         return False
-    if key in ('mute', 'unmute'):
-        return volume['muted'] is (key == 'mute')
-    if key == 'volume_up':
-        return volume['index'] > prior['index'] or prior['index'] >= prior['max']
-    return volume['index'] < prior['index'] or prior['index'] <= 0
+    if action in ('mute', 'unmute'):
+        return volume['muted'] is (action == 'mute')
+    # Setting a non-zero index also unmutes (measured): volume N means audible at N.
+    return volume['index'] == level and (not volume['muted'] or level == 0)
+
+
+def _reach(row, cancel, context, boot, power, args, audio=None):
+    """Reach one target state like the TFT controller: the TV's own readback is the truth.
+
+    Read the state, act only on a difference, confirm by reading again; on a
+    mismatch re-read and act once more. Volume is set directly (idempotent);
+    mute and playback use one remote key, sent again only after a fresh read
+    still differs once its own wait has passed.
+    """
+    action = args['action']
+    tv = _state(row, cancel, power) if action in ('pause', 'resume') else None
+    audio = {'media_playing': tv['media_playing'], 'volume': tv['volume']} if tv else audio or _audio(row, cancel)
+    level = None
+    if action not in ('pause', 'resume') and audio['volume'] is None:
+        # Mute is a toggle: without readback it is never pressed.
+        raise ValueError('TV volume readback unavailable')
+    if action.startswith('volume'):
+        level = args['level'] if action == 'volume' else audio['volume']['index'] + (
+            VOLUME_STEP if action == 'volume_up' else -VOLUME_STEP)
+        level = max(0, min(audio['volume']['max'], level))
+    result = {'status': 'completed', 'delivery': 'verified', 'action': action}
+    if level is not None:
+        result['level'] = level
+    opened = (tv or {}).get('last_opened') or {}
+    if (action == 'pause' and not _reached(action, level, audio) and opened.get('still_playing')
+            and PLUTO_CHANNEL.fullmatch(opened['link'])):
+        # A live channel is a broadcast: its player cannot pause, so nothing is sent.
+        return {**result, 'effect_applied': False, 'live_channel': True, 'tv': tv,
+                'note': 'Live TV cannot pause; offer mute instead.'}
+    attempts = 0
+    while not _reached(action, level, audio):
+        if attempts == 2:
+            break
+        attempts += 1
+        context['_tv_effect_uncertain'] = True
+        if level is not None:
+            audio = _audio(row, cancel, f'cmd media_session volume --show --stream 3 --set {level} >/dev/null && ')
+        else:
+            _press(row, cancel, boot, ['play' if action == 'resume' else 'pause' if action == 'pause' else 'mute'])
+            deadline = time.monotonic() + (2.5 if action in ('mute', 'unmute') else 4)
+            while not _reached(action, level, audio := _audio(row, cancel)) and time.monotonic() < deadline:
+                _wait(cancel, .2)
+        if not _reached(action, level, audio):
+            _wait(cancel, .3)
+            audio = _audio(row, cancel)  # A fresh read decides whether to act once more.
+        context['_tv_effect_uncertain'] = False
+    reached = _reached(action, level, audio)
+    if tv:
+        result['tv'] = _state(row, cancel, power) if attempts else tv
+    elif _LAST['state'] is not None and 'volume' in _LAST['state']:
+        _LAST['state'] = {**_LAST['state'], 'volume': audio['volume']}
+    result.update(volume=audio['volume'], media_playing=audio['media_playing'],
+                  effect_applied=attempts > 0, attempts=attempts)
+    if not reached:
+        result.update(delivery='acknowledged', note=(
+            'Sent twice; the readback still differs. Report the requested state as unverified.'))
+    return result
 
 
 def reflex_summary(args, result):
     """The spoken reply of a direct TV command; result is None unless verified."""
-    action, key = args['action'], args.get('key')
+    action = args['action']
     if result is None:
-        what = ('power command' if action in ('on', 'off') else 'pause' if key == 'pause' else
-                'resume' if key == 'play' else 'mute change' if key in ('mute', 'unmute') else 'volume change')
-        return f'The TV {what} could not be verified; no command was replayed.'
+        what = {'on': 'power command', 'off': 'power command', 'pause': 'pause', 'resume': 'resume',
+                'mute': 'mute', 'unmute': 'unmute'}.get(action, 'volume change')
+        return f'The TV {what} could not be verified.'
     if action in ('on', 'off'):
         return f'TV turned {action}.'
-    tv = result.get('tv') or {}
-    volume = tv.get('volume') or {}
-    if result.get('effect_applied') is False:
-        if key == 'pause':
-            return 'The TV is already paused.' if tv.get('playback') == 'paused' else 'Nothing is playing on the TV.'
-        if key == 'play':
-            return 'The TV is already playing.'
-        if key in ('mute', 'unmute'):
-            return f"The TV is already {key}d."
-        return f"TV volume is already at {volume.get('index')}."
-    return {'pause': 'TV paused.', 'play': 'TV playing.', 'mute': 'TV muted.',
-            'unmute': 'TV unmuted.'}.get(key) or f"TV volume {volume.get('index')}."
+    unchanged = result.get('effect_applied') is False
+    if action == 'pause':
+        if result.get('live_channel'):
+            return 'Live TV cannot pause. I can mute it instead.'
+        if unchanged:
+            return ('The TV is already paused.' if (result.get('tv') or {}).get('playback') == 'paused'
+                    else 'Nothing is playing on the TV.')
+        return 'TV paused.'
+    if action == 'resume':
+        return 'The TV is already playing.' if unchanged else 'TV playing.'
+    if action in ('mute', 'unmute'):
+        return f'The TV is already {action}d.' if unchanged else f'TV {action}d.'
+    index = (result.get('volume') or {}).get('index')
+    return f'TV volume is already {index}.' if unchanged else f'TV volume {index}.'
 
 
 def _app_uid(row, cancel, package):
@@ -520,16 +730,14 @@ def _find(args, context):
     apps = _inventory()['apps']
     wanted = [args['app']] if 'app' in args else ['pluto', 'youtube']
     candidates, errors = [], []
-    for alias, search in (('pluto', _pluto_matches), ('youtube', _youtube_matches)):
+    for alias, search in (('pluto', lambda q, n: [c for _strong, c in _pluto_matches(q, n)]),
+                          ('youtube', _youtube_matches)):
         if alias in wanted and alias in apps:
             try:
                 candidates += search(query, 5 if len(wanted) > 1 else 8)
             except Exception as error:  # One listing failing leaves the other usable.
                 errors.append(f'{alias} listing unavailable ({type(error).__name__})')
-    bound = context.setdefault('_tv_candidates', {})
-    for candidate in candidates:
-        candidate['id'] = 'c' + str(len(bound) + 1)
-        bound[candidate['id']] = (candidate['app'], candidate.pop('url'), candidate['title'], candidate['by'])
+    _bind(candidates, context)
     result = {'status': 'completed', 'query': query, 'candidates': candidates,
               'note': ('Choose the candidate that fits the owner request and call open with its id. '
                        'Pluto entries are live channels; YouTube duration "live or unknown" is usually a live stream. '
@@ -540,6 +748,50 @@ def _find(args, context):
         result['note'] = ('No candidates. Try a shorter query, the other app, web.search for an official '
                           'YouTube/Pluto/Tubi/Netflix/Hulu link to open, or remote navigation.')
     return result
+
+
+def _bind(candidates, context):
+    """Give each candidate a run-scoped id that open accepts; the link stays private."""
+    bound = context.setdefault('_tv_candidates', {})
+    for candidate in candidates:
+        candidate['id'] = 'c' + str(len(bound) + 1)
+        bound[candidate['id']] = (candidate['app'], candidate.pop('url'), candidate['title'], candidate['by'])
+
+
+_LIVE_WORDS = {'news', 'weather', 'live', 'forecast', 'headlines', *_TOPICS}
+
+
+def _choose(args, context):
+    """Deterministic content pick for play (read-only): (alias, link, title), chosen, alternatives.
+
+    A strong Pluto channel match first (the owner prefers Pluto live TV), else
+    YouTube's top result (its first live stream for news/weather), else the best
+    Pluto match. YouTube is not searched when Pluto already has a strong match.
+    """
+    query, app = args['query'], args.get('app')
+    apps = _inventory()['apps']
+    pluto, youtube, errors = [], [], []
+    if app != 'youtube' and 'pluto' in apps:
+        try:
+            pluto = _pluto_matches(query, 8)
+        except Exception as error:  # One listing failing leaves the other usable.
+            errors.append(f'pluto listing unavailable ({type(error).__name__})')
+    order = sorted(pluto, key=lambda item: not item[0]) if app != 'pluto' else pluto
+    if not (order and order[0][0]) and app != 'pluto' and 'youtube' in apps:
+        try:
+            youtube = _youtube_matches(query, 5)
+        except Exception as error:
+            errors.append(f'youtube listing unavailable ({type(error).__name__})')
+        if _words(query) & _LIVE_WORDS:
+            youtube.sort(key=lambda candidate: candidate['duration'] != 'live or unknown')
+        order = [(False, candidate) for candidate in youtube] + order
+    candidates = [candidate for _strong, candidate in order][:4]
+    if not candidates:
+        raise LookupError('No TV content matches this query' + (' (' + '; '.join(errors) + ')' if errors else ''))
+    chosen = candidates[0]
+    link = chosen['url']
+    _bind(candidates, context)
+    return (chosen['app'], link, chosen['title']), chosen, candidates[1:]
 
 
 def _inventory():
@@ -595,8 +847,8 @@ def _adb(row, cancel, *args, timeout=8, connect=False):
                 process.communicate()
 
 
-def _shell(row, cancel, command):
-    return _adb(row, cancel, 'shell', command).decode(errors='replace')
+def _shell(row, cancel, command, timeout=8):
+    return _adb(row, cancel, 'shell', command, timeout=timeout).decode(errors='replace')
 
 
 def _guard(row):
@@ -605,16 +857,43 @@ def _guard(row):
             + ' && test "$(getprop ro.product.oemmodel)" = ' + shlex.quote(row['model']) + ' && ')
 
 
-def _power(row, cancel):
-    raw = _shell(row, cancel, 'getprop ro.serialno; getprop ro.product.oemmodel; dumpsys power')
-    lines = raw.splitlines()
-    if lines[:2] != [row['serial'], row['model']]:
+# dumpsys power is ~140 KB and costs 0.2-0.9 s; only its two power lines cross the network.
+_POWER_READ = "dumpsys power | grep -E '^ *mWakefulness=|^Display Power: state=' || true"
+
+
+def _identity(row, raw):
+    if raw.splitlines()[:2] != [row['serial'], row['model']]:
         raise ValueError('The ADB target is not the registered TV')
+
+
+def _parse_power(raw):
     wake = re.search(r'^\s*mWakefulness=(\w+)', raw, re.M)
     display = re.search(r'^Display Power: state=(\w+)', raw, re.M)
     if not wake or not display:
         raise ValueError('TV power readback unavailable')
     return {'wakefulness': wake[1], 'display': display[1]}
+
+
+def _power(row, cancel):
+    raw = _shell(row, cancel, 'getprop ro.serialno; getprop ro.product.oemmodel; ' + _POWER_READ)
+    _identity(row, raw)
+    return _parse_power(raw)
+
+
+def _preamble(row, cancel, read, timeout=8):
+    """Identity, TV boot id and advertising-ID settings plus one read, in a single round trip.
+
+    Returns (read output, boot id, [advertising_id, limit_ad_tracking]).
+    """
+    raw = _shell(row, cancel, 'getprop ro.serialno; getprop ro.product.oemmodel; cat /proc/sys/kernel/random/boot_id; '
+                 'settings get secure advertising_id; settings get secure limit_ad_tracking; echo @@; ' + read,
+                 timeout=timeout)
+    _identity(row, raw)
+    head, separator, tail = raw.partition('\n@@\n')
+    lines = head.splitlines()
+    if not separator or len(lines) != 5:
+        raise ValueError('TV identity readback unavailable')
+    return tail, lines[2].strip(), [line.strip() for line in lines[3:5]]
 
 
 def _focus(row, cancel):
@@ -709,7 +988,44 @@ def _observe(row, cancel, context, power, after_input=False, started=False):
             **({'_private_image_png': output.getvalue()} if output is not None else {})}
 
 
+def _outcome(result):
+    if result.get('status') != 'completed':
+        return 'failed'
+    if result.get('delivery') == 'verified' or result.get('playback_started') is True:
+        return 'unchanged' if result.get('effect_applied') is False else 'verified'
+    return 'unconfirmed'
+
+
+def _record(args, result):
+    """The ledger: the latest state and, for an effect, its intent with the confirmed outcome."""
+    action = args.get('action')
+    with _LEDGER_LOCK:
+        if action != 'observe':
+            volume = result.get('volume') or {}
+            opened = result.get('opened') or {}
+            detail = (result.get('failure') or opened.get('title') or opened.get('link')
+                      or (f"volume {volume.get('index')}" + (' muted' if volume.get('muted') else '') if volume else ''))
+            # Typed text is not kept: it can be a search or a sign-in field.
+            _INTENTS.append({'at': round(time.time(), 3), 'action': action,
+                             **{key: args[key] for key in ('level', 'key', 'keys', 'query', 'app', 'id', 'url')
+                                if key in args},
+                             'outcome': _outcome(result), **({'detail': str(detail)[:200]} if detail else {})})
+        try:
+            temp = _LEDGER_PATH.with_suffix('.tmp')
+            temp.write_text(json.dumps({'state': _LAST['state'], 'intents': list(_INTENTS)}))
+            temp.replace(_LEDGER_PATH)
+        except (OSError, TypeError, ValueError):
+            pass  # The ledger is a record; the TV itself holds the real state.
+
+
 def execute(args: dict, context: dict) -> dict:
+    result = _execute(args, context)
+    if args.get('action') != 'find':
+        _record(args, result)
+    return result
+
+
+def _execute(args, context):
     if (context.get('_agent_ref') != 'Agents/Executive/Executive'
             or context.get('task') != 'Agents/Executive/Executive'):
         raise PermissionError('TV control belongs to the Executive conversation')
@@ -718,24 +1034,38 @@ def execute(args: dict, context: dict) -> dict:
     action = args.get('action')
     fields = {'on': [set()], 'off': [set()], 'observe': [set()], 'launch': [{'app'}],
               'key': [{'key'}], 'keys': [{'keys'}], 'text': [{'text'}],
-              'find': [{'query'}, {'query', 'app'}], 'open': [{'id'}, {'url'}]}
+              'find': [{'query'}, {'query', 'app'}], 'play': [{'query'}, {'query', 'app'}],
+              'open': [{'id'}, {'url'}], 'volume': [{'level'}],
+              **{target: [set()] for target in TARGETS if target != 'volume'}}
     if action not in fields or set(args) - {'action'} not in fields[action]:
         raise ValueError('Invalid TV action arguments')
-    if action == 'key' and args['key'] not in KEYS:
-        raise ValueError('Unknown TV remote key')
+    if action == 'key' and args['key'] not in NAV_KEYS and args['key'] not in MEDIA_KEYS:
+        raise ValueError('Unknown TV remote key; volume, mute, pause and resume are their own actions')
     if action == 'keys' and (not isinstance(args['keys'], list) or not 1 <= len(args['keys']) <= 8
-                             or any(key not in KEYS or key in MEDIA_KEYS for key in args['keys'])):
+                             or any(key not in NAV_KEYS for key in args['keys'])):
         raise ValueError('keys takes 1-8 navigation keys')
+    if action == 'volume':
+        if isinstance(args['level'], float) and args['level'].is_integer():
+            args = {**args, 'level': int(args['level'])}
+        if not isinstance(args['level'], int) or isinstance(args['level'], bool) or not 0 <= args['level'] <= 100:
+            raise ValueError('volume takes level 0-100')
     if action == 'text' and (not isinstance(args['text'], str)
             or not re.fullmatch(r'[A-Za-z0-9 .,:!?\-]{1,120}', args['text'])):
         raise ValueError('TV search text requires 1-120 simple printable characters')
-    if action == 'find' and (not isinstance(args['query'], str) or not 1 <= len(args['query'].strip()) <= 120
-                             or args.get('app', 'pluto') not in {'pluto', 'youtube'}):
-        raise ValueError('find takes a 1-120 character query and optional app pluto|youtube')
+    if action in ('find', 'play') and (not isinstance(args['query'], str) or not 1 <= len(args['query'].strip()) <= 120
+                                       or args.get('app', 'pluto') not in {'pluto', 'youtube'}):
+        raise ValueError(f'{action} takes a 1-120 character query and optional app pluto|youtube')
     if action == 'find':
         try:
             return _find({**args, 'query': args['query'].strip()}, context)
         except (OSError, ValueError, KeyError) as error:
+            return {'status': 'failed', 'delivery': 'not_dispatched', 'effect_applied': False,
+                    'correction_allowed': True, 'failure': str(error)}
+    if action == 'play':
+        # Content resolution is read-only network work; it never holds the TV.
+        try:
+            (alias, link, title), chosen, alternatives = _choose({**args, 'query': args['query'].strip()}, context)
+        except (OSError, ValueError, LookupError) as error:
             return {'status': 'failed', 'delivery': 'not_dispatched', 'effect_applied': False,
                     'correction_allowed': True, 'failure': str(error)}
     cancel = context.get('_capability_cancel_event')
@@ -743,39 +1073,59 @@ def execute(args: dict, context: dict) -> dict:
         if cancel is not None and cancel.is_set():
             return {'status': 'failed', 'delivery': 'not_dispatched', 'failure': 'cancelled'}
     delivery = 'not_dispatched'
+    uncertain_before = context.get('_tv_effect_uncertain')
     try:
         row = _inventory()
         if action == 'launch' and args['app'] not in row['apps']:
             raise ValueError('App is not registered on this TV; observe to list apps')
-        if action != 'observe' and context.get('_tv_effect_uncertain'):
+        if action != 'observe' and uncertain_before:
             raise ValueError('An earlier TV effect is uncertain; stop effects and report it')
-        # Reconnect only the transport, never replay an input or restart the ADB server.
-        _adb(row, cancel, connect=True, timeout=4)
-        state = _power(row, cancel)
+        # Volume and mute need no screen, so their first audio read replaces the power read.
+        audible = action in ('volume', 'volume_up', 'volume_down', 'mute', 'unmute')
+        read = 'dumpsys audio' if audible else _POWER_READ
+        try:
+            tail, boot, ad = _preamble(row, cancel, read, timeout=4)
+        except OSError as error:
+            if isinstance(error, InterruptedError):
+                raise
+            # Reconnect only the transport and read again; never replay an input or restart the ADB server.
+            _adb(row, cancel, connect=True, timeout=4)
+            tail, boot, ad = _preamble(row, cancel, read)
         if action != 'observe':
-            _placeholder_ad_id(row, cancel)
-            _boot_policy(row, cancel)
+            _placeholder_ad_id(row, cancel, ad)
+            _boot_policy(row, cancel, boot)
+        if audible:
+            return _reach(row, cancel, context, boot, None, args, audio=_audio_state(tail))
+        state = _parse_power(tail)
         if state['wakefulness'] == 'Dreaming' and action not in ('observe', 'off'):
             # Seen on this TV: an app launched behind the screensaver stays frozen
             # on its splash. Wake ends the screensaver; it changes no content.
             state = _end_screensaver(row, cancel)
+        if state['wakefulness'] == 'Awake' and action != 'off':
+            # Ready for the keys that usually follow; starting it never delays this call.
+            _remote(row, cancel, boot, check=False)
         if action == 'observe':
             return {'status': 'completed', **_observe(row, cancel, context, state)}
+        if action in TARGETS:
+            return _reach(row, cancel, context, boot, state, args)
         attempted = context.setdefault('_tv_attempted', set())
+        opening = action in ('open', 'play')
+        extra = {'query': args['query'].strip(), 'chosen': chosen, 'alternatives': alternatives} if action == 'play' else {}
         if action == 'open':
             if 'id' in args:
-                chosen = (context.get('_tv_candidates') or {}).get(args['id'])
-                if chosen is None:
+                candidate = (context.get('_tv_candidates') or {}).get(args['id'])
+                if candidate is None:
                     return {'status': 'failed', 'delivery': 'not_dispatched', 'effect_applied': False,
                             'correction_allowed': True,
                             'failure': 'Unknown candidate id; call find in this turn and open one of its ids.'}
-                alias, link, title, _by = chosen
+                alias, link, title, _by = candidate
             else:
                 (alias, link), title = _link(args['url'], row['apps']), None
         token = ('power' if action in ('on', 'off') else 'launch:' + args['app'] if action == 'launch'
-                 else 'open:' + link if action == 'open' else '')
+                 else 'open:' + link if opening else '')
         if token and token in attempted:
             raise ValueError('This TV operation was already attempted in this run; do not replay it')
+        command, names = None, None
         if action in ('on', 'off'):
             desired = {'wakefulness': 'Awake', 'display': 'ON'} if action == 'on' else {'wakefulness': 'Asleep', 'display': 'OFF'}
             if state == desired:
@@ -791,7 +1141,7 @@ def execute(args: dict, context: dict) -> dict:
             if not re.fullmatch(re.escape(package) + r'/[A-Za-z0-9_.$]+', component):
                 raise ValueError('No launchable TV activity for this app')
             command = 'am start -W -n ' + shlex.quote(component)
-        elif action == 'open':
+        elif opening:
             package = row['apps'][alias]
             channel = PLUTO_CHANNEL.fullmatch(link)
             target = 'plutotv://live-tv/' + channel[1] if alias == 'pluto' and channel else link
@@ -812,16 +1162,10 @@ def execute(args: dict, context: dict) -> dict:
                 # Already playing exactly this link: nothing to send.
                 return {'status': 'completed', 'delivery': 'verified', 'action': action,
                         'effect_applied': False, 'playback_started': True, 'already_playing': True,
-                        'opened': {'app': alias, 'link': link, 'title': title}, 'tv': _state(row, cancel, state)}
-        elif action == 'key' and args['key'] in READBACK_KEYS:
-            before = _audio(row, cancel)
-            if _media_done(args['key'], before, before):
-                return {'status': 'completed', 'delivery': 'verified', 'action': action, 'key': args['key'],
-                        'effect_applied': False, 'tv': _state(row, cancel, state),
-                        'note': 'The readback already shows the requested state (or nothing is playing); no key was sent.'}
-            command = 'input keyevent ' + KEYS[args['key']]
+                        'opened': {'app': alias, 'link': link, 'title': title}, **extra,
+                        'tv': _state(row, cancel, state)}
         elif action == 'key' and args['key'] in MEDIA_KEYS:
-            command = 'input keyevent ' + KEYS[args['key']]
+            names = [args['key']]
         else:
             observed = context.pop('_tv_observation', None)
             if not observed or time.monotonic() - observed[1] > 60 or _focus(row, cancel) != observed[0]:
@@ -834,10 +1178,9 @@ def execute(args: dict, context: dict) -> dict:
                     return {'status': 'failed', 'delivery': 'not_dispatched',
                             'effect_applied': False, 'correction_allowed': True,
                             'failure': 'No active TV text input. Text is not a search command. Observe, open the requested or preferred app, navigate to Search and focus its text field. For a custom on-screen keyboard, select visible letters using remote keys.'}
-            command = ('input keyevent ' + KEYS[args['key']] if action == 'key' else
-                       ' && sleep 0.3 && '.join('input keyevent ' + KEYS[key] for key in args['keys'])
-                       if action == 'keys' else
-                       'input text ' + shlex.quote(args['text'].replace(' ', '%s')))
+                command = 'input text ' + shlex.quote(args['text'].replace(' ', '%s'))
+            else:
+                names = [args['key']] if action == 'key' else args['keys']
         if cancel is not None and cancel.is_set():
             raise InterruptedError('TV command cancelled')
         if token:
@@ -845,31 +1188,17 @@ def execute(args: dict, context: dict) -> dict:
         context.pop('_tv_observation', None)
         context['_tv_effect_uncertain'] = True
         delivery = 'uncertain'
-        _shell(row, cancel, _guard(row) + command)
+        how = _press(row, cancel, boot, names) if names else _shell(row, cancel, _guard(row) + command)
         delivery = 'acknowledged'
         if action == 'key' and args['key'] in MEDIA_KEYS:
             context['_tv_effect_uncertain'] = False
-            if args['key'] not in READBACK_KEYS:
-                return {'status': 'completed', 'delivery': delivery, 'action': action, 'key': args['key'],
-                        'effect_applied': True, 'must_not_replay': True,
-                        'note': 'Remote key delivered once; the playback position is not read back.'}
-            # Read back the audio service: player state, volume index and mute.
-            deadline = time.monotonic() + 4
-            while not _media_done(args['key'], before, after := _state(row, cancel, state)):
-                if time.monotonic() >= deadline:
-                    return {'status': 'completed', 'delivery': delivery, 'action': action, 'key': args['key'],
-                            'effect_applied': True, 'must_not_replay': True, 'tv': after,
-                            'note': 'Remote key delivered once, but the readback does not show the change. '
-                                    'Report it as unverified; never resend it.'}
-                if cancel is not None:
-                    if cancel.wait(.3):
-                        raise InterruptedError('TV command cancelled')
-                else:
-                    time.sleep(.3)
-            return {'status': 'completed', 'delivery': 'verified', 'action': action, 'key': args['key'],
-                    'effect_applied': True, 'must_not_replay': True, 'tv': after}
+            return {'status': 'completed', 'delivery': delivery, 'action': action, 'key': args['key'],
+                    'effect_applied': True, 'must_not_replay': True,
+                    'note': 'Remote key delivered once; the playback position is not read back.'}
+        if how == 'remote':
+            _wait(cancel, .3)  # Remote keys travel asynchronously; let them land before observing.
         context['_tv_navigation_applied'] = True
-        if action == 'open':
+        if opening:
             settle = alias in LINK_NEEDS_SETTLED_APP
             # Seen on screen: a cold-started Pluto lands on its On Demand home and
             # ignores the link; the same link sent to the running app plays.
@@ -887,12 +1216,8 @@ def execute(args: dict, context: dict) -> dict:
                             'power': state, 'effect_applied': True, 'must_not_replay': True}
                 if time.monotonic() >= deadline:
                     raise ValueError('TV did not report the requested display state')
-                if cancel is not None:
-                    if cancel.wait(.15):
-                        raise InterruptedError('TV command cancelled')
-                else:
-                    time.sleep(.15)
-        started = action == 'open' and playback is not None
+                _wait(cancel, .15)
+        started = opening and playback is not None
         if started:
             _OPENED[alias] = {'app': alias, 'link': link, 'title': title, 'opened_at': time.time(),
                               'player': playback}
@@ -905,13 +1230,16 @@ def execute(args: dict, context: dict) -> dict:
         # A confirmed playback start needs no slow video screenshot.
         result = _observe(row, cancel, context, state, after_input=True, started=started)
         context['_tv_effect_uncertain'] = False
-        if action == 'open':
+        if opening:
             result['playback_started'] = started
             result['opened'] = {'app': alias, 'link': link, 'title': title}
         return {'status': 'completed', 'delivery': delivery, 'action': action,
                 'effect_applied': True, 'must_not_replay': True,
-                'note': 'Input delivered once; inspect the fresh evidence before claiming the requested outcome.', **result}
+                'note': 'Input delivered once; inspect the fresh evidence before claiming the requested outcome.',
+                **extra, **result}
     except (OSError, ValueError, KeyError, IndexError) as error:
+        if delivery == 'not_dispatched' and context.get('_tv_effect_uncertain') and not uncertain_before:
+            delivery = 'uncertain'  # A target-state readback failed after its effect was sent.
         return {'status': 'failed', 'delivery': delivery, 'effect_applied': None if delivery != 'not_dispatched' else False,
                 'failure': str(error), 'must_not_replay': True,
                 'next_step': 'Stop this turn. No retry is scheduled. If the connection is unavailable, check that the TV is awake and ADB debugging is enabled.'}

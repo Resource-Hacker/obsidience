@@ -343,9 +343,13 @@ neighbours); (9) history projected from the native conversation (no conversation
   discrete power with display/wake readback, registered app launch, backend state read from
   Android services (foreground app, audio-service playback, volume/mute, media sessions, text
   input, content this Harness opened) before any screen image, which is skipped while video
-  plays, bounded accessibility labels and one remote key/text action per observation. Media
-  keys verify their effect from the audio service. The Executive's per-turn metadata renders
-  the last read state with its age, never contacting the TV while building the prompt.
+  plays, bounded accessibility labels and one remote key/text action per observation.
+  Intents (play content, exact volume, mute, pause/resume) are target states: read the audio
+  service, act only on a difference, confirm from fresh readback, re-read before one retry.
+  Keys go through a virtual remote from Android's `hid` tool, with `input keyevent` as the
+  fallback. The Executive's per-turn metadata renders the last read state with its age,
+  never contacting the TV while building the prompt; a private ledger keeps that state and
+  recent intent outcomes across restarts.
   Protected video may omit pixels while accessible controls remain available. Text requires an active
   Android text-input method; custom keyboards use visible remote navigation.
   Missing observation or text focus is correctable before dispatch; transport or
