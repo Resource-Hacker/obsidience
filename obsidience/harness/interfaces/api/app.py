@@ -1819,9 +1819,9 @@ def _set_knowledge_assignment(agent: str, identity: Note, note: Note, checked: b
     selected = [item for item in _roots(identity, res, "knowledge") if not _within(item, note)]
     excluded = [item for item in _roots(identity, res, "exclude_knowledge") if not _within(item, note)]
     if checked:
-        if any(_within(note, item) for item in excluded):
-            raise HTTPException(409, "A parent scope is excluded; enable that parent first")
-        if not any(_within(note, item) for item in selected):
+        # The most specific entry decides (knowledge.scope._admitted): an exact
+        # checkout opens one Article inside an excluded parent branch.
+        if not any(_within(note, item) for item in selected) or any(_within(note, item) for item in excluded):
             selected.append(note)
     elif any(_within(note, item) for item in selected):
         excluded.append(note)

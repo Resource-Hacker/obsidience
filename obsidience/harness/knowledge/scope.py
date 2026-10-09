@@ -25,6 +25,24 @@ def _within(note: Note, root: Note) -> bool:
     return note.ref == root.ref or (is_index and note.path.startswith(str(folder) + "/"))
 
 
+def _specificity(note: Note, root: Note) -> tuple[int, int]:
+    """How specifically a checkout entry names this note: the exact Article beats any folder, a deeper folder a shallower one."""
+    return (1, 0) if note.ref == root.ref else (0, len(PurePosixPath(root.path).parent.parts))
+
+
+def _admitted(note: Note, roots: list[Note], excluded: list[Note]) -> bool:
+    """The most specific matching entry decides; on a tie the exclusion wins.
+
+    An exact checkout of one Article therefore opens it inside an excluded branch,
+    and a narrower exclusion still closes part of a checked-out branch.
+    """
+    best_in = max((_specificity(note, item) for item in roots if _within(note, item)), default=None)
+    if best_in is None:
+        return False
+    best_out = max((_specificity(note, item) for item in excluded if _within(note, item)), default=None)
+    return best_out is None or best_in > best_out
+
+
 def private_observation(note: Note, agent_ref: str) -> bool:
     if not note.ref.startswith("Agents/") or note.ref.startswith(agent_ref.rsplit("/", 1)[0] + "/"):
         return False
@@ -63,9 +81,7 @@ def knowledge_refs(agent: Note, res: Resolver) -> set[str]:
             continue
         if note.ref.startswith(own):
             visible.add(note.ref)
-        elif (not private_observation(note, agent.ref)
-                and any(_within(note, item) for item in roots)
-                and not any(_within(note, item) for item in exclusions)):
+        elif not private_observation(note, agent.ref) and _admitted(note, roots, exclusions):
             visible.add(note.ref)
     return visible
 
@@ -154,7 +170,7 @@ def checkout_state(note: Note, agent: Note, res: Resolver) -> dict:
     excluded = _roots(agent, res, "exclude_knowledge")
     direct = any(item.ref == note.ref for item in roots)
     inherited_from = [item.ref for item in roots if item.ref != note.ref and _within(note, item)]
-    exclusion = any(_within(note, item) for item in excluded)
+    exclusion = any(_within(note, item) for item in excluded) and not _admitted(note, roots, excluded)
     partial = any(item.ref != note.ref and _within(item, note) for item in [*roots, *excluded])
     return {"partial": partial, "ref": note.ref, "kind": note.kind, "agent_ref": agent.ref,
             "checked": own or (not private and not exclusion and (direct or bool(inherited_from))),
