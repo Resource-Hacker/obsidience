@@ -53,9 +53,21 @@ MENTAL_MODELS = (
      "Which decisions, commitments and open follow-ups have the owner and the agents made recently? "
      "Give their dates, current status and any later reversal."),
 )
-MENTAL_MODEL_TRIGGER = {"mode": "delta", "refresh_after_consolidation": True,
+# Full regeneration (Hindsight's default): the free reflect models could not
+# apply delta edits reliably ("delta operations did not reach the document").
+MENTAL_MODEL_TRIGGER = {"mode": "full", "refresh_after_consolidation": True,
                         "fact_types": ["observation"], "exclude_mental_models": True,
                         "min_refresh_interval_seconds": 6 * 3600}
+
+
+def _recent(stamp, seconds=86400):
+    """Whether an ISO-8601 failure time lies within the last day (unknown counts as recent)."""
+    if not stamp:
+        return True
+    try:
+        return time.time() - datetime.fromisoformat(str(stamp).replace("Z", "+00:00")).timestamp() < seconds
+    except ValueError:
+        return True
 
 
 def model_source_ref(bank, identifier, version):
@@ -448,7 +460,7 @@ class Hindsight:
             items = page.get("operations", [])
             for item in items:
                 row = {"id": item["id"], "type": item.get("task_type", item.get("type", "")),
-                       "bank": bank}
+                       "bank": bank, "failed_at": item.get("completed_at") or item.get("updated_at")}
                 if reset := _quota_reset(item):
                     row["retry_after"] = reset
                 rows.append(row)
@@ -784,12 +796,16 @@ class Hindsight:
                 operations[state] = operations.get(state, 0) + count
         attempted = {r[0] for r in self._sql("SELECT operation_id FROM memory_retries")}
         retryable = [r for r in failures if r["id"] not in attempted]
+        # Degraded means action is still due: a failure the repair path has not
+        # retried, or one from the last day. Older, already-retried failures stay
+        # listed as evidence without masking new faults behind a permanent state.
+        actionable = [r for r in failures if r["id"] not in attempted or _recent(r.get("failed_at"))]
         consolidations = [{"bank": bank, "count": len(keys),
                            "failure_key": hashlib.sha256(json.dumps(keys).encode()).hexdigest()}
                           for bank, keys in self.failed_consolidations.items()
                           if keys and not attempted.intersection(keys)]
         recall = self.recall_status()
-        return {"status": "degraded" if self.error or self.client is None or failures or consolidation_failures
+        return {"status": "degraded" if self.error or self.client is None or actionable or consolidation_failures
                 or self.model_error or recall["status"] == "degraded" else "healthy",
                 "provider": "hindsight", "processing_paused": self.processing_paused,
                 "delivery_paused": self.delivery_paused,
@@ -798,6 +814,7 @@ class Hindsight:
                 "pending_delivery": pending, "error": self.error,
                 "recall": recall,
                 "failed_operations": failures,
+                "actionable_failed_operations": actionable,
                 "consolidation_failures": consolidation_failures,
                 "operations_by_status": operations,
                 "pending_consolidation": sum(s.get("pending_consolidation") or 0 for s in self.bank_status.values()),
@@ -817,7 +834,7 @@ class Hindsight:
         reasons += [f"Hindsight has {stats['failed_consolidation']} failed consolidations in {bank}"
                     for bank, stats in self.bank_status.items() if stats.get("failed_consolidation")]
         reasons += [f"Hindsight {row['type']} operation {row['id']} failed in {row['bank']}"
-                    for row in state.get("failed_operations", [])]
+                    for row in state.get("actionable_failed_operations", [])]
         reasons += [f"Hindsight {budget}-budget recall repeatedly failed or exceeded its deadline"
                     for budget, stats in state.get("recall", {}).get("budgets", {}).items()
                     if stats["status"] == "degraded"]
