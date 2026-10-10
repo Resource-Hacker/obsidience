@@ -338,6 +338,17 @@
       "patch_sha256": "27cf3b20af1ed46e657fe4b263f4d69eb32a51639a07b77ab45352c91b6dc71d",
       "integration": "Selected 2026-10-08. Only the exact-input admission patch is carried (rebased, behaviour unchanged); the Jinja filter-scope fix is upstream (#29776). Launcher adds --no-reasoning-preserve (keeps b10078 prompt bytes) and --checkpoint-min-step 1024 (#28302 fixed the eviction behind the old 0 setting). Measured live: cold 39.7K-token prefill 26.9 s at min-step 0 vs 15.6 s at 1024 (b10078: 28.0 s); warm simple turns 1.56-1.66 s vs 1.79-2.01 s on b10078; VRAM 17,716 MiB. /v1/models now requires the API key (#26347); the Harness health probe sends it."
     },
+    "llama_cpp_executive_g4grammar": {
+      "repository": "https://github.com/ggml-org/llama.cpp",
+      "revision": "1167d3f42c2b4dc5469bf4e696cb8c678ca79110",
+      "version": "b11509+obsidience-exact-input-admission+gemma4-tool-argument-grammar",
+      "license": "MIT",
+      "path": "/var/lib/ai/opt/llama.cpp-b11509-obsidience-admission-g4grammar-20261009",
+      "manifest": "/var/lib/ai/opt/llama.cpp-b11509-obsidience-admission-g4grammar-20261009/MANIFEST.json",
+      "patch": "obsidience/scripts/patches/llama-cpp-gemma4-tool-argument-grammar-b11509.patch",
+      "patch_sha256": "71e8f6c2ebcf14ebf309cce2ecf3f75b2ff336ee431268565d7c14bc44ac1a42",
+      "integration": "Selected 2026-10-09 for obsidience-gemma (llm.sh). The admission build plus json-schema-to-grammar emitting Gemma 4 value syntax, used by the Gemma 4 parser for Tool arguments (the upstream TODO). Enums, constants, ranges, formats, patterns and required keys are now decoder-enforced; output parsing is unchanged. Trade-offs: required keys are generated first, and length/pattern-bounded strings cannot contain '<'. The embedding service keeps llama_cpp_executive_admission. Rollback: the previous LLAMA path in llm.sh."
+    },
     "embeddinggemma_2_text_bf16_gguf": {
       "repository": "https://huggingface.co/ggml-org/embeddinggemma-2-GGUF",
       "revision": "bfcd298762cc34d0357ece5ebdd31791a3a374d8",

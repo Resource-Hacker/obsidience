@@ -3,9 +3,10 @@
 # GPU/context launch profile before systemd starts this service.
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PRODUCT_ROOT=$(dirname -- "$SCRIPT_DIR")
-# Pinned b11509 with exact input-budget admission (the Jinja scope fix is upstream).
-# Rollback: LLAMA=/var/lib/ai/opt/llama.cpp-b10078-obsidience-admission-20261005
-LLAMA=/var/lib/ai/opt/llama.cpp-b11509-obsidience-admission-20261008
+# Pinned b11509 with exact input-budget admission plus Gemma 4 schema-constrained
+# Tool arguments (2026-10-09; artifacts.lock.json llama_cpp_executive_g4grammar).
+# Rollback: LLAMA=/var/lib/ai/opt/llama.cpp-b11509-obsidience-admission-20261008
+LLAMA=/var/lib/ai/opt/llama.cpp-b11509-obsidience-admission-g4grammar-20261009
 MODEL=${OBSIDIENCE_MODEL:-"$PRODUCT_ROOT/state/models/executive.gguf"}
 LAUNCH="$PRODUCT_ROOT/state/model-launch/obsidience-gemma.json"
 GPU_UUIDS=$(jq -er '.gpu_uuids | join(",")' "$LAUNCH") || exit 64
