@@ -778,7 +778,8 @@ def prompt_line(now=None):
                 if airing['from'] <= now < airing['until']:
                     app += ' (now: ' + _quote(' - '.join(filter(None, (airing['title'], airing['episode'])))) + ')'
         parts.append(app)
-        parts.append('Pluto inactivity ad screen (resume returns to the channel)'
+        parts.append('NOT playing the channel: Pluto stopped it for inactivity and loops advertisements '
+                     'until a key press (resume returns to the channel)'
                      if state['playback'] == 'inactivity_ad' else state['playback'] or 'no media player')
         session = next((s for s in state['media_sessions']
                         if s['package'] == foreground['package'] and s.get('title')), None)
