@@ -21,7 +21,7 @@ psutil==7.2.2
 nvidia-ml-py==13.610.43
 jsonschema==4.25.1
 hassil==3.12.1
-# Executive ADK loop (stage 1, executive_loop = "adk"); official LiteLlm model route.
+# ADK Agent loop (Executive and Tasks); official LiteLlm model route.
 google-adk==2.11.0
 litellm==1.101.0
 aiosqlite==0.22.1

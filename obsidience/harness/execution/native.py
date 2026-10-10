@@ -407,7 +407,7 @@ def request_payload(messages, spec, effort, tools, *, task=False):
 # `conversation_window = false` in obsidience/obsidience.toml.
 WINDOW_KEEP = (8, 6_000)      # exchanges, estimated tokens kept by a rebase (at least two exchanges)
 WINDOW_LIMIT = (16, 12_000)   # a window beyond either rebases at the next idle edge
-_WINDOW_KEY = 'deepseek_window_anchor'  # Stored key name predates the ADK loop; kept so the live window survives.
+_WINDOW_KEY = 'conversation_window_anchor'
 _window: dict | None = None
 
 
@@ -443,7 +443,7 @@ def _estimate(messages: list[dict]) -> int:
 def rebase_window(conversation_id: str, messages: list[dict] | None) -> str | None:
     """At an idle edge, move an outgrown window's anchor forward; return a new anchor.
 
-    messages is the selected loop's native view of this conversation.
+    messages is the ADK conversation log's native view of this conversation.
     """
     global _window
     from ..config import CONFIG
