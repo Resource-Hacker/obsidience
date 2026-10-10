@@ -512,13 +512,29 @@ def _pluto_inactivity(state):
 _PLUTO_CHECK = {'at': 0.0}
 
 
+def _pluto_due(state):
+    return (state is not None and state.get('foreground', {}).get('app') == 'pluto'
+            and state.get('playback') in ('playing', 'inactivity_ad'))
+
+
+def _schedule_pluto_check():
+    """Re-read Pluto's screen off the turn path, at most every 20 s."""
+    if _pluto_due(_LAST['state']) and time.monotonic() - _PLUTO_CHECK['at'] >= 20:
+        _PLUTO_CHECK['at'] = time.monotonic()
+        threading.Thread(target=_pluto_check, name='tv-pluto-check', daemon=True).start()
+
+
 def _pluto_check():
     """Background re-read for the tv line: the inactivity screen changes no pushed state."""
     if not _LOCK.acquire(blocking=False):
         return
     try:
         if (state := _LAST['state']) is not None:
-            _LAST['state'] = _pluto_inactivity(dict(state))
+            marked = _pluto_inactivity(dict(state))
+            if _LAST['state'] is state:
+                _LAST['state'] = marked
+            else:
+                _PLUTO_CHECK['at'] = 0.0  # A push replaced the state during the read; read again on the next one.
     except Exception as error:  # The line keeps the last state; observe reads again.  # noqa: BLE001
         _agent.log.info('Pluto inactivity check skipped: %s', error)
     finally:
@@ -564,7 +580,13 @@ def _from_agent(row, raw, fetch=True):
 def _pushed(row):
     """The agent pushes each state change; it replaces the state prompt_line renders, with no TV round trip."""
     def consume(raw):
-        _LAST['state'] = _from_agent(row, raw, fetch=False)
+        state = _from_agent(row, raw, fetch=False)
+        previous = _LAST['state'] or {}
+        if previous.get('playback') == 'inactivity_ad' and _pluto_due(state):
+            # Looping ads push often; the mark stays until a screen read clears it.
+            state.update(playback='inactivity_ad', note=previous.get('note'))
+        _LAST['state'] = state
+        _schedule_pluto_check()
     return consume
 
 
@@ -716,7 +738,7 @@ def _warm():
         row = _inventory()
         _tail, boot, _ad = _preamble(row, None, _POWER_READ, timeout=4)
         if _agent.session(row, None, boot, _pushed(row)) is not None and (reply := _ask('state')) is not None:
-            _LAST['state'] = _from_agent(row, reply, fetch=False)
+            _LAST['state'] = _pluto_inactivity(_from_agent(row, reply, fetch=False))
     except Exception as error:  # The TV may be off or away; the line stays marked as aged.  # noqa: BLE001
         _agent.log.info('TV agent warm-up skipped: %s', error)
     finally:
@@ -739,11 +761,8 @@ def prompt_line(now=None):
     state = _LAST['state']
     if state is None:
         return ''
-    if (live and state.get('foreground', {}).get('app') == 'pluto'
-            and state.get('playback') in ('playing', 'inactivity_ad')
-            and time.monotonic() - _PLUTO_CHECK['at'] >= 20):
-        _PLUTO_CHECK['at'] = time.monotonic()
-        threading.Thread(target=_pluto_check, name='tv-pluto-check', daemon=True).start()
+    if live:
+        _schedule_pluto_check()
     now = time.time() if now is None else now
     age = int(now // 60 - state['captured_at'] // 60)
     parts = [state['power']['screen']]
