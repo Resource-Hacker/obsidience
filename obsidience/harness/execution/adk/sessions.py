@@ -103,6 +103,9 @@ def service():
 
 
 def _import_litellm() -> None:
+    # LiteLLM would otherwise fetch its model cost map from GitHub at import; the
+    # bundled map suffices and the Harness makes no network call of its own here.
+    os.environ.setdefault('LITELLM_LOCAL_MODEL_COST_MAP', 'True')
     from google.adk.models.lite_llm import _ensure_litellm_imported
     _ensure_litellm_imported()
     import litellm

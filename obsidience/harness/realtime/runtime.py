@@ -1005,6 +1005,16 @@ class RealtimeSessionManager:
                 if self._hardware_leased:
                     await model_runtime.release_devices(RUNTIME_LEASE_OWNER)
                     self._hardware_leased = False
+                if self._audio_source == media_runtime.UMA8_SOURCE and not isinstance(exc, asyncio.CancelledError):
+                    # A missing or hung UMA-8 cannot start now; the requested mode
+                    # stays, and the device watcher starts voice once a new endpoint
+                    # generation appears (a replug or power cycle), as after a stall.
+                    with contextlib.suppress(Exception):
+                        _intact, generation = await asyncio.to_thread(
+                            media_runtime.uma8_reference_state, self._audio_sink,
+                        )
+                        self._audio_reconnect_attempt = generation
+                        self._audio_reconnect_pending = True
                 raise
             self._monitor = asyncio.create_task(
                 self._monitor_process(self._process, operation),
