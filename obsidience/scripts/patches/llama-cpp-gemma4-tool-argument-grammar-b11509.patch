@@ -1,165 +1,432 @@
---- a/common/parsers/gemma4.cpp	2026-10-09 16:24:04.144491350 -0700
-+++ b/common/parsers/gemma4.cpp	2026-10-09 16:24:04.144491350 -0700
-@@ -148,6 +148,139 @@
+--- a/common/json-schema.h
++++ b/common/json-schema.h
+@@ -11,6 +11,14 @@
  
- }
+ // JSON schema, covering the subset that json_schema_to_grammar() can convert.
  
-+// Gemma4 tool arguments use their own dict syntax (bare keys, <|"|>-delimited
-+// strings), so json-schema-to-grammar cannot constrain them. Translate the
-+// supported JSON-schema subset into GBNF over the same syntax: the closed key
-+// set with required keys first, then optional keys, in declaration order; string
-+// and number enums/consts; and typed strings, numbers, booleans, nulls, arrays
-+// and objects. Anything else keeps the generic gemma4-value. Parsing is
-+// unchanged: the generated rules accept a subset of the generic gemma4 dict.
-+static std::string gemma4_literal_gbnf(const json & value) {
++// The value syntax a schema's grammar is written in: JSON, or Gemma 4's tool-call
++// argument syntax (bare object keys and <|"|>-delimited raw strings; numbers,
++// booleans and null as in JSON).
++enum common_schema_value_syntax {
++    COMMON_SCHEMA_VALUE_SYNTAX_JSON,
++    COMMON_SCHEMA_VALUE_SYNTAX_GEMMA4,
++};
++
+ struct common_chat_schema {
+     enum node_kind {
+         KIND_ANY,
+--- a/common/json-schema-to-grammar.cpp
++++ b/common/json-schema-to-grammar.cpp
+@@ -257,6 +257,58 @@ static std::unordered_map<std::string, B
+     {"date-time-string", {"\"\\\"\" date-time \"\\\"\"", {"date-time"}}}
+ };
+ 
++// Gemma 4 argument syntax. A raw string ends at the first <|"|>, so its content is
++// any text that does not contain that delimiter (g4-string-0..4 track a partial
++// match). Length-bounded and pattern strings use characters other than '<'.
++// Primitives keep their own names so JSON and Gemma 4 rules can share a grammar.
++static std::unordered_map<std::string, BuiltinRule> GEMMA4_PRIMITIVE_RULES = {
++    {"g4-value", {"g4-object | g4-array | g4-string | number | boolean | null", {"g4-object", "g4-array", "g4-string", "number", "boolean", "null"}}},
++    {"g4-object", {R"("{" space ( g4-key ":" space g4-value ("," space g4-key ":" space g4-value)* )? space "}")", {"g4-key", "g4-value"}}},
++    {"g4-array", {R"("[" space ( g4-value ("," space g4-value)* )? space "]")", {"g4-value"}}},
++    {"g4-key", {"g4-key-char+", {"g4-key-char"}}},
++    {"g4-key-char", {"[^:}]", {}}},
++    {"g4-char", {"[^<]", {}}},
++    {"g4-string", {R"("<|\"|>" g4-string-0 "<|\"|>")", {"g4-string-0", "g4-string-1", "g4-string-2", "g4-string-3", "g4-string-4"}}},
++    {"g4-string-0", {R"(( [^<] g4-string-0 | "<" g4-string-1 )?)", {}}},
++    {"g4-string-1", {R"(( [^<|] g4-string-0 | "<" g4-string-1 | "|" g4-string-2 )?)", {}}},
++    {"g4-string-2", {R"(( [^<"] g4-string-0 | "<" g4-string-1 | "\"" g4-string-3 )?)", {}}},
++    {"g4-string-3", {R"(( [^<|] g4-string-0 | "<" g4-string-1 | "|" g4-string-4 )?)", {}}},
++    {"g4-string-4", {R"(( [^<>] g4-string-0 | "<" g4-string-1 )?)", {}}},
++    {"g4-uuid", {R"("<|\"|>" [0-9a-fA-F]{8} "-" [0-9a-fA-F]{4} "-" [0-9a-fA-F]{4} "-" [0-9a-fA-F]{4} "-" [0-9a-fA-F]{12} "<|\"|>")", {}}},
++    {"g4-date-string", {R"("<|\"|>" date "<|\"|>")", {"date"}}},
++    {"g4-time-string", {R"("<|\"|>" time "<|\"|>")", {"time"}}},
++    {"g4-date-time-string", {R"("<|\"|>" date-time "<|\"|>")", {"date-time"}}},
++};
++
++// The Gemma 4 primitive standing in for each JSON primitive.
++static const std::unordered_map<std::string, std::string> GEMMA4_PRIMITIVE_NAMES = {
++    {"value", "g4-value"}, {"object", "g4-object"}, {"array", "g4-array"}, {"string", "g4-string"},
++    {"char", "g4-char"}, {"uuid", "g4-uuid"}, {"date-string", "g4-date-string"},
++    {"time-string", "g4-time-string"}, {"date-time-string", "g4-date-time-string"},
++    {"key", "g4-key"}, {"key-char", "g4-key-char"},
++};
++
++// A constant in Gemma 4 argument syntax.
++static std::string gemma4_dump(const json & value) {
 +    if (value.is_string()) {
-+        return gbnf_format_literal("<|\"|>" + value.get<std::string>() + "<|\"|>");
++        return "<|\"|>" + value.get<std::string>() + "<|\"|>";
 +    }
-+    if (value.is_boolean() || value.is_number() || value.is_null()) {
-+        return gbnf_format_literal(value.dump());
++    std::vector<std::string> parts;
++    if (value.is_object()) {
++        for (const auto & item : value.items()) {
++            parts.push_back(item.key() + ":" + gemma4_dump(item.value()));
++        }
++        return "{" + string_join(parts, ",") + "}";
 +    }
-+    return "";
++    if (value.is_array()) {
++        for (const auto & item : value) {
++            parts.push_back(gemma4_dump(item));
++        }
++        return "[" + string_join(parts, ",") + "]";
++    }
++    return value.dump();
 +}
 +
-+static std::string gemma4_schema_gbnf(const json & schema, int depth) {
-+    static const std::string generic = "gemma4-value";
-+    if (!schema.is_object() || depth > 12) {
-+        return generic;
-+    }
-+    if (schema.contains("const")) {
-+        auto literal = gemma4_literal_gbnf(schema.at("const"));
-+        return literal.empty() ? generic : literal;
-+    }
-+    if (schema.contains("enum") && schema.at("enum").is_array() && !schema.at("enum").empty()) {
-+        std::string alternatives;
-+        for (const auto & value : schema.at("enum")) {
-+            auto literal = gemma4_literal_gbnf(value);
-+            if (literal.empty()) {
-+                return generic;
-+            }
-+            alternatives += (alternatives.empty() ? "" : " | ") + literal;
+ static bool is_reserved_name(const std::string & name) {
+     static const std::unordered_set<std::string> RESERVED_NAMES = [] {
+         std::unordered_set<std::string> s;
+@@ -267,6 +319,9 @@ static bool is_reserved_name(const std::
+         for (const auto & p : STRING_FORMAT_RULES) {
+             s.insert(p.first);
+         }
++        for (const auto & p : GEMMA4_PRIMITIVE_RULES) {
++            s.insert(p.first);
 +        }
-+        return "(" + alternatives + ")";
-+    }
-+    for (const char * key : {"anyOf", "oneOf"}) {
-+        if (schema.contains(key) && schema.at(key).is_array() && !schema.at(key).empty()) {
-+            std::string alternatives;
-+            for (const auto & branch : schema.at(key)) {
-+                alternatives += (alternatives.empty() ? "" : " | ") + gemma4_schema_gbnf(branch, depth + 1);
-+            }
-+            return "(" + alternatives + ")";
-+        }
-+    }
-+    json types = schema.contains("type") ? schema.at("type") : json();
-+    if (types.is_array()) {
-+        std::string alternatives;
-+        for (const auto & type : types) {
-+            json branch = schema;
-+            branch["type"] = type;
-+            alternatives += (alternatives.empty() ? "" : " | ") + gemma4_schema_gbnf(branch, depth + 1);
-+        }
-+        return alternatives.empty() ? generic : "(" + alternatives + ")";
-+    }
-+    std::string type = types.is_string() ? types.get<std::string>()
-+        : (schema.contains("properties") ? "object" : "");
-+    if (type == "string") {
-+        return "gemma4-string";
-+    }
-+    if (type == "integer") {
-+        return "(\"-\"? [0-9]+)";
-+    }
-+    if (type == "number") {
-+        return "gemma4-number";
-+    }
-+    if (type == "boolean") {
-+        return "gemma4-bool";
-+    }
-+    if (type == "null") {
-+        return "gemma4-null";
-+    }
-+    if (type == "array") {
-+        auto item = schema.contains("items") ? gemma4_schema_gbnf(schema.at("items"), depth + 1) : generic;
-+        return "(\"[\" space ((" + item + ") (\",\" space (" + item + "))* space)? \"]\")";
-+    }
-+    if (type == "object") {
-+        if (!schema.contains("properties") || !schema.at("properties").is_object()) {
-+            return "gemma4-dict";
-+        }
-+        auto additional = schema.contains("additionalProperties") ? schema.at("additionalProperties") : json(true);
-+        if (!(additional.is_boolean() && !additional.get<bool>())) {
-+            return "gemma4-dict";  // Open key sets keep the generic dict.
-+        }
-+        std::set<std::string> required;
-+        if (schema.contains("required") && schema.at("required").is_array()) {
-+            for (const auto & name : schema.at("required")) {
-+                if (name.is_string()) {
-+                    required.insert(name.get<std::string>());
+         return s;
+     }();
+     return RESERVED_NAMES.find(name) != RESERVED_NAMES.end();
+@@ -343,6 +398,7 @@ class common_chat_schema_converter {
+ private:
+     friend std::string build_grammar(const std::function<void(const common_grammar_builder &)> & cb, const common_grammar_options & options);
+     bool _dotall;
++    common_schema_value_syntax _syntax = COMMON_SCHEMA_VALUE_SYNTAX_JSON;
+     std::map<std::string, std::string> _rules;
+     std::unordered_set<std::string> _refs_being_resolved;
+     std::vector<std::string> _errors;
+@@ -395,7 +451,7 @@ private:
+             // revert rules
+             _rules = std::move(rules_snapshot);
+             _warnings.push_back("pattern " + pattern + " is not supported (" + err.what() + "), accepting any string");
+-            return _add_rule(name, _add_primitive("string", PRIMITIVE_RULES.at("string")));
++            return _add_rule(name, _builtin("string"));
+         } catch (const invalid_pattern & err) {
+             _rules = std::move(rules_snapshot);
+             _errors.push_back("Invalid pattern " + pattern + ": " + err.what());
+@@ -425,6 +481,10 @@ private:
+ 
+             auto get_dot = [&]() {
+                 std::string rule;
++                if (_syntax == COMMON_SCHEMA_VALUE_SYNTAX_GEMMA4) {
++                    // '<' could begin the raw string's closing delimiter.
++                    return _add_rule("g4-dot", _dotall ? "[^<]" : "[^<\\x0A\\x0D]");
 +                }
+                 if (_dotall) {
+                     rule = "[\\U00000000-\\U0010FFFF]";
+                 } else {
+@@ -627,7 +687,7 @@ private:
+             throw invalid_pattern("unbalanced parentheses");
+         }
+ 
+-        return _add_rule(name, "\"\\\"\" (" + rule + ") \"\\\"\"");
++        return _add_rule(name, _string_delimiter() + " (" + rule + ") " + _string_delimiter());
+     }
+ 
+     /*
+@@ -641,9 +701,12 @@ private:
+     std::string _not_strings(const std::vector<std::string> & strings) {
+         common_trie trie(strings);
+ 
+-        std::string char_rule = _add_primitive("char", PRIMITIVE_RULES.at("char"));
++        // JSON keys are quoted strings; Gemma 4 keys are bare, non-empty and end at ':' or '}'.
++        const bool gemma4 = _syntax == COMMON_SCHEMA_VALUE_SYNTAX_GEMMA4;
++        std::string char_rule = _builtin(gemma4 ? "key-char" : "char");
++        const std::string excluded = gemma4 ? ":}" : "\"";
+         std::ostringstream out;
+-        out << "[\"] ( ";
++        out << (gemma4 ? "( " : "[\"] ( ");
+         std::function<void(size_t)> visit = [&](size_t idx) {
+             const auto & node = trie.nodes[idx];
+             std::string rejects;
+@@ -666,12 +729,15 @@ private:
+                 }
+             }
+             if (!node.children.empty()) {
+-                out << " | [^\"" << rejects << "] " << char_rule << "*";
++                out << " | [^" << excluded << rejects << "] " << char_rule << "*";
+             }
+         };
+         visit(0);
+ 
+         out << " )";
++        if (gemma4) {
++            return out.str();
++        }
+         if (trie.nodes[0].pattern < 0) {
+             out << "?";
+         }
+@@ -706,14 +772,20 @@ private:
+         std::vector<std::string> optional_props;
+         std::unordered_map<std::string, std::string> prop_kv_rule_names;
+         std::vector<std::string> prop_names;
++        const bool gemma4 = _syntax == COMMON_SCHEMA_VALUE_SYNTAX_GEMMA4;
+         for (const auto & kv : properties) {
+             const auto &prop_name = kv.first;
+             const auto &prop_schema = kv.second;
+ 
++            if (gemma4 && (prop_name.empty() || prop_name.find_first_of(":}") != std::string::npos)) {
++                _warnings.push_back("Gemma 4 key " + json(prop_name).dump() + " is not expressible, accepting any object");
++                return _builtin("object");
++            }
+             std::string prop_rule_name = visit(*prop_schema, name + (name.empty() ? "" : "-") + prop_name);
+             prop_kv_rule_names[prop_name] = _add_rule(
+                 name + (name.empty() ? "" : "-") + prop_name + "-kv",
+-                format_literal(json(prop_name).dump()) + " space \":\" space " + prop_rule_name
++                gemma4 ? format_literal(prop_name + ":") + " space " + prop_rule_name
++                       : format_literal(json(prop_name).dump()) + " space \":\" space " + prop_rule_name
+             );
+             if (required.find(prop_name) != required.end()) {
+                 required_props.push_back(prop_name);
+@@ -726,10 +798,10 @@ private:
+             std::string sub_name = name + (name.empty() ? "" : "-") + "additional";
+             std::string value_rule =
+                 additional_properties->kind() != common_chat_schema::KIND_ANY ? visit(*additional_properties, sub_name + "-value")
+-                : _add_primitive("value", PRIMITIVE_RULES.at("value"));
++                : _builtin("value");
+ 
+             auto key_rule =
+-                prop_names.empty() ? _add_primitive("string", PRIMITIVE_RULES.at("string"))
++                prop_names.empty() ? _builtin(gemma4 ? "key" : "string")
+                 : _add_rule(sub_name + "-k", _not_strings(prop_names));
+             std::string kv_rule = _add_rule(sub_name + "-kv", key_rule + " \":\" space " + value_rule);
+             prop_kv_rule_names["*"] = kv_rule;
+@@ -793,40 +865,73 @@ private:
+         return rule;
+     }
+ 
++    static const BuiltinRule * _find_builtin(const std::string & name) {
++        for (const auto * table : {&PRIMITIVE_RULES, &STRING_FORMAT_RULES, &GEMMA4_PRIMITIVE_RULES}) {
++            auto it = table->find(name);
++            if (it != table->end()) {
++                return &it->second;
 +            }
 +        }
-+        std::vector<std::string> mandatory, optional;
-+        for (const auto & entry : schema.at("properties").items()) {
-+            const std::string name = entry.key();
-+            const json & property = entry.value();
-+            if (name.empty() || name.find_first_of(":}") != std::string::npos) {
-+                return "gemma4-dict";  // Not expressible as a gemma4 dict key.
-+            }
-+            auto member = gbnf_format_literal(name + ":") + " space (" + gemma4_schema_gbnf(property, depth + 1) + ")";
-+            (required.count(name) ? mandatory : optional).push_back(member);
-+        }
-+        if (mandatory.empty() && optional.empty()) {
-+            return "(\"{\" space \"}\")";
-+        }
-+        // Required members in order, then each optional member at most once in
-+        // order. A member after the first carries its separating comma.
-+        std::string body;
-+        for (size_t i = 0; i < mandatory.size(); i++) {
-+            body += (i == 0 ? "" : " \",\" space ") + mandatory[i];
-+        }
-+        if (mandatory.empty()) {
-+            // The first present optional member has no leading comma.
-+            std::string alternatives;
-+            for (size_t first = 0; first < optional.size(); first++) {
-+                std::string tail = optional[first];
-+                for (size_t next = first + 1; next < optional.size(); next++) {
-+                    tail += " (\",\" space " + optional[next] + ")?";
-+                }
-+                alternatives += std::string(alternatives.empty() ? "" : " | ") + "(" + tail + ")";
-+            }
-+            body = "(" + alternatives + ")?";
-+        } else {
-+            for (const auto & member : optional) {
-+                body += " (\",\" space " + member + ")?";
-+            }
-+        }
-+        return "(\"{\" space " + body + " space \"}\")";
++        return nullptr;
 +    }
-+    return generic;
-+}
 +
- common_chat_params common_chat_params_init_gemma4(const common_chat_template &    tmpl,
-                                                          const autoparser::generation_params & inputs) {
-     common_chat_params data;
-@@ -257,12 +390,19 @@
+     std::string _add_primitive(const std::string & name, const BuiltinRule & rule) {
+         auto n = _add_rule(name, rule.content);
+         for (const auto & dep : rule.deps) {
+-            BuiltinRule dep_rule;
+-            auto it = PRIMITIVE_RULES.find(dep);
+-            if (it == PRIMITIVE_RULES.end()) {
+-                it = STRING_FORMAT_RULES.find(dep);
+-                if (it == STRING_FORMAT_RULES.end()) {
+-                    _errors.push_back("Rule " + dep + " not known");
+-                    continue;
+-                }
++            const auto * dep_rule = _find_builtin(dep);
++            if (!dep_rule) {
++                _errors.push_back("Rule " + dep + " not known");
++                continue;
+             }
+             if (_rules.find(dep) == _rules.end()) {
+-                _add_primitive(dep, it->second);
++                _add_primitive(dep, *dep_rule);
+             }
+         }
+         return n;
+     }
+ 
++    // The builtin rule for a JSON primitive, in the current value syntax.
++    std::string _builtin_name(const std::string & name) const {
++        if (_syntax == COMMON_SCHEMA_VALUE_SYNTAX_GEMMA4) {
++            auto it = GEMMA4_PRIMITIVE_NAMES.find(name);
++            if (it != GEMMA4_PRIMITIVE_NAMES.end()) {
++                return it->second;
++            }
++        }
++        return name;
++    }
++
++    std::string _builtin(const std::string & name) {
++        auto builtin = _builtin_name(name);
++        return _add_primitive(builtin, *_find_builtin(builtin));
++    }
++
++    // The literal that opens and closes a string value.
++    std::string _string_delimiter() const {
++        return _syntax == COMMON_SCHEMA_VALUE_SYNTAX_GEMMA4 ? format_literal("<|\"|>") : "\"\\\"\"";
++    }
++
+ public:
+     explicit common_chat_schema_converter(bool dotall) : _dotall(dotall) {
+         _rules["space"] = SPACE_RULE;
+     }
+ 
+-    std::string add_schema(const std::string & name, const common_chat_schema & schema) {
+-        return visit(schema, name);
++    std::string add_schema(const std::string & name, const common_chat_schema & schema,
++                           common_schema_value_syntax syntax = COMMON_SCHEMA_VALUE_SYNTAX_JSON) {
++        auto previous = _syntax;
++        _syntax = syntax;
++        auto rule = visit(schema, name);
++        _syntax = previous;
++        return rule;
+     }
+ 
+-    static std::string _generate_constant_rule(const json & value) {
+-        return format_literal(value.dump());
++    std::string _generate_constant_rule(const json & value) const {
++        return format_literal(_syntax == COMMON_SCHEMA_VALUE_SYNTAX_GEMMA4 ? gemma4_dump(value) : value.dump());
+     }
+ 
+     std::string _visit_primitive(const std::string & rule_name, const std::string & type) {
+-        return _add_primitive(rule_name == "root" ? "root" : type, PRIMITIVE_RULES.at(type));
++        auto builtin = _builtin_name(type);
++        return _add_primitive(rule_name == "root" ? "root" : builtin, *_find_builtin(builtin));
+     }
+ 
+     std::string _visit_all_of(const common_chat_schema_all_of & schema, const std::string & name, const std::string & rule_name) {
+@@ -897,7 +1002,7 @@ public:
+             case common_chat_schema::KIND_OBJECT: {
+                 const auto & obj = as<common_chat_schema_object>(schema);
+                 if (obj.properties.empty() && obj.additional_properties && obj.additional_properties->kind() == common_chat_schema::KIND_ANY) {
+-                    return _add_rule(rule_name, _add_primitive("object", PRIMITIVE_RULES.at("object")));
++                    return _add_rule(rule_name, _builtin("object"));
+                 }
+                 std::vector<std::pair<std::string, const common_chat_schema *>> properties;
+                 std::unordered_set<std::string> required;
+@@ -940,12 +1045,12 @@ public:
+                 }
+                 if (str.format != common_chat_schema::FORMAT_NONE) {
+                     std::string prim_name = std::string(str.format == common_chat_schema::FORMAT_DATE ? "date" : str.format == common_chat_schema::FORMAT_TIME ? "time" : "date-time") + "-string";
+-                    return _add_rule(rule_name, _add_primitive(prim_name, STRING_FORMAT_RULES.at(prim_name)));
++                    return _add_rule(rule_name, _builtin(prim_name));
+                 }
+                 if (str.min_length > 0 || str.max_length >= 0) {
+-                    std::string char_rule = _add_primitive("char", PRIMITIVE_RULES.at("char"));
++                    std::string char_rule = _builtin("char");
+                     int max_len = str.max_length < 0 ? std::numeric_limits<int>::max() : str.max_length;
+-                    return _add_rule(rule_name, "\"\\\"\" " + build_repetition(char_rule, str.min_length, max_len) + " \"\\\"\"");
++                    return _add_rule(rule_name, _string_delimiter() + " " + build_repetition(char_rule, str.min_length, max_len) + " " + _string_delimiter());
+                 }
+                 return _visit_primitive(rule_name, "string");
+             }
+@@ -967,7 +1072,7 @@ public:
+             case common_chat_schema::KIND_NULL:
+                 return _visit_primitive(rule_name, "null");
+             case common_chat_schema::KIND_ANY:
+-                return _add_rule(rule_name, _add_primitive("value", PRIMITIVE_RULES.at("value")));
++                return _add_rule(rule_name, _builtin("value"));
+         }
+         return "";
+     }
+@@ -1018,8 +1123,8 @@ std::string build_grammar(const std::fun
+         /* .add_rule = */ [&](const std::string & name, const std::string & rule) {
+             return converter._add_rule(name, rule);
+         },
+-        /* .add_schema = */ [&](const std::string & name, const common_chat_schema & schema) {
+-            return converter.add_schema(name == "root" ? "" : name, schema);
++        /* .add_schema = */ [&](const std::string & name, const common_chat_schema & schema, common_schema_value_syntax syntax) {
++            return converter.add_schema(name == "root" ? "" : name, schema, syntax);
+         },
+     };
+     cb(builder);
+--- a/common/json-schema-to-grammar.h
++++ b/common/json-schema-to-grammar.h
+@@ -11,7 +11,7 @@ std::string json_schema_to_grammar(const
+ 
+ struct common_grammar_builder {
+     std::function<std::string(const std::string &, const std::string &)>    add_rule;
+-    std::function<std::string(const std::string &, const common_chat_schema &)> add_schema;
++    std::function<std::string(const std::string &, const common_chat_schema &, common_schema_value_syntax)> add_schema;
+ };
+ 
+ struct common_grammar_options {
+--- a/common/parsers/gemma4.cpp
++++ b/common/parsers/gemma4.cpp
+@@ -257,12 +257,14 @@ common_chat_params common_chat_params_in
              foreach_function(inputs.tools, [&](size_t tool_index, const json & tool) {
                  const auto & function = tool.at("function");
                  std::string  name     = function.at("name");
 -                // TODO @aldehir : need to extend json-schema-to-grammar to produce more than JSON rules
 -                // const auto & params   = function.at("parameters");
-+                // Parse with the generic gemma4 dict; constrain generation with
-+                // the arguments' own schema (see gemma4_schema_gbnf).
-+                auto args = p.ref("gemma4-dict");
-+                if (function.contains("parameters")) {
-+                    auto schema_gbnf = gemma4_schema_gbnf(function.at("parameters"), 0);
-+                    if (schema_gbnf != "gemma4-value" && schema_gbnf != "gemma4-dict") {
-+                        args = p.gbnf(args, schema_gbnf);
-+                    }
-+                }
++                const auto   params   = function.contains("parameters") ? function.at("parameters") : json::object();
  
++                // Arguments parse as a gemma4 dict; generation follows the parameter
++                // schema written in Gemma 4 syntax.
                  tool_choice |= p.rule("tool-" + std::to_string(tool_index), p.tool(p.sequence({
                      p.tool_open(p.tool_name(p.literal(name)) + p.peek(p.literal("{"))),
 -                    p.tool_args(p.ref("gemma4-dict")),
-+                    p.tool_args(args),
++                    p.tool_args(p.schema(p.ref("gemma4-dict"), "tool-" + name + "-args", params, false,
++                                         COMMON_SCHEMA_VALUE_SYNTAX_GEMMA4)),
                  })));
              });
  
+--- a/common/peg-parser.cpp
++++ b/common/peg-parser.cpp
+@@ -1145,13 +1145,15 @@ common_peg_parser common_peg_parser_buil
+     return wrap(arena_.add_parser(common_peg_chars_parser{classes, ranges, negated, min, max}));
+ }
+ 
+-common_peg_parser common_peg_parser_builder::schema(const common_peg_parser & p, const std::string & name, common_chat_schema_document_ptr doc, const common_chat_schema & node, bool raw) {
+-    return wrap(arena_.add_parser(common_peg_schema_parser{p.id(), name, std::move(doc), &node, raw}));
++common_peg_parser common_peg_parser_builder::schema(const common_peg_parser & p, const std::string & name, common_chat_schema_document_ptr doc, const common_chat_schema & node, bool raw,
++                                                    common_schema_value_syntax syntax) {
++    return wrap(arena_.add_parser(common_peg_schema_parser{p.id(), name, std::move(doc), &node, raw, syntax}));
+ }
+ 
+-common_peg_parser common_peg_parser_builder::schema(const common_peg_parser & p, const std::string & name, const common_json & schema, bool raw) {
++common_peg_parser common_peg_parser_builder::schema(const common_peg_parser & p, const std::string & name, const common_json & schema, bool raw,
++                                                    common_schema_value_syntax syntax) {
+     auto doc = std::make_shared<const common_chat_schema_document>(common_chat_schema_from_json(schema));
+-    return this->schema(p, name, doc, *doc->root, raw);
++    return this->schema(p, name, doc, *doc->root, raw, syntax);
+ }
+ 
+ common_peg_parser common_peg_parser_builder::rule(const std::string & name, const common_peg_parser & p, bool trigger) {
+@@ -1741,7 +1743,7 @@ void common_peg_arena::build_grammar(con
+                 if (schema_delegates(p)) {
+                     return to_gbnf(p.child);
+                 }
+-                return builder.add_schema(p.name, *p.node);
++                return builder.add_schema(p.name, *p.node, p.syntax);
+             } else if constexpr (std::is_same_v<T, common_peg_rule_parser>) {
+                 return p.name;
+             } else if constexpr (std::is_same_v<T, common_peg_ref_parser>) {
+@@ -1869,7 +1871,8 @@ static common_json serialize_parser_vari
+                 {"type", "schema"},
+                 {"child", p.child},
+                 {"name", p.name},
+-                {"raw", p.raw}
++                {"raw", p.raw},
++                {"syntax", p.syntax == COMMON_SCHEMA_VALUE_SYNTAX_GEMMA4 ? "gemma4" : "json"}
+             };
+         } else if constexpr (std::is_same_v<T, common_peg_rule_parser>) {
+             return json{
+@@ -2015,6 +2018,7 @@ static common_peg_parser_variant deseria
+         parser.child = j["child"].get<common_peg_parser_id>();
+         parser.name = j["name"];
+         parser.raw = j["raw"].get<bool>();
++        parser.syntax = j.value("syntax", "json") == "gemma4" ? COMMON_SCHEMA_VALUE_SYNTAX_GEMMA4 : COMMON_SCHEMA_VALUE_SYNTAX_JSON;
+         return parser;
+     }
+     if (type == "rule") {
+--- a/common/peg-parser.h
++++ b/common/peg-parser.h
+@@ -274,6 +274,9 @@ struct common_peg_schema_parser {
+ 
+     // Indicates if the GBNF should accept a raw string that matches the schema.
+     bool raw;
++
++    // The value syntax the schema's GBNF is written in.
++    common_schema_value_syntax syntax = COMMON_SCHEMA_VALUE_SYNTAX_JSON;
+ };
+ 
+ struct common_peg_rule_parser {
+@@ -515,10 +518,12 @@ class common_peg_parser_builder {
+     common_peg_parser marker();
+ 
+     // Wraps a parser with the schema its GBNF is generated from, a node of the document that owns it
+-    common_peg_parser schema(const common_peg_parser & p, const std::string & name, common_chat_schema_document_ptr doc, const common_chat_schema & node, bool raw = false);
++    common_peg_parser schema(const common_peg_parser & p, const std::string & name, common_chat_schema_document_ptr doc, const common_chat_schema & node, bool raw = false,
++                             common_schema_value_syntax syntax = COMMON_SCHEMA_VALUE_SYNTAX_JSON);
+ 
+     // Parses the JSON schema into a document of its own
+-    common_peg_parser schema(const common_peg_parser & p, const std::string & name, const common_json & schema, bool raw = false);
++    common_peg_parser schema(const common_peg_parser & p, const std::string & name, const common_json & schema, bool raw = false,
++                             common_schema_value_syntax syntax = COMMON_SCHEMA_VALUE_SYNTAX_JSON);
+ 
+     // Creates a named rule, stores it in the grammar, and returns a ref.
+     // If trigger=true, marks this rule as an entry point for lazy grammar generation.
