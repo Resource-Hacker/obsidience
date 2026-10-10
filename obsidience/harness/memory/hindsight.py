@@ -460,7 +460,8 @@ class Hindsight:
             items = page.get("operations", [])
             for item in items:
                 row = {"id": item["id"], "type": item.get("task_type", item.get("type", "")),
-                       "bank": bank, "failed_at": item.get("completed_at") or item.get("updated_at")}
+                       "bank": bank, "failed_at": item.get("completed_at") or item.get("updated_at"),
+                       "mental_model_id": item.get("mental_model_id")}
                 if reset := _quota_reset(item):
                     row["retry_after"] = reset
                 rows.append(row)
@@ -826,10 +827,12 @@ class Hindsight:
                 "updated_at": self.updated_at}
 
     def _refresh_superseded(self, row):
-        """A failed mental-model refresh after which every model in its bank refreshed again."""
+        """A failed mental-model refresh after which its model (else every model in the bank) refreshed again."""
         if row.get("type") != "refresh_mental_model" or not row.get("failed_at"):
             return False
         models = self.mental_models.get(row["bank"]) or {}
+        if row.get("mental_model_id") in models:
+            models = {row["mental_model_id"]: models[row["mental_model_id"]]}
         try:
             failed = datetime.fromisoformat(str(row["failed_at"]).replace("Z", "+00:00"))
             return bool(models) and all(
