@@ -799,7 +799,8 @@ class Hindsight:
         # Degraded means action is still due: a failure the repair path has not
         # retried, or one from the last day. Older, already-retried failures stay
         # listed as evidence without masking new faults behind a permanent state.
-        actionable = [r for r in failures if r["id"] not in attempted or _recent(r.get("failed_at"))]
+        actionable = [r for r in failures if (r["id"] not in attempted or _recent(r.get("failed_at")))
+                      and not self._refresh_superseded(r)]
         consolidations = [{"bank": bank, "count": len(keys),
                            "failure_key": hashlib.sha256(json.dumps(keys).encode()).hexdigest()}
                           for bank, keys in self.failed_consolidations.items()
@@ -823,6 +824,20 @@ class Hindsight:
                 "records": sum(len(r) for r in self.records.values()), "banks": len(self.records),
                 "mental_models": self.mental_models, "mental_model_error": self.model_error,
                 "updated_at": self.updated_at}
+
+    def _refresh_superseded(self, row):
+        """A failed mental-model refresh after which every model in its bank refreshed again."""
+        if row.get("type") != "refresh_mental_model" or not row.get("failed_at"):
+            return False
+        models = self.mental_models.get(row["bank"]) or {}
+        try:
+            failed = datetime.fromisoformat(str(row["failed_at"]).replace("Z", "+00:00"))
+            return bool(models) and all(
+                state.get("last_refreshed_at")
+                and datetime.fromisoformat(str(state["last_refreshed_at"]).replace("Z", "+00:00")) > failed
+                for state in models.values())
+        except ValueError:
+            return False
 
     def health_findings(self):
         state = self.status()
