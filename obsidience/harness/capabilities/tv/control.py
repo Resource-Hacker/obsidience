@@ -481,6 +481,50 @@ def _window(row, cancel):
     return _agent_window(raw) if raw is not None else _focus(row, cancel)
 
 
+PLUTO_INACTIVITY = 'return to programming'
+
+
+def _pluto_inactivity(state):
+    """Mark Pluto's inactivity screen, which a running audio player alone reads as the channel.
+
+    Measured 2026-10-09: after hours without input Pluto stops the channel and loops
+    advertisements behind "Press any button to return to programming"; its player keeps
+    running. One agent screen read (~30 ms) tells them apart. Never called from the
+    agent's push thread, whose own request would wait on itself.
+    """
+    if (state.get('foreground', {}).get('app') != 'pluto'
+            or state.get('playback') not in ('playing', 'inactivity_ad')):
+        return state
+    tree = _ask('tree', max=80)
+    if tree is None:
+        return state
+    labels = ' '.join((n.get('text') or n.get('desc') or '') for n in tree.get('nodes', []))
+    if PLUTO_INACTIVITY in labels.lower():
+        state['playback'] = 'inactivity_ad'
+        state['note'] = ('Pluto inactivity screen: advertisements loop until a remote key returns to the '
+                         'channel; resume does that.')
+    elif state['playback'] == 'inactivity_ad':
+        state['playback'] = 'playing'  # Returned to the channel, e.g. with the physical remote.
+        state.pop('note', None)
+    return state
+
+
+_PLUTO_CHECK = {'at': 0.0}
+
+
+def _pluto_check():
+    """Background re-read for the tv line: the inactivity screen changes no pushed state."""
+    if not _LOCK.acquire(blocking=False):
+        return
+    try:
+        if (state := _LAST['state']) is not None:
+            _LAST['state'] = _pluto_inactivity(dict(state))
+    except Exception as error:  # The line keeps the last state; observe reads again.  # noqa: BLE001
+        _agent.log.info('Pluto inactivity check skipped: %s', error)
+    finally:
+        _LOCK.release()
+
+
 def _from_agent(row, raw, fetch=True):
     """The backend state from the TV agent, in _state's shape.
 
@@ -579,7 +623,7 @@ def _state(row, cancel, power):
     the foreground app's uid.
     """
     if (reply := _ask('state')) is not None:
-        _LAST['state'] = _from_agent(row, reply)
+        _LAST['state'] = _pluto_inactivity(_from_agent(row, reply))
         return _LAST['state']
     raw = _shell(row, cancel, _guard(row) + (
         "{ f=$(dumpsys window | grep -m1 -E '^ *mCurrentFocus='); echo \"$f\"; echo @@; dumpsys audio; "
@@ -695,6 +739,11 @@ def prompt_line(now=None):
     state = _LAST['state']
     if state is None:
         return ''
+    if (live and state.get('foreground', {}).get('app') == 'pluto'
+            and state.get('playback') in ('playing', 'inactivity_ad')
+            and time.monotonic() - _PLUTO_CHECK['at'] >= 20):
+        _PLUTO_CHECK['at'] = time.monotonic()
+        threading.Thread(target=_pluto_check, name='tv-pluto-check', daemon=True).start()
     now = time.time() if now is None else now
     age = int(now // 60 - state['captured_at'] // 60)
     parts = [state['power']['screen']]
@@ -710,7 +759,8 @@ def prompt_line(now=None):
                 if airing['from'] <= now < airing['until']:
                     app += ' (now: ' + _quote(' - '.join(filter(None, (airing['title'], airing['episode'])))) + ')'
         parts.append(app)
-        parts.append(state['playback'] or 'no media player')
+        parts.append('Pluto inactivity ad screen (resume returns to the channel)'
+                     if state['playback'] == 'inactivity_ad' else state['playback'] or 'no media player')
         session = next((s for s in state['media_sessions']
                         if s['package'] == foreground['package'] and s.get('title')), None)
         if session:
@@ -760,6 +810,19 @@ def _reach(row, cancel, context, boot, power, args, audio=None):
     if level is not None:
         result['level'] = level
     opened = (tv or {}).get('last_opened') or {}
+    if action == 'resume' and (tv or {}).get('playback') == 'inactivity_ad':
+        # The screen asks for any button; one Select returns to the channel. Confirm by
+        # reading the screen again rather than trusting the still-running player.
+        context['_tv_effect_uncertain'] = True
+        _press(row, cancel, boot, ['select'])
+        deadline = time.monotonic() + 6
+        while (tv := _state(row, cancel, power))['playback'] == 'inactivity_ad' and time.monotonic() < deadline:
+            _wait(cancel, .5)
+        context['_tv_effect_uncertain'] = False
+        back = tv['playback'] != 'inactivity_ad'
+        return {**result, 'effect_applied': True, 'attempts': 1, 'tv': tv,
+                **({} if back else {'delivery': 'acknowledged',
+                                    'note': 'The inactivity screen remained; report the resume as unverified.'})}
     if (action == 'pause' and not _reached(action, level, audio) and opened.get('still_playing')
             and PLUTO_CHANNEL.fullmatch(opened['link'])):
         # A live channel is a broadcast: its player cannot pause, so nothing is sent.
