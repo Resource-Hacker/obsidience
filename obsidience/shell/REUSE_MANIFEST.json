@@ -106,8 +106,8 @@
         "adapter/quickshell/patches/0003-notify-session-unlock.patch"
       ],
       "runtime": {
-        "path": "/home/wissenschafter/.local/opt/obsidience-quickshell/quickshell-0.3.2-webengine-lock-5cd6026d/quickshell",
-        "sha256": "5cd6026d4ba8dde8e5b54351c7c9c97403a535e1be072eadbf582709a73e5ff4"
+        "path": "/home/wissenschafter/.local/opt/obsidience-quickshell/quickshell-0.3.2-webengine-lock-3875e308/quickshell",
+        "sha256": "3875e308a99703afcbb373dd449629bf5cb409bd6fcad61990e06e81da56f387"
       },
       "adaptation": "Used as the Qt Quick and Wayland shell runtime. Its WlSessionLock and WlSessionLockSurface types own the secure ext-session-lock surfaces, while PamContext delegates authentication to the system PAM stack. One two-line compatibility patch supplies Qt WebEngine's documented host preconditions: a valid argv[0] for Chromium and shared graphics contexts selected before the first application object. v0.3.2 contains the upstream afb2c27 session-lock reentrancy fix that was previously backported. A two-line follow-up preserves the pre-unlock state so the existing locked property emits its false transition after release. The recipe asserts the upstream commit, the touched source files and both patches by hash, and records the produced binary hash in the runtime directory name and BUILDINFO; a Qt update is a plain rebuild. The distro quickshell package remains the IPC client (/usr/bin/qs); its IPC protocol is unchanged between 0.3.1 and 0.3.2. Obsidience owns the QML presentation and lock policy; no upstream visual design was copied."
     },
