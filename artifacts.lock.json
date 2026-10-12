@@ -422,6 +422,25 @@
       "path": "/var/lib/ai/opt/gpu-screen-recorder-6.1.2-static",
       "binary_sha256": "6418d2c2f57aaa4bf475b2fe5caf04e5dd5cab966bd57f8107712b32b21f3ee3",
       "integration": "Selected 2026-10-12 for obsidience-shell-screen-replay@<output>.service (rolling replay buffers read by computer.replay); run as a separate program, not linked into Obsidience. The upstream static build links the FFmpeg that negotiates the NVENC API at runtime: the system FFmpeg 9.0.1 requires NVENC API 13.1 (driver 610+) and the pinned 580 driver has 13.0. bin/gsr-kms-server is a symlink to the packaged /usr/bin/gsr-kms-server 6.1.2 (cap_sys_admin=ep; capabilities apply through the symlink). Measured on the Samsung: HEVC 30 fps, one NVENC session on the RTX 4080 at ~14% encoder load, ~3% CPU, HDR tone-mapped to SDR bt709."
+    },
+    "sunshine": {
+      "repository": "https://github.com/LizardByte/Sunshine",
+      "version": "2026.1008.155609 (CachyOS package sunshine 2026.1008.155609-1)",
+      "license": "GPL-3.0-only",
+      "integration": "Selected 2026-10-12 as the host of the PC-hosted TV: obsidience-tv-sunshine.service runs the unmodified distribution package as a separate program against obsidience/tv/host/sunshine.conf. It connects only to the TV session's headless compositor (wlr capture, VAAPI HEVC on the AMD iGPU) and the TV's private PipeWire server, so it cannot capture the desktop or change desktop audio; keyboard, mouse and controller input are disabled. Paired clients, web credentials and state stay in ~/.config/sunshine."
+    },
+    "sway": {
+      "repository": "https://github.com/swaywm/sway",
+      "version": "1.12 (CachyOS package sway 1:1.12-4.1)",
+      "license": "MIT",
+      "integration": "Selected 2026-10-12 as the TV session compositor only: obsidience-tv-session.service runs the unmodified distribution package headless (WLR_BACKENDS=headless, one 1920x1080@60 output, AMD iGPU renderer) with obsidience/tv/host/sway.conf. It holds only TV content and never replaces or joins the Hyprland desktop session."
+    },
+    "moonlight_android": {
+      "repository": "https://github.com/moonlight-stream/moonlight-android",
+      "version": "12.2 (app-nonRoot-release.apk)",
+      "license": "GPL-3.0-only",
+      "apk_sha256": "a871f6190365386ef3ac5722a016d4da015ee1555631ec257f6e5dc3f4a45fe0",
+      "integration": "Unmodified upstream release APK sideloaded on the Fire TV (package com.limelight) as the display client of the PC-hosted TV; paired with the Sunshine host. Client settings chosen for television, not games: 1080p, 60 FPS, about 29 Mbps, frame pacing 'Prefer smoothest video', connection warnings off. Local copy: ~/backups/obsidience-tv-moonlight-20261012/apk/."
     }
   }
 }

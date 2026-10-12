@@ -1,0 +1,20 @@
+[Unit]
+Description=Obsidience TV stream (Sunshine, captures only the TV session)
+Requires=obsidience-tv-session.service obsidience-tv-audio-pulse.service
+After=obsidience-tv-session.service obsidience-tv-audio-pulse.service obsidience-tv-player.service
+PartOf=obsidience-tv-session.service
+
+[Service]
+Type=exec
+UnsetEnvironment=DISPLAY HYPRLAND_INSTANCE_SIGNATURE
+# The TV's private audio server: Sunshine's default-sink switching stays in there.
+Environment=PULSE_SERVER=unix:%t/obsidience-tv/pulse/native
+Environment=PIPEWIRE_RUNTIME_DIR=%t/obsidience-tv
+ExecStartPre=/bin/sh -c 'for i in $(seq 100); do [ -s %t/obsidience-tv/wayland ] && exit 0; sleep 0.1; done; exit 1'
+ExecStart=/bin/sh -c 'WAYLAND_DISPLAY=$(cat %t/obsidience-tv/wayland) exec /usr/bin/sunshine /home/wissenschafter/Projects/obsidience/obsidience/tv/host/sunshine.conf'
+Restart=on-failure
+RestartSec=3
+UMask=0077
+
+[Install]
+WantedBy=default.target

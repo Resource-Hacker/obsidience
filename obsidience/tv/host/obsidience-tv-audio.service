@@ -1,0 +1,19 @@
+[Unit]
+Description=Obsidience TV audio server (private PipeWire instance)
+# Sunshine changes the default audio sink of whatever server it talks to when a
+# stream starts. The TV session therefore has its own audio server: nothing it
+# does can reach the desktop's audio devices, defaults or streams.
+
+[Service]
+Type=exec
+Environment=PIPEWIRE_RUNTIME_DIR=%t/obsidience-tv
+# Its own configuration, never the desktop's ~/.config/pipewire drop-ins.
+Environment=XDG_CONFIG_HOME=/home/wissenschafter/Projects/obsidience/obsidience/tv/host/audio
+ExecStartPre=/usr/bin/install -d -m 0700 %t/obsidience-tv
+ExecStart=/usr/bin/pipewire
+Restart=on-failure
+RestartSec=2
+UMask=0077
+
+[Install]
+WantedBy=default.target

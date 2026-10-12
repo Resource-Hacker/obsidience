@@ -1,0 +1,19 @@
+[Unit]
+Description=Obsidience TV audio policy (WirePlumber, policy only, private state)
+Requires=obsidience-tv-audio.service
+After=obsidience-tv-audio.service
+PartOf=obsidience-tv-audio.service
+
+[Service]
+Type=exec
+Environment=PIPEWIRE_RUNTIME_DIR=%t/obsidience-tv
+Environment=XDG_CONFIG_HOME=/home/wissenschafter/Projects/obsidience/obsidience/tv/host/audio
+# No hardware monitors, and state kept away from the desktop's WirePlumber.
+Environment=XDG_STATE_HOME=%t/obsidience-tv/state
+ExecStart=/usr/bin/wireplumber -p policy
+Restart=on-failure
+RestartSec=2
+UMask=0077
+
+[Install]
+WantedBy=default.target

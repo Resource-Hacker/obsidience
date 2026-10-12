@@ -1,0 +1,22 @@
+[Unit]
+Description=Obsidience TV session (headless compositor holding only TV content)
+# The Fire TV shows this session through Sunshine and Moonlight. It is separate from
+# the desktop compositor: nothing here can see or focus desktop windows.
+
+[Service]
+Type=exec
+Environment=WLR_BACKENDS=headless
+Environment=WLR_LIBINPUT_NO_DEVICES=1
+Environment=WLR_RENDER_DRM_DEVICE=/dev/dri/by-path/pci-0000:7a:00.0-render
+Environment=XDG_CURRENT_DESKTOP=sway
+UnsetEnvironment=WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE
+ExecStartPre=/usr/bin/install -d -m 0700 %t/obsidience-tv
+ExecStartPre=/usr/bin/rm -f %t/obsidience-tv/wayland
+ExecStart=/usr/bin/sway -c /home/wissenschafter/Projects/obsidience/obsidience/tv/host/sway.conf
+ExecStopPost=/usr/bin/rm -f %t/obsidience-tv/wayland
+Restart=on-failure
+RestartSec=3
+UMask=0077
+
+[Install]
+WantedBy=default.target

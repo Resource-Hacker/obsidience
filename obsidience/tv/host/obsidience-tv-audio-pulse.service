@@ -1,0 +1,18 @@
+[Unit]
+Description=Obsidience TV audio bridge (PulseAudio protocol for Sunshine)
+Requires=obsidience-tv-audio.service
+After=obsidience-tv-audio.service obsidience-tv-audio-policy.service
+PartOf=obsidience-tv-audio.service
+
+[Service]
+Type=exec
+Environment=PIPEWIRE_RUNTIME_DIR=%t/obsidience-tv
+Environment=XDG_CONFIG_HOME=/home/wissenschafter/Projects/obsidience/obsidience/tv/host/audio
+Environment=PULSE_RUNTIME_PATH=%t/obsidience-tv/pulse
+ExecStart=/usr/bin/pipewire-pulse
+Restart=on-failure
+RestartSec=2
+UMask=0077
+
+[Install]
+WantedBy=default.target
