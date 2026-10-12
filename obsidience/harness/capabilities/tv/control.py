@@ -1546,6 +1546,8 @@ def _execute(args, context):
                 state = _power(row, cancel)
                 if state == desired:
                     context['_tv_effect_uncertain'] = False
+                    # The display state is the TV's own readback, like a started player.
+                    context.pop('_tv_navigation_applied', None)
                     _remember_power(state)
                     return {'status': 'completed', 'delivery': 'verified', 'action': action,
                             'power': state, 'effect_applied': True, 'must_not_replay': True}
