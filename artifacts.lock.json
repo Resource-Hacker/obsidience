@@ -254,7 +254,7 @@
       "repository": "https://github.com/DeusData/codebase-memory-mcp",
       "version": "0.10.8",
       "license": "MIT",
-      "integration": "Optional read-only Code pane consumes the existing local MCP provider native /api/layout graph and positions. Public Codex and Claude Code tool receipts supply exact activity identities through a bounded journal adapter. The derived index stays outside Vault and Source; no graph store, MCP owner, model, ADR or installer hook is added. Obsidience uses its existing Three.js renderer, not a copied upstream UI.",
+      "integration": "Optional read-only Code pane consumes the local MCP provider native /api/layout graph and positions; obsidience-code-graph.service keeps that unmodified provider's permanent daemon and viewer running through its own `daemon start`. Public Codex and Claude Code tool receipts supply exact activity identities through a bounded journal adapter. The derived index stays outside Vault and Source; no graph store, MCP owner, model, ADR or installer hook is added. Obsidience uses its existing Three.js renderer, not a copied upstream UI.",
       "license_source": "https://github.com/DeusData/codebase-memory-mcp/blob/main/LICENSE"
     },
     "nodeterm": {

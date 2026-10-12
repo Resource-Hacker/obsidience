@@ -1,0 +1,30 @@
+[Unit]
+Description=Obsidience Code graph provider (codebase-memory-mcp daemon and graph viewer)
+ConditionPathExists=/home/wissenschafter/.local/bin/codebase-memory-mcp
+After=basic.target
+# A daemon spawned by an agent's MCP session stops with its last session and
+# cannot be promoted: `daemon start` then only reports it and this unit ends
+# inactive. Restored agent panes must find the permanent daemon already there.
+Before=tmux.service
+
+[Service]
+Type=forking
+WorkingDirectory=/home/wissenschafter/Projects/obsidience
+# The limits of the agents' obsidience_code MCP sessions, which join this daemon.
+Environment=CBM_ALLOWED_ROOT=/home/wissenschafter/Projects/obsidience
+Environment=CBM_WORKERS=4
+Environment=CBM_MEM_BUDGET_MB=2048
+Environment=CBM_LOG_LEVEL=warn
+# Upstream's permanent daemon: it serves the viewer with no MCP client attached
+# and exits cleanly on SIGTERM. A fresh start also re-enables a disabled viewer.
+ExecStart=/home/wissenschafter/.local/bin/codebase-memory-mcp daemon start --port=9749
+# Started means serving: the Harness ordered After= this unit never races the viewer.
+ExecStartPost=/usr/bin/curl -fsS -o /dev/null --retry 10 --retry-delay 1 --retry-all-errors --max-time 2 http://127.0.0.1:9749/
+Restart=on-failure
+RestartSec=3
+TimeoutStartSec=20
+TimeoutStopSec=30
+UMask=0077
+
+[Install]
+WantedBy=default.target

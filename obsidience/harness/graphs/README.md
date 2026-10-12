@@ -48,12 +48,23 @@ stage; closing a viewer does not close or reconstruct the stage graph.
   dictate the display. Native containment groups branches, while calls/imports
   remain cross-links. Layout-only path/project fallbacks never create provider
   relationships. Its cache remains outside Vault and Source.
-  Run the installed MCP provider with its local UI enabled; do not launch a
+  `obsidience-code-graph.service` (`obsidience/scripts/`) owns the provider: its
+  `codebase-memory-mcp daemon start` keeps upstream's permanent daemon and graph
+  viewer running with no agent session, and the Harness unit orders after it.
+  Agent MCP sessions join that daemon and exit if it stops, so never restart
+  the unit under them. A daemon spawned by a session instead stops with its
+  last session and cannot be promoted, so the unit starts before
+  `tmux.service`; started while one exists it ends inactive and owns the
+  provider from its next start with no session attached (login or a Harness
+  start). Agent sessions keep `--tool-profile analysis`: a full-profile
+  `--ui=false` session persists the viewer off for everyone. Do not launch a
   second competing MCP owner. The default endpoint is `http://127.0.0.1:9749`.
   Optional local `[graphs]` keys `codebase_url` and `codebase_project` select an
   existing provider and indexed project. The default project identity is the
   repository's absolute path with `/` replaced by `-`, without the leading `-`.
-  The Code view reports unavailable when that optional provider is absent.
+  The Code view reports unavailable when that optional provider is absent and
+  loads again on the next Code operation or activity-socket connection; it
+  never polls.
   Its complete HTTP read and JSON response run in FastAPI's existing worker
   pool: the native provider has a one-second response-send deadline, so sharing
   the conversational event loop could truncate a multi-megabyte graph. One

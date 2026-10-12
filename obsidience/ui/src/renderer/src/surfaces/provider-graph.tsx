@@ -145,6 +145,10 @@ function ProviderGraphStage({fixedBank, availableBanks, memoryPresentation}: {
   const pickRef = useRef<(n: ProviderNode | null) => void>(() => {});
   followRef.current = follow;
   scope.current = data?.graph_id || (code ? "" : "memory:" + bank);
+  // A Code view whose load failed has no graph identity to match operations
+  // against. It loads again on the next sign that its provider path is alive.
+  const stranded = useRef(false);
+  stranded.current = code && !data && !loading && !!error;
   const back = () => {
     setCodeFileId(""); setFollowingFile(""); setSelected(null); setExpanded([]); lastFollow.current = "";
   };
@@ -259,7 +263,9 @@ function ProviderGraphStage({fixedBank, availableBanks, memoryPresentation}: {
     if (!rendering) return;
     let socket: WebSocket | null = null, retry: ReturnType<typeof setTimeout> | null = null, disposed = false;
     function accept(op: GraphOperation, live: boolean) {
-      if (!op || op.graph_id !== scope.current || !Array.isArray(op.refs)) return;
+      if (!op || !Array.isArray(op.refs)) return;
+      if (stranded.current && op.graph_id?.startsWith("code:")) { coalesceRefresh(); return; }
+      if (op.graph_id !== scope.current) return;
       setOperations(current => [op, ...current.filter(item => item.id !== op.id)].slice(0, 12));
       if (code && live && op.kind === "edit") setIndexState({state: "updating"});
       // Reconnect reconciles saved snapshots, but never replays camera activity.
@@ -278,7 +284,8 @@ function ProviderGraphStage({fixedBank, availableBanks, memoryPresentation}: {
     function connect() {
       if (disposed) return;
       socket = new WebSocket(API.replace("http", "ws") + "/ws/activity");
-      socket.onopen = () => setConnected(true);
+      // The Harness is reachable (again): one more load, never a poll.
+      socket.onopen = () => { setConnected(true); if (stranded.current) coalesceRefresh(); };
       socket.onmessage = event => {
         let value; try { value = JSON.parse(event.data); } catch { return; }
         if (value.type === "snapshot") {
