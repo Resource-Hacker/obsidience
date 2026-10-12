@@ -16,6 +16,8 @@ from obsidience.harness.knowledge import source, vault
 def system_source(tmp_path, monkeypatch, isolated_task_ledger):
     monkeypatch.setattr(config, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(config.CONFIG, "vault_dir", tmp_path / "obsidience/vault")
+    # Modules that imported iter_notes before this fixture keep the real reader; an empty Vault serves both.
+    (tmp_path / "obsidience/vault").mkdir(parents=True)
     monkeypatch.setattr(vault, "iter_notes", lambda **_kwargs: [])
     events = []
     monkeypatch.setattr(scheduler, "enqueue_named_event", lambda *args, **kwargs: events.append(args) or [])
