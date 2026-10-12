@@ -446,6 +446,12 @@
       "license": "MIT",
       "integration": "Selected 2026-10-12 as the TV session compositor only: obsidience-tv-session.service runs the unmodified distribution package headless (WLR_BACKENDS=headless, one 3840x2160@60 output, rendered on the RTX 4080 with --unsupported-gpu) with obsidience/tv/host/sway.conf. It holds only TV content and never replaces or joins the Hyprland desktop session."
     },
+    "streamlink": {
+      "repository": "https://github.com/streamlink/streamlink",
+      "version": "8.6.2 (CachyOS package streamlink 8.6.2-1)",
+      "license": "BSD-2-Clause",
+      "integration": "Selected 2026-10-12 for the TV tuner: obsidience-tv-tuner.service (obsidience/tv/host/tuner.py, system Python) imports the unmodified distribution package as a library and uses its Pluto plugin to open a live channel, mux its separate video and audio with the system ffmpeg and drop the advertisement segments. Beyond the public session, plugin and stream API the tuner takes a muxed stream's readers as its substreams open, reads their is_paused(), releases the muxer's pipes and reaps its process on close, and re-points one Pluto plugin instance by its url setter; check those after a package update (obsidience/tv/host/README.md)."
+    },
     "moonlight_android": {
       "repository": "https://github.com/moonlight-stream/moonlight-android",
       "version": "12.2 (app-nonRoot-release.apk)",

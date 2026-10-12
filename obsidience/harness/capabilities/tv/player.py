@@ -1,175 +1,103 @@
 """The PC route: the workstation's own player, whose picture the registered TV only displays.
 
-A headless compositor on this workstation runs one idle mpv (obsidience-tv-player.service)
-that Sunshine streams to Moonlight on the TV, so a channel starts in a few seconds instead
-of a Fire OS app's 20-50 s. This module is the only owner of mpv's JSON IPC socket. Each
-call opens one connection and closes it before returning. A command is sent once: a lost or
-late reply is an error for the caller to report, never a reason to send it again. Volume
-stays with the TV. A stream address can carry a session token, so this module never logs or
-returns one: the only title it reports is the one play was given.
+A headless compositor on this workstation runs one idle mpv (obsidience-tv-player.service) that
+Sunshine streams to Moonlight on the TV, so a channel starts in about a second instead of a Fire
+OS app's 20-50 s. The TV tuner (obsidience-tv-tuner.service, obsidience/tv/host/tuner.py) is the
+only owner of that player and of what it shows: it resolves a channel, feeds the player, skips
+advertisement breaks behind a break card and keeps running across Harness restarts. This module
+is its client. Each call opens one connection to the tuner's socket and closes it before
+returning. A request is sent once: a lost or late reply is an error for the caller to report,
+never a reason to send it again. Volume stays with the TV. The tuner reports titles and channel
+ids only, never a stream address.
 
-Protocol: newline-delimited JSON. {command, request_id} gets one reply {error, data,
-request_id}; {event, ...} lines arrive in between.
+Protocol: newline-delimited JSON, one reply {ok, state} or {ok: false, error} per request.
 """
 from __future__ import annotations
 
-from contextlib import contextmanager
 import json
 import os
 import socket
-import tempfile
 import time
 
-SOCKET = os.path.join(os.environ.get('XDG_RUNTIME_DIR') or f'/run/user/{os.getuid()}', 'obsidience-tv-player.sock')
-# The player is local and answers within milliseconds; every call but play ends within this.
-TIMEOUT = 0.5
-# Measured 2026-10-12: a reduced live HLS playlist shows its first picture 0.9-2.7 s after
-# loadfile, a full master with five variants 4.4-6.2 s (once more than 10 s).
+SOCKET = os.path.join(os.environ.get('XDG_RUNTIME_DIR') or f'/run/user/{os.getuid()}', 'obsidience-tv', 'tuner.sock')
+# The tuner is local and answers within milliseconds; every call but play ends within this.
+TIMEOUT = 2.5
+# Measured 2026-10-12: a channel shows its first picture 0.5-1.5 s after the request, and about
+# 3 s when the tuner first opens a fresh session with Pluto.
 START_LIMIT = 12.0
-# Per-file options measured to start live HLS sooner: a short stream probe.
-_FAST_START = {'demuxer-lavf-analyzeduration': '0.4', 'demuxer-lavf-probesize': '400000'}
-# FFmpeg lets a playlist read from a file open only file, crypto and data addresses; this
-# per-file option also admits the https entries of a playlist this module wrote itself.
-_PLAYLIST_FILE = {'demuxer-lavf-o-append': 'protocol_whitelist=file,crypto,data,https,tls,tcp'}
 _LINE_LIMIT = 1024 * 1024
 
 
-class _Link:
-    """One connection: commands with their replies, and the events read in between."""
+def _ask(request, limit=TIMEOUT, cancel=None):
+    """One request on one connection, sent once: the tuner's state after it.
 
-    def __init__(self, sock):
-        self.sock, self.buffer, self.events, self.ident = sock, b'', [], 0
-        self.deadline = time.monotonic() + TIMEOUT
-
-    def read(self, deadline):
-        """The next message; TimeoutError past the deadline, ConnectionError when the player closed."""
-        while b'\n' not in self.buffer:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise TimeoutError('The PC player did not answer')
-            self.sock.settimeout(remaining)
-            chunk = self.sock.recv(65536)
-            if not chunk:
-                raise ConnectionError('The PC player closed its connection')
-            self.buffer += chunk
-            if len(self.buffer) > _LINE_LIMIT:
-                raise ValueError('PC player message exceeded its bound')
-        line, self.buffer = self.buffer.split(b'\n', 1)
-        message = json.loads(line)
-        return message if isinstance(message, dict) else {}
-
-    def command(self, *command):
-        """One command, sent once: its reply's data, or ValueError when the player refuses it."""
-        self.ident += 1
-        self.sock.settimeout(TIMEOUT)
-        self.sock.sendall((json.dumps({'command': command, 'request_id': self.ident}) + '\n').encode())
-        while True:
-            message = self.read(self.deadline)
-            if 'error' in message and message.get('request_id') == self.ident:
-                break
-            self.events.append(message)
-        if message['error'] != 'success':
-            raise ValueError(f"The PC player refused {command[0]}: {str(message['error'])[:100]}")
-        return message.get('data')
-
-    def get(self, name):
-        """A property, or None while the player has none (no video size before a frame is decoded)."""
-        try:
-            return self.command('get_property', name)
-        except ValueError:
-            return None
-
-
-@contextmanager
-def _open():
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    try:
+    OSError when the tuner does not answer in time, ValueError when it refuses the request.
+    """
+    deadline = time.monotonic() + limit
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:  # Cleanup paired with the acquisition.
         sock.settimeout(TIMEOUT)
         sock.connect(SOCKET)
-        yield _Link(sock)
-    finally:
-        sock.close()  # Cleanup paired with the acquisition.
-
-
-def available():
-    """Whether the player's socket exists and answers (one read)."""
-    try:
-        with _open() as link:
-            link.command('get_property', 'idle-active')
-        return True
-    except (OSError, ValueError):
-        return False
+        sock.sendall((json.dumps(request) + '\n').encode())
+        buffer = b''
+        while b'\n' not in buffer:
+            if cancel is not None and cancel.is_set():
+                raise InterruptedError('TV command cancelled')
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError('The TV tuner did not answer')
+            sock.settimeout(min(remaining, .1))
+            try:
+                chunk = sock.recv(65536)
+            except TimeoutError:
+                continue
+            if not chunk:
+                raise ConnectionError('The TV tuner closed its connection')
+            buffer += chunk
+            if len(buffer) > _LINE_LIMIT:
+                raise ValueError('TV tuner message exceeded its bound')
+    reply = json.loads(buffer.split(b'\n', 1)[0])
+    if not isinstance(reply, dict) or not reply.get('ok') or not isinstance(reply.get('state'), dict):
+        raise ValueError('The TV tuner refused: ' + str(reply.get('error') if isinstance(reply, dict) else '')[:100])
+    return reply['state']
 
 
 def state():
-    """What the player shows now, or None when it does not answer.
+    """What the player shows now, or None when the tuner or its player does not answer.
 
-    playback is idle (nothing loaded), loading (no picture yet), playing or paused; title is the
-    one play gave it ('' for a file loaded any other way, whose own title would be its address);
-    video is [width, height] once a frame was decoded.
+    playback is idle (nothing loaded), loading (no picture yet), playing, break (a channel's
+    advertisement break: the tuner plays none of it and shows a break card until the programme
+    returns by itself), paused or failed (with reason); title is the one play gave it; video is
+    [width, height] once a picture shows; since is when playback last changed (epoch seconds).
     """
     try:
-        with _open() as link:
-            if link.command('get_property', 'idle-active'):
-                return {'playback': 'idle', 'title': '', 'video': None}
-            playback = ('paused' if link.command('get_property', 'pause') else
-                        'loading' if link.command('get_property', 'core-idle') else 'playing')
-            size = [link.get('width'), link.get('height')]
-            return {'playback': playback, 'title': str(link.get('force-media-title') or '')[:160],
-                    'video': size if all(isinstance(side, int) for side in size) else None}
+        tuner = _ask({'op': 'state'})
     except (OSError, ValueError):
         return None
+    return tuner if tuner.get('player') else None
+
+
+def available():
+    """Whether the tuner and its player answer (one read)."""
+    return state() is not None
 
 
 def play(source, title, cancel=None, limit=START_LIMIT):
-    """Load one stream in place of whatever plays; True once the player shows its first picture.
+    """Play one source in place of whatever plays; True once the player shows it.
 
-    source is an https address, or the text of an HLS playlist. The player reads a playlist from
-    a private file beside its socket, which exists only during this call (it is read once, when
-    the stream opens). loadfile is sent once, with the title to report for it. False means the
-    player accepted it but showed no picture within the limit, or gave the stream up: the caller
-    reports playback as unverified. True proves that this stream started, not what its picture shows.
+    source is {'provider': 'pluto', 'channel': <the guide's 24-digit channel id>} or {'url': <https
+    address>}. The request is sent once, with the title to report for it. True means its first
+    picture shows, or, for a channel tuned in during its advertisement break, the break card that
+    stays until the programme returns. False means the tuner took it but showed nothing within the
+    limit, or gave the source up (state then says failed and why): the caller reports playback as
+    unverified. True proves that this source started, not what its picture shows.
     """
-    if source.startswith('#EXTM3U'):
-        with tempfile.NamedTemporaryFile('w', prefix='obsidience-tv-', suffix='.m3u8',
-                                         dir=os.path.dirname(SOCKET)) as playlist:
-            playlist.write(source)
-            playlist.flush()
-            return _load(playlist.name, {**_FAST_START, **_PLAYLIST_FILE}, title, cancel, limit)
-    if not source.startswith('https://'):
-        raise ValueError('The PC player loads https streams only')
-    return _load(source, _FAST_START, title, cancel, limit)
-
-
-def _load(path, options, title, cancel, limit):
-    with _open() as link:
-        entry = (link.command('loadfile', path, 'replace', -1, {**options, 'force-media-title': title})
-                 or {}).get('playlist_entry_id')
-        deadline, started = time.monotonic() + limit, False
-        while True:
-            if cancel is not None and cancel.is_set():
-                raise InterruptedError('TV command cancelled')
-            try:
-                event = link.events.pop(0) if link.events else link.read(min(deadline, time.monotonic() + .1))
-            except TimeoutError:
-                if time.monotonic() >= deadline:
-                    return False
-                continue
-            name = event.get('event')
-            # The replaced file's events come first; only this entry's own picture counts.
-            if name == 'start-file' and event.get('playlist_entry_id') == entry:
-                started = True
-            elif started and name == 'playback-restart':
-                return True
-            elif started and name == 'end-file':
-                return False
+    tuner = _ask({'op': 'play', **source, 'title': title, 'wait': limit}, limit + TIMEOUT, cancel)
+    return tuner.get('playback') in ('playing', 'break') and tuner.get('title') == title
 
 
 def pause(paused=True):
     """Set the pause flag once; True when the player's own readback shows it."""
-    with _open() as link:
-        link.command('set_property', 'pause', paused)
-        return link.command('get_property', 'pause') is paused
+    return (_ask({'op': 'pause' if paused else 'resume'}).get('playback') == 'paused') is paused
 
 
 def resume():
@@ -178,6 +106,4 @@ def resume():
 
 def stop():
     """End playback and return to the idle player; True when it reads back idle."""
-    with _open() as link:
-        link.command('stop')
-        return link.command('get_property', 'idle-active') is True
+    return _ask({'op': 'stop'}).get('playback') == 'idle'

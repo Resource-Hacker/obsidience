@@ -12,11 +12,14 @@ the place where channels load.
 | `obsidience-tv-audio-policy.service` | WirePlumber for that server, policy only, state in the runtime directory |
 | `obsidience-tv-audio-pulse.service` | Its PulseAudio endpoint (Sunshine captures through it) and the idle sink `obsidience_tv` |
 | `obsidience-tv-session.service` | A headless sway compositor with one 3840x2160@60 output, rendered on the RTX 4080 |
-| `obsidience-tv-player.service` | `mpv --idle` in that compositor; JSON IPC at `$XDG_RUNTIME_DIR/obsidience-tv-player.sock` |
+| `obsidience-tv-player.service` | `mpv --idle` in that compositor; JSON IPC at `$XDG_RUNTIME_DIR/obsidience-tv-player.sock`, used by the tuner only |
+| `obsidience-tv-tuner.service` | `tuner.py` (system Python with streamlink): the one owner of the player's IPC socket and of what plays; control socket `$XDG_RUNTIME_DIR/obsidience-tv/tuner.sock` |
 | `obsidience-tv-sunshine.service` | Sunshine (NVENC HEVC on the RTX 4080), connected only to that compositor and that audio server |
 
 The session publishes its Wayland socket name in `$XDG_RUNTIME_DIR/obsidience-tv/wayland`;
-the player and Sunshine wait for it. Stopping the session stops both.
+the player and Sunshine wait for it. Stopping the session stops both, and the tuner with
+them. The tuner is not part of the Harness: a channel keeps playing while the Harness
+restarts.
 
 ## Boundaries
 
@@ -51,8 +54,51 @@ the player and Sunshine wait for it. Stopping the session stops both.
 
 ## Playing something
 
-One IPC command: `{"command": ["loadfile", URL, "replace"]}`; `playback-restart`
-means the stream started, not that the picture is the intended one.
+Ask the tuner, never the player: one JSON line per request on `tuner.sock`, one JSON
+line back (`{"ok": true, "state": {...}}`). The Harness does this through
+`obsidience/harness/capabilities/tv/player.py`; by hand:
+
+    printf '%s\n' '{"op":"play","provider":"pluto","channel":"640a68880e884c0009979cc2","title":"FOX Weather","wait":12}' \
+      | socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/obsidience-tv/tuner.sock
+
+- `play` with `provider` `pluto` and `channel` (the 24-digit `_id` of Pluto's public
+  guide `api.pluto.tv/v2/channels`; the slug finds no streams) or with `url` (a plain
+  https stream, handed to the player as it is), plus `title`. It replaces whatever
+  plays and answers once the first picture shows (or the break card of a channel tuned
+  in during its break, or `failed`), or after `wait` seconds.
+- `pause`, `resume`, `stop`, `state`.
+- State `playback`: `idle`, `loading`, `playing`, `break`, `paused` or `failed` (with a
+  `reason`); also `title`, `video` size, `since`, and `provider`/`channel` for a channel.
+  `playing` means the stream shows a picture, not that the picture is the intended one.
+
+A channel is resolved by streamlink's Pluto plugin inside the tuner (one warm session:
+measured 0.5-1.0 s from request to first picture, now and then 1.5-3.5 s when Pluto
+answers slowly or the session is fresh), muxed by its ffmpeg and written into a FIFO
+(`stream-N.fifo` beside the socket) that the player reads. A new play stops the previous
+picture at once and releases the previous stream beside its own start.
+
+The plugin drops the advertisement segments, and the player plays the programme it still
+holds (up to about eight seconds). Once it has run dry and the plugin reports
+advertisements, the tuner draws a break card over the last frame (channel, "Commercial
+break", elapsed time) and reports `break`; the plugin can see the first advertisement a
+second or two after the player ran dry, which reads as `loading` until then. When the
+programme returns the player first buffers eight seconds (`cache-pause-wait`; resuming on
+the first segment stalled twice in the next minute), then plays, and the tuner removes the
+card and reports `playing`. A first picture waits for the same margin (about 0.1 s on an
+ordinary channel change). A channel tuned in during its break shows the card within a few
+seconds, over the empty screen, and its picture when the break ends. A stream that ends
+or fails is opened once more with a fresh session; if that fails too the state is
+`failed` and nothing loops. The journal (`journalctl --user -u obsidience-tv-tuner`) names
+titles and channel ids, state changes and when advertisements begin and end, never a
+stream address.
+
+After a streamlink update, check what the tuner relies on beyond its public session,
+plugin and stream calls: the Pluto plugin taking a channel id in the page address,
+keeping its `app_version` per instance and accepting a new `url` on the same instance;
+a muxed stream's `substreams`, each opened through its own `open()` (the tuner takes the
+readers there) and reporting advertisements through `is_paused()`; and the muxer's
+`pipes` (released on close, or a writer waits forever for an ffmpeg that is gone) and
+`process` (reaped on close).
 
 ## Television side
 
@@ -80,12 +126,14 @@ udp 47998-48000, 48002, 48010.
   drifts past the TV's refresh. Not solved; an event-driven capture is the direction.
 - wlroots' headless output re-arms a whole-millisecond frame timer after each commit, so
   a "60 Hz" output is not a 60.00 Hz clock (clients estimate 62-70 Hz).
-- FFmpeg's HLS reader (mpv's) cannot play Pluto across an ad break: Pluto serves video
-  and audio as separate playlists and marks the break with `#EXT-X-DISCONTINUITY`, which
-  FFmpeg skips; it then reads one playlist only and the player starves (no recovery in a
-  15-minute reproduction). streamlink's Pluto plugin muxes the two, drops the ad
-  segments and resumes at the next content frame (measured: 174 s pause, clean resume).
-  Feed mpv through a FIFO: over streamlink's HTTP server mpv times out during the break.
+- History, solved by the tuner: FFmpeg's HLS reader (mpv's) cannot play Pluto across an
+  ad break. Pluto serves video and audio as separate playlists and marks the break with
+  `#EXT-X-DISCONTINUITY`, which FFmpeg skips; it then reads one playlist only and the
+  player starves (no recovery in a 15-minute reproduction). streamlink's Pluto plugin
+  muxes the two, drops the ad segments and resumes at the next content frame. The player
+  is fed through a FIFO because over streamlink's HTTP server mpv times out during the
+  break. Pluto's v1 stitcher path and the guide's `stitched.urls` play a "no longer
+  available on this device" slate.
 
 ## Checking smoothness
 

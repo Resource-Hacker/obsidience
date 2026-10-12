@@ -1,0 +1,20 @@
+[Unit]
+Description=Obsidience TV tuner (resolves channels, feeds the player, skips advertisement breaks)
+# The one owner of the player's IPC socket and of what it shows. Not Harness code: a channel
+# keeps playing, and its breaks keep being skipped, while the Harness restarts.
+Requires=obsidience-tv-player.service
+After=obsidience-tv-player.service
+PartOf=obsidience-tv-session.service
+
+[Service]
+Type=exec
+# The system Python: streamlink is a distribution package, not part of the Harness environment.
+# Control socket and stream FIFOs live in %t/obsidience-tv; the journal names titles and channel
+# ids only, never a stream address.
+ExecStart=/usr/bin/python3 /home/wissenschafter/Projects/obsidience/obsidience/tv/host/tuner.py
+Restart=on-failure
+RestartSec=2
+UMask=0077
+
+[Install]
+WantedBy=default.target

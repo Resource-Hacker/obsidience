@@ -13,7 +13,6 @@ import socket
 import subprocess
 import threading
 import time
-import uuid
 import xml.etree.ElementTree as ET
 
 from PIL import Image
@@ -78,20 +77,16 @@ LINK_NEEDS_SETTLED_APP = {'pluto'}
 AD_FREE_YOUTUBE = 'smarttube'
 PLUTO_GUIDE = 'https://api.pluto.tv/v2/channels'
 PLUTO_CHANNEL = re.compile(r'https://pluto\.tv/[a-z]{2}/live-tv/([a-z0-9-]{1,80})')
-# The PC route (2026-10-12): the workstation's player (player.py) loads a stream and the TV only
-# shows it through Moonlight, to which Sunshine serves the player's headless screen as one app.
-# Fire OS apps take 20-50 s to start a channel; the player starts one in a second or two.
+# The PC route (2026-10-12): the workstation's TV tuner (player.py is its client) plays a channel
+# and the TV only shows it through Moonlight, to which Sunshine serves the player's headless
+# screen as one app. Fire OS apps take 20-50 s to start a channel; the tuner starts one in about
+# a second and plays no advertisements: during a channel's break it shows a break card.
 MOONLIGHT = 'com.limelight'
 PC_APP = 'pc'
 STREAM_HOST, STREAM_APP = 'Obsidience', 'Obsidience TV'
 _SUNSHINE_STATE = Path.home() / '.config' / 'sunshine' / 'sunshine_state.json'
-# How the PC player asks Pluto for a channel: as Pluto's web player does, with one anonymous
-# client id for this process. Measured: with a thinner query the stitcher answers 400.
-PLUTO_BOOT = 'https://boot.pluto.tv/v4/start'
-_PLUTO_CLIENT = {'appName': 'web', 'appVersion': '9.19.0', 'clientID': str(uuid.uuid4()),
-                 'clientModelNumber': '1.0.0', 'deviceMake': 'chrome', 'deviceModel': 'web', 'deviceType': 'web',
-                 'deviceVersion': '141.0.0', 'serverSideAds': 'false', 'drmCapabilities': 'widevine:L3',
-                 'blockingMode': '', 'notificationVersion': '1', 'appLaunchCount': '', 'lastAppLaunchDate': ''}
+BREAK_NOTE = ('Commercial break on this channel: the PC player plays no advertisements and shows a break card; '
+              'the programme resumes by itself.')
 # The content last opened per app, once playback started: {app, link, title,
 # opened_at, player}, for idempotent repeats and state. Kept in private state so
 # a Harness restart still knows what the TV is showing.
@@ -156,7 +151,7 @@ def _pluto_guide():
     response.raise_for_status()
     if len(response.content) > 4 * 1024 * 1024:
         raise ValueError('Pluto channel guide exceeded its bound')
-    rows = [{'name': str(c.get('name') or '')[:80], 'slug': c['slug'],
+    rows = [{'name': str(c.get('name') or '')[:80], 'slug': c['slug'], 'id': str(c.get('_id') or ''),
              'category': str(c.get('category') or '')[:40], 'summary': str(c.get('summary') or '')[:300]}
             for c in response.json()
             if isinstance(c, dict) and re.fullmatch(r'[a-z0-9-]{1,80}', str(c.get('slug') or ''))]
@@ -164,73 +159,16 @@ def _pluto_guide():
     return rows
 
 
-def _pluto_stream(slug):
-    """A Pluto live channel for the PC player as (channel name, HLS source), from a fresh web session.
+def _pluto_channel(key):
+    """A Pluto live channel for the PC route as (channel name, channel id), from the public guide.
 
-    Pluto's boot service opens an anonymous session for the channel and names its stitcher, query
-    and session token; together they are the channel's own stream, so no Pluto app is involved.
-    Measured 2026-10-12: the public guide's stitched URL plays only a "no longer available on this
-    device" slate, and an unknown slug is answered with some other channel. The source (the master's
-    address, or its reduced playlist) carries the session token: it is resolved for each play,
-    handed to the player only, and never logged, returned or stored.
+    key is the slug or the id in the channel's link. The TV tuner takes the id; it opens the channel's
+    stream itself, so no stream address ever reaches the Harness.
     """
-    import httpx
-    from urllib.parse import urlsplit
-    response = httpx.get(PLUTO_BOOT, params={**_PLUTO_CLIENT, 'channelSlug': slug},
-                         headers={'User-Agent': 'Mozilla/5.0'}, timeout=httpx.Timeout(4.0, connect=2.0))
-    response.raise_for_status()
-    if len(response.content) > 1024 * 1024:
-        raise ValueError('Pluto session exceeded its bound')
-    boot = response.json()
-    channel = boot['EPG'][0]
-    if channel['slug'] != slug or not re.fullmatch(r'[0-9a-f]{24}', str(channel['id'])):
-        raise LookupError('Pluto opened no session for this channel')
-    url = (f"{boot['servers']['stitcher']}/v2/stitch/hls/channel/{channel['id']}/master.m3u8"
-           f"?{boot['stitcherParams']}&jwt={boot['sessionToken']}&masterJWTPassthrough=true")
-    parts = urlsplit(url)
-    if (parts.scheme != 'https' or not (parts.hostname or '').endswith('.pluto.tv') or len(url) > 8000
-            or re.search(r'[\s"\'`\\<>]', url)):
-        raise ValueError('Pluto named an unusable stream address')
-    return str(channel.get('name') or slug)[:80], _one_variant(url) or url
-
-
-def _one_variant(master):
-    """An HLS master reduced to its best variant (at most 1080p, highest BANDWIDTH) with that
-    variant's default audio, as playlist text; None whenever that choice is not clear-cut.
-
-    Measured 2026-10-12: the player probes every variant and rendition of a master before its first
-    picture (4.4-6.2 s for Pluto's five variants and two audio tracks) and starts the reduced one in
-    about a second. A variant cannot be loaded on its own: its audio can be a separate rendition
-    (FOX Weather then plays silent). The master itself plays as well, only slower.
-    """
-    import httpx
-    from urllib.parse import urljoin
-    try:
-        response = httpx.get(master, timeout=httpx.Timeout(3.0, connect=2.0))
-        response.raise_for_status()
-        lines = response.text.splitlines() if len(response.content) <= 256 * 1024 else []
-    except Exception:  # noqa: BLE001
-        return None
-    best = None
-    for line, uri in zip(lines, [*lines[1:], '']):
-        bandwidth = re.search(r'[:,]BANDWIDTH=(\d+)', line) if line.startswith('#EXT-X-STREAM-INF:') else None
-        height = re.search(r'[:,]RESOLUTION=\d+x(\d+)', line)
-        if (bandwidth and uri.strip() and not uri.startswith('#') and (not height or int(height[1]) <= 1080)
-                and (best is None or int(bandwidth[1]) > best[0])):
-            best = (int(bandwidth[1]), line, uri.strip())
-    if best is None or re.search(r'[:,]VIDEO="', best[1]):
-        return None
-    group = re.search(r'[:,]AUDIO="([^"]+)"', best[1])
-    audio = [line for line in lines if group and line.startswith('#EXT-X-MEDIA:') and 'TYPE=AUDIO' in line
-             and f'GROUP-ID="{group[1]}"' in line]
-    audio = [line for line in audio if 'DEFAULT=YES' in line][:1] or audio[:1]
-    # Every address becomes absolute: the reduced playlist has no address of its own to resolve against.
-    audio = [re.sub(r'URI="([^"]+)"', lambda found: f'URI="{urljoin(master, found[1])}"', line) for line in audio]
-    variant = urljoin(master, best[2])
-    if any(not address.startswith('https://') or re.search(r'\s', address)
-           for address in [variant, *re.findall(r'URI="([^"]+)"', ''.join(audio))]):
-        return None
-    return '\n'.join(['#EXTM3U', *audio, re.sub(r'SUBTITLES="[^"]*",?', '', best[1]).rstrip(','), variant, ''])
+    row = next((row for row in _pluto_guide() if key in (row['slug'], row['id'])), None)
+    if row is None or not re.fullmatch(r'[0-9a-f]{24}', row['id']):
+        raise LookupError('The Pluto guide lists no such channel')
+    return row['name'] or key, row['id']
 
 
 def _pluto_airing(slug):
@@ -623,7 +561,13 @@ def _pc_state(state):
         pc = _player.state()
         foreground['app'] = PC_APP
         state['pc'] = pc
-        state['playback'] = pc['playback'] if pc and pc['playback'] != 'idle' else None
+        playback = pc['playback'] if pc and pc['playback'] != 'idle' else None
+        # A commercial break is the channel playing: the tuner skips the advertisements behind its card.
+        state['playback'] = 'playing' if playback == 'break' else playback
+        if playback == 'break':
+            state['note'] = BREAK_NOTE
+        else:
+            state.pop('note', None)
     return state
 
 
@@ -812,7 +756,7 @@ def _with_opened(state, started, fetch=True):
                                 # The exact player it started still plays in the foreground app
                                 # (on the PC route: the PC player still plays that title).
                                 'still_playing': opened['app'] == state['foreground']['app']
-                                and (pc.get('playback') == 'playing' and pc.get('title') == opened['title']
+                                and (pc.get('playback') in ('playing', 'break') and pc.get('title') == opened['title']
                                      if opened['app'] == PC_APP else started(opened['player']))}
         channel = PLUTO_CHANNEL.fullmatch(opened['link'])
         if opened['app'] in ('pluto', PC_APP) and opened['app'] == state['foreground']['app'] and channel:
@@ -906,7 +850,8 @@ def prompt_line(now=None):
         parts.append(app)
         parts.append('NOT playing the channel: Pluto stopped it for inactivity and loops advertisements '
                      'until a key press (resume returns to the channel)'
-                     if state['playback'] == 'inactivity_ad' else state['playback']
+                     if state['playback'] == 'inactivity_ad' else
+                     'commercial break' if (state.get('pc') or {}).get('playback') == 'break' else state['playback']
                      or ('idle' if foreground['app'] == PC_APP else 'no media player'))
         session = next((s for s in state['media_sessions']
                         if s['package'] == foreground['package'] and s.get('title')), None)
@@ -1016,10 +961,11 @@ def _reach_pc(row, cancel, context, power, action, tv):
     pc, opened = tv['pc'], tv.get('last_opened') or {}
     if pc is None:
         raise ValueError('The PC player does not answer')
-    if pc['playback'] == 'idle' and action == 'resume':
+    idle = pc['playback'] in ('idle', 'failed')
+    if idle and action == 'resume':
         return {'status': 'failed', 'delivery': 'not_dispatched', 'effect_applied': False, 'correction_allowed': True,
                 'failure': 'Nothing is loaded on the PC player; play content instead.'}
-    if pc['playback'] == 'idle' or (pc['playback'] == 'paused') is (action == 'pause'):
+    if idle or (pc['playback'] == 'paused') is (action == 'pause'):
         return {**result, 'effect_applied': False, 'tv': tv}
     if action == 'pause' and opened.get('still_playing') and PLUTO_CHANNEL.fullmatch(opened['link']):
         # A live channel is a broadcast: its player cannot pause meaningfully, so nothing is sent.
@@ -1621,22 +1567,28 @@ def _execute(args, context):
             raise ValueError('This TV operation was already attempted in this run; do not replay it')
         pc = None
         if opening and alias == 'pluto' and (channel := PLUTO_CHANNEL.fullmatch(link)) and _player.available():
-            # Fastest route first: the PC player loads the channel's own stream (a second or two)
-            # and the TV only shows it. Without the player or a stream, the Fire OS app remains.
+            # Fastest route first: the TV tuner plays the channel (about a second) and the TV only
+            # shows it. Without the tuner, or when it cannot play the channel, the Fire OS app remains.
             try:
-                pc = _pluto_stream(channel[1])
-            except Exception as error:  # Only the error's type is logged: its text may hold an address.  # noqa: BLE001
+                pc = _pluto_channel(channel[1])
+            except Exception as error:  # The public guide is unavailable or lists no such channel.  # noqa: BLE001
                 _agent.log.info('PC route skipped for %s: %s', channel[1], type(error).__name__)
         if pc is not None:
-            title, stream = pc
+            title, ident = pc
             playing = _player.state() or {}
-            # A channel the player already plays is not loaded again.
-            loaded = not (playing.get('playback') == 'playing' and playing.get('title') == title)
+            # A channel the player already plays (a commercial break included) is not loaded again.
+            loaded = not (playing.get('playback') in ('playing', 'break') and playing.get('title') == title)
             if loaded:
                 attempted.add(token)
                 context['_tv_effect_uncertain'] = True
-                started = _player.play(stream, title, cancel)
+                started = _player.play({'provider': 'pluto', 'channel': ident}, title, cancel)
                 context['_tv_effect_uncertain'] = False
+                if not started and (_player.state() or {}).get('playback') == 'failed':
+                    # The tuner gave the channel up and plays nothing (its journal says why).
+                    _agent.log.info('PC route failed for %s', channel[1])
+                    pc = None
+        if pc is not None:
+            if loaded:
                 delivery = 'acknowledged'
                 if not started:
                     context['_tv_navigation_applied'] = True
