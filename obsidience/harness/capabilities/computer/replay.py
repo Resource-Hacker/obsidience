@@ -27,7 +27,12 @@ REPLAY_DIR = Path(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}
 UNIT = "obsidience-shell-screen-replay@{}.service"
 SURFACES = {"HDMI-A-1": "samsung", "HDMI-A-2": "dp-4", "DP-8": "usb-c"}
 SAMPLE_WIDTH = 160
-FRAME_WIDTH = 1280
+# Frames are scaled to one pixel area, not one width: image cost is linear in
+# tokens (measured 1.35 ms each), and at a fixed 1280 width a 16:10 USB-C frame cost
+# 461 tokens against 218 for the 32:9 Samsung. Every screen now costs about 220.
+FRAME_AREA = 1280 * 360
+# Keyframes decode at about 24 ms each at 5120x1440; chunks decode concurrently.
+DECODE_CHUNK = 16
 MAX_FRAMES = 8
 # Mean absolute grey-level change (0-1) between keyframes half a second apart that
 # counts as visible: a cursor blink stays below it, a new window or scene does not.
@@ -75,7 +80,7 @@ def _save(output: str, cancel) -> Path:
             if size and sizes.get(path) == size:
                 return path  # Size held for one poll: the recorder finished writing.
             sizes[path] = size
-        time.sleep(0.15)
+        time.sleep(0.05)
     raise TimeoutError(f"the {SURFACES.get(output, output)} replay buffer wrote no clip")
 
 
@@ -158,24 +163,27 @@ def execute(args: dict, context: dict) -> dict[str, object]:
         sample_height = max(2, round(SAMPLE_WIDTH * height / width / 2) * 2)
         # Passthrough keeps one output frame per decoded keyframe (rawvideo would
         # otherwise repeat them to the stream's 30 fps).
-        raw = _ffmpeg("-skip_frame", "nokey", "-ss", window[0], "-i", str(clip),
-                      "-vf", f"scale={SAMPLE_WIDTH}:{sample_height},format=gray", "-fps_mode", "passthrough",
-                      "-f", "rawvideo", "-pix_fmt", "gray", "-")
+        chunks = [window[at:at + DECODE_CHUNK] for at in range(0, len(window), DECODE_CHUNK)]
+        raw = b"".join(decoders.map(lambda chunk: _ffmpeg(
+            "-skip_frame", "nokey", "-ss", chunk[0], "-i", str(clip), "-frames:v", str(len(chunk)),
+            "-vf", f"scale={SAMPLE_WIDTH}:{sample_height},format=gray", "-fps_mode", "passthrough",
+            "-f", "rawvideo", "-pix_fmt", "gray", "-"), chunks))
         samples = np.frombuffer(raw, dtype=np.uint8)
         samples = samples[: samples.size - samples.size % (SAMPLE_WIDTH * sample_height)]
         samples = samples.reshape(-1, sample_height, SAMPLE_WIDTH)
         count = min(len(samples), len(window))
-        return output, clip, duration, window[:count], _changes(samples[:count])
+        frame_width = max(2, round((FRAME_AREA * width / height) ** 0.5 / 2) * 2)
+        return output, clip, duration, window[:count], _changes(samples[:count]), frame_width
 
     try:
-        with ThreadPoolExecutor(max_workers=6) as pool:
+        with ThreadPoolExecutor(max_workers=6) as pool, ThreadPoolExecutor(max_workers=12) as decoders:
             windows = list(pool.map(read, outputs))
             if cancel is not None and cancel.is_set():
                 raise InterruptedError("screen replay cancelled")
             changed = [w for w in windows if len(w[4]) and w[4].max() >= CHANGE]
             budget = max(2, MAX_FRAMES // max(1, len(changed)))
             wanted, screens = [], []
-            for output, clip, duration, window, diffs in windows:
+            for output, clip, duration, window, diffs, frame_width in windows:
                 peak = float(diffs.max()) if len(diffs) else 0.0
                 name = SURFACES.get(output, output)
                 picks = _choose(diffs, len(window), budget)
@@ -186,14 +194,14 @@ def execute(args: dict, context: dict) -> dict[str, object]:
                 for index in picks:
                     ago = max(0.0, duration - float(window[index]))
                     label = f"{name}: now (end of the window)" if index == picks[-1] else f"{name}: {ago:.0f} s ago"
-                    wanted.append((label, clip, window[index]))
+                    wanted.append((label, clip, window[index], frame_width))
                     attached.append({"seconds_ago": round(ago, 1)})
                 screens.append({"surface": name, "visible_change": peak >= CHANGE, "frames_attached": attached})
             # An exact keyframe timestamp seeks straight to that frame.
             pngs = pool.map(lambda item: _ffmpeg("-ss", item[2], "-i", str(item[1]), "-frames:v", "1",
-                                                 "-vf", f"scale={FRAME_WIDTH}:-2", "-f", "image2pipe",
+                                                 "-vf", f"scale={item[3]}:-2", "-f", "image2pipe",
                                                  "-c:v", "png", "-"), wanted)
-            frames = [(label, png) for (label, _clip, _key), png in zip(wanted, pngs)]
+            frames = [(label, png) for (label, _clip, _key, _width), png in zip(wanted, pngs)]
     except (RuntimeError, TimeoutError, OSError, ValueError) as error:
         return _unavailable("replay_failed", f"Screen replay could not be read: {error}", True)
     finally:
