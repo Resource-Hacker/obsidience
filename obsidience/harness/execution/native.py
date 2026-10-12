@@ -419,8 +419,11 @@ def request_payload(messages, spec, effort, tools, *, task=False):
 # WINDOW_KEEP, so the cached prompt prefix changes once per rebase. One persisted
 # value names its conversation, so New Conversation starts unwindowed. Kill switch:
 # `conversation_window = false` in obsidience/obsidience.toml.
-WINDOW_KEEP = (8, 6_000)      # exchanges, estimated tokens kept by a rebase (at least two exchanges)
-WINDOW_LIMIT = (16, 12_000)   # a window beyond either rebases at the next idle edge
+# Owner direction 2026-10-12: carry as little standing context as possible and let
+# Hindsight recall supply the rest. A finished exchange is recallable about 18 s
+# later (35 s at worst, measured), so only the newest few stay verbatim.
+WINDOW_KEEP = (3, 2_000)      # exchanges, estimated tokens kept by a rebase (at least two exchanges)
+WINDOW_LIMIT = (6, 4_000)     # a window beyond either rebases at the next idle edge
 _WINDOW_KEY = 'conversation_window_anchor'
 _window: dict | None = None
 
