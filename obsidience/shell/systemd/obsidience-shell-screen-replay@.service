@@ -1,0 +1,25 @@
+[Unit]
+Description=Obsidience rolling screen replay buffer for %i
+# One gpu-screen-recorder per Shell output keeps the last minute in RAM; the
+# Executive's computer.replay writes it to a clip with SIGUSR1 (recording
+# continues), reads it and deletes it. A keyframe every 0.5 s lets the reader
+# decode keyframes only. The WoW lease stops and restores it.
+PartOf=obsidience-shell-session.target
+After=wayland-session@Hyprland.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=exec
+# Statically linked FFmpeg negotiates the NVENC API at runtime (driver 580 has
+# 13.0; the system FFmpeg needs 13.1), so the Samsung encodes on the RTX 4080.
+ExecStartPre=/usr/bin/rm -rf %t/obsidience-screen-replay/%i
+ExecStartPre=/usr/bin/mkdir -p -m 0700 %t/obsidience-screen-replay/%i
+ExecStart=/var/lib/ai/opt/gpu-screen-recorder-6.1.2-static/bin/gpu-screen-recorder -w %i -c mkv -k hevc -f 30 -keyint 0.5 -r 60 -replay-storage ram -cursor yes -o %t/obsidience-screen-replay/%i
+ExecStopPost=/usr/bin/rm -rf %t/obsidience-screen-replay/%i
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=10
+UMask=0077
+CPUWeight=25

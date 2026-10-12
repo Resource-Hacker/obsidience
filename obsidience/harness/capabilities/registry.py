@@ -33,6 +33,7 @@ _CAPABILITY_NAMES = (
     "media.pause",
     "computer.act",
     "computer.observe",
+    "computer.replay",
     "harness.evaluate",
     "harness.optimize",
     "harness.repair",
@@ -198,6 +199,8 @@ def _argument_schemas() -> dict[str, dict]:
         "camera.observe": obj({"query":text(500), "wake":{"type":"boolean"}},("query",)),
         "media.pause": obj({"query":text(128, empty=True)}),
         "computer.observe": obj({"target":observe_target,"query":text(500)},("query",)),
+        "computer.replay": obj({"query":text(500),"seconds":{"type":"integer","minimum":5,"maximum":60},
+            "surface":surface},("query",)),
         # The adapter requires application or handle and checks both against the observation.
         "computer.act": obj({"scope":{"enum":["input","state"]},"application":text(256),"handle":handle,
             "action":{"const":"click"},

@@ -284,9 +284,11 @@ class AgentPlugin(BasePlugin):
                 return _text(json.dumps(self.ctx.get('completion') or {'status': self.ex.status}))
             blocks = [{'type': 'text', 'text': observation_text(
                 outcome.observation, self._budget_nudge() if outcome.kind == 'returned' else '')}]
-            if outcome.image_png is not None:
+            images = ([('', outcome.image_png)] if outcome.image_png is not None else []) + list(outcome.frames)
+            for label, raw in images:
                 self.ex.visual_context_seen = True
-                raw = outcome.image_png
+                if label:
+                    blocks.append({'type': 'text', 'text': label})
                 identifier = hashlib.sha256(raw).hexdigest()
                 self.images[identifier] = 'data:image/png;base64,' + base64.b64encode(raw).decode('ascii')
                 blocks.append({'type': 'image', 'attachment': {

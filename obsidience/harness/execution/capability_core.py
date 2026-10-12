@@ -65,6 +65,8 @@ class CallOutcome:
     kind: str
     observation: str = ""
     image_png: bytes | None = None
+    # Labelled PNG frames in order (a screen replay); same privacy as image_png.
+    frames: tuple[tuple[str, bytes], ...] = ()
 
 
 @dataclass
@@ -271,6 +273,7 @@ async def run_capability(ex, name: str, args: dict, *, execute, execute_async, s
         return CallOutcome("completed")
     ex.response_completion_observation = None
     private_image_png: bytes | None = None
+    private_frames: tuple[tuple[str, bytes], ...] = ()
     private_observation_lease = None
     result_object: dict | None = None
     call_status = "rejected"
@@ -330,6 +333,10 @@ async def run_capability(ex, name: str, args: dict, *, execute, execute_async, s
                 if private_value is not None:
                     if isinstance(private_value, bytes):
                         private_image_png = private_value
+                    elif (isinstance(private_value, list) and 0 < len(private_value) <= 12 and all(
+                            isinstance(frame, tuple) and len(frame) == 2 and isinstance(frame[0], str)
+                            and isinstance(frame[1], bytes) for frame in private_value)):
+                        private_frames = tuple(private_value)
                     else:
                         result = {
                             "observation": {
@@ -507,4 +514,4 @@ async def run_capability(ex, name: str, args: dict, *, execute, execute_async, s
         ex.done = True
         return CallOutcome("waiting", observation)
     foreground_checkpoint(ex.interruption_event, ex.ctx)
-    return CallOutcome("returned", observation, private_image_png)
+    return CallOutcome("returned", observation, private_image_png, private_frames)

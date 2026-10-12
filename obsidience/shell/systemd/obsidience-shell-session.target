@@ -11,3 +11,6 @@ Wants=obsidience-shell-knowledge.service
 Wants=obsidience-shell-agent-canvas.service
 Wants=obsidience-shell-notifications.service
 Wants=obsidience-shell-window-adapter.service
+Wants=obsidience-shell-screen-replay@HDMI-A-1.service
+Wants=obsidience-shell-screen-replay@HDMI-A-2.service
+Wants=obsidience-shell-screen-replay@DP-8.service

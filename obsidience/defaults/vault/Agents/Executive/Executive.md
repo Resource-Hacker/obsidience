@@ -19,6 +19,7 @@ obsidience:
   - '[[Skills/camera.observe]]'
   - '[[Skills/computer.act]]'
   - '[[Skills/computer.observe]]'
+  - '[[Skills/computer.replay]]'
   - '[[Skills/harness.evaluate]]'
   - '[[Skills/harness.repair]]'
   - '[[Skills/harness.status]]'
