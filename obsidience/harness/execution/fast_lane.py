@@ -49,7 +49,16 @@ def _room_candidates(text, objective, allowed):
         'can you see me through the camera',
     }:
         return [{'name': 'camera.observe', 'args': {'query': objective, 'wake': True}}]
+    # A whole question about the recent past on screen; a current screenshot or
+    # an earlier answer cannot show that window (seen: answers repeated from history).
+    if 'computer.replay' in allowed and _RECENT_PAST.fullmatch(request.replace(',', '')):
+        return [{'name': 'computer.replay', 'args': {'query': objective}}]
     return None
+
+
+_RECENT_PAST = re.compile(
+    r"(?:hey |computer )?(?:what (?:just )?happened|what was that|what did i (?:just )?miss)"
+    r"(?: just now| there| on (?:my|the) (?:screens?|monitors?|computer))*")
 
 
 def candidates(objective, allowed, *, first_step=False, search_refs=None, trace=(), steering=False):
@@ -164,7 +173,7 @@ async def select(client, payload, spec, choices, metrics, *, objective='', heade
             if (set(choice) != {'name', 'args'} or choice['name'] not in allowed
                     or choice['name'] not in {'harness.status', 'session.unlock',
                                                'application.launch', 'vault.read',
-                                               'lights.set', 'camera.observe'}
+                                               'lights.set', 'camera.observe', 'computer.replay'}
                     or not Draft202012Validator(schemas[choice['name']]).is_valid(choice['args'])):
                 raise ValueError('Invalid or unavailable complete candidate')
         # Render the complete native request, including its Tool schemas.
