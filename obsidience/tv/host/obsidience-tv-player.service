@@ -12,9 +12,10 @@ Environment=PIPEWIRE_RUNTIME_DIR=%t/obsidience-tv
 # Frames are timed to the compositor's refresh, not the audio clock: audio-clock timing
 # skipped a refresh every second or so on the TV (measured on its panel, 2026-10-12).
 # Decoding stays on the CPU so the iGPU's video engine is left to the encoders.
+# Warnings go to the journal: a stalled stream must leave its reason there.
 # Wait for the session to publish its socket name (bounded).
 ExecStartPre=/bin/sh -c 'for i in $(seq 100); do [ -s %t/obsidience-tv/wayland ] && exit 0; sleep 0.1; done; exit 1'
-ExecStart=/bin/sh -c 'WAYLAND_DISPLAY=$(cat %t/obsidience-tv/wayland) exec /usr/bin/mpv --no-config --no-terminal --idle=yes --force-window=yes --fs --wayland-app-id=obsidience-tv-player --video-sync=display-resample --cache=yes --demuxer-max-bytes=64MiB --input-ipc-server=%t/obsidience-tv-player.sock'
+ExecStart=/bin/sh -c 'WAYLAND_DISPLAY=$(cat %t/obsidience-tv/wayland) exec /usr/bin/mpv --no-config --no-input-terminal --msg-level=all=warn --idle=yes --force-window=yes --fs --wayland-app-id=obsidience-tv-player --video-sync=display-resample --cache=yes --demuxer-max-bytes=64MiB --input-ipc-server=%t/obsidience-tv-player.sock'
 ExecStopPost=/usr/bin/rm -f %t/obsidience-tv-player.sock
 Restart=on-failure
 RestartSec=2
