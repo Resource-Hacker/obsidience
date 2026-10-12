@@ -92,6 +92,12 @@ or fails is opened once more with a fresh session; if that fails too the state i
 titles and channel ids, state changes and when advertisements begin and end, never a
 stream address.
 
+Measured on the television, 2026-10-12 (FOX Weather, about three minutes of advertisements
+every 12-17 minutes): the card showed 4.6 s after the advertisements began, the programme
+returned 4.8 s after they ended, and in the following two minutes video and audio each
+advanced 120.0 s with no stall. Through `tv.control` an idle player showed the channel
+1.0 s after the tuner got the request (3.7 s for the whole typed request).
+
 After a streamlink update, check what the tuner relies on beyond its public session,
 plugin and stream calls: the Pluto plugin taking a channel id in the page address,
 keeping its `app_version` per instance and accepting a new `url` on the same instance;
