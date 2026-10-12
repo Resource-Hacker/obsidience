@@ -1,6 +1,6 @@
 --- a/hindsight_api/engine/providers/openai_compatible_llm.py
 +++ b/hindsight_api/engine/providers/openai_compatible_llm.py
-@@ -700,6 +700,25 @@
+@@ -738,6 +738,25 @@
          if reset_seconds:
              retry_candidates.append(now + timedelta(seconds=max(reset_seconds)))
  

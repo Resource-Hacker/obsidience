@@ -1,0 +1,14 @@
+--- a/hindsight_api/engine/query_analyzer.py
++++ b/hindsight_api/engine/query_analyzer.py
+@@ -463,6 +463,11 @@
+         # Highest signal score wins; ties broken by the longest matched span.
+         _, _, parsed_date = max(scored_results, key=lambda entry: (entry[0], entry[1]))
+ 
++        # dateparser answers with a naive date on the reference's own calendar. Keep the
++        # reference offset, so the window is that local day rather than the same date in UTC.
++        if parsed_date.tzinfo is None and reference_date.tzinfo is not None:
++            parsed_date = parsed_date.replace(tzinfo=reference_date.tzinfo)
++
+         # Create constraint for single day
+         start_date = parsed_date.replace(hour=0, minute=0, second=0, microsecond=0)
+         end_date = parsed_date.replace(hour=23, minute=59, second=59, microsecond=999999)

@@ -177,16 +177,16 @@
     },
     "hindsight": {
       "repository": "https://github.com/vectorize-io/hindsight",
-      "version": "0.10.2",
+      "version": "0.10.3",
       "license": "MIT",
-      "package": "hindsight-api-slim[local-onnx]==0.10.2",
+      "package": "hindsight-api-slim[local-onnx]==0.10.3",
       "integration": "Separate local PostgreSQL/pgvector memory server; CPU ONNX embedding and FlashRank reranking. The ADK Executive loop takes bounded automatic recall through the Obsidience memory port. Supported async retain operation IDs, webhooks, memory graph/list APIs and immutable Source handoffs replace the ordinary Temporary-memory writer. The read-only Memory pane consumes native graph identities separately from accepted Articles. The ADK conversation log and its provider window own live conversation/context; Alexandria Curate and owner Review own durable wiki recommendations. Memory inference borrows preemptible idle capacity from the existing model owner. No coding-agent git-history importer, second wiki or generative reflect call is mounted.",
       "cordis_reference": {
         "package": "@vectorize-io/hindsight-coding-agents",
         "version": "0.6.1",
         "usage": "Supported Cordis integration patterns inspected; its opinionated coding wiki/runtime is not installed or copied."
       },
-      "wheel_sha256": "5f05c1017813000e8c46da941ad5cdd7b3d288d864bd985690f8c4f9555f7f64",
+      "wheel_sha256": "1b96b1733a90db03374ce997a81caebcdbd11b4178f9b2d95cdc7d8af28ce4b9",
       "validated_environment": {
         "python": "3.13.14",
         "postgresql": "18.6",
@@ -200,34 +200,34 @@
           "files": [
             {
               "path": "hindsight_api/engine/memory_engine.py",
-              "preimage_sha256": "a29452cbe3d98599dbef96d260569713bdf673a0c8df02774bc98c1745dd4f3d",
-              "installed_sha256": "13599f5258e370f21ef640caf38b4280da30bd92e497f474ef6c325958723e10"
+              "preimage_sha256": "edb5bd32d8d00fc00ded361a5f6c8701f7aecab01335f588a69fee072f5e2b4c",
+              "installed_sha256": "57f1a13a871c20c7546eb7bf8d3c82d0fdb5f0e7d9b5d82d94882af3994351a9"
             },
             {
               "path": "hindsight_api/api/http.py",
-              "preimage_sha256": "74970ce46d5f3666692c14c9b0668c6226a0f3a505d92cedd3ddbccfbef40bcc",
-              "installed_sha256": "04b943021b46517fdcbe698b6b4cb8cc2742db8f6cd5db800104f367067b172b"
+              "preimage_sha256": "9112d3dbb7654c8fce33de6d7755e6e6e136b78b86a92b456a8de280096c8261",
+              "installed_sha256": "1f8c873c7498b654deda139a8ee191573daddf1fbf6aa446f14054e2b7e8df61"
             }
           ]
         },
         {
           "path": "obsidience/scripts/patches/hindsight/0002-bound-cpu-reranking-and-cancellation.patch",
-          "purpose": "Expose a local FlashRank ONNX intra-op thread setting with spinning disabled when configured; carry the existing request cancellation token into CPU microbatch checkpoints. Preserve the reranker model, 512-token limit, candidate budgets, scoring pipeline and prior graph patch. Apply after 0001. Batch size uses the existing native configuration option.",
+          "purpose": "Expose a local FlashRank ONNX intra-op thread setting with spinning disabled when configured; carry the existing request cancellation token into CPU microbatch checkpoints. Preserve the reranker model, 512-token limit, candidate budgets, scoring pipeline and prior graph patch. Apply after 0001. Batch size uses the existing native configuration option. The cancellable FlashRank path applies upstream's per-candidate token cap (0.10.3) itself, because it bypasses the base predict().",
           "files": [
             {
               "path": "hindsight_api/engine/cross_encoder.py",
-              "preimage_sha256": "2e1e43b95261dc3be2fbfe60f5a5ba493035a8de34f7740dbd5255a4b02d51b2",
-              "installed_sha256": "0550285eaad1e01046596acb6ca6b4dfaa1b25e37fb025a4bf9ad64522898af1"
+              "preimage_sha256": "b9e604a271328aa525939da4878ec5c807fea282382cbef4d27e280090c67e80",
+              "installed_sha256": "987711584d5e3ee4bd6bc7172c1606e81565e3c80be7511618dc33e0df6e1749"
             },
             {
               "path": "hindsight_api/engine/search/reranking.py",
-              "preimage_sha256": "272b442b8f1ce88539fad9d1fd0bd95f8dbd80cf61a2a291476ef13323d5d52e",
-              "installed_sha256": "c053948fe568b73a5b83feb2153c84e52f1ac10a7d24be67e032a285bd133372"
+              "preimage_sha256": "5b428be91758cb2b7b56b2619edccd0df199020234d43411133b4cfac51ac15a",
+              "installed_sha256": "29bb0e701c8472dcc413260dfc8395989ca41d86a7d63c6e42a998cff17e1a0a"
             },
             {
               "path": "hindsight_api/engine/memory_engine.py",
-              "preimage_sha256": "13599f5258e370f21ef640caf38b4280da30bd92e497f474ef6c325958723e10",
-              "installed_sha256": "f3373d370f6c77c356fd474ce5020ddb05ffbb3731a6b211dfbf5190562be039"
+              "preimage_sha256": "57f1a13a871c20c7546eb7bf8d3c82d0fdb5f0e7d9b5d82d94882af3994351a9",
+              "installed_sha256": "2abff48637b49ab6489b0541d7c5e377923d8e4d7aae861c1ae6a484c122d27d"
             }
           ]
         },
@@ -237,8 +237,19 @@
           "files": [
             {
               "path": "hindsight_api/engine/providers/openai_compatible_llm.py",
-              "preimage_sha256": "6f94a136999fa799391e7b62b10bd65a03f23a1cb20b78760c7ed442ab9caf7b",
-              "installed_sha256": "2514f66d6a204c5d8c0dd6c68711ca2e47e6bbfdc1a98331debc99fde9bf4e5b"
+              "preimage_sha256": "5cfe2f9c870b8dbf4affcbb96d0e15804b05d17951495ff2cda25636d8667395",
+              "installed_sha256": "2daca241889f91464a85e7dd24305d77fed9afa32c90497c2485cbeedd2635be"
+            }
+          ]
+        },
+        {
+          "path": "obsidience/scripts/patches/hindsight/0004-keep-reference-offset-in-parsed-dates.patch",
+          "purpose": "Keep the recall anchor's UTC offset on a date parsed from the query (\"on Friday\", \"two days ago\", \"October 8\"), so its one-day window is the owner's local day instead of the same calendar date in UTC. Callers without an offset-aware anchor are unchanged.",
+          "files": [
+            {
+              "path": "hindsight_api/engine/query_analyzer.py",
+              "preimage_sha256": "c6d5a559e1a98ab53ce5bd9d076539cfc9a7fd860555d3587de58d5126b05f7c",
+              "installed_sha256": "3a807f30b1e26011c244c1e1177a9154aaf1774a8bf05b3c389ea009d2acd507"
             }
           ]
         }

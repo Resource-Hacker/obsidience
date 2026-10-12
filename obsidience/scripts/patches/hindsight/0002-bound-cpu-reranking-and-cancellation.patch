@@ -16,7 +16,7 @@
  from ..config import (
      DEFAULT_LITELLM_API_BASE,
      DEFAULT_RERANKER_ALIBABA_MODEL,
-@@ -160,6 +162,15 @@
+@@ -179,6 +181,15 @@
              provider=self.provider_name,
          )
  
@@ -32,7 +32,7 @@
      async def _predict(self, pairs: list[tuple[str, str]]) -> list[float]:
          """Score ``pairs`` without retry — what each backend in this module implements.
  
-@@ -1364,11 +1375,15 @@
+@@ -1385,11 +1396,15 @@
          # Configure ONNX session options before Ranker creates the session.
          # When cpu_mem_arena=False (default), ONNX won't pre-allocate an arena
          # that grows monotonically, keeping RSS bounded after rerank batches.
@@ -50,7 +50,7 @@
          else:
              session_options = None
  
-@@ -1395,7 +1410,10 @@
+@@ -1416,7 +1431,10 @@
                      break
              if model_file:
                  self._ranker.session = ort.InferenceSession(model_file, sess_options=session_options)
@@ -62,7 +62,7 @@
  
          # Initialize shared executor
          if FlashRankCrossEncoder._executor is None:
-@@ -1409,7 +1427,7 @@
+@@ -1430,7 +1448,7 @@
          else:
              logger.info("Reranker: FlashRank provider initialized (using existing executor)")
  
@@ -71,7 +71,7 @@
          """Synchronous predict — each query group, in bounded batches.
  
          FlashRank scores every passage of a request in one ONNX forward pass, and
-@@ -1421,9 +1439,9 @@
+@@ -1442,9 +1460,9 @@
          one long candidate inflates the sequence length for every other one.
  
          Splitting into ``batch_size`` chunks bounds the peak the same way the
@@ -84,7 +84,7 @@
          """
          if not pairs:
              return []
-@@ -1444,6 +1462,8 @@
+@@ -1465,6 +1483,8 @@
                  global_indices = [idx for idx, _ in indexed_texts]
  
                  for start in range(0, len(indexed_texts), self.batch_size):
@@ -93,7 +93,7 @@
                      batch = indexed_texts[start : start + self.batch_size]
  
                      # Build passages list for FlashRank. Ids are batch-local, so
-@@ -1461,10 +1481,22 @@
+@@ -1482,10 +1502,26 @@
                          global_idx = global_indices[start + local_idx]
                          all_scores[global_idx] = score
  
@@ -109,6 +109,10 @@
 +        if self._ranker is None:
 +            raise RuntimeError("Reranker not initialized. Call initialize() first.")
 +        cancellation.raise_if_cancelled()
++        # This path skips the base predict(), so apply its per-candidate cap here too.
++        if self.max_tokens_per_candidate is not None and pairs:
++            docs = _truncate_docs_to_tokens([doc for _, doc in pairs], self.max_tokens_per_candidate)
++            pairs = [(query, doc) for (query, _), doc in zip(pairs, docs)]
 +        return await asyncio.get_running_loop().run_in_executor(
 +            FlashRankCrossEncoder._executor, self._predict_sync, pairs, cancellation,
 +        )
@@ -137,21 +141,21 @@
          """
          Rerank candidates using cross-encoder scores.
  
-@@ -414,7 +417,10 @@
-         token = _served_provider.set(None)
+@@ -415,7 +418,10 @@
          try:
              try:
--                scores = await self.cross_encoder.predict(pairs)
+                 # The model takes 2-tuples; `pairs` is built as two-element lists.
+-                scores = await self.cross_encoder.predict([(a, b) for a, b in pairs])
 +                if cancellation is not None:
-+                    scores = await self.cross_encoder.predict_cancellable(pairs, cancellation)
++                    scores = await self.cross_encoder.predict_cancellable([(a, b) for a, b in pairs], cancellation)
 +                else:
-+                    scores = await self.cross_encoder.predict(pairs)
++                    scores = await self.cross_encoder.predict([(a, b) for a, b in pairs])
              except RerankTimeoutError as exc:
                  logger.warning(f"Reranking: {exc}; ranking the remainder by RRF order")
                  unscored = {i for i, score in enumerate(exc.scores) if score is None}
 --- a/hindsight_api/engine/memory_engine.py
 +++ b/hindsight_api/engine/memory_engine.py
-@@ -9360,7 +9360,10 @@
+@@ -9915,7 +9915,10 @@
  
                      # Ensure reranker is initialized (for lazy initialization mode)
                      await reranker_instance.ensure_initialized()

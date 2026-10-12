@@ -130,6 +130,7 @@ uv pip install --python <hindsight-venv>/bin/python -r obsidience/harness/memory
 patch --forward -d <hindsight-venv>/lib/python3.13/site-packages -p1 < obsidience/scripts/patches/hindsight/0001-render-graphs-outside-event-loop.patch
 patch --forward -d <hindsight-venv>/lib/python3.13/site-packages -p1 < obsidience/scripts/patches/hindsight/0002-bound-cpu-reranking-and-cancellation.patch
 patch --forward -d <hindsight-venv>/lib/python3.13/site-packages -p1 < obsidience/scripts/patches/hindsight/0003-openrouter-daily-quota-reset.patch
+patch --forward -d <hindsight-venv>/lib/python3.13/site-packages -p1 < obsidience/scripts/patches/hindsight/0004-keep-reference-offset-in-parsed-dates.patch
 ```
 
 Initialize a private PostgreSQL cluster with UTF-8, local peer authentication,
@@ -180,6 +181,7 @@ HINDSIGHT_API_RERANKER_FLASHRANK_CACHE_DIR=<private model cache>
 HINDSIGHT_API_RERANKER_MAX_CANDIDATES_LOW=16
 HINDSIGHT_API_RERANKER_FLASHRANK_BATCH_SIZE=1
 HINDSIGHT_API_RERANKER_FLASHRANK_INTRA_OP_THREADS=8
+HINDSIGHT_API_RECALL_STRATEGY_BOOSTS=temporal:medium
 HINDSIGHT_API_CONSOLIDATION_RECALL_BUDGET=mid
 HINDSIGHT_API_WEBHOOK_ALLOWED_HOSTS=127.0.0.1
 HINDSIGHT_API_AUDIT_LOG_ENABLED=false
@@ -215,6 +217,14 @@ worker; no new cancellation owner or rerank model is added. `OMP_NUM_THREADS`
 does not configure ONNX's own thread pool. The model and 512-token truncation
 remain unchanged; dynamic quantization can cause small batch-dependent score
 differences. Re-measure the profile after an ONNX, model or hardware change.
+
+A question that names a time ("yesterday", "on Friday") gets a further retrieval
+arm: memories dated in that window, then memories linked to them in time. The
+window ranks, it does not filter. The `temporal:medium` boost promotes that arm.
+Set it only on Hindsight 0.10.3 or later: in 0.10.2 the same setting lowered
+recall for dated questions. The fourth native patch keeps the port's local
+offset on a date parsed from the question, so its window is the owner's
+calendar day rather than the same date in UTC.
 
 Supervise the private PostgreSQL server and
 `<hindsight-venv>/bin/hindsight-api --host 127.0.0.1 --port 8790` as separate user

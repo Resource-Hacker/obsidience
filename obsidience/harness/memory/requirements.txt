@@ -1,2 +1,2 @@
-hindsight-api-slim[local-onnx]==0.10.0
+hindsight-api-slim[local-onnx]==0.10.3
 flashrank==0.2.10
