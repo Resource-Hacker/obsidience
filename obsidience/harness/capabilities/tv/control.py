@@ -599,6 +599,20 @@ def _stream_shown(window):
     return bool(re.search(r' u0 ' + re.escape(MOONLIGHT) + r'/[\w.$]*\.Game\}', window))
 
 
+def _stream_unobstructed():
+    """Whether Moonlight's stream view has nothing over it; None when the TV agent cannot say.
+
+    While the stream plays, Moonlight's screen is one unlabelled video view. When the host
+    restarts, Moonlight stays in front with a "Connection Terminated" dialog: the same
+    focused activity, so the window alone reads as a running stream (seen 2026-10-12).
+    One agent screen read (~30 ms) tells them apart by the dialog's labels.
+    """
+    tree = _ask('tree', max=40)
+    if tree is None:
+        return None
+    return not any((node.get('text') or node.get('desc') or '').strip() for node in tree.get('nodes', []))
+
+
 def _pc_state(state):
     """While the TV shows the PC player's stream, the state describes that player, not Moonlight.
 
@@ -1141,7 +1155,7 @@ def _show_stream(row, cancel, context):
     """
     def shown():
         try:
-            return _stream_shown(_window(row, cancel))
+            return _stream_shown(_window(row, cancel)) and _stream_unobstructed() is not False
         except ValueError:  # No focused window during a transition.
             return False
     if shown():
@@ -1633,7 +1647,7 @@ def _execute(args, context):
                                      'sent to the TV. Report playback as unverified.')}
             reply = _ask('state')
             if (reply is not None and _agent_power(reply) == {'wakefulness': 'Awake', 'display': 'ON'}
-                    and _stream_shown(_agent_window(reply))):
+                    and _stream_shown(_agent_window(reply)) and _stream_unobstructed() is not False):
                 # The TV already shows the stream: nothing is sent to it.
                 return _pc_opened(row, cancel, context, action, link, title, loaded, _agent_power(reply), extra)
         # Volume and mute need no screen, so their first audio read replaces the power read.
