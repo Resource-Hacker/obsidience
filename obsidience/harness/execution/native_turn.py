@@ -77,15 +77,30 @@ PROTOCOL = (
 )
 
 
-def _recalled(row):
-    """Model-facing recall row: local recording minute, differing occurrence date, text."""
+def _age(then, now) -> str:
+    """How long ago a local moment was, in calendar terms the owner uses."""
+    days = (now.date() - then.date()).days
+    if days < 2:
+        return 'yesterday' if days == 1 else 'today'
+    if days < 14:
+        return f'{days} days ago'
+    if days < 60:
+        return f'{days // 7} weeks ago'
+    return f'{days // 30} months ago' if days < 730 else f'{days // 365} years ago'
+
+
+def _recalled(row, now, refs):
+    """Model-facing recall row: local recording minute with its age, differing occurrence date, text."""
     def moment(value):
         try:
             return datetime.fromisoformat(value)
         except (TypeError, ValueError):
             return None
     recorded, occurred = moment(row.get('mentioned_at')), moment(row.get('occurred_start'))
-    item = {'recorded': recorded.astimezone().strftime('%Y-%m-%d %H:%M')} if recorded else {}
+    item = {'ref': row['ref']} if refs else {}
+    if recorded:
+        recorded = recorded.astimezone()
+        item['recorded'] = f"{recorded:%Y-%m-%d %H:%M} ({_age(recorded, now)})"
     if occurred:
         # Hindsight stores a date-only occurrence at UTC midnight; keep that calendar date.
         day = (occurred.date() if occurred.utcoffset() == timedelta(0) and occurred.time() < time_of_day(0, 0, 1)
@@ -95,9 +110,15 @@ def _recalled(row):
     return {**item, 'text': row['text']}
 
 
-def recall_reply(value) -> dict:
-    """The model-facing reply to the native memory hook's recall request."""
-    return {'notice': value.get('notice'), 'memories': [_recalled(row) for row in value.get('memories', [])]}
+def recall_reply(value, *, refs=False) -> dict:
+    """The model-facing reply to a recall: the memory hook's, or with refs the observations.recall Tool's.
+
+    Each memory's age against the local clock is explicit: a days-old memory was
+    presented as "earlier today" when only its recording minute was shown.
+    """
+    now = datetime.now().astimezone()
+    return {'notice': value.get('notice'),
+            'memories': [_recalled(row, now, refs) for row in value.get('memories', [])]}
 
 
 def memory_message(recalled: dict) -> str:
@@ -106,26 +127,23 @@ def memory_message(recalled: dict) -> str:
 
 
 def recall_query(text, conversation_id=None, before_sequence=None):
-    """The automatic recall query: the owner request plus the exchange it follows.
+    """The automatic recall query: the owner request and the owner request it follows.
 
     A follow-up ("do that again", "what about it") names its subject only in
-    the preceding exchange. Admission, the memory hook and speech preparation
-    build the same bounded query from the same public ledger rows.
+    the preceding request, which memory recalls separately (Hindsight.recall).
+    One query of the request plus the whole previous exchange returned memories
+    of the previous topic: measured 2026-10-12 on 34 questions after an unrelated
+    exchange, 3 to 22 kept a useful memory against 24 for the request alone.
+    Admission, the memory hook and speech preparation build the same bounded
+    pair from the same public ledger rows.
     """
     text = text.strip()
     if not conversation_id:
-        return text
+        return text, ''
     from ..knowledge.index import INDEX
     turns = INDEX.conversation_turns(conversation_id, before_sequence=before_sequence, limit=8)
     owner = next((turn for turn in reversed(turns) if turn['role'] == 'user'), None)
-    if owner is None:
-        return text
-    previous = 'Owner: ' + ' '.join(owner['text'].split())[:200]
-    reply = next((turn for turn in turns if turn['role'] == 'assistant'
-                  and turn['reply_to'] == owner['id'] and turn['state'] in {'final', 'interrupted'}), None)
-    if reply is not None:
-        previous += '\nAssistant: ' + ' '.join(reply['text'].split())[:500 - len(previous)]
-    return text + '\n\nPrevious exchange:\n' + previous
+    return text, ' '.join(owner['text'].split())[:200] if owner else ''
 
 
 def prefetch_recall(agent_ref, text, turn=None):
@@ -139,7 +157,7 @@ def prefetch_recall(agent_ref, text, turn=None):
     from ..memory.hindsight import MEMORY
     query = recall_query(text, *((str(turn['conversation_id']), int(turn['sequence'])) if turn else ()))
     return agent_ref, query, asyncio.create_task(
-        MEMORY.recall(agent_ref, query), name='obsidience-executive-recall')
+        MEMORY.recall(agent_ref, *query), name='obsidience-executive-recall')
 
 
 async def turn_recall(ctx, query, *, emit, run, context_text='', evaluation=None) -> dict:
@@ -151,10 +169,11 @@ async def turn_recall(ctx, query, *, emit, run, context_text='', evaluation=None
     from ..memory.hindsight import MEMORY
     recall_started = time.perf_counter()
     params = ctx.get('params') or {}
+    query = (query, '')
     if evaluation is None and params.get('conversation_id'):
         from ..knowledge.index import INDEX
         turn = INDEX.conversation_turn(params['reply_to_turn_id']) or {}
-        query = recall_query(query, params['conversation_id'], turn.get('sequence'))
+        query = recall_query(query[0], params['conversation_id'], turn.get('sequence'))
     prefetched = ctx.pop('_memory_recall', None)
     if evaluation is not None:
         value = {'status': 'disabled', 'memories': []}
@@ -162,7 +181,7 @@ async def turn_recall(ctx, query, *, emit, run, context_text='', evaluation=None
         # Started at admission; duration_ms below is the remaining wait.
         value = await prefetched[2]
     else:
-        value = await MEMORY.recall(ctx['_agent_ref'], query)
+        value = await MEMORY.recall(ctx['_agent_ref'], *query)
     from . import activity
     refs = [row['ref'] for row in value.get('memories', [])]
     if refs:

@@ -95,7 +95,7 @@ async def prepare(conversation, text: str, response_contract: str, *, idle: bool
             if native and not idle:
                 from ..memory.hindsight import MEMORY
                 # The final transcript's turn follows the same latest exchange.
-                recall = asyncio.create_task(MEMORY.recall(agent.ref, recall_query(text, conversation_id),
+                recall = asyncio.create_task(MEMORY.recall(agent.ref, *recall_query(text, conversation_id),
                                                            speculative=True),
                                              name="obsidience-speech-recall")
             try:

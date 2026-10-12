@@ -7,6 +7,7 @@ async def execute(args: dict, context: dict) -> str:
     from obsidience.harness.knowledge.vault import resolver
     from obsidience.harness.memory.hindsight import MEMORY
     from obsidience.harness.execution import activity
+    from obsidience.harness.execution.native_turn import recall_reply
 
     agent, _allowed = execution_scope(context, resolver())
     result = await MEMORY.recall(agent.ref, args["query"], timeout=6, budget="mid")
@@ -14,4 +15,5 @@ async def execute(args: dict, context: dict) -> str:
     if refs:
         activity.emit_operation("read", "returned", refs, label="Hindsight recall",
                                 run_id=str(context.get("run_id", "")))
-    return json.dumps(result, ensure_ascii=False)
+    # The same rendering as the automatic recall (local time and age), plus exact refs.
+    return json.dumps({"status": result["status"], **recall_reply(result, refs=True)}, ensure_ascii=False)

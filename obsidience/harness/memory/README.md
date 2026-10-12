@@ -46,6 +46,13 @@ history importer and separate coding wiki are deliberately not mounted.
    window (there is no summary compaction). Automatic recall has a 750 ms deadline; the
    explicit scoped `observations.recall` Tool permits six seconds. Neither
    path calls generative Reflect or treats memory as current screen evidence.
+   Automatic recall queries the owner request alone and, concurrently under the
+   same deadline, the request joined with the owner request it follows; the
+   second result fills one of the three slots. Every recall sends the local
+   time as `query_timestamp`, so "today" and "yesterday" resolve on the owner's
+   calendar. The port, not Hindsight's `prefer_observations`, drops an
+   observation/source pair, keeping the better-ranked one. The model sees each
+   memory's local recording minute with its age ("4 days ago").
 
 The mental models ask about owner preferences, workstation changes and
 decisions.
