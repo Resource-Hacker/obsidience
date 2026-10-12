@@ -423,6 +423,93 @@ class HyprlandSurfaceWindows:
         self._publish()
         return False, "move_not_observed"
 
+    def place_floating(
+        self, window_id: str, destination_surface_id: str, rect: LocalRect
+    ) -> tuple[bool, str]:
+        """Put one already-floating window at a Surface-local rect; verify it."""
+
+        if (
+            _ADDRESS.fullmatch(window_id) is None
+            or destination_surface_id not in SURFACE_IDS
+            or rect.normalized() is None
+        ):
+            return False, "invalid_destination"
+        clients, monitors = self.clients_and_monitors()
+        client = next(
+            (
+                item
+                for item in clients
+                if isinstance(item, dict) and item.get("address") == window_id
+            ),
+            None,
+        ) if isinstance(clients, list) else None
+        if client is None:
+            return False, "window_absent"
+        if client.get("floating") is not True:
+            return False, "not_floating"
+        output = next(
+            (
+                name
+                for name, surface in surface_outputs(monitors).items()
+                if surface == destination_surface_id
+            ),
+            "",
+        )
+        monitor = next(
+            (
+                item
+                for item in monitors
+                if isinstance(item, dict) and item.get("name") == output
+            ),
+            None,
+        ) if output else None
+        origin_x = _number(monitor.get("x")) if monitor else None
+        origin_y = _number(monitor.get("y")) if monitor else None
+        if origin_x is None or origin_y is None:
+            return False, "invalid_destination"
+        x, y = round(origin_x + rect.x), round(origin_y + rect.y)
+        window = f'window = "address:{window_id}"'
+        resized = self._dispatch(
+            f"hl.dsp.window.resize({{ x = {rect.width}, y = {rect.height}, {window} }})"
+        )
+        moved = self._dispatch(f"hl.dsp.window.move({{ x = {x}, y = {y}, {window} }})")
+        if not self._accepted(resized) or not self._accepted(moved):
+            self._publish()
+            return False, "move_rejected"
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            clients = self._json("clients")
+            current = next(
+                (
+                    item
+                    for item in clients
+                    if isinstance(item, dict) and item.get("address") == window_id
+                ),
+                None,
+            ) if isinstance(clients, list) else None
+            local = _local_rect(current, origin_x, origin_y)
+            if (
+                current is not None
+                and current.get("monitor") == monitor.get("id")
+                and local is not None
+                and max(
+                    abs(local.x - rect.x),
+                    abs(local.y - rect.y),
+                    abs(local.width - rect.width),
+                    abs(local.height - rect.height),
+                ) <= 2
+            ):
+                self._publish()
+                return True, ""
+            time.sleep(0.05)
+        self._publish()
+        return False, "placement_not_observed"
+
+    def clients_and_monitors(self) -> tuple[object, object]:
+        """One read-only native snapshot for the application session record."""
+
+        return self._json("clients"), self._json("monitors", "all")
+
     def _verify_placement(self, window_id: str, tile: dict[str, object]) -> bool:
         """Ask the existing layout owner once whether exact requested bounds settled."""
         message = (

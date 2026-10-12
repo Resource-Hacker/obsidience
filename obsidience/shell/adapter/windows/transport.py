@@ -74,6 +74,8 @@ class ShellWindowTransport:
         self._click_tokens: set[str] = set()
         self._applied_grids: dict[str, tuple[int, int]] = {}
         self._applied_policy: tuple[int, bool, int, int, int, bool] | None = None
+        # The Shell's latest per-Surface tile grids, for adapter-owned placement.
+        self._workspace_grids: dict[str, tuple[int, int]] = {}
         self._stop = threading.Event()
         self._thread = threading.Thread(
             target=self._run,
@@ -86,6 +88,11 @@ class ShellWindowTransport:
 
     def stop(self) -> None:
         self._stop.set()
+
+    def grids(self) -> dict[str, tuple[int, int]] | None:
+        """Return the Shell's current tile grids, or None before its first state."""
+        grids = self._workspace_grids
+        return dict(grids) if grids else None
 
     def _run(self) -> None:
         while not self._stop.is_set():
@@ -153,6 +160,7 @@ class ShellWindowTransport:
             policy = self._policy(event)
             if grids is None or policy is None:
                 return
+            self._workspace_grids = grids
             if self._applied_policy != policy:
                 try:
                     success, reason = self.configure_policy(*policy)

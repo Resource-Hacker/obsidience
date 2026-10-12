@@ -11,6 +11,7 @@ from gi.repository import GLib
 
 from .hyprland import HyprlandSurfaceWindows
 from .model import ApplicationWindow, WindowStateStore
+from .session import ApplicationSession
 from .transport import ShellWindowTransport
 
 LOGGER = logging.getLogger(__name__)
@@ -32,16 +33,25 @@ class WindowAdapterHost:
             click=self._click,
             refresh=self.hyprland.refresh,
         )
+        self.session = ApplicationSession(
+            self.store,
+            self.hyprland.clients_and_monitors,
+            self._place,
+            self.hyprland.place_floating,
+            self.transport.grids,
+        )
         self.loop = GLib.MainLoop()
 
     def run(self) -> None:
         self.hyprland.start()
         self.transport.start()
+        self.session.start()
         signal.signal(signal.SIGTERM, lambda *_args: self.loop.quit())
         signal.signal(signal.SIGINT, lambda *_args: self.loop.quit())
         try:
             self.loop.run()
         finally:
+            self.session.stop()
             self.transport.stop()
             self.hyprland.stop()
 
