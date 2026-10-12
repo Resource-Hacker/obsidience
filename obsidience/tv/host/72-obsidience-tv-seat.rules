@@ -1,0 +1,24 @@
+# Obsidience TV: Sunshine's virtual input devices (libvirtualhid) are kernel devices
+# that every seat0 reader sees. Park them on a seat no compositor owns, so libinput
+# on seat0 (Hyprland/aquamarine) skips them, logind gives the desktop user no ACL on
+# them, and logind stops watching the virtual keyboard for power keys.
+# Must sort after 60-sunshine.rules and 70-power-switch.rules, before 73-seat-late.rules.
+# MODE closes the world-readable legacy js node of the absolute mouse.
+# Same mechanism as Wolf's 85-wolf.rules (phantom seat9).
+ACTION=="remove", GOTO="obsidience_tv_seat_end"
+
+# Keyboard 1209:0002, mouse 1209:0003 (relative and absolute), touchscreen 1209:0004,
+# trackpad 1209:0005, pen tablet 1209:0006, generic controller 1209:0001.
+SUBSYSTEM=="input", ATTRS{id/vendor}=="1209", ATTRS{id/product}=="000[1-6]", ATTRS{name}=="*libvirtualhid*", MODE="0660", ENV{ID_SEAT}="seat-obsidience-tv", TAG-="power-switch"
+
+# Controllers that copy a real vendor id (Xbox 045e, Sony 054c, Nintendo 057e) and the
+# child devices their kernel drivers add (touchpad, motion sensors).
+SUBSYSTEM=="input", ATTRS{name}=="Sunshine (libvirtualhid)*", MODE="0660", ENV{ID_SEAT}="seat-obsidience-tv", TAG-="power-switch"
+SUBSYSTEM=="input", ATTRS{phys}=="libvirtualhid/uhid/*", MODE="0660", ENV{ID_SEAT}="seat-obsidience-tv", TAG-="power-switch"
+
+# hidraw nodes of the UHID controllers (name and phys live on the HID parent's uevent).
+SUBSYSTEM=="hidraw", KERNEL=="hidraw*", IMPORT{parent}="HID_*"
+SUBSYSTEM=="hidraw", KERNEL=="hidraw*", ENV{HID_PHYS}=="libvirtualhid/uhid/*", ENV{ID_SEAT}="seat-obsidience-tv"
+SUBSYSTEM=="hidraw", KERNEL=="hidraw*", ENV{HID_NAME}=="Sunshine (libvirtualhid)*", ENV{ID_SEAT}="seat-obsidience-tv"
+
+LABEL="obsidience_tv_seat_end"

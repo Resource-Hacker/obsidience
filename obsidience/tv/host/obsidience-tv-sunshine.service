@@ -7,6 +7,8 @@ PartOf=obsidience-tv-session.service
 [Service]
 Type=exec
 UnsetEnvironment=DISPLAY HYPRLAND_INSTANCE_SIGNATURE
+# NVENC on the RTX 4080 only (GPU UUID), never the model GPU.
+Environment=CUDA_VISIBLE_DEVICES=GPU-4332e1a5-17a8-7e18-5347-5a296549ee81
 # The TV's private audio server: Sunshine's default-sink switching stays in there.
 Environment=PULSE_SERVER=unix:%t/obsidience-tv/pulse/native
 Environment=PIPEWIRE_RUNTIME_DIR=%t/obsidience-tv

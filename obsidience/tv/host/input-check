@@ -1,0 +1,59 @@
+#!/bin/sh
+# Exit 0 only when every Sunshine virtual input device that exists right now is
+# invisible to the desktop. Whatever cannot be proven is a failure (fail closed).
+# Unprivileged and read-only: sysfs, udev database, own-user /proc, keyd journal, hyprctl.
+set -u
+SEAT=seat-obsidience-tv
+die() { echo "tv-input-check: FAIL: $*" >&2; exit 1; }
+
+[ -r /etc/udev/rules.d/72-obsidience-tv-seat.rules ] || die "seat rule is not installed"
+grep -qx -- '-1209:0002' /etc/keyd/default.conf || die "keyd config does not exclude 1209:0002"
+
+# Sunshine creates its keyboard at start (not at connect); wait for it, bounded.
+i=0
+until grep -qsx 'libvirtualhid Keyboard' /sys/class/input/input*/name; do
+    i=$((i + 1)); [ "$i" -lt 50 ] || die "no virtual keyboard appeared, nothing verified"
+    sleep 0.1
+done
+
+# Device nodes held by this user's processes (Hyprland runs as this user).
+held=$(find /proc/[0-9]*/fd -maxdepth 1 -lname '/dev/input/event*' -printf '%l %p\n' 2>/dev/null)
+
+for name in /sys/class/input/input*/name; do
+    grep -qs 'libvirtualhid' "$name" || continue
+    label=$(cat "$name")
+    for ev in "${name%/name}"/event*; do
+        [ -e "$ev" ] || continue
+        node=/dev/input/${ev##*/}
+        props=$(udevadm info -q property -p "$ev") || die "cannot query $node"
+        printf '%s\n' "$props" | grep -qx "ID_SEAT=$SEAT" || die "$node ($label) is not on $SEAT"
+        printf '%s\n' "$props" | grep -q '^CURRENT_TAGS=.*:power-switch:' &&
+            die "$node ($label) is still watched by logind for power keys"
+        printf '%s\n' "$held" | while read -r target path; do
+            [ "$target" = "$node" ] || continue
+            pid=${path#/proc/}; pid=${pid%%/*}
+            grep -qs 'obsidience-tv-' "/proc/$pid/cgroup" && continue
+            echo "tv-input-check: FAIL: $node ($label) is open in pid $pid ($(cat "/proc/$pid/comm" 2>/dev/null))" >&2
+            exit 1
+        done || exit 1
+    done
+done
+
+# keyd grabs every keyboard it matches and retypes it on the desktop's main keyboard.
+if systemctl is-active --quiet keyd.service; then
+    last=$(journalctl -u keyd -b -o cat --no-pager 2>/dev/null |
+        grep -E 'DEVICE: (match|ignoring) .*libvirtualhid Keyboard' | tail -n 1)
+    case "$last" in
+        *"DEVICE: ignoring"*) ;;
+        *) die "keyd has not logged that it ignores the virtual keyboard (last: ${last:-none})" ;;
+    esac
+fi
+
+# The desktop compositor must not list any of them.
+sig=$(ls -t "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hypr" 2>/dev/null | head -n 1)
+if [ -n "$sig" ]; then
+    devices=$(HYPRLAND_INSTANCE_SIGNATURE=$sig hyprctl devices 2>/dev/null) || die "cannot ask Hyprland for its devices"
+    printf '%s\n' "$devices" | grep -qi 'libvirtualhid' && die "Hyprland lists a virtual device"
+fi
+
+echo "tv-input-check: OK: Sunshine virtual input is isolated on $SEAT"

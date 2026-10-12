@@ -200,6 +200,13 @@ hl.device({
     sensitivity = 0,
 })
 
+-- Sunshine's virtual input (libvirtualhid) belongs to the TV session, never to the
+-- desktop. A udev rule parks those devices on another seat; this is the second guard.
+for _, name in ipairs({ "libvirtualhid-keyboard", "libvirtualhid-keyboard-1",
+    "libvirtualhid-mouse", "libvirtualhid-mouse-(absolute)", "libvirtualhid-touchscreen" }) do
+    hl.device({ name = name, enabled = false })
+end
+
 hl.on("hyprland.start", function()
     hl.exec_cmd("systemctl --user start --no-block obsidience-shell-session.target")
 end)
