@@ -12,6 +12,8 @@ launcher and places matching windows with the adapter's verified ``place``.
 from __future__ import annotations
 
 import contextlib
+import difflib
+import itertools
 import json
 import logging
 import math
@@ -56,6 +58,10 @@ LAUNCHER = "/home/wissenschafter/bin/agent-launch-gui"
 STABLE_SECONDS = 5.0
 RESTORE_SECONDS = 120.0
 SETTLE_SECONDS = 3.0
+# An app that reopens several windows itself (Edge) shows placeholder titles
+# first; wait this long for all of them and their real titles before pairing by
+# order (seen 2026-10-12: two Edge windows restored into each other's tiles).
+MULTI_WINDOW_SECONDS = 25.0
 HELPER_EXTENT = 48
 # Games keep their own launch contracts, leases and placement.
 NO_RELAUNCH = ("world_of_warcraft", "teamfight_tactics")
@@ -330,21 +336,38 @@ def launch_plan(
 
 def assign(
     pending: list[tuple[int, dict]], windows: list[ApplicationWindow]
-) -> list[tuple[int, ApplicationWindow]]:
-    """Pair saved entries with free windows of one app: exact title, then order."""
+) -> tuple[list[tuple[int, ApplicationWindow]], bool]:
+    """Pair saved entries with free windows of one app by title similarity.
 
-    free = list(windows)
-    pairs: list[tuple[int, ApplicationWindow]] = []
-    rest: list[int] = []
-    for index, entry in pending:
-        match = next((window for window in free if window.title == entry["title"]), None)
-        if match is None:
-            rest.append(index)
-        else:
-            free.remove(match)
-            pairs.append((index, match))
-    pairs.extend(zip(rest, free))
-    return pairs
+    Returns the best pairing and whether the titles decided it: with several
+    windows, a pairing that barely beats the alternative (placeholder titles) is
+    not decisive and the caller may wait for real titles.
+    """
+
+    if not pending or not windows:
+        return [], True
+    if max(len(pending), len(windows)) > 6:  # bounded search; such an app is paired in order
+        return list(zip((index for index, _ in pending), windows)), False
+
+    def similarity(slot: int, choice: int) -> float:
+        return difflib.SequenceMatcher(
+            None, pending[slot][1]["title"].casefold(), windows[choice].title.casefold()
+        ).ratio()
+
+    # Every way to pair the smaller side into the larger one, as (entry, window) slots.
+    if len(windows) <= len(pending):
+        options = [list(zip(slots, range(len(windows))))
+                   for slots in itertools.permutations(range(len(pending)), len(windows))]
+    else:
+        options = [list(zip(range(len(pending)), choices))
+                   for choices in itertools.permutations(range(len(windows)), len(pending))]
+    ranked = sorted(
+        ((sum(similarity(slot, choice) for slot, choice in option), option) for option in options),
+        key=lambda item: -item[0],
+    )
+    best_score, best = ranked[0]
+    decisive = len(ranked) == 1 or best_score - ranked[1][0] >= 0.15
+    return [(pending[slot][0], windows[choice]) for slot, choice in best], decisive
 
 
 def _candidate(window: ApplicationWindow) -> bool:
@@ -500,6 +523,7 @@ class ApplicationSession:
         windows: dict[int, str] = {}
         results: dict[int, str] = {}
         first_seen: dict[str, float] = {}
+        titled: dict[str, tuple[str, float]] = {}
         saved = dict(entries)
         while (
             not self._stop.is_set()
@@ -509,8 +533,10 @@ class ApplicationSession:
             now = time.monotonic()
             live = {window.window_id: (surface_id, revision, window)
                     for surface_id, revision, window in self._live()}
-            for window_id in live:
+            for window_id, (_, _, window) in live.items():
                 first_seen.setdefault(window_id, now)
+                if titled.get(window_id, ("", 0.0))[0] != window.title:
+                    titled[window_id] = (window.title, now)
             # A window that closed (a login window replaced by the main one)
             # frees its entry for the next window of that app.
             for index, window_id in list(windows.items()):
@@ -526,12 +552,17 @@ class ApplicationSession:
                 )
                 pending = [(index, entry) for index, entry in entries
                            if entry["app_id"].casefold() == key and index not in windows]
-                # Let an app finish opening its windows so titles can match.
+                # Let an app finish opening its windows and settle their titles.
                 if not free or not pending or any(
-                    now - first_seen[window.window_id] < SETTLE_SECONDS for window in free
+                    now - titled[window.window_id][1] < SETTLE_SECONDS for window in free
                 ):
                     continue
-                for index, window in assign(pending, free):
+                pairs, decisive = assign(pending, free)
+                waited = now - min(first_seen[window.window_id] for window in free)
+                if (len(pending) > 1 and waited < MULTI_WINDOW_SECONDS
+                        and (len(free) < len(pending) or not decisive)):
+                    continue
+                for index, window in pairs:
                     if self._stop.is_set():
                         return results
                     surface_id, revision, _ = live[window.window_id]
@@ -685,7 +716,7 @@ def dry_run(output: Path) -> None:
             pending = [(index, entry) for index, entry in enumerate(entries)
                        if entry["app_id"].casefold() == key]
             free = [window for window in windows if window.app_id.casefold() == key]
-            for index, window in assign(pending, free):
+            for index, window in assign(pending, free)[0]:
                 entry = entries[index]
                 target = entry["tile_bounds"] or entry["rect"]
                 print(f"  place {window.window_id} ({window.title[:48]!r}) -> "
