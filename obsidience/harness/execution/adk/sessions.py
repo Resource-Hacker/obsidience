@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import sqlite3
 import sys
 from contextvars import ContextVar
 
@@ -23,7 +24,7 @@ from google.genai import types  # noqa: E402
 
 from ..native import (  # noqa: E402
     conversation_text, measure_view, message_producer, prefill_messages as native_prefill_messages,
-    rebase_window as native_rebase_window, reconcile_outcomes,
+    rebase_window as native_rebase_window, reconcile_outcomes, window_anchor,
 )
 
 BACKEND = 'adk'
@@ -36,6 +37,8 @@ _TURN_KINDS = {'user', 'plugin:obsidience.continuation', 'plugin:obsidience.comm
 _LIVE_KINDS = {'plugin:obsidience.context', 'plugin:obsidience.memory'}
 
 _service = None
+# (conversation, window anchor) -> timestamp of the anchor's first log event.
+_floors: dict[tuple[str, str], float] = {}
 _models: dict[tuple, object] = {}
 # The current model step's metrics, set by the plugin before each request; the
 # admission client records the provider's acknowledged input count there.
@@ -113,20 +116,64 @@ def _import_litellm() -> None:
     litellm.telemetry = False
 
 
+async def window_floor(conversation_id: str) -> float | None:
+    """When the conversation's provider window begins in its log, if it has an anchor there."""
+    anchor = window_anchor(conversation_id)
+    if not anchor:
+        return None
+    key = (conversation_id, anchor)
+    if key not in _floors:
+        from ...config import CONFIG
+
+        def find():
+            with sqlite3.connect(f'file:{CONFIG.runtime_dir / STORE}?mode=ro', uri=True) as db:
+                return db.execute(
+                    'SELECT MIN(timestamp) FROM events WHERE app_name=? AND user_id=? AND session_id=? '
+                    'AND instr(event_data, ?) > 0', (APP, USER, conversation_id, anchor)).fetchone()[0]
+        floor = await asyncio.to_thread(find)
+        if floor is None:
+            return None  # The anchor is not in this log yet: load it whole.
+        _floors.clear()
+        _floors[key] = floor
+    return _floors[key]
+
+
+def _windowed_store(path: str):
+    from google.adk.sessions.base_session_service import GetSessionConfig
+    from google.adk.sessions.sqlite_session_service import SqliteSessionService
+
+    class WindowedStore(SqliteSessionService):
+        """The conversation log, loaded from its provider window's anchor onward.
+
+        ADK reloads the session and rebuilds model input from every loaded event on
+        each invocation (measured 180-560 ms at 1,817 events against 11-20 ms at
+        100-300), yet only the window after the anchor reaches the model. Earlier
+        events stay in the log; a conversation without an anchor loads whole.
+        """
+
+        async def get_session(self, *, app_name, user_id, session_id, config=None):
+            if config is None and (floor := await window_floor(session_id)) is not None:
+                config = GetSessionConfig(after_timestamp=floor)
+            return await super().get_session(
+                app_name=app_name, user_id=user_id, session_id=session_id, config=config)
+
+    return WindowedStore(path)
+
+
 async def start() -> None:
     """Open the conversation store and load LiteLLM once, before the API accepts turns."""
     global _service
     if _service is not None:
         return
-    from google.adk.sessions.sqlite_session_service import SqliteSessionService
     from ...config import CONFIG
-    _service = SqliteSessionService(str(CONFIG.runtime_dir / STORE))
+    _service = _windowed_store(str(CONFIG.runtime_dir / STORE))
     await asyncio.to_thread(_import_litellm)
 
 
 async def stop() -> None:
     global _service
     _service = None
+    _floors.clear()
     _views.clear()
     _models.clear()
     if 'litellm' in sys.modules:
@@ -312,6 +359,13 @@ async def open_session(conversation_id: str, turn_id: str | None):
     if not current or current['conversation_id'] != conversation_id:
         raise ValueError('Native conversation requires an exact admitted owner turn')
     turns = INDEX.conversation_turns(conversation_id, before_sequence=current['sequence'])
+    if await window_floor(conversation_id) is not None:
+        # The log was loaded from the window's anchor; earlier turns are already in it.
+        # Without the anchor's ledger row nothing can be placed safely: seed nothing.
+        first = INDEX.conversation_turn(window_anchor(conversation_id))
+        floor_sequence = (first['sequence'] if first and first['conversation_id'] == conversation_id
+                          else current['sequence'])
+        turns = [turn for turn in turns if turn['sequence'] >= floor_sequence]
     known = known_turns(session)
     replies = {turn['reply_to']: turn for turn in turns if turn['role'] == 'assistant'}
     for turn in turns:
