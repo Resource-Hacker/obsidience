@@ -69,14 +69,23 @@ udp 47998-48000, 48002, 48010.
 ## Known limits (measured 2026-10-12)
 
 - Sunshine sends 60 frames a second on average but unevenly (interval 3-38 ms, standard
-  deviation about 5 ms; `sudo python3 framesniff.py IFACE SECONDS` reads its outgoing packets), with or
-  without picture changes and at any compositor refresh. With "smoothest" pacing the TV
-  hides this except for a burst of skipped refreshes (about 8 s, 0.5% overall) roughly
-  every 7 minutes, when the stream clock drifts past the TV's refresh. Not solved.
+  deviation about 5 ms; `sudo python3 framesniff.py IFACE SECONDS` reads its outgoing
+  packets). Its Wayland capture polls: it asks for a frame on an exact 16.67 ms clock
+  and each request completes only at the compositor's next buffer commit, 0.7-24 ms
+  later (mean 11-13 ms at the 60 Hz mode, measured with `WAYLAND_DEBUG=1`); conversion
+  and NVENC add 6.4 ms with a 2.8 ms spread. A 120 Hz output mode cuts the wait to about
+  2 ms but then only commits with new content complete a capture, so the spacing stays
+  uneven. With "smoothest" pacing the TV hides this except for a burst of skipped
+  refreshes (about 8 s, 0.5% overall) roughly every 7 minutes, when the stream clock
+  drifts past the TV's refresh. Not solved; an event-driven capture is the direction.
 - wlroots' headless output re-arms a whole-millisecond frame timer after each commit, so
   a "60 Hz" output is not a 60.00 Hz clock (clients estimate 62-70 Hz).
-- A Pluto live channel stalls with an empty cache several minutes after it starts, at a
-  stream timestamp reset, while a fresh session keeps flowing. Under investigation.
+- FFmpeg's HLS reader (mpv's) cannot play Pluto across an ad break: Pluto serves video
+  and audio as separate playlists and marks the break with `#EXT-X-DISCONTINUITY`, which
+  FFmpeg skips; it then reads one playlist only and the player starves (no recovery in a
+  15-minute reproduction). streamlink's Pluto plugin muxes the two, drops the ad
+  segments and resumes at the next content frame (measured: 174 s pause, clean resume).
+  Feed mpv through a FIFO: over streamlink's HTTP server mpv times out during the break.
 
 ## Checking smoothness
 
