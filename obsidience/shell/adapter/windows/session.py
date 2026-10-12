@@ -7,6 +7,11 @@ missing, so a logout or reboot that closes applications one by one cannot
 shrink the record. Restore runs once per compositor instance: it launches each
 saved, allow-listed application at most once through the manager-owned
 launcher and places matching windows with the adapter's verified ``place``.
+
+The record also carries each Surface's owner-moved dividers, exactly as the
+layout owner exports them. The same restore hands them back once, after the
+windows are placed; the layout refuses them on a changed grid or work area and
+where a divider has already been moved in the new session.
 """
 
 from __future__ import annotations
@@ -293,20 +298,30 @@ def _saved_entry(value: object) -> dict | None:
     }
 
 
-def load_record(path: Path = STATE_PATH) -> list[dict]:
+def load_record(path: Path = STATE_PATH) -> tuple[list[dict], dict[str, str]]:
+    """Saved window entries, and each Surface's saved cuts."""
+
     try:
         record = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        return []
+        return [], {}
     except (OSError, ValueError) as error:
         LOGGER.warning("Application session record unreadable: %s", error)
-        return []
+        return [], {}
     if not isinstance(record, dict) or record.get("schema") != SCHEMA:
-        return []
+        return [], {}
     windows = record.get("windows")
     if not isinstance(windows, list):
-        return []
-    return [entry for entry in map(_saved_entry, windows[:256]) if entry]
+        return [], {}
+    cuts = record.get("cuts")
+    return (
+        [entry for entry in map(_saved_entry, windows[:256]) if entry],
+        {
+            surface_id: value
+            for surface_id, value in (cuts.items() if isinstance(cuts, dict) else ())
+            if surface_id in SURFACE_IDS and isinstance(value, str)
+        },
+    )
 
 
 def launch_plan(
@@ -405,13 +420,17 @@ class ApplicationSession:
         place: Callable[..., tuple[bool, str, int]],
         place_floating: Callable[[str, str, LocalRect], tuple[bool, str]],
         grids: Callable[[], dict[str, tuple[int, int]] | None],
+        cuts: Callable[[], dict[str, str]],
+        restore_cuts: Callable[[str, str], tuple[bool, str]],
     ) -> None:
         self.store = store
         self._snapshot = snapshot
         self._place = place
         self._place_floating = place_floating
         self._grids = grids
-        self._written: list | None = None
+        self._cuts = cuts
+        self._restore_cuts = restore_cuts
+        self._written: tuple[list, dict] | None = None
         self._stop = threading.Event()
         self._thread = threading.Thread(
             target=self._run, name="obsidience-window-session", daemon=True
@@ -426,9 +445,9 @@ class ApplicationSession:
 
     def _run(self) -> None:
         try:
-            entries = load_record()
+            entries, cuts = load_record()
             if self._claim_restore():
-                self._restore(entries)
+                self._restore(entries, cuts)
         except Exception as error:  # restore is best effort; recording continues
             LOGGER.warning("Application session restore stopped: %s", error)
         self._record()
@@ -455,7 +474,7 @@ class ApplicationSession:
             if _candidate(window)
         ]
 
-    def _restore(self, entries: list[dict]) -> None:
+    def _restore(self, entries: list[dict], cuts: dict[str, str]) -> None:
         if not entries:
             LOGGER.info("Application session: nothing saved to restore")
             return
@@ -493,6 +512,16 @@ class ApplicationSession:
             ", ".join(f"{app}:{reason}" for app, reason in skipped),
             ", ".join(unplaced),
         )
+        # Once, after placement: the layout then holds this session's windows,
+        # grids and resize limit, and refuses dividers already moved since.
+        for surface_id, value in sorted(cuts.items()):
+            if self._stop.is_set() or self._grids() is None:
+                return
+            success, reason = self._restore_cuts(surface_id, value)
+            LOGGER.info(
+                "Application session dividers on %s: %s",
+                surface_id, "restored" if success else reason,
+            )
 
     def _launch(self, desktop_id: str) -> str:
         """Dispatch exactly once; a failed or uncertain launch is never retried."""
@@ -643,12 +672,14 @@ class ApplicationSession:
         record = build_record(clients, monitors, grids, desktop_entries())
         if record is None:
             return False
-        if record["windows"] == self._written:
+        record["cuts"] = self._cuts()
+        written = (record["windows"], record["cuts"])
+        if written == self._written:
             return True
         if self._stop.is_set() or _tearing_down():
             return False
         write_record(record)
-        self._written = record["windows"]
+        self._written = written
         return True
 
 

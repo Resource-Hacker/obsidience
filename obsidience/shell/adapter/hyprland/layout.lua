@@ -867,6 +867,101 @@ local function move_shared_cut(state, grid, value, dx, dy, corner, area)
     end
 end
 
+-- Fixed notation without trailing zeros: 5110, -37.5.
+local function plain(value)
+    return (string.format("%.3f", value):gsub("%.?0+$", ""))
+end
+
+-- The settled state of each Surface's active workspace.
+local function active_states(allow_fullscreen)
+    local result = {}
+    for _, ctx in ipairs(active_contexts(nil, allow_fullscreen)) do
+        local first = ctx.targets[1]
+        table.insert(result, contexts[context_id(first, target_grid(first))])
+    end
+    return result
+end
+
+-- The grid and work area a state's manual cuts are measured in. Saved cuts
+-- return only to the identical geometry.
+local function cuts_geometry(state)
+    local grid, area = state.grid, state.ctx.area
+    return table.concat({
+        grid.surface, plain(grid.columns), plain(grid.rows),
+        plain(area.x), plain(area.y), plain(area.w), plain(area.h),
+    }, " ")
+end
+
+-- "x2:-40,y1:0:12.5": every moved vertical cut, and every moved horizontal cut
+-- per column. nil while all cuts rest on the grid.
+local function manual_cuts(state)
+    local grid, entries = state.grid, {}
+    for index = 1, grid.columns - 1 do
+        local value = cut_offset(state.x_cuts, index, grid.columns)
+        if value ~= 0 then
+            table.insert(entries, "x" .. index .. ":" .. plain(value))
+        end
+    end
+    for index = 1, grid.rows - 1 do
+        for column = 0, grid.columns - 1 do
+            local value = y_cut_offset(state, index, column, grid.rows)
+            if value ~= 0 then
+                table.insert(
+                    entries, "y" .. index .. ":" .. column .. ":" .. plain(value))
+            end
+        end
+    end
+    return #entries > 0 and table.concat(entries, ",") or nil
+end
+
+local function within_manual_limit(extent, count, offset)
+    for cell = 0, count - 1 do
+        local allowance = cell_extent(extent, count, cell)
+            * settings.manual_limit_percent / 100
+        -- Saved offsets carry three decimals.
+        if math.abs(offset(cell + 1) - offset(cell)) > allowance + 0.001 then
+            return false
+        end
+    end
+    return true
+end
+
+-- Replace a state's cuts with saved ones. Refuses a malformed entry and any
+-- tile resized beyond the current manual limit.
+local function restore_cuts(state, text)
+    local grid, area = state.grid, state.ctx.area
+    local x_cuts, y_cuts = {}, {}
+    for entry in text:gmatch("[^,]+") do
+        local index, value = entry:match("^x(%d+):(-?[%d.]+)$")
+        local row, column, offset = entry:match("^y(%d+):(%d+):(-?[%d.]+)$")
+        index, value = tonumber(index), tonumber(value)
+        row, column, offset = tonumber(row), tonumber(column), tonumber(offset)
+        if value and whole_number(index, 1, grid.columns - 1) then
+            x_cuts[index] = value
+        elseif offset and whole_number(row, 1, grid.rows - 1)
+                and whole_number(column, 0, grid.columns - 1) then
+            y_cuts[row] = y_cuts[row] or {}
+            y_cuts[row][column] = offset
+        else
+            return false
+        end
+    end
+    if not within_manual_limit(area.w, grid.columns, function(index)
+        return x_cuts[index] or 0
+    end) then
+        return false
+    end
+    for column = 0, grid.columns - 1 do
+        if not within_manual_limit(area.h, grid.rows, function(index)
+            return y_cuts[index] and y_cuts[index][column] or 0
+        end) then
+            return false
+        end
+    end
+    state.x_cuts, state.y_cuts = x_cuts, y_cuts
+    return true
+end
+
 local provider = {
     recalculate = function(ctx)
         place_context(ctx)
@@ -925,6 +1020,43 @@ local provider = {
                 glow_rotation_hours,
                 session_locked == 1)
             return true
+        end
+        if tokens[1] == "cuts" then
+            if #tokens ~= 1 then
+                return "obsidience: invalid cuts"
+            end
+            -- Read with `hyprctl repl`: one restore-cuts argument list for
+            -- each Surface whose cuts have been moved off the grid.
+            for _, state in ipairs(active_states(true)) do
+                local cuts = manual_cuts(state)
+                if cuts then
+                    print("obsidience-cuts " .. cuts_geometry(state) .. " " .. cuts)
+                end
+            end
+            return true
+        end
+        if tokens[1] == "restore-cuts" then
+            if #tokens ~= 9 then
+                return "obsidience: invalid restore-cuts"
+            end
+            for _, state in ipairs(active_states(false)) do
+                if state.grid.surface == tokens[2] then
+                    sync_context(state.ctx)
+                    if table.concat(tokens, " ", 2, 8) ~= cuts_geometry(state) then
+                        return "obsidience: cuts geometry changed"
+                    end
+                    -- Never replace cuts already moved in this session.
+                    if manual_cuts(state) then
+                        return "obsidience: cuts already moved"
+                    end
+                    if not restore_cuts(state, tokens[9]) then
+                        return "obsidience: invalid cuts"
+                    end
+                    place_context(state.ctx)
+                    return true
+                end
+            end
+            return "obsidience: surface unavailable"
         end
         local requested_id = tokens[2]
         local target

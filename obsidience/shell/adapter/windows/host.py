@@ -39,6 +39,8 @@ class WindowAdapterHost:
             self._place,
             self.hyprland.place_floating,
             self.transport.grids,
+            self.hyprland.cuts,
+            self.hyprland.restore_cuts,
         )
         self.loop = GLib.MainLoop()
 

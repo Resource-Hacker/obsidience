@@ -24,6 +24,11 @@ _FULLSCREEN_STATE = _RUNTIME_DIR / "obsidience-shell-fullscreen.state"
 _ACTIONS = frozenset(("resize", "tile", "surface"))
 _DIRECTIONS = frozenset(("left", "right", "top", "bottom"))
 _MODULE_TITLE_PREFIX = "obsidience-pane:"
+# One Surface's manual cuts as layout.lua prints them: grid, work area, offsets.
+# Bounded so a restore fits the compositor's single 1023-byte request read.
+_CUTS = re.compile(
+    r"[0-9]{1,2} [0-9]{1,2}(?: -?[0-9.]{1,12}){4} [xy0-9:.,-]{1,800}"
+)
 
 
 def _number(value: object) -> float | None:
@@ -509,6 +514,37 @@ class HyprlandSurfaceWindows:
         """One read-only native snapshot for the application session record."""
 
         return self._json("clients"), self._json("monitors", "all")
+
+    def cuts(self) -> dict[str, str]:
+        """Each Surface's owner-moved dividers, exported by the layout owner."""
+
+        # Only `repl` returns what the layout prints; `eval` answers "ok".
+        result = self._command("repl", 'hl.dispatch(hl.dsp.layout("cuts"))')
+        if result.returncode != 0:
+            raise RuntimeError(result.stdout.strip()[:256])
+        cuts: dict[str, str] = {}
+        for line in result.stdout.splitlines():
+            marker, _, rest = line.partition(" ")
+            surface_id, _, value = rest.partition(" ")
+            if (
+                marker == "obsidience-cuts"
+                and surface_id in SURFACE_IDS
+                and _CUTS.fullmatch(value)
+            ):
+                cuts[surface_id] = value
+        return cuts
+
+    def restore_cuts(self, surface_id: str, cuts: str) -> tuple[bool, str]:
+        """Hand one Surface's exported dividers back; the layout decides."""
+
+        if surface_id not in SURFACE_IDS or _CUTS.fullmatch(cuts) is None:
+            return False, "invalid_cuts"
+        result = self._layout_message(f"restore-cuts {surface_id} {cuts}")
+        if not self._accepted(result):
+            reason = result.stdout.strip().rpartition("obsidience: ")[2]
+            return False, reason[:64] or "layout_rejected"
+        self._publish()
+        return True, ""
 
     def _verify_placement(self, window_id: str, tile: dict[str, object]) -> bool:
         """Ask the existing layout owner once whether exact requested bounds settled."""
