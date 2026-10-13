@@ -94,6 +94,11 @@ solid and the outer ones the clearest. The Glass group in Graph settings sets
 each layer's solidity, counted outward from the core, and the crater depth,
 crater glow, seed glow, sheen lines and dust for each graph.
 
+A resting link between Articles is one unbroken thread of light in its two
+Articles' colors, a bright centre in a faint sleeve, dimmer on the ball's far
+side. The dash setting only shades it, so the eye can follow a link through
+the glass; a link lit by a thinking route keeps the route's own beam.
+
 At rest the graph answers the comets that ride the article links: where one
 lands on an Article, the Article swells to twice its size and back in half a
 second, flares and dims over a second, and sends a small ripple across its
@@ -116,6 +121,18 @@ Labels are captions in light capitals inside a thin box in the branch color,
 with a grey hairline between title and location and a leader to their node,
 drawn last, over the glass. A consulted node also wears a faint disc and a
 breathing ring in its branch color.
+
+A Memory stream's links stay quiet at rest and come alive only with real
+activity. At rest a bank shows its skeleton: each record's strongest specific
+tie (evidence, cause, meaning) as a hairline that arches around the stream,
+thinned evenly to what a row can carry and dimmed where many meet. Shared
+entities and the order of time appear on hover and selection. When a recall
+returns, a tendril reaches from the bank's newest record back to each memory
+it returned, one after another; the memory lights as its reach arrives, the
+tendril flashes, and its dashes then stream back toward the present until the
+operation expires. Links between two records the same operation holds light
+from both ends and meet in the middle. Nothing lights without an operation
+that names its records.
 
 ## Scoped graphs and Library
 

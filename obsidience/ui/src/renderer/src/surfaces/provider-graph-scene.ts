@@ -29,6 +29,16 @@ export interface GraphOperation {
 type Point = ProviderNode & { x: number; y: number; z: number };
 type Pulse = { until: number; start: number; color: THREE.Color };
 type LayoutPoint = {x: number; y: number; z: number; vx?: number; vy?: number; vz?: number};
+/** A recall reaches from the newest memory back to each one it returned: one
+ *  tendril after another this far apart, each arriving this long after it left. */
+const REACH_STAGGER_MS = 45;
+const REACH_MS = 550;
+/** One operation lights at most this many links, the most specific first,
+ *  and a recall reaches at most this many of its memories. */
+const LIVE_LINKS = 240;
+const LIVE_REACHES = 48;
+/** Operation colours as the link shader numbers them. */
+const LIVE_TINTS: Record<string, number> = {read: 0, edit: 1, consolidate: 2};
 export type ProviderPresentation = Pick<GraphPublisher, "publishCatalog" | "publishState" | "frame" | "dispose">;
 export type ProviderPresentationFactory = (canvas: HTMLCanvasElement, command: (command: GraphControl) => void,
   redraw: () => void, consumers: (count: number) => void) => ProviderPresentation;
@@ -46,6 +56,16 @@ export class ProviderGraphScene {
   private colorTexture: THREE.DataTexture | null = null;
   private linkIndex = {adjacency: new Map<string, number[]>(), overview: new Set<number>()};
   private nodeColors = new Float32Array(0);
+  // Memory links lit by an operation that holds both their records: when
+  // each lights and goes out, in seconds since `epoch`, and in which colour.
+  private readonly epoch = Date.now();
+  private live = new Map<number, {from: number; until: number; tint: number}>();
+  private lit = new Map<string, number[]>();
+  // A recall's reaches are not links of the bank: each runs from the newest
+  // record to one the recall returned.
+  private reaches = new Map<string, {record: number; from: number; until: number; tint: number}[]>();
+  private newest = -1;
+  private reach = 100;
 
   private timeAxis: MemoryTimeAxis | null = null;
   private timeGuides = new THREE.Group();
@@ -324,6 +344,8 @@ export class ProviderGraphScene {
     }
     this.edges = data.edges.filter(e => e.source !== e.target && this.indices.has(e.source) && this.indices.has(e.target));
     this.linkIndex = providerLinkIndex(this.nodes, this.edges, this.code);
+    // Lit links are numbered by the edges and records just replaced.
+    this.live.clear(); this.lit.clear(); this.reaches.clear();
     const assets = providerGraphAssets(this.nodes, this.code, this.pixelRatio);
     this.points = assets.points; this.lines = assets.lines;
     this.positionTexture = assets.positions; this.colorTexture = assets.colors;
@@ -400,28 +422,86 @@ export class ProviderGraphScene {
     const shown = new Set(this.linkIndex.overview);
     for (const id of [this.selected, this.hovered])
       for (const index of this.linkIndex.adjacency.get(id) || []) shown.add(index);
-    const values = new Float32Array(shown.size * 4);
-    let offset = 0;
-    for (const index of shown) {
+    for (const index of this.live.keys()) shown.add(index);
+    const reaches = this.newest < 0 ? [] : [...this.reaches.values()].flat().filter(reach => reach.record !== this.newest);
+    const ends = (index: number) => {
       const edge = this.edges[index], source = this.indices.get(edge.source)!, target = this.indices.get(edge.target)!;
       // Stable endpoint order gives reciprocal relationships the same thread.
-      const a = Math.min(source, target), b = Math.max(source, target);
-      const opacity = this.code ? 0.15 : edge.kind === "entity" ? 0.09 : edge.kind === "temporal" ? 0.06 : 0.38;
-      values.set([a, b, (a * 0.6180339887 + b * 0.4142135624) % 1 * Math.PI * 2, opacity], offset);
-      offset += 4;
+      return [Math.min(source, target), Math.max(source, target)];
+    };
+    // A record many resting threads meet at would burn white: each of its
+    // threads dims by how many share it.
+    const shared = new Map<number, number>();
+    if (!this.code) for (const index of this.linkIndex.overview) {
+      for (const end of ends(index)) shared.set(end, (shared.get(end) || 0) + 1);
+    }
+    const count = shown.size + reaches.length;
+    const values = new Float32Array(count * 4), lights = new Float32Array(count * 3);
+    let at = 0;
+    for (const index of shown) {
+      const [a, b] = ends(index), kind = this.edges[index].kind;
+      const opacity = this.code ? 0.15 : (kind === "entity" ? 0.1 : kind === "temporal" ? 0.08 : 0.8)
+        / Math.sqrt(Math.max(1, shared.get(a) || 0, shared.get(b) || 0));
+      values.set([a, b, (a * 0.6180339887 + b * 0.4142135624) % 1 * Math.PI * 2, opacity], at * 4);
+      const live = this.live.get(index);
+      if (live) lights.set([live.from, live.until, live.tint], at * 3);
+      at += 1;
+    }
+    for (const reach of reaches) {
+      // Unseen until lit; 8 or 16 tells the shader which end is the newest record.
+      const a = Math.min(this.newest, reach.record), b = Math.max(this.newest, reach.record);
+      values.set([a, b, (a * 0.6180339887 + b * 0.4142135624) % 1 * Math.PI * 2, 0], at * 4);
+      lights.set([reach.from, reach.until, reach.tint + (a === this.newest ? 8 : 16)], at * 3);
+      at += 1;
     }
     // Replacing a BufferAttribute repeatedly strands its old WebGLBuffer.
     // Reuse capacity, and explicitly release the geometry before growing it.
-    let links = this.lines.geometry.getAttribute("aLink") as THREE.InstancedBufferAttribute | undefined;
-    if (!links || links.count < shown.size) {
-      this.lines.geometry.dispose();
-      links = new THREE.InstancedBufferAttribute(new Float32Array(Math.max(shown.size, 1) * 8), 4);
-      links.setUsage(THREE.DynamicDrawUsage); this.lines.geometry.setAttribute("aLink", links);
+    const geometry = this.lines.geometry;
+    let links = geometry.getAttribute("aLink") as THREE.InstancedBufferAttribute | undefined;
+    if (!links || links.count < count) {
+      geometry.dispose();
+      const room = Math.max(count, 1) * 2;
+      links = new THREE.InstancedBufferAttribute(new Float32Array(room * 4), 4);
+      links.setUsage(THREE.DynamicDrawUsage); geometry.setAttribute("aLink", links);
+      const live = new THREE.InstancedBufferAttribute(new Float32Array(room * 3), 3);
+      live.setUsage(THREE.DynamicDrawUsage); geometry.setAttribute("aLive", live);
     }
+    const live = geometry.getAttribute("aLive") as THREE.InstancedBufferAttribute;
     (links.array as Float32Array).set(values); links.needsUpdate = true;
-    this.lines.geometry.instanceCount = shown.size;
+    (live.array as Float32Array).set(lights); live.needsUpdate = true;
+    geometry.instanceCount = count;
     this.lines.material.uniforms.uSelected.value = this.indices.get(this.selected) ?? -1;
     this.lines.material.uniforms.uHovered.value = this.indices.get(this.hovered) ?? -1;
+  }
+  /** Light the links an operation holds both records of. True when the lit set changed. */
+  private lightLinks(op: GraphOperation, ids: string[], recall: boolean): boolean {
+    const until = ((op.expires_at || op.at + 3500) - this.epoch) / 1000;
+    const held = this.lit.get(op.id);
+    if (held) {
+      // The same operation again: it only lasts longer.
+      for (const index of held) { const live = this.live.get(index); if (live) live.until = Math.max(live.until, until); }
+      for (const reach of this.reaches.get(op.id) || []) reach.until = Math.max(reach.until, until);
+      return held.length > 0 || this.reaches.has(op.id);
+    }
+    const records = new Set(ids), found: number[] = [];
+    for (const id of ids) for (const index of this.linkIndex.adjacency.get(id) || []) {
+      const edge = this.edges[index];
+      if (edge.source === id && records.has(edge.target)) found.push(index);
+    }
+    found.sort((a, b) => memoryRelationshipWeight(this.edges[b]) - memoryRelationshipWeight(this.edges[a]) || a - b);
+    found.length = Math.min(found.length, LIVE_LINKS);
+    const tint = ["failed", "interrupted"].includes(op.status) ? 4 : LIVE_TINTS[op.kind] ?? 3;
+    // What a recall returned is held once its reaches have arrived.
+    const from = (op.at + (recall ? REACH_MS + Math.min(ids.length, LIVE_REACHES) * REACH_STAGGER_MS : 0) - this.epoch) / 1000;
+    for (const index of found) this.live.set(index, {from, until, tint});
+    this.lit.set(op.id, found);
+    if (recall) this.reaches.set(op.id, ids.slice(0, LIVE_REACHES).map((id, order) => ({
+      record: this.indices.get(id)!, from: (op.at + order * REACH_STAGGER_MS - this.epoch) / 1000, until, tint,
+    })));
+    for (const stale of [...this.lit.keys()].slice(0, Math.max(0, this.lit.size - 64))) {
+      this.lit.delete(stale); this.reaches.delete(stale);
+    }
+    return found.length > 0 || recall;
   }
   private updateTimeGuides() {
     if (this.code || !this.nodes.length || this.options.timeGuides === false) return;
@@ -510,6 +590,14 @@ export class ProviderGraphScene {
       const expansion = 1 + 0.3 / (1 + d * d);
       node.x = memoryLensX(point.x, this.memoryLens); node.y = point.y * expansion; node.z = point.z * expansion;
     }
+    if (!this.code && this.nodes.length) {
+      this.reach = 1; this.newest = 0;
+      this.nodes.forEach((node, index) => {
+        this.reach = Math.max(this.reach, Math.hypot(node.y, node.z));
+        if (node.x > this.nodes[this.newest].x) this.newest = index;
+      });
+      if (this.lines) this.lines.material.uniforms.uReach.value = this.reach;
+    }
     this.updatePositions(); this.updateTimeGuides(); this.labelsDirty = true;
   }
   private frameMemoryFocus() {
@@ -588,17 +676,23 @@ export class ProviderGraphScene {
   }
   activity(operations: GraphOperation[]) {
     const now = Date.now();
+    let relit = false;
     for (const op of operations) {
       if (op.status === "running" || (op.expires_at && op.expires_at < now - 900)) continue;
       const color = new THREE.Color(["failed", "interrupted"].includes(op.status) ? "#fb7185" : op.kind === "edit" ? "#fbbf24" : op.kind === "read" ? "#67e8f9" : op.kind === "consolidate" ? "#e9a8ff" : "#6ee7b7");
-      for (const ref of op.refs) {
-        const id = this.aliases.get(ref);
-        if (id) {
-          this.pulses.set(id, { start: op.at, until: (op.expires_at || op.at + 3500) + 900, color });
-          this.paintNodes.add(id);
-        }
-      }
+      // A Memory recall reaches back from the newest record, and each memory
+      // it returned lights as its reach arrives.
+      const recall = !this.code && (op.kind === "read" || op.kind === "search");
+      const ids = op.refs.map(ref => this.aliases.get(ref)).filter((id): id is string => !!id);
+      ids.forEach((id, order) => {
+        const start = op.at + (recall ? REACH_MS + Math.min(order, LIVE_REACHES) * REACH_STAGGER_MS : 0);
+        this.pulses.set(id, { start, until: (op.expires_at || op.at + 3500) + 900, color });
+        this.paintNodes.add(id);
+      });
+      if (this.code || !ids.length) continue;
+      relit = this.lightLinks(op, ids, recall) || relit;
     }
+    if (relit) this.updateLinks();
     this.labelsDirty = true; this.request();
   }
   focus(ids: string[]) {
@@ -796,8 +890,21 @@ export class ProviderGraphScene {
     const scale = this.host.clientHeight / (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2))
       * Math.max(1, this.camera.position.distanceTo(this.controls.target)));
     if (!this.code && this.lines) {
-      this.lines.material.uniforms.uOverview.value = THREE.MathUtils.clamp(scale * 0.8, 0.3, 1)
+      const uniforms = this.lines.material.uniforms;
+      uniforms.uOverview.value = THREE.MathUtils.clamp(scale * 0.8, 0.45, 1)
         * (this.selected || this.hovered || this.searchQuery.trim() ? 0.2 : 1);
+      const clock = (now - this.epoch) / 1000;
+      uniforms.uClock.value = clock;
+      if (this.live.size || this.reaches.size) {
+        // Lit tendrils stream until they go out; then they leave the scene.
+        moving = true;
+        let gone = false;
+        for (const [index, live] of this.live) if (clock > live.until + 0.9) gone = this.live.delete(index) || gone;
+        for (const [id, reaches] of this.reaches) {
+          if (reaches.every(reach => clock > reach.until + 0.9)) gone = this.reaches.delete(id) || gone;
+        }
+        if (gone) this.updateLinks();
+      }
     }
     if (this.labelsDirty) {
       this.labelsDirty = false;

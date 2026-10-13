@@ -483,6 +483,18 @@ uniform float uHovered;
 uniform float uCurve;
 uniform float uOverview;
 varying float vLinkOpacity;
+#ifdef KNOWLEDGE_MEMORY_LINKS
+// A Memory link is a quiet thread at rest and a tendril while a memory
+// operation holds both its records.
+attribute vec3 aLive;   // lit from and until, in seconds on the scene's clock; operation colour + 8 * which end it starts from
+uniform float uClock;
+uniform float uReach;   // the stream's radius, for dimming its far side
+uniform float uLivePx;  // a lit tendril's width
+varying float vAlong;
+varying vec2 vLive;     // how lit, and for how long
+varying float vNear;
+varying float vTint;
+#endif
 vec2 nodeUv(float index) {
   return (vec2(mod(index, uTextureSize), floor(index / uTextureSize)) + 0.5) / uTextureSize;
 }
@@ -500,7 +512,7 @@ vec3 threadPoint(vec3 a, vec3 b, float t, float phase) {
   vec3 middle = 0.5 * (a + b);
   float away = length(middle.yz);
   vec3 outward = away > 1e-3 ? vec3(0.0, middle.yz / away) : vec3(0.0, cos(phase), sin(phase));
-  return mix(a, b, t) + 2.0 * t * (1.0 - t) * max(14.0, distance(a, b) * 0.22) * uCurve * outward;
+  return mix(a, b, t) + 2.0 * t * (1.0 - t) * clamp(distance(a, b) * 0.22, 14.0, 80.0) * uCurve * outward;
 #endif
 }
 #else
@@ -529,6 +541,9 @@ varying float vArc;
 varying float vP;
 varying float vDormant;
 varying float vHover;
+#ifdef KNOWLEDGE_THREAD_LINKS
+varying float vFront;
+#endif
 void main() {
 #ifdef KNOWLEDGE_PROVIDER
   vec3 from = texture2D(uPositions, nodeUv(aLink.x)).xyz;
@@ -553,6 +568,16 @@ void main() {
   float aHover = (aLink.x == uSelected || aLink.y == uSelected ||
     aLink.x == uHovered || aLink.y == uHovered) ? 1.0 : 0.0;
   vLinkOpacity = mix(aLink.w * uOverview, 0.85, aHover);
+  #ifdef KNOWLEDGE_MEMORY_LINKS
+  vec3 here = mix(aStart, aEnd, aEnd01);
+  vAlong = t;
+  vLive = vec2(aLive.y > aLive.x && uClock >= aLive.x ? 1.0 - smoothstep(aLive.y, aLive.y + 0.9, uClock) : 0.0,
+    uClock - aLive.x);
+  vTint = aLive.z;
+  // Threads on the stream's far side stand back.
+  vNear = clamp(0.62 + 0.38 * ((modelViewMatrix * vec4(here, 1.0)).z
+    - (modelViewMatrix * vec4(here.x, 0.0, 0.0, 1.0)).z) / max(uReach, 1.0), 0.3, 1.0);
+  #endif
 #endif
   vP = aP;
   vDormant = aDormant;
@@ -578,6 +603,10 @@ void main() {
     : (aReview.y >= 0.8 ? 0.2 + 0.08 * cos((aReview.y - 0.8) * 3.14159265) : 0.0);
 #endif
   float swell = aP >= 0.0 ? 1.0 + beamGlow * 0.9 : 1.0;
+#ifdef KNOWLEDGE_MEMORY_LINKS
+  // A tendril grows to its width as it lights.
+  swell = mix(1.0, uLivePx / uWidthPx, vLive.x * min(1.0, max(vLive.y, 0.0) / 0.25));
+#endif
   vec2 normalPx = vec2(-direction.y, direction.x) *
     (mix(uWidthPx, uFloorPx, aWidth) * swell * 0.5 * aSide);
   vec4 clip = mix(clipA, clipB, aEnd01);
@@ -585,6 +614,13 @@ void main() {
   vColor = aColor;
   vAcross = aSide;
   vArc = aArc;
+#ifdef KNOWLEDGE_THREAD_LINKS
+  // How squarely this part of the link faces the viewer: 1 on the ball's
+  // near side, -1 behind it.
+  vec3 fromCentre = (modelViewMatrix * vec4(mix(aStart, aEnd, aEnd01), 1.0)).xyz
+    - (modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+  vFront = fromCentre.z / max(length(fromCentre), 1e-4);
+#endif
   gl_Position = clip;
 }
 `;
@@ -681,6 +717,12 @@ export const CROSS_PATH_FRAGMENT_SHADER = `
 #ifdef KNOWLEDGE_PROVIDER
 varying float vLinkOpacity;
 #endif
+#ifdef KNOWLEDGE_MEMORY_LINKS
+varying float vAlong;
+varying vec2 vLive;
+varying float vNear;
+varying float vTint;
+#endif
 uniform float uOpacity;
 uniform float uDashFreq;
 #ifndef KNOWLEDGE_REVIEW_EFFECT
@@ -698,8 +740,47 @@ varying float vAcross;
 varying float vArc;
 varying float vP;
 varying float vDormant;
+#ifdef KNOWLEDGE_THREAD_LINKS
+varying float vFront;
+#endif
 void main() {
   float t = abs(vAcross);
+#ifdef KNOWLEDGE_MEMORY_LINKS
+  {
+    // At rest: a soft hairline in its records' colours, dimmer on the far side.
+    float thread = 1.0 - smoothstep(0.15, 1.0, t);
+    vec3 color = vColor;
+    float alpha = uOpacity * vLinkOpacity * vNear * thread;
+    if (vLive.x > 0.0) {
+      // Lit. Between two records an operation holds, a front leaves each
+      // and they meet in the middle. A recall's reach runs one way, from the
+      // newest memory back to the one it returned. The tendril flashes when
+      // the front arrives, then its dashes stream: along a held link, and
+      // back toward the present along a recall's reach.
+      float age = vLive.y;
+      float start = floor(vTint / 8.0 + 0.01);
+      float which = vTint - start * 8.0;
+      float reached = start < 1.5 ? vAlong : 1.0 - vAlong;
+      float behind = start < 0.5 ? min(1.0, age / 0.55) * 0.5 - min(vAlong, 1.0 - vAlong)
+        : min(1.0, age / 0.55) - reached;
+      float shown = smoothstep(0.0, 0.02, behind);
+      float head = shown * (1.0 - smoothstep(0.0, 0.1, behind)) * (1.0 - smoothstep(0.55, 0.75, age));
+      float flash = age > 0.55 ? exp(-(age - 0.55) * 3.2) : 0.0;
+      float flow = start < 0.5 || start > 1.5 ? vArc * uDashFreq - age * 1.1 : vArc * uDashFreq + age * 1.1;
+      float dash = age > 0.55 ? mix(0.3, 1.0, step(fract(flow), 0.55)) : 1.0;
+      float sleeve = 1.0 - smoothstep(0.5, 1.0, t);
+      float centre = 1.0 - smoothstep(0.12, 0.3, t);
+      vec3 tint = which < 0.5 ? vec3(0.404, 0.91, 0.976) : which < 1.5 ? vec3(0.984, 0.749, 0.141)
+        : which < 2.5 ? vec3(0.914, 0.659, 1.0) : which < 3.5 ? vec3(0.431, 0.906, 0.718) : vec3(0.984, 0.443, 0.522);
+      vec3 lit = mix(mix(vColor, tint, 0.6), vec3(1.0), min(1.0, centre * 0.45 + head * 0.7 + flash * 0.5));
+      float glow = shown * (sleeve * (0.22 + 0.5 * flash) + centre * dash * 0.85 + head);
+      color = mix(color, lit, vLive.x);
+      alpha = mix(alpha, uOpacity * glow, vLive.x);
+    }
+    gl_FragColor = vec4(color, alpha);
+    return;
+  }
+#endif
   float band = (1.0 - smoothstep(0.88, 1.0, t)) * 0.24;
   float core = 1.0 - smoothstep(0.14, 0.24, t);
 #ifdef KNOWLEDGE_REVIEW_EFFECT
@@ -717,6 +798,18 @@ void main() {
   if (uBeamP < vP) discard;
 #endif
   if (vP < 0.0 || uBeamP < vP) {
+#ifdef KNOWLEDGE_THREAD_LINKS
+    // At rest a link between Articles is one unbroken thread of light in
+    // their two colours, a bright centre in a faint sleeve, so the eye can
+    // follow it through the glass. Its dashes only shade it, and it stands
+    // back on the ball's far side.
+    float lit = fract(vArc * uDashFreq) > 0.55 ? 0.45 : 1.0;
+    float sleeve = (1.0 - smoothstep(0.3, 1.0, t)) * 0.2;
+    float centre = 1.0 - smoothstep(0.1, 0.3, t);
+    gl_FragColor = vec4(mix(vColor, vec3(1.0), centre * 0.3),
+      uOpacity * (sleeve + centre * 1.15 * lit) * mix(0.22, 1.0, smoothstep(-0.5, 0.3, vFront)));
+    return;
+#endif
     // Dormant: static checkered dashes at the tuned opacity.
     if (fract(vArc * uDashFreq) > 0.55) discard;
     float profile = min(1.0, band + core);

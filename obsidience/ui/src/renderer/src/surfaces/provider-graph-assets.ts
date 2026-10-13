@@ -60,12 +60,14 @@ export function providerGraphAssets(nodes: ProviderNode[], code: boolean, pixelR
   ribbons.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3));
   ribbons.setIndex(indices); ribbons.instanceCount = 0;
   const lineMaterial = new THREE.ShaderMaterial({
-    defines: code ? {KNOWLEDGE_PROVIDER: 1, KNOWLEDGE_CODE: 1} : {KNOWLEDGE_PROVIDER: 1}, vertexShader: BEAM_VERTEX_SHADER, fragmentShader: CROSS_PATH_FRAGMENT_SHADER,
+    defines: code ? {KNOWLEDGE_PROVIDER: 1, KNOWLEDGE_CODE: 1} : {KNOWLEDGE_PROVIDER: 1, KNOWLEDGE_MEMORY_LINKS: 1},
+    vertexShader: BEAM_VERTEX_SHADER, fragmentShader: CROSS_PATH_FRAGMENT_SHADER,
     uniforms: {uPositions: {value: positions}, uNodeColors: {value: colors}, uTextureSize: {value: textureSize},
       uSelected: {value: -1}, uHovered: {value: -1}, uCurve: {value: code ? 0 : 1}, uOverview: {value: 1},
-      // Memory links are the early Knowledge tendrils: a dashed band, wider than Code's thread.
-      uViewportPx: {value: new THREE.Vector2(1, 1)}, uWidthPx: {value: (code ? 2.2 : 4) * pixelRatio}, uFloorPx: {value: (code ? 2.2 : 4) * pixelRatio},
+      // A Memory link is a hairline at rest and a wide dashed tendril while lit.
+      uViewportPx: {value: new THREE.Vector2(1, 1)}, uWidthPx: {value: 2.2 * pixelRatio}, uFloorPx: {value: 2.2 * pixelRatio},
       uOpacity: {value: 1}, uDashFreq: {value: code ? 0.035 : 0.085}, uPathOpacity: {value: 1},
+      uClock: {value: 0}, uReach: {value: 100}, uLivePx: {value: 7 * pixelRatio},
       uBeamP: {value: -1}, uSolidP: {value: -1}, uGlow: {value: 0}, uFlowAge: {value: -1}, uHeadSpan: {value: 0.06}},
     transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending,
   });
@@ -73,6 +75,9 @@ export function providerGraphAssets(nodes: ProviderNode[], code: boolean, pixelR
   lines.frustumCulled = false;
   return {points, lines, positions, colors};
 }
+
+/** The most links a Memory bank draws at rest. */
+const MEMORY_REST_LINKS = 1400;
 
 /** Overview is a legible subset, never a truncation of the native graph.
  * Keep each node's two strongest ties; selecting/hovering adds every incident
@@ -87,14 +92,20 @@ export function providerLinkIndex(nodes: ProviderNode[], edges: ProviderEdge[], 
   });
   const overview = new Set<number>();
   if (code) edges.forEach((_, i) => overview.add(i));
-  else for (const node of nodes) {
-    let first = -1, second = -1;
-    for (const i of adjacency.get(node.id) || []) {
-      if (first < 0 || scores[i] > scores[first]) { second = first; first = i; }
-      else if (second < 0 || scores[i] > scores[second]) second = i;
+  else {
+    // At rest a bank shows its skeleton: each record's strongest specific tie
+    // (evidence, cause, meaning), thinned evenly to what a row can carry.
+    // Shared entities and the order of time join in on hover, selection and
+    // while an operation holds both ends.
+    const strongest = new Set<number>();
+    for (const node of nodes) {
+      let best = -1;
+      for (const i of adjacency.get(node.id) || []) if (scores[i] >= 0.5 && (best < 0 || scores[i] > scores[best])) best = i;
+      if (best >= 0) strongest.add(best);
     }
-    if (first >= 0) overview.add(first);
-    if (second >= 0) overview.add(second);
+    const keep = Math.max(1, Math.ceil(strongest.size / MEMORY_REST_LINKS));
+    let at = 0;
+    for (const i of strongest) if (at++ % keep === 0) overview.add(i);
   }
   return {adjacency, overview};
 }

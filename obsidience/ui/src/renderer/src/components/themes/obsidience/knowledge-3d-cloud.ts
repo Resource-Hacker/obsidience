@@ -848,6 +848,7 @@ export function createKnowledge3dCloud(
   };
   const crossMaterial = new THREE.ShaderMaterial({
     uniforms: crossUniforms,
+    defines: { KNOWLEDGE_THREAD_LINKS: 1 },
     vertexShader: deps.beamVertexShader,
     fragmentShader: deps.crossFragmentShader,
     transparent: true,
