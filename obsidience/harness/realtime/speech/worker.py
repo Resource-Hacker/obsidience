@@ -109,9 +109,12 @@ WAKE_COMMAND_WAIT_SECS = 8
 # The wake word is an address, not any mention: it must start the speech
 # segment or follow a pause in recognized words, optionally after hey/ok/okay.
 WAKE_PAUSE_SECS = 0.4
-# A name ending the recognized text may still become "computer's"; the next
-# ASR delta normally arrives within one or two 80-160 ms steps.
-WAKE_CONFIRM_SECS = 0.35
+# A name ending the recognized text may still become "computer's": the next
+# ASR delta arrives one 160 ms step later. This wait is what the opening
+# chirp costs when the name is said alone, so it covers that one step and no
+# more (owner, 2026-10-12: the chirp must be as snappy as possible; it was
+# 0.35 s, two steps).
+WAKE_CONFIRM_SECS = 0.2
 WAKE_STRIP = " ,.!?:;—-'’\t\n"
 _WAKE_LEAD = re.compile(r"[\W_]*(?:(?:hey|ok|okay)\b[\W_]*)?", re.IGNORECASE)
 # Short acknowledgements that must not interrupt a playing Realtime reply.
