@@ -21,7 +21,8 @@ The direct path is the audible one while the Executive waits for its name, so th
 chirp is as immediate as ever (owner, 2026-10-12: it must be as snappy as possible). Once the
 line is open and that chirp has ended, while the owner speaks, the Snapcast path takes over:
 the "accepted" chirp, the reply and the closing chirp play on both speakers in step, and then
-the direct path returns.
+the direct path returns. A command spoken over the opening chirp leaves no such moment; then
+the switch follows the "accepted" chirp, just ahead of the reply.
 
 A reply must never be lost to this. While the Snapcast path is the audible one the router
 listens, electrically, to what goes into the chain and what the desk speakers receive; sound
@@ -63,6 +64,8 @@ CLOSING = {'complete', 'cancel', 'error'}
 # A chirp's last samples are still in the worker's output buffer when it reports the chirp
 # written (40 ms chunks plus the audio server's buffer); the stream moves once they have left.
 DRAIN = 0.25
+# After the "accepted" chirp is reported written, its last 40 ms chunk is still on its way out.
+ACCEPTED_TAIL = 0.06
 # The opening chirp is queued within milliseconds of the line opening; a line that has been open
 # this long without one was opened inside a sentence and has none.
 CHIRP_GRACE = 0.2
@@ -100,6 +103,10 @@ class State:
                 self.chirping = edge == 'started'
                 if edge == 'finished':
                     self.clear_at = now + DRAIN
+            elif name == 'accepted' and edge == 'finished' and not self.exchange:
+                # A command spoken over the opening chirp left no moment of speech to switch in.
+                # The reply follows this chirp by a tenth of a second or more (measured 0.12-0.9 s).
+                self.exchange, self.opened_at, self.move_after = True, None, now + ACCEPTED_TAIL
             elif name in CLOSING and edge == 'finished':
                 self.exchange, self.opened_at, self.move_after = False, None, now + DRAIN
         self.changed.set()
