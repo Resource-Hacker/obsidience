@@ -63,8 +63,9 @@ export function providerGraphAssets(nodes: ProviderNode[], code: boolean, pixelR
     defines: code ? {KNOWLEDGE_PROVIDER: 1, KNOWLEDGE_CODE: 1} : {KNOWLEDGE_PROVIDER: 1}, vertexShader: BEAM_VERTEX_SHADER, fragmentShader: CROSS_PATH_FRAGMENT_SHADER,
     uniforms: {uPositions: {value: positions}, uNodeColors: {value: colors}, uTextureSize: {value: textureSize},
       uSelected: {value: -1}, uHovered: {value: -1}, uCurve: {value: code ? 0 : 1}, uOverview: {value: 1},
-      uViewportPx: {value: new THREE.Vector2(1, 1)}, uWidthPx: {value: 2.2 * pixelRatio}, uFloorPx: {value: 2.2 * pixelRatio},
-      uOpacity: {value: 1}, uDashFreq: {value: code ? 0.035 : 0}, uPathOpacity: {value: 1},
+      // Memory links are the early Knowledge tendrils: a dashed band, wider than Code's thread.
+      uViewportPx: {value: new THREE.Vector2(1, 1)}, uWidthPx: {value: (code ? 2.2 : 4) * pixelRatio}, uFloorPx: {value: (code ? 2.2 : 4) * pixelRatio},
+      uOpacity: {value: 1}, uDashFreq: {value: code ? 0.035 : 0.085}, uPathOpacity: {value: 1},
       uBeamP: {value: -1}, uSolidP: {value: -1}, uGlow: {value: 0}, uFlowAge: {value: -1}, uHeadSpan: {value: 0.06}},
     transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending,
   });

@@ -406,7 +406,7 @@ export class ProviderGraphScene {
       const edge = this.edges[index], source = this.indices.get(edge.source)!, target = this.indices.get(edge.target)!;
       // Stable endpoint order gives reciprocal relationships the same thread.
       const a = Math.min(source, target), b = Math.max(source, target);
-      const opacity = this.code ? 0.15 : edge.kind === "entity" ? 0.035 : edge.kind === "temporal" ? 0.025 : 0.18;
+      const opacity = this.code ? 0.15 : edge.kind === "entity" ? 0.09 : edge.kind === "temporal" ? 0.06 : 0.38;
       values.set([a, b, (a * 0.6180339887 + b * 0.4142135624) % 1 * Math.PI * 2, opacity], offset);
       offset += 4;
     }
@@ -796,7 +796,7 @@ export class ProviderGraphScene {
     const scale = this.host.clientHeight / (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2))
       * Math.max(1, this.camera.position.distanceTo(this.controls.target)));
     if (!this.code && this.lines) {
-      this.lines.material.uniforms.uOverview.value = THREE.MathUtils.clamp(scale * 0.5, 0.12, 1)
+      this.lines.material.uniforms.uOverview.value = THREE.MathUtils.clamp(scale * 0.8, 0.3, 1)
         * (this.selected || this.hovered || this.searchQuery.trim() ? 0.2 : 1);
     }
     if (this.labelsDirty) {

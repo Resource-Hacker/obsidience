@@ -493,10 +493,14 @@ vec3 threadPoint(vec3 a, vec3 b, float t, float phase) {
 #ifdef KNOWLEDGE_CODE
   return knowledgeShellPoint(a, b, t);
 #else
-  // Early Knowledge threads used a gently bowed quadratic, not a shell arc.
-  // Its x coordinate stays chronological; the bow lives across the tube.
-  float bow = min(90.0, abs(b.x - a.x) * 0.08 + 14.0) * uCurve;
-  return mix(a, b, t) + 2.0 * t * (1.0 - t) * bow * vec3(0.0, cos(phase), sin(phase));
+  // The early Knowledge tendrils: the thread's middle is pushed outward
+  // from the stream's axis by a share of its length, so a link arches
+  // around the stream instead of cutting through it. Its x coordinate stays
+  // chronological; a thread that lies on the axis bows by its own phase.
+  vec3 middle = 0.5 * (a + b);
+  float away = length(middle.yz);
+  vec3 outward = away > 1e-3 ? vec3(0.0, middle.yz / away) : vec3(0.0, cos(phase), sin(phase));
+  return mix(a, b, t) + 2.0 * t * (1.0 - t) * max(14.0, distance(a, b) * 0.22) * uCurve * outward;
 #endif
 }
 #else
