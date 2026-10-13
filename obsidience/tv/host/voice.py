@@ -3,10 +3,11 @@
 with the desk speakers, without slowing the chirp that opens the line.
 
 A second speaker over Wi-Fi is only in step if both speakers play each moment of sound at an
-agreed time. Snapcast does that (obsidience-tv-voice-server.service): its server is a PipeWire
-sink, obsidience_tv_voice; one client plays on the desk speakers (obsidience-tv-voice-desk.service)
-and one on the television (the Snapcast app there), each at the server's time plus the server's
-buffer. The price is that buffer: sound on this route starts about 0.3 s later.
+agreed time. Snapcast does that (obsidience-tv-voice-server.service): its server plays what goes
+into the PipeWire sink obsidience_tv_voice (obsidience-tv-voice-sink.service); one client plays on
+the desk speakers (obsidience-tv-voice-desk.service) and one on the television (the Snapcast app
+there), each at the server's time plus the server's buffer. The price is that buffer: sound on
+this route starts about 0.3 s later.
 
 While a television client listens, this router keeps a small chain in front of the speakers:
 a voice sink (obsidience_tv_voice_in) that the speech worker's one playback stream is put on,
@@ -27,7 +28,14 @@ the switch follows the "accepted" chirp, just ahead of the reply.
 A reply must never be lost to this. While the Snapcast path is the audible one the router
 listens, electrically, to what goes into the chain and what the desk speakers receive; sound
 going in with nothing coming out for most of a second puts the direct path back at once and
-restarts the Snapcast server afterwards.
+restarts the Snapcast server afterwards. A chirp is shorter than that: one that went in and
+never came out is noticed when the exchange ends, too late for itself, and the server is
+restarted for the next one.
+
+The television's client goes with its screen (tv.control stops it when the television is
+switched off). A television that stops listening during an exchange changes nothing until the
+exchange has ended: the desk client goes on playing, and nothing is switched in the middle of
+a sound. But no exchange takes the Snapcast route once the television has stopped listening.
 
 Without a television client, the desk client, the Harness or the Snapcast server there is no
 chain and the voice plays on its own speaker as it always did. The microphone's echo reference
@@ -69,8 +77,10 @@ ACCEPTED_TAIL = 0.06
 # The opening chirp is queued within milliseconds of the line opening; a line that has been open
 # this long without one was opened inside a sentence and has none.
 CHIRP_GRACE = 0.2
+# The Snapcast server's buffer (voice/snapserver.conf): sound on that path comes out this much later.
+BUFFER = 0.3
 # In step, sound into the chain with none reaching the desk speakers for this long is a dead
-# Snapcast path (the server's buffer is 0.3 s).
+# Snapcast path.
 DEAD_AFTER = 0.9
 # An exchange ends with its closing chirp, however long the Executive works before it speaks.
 # Should that chirp never come, the exchange ends once the line has been closed and nothing has
@@ -383,6 +393,10 @@ class Watch:
         if self.went_in is not None:
             self.came_out = True
 
+    def lost(self):
+        """Sound went in long enough ago to have come out of the server's buffer, and none did."""
+        return self.went_in is not None and not self.came_out and time.monotonic() - self.went_in > 2 * BUFFER
+
     def stop(self):
         self.stopping.set()
         for tap in self.taps:
@@ -411,6 +425,8 @@ def main():
     def leave_step():
         nonlocal watch, in_step
         if watch is not None:
+            if watch.lost():
+                fall_back()  # A chirp, shorter than the watch's patience: the next one must play.
             watch.stop()
             watch = None
         if in_step:
@@ -439,8 +455,13 @@ def main():
                 stream = voice(found)
                 usable = stream is not None and stream[2] == desk
                 if chain is None and listening and usable and state.idle() and not failed.is_set():
-                    chain = Chain(desk)
-                    chain.start()
+                    starting = Chain(desk)
+                    try:
+                        starting.start()
+                    except OSError:
+                        starting.stop()  # Half a chain would play the voice twice.
+                        raise
+                    chain = starting
                     log.info('the television listens: the voice chain is up')
                 if chain is not None and state.idle():
                     if listening and usable and not failed.is_set():
@@ -459,7 +480,9 @@ def main():
                             subprocess.Popen(['systemctl', '--user', '--no-block', 'restart',
                                               'obsidience-tv-voice-server.service'])
                             failed.clear()
-                want = (chain is not None and together and not failed.is_set()
+                # Without a television client there is nothing to get in step with; one that
+                # leaves mid-exchange is no reason to switch in the middle of a sound.
+                want = (chain is not None and together and (listening or in_step) and not failed.is_set()
                         and stream is not None and stream[1] == CHAIN_SINK)
                 if want != in_step:
                     wait = earliest - time.monotonic()

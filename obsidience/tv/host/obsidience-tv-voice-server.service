@@ -2,6 +2,8 @@
 Description=Obsidience TV voice server (Snapcast: one voice, desk speakers and television in step)
 # Not part of the TV session: sound in step needs no picture. Without a television client the
 # router leaves the voice on its direct route and this server idles.
+Requires=obsidience-tv-voice-sink.service
+After=obsidience-tv-voice-sink.service
 
 [Service]
 Type=exec

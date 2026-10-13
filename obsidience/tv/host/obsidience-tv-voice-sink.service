@@ -1,0 +1,15 @@
+[Unit]
+Description=Obsidience TV voice sink (PipeWire sink whose sound the Snapcast server plays)
+
+[Service]
+Type=exec
+ExecStartPre=/usr/bin/install -d -m 0700 %t/obsidience-tv
+ExecStartPre=/bin/sh -c '[ -p %t/obsidience-tv/voice.fifo ] || /usr/bin/mkfifo -m 0600 %t/obsidience-tv/voice.fifo'
+ExecStart=/usr/bin/pipewire -c /home/wissenschafter/Projects/obsidience/obsidience/tv/host/voice/pipe-sink.conf
+# Always: the Snapcast server and the voice router count on this sink being there.
+Restart=always
+RestartSec=2
+UMask=0077
+
+[Install]
+WantedBy=default.target

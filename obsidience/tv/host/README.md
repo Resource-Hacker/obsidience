@@ -88,9 +88,10 @@ each moment of sound at an agreed time, which is what Snapcast is for.
 
 | Unit | Owns |
 | --- | --- |
-| `obsidience-tv-voice-server.service` | `snapserver` with `voice/snapserver.conf`: its PipeWire source is the sink `obsidience_tv_voice`; stream port 1704 and control port 1705 (the firewall admits only the television) |
+| `obsidience-tv-voice-sink.service` | a small PipeWire client (`voice/pipe-sink.conf`, module pipe-tunnel) that offers the sink `obsidience_tv_voice` and writes what plays into it to the pipe `$XDG_RUNTIME_DIR/obsidience-tv/voice.fifo` |
+| `obsidience-tv-voice-server.service` | `snapserver` with `voice/snapserver.conf`: reads that pipe; stream port 1704 and control port 1705 (the firewall admits only the television) |
 | `obsidience-tv-voice-desk.service` | `snapclient` (host id `obsidience-desk`) on the Executive's physical speaker, named in `voice/desk.env` |
-| `obsidience-tv-voice.service` | `voice.py`: moves the speech worker's one playback stream onto `obsidience_tv_voice` while a reply is spoken, and back |
+| `obsidience-tv-voice.service` | `voice.py`: while a television client listens, the voice chain in front of the speakers, and which of its two paths is audible |
 
 On the television the Snapcast app (`de.badaix.snapcast` 0.29.0.2, sideloaded unmodified)
 finds the server by mDNS; its client runs as a foreground service and keeps playing while
@@ -100,20 +101,39 @@ later. Measured at the desk microphone: the television 46 ms behind the desk spe
 steady to a few ms, which the owner judged in step by ear; sound that starts after a long
 silence is not clipped.
 
+The client goes with the television's screen. It neither starts itself after the television
+restarts nor stops when it sleeps, so `tv.control` starts and stops it through the app's own
+receiver (`am broadcast -a de.badaix.snapcast.START_SERVICE` or `STOP_SERVICE`
+`-n de.badaix.snapcast/.BroadcastReceiver`, which does not touch the screen): with its own
+power commands, when the television's agent reports that the screen went off or came on by
+the remote, and when it starts the stream. With the television off there is no client, no
+chain, and the voice plays on the desk speakers directly, as it did before all this.
+
 Speech can afford 0.3 s; the chirp that opens the line cannot (owner: it must be as snappy as
-possible). So while the Executive waits for its name the stream is on its own speaker and the
-opening chirp plays there directly. Once the line is open and that chirp has ended, and only
-while the owner is speaking, `voice.py` moves the stream onto the Snapcast sink: the "accepted"
-chirp, the reply and the closing chirp play on both speakers in step, and then it moves back.
-The owner's voice is the one safely quiet moment: the "accepted" chirp cannot start before
-speech has ended and been judged, and the reply follows that chirp without a gap (moved in the
-first milliseconds of the "accepted" chirp, the stream stalled for two seconds). A command
-finished before the stream could move is answered on the desk speakers alone. It
-reads those moments from the Harness (`/ws/trace` chirp lines, `/ws/realtime` state) and the
-television's presence from the Snapcast server; without any of them, or when the Executive
-speaks from another speaker than the desk client's, the voice stays on its own speaker. The
-echo reference is unchanged: it is the monitor of the physical speaker, which carries the
-voice whichever way it arrives there.
+possible). While a television client listens, `voice.py` keeps a voice sink
+(`obsidience_tv_voice_in`) that the speech worker's one playback stream is put on, with two
+paths out of it that run all the time: one straight to the desk speakers, one into the
+Snapcast sink. Exactly one is audible, and choosing is a mute, never a move (moving the
+worker's stream for each reply stalled it for two seconds). The direct path is audible while
+the Executive waits for its name, so the opening chirp is immediate. Once the line is open
+and that chirp has ended, while the owner speaks, the Snapcast path takes over: the
+"accepted" chirp, the reply and the closing chirp play on both speakers in step, and then
+the direct path returns. A command spoken over the opening chirp switches after the
+"accepted" chirp instead. `voice.py` reads those moments from the Harness (`/ws/trace` chirp
+lines, `/ws/realtime` state) and the television's presence from the Snapcast server. A
+television that stops listening during an exchange changes nothing until the exchange ends;
+none begins on the Snapcast path without it. The echo reference is unchanged: it is the
+monitor of the physical speaker, which carries the voice whichever way it arrives there.
+
+A reply must not be lost to this. In step, `voice.py` compares, electrically, what goes
+into the chain with what the desk speakers receive: sound in and none out for 0.9 s puts the
+direct path back at once and restarts the server; a shorter sound (a chirp) that never came
+out restarts the server when the exchange ends. Seen 2026-10-12, twice: snapserver
+0.35.0 reading the sink through its own PipeWire input stopped producing chunks after
+running for a while (clients connected, stream "playing", every client "No chunks
+available") until it was restarted, which silenced the reply to "turn off the TV". Its pipe
+input replaced that. To check the path without a sound anyone hears, play one second of 90 Hz
+at -40 dBFS into `obsidience_tv_voice` and look for it on the desk speaker's monitor.
 
 Tried first and dropped: sending the voice through Sunshine's own audio stream and delaying
 the desk speakers by a fixed amount. That path's delay wandered between about 190 and 270 ms
