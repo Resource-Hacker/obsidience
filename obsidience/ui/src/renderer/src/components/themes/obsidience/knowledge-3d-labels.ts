@@ -27,8 +27,6 @@ interface LabelLayout {
   note: string;
   fontSize: number;
   letterSpacing: number;
-  /** The caption hangs to this side of its point. */
-  outward: number;
   width: number;
   height: number;
   centerX: number;
@@ -194,7 +192,6 @@ function layoutLabels(
         note,
         fontSize,
         letterSpacing,
-        outward,
         width: boxWidth,
         height: boxHeight,
         centerX,
@@ -223,22 +220,19 @@ function createLabelTexture(
   const context = canvas.getContext("2d");
   if (!context) throw new Error("Unable to create label canvas");
   context.scale(scale, scale);
-  const root = layout.meta.role === "root";
-  const right = layout.outward < 0 && !root;
-  const edge = root ? layout.width / 2 : right ? layout.width - 7 : 7;
+  const edge = 7;
   context.fillStyle = LABEL_FILL;
   context.fillRect(0, 0, layout.width, layout.height);
   context.strokeStyle = layout.meta.accent;
   context.lineWidth = 1;
   context.strokeRect(0.5, 0.5, layout.width - 1, layout.height - 1);
-  context.textAlign = root ? "center" : right ? "right" : "left";
+  context.textAlign = "left";
   context.textBaseline = "middle";
   context.font = `300 ${layout.fontSize}px "JetBrains Mono", ui-monospace, monospace`;
   context.letterSpacing = `${layout.letterSpacing}px`;
   context.fillStyle = LABEL_TEXT;
   layout.lines.forEach((line, index) => {
-    // Canvas letter spacing trails each glyph; recentre the root caption.
-    context.fillText(line, edge + (root ? layout.letterSpacing / 2 : 0), 4 + LINE_HEIGHT / 2 + index * LINE_HEIGHT);
+    context.fillText(line, edge, 4 + LINE_HEIGHT / 2 + index * LINE_HEIGHT);
   });
   if (layout.note) {
     // A hairline in the branch colour parts the title from where it lives.
@@ -292,7 +286,6 @@ function labelSignature(
     layout.meta.depth,
     layout.meta.branch,
     layout.meta.accent,
-    layout.outward,
     pixelRatio,
   ].join("|");
 }
