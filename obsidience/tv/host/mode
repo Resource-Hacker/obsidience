@@ -1,22 +1,28 @@
 #!/usr/bin/python3
 """Obsidience TV mode: which GPU carries the TV session, and the stream size that goes with it.
 
-  normal  the RTX 4080 renders the session and encodes a 3840x2160 stream.
-  gaming  the integrated GPU renders it and encodes 1920x1080, so a game has the RTX 4080 to
-          itself (owner, 2026-10-12). GameMode enters it when a game registers and leaves it
-          when the last one exits: ~/.config/gamemode.ini starts obsidience-tv-mode@<mode>.
+  1080p  the integrated GPU renders the session and encodes a 1920x1080 stream. Nothing else
+         competes for it the way the desktop and games compete for the RTX 4080.
+  4k     the RTX 4080 renders it and encodes 3840x2160: sharper, and only as smooth as that
+         card is free (the stream fell to 54 frames a second while the desktop played a video).
 
-  mode normal|gaming   switch; nothing happens when the TV is already in that mode
-  mode reload          restart the session in its current mode (after a change to its units or
-                       mode files), putting the channel and the stream back like a switch
-  mode client          make the television's Moonlight ask for the current mode's stream size
-  mode status          print the current mode
+  mode 4k|1080p   switch; nothing happens when the TV is already in that mode
+  mode default    switch to the default mode (modes/default.env, a link to one of the two)
+  mode reload     restart the session in its current mode (after a change to its units or
+                  mode files), putting the channel and the stream back like a switch
+  mode client     make the television's Moonlight ask for the current mode's stream size
+  mode status     print the current mode
 
-The GPU is chosen when the session, player, tuner and Sunshine start, so a switch selects the
-mode's file (modes/<mode>.env, linked from $XDG_RUNTIME_DIR/obsidience-tv/mode.env; no link
-means normal, also after a reboot) and restarts the session, which restarts the other three.
-It then puts back what the switch itself took away: the channel that was playing, and the
-stream on the television when the television was showing it.
+GameMode keeps a game off a shared card: ~/.config/gamemode.ini starts
+obsidience-tv-mode@1080p when a game registers and obsidience-tv-mode@default when the last
+one exits (owner, 2026-10-12: the TV drops to the integrated GPU during gaming).
+
+The GPU is chosen when the session, player, tuner and Sunshine start. The units read
+modes/default.env and then $XDG_RUNTIME_DIR/obsidience-tv/mode.env, a link to the selected
+mode's file that exists only while the mode is not the default (so a reboot returns to the
+default). A switch sets or removes that link and restarts the session, which restarts the
+other three. It then puts back what the switch itself took away: the channel that was
+playing, and the stream on the television when the television was showing it.
 
 Moonlight asks the host for the size in its own "Video resolution" setting, which it offers
 no way to set from outside, and the integrated GPU cannot encode 3840x2160 at 60 frames a
@@ -56,11 +62,18 @@ def say(*words):
     print(*words, flush=True)
 
 
+MODES = ('4k', '1080p')
+
+
+def default():
+    return Path(os.readlink(HOST / 'modes' / 'default.env')).stem
+
+
 def current():
     try:
         return Path(os.readlink(LINK)).stem
     except OSError:
-        return 'normal'
+        return default()
 
 
 def settings(mode):
@@ -231,7 +244,7 @@ def switch(mode, reload=False):
         tv, showing = None, False
     say(f'TV mode {before} -> {mode}')
     RUNTIME.mkdir(mode=0o700, exist_ok=True)
-    if mode == 'normal':
+    if mode == default():
         LINK.unlink(missing_ok=True)
     else:
         temp = LINK.with_suffix('.new')
@@ -264,14 +277,14 @@ def main():
     if op == 'status':
         say(current())
         return
-    if op not in ('normal', 'gaming', 'reload', 'client'):
+    if op not in (*MODES, 'default', 'reload', 'client'):
         raise SystemExit(__doc__)
     RUNTIME.mkdir(mode=0o700, exist_ok=True)
     with open(RUNTIME / 'mode.lock', 'w') as lock:  # One switch at a time; a second waits its turn.
         fcntl.flock(lock, fcntl.LOCK_EX)
         if op == 'client':
             sys.exit(0 if client(Television(), restart=False) else 1)
-        switch(current() if op == 'reload' else op, reload=op == 'reload')
+        switch({'reload': current(), 'default': default()}.get(op, op), reload=op == 'reload')
 
 
 if __name__ == '__main__':

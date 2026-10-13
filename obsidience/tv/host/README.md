@@ -11,13 +11,13 @@ the place where channels load.
 | `obsidience-tv-audio.service` | A private PipeWire server (`$XDG_RUNTIME_DIR/obsidience-tv`), configured only by `audio/` |
 | `obsidience-tv-audio-policy.service` | WirePlumber for that server, policy only, state in the runtime directory |
 | `obsidience-tv-audio-pulse.service` | Its PulseAudio endpoint (Sunshine captures through it) and the idle sink `obsidience_tv` |
-| `obsidience-tv-session.service` | A headless sway compositor with one output; its GPU and size come from the TV mode (below): 3840x2160@60 on the RTX 4080, or 1920x1080@60 on the integrated GPU while a game runs |
+| `obsidience-tv-session.service` | A headless sway compositor with one output; its GPU and size come from the TV mode (below): 1920x1080@60 on the integrated GPU, or 3840x2160@60 on the RTX 4080 |
 | `obsidience-tv-player.service` | `mpv --idle` in that compositor; JSON IPC at `$XDG_RUNTIME_DIR/obsidience-tv-player.sock`, used by the tuner only |
 | `obsidience-tv-tuner.service` | `tuner.py` (system Python with streamlink): the one owner of the player's IPC socket and of what plays; control socket `$XDG_RUNTIME_DIR/obsidience-tv/tuner.sock` |
-| `obsidience-tv-sunshine.service` | Sunshine (HEVC on the mode's GPU: NVENC on the RTX 4080, or VAAPI on the integrated GPU), connected only to that compositor and that audio server |
+| `obsidience-tv-sunshine.service` | Sunshine (HEVC on the mode's GPU: VAAPI on the integrated GPU, or NVENC on the RTX 4080), connected only to that compositor and that audio server |
 | `obsidience-tv-remote.service` | `remote.py` (system Python with pywayland): the television's remote keys, typed into that compositor through a virtual keyboard (section below). Not installed or enabled yet |
 | `obsidience-tv-android.service` | Android TV in its own container (section below); its window is one more client of that compositor. Staged 2026-10-12, not installed or enabled yet |
-| `obsidience-tv-mode@.service` | One run of `mode <normal\|gaming>`, started by GameMode |
+| `obsidience-tv-mode@.service` | One run of `mode <1080p\|default>`, started by GameMode |
 
 The session publishes its Wayland socket name in `$XDG_RUNTIME_DIR/obsidience-tv/wayland`;
 the player and Sunshine wait for it. Stopping the session stops both, and the tuner with
@@ -26,42 +26,50 @@ restarts.
 
 ## Modes
 
-`mode normal|gaming|client|status` (this directory) is the one place that decides which GPU
-carries the TV session.
+`mode 4k|1080p|default|reload|client|status` (this directory) is the one place that decides
+which GPU carries the TV session.
 
-| Mode | Session and encode | Stream | When |
+| Mode | Session and encode | Stream | |
 | --- | --- | --- | --- |
-| `normal` | RTX 4080, NVENC | 3840x2160, about 63 Mbit/s | Always, unless a game runs |
-| `gaming` | Integrated GPU, VAAPI | 1920x1080, about 15 Mbit/s | While a game runs (owner, 2026-10-12): the game has the RTX 4080 to itself |
+| `1080p` (default) | Integrated GPU, VAAPI | 1920x1080, about 15 Mbit/s | Nothing else competes for that GPU the way the desktop and games compete for the RTX 4080 |
+| `4k` | RTX 4080, NVENC | 3840x2160, about 63 Mbit/s | Sharper; only as smooth as that card is free |
 
-`modes/normal.env` and `modes/gaming.env` hold everything that differs (render node, sway
-configuration, the player's Vulkan device and frame timing, Sunshine's encoder, Moonlight's
-resolution entry, the break view's capture size). The session, player, tuner and Sunshine
-units read `normal.env` and then `$XDG_RUNTIME_DIR/obsidience-tv/mode.env`, a link to the
-selected mode's file; without the link (also after a reboot) the mode is normal. A switch
-sets the link, restarts the session (which restarts the other three), asks the tuner for the
-channel that was playing, and, when the television was showing the stream, brings it back.
+Why 1080p is the default (measured on the television, 2026-10-12): on the RTX 4080 the
+stream is fine while the desktop is quiet (0.5% of refreshes skipped) and fell to 54 frames a
+second, 10-11% skipped, while the desktop played a video in the browser; a test compositor
+and encoder on that card had the same effect and once dropped the session. In the same
+minutes the integrated GPU, itself fully busy with another test, held 59.7 frames a second
+and 0.45% skipped. The integrated GPU cannot encode 3840x2160 at 60 frames a second (44
+against 135 at 1920x1080, with the side-panel screen recorders running).
 
-"A game runs" is GameMode's answer: `~/.config/gamemode.ini` starts
-`obsidience-tv-mode@gaming.service` when the first game registers and
-`obsidience-tv-mode@normal.service` when the last one exits (both WoW launchers use
-GameMode). The commands return at once, so a game's start never waits for the TV.
+`modes/4k.env` and `modes/1080p.env` hold everything that differs (render node, sway
+configuration, compositor renderer, the player's Vulkan device and frame timing, Sunshine's
+encoder, Moonlight's resolution entry, the break view's capture size); `modes/default.env`
+is a link to the default one. The session, player, tuner and Sunshine units read
+`default.env` and then `$XDG_RUNTIME_DIR/obsidience-tv/mode.env`, a link that exists only
+while the mode is not the default, so a reboot returns to the default. A switch sets or
+removes that link, restarts the session (which restarts the other units of the session), asks
+the tuner for the channel that was playing, and, when the television was showing the stream,
+brings it back.
 
-The integrated GPU cannot encode 3840x2160 at 60 frames a second (44 against 135 at
-1920x1080, measured with the side-panel screen recorders running), and the stream's size is
-whatever Moonlight asks for: its "Video resolution" setting, which cannot be set from
-outside the app. So `mode` changes that setting on the television's screen over ADB (host
-list, settings button, "Video resolution", the entry by name), reads it back from the same
-list, and remembers the value in `~/.local/state/obsidience-tv/moonlight-resolution` so
-that nothing is touched when it already fits. Moonlight then chooses its default bit rate
-for that size. A television that is off, unreachable or showing another app is left alone;
-`tv.control` runs `mode client` before it next starts the stream. A stream started by hand
-in between asks for the old size.
+GameMode keeps a game off a shared card (owner, 2026-10-12: the TV drops to the integrated
+GPU during gaming): `~/.config/gamemode.ini` starts `obsidience-tv-mode@1080p.service` when
+the first game registers and `obsidience-tv-mode@default.service` when the last one exits
+(both WoW launchers use GameMode). With 1080p as the default both do nothing; they matter
+when the mode was set to `4k`. The commands return at once, so a game's start never waits.
 
-Measured 2026-10-12 on the television: a switch takes 26-34 s (about 10 s until the channel
-plays again on the other GPU, the rest is Moonlight's setting and reconnect); in gaming
-mode the panel skipped 0.07% of refreshes over a commercial break with the break view
-showing.
+The stream's size is whatever Moonlight asks for: its "Video resolution" setting, which
+cannot be set from outside the app. So `mode` changes that setting on the television's
+screen over ADB (host list, settings button, "Video resolution", the entry by name), reads
+it back from the same list, and remembers the value in
+`~/.local/state/obsidience-tv/moonlight-resolution` so that nothing is touched when it
+already fits. Moonlight then chooses its default bit rate for that size. A television that
+is off, unreachable or showing another app is left alone; `tv.control` runs `mode client`
+before it next starts the stream. A stream started by hand in between asks for the old size.
+
+A switch between modes takes 26-34 s on the television (about 10 s until the channel plays
+again on the other GPU, the rest is Moonlight's setting and reconnect); `mode reload`, with
+no change of size, about 15 s.
 
 ## Boundaries
 
@@ -255,11 +263,11 @@ at 8 keys a second; frame statistics from `dumpsys gfxinfo`):
 
 | Compositor | Android display | Frames over one refresh | Compositor CPU |
 | --- | --- | --- | --- |
-| RTX 4080, GLES2 (normal mode) | 3840x2160 | 30% (median frame 36 ms) | 27% of a core |
+| RTX 4080, GLES2 (mode `4k`) | 3840x2160 | 30% (median frame 36 ms) | 27% of a core |
 | RTX 4080, GLES2 | 1920x1080 pinned, shown unscaled | 0% (5 ms) | 14% |
 | RTX 4080, Vulkan (`WLR_RENDERER=vulkan`) | 3840x2160 | 0% (5 ms) | 1% |
 | Integrated GPU, GLES2 | 3840x2160 | 0% (5 ms) | 0.4% |
-| Integrated GPU, GLES2, 1920x1080 output (gaming mode) | 1920x1080 | 0.1% (12 ms, with the live session also on that GPU) | 0.7% |
+| Integrated GPU, GLES2, 1920x1080 output (mode `1080p`) | 1920x1080 | 0.1% (12 ms, with the live session also on that GPU) | 0.7% |
 
 Android renders on the integrated GPU and hands the compositor LINEAR dmabufs; the RTX 4080
 samples them without a copy (a test client sending 59 MB frames at 63 a second cost the

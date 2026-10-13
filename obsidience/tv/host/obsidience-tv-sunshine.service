@@ -13,7 +13,7 @@ Environment=CUDA_VISIBLE_DEVICES=GPU-4332e1a5-17a8-7e18-5347-5a296549ee81
 # The TV's private audio server: Sunshine's default-sink switching stays in there.
 Environment=PULSE_SERVER=unix:%t/obsidience-tv/pulse/native
 Environment=PIPEWIRE_RUNTIME_DIR=%t/obsidience-tv
-EnvironmentFile=/home/wissenschafter/Projects/obsidience/obsidience/tv/host/modes/normal.env
+EnvironmentFile=/home/wissenschafter/Projects/obsidience/obsidience/tv/host/modes/default.env
 EnvironmentFile=-%t/obsidience-tv/mode.env
 ExecStartPre=/bin/sh -c 'for i in $(seq 100); do [ -s %t/obsidience-tv/wayland ] && exit 0; sleep 0.1; done; exit 1'
 # Frame pacing: tvpace (tvpace.c beside this file) holds each video frame until its slot on an

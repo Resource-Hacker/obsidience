@@ -9,7 +9,7 @@ Type=exec
 UnsetEnvironment=DISPLAY HYPRLAND_INSTANCE_SIGNATURE
 # The TV's private audio server, never the desktop's.
 Environment=PIPEWIRE_RUNTIME_DIR=%t/obsidience-tv
-EnvironmentFile=/home/wissenschafter/Projects/obsidience/obsidience/tv/host/modes/normal.env
+EnvironmentFile=/home/wissenschafter/Projects/obsidience/obsidience/tv/host/modes/default.env
 EnvironmentFile=-%t/obsidience-tv/mode.env
 # Frame timing and the GPU that renders (the TV compositor's; left to itself the player may
 # pick another card) come from the TV mode (modes/*.env). Decoding stays on the CPU.

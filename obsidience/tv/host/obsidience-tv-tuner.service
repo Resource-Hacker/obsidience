@@ -9,7 +9,7 @@ PartOf=obsidience-tv-session.service
 [Service]
 Type=exec
 # The break view renders on the TV mode's GPU.
-EnvironmentFile=/home/wissenschafter/Projects/obsidience/obsidience/tv/host/modes/normal.env
+EnvironmentFile=/home/wissenschafter/Projects/obsidience/obsidience/tv/host/modes/default.env
 EnvironmentFile=-%t/obsidience-tv/mode.env
 # The system Python: streamlink is a distribution package, not part of the Harness environment.
 # Control socket and stream FIFOs live in %t/obsidience-tv; the journal names titles and channel

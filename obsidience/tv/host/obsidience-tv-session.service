@@ -8,9 +8,8 @@ Type=exec
 Environment=WLR_BACKENDS=headless
 Environment=WLR_LIBINPUT_NO_DEVICES=1
 # The GPU that renders the session and the output's size come from the TV mode (modes/*.env,
-# selected by tv/host/mode): the RTX 4080 at 3840x2160, or the integrated GPU at 1920x1080
-# while a game runs.
-EnvironmentFile=/home/wissenschafter/Projects/obsidience/obsidience/tv/host/modes/normal.env
+# selected by tv/host/mode): the integrated GPU at 1920x1080, or the RTX 4080 at 3840x2160.
+EnvironmentFile=/home/wissenschafter/Projects/obsidience/obsidience/tv/host/modes/default.env
 EnvironmentFile=-%t/obsidience-tv/mode.env
 Environment=XDG_CURRENT_DESKTOP=sway
 UnsetEnvironment=WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE
