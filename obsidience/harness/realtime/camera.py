@@ -116,10 +116,13 @@ async def wake_selected_camera(*, cancel_event: Any = None) -> None:
             raise CameraCaptureError("Wake is supported only for the selected OBSBOT Tiny 2 Lite.")
         from . import tracking
         state = await asyncio.to_thread(tracking.snapshot)
-        if state.get("state") == "running" and state.get("fresh") and state.get("awake") is True:
+        if (state.get("state") == "running" and state.get("fresh") and state.get("awake") is True
+                and state.get("recovery", {}).get("state") == "idle"):
             # The owner already attests what a wake establishes: a running
             # tracker with fresh frames whose motor helper reads the camera
-            # awake. No power command and no tracker restart.
+            # awake. No power command and no tracker restart. After an
+            # automatic recovery the full wake runs: it restarts the tracker
+            # and re-arms the single recovery allowance.
             return
         # Otherwise the wake must reach the hardware owner: fresh frames alone
         # do not attest an awake camera.
