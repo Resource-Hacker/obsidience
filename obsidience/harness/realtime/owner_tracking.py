@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import itertools
 import json
 import logging
 import math
@@ -43,6 +44,24 @@ VISION_KEYS = ("detector_model", "recognizer_model", "person_model", "person_mod
 VISION_FAILURES = {"camera_capture_ended", "camera_capture_error",
                    "camera_frame_stalled", "camera_inference_error"}
 MESSAGE_BYTES = 65536
+# One look step per picture direction as a motor pose change (yaw, pitch): the
+# follow law shows that the view goes picture-right as yaw falls and down as
+# pitch rises. Goals stay inside the limits by more than the helper's .75
+# degree stop margin, or they would never be reached.
+LOOK_STEPS = {"left": (30., 0.), "right": (-30., 0.), "up": (0., -15.), "down": (0., 15.)}
+LOOK_INSET = 1.5
+_LOOK_IDS = itertools.count(1)
+
+
+def _look_room(pose, limits):
+    """Whole degrees a look can still turn from a pose, by picture direction."""
+    room = {}
+    for direction, step in LOOK_STEPS.items():
+        axis = 0 if step[0] else 1
+        low, high = limits[axis]
+        room[direction] = max(0, int(high-LOOK_INSET-pose[axis] if step[axis] > 0
+                                     else pose[axis]-low-LOOK_INSET))
+    return room
 
 
 class Tracker:
@@ -66,6 +85,7 @@ class Tracker:
         self._enroll_requests = self._enroll_ack = 0
         self._child_enrolling = False
         self._generation = 0
+        self._look = None
         self._status = {"state": "stopped", "enrollment": {"state": "idle", "samples": 0}}
 
     def start(self, device, name, identity, config):
@@ -86,6 +106,7 @@ class Tracker:
             self._config = config
             self._identity = identity
             self._home = home
+            self._limits = limits
             self._max_age = min(.75, max(.1, float(config.get("frame_max_age_s", .75))))
             self._frame_mono = None
             self._observed_mono = None
@@ -105,7 +126,7 @@ class Tracker:
                             "motor_ms": None, "motor_commands": 0, "reported_speed": None,
                             "submitted_speed": None, "feedback_age_s": None, "velocity_submitted": False,
                             "body_count": 0, "body_id": None, "bound_body_id": None,
-                            "framing_anchor": None,
+                            "framing_anchor": None, "look": None,
                             "motion_reason": "holding", "motor_state": "idle",
                             "target": "unknown", "enrollment": {"state": "idle", "samples": 0}}
         command = [str(config.get("ffmpeg_path", "ffmpeg")), "-nostdin", "-hide_banner",
@@ -204,6 +225,7 @@ class Tracker:
             self._frame_mono = None
             self._observed_mono = None
             self._desired_motion = None
+            self._clear_look()
             self._frame_ready.notify_all()
             if self._helper is not None and self._helper.poll() is None:
                 try:
@@ -273,9 +295,18 @@ class Tracker:
                 return
             observed, now, target = decision["observed"], decision["now"], decision["target"]
             self._observed_mono = observed
+            if self._look is not None and self._look["phase"] == "returning" and target is not None:
+                # Someone is back in the picture: following replaces the return.
+                self._clear_look()
             if decision["enrolling"] or self._enrolling():
                 self._lost_since = now
                 self._desired_motion = None
+            elif self._look is not None:
+                # A look outranks follow and return_home until it is returning.
+                # Reissued per analysed frame: the motor acts only on fresh ones.
+                if target is not None:
+                    self._lost_since = now
+                self._steer_look()
             elif target is not None:
                 self._lost_since = now
                 self._home_verified = False
@@ -329,6 +360,9 @@ class Tracker:
             result["authentication"] = False
             analyzed = self._observed_mono
             result["recognition_age_s"] = None if analyzed is None else round(time.monotonic()-analyzed, 3)
+            pose = result.get("pose")
+            result["look_room"] = None if pose is None else _look_room(
+                (pose["yaw"], pose["pitch"]), self._limits)
             return result
 
     def begin_enrollment(self):
@@ -340,6 +374,7 @@ class Tracker:
             self._enroll_requests += 1
             self._observed_mono = None
             self._desired_motion = None
+            self._clear_look()
             self._status["enrollment"] = {"state": "sampling", "samples": 0, "required": 20,
                                           "deadline_s": 40, "last_rejection": None}
         try:
@@ -347,6 +382,89 @@ class Tracker:
         except (OSError, ValueError) as error:
             raise RuntimeError("camera_tracker_not_running") from error
         return self.snapshot()
+
+    def begin_look(self, direction):
+        """Turn one step toward a picture direction; the motor loop settles,
+        holds and returns it. A look begun during another composes with it."""
+        step = LOOK_STEPS[direction]
+        with self._lock:
+            if self._stop.is_set() or self._status["state"] != "running":
+                raise RuntimeError("camera_tracker_not_running")
+            if self._enrolling():
+                raise RuntimeError("camera_enrollment_active")
+            pose = self._status["pose"]
+            if pose is None:
+                raise RuntimeError("camera_pose_unavailable")
+            pose = (pose["yaw"], pose["pitch"])
+            look = self._look
+            start = pose if look is None or look["phase"] == "returning" else look["goal"]
+            self._look = {
+                "id": next(_LOOK_IDS), "direction": direction, "phase": "moving",
+                "origin": pose if look is None else look["origin"],
+                "goal": tuple(max(low+LOOK_INSET, min(high-LOOK_INSET, at+move))
+                              for at, move, (low, high) in zip(start, step, self._limits)),
+                "deadline": time.monotonic()+8, "settled_mono": None, "still": 0, "pose": None}
+            self._home_verified = False
+            self._steer_look()
+            return self._look["id"]
+
+    def end_look(self, look_id):
+        """Start that look's return now; its own deadlines do so otherwise."""
+        with self._lock:
+            look = self._look
+            if look is not None and look["id"] == look_id and look["phase"] != "returning":
+                look.update(phase="returning", deadline=time.monotonic()+8)
+                self._steer_look()
+
+    def _steer_look(self):
+        """Publish the look and make it the desired motion; lock held."""
+        look, at = self._look, self._observed_mono
+        self._status["look"] = {
+            "id": look["id"], "direction": look["direction"], "phase": look["phase"],
+            "goal": {"yaw": round(look["goal"][0], 2), "pitch": round(look["goal"][1], 2)},
+            "settled_mono": look["settled_mono"]}
+        # The binding is the pose steered to, so a new goal restarts the
+        # frozen-motor watch and cancels a speed computed for the old one.
+        self._desired_motion = None if at is None else {
+            "generation": self._generation, "at": at, "center": None, "reason": "look",
+            "phase": look["phase"],
+            "binding": look["origin"] if look["phase"] == "returning" else look["goal"]}
+        self._status["motion_reason"] = "holding" if self._desired_motion is None else "look"
+
+    def _clear_look(self):
+        """Drop any look and its motion; lock held. Ordinary policy resumes."""
+        self._look = None
+        self._status["look"] = None
+        if self._desired_motion is not None and self._desired_motion["reason"] == "look":
+            self._desired_motion = None
+            self._status["motion_reason"] = "holding"
+
+    def _advance_look(self, pose):
+        """One motor tick of the look's phases; lock held."""
+        look = self._look
+        if look is None:
+            return
+        now = time.monotonic()
+        returning = look["phase"] == "returning"
+        error = max(abs(goal-at) for goal, at in zip(look["origin"] if returning else look["goal"], pose))
+        # Settled needs the goal reached, a zero submitted speed and a resting
+        # pose on two consecutive ticks.
+        still = (error <= .5 and not any(self._velocity) and look["pose"] is not None
+                 and max(abs(at-before) for at, before in zip(pose, look["pose"])) < .2)
+        look["pose"] = pose
+        look["still"] = look["still"]+1 if still else 0
+        if look["phase"] == "moving" and look["still"] >= 2:
+            # Hold so that a following look composes before the return.
+            look.update(phase="holding", settled_mono=now, deadline=now+5)
+        elif returning and (error < .3 or now >= look["deadline"]):
+            # Home stays unverified: nobody seen for four seconds still goes home.
+            self._clear_look()
+            return
+        elif not returning and now >= look["deadline"]:
+            look.update(phase="returning", deadline=now+8)
+        else:
+            return
+        self._steer_look()
 
     def _helper_line(self, generation, timeout):
         deadline = time.monotonic()+timeout
@@ -442,6 +560,7 @@ class Tracker:
                         return
                     pose = feedback
                     with self._lock:
+                        self._advance_look(pose)
                         motion = self._desired_motion
                         fresh = (motion is not None and motion["generation"] == generation
                                  and time.monotonic()-motion["at"] <= self._max_age
@@ -495,6 +614,11 @@ class Tracker:
                                 if self._desired_motion is motion:
                                     self._home_verified = True
                             wanted = (0.,0.)
+                    elif fresh and motion["reason"] == "look":
+                        # The return_home law, toward the look's goal or origin.
+                        wanted = tuple(0. if abs(goal-at)<.3 else 1.4*(goal-at)
+                                       for goal,at in zip(motion["binding"],pose))
+                        reason = "look_"+motion["phase"]
                     dt = min(.3,max(.01,tick-previous))
                     previous = tick
                     if fresh:
@@ -526,6 +650,7 @@ class Tracker:
             self._frame_mono = None
             self._observed_mono = None
             self._desired_motion = None
+            self._clear_look()
             if self._enrolling():
                 self._status["enrollment"] = {"state": "cancelled",
                                               "samples": self._status["enrollment"].get("samples", 0)}

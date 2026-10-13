@@ -197,7 +197,8 @@ def _argument_schemas() -> dict[str, dict]:
     schemas = {
         "application.launch": obj({"application": {"type":"string","enum":sorted(APPLICATIONS)},
             "url":text(2000)},("application",)),
-        "camera.observe": obj({"query":text(500), "wake":{"type":"boolean"}},("query",)),
+        "camera.observe": obj({"query":text(500), "wake":{"type":"boolean"},
+            "look":{"type":"string","enum":["left","right","up","down"]}},("query",)),
         "media.pause": obj({"query":text(128, empty=True)}),
         "media.library": {"anyOf": [
             obj({"action":{"const":"browse"}, "query":text(120,empty=True),

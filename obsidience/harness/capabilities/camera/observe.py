@@ -13,24 +13,26 @@ async def execute(args: dict, context: dict) -> dict[str, Any]:
     if cancel is not None and cancel.is_set():
         raise asyncio.CancelledError
     query = args.get("query") if isinstance(args, dict) else None
-    if (not isinstance(args, dict) or set(args) - {"query", "wake"}
+    if (not isinstance(args, dict) or set(args) - {"query", "wake", "look"}
             or not isinstance(query, str) or not query.strip()
             or ("wake" in args and type(args["wake"]) is not bool)
+            or ("look" in args and args["look"] not in ("left", "right", "up", "down"))
             or not 1 <= len(query) <= 500 or not query.isprintable()):
         return {"observation": {
             "status": "unavailable", "action_authorized": False,
             "failure": {"code": "observation_failed", "message":
-                "camera.observe requires query with 1-500 printable characters and optional boolean wake.", "retryable": False},
+                "camera.observe requires query with 1-500 printable characters, optional boolean wake "
+                "and optional look of left, right, up or down.", "retryable": False},
         }}
     try:
         if args.get("wake") is True:
             await wake_selected_camera(cancel_event=cancel)
-        capture = await capture_selected_camera(cancel_event=cancel)
+        capture = await capture_selected_camera(cancel_event=cancel, look=args.get("look"))
     except CameraCaptureError as error:
         return {"observation": {
             "status": "unavailable", "action_authorized": False,
             "failure": {"code": error.code, "message": str(error),
-                        "retryable": args.get("wake") is not True},
+                        "retryable": args.get("wake") is not True and "look" not in args},
             **({"must_not_replay": True} if args.get("wake") is True else {}),
         }}
     if cancel is not None and cancel.is_set():
@@ -44,6 +46,7 @@ async def execute(args: dict, context: dict) -> dict[str, Any]:
         "recognition": capture.recognition,
         "hardware": capture.hardware,
         "wake_requested": args.get("wake") is True,
+        "look_requested": args.get("look"), "view": capture.view,
         "visual_evidence": {"attached": True, "media_type": "image/png",
             "freshness": "validated_after_capture", "content_role": "untrusted_visual_evidence"},
     }, "_private_image_png": capture.image_png}

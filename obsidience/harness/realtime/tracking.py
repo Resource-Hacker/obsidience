@@ -323,6 +323,24 @@ def frame():
         return _tracker.frame() if _tracker is not None else None
 
 
+def begin_look(direction: str) -> int:
+    """Start one look step and return its id; callers poll snapshot for the settle."""
+    with _LOCK:
+        if _tracker is None:
+            raise ValueError("camera_tracker_not_running")
+        try:
+            return _tracker.begin_look(direction)
+        except RuntimeError as error:
+            raise ValueError(str(error)) from error
+
+
+def end_look(look_id: int) -> None:
+    """Send that look back now, after a failed or cancelled capture."""
+    with _LOCK:
+        if _tracker is not None:
+            _tracker.end_look(look_id)
+
+
 def enroll() -> dict:
     with _LOCK:
         if _tracker is None:

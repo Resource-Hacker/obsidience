@@ -20,6 +20,7 @@ from obsidience.harness.realtime import media
 
 MAX_CAPTURE_BYTES = 8 * 1024 * 1024
 CAPTURE_TIMEOUT_SECONDS = 8
+LOOK_TIMEOUT_SECONDS = 6  # Added for a look: the turn itself is bounded at eight.
 _CAPTURE_LOCK = asyncio.Lock()
 
 
@@ -38,6 +39,7 @@ class CameraCapture:
     captured_at_unix_ns: int
     recognition: dict | None = None
     hardware: dict | None = None
+    view: dict | None = None
 
 
 def _selected() -> tuple[str, str, tuple[object, ...]]:
@@ -125,8 +127,70 @@ async def wake_selected_camera(*, cancel_event: Any = None) -> None:
             raise CameraCaptureError("The selected camera changed during wake.", code="camera_changed")
 
 
-async def _capture(cancel_event: Any) -> CameraCapture:
-    async with _CAPTURE_LOCK:
+class _Look:
+    """One capture's turn of the tracked camera, entered under the capture lock.
+
+    After a success the tracker's own hold-then-return deadline brings the
+    camera back. A failure or cancellation sends it back at once.
+    """
+
+    def __init__(self, direction: str | None, cancel_event: Any) -> None:
+        self.direction, self.cancel_event, self.id = direction, cancel_event, None
+
+    async def __aenter__(self) -> int | None:
+        if self.direction is None:
+            return None
+        from . import tracking
+        # A wake has just restarted the tracker: let it reach running first.
+        while (await asyncio.to_thread(tracking.snapshot)).get("state") == "starting":
+            _check_cancel(self.cancel_event)
+            await asyncio.sleep(.05)
+        begin = asyncio.create_task(asyncio.to_thread(tracking.begin_look, self.direction))
+        try:
+            await _join(begin)
+        except ValueError as exc:
+            raise CameraCaptureError(f"The camera cannot turn {self.direction} now ({exc}). "
+                                     "A look needs the running owner tracker.") from exc
+        except asyncio.CancelledError:
+            # The join drained the begin first, so the look exists.
+            self.id = begin.result()
+            await self.end()
+            raise
+        self.id = begin.result()
+        return self.id
+
+    async def __aexit__(self, kind, error, trace) -> None:
+        if kind is not None:
+            await self.end()
+
+    async def end(self) -> None:
+        """Start the return now; nothing to do before a begin or once it returns."""
+        if self.id is not None:
+            from . import tracking
+            await _join(asyncio.create_task(asyncio.to_thread(tracking.end_look, self.id)))
+
+
+async def _look_settled(look_id: int, cancel_event: Any) -> float:
+    """Wait until this look rests on its goal; return that monotonic time."""
+    from . import tracking
+    while True:
+        _check_cancel(cancel_event)
+        state = await asyncio.to_thread(tracking.snapshot)
+        if state.get("state") != "running":
+            reason = state.get("error") or state.get("state", "unavailable")
+            raise CameraCaptureError(f"The camera could not finish turning: owner tracking is {reason}.")
+        current = state.get("look")
+        if not isinstance(current, dict) or current.get("id") != look_id:
+            raise CameraCaptureError("The camera could not finish turning: the look was cancelled.")
+        if current.get("settled_mono") is not None:
+            return current["settled_mono"]
+        if current.get("phase") == "returning":
+            raise CameraCaptureError("The camera did not reach the requested direction in time and is turning back.")
+        await asyncio.sleep(.05)
+
+
+async def _capture(cancel_event: Any, turn: _Look) -> CameraCapture:
+    async with _CAPTURE_LOCK, turn as look_id:
         _check_cancel(cancel_event)
         device, name, identity = _selected()
         if _is_obsbot(device):
@@ -147,8 +211,10 @@ async def _capture(cancel_event: Any) -> CameraCapture:
         if tracking_state.get("enabled"):
             # The existing media lease owns one persistent video stream while
             # owner tracking is enabled. Never compete with it for V4L2.
+            # A look's picture is taken once the camera has rested on its goal.
+            not_before = 0. if look_id is None else await _look_settled(look_id, cancel_event) + .3
             frame = await asyncio.to_thread(tracking.frame)
-            while frame is None:
+            while frame is None or frame[2] < not_before:
                 _check_cancel(cancel_event)
                 tracking_state = await asyncio.to_thread(tracking.snapshot)
                 if tracking_state.get("state") not in {"starting", "running"}:
@@ -162,6 +228,12 @@ async def _capture(cancel_event: Any) -> CameraCapture:
             pixels, captured_at, captured_mono, frame_identity, recognition = frame
             if frame_identity != identity:
                 raise CameraCaptureError("The selected camera changed.", code="camera_changed")
+            if look_id is not None:
+                tracking_state = await asyncio.to_thread(tracking.snapshot)
+                current = tracking_state.get("look") or {}
+                if current.get("id") != look_id or current.get("phase") != "holding":
+                    raise CameraCaptureError("The camera turned back before its picture was taken.")
+            room = tracking_state.get("look_room")
             def encode() -> bytes:
                 import cv2
                 ok, encoded = cv2.imencode(".png", pixels)
@@ -179,7 +251,10 @@ async def _capture(cancel_event: Any) -> CameraCapture:
                                  {"tracking_state": tracking_state.get("state"),
                                   "motor_state": tracking_state.get("motor_state"),
                                   "recovery": tracking_state.get("recovery"),
-                                  "indicator_verified": False})
+                                  "indicator_verified": False},
+                                 None if room is None else {"looked": turn.direction, "room": room})
+        if look_id is not None:
+            raise CameraCaptureError("The camera turned, but owner tracking is no longer enabled.")
         spawn = asyncio.create_task(asyncio.create_subprocess_exec(
             "/usr/bin/ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error",
             # Stream startup can deliver a partial MJPEG packet. Reject it
@@ -246,12 +321,17 @@ async def _capture(cancel_event: Any) -> CameraCapture:
             await _join(asyncio.create_task(cleanup()))
 
 
-async def capture_selected_camera(*, cancel_event: Any = None) -> CameraCapture:
-    """Capture once, without waking hardware, choosing alternatives or saving video."""
+async def capture_selected_camera(*, cancel_event: Any = None, look: str | None = None) -> CameraCapture:
+    """Capture once, without waking hardware, choosing alternatives or saving video.
+
+    look (left, right, up or down, as seen in the picture) first turns the
+    tracked camera one step that way; it needs the running owner tracker.
+    """
     _check_cancel(cancel_event)
-    task = asyncio.create_task(_capture(cancel_event))
+    turn = _Look(look, cancel_event)
+    task = asyncio.create_task(_capture(cancel_event, turn))
     try:
-        async with asyncio.timeout(CAPTURE_TIMEOUT_SECONDS):
+        async with asyncio.timeout(CAPTURE_TIMEOUT_SECONDS + (LOOK_TIMEOUT_SECONDS if look else 0)):
             while not task.done():
                 _check_cancel(cancel_event)
                 await asyncio.wait({task}, timeout=0.05)
@@ -264,5 +344,8 @@ async def capture_selected_camera(*, cancel_event: Any = None) -> CameraCapture:
             task.cancel()
         # _capture owns native cleanup; never leave its child holding V4L2.
         async def drain() -> None:
+            if not task.done():
+                # An interrupted look turns back now, not after that cleanup.
+                await turn.end()
             await asyncio.gather(task, return_exceptions=True)
         await _join(asyncio.create_task(drain()))
