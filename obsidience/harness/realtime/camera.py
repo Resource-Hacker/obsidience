@@ -21,7 +21,9 @@ from obsidience.harness.realtime import media
 MAX_CAPTURE_BYTES = 8 * 1024 * 1024
 CAPTURE_TIMEOUT_SECONDS = 8
 LOOK_TIMEOUT_SECONDS = 6  # Added for a look: the turn itself is bounded at eight.
+AWAKE_REUSE_SECONDS = 20
 _CAPTURE_LOCK = asyncio.Lock()
+_awake_verified: tuple[float, tuple[object, ...]] | None = None
 
 
 class CameraCaptureError(ValueError):
@@ -192,11 +194,27 @@ async def _look_settled(look_id: int, cancel_event: Any) -> float:
         await asyncio.sleep(.05)
 
 
+async def _awake_recently(identity: tuple[object, ...]) -> bool:
+    """Whether the last power readback still stands for this picture.
+
+    A readback opens a second SDK connection beside the tracker's motor helper.
+    Seven in a row stalled both: the last readback failed and the tracker lost
+    its pose. One request's pictures share a readback while the tracker runs.
+    """
+    verified = _awake_verified
+    if (verified is None or verified[1] != identity
+            or time.monotonic()-verified[0] > AWAKE_REUSE_SECONDS):
+        return False
+    from . import tracking
+    return (await asyncio.to_thread(tracking.snapshot)).get("state") == "running"
+
+
 async def _capture(cancel_event: Any, turn: _Look) -> CameraCapture:
     async with _CAPTURE_LOCK, turn as look_id:
         _check_cancel(cancel_event)
         device, name, identity = _selected()
-        if _is_obsbot(device):
+        from . import tracking
+        if _is_obsbot(device) and not await _awake_recently(identity):
             # Sleeping hardware can still clock blank V4L2 frames. Fresh pixels
             # and a cached power flag do not attest an awake physical camera.
             readback = asyncio.create_task(asyncio.to_thread(media.obsbot_camera_state, refresh=True))
@@ -209,7 +227,8 @@ async def _capture(cancel_event: Any, turn: _Look) -> CameraCapture:
                 raise CameraCaptureError("The selected camera is asleep. Use wake:true for a requested camera wake.")
             if _selected()[2] != identity:
                 raise CameraCaptureError("The selected camera changed.", code="camera_changed")
-        from . import tracking
+            global _awake_verified
+            _awake_verified = (time.monotonic(), identity)
         tracking_state = await asyncio.to_thread(tracking.snapshot)
         if tracking_state.get("enabled"):
             # The existing media lease owns one persistent video stream while
