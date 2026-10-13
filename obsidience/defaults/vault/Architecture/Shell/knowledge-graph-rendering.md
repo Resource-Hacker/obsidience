@@ -117,21 +117,6 @@ with a grey hairline between title and location and a leader to their node,
 drawn last, over the glass. A consulted node also wears a faint disc and a
 breathing ring in its branch color.
 
-The Memory streams carry one layer of the same glass (`memory-glass.ts`). The
-memory layout and the stream's own look are unchanged: time fixes each record
-along the stream and the forces wind the bank into its own loose helix. The
-glass follows the memories that matter most, the best connected, the plain
-order of time aside: its centre line is where they lie along time, each record
-counted by how connected it is, so the layer twists with the helix, and it
-stands a little wider than they spread, closing past the first and last record.
-The best connected seventh of a bank belongs to the glass: those records press
-craters into it by their size and links and carry a seed, and a crater shows
-its rings once it is large enough on screen to hold them. Every other record
-is drawn as before. A record touched by a memory operation sends one ripple
-along the glass in its own color. The layer uses the Knowledge orb's saved
-Glass settings, with the first layer's solidity, and dims while a record is
-inspected.
-
 ## Scoped graphs and Library
 
 The four separate Agent clouds remain independently populated and retain their

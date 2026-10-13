@@ -5,8 +5,6 @@ import { providerGraphAssets, providerLinkIndex } from "./provider-graph-assets"
 import { CODE_STRUCTURE } from "./code-spherical-layout";
 import { createKnowledge3dLabelLayer, type Knowledge3dLabelMeta } from "@/components/themes/obsidience/knowledge-3d-labels";
 import { memoryTimeAxis, memoryInitialOffset, memoryRelationshipWeight, memoryLens, memoryLensX, type MemoryLens, type MemoryTimeAxis } from "./memory-time-layout";
-import { createMemoryGlass, type MemoryGlass } from "./memory-glass";
-import { loadGraphTuning, MAIN_GRAPH_ID } from "@/lib/graph-tuning";
 
 export interface ProviderNode {
   id: string; name: string; kind: string; color: string;
@@ -48,8 +46,6 @@ export class ProviderGraphScene {
   private colorTexture: THREE.DataTexture | null = null;
   private linkIndex = {adjacency: new Map<string, number[]>(), overview: new Set<number>()};
   private nodeColors = new Float32Array(0);
-  private glass: MemoryGlass | null = null;
-  private dropped = new Set<string>();
 
   private timeAxis: MemoryTimeAxis | null = null;
   private timeGuides = new THREE.Group();
@@ -111,14 +107,6 @@ export class ProviderGraphScene {
     this.host.appendChild(this.renderer.domElement);
     this.scene.add(this.group);
     this.scene.add(this.timeGuides);
-    if (!code) {
-      // A memory stream carries one layer of the Knowledge orb's glass, which
-      // follows the orb's saved Glass settings.
-      this.glass = createMemoryGlass();
-      this.glass.applyTuning(loadGraphTuning(MAIN_GRAPH_ID));
-      this.scene.add(this.glass.group);
-      window.addEventListener("storage", this.tuningSaved);
-    }
     this.camera.position.set(0, 0, 850);
     if (!code) this.camera.position.set(310, 140, 850);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
@@ -179,10 +167,6 @@ export class ProviderGraphScene {
     }
     return false;
   }
-  private tuningSaved = (event: StorageEvent) => {
-    if (event.key && !event.key.startsWith("obsidience.tuning3d.")) return;
-    this.glass?.applyTuning(loadGraphTuning(MAIN_GRAPH_ID)); this.request();
-  };
   private stopFlight = () => {
     this.cameraFlight = null; this.fitAfterLayout = false;
     if (this.transition) this.transition.camera = false;
@@ -194,7 +178,6 @@ export class ProviderGraphScene {
     const w = Math.max(1, this.host.clientWidth), h = Math.max(1, this.host.clientHeight);
     this.renderer.setSize(w, h);
     this.labels.resize(w, h, this.pixelRatio);
-    this.glass?.resize(this.pixelRatio);
     if (this.points) (this.points.material as THREE.ShaderMaterial).uniforms.uPerspective.value =
       h * this.pixelRatio / (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)));
     this.lines?.material.uniforms.uViewportPx.value.set(w * this.pixelRatio, h * this.pixelRatio);
@@ -346,19 +329,6 @@ export class ProviderGraphScene {
     this.positionTexture = assets.positions; this.colorTexture = assets.colors;
     this.nodeColors = new Float32Array(this.points.geometry.getAttribute("aCore").array);
     this.group.add(this.lines, this.points);
-    if (this.glass) {
-      const radii = this.points.geometry.getAttribute("aRadius").array;
-      this.glass.setRecords({
-        positions: this.points.geometry.getAttribute("position").array as Float32Array,
-        positionTexture: assets.positions, radii, tints: this.nodeColors,
-        // Connections: every link but the plain order of time, which each
-        // record has alike.
-        links: Float32Array.from(this.nodes, node => (this.linkIndex.adjacency.get(node.id) || [])
-          .filter(edge => this.edges[edge].kind !== "temporal").length),
-        weights: Float32Array.from(this.nodes, (node, i) => radii[i] * Math.sqrt(1
-          + (this.linkIndex.adjacency.get(node.id) || []).reduce((sum, edge) => sum + memoryRelationshipWeight(this.edges[edge]), 0))),
-      });
-    }
     if (data.code_root) {
       const root = this.indices.get(data.code_root);
       if (root !== undefined) this.points.geometry.getAttribute("aRadius").setX(root, 6.6);
@@ -507,7 +477,6 @@ export class ProviderGraphScene {
     });
     p.needsUpdate = true; this.positionTexture.needsUpdate = true;
     this.points.geometry.computeBoundingSphere();
-    this.glass?.invalidate();
   }
   select(id: string, range = "") {
     id = this.aliases.get(id) || id;
@@ -625,16 +594,7 @@ export class ProviderGraphScene {
       for (const ref of op.refs) {
         const id = this.aliases.get(ref);
         if (id) {
-          const until = (op.expires_at || op.at + 3500) + 900;
-          // A record touched just now drops into its glass, once for each
-          // operation however often the list is sent again.
-          const drop = op.id + "\0" + id;
-          if (this.glass && until > now && !this.dropped.has(drop)) {
-            if (this.dropped.size > 400) this.dropped.clear();
-            this.dropped.add(drop);
-            this.glass.ripple(this.indices.get(id)!);
-          }
-          this.pulses.set(id, { start: op.at, until, color });
+          this.pulses.set(id, { start: op.at, until: (op.expires_at || op.at + 3500) + 900, color });
           this.paintNodes.add(id);
         }
       }
@@ -839,11 +799,6 @@ export class ProviderGraphScene {
       this.lines.material.uniforms.uOverview.value = THREE.MathUtils.clamp(scale * 0.5, 0.12, 1)
         * (this.selected || this.hovered || this.searchQuery.trim() ? 0.2 : 1);
     }
-    if (this.glass) {
-      this.glass.group.rotation.x = this.group.rotation.x;
-      if (this.glass.advance(time, scale, !!(this.selected || this.hovered || this.searchQuery.trim()))) moving = true;
-      this.glass.prepare(this.renderer);
-    }
     if (this.labelsDirty) {
       this.labelsDirty = false;
       if (this.transition?.kind === "enter" && !this.transition.unfolding)
@@ -893,8 +848,7 @@ export class ProviderGraphScene {
     this.disposed = true; cancelAnimationFrame(this.raf); clearTimeout(this.wakeTimer); this.resize.disconnect();
     this.layoutWorker?.terminate(); this.layoutWorker = null;
     this.motionPreference.removeEventListener("change", this.request);
-    window.removeEventListener("storage", this.tuningSaved);
-    this.controls.dispose(); this.clearGhost(); this.clearGeometry(); this.glass?.dispose(); this.labels.dispose(); this.renderer.dispose();
+    this.controls.dispose(); this.clearGhost(); this.clearGeometry(); this.labels.dispose(); this.renderer.dispose();
     this.renderer.domElement.removeEventListener("pointerenter", this.pointerEnter);
     this.renderer.domElement.removeEventListener("pointermove", this.pointerMove);
     this.renderer.domElement.removeEventListener("pointerdown", this.pointerDown);

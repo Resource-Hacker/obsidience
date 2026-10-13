@@ -69,38 +69,18 @@ float rippleWave(vec3 direction, out vec3 tint) {
 `;
 
 /** Light added to a premultiplied canvas: alpha follows the brightest channel. */
-export const LIGHT_GLSL = `
+const LIGHT_GLSL = `
 const vec3 AMBER = vec3(1.0, 0.604, 0.235);
 vec4 knowledgeLight(vec3 light) {
   return vec4(light, clamp(max(light.r, max(light.g, light.b)), 0.0, 1.0));
 }
 `;
 
-export const ADDITIVE = {
+const ADDITIVE = {
   transparent: true, depthTest: false, depthWrite: false,
   blending: THREE.CustomBlending, blendEquation: THREE.AddEquation,
   blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
 } as const;
-
-/** Smooth noise in space, 0 to 1: what makes the glass look hand-blown. */
-export const NOISE_GLSL = `
-float hash(vec3 p) {
-  p = fract(p * 0.1031);
-  p += dot(p, p.zyx + 31.32);
-  return fract((p.x + p.y) * p.z);
-}
-float valueNoise(vec3 p) {
-  vec3 i = floor(p);
-  vec3 f = fract(p);
-  f = f * f * (3.0 - 2.0 * f);
-  return mix(
-    mix(mix(hash(i), hash(i + vec3(1.0, 0.0, 0.0)), f.x),
-      mix(hash(i + vec3(0.0, 1.0, 0.0)), hash(i + vec3(1.0, 1.0, 0.0)), f.x), f.y),
-    mix(mix(hash(i + vec3(0.0, 0.0, 1.0)), hash(i + vec3(1.0, 0.0, 1.0)), f.x),
-      mix(hash(i + vec3(0.0, 1.0, 1.0)), hash(i + vec3(1.0, 1.0, 1.0)), f.x), f.y),
-    f.z);
-}
-`;
 
 const SPHERE_GLSL = `
 vec3 sphereDirection(vec2 st) {
@@ -120,7 +100,22 @@ uniform int uCount;
 uniform float uSeed;
 varying vec2 vUv;
 ${SPHERE_GLSL}
-${NOISE_GLSL}
+float hash(vec3 p) {
+  p = fract(p * 0.1031);
+  p += dot(p, p.zyx + 31.32);
+  return fract((p.x + p.y) * p.z);
+}
+float valueNoise(vec3 p) {
+  vec3 i = floor(p);
+  vec3 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(
+    mix(mix(hash(i), hash(i + vec3(1.0, 0.0, 0.0)), f.x),
+      mix(hash(i + vec3(0.0, 1.0, 0.0)), hash(i + vec3(1.0, 1.0, 0.0)), f.x), f.y),
+    mix(mix(hash(i + vec3(0.0, 0.0, 1.0)), hash(i + vec3(1.0, 0.0, 1.0)), f.x),
+      mix(hash(i + vec3(0.0, 1.0, 1.0)), hash(i + vec3(1.0, 1.0, 1.0)), f.x), f.y),
+    f.z);
+}
 void main() {
   vec3 direction = sphereDirection(vUv);
   float blend = 0.0;
@@ -325,7 +320,7 @@ void main() {
 `;
 
 // A large blur is a ring, as through a lens.
-export const BOKEH_FRAGMENT = `
+const BOKEH_FRAGMENT = `
 varying float vAlpha;
 varying float vRing;
 varying vec3 vColor;
