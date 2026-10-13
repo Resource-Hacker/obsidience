@@ -78,8 +78,9 @@ def record(sample: dict | None, run_id: str, step: int, result: object, status: 
         identity = refinement._store('decisions', sample)
         path = refinement._root() / 'incidents' / (run_id + '.json')
         previous = json.loads(path.read_text()) if path.exists() else []
-        if identity not in previous and len(previous) < 4:
-            _atomic_write(path, json.dumps([*previous, identity]))
+        if identity not in previous:
+            # Four at most: the run's first three rejections and its newest one.
+            _atomic_write(path, json.dumps([*previous[:3], identity]))
     else:
         key = refinement._hash((task.ref + ':' + sample['tool']).encode())
         # Keep enough independent runs for four controls even when the current
@@ -290,18 +291,22 @@ def contract_dead_end(run: dict, entries: list, sample: dict | None) -> str | No
     without a dispatchable Tool call, are Tool-contract or code findings.
     """
     found = []
-    if sample is not None and sample['tool'] == 'task.complete':
+    failed = run['status'] in {'failed', 'blocked'}
+    # Only the read-receipt rejection of a run that never completed, and only a
+    # search lead: the completion gate requires a read of nothing else.
+    if (failed and sample is not None and sample['tool'] == 'task.complete' and isinstance(sample['result'], dict)
+            and 'complete current read' in str(sample['result'].get('error', ''))):
         evidence = sample['args'].get('evidence')
         cited = '\n'.join(str(item) for item in evidence) if isinstance(evidence, list) else ''
+        leads = {ref for row in sample['context'].get('_vault_searches', {}).values() for ref in row.get('refs', [])}
         for ref, read in sample['context'].get('_article_reads', {}).items():
-            if read.get('complete') is False and ref in cited:
+            if read.get('complete') is False and ref in leads and ref in cited:
                 found.append(f'the rejected completion cites [[{ref}]], which vault.read returned only in part '
                              f'(ranges {read.get("ranges")} of {read.get("total_characters")} characters)')
     summary = str(run.get('summary') or '')
     last = entries[-1] if entries and isinstance(entries[-1], dict) else {}
     limit = last.get('finish_reason') == 'max-tokens' or 'ended with max-tokens' in summary
-    if run['status'] in {'failed', 'blocked'} and (
-            limit or 'valid action block' in summary or 'invalid native Tool calls' in summary):
+    if failed and (limit or 'valid action block' in summary or 'invalid native Tool calls' in summary):
         found.append(f'the run ended on "{summary[:200]}"' + (' with its last reply cut off at the output limit' if limit else ''))
     if not found:
         return None
@@ -383,16 +388,19 @@ def notifications() -> list[dict]:
     return rows
 
 
-# File-attested replacement reports per finding, for one state of the attention
-# record and job reports. The scheduler tick then repeats only the ledger reads.
+# File-attested replacement reports per finding, for one state of the exhausted
+# findings and job reports. The scheduler tick then repeats only the ledger reads.
 _REPLACEMENTS: dict = {}
 
 
 def _evaluation_files() -> tuple:
-    """Identify the attention record and job reports as last written."""
+    """Identify what a replacement attestation reads: exhausted findings, and job reports as last written."""
     root = refinement._root()
     attention_path = root / 'optimization-attention.json'
-    return (attention_path.stat().st_mtime_ns if attention_path.is_file() else 0,
+    findings = json.loads(attention_path.read_text()) if attention_path.is_file() else []
+    # Admission rewrites the record in another order on every inspection pass.
+    return (frozenset((row.get('key'), row.get('run_id'), row.get('reason')) for row in findings
+                      if str(row.get('reason')).startswith('AutoSaddler exhausted its bounded improvement attempt: ')),
             tuple(sorted((path.parent.name, path.stat().st_mtime_ns)
                          for path in (root / 'executive/jobs').glob('*/report.json'))))
 

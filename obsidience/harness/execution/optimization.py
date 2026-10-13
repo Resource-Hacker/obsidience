@@ -141,8 +141,10 @@ def reconcile_rejections(notes: list) -> None:
         finding = None if rejected['tool'] == 'execution' else incidents.contract_dead_end(run, entries, terminal)
         if finding:
             # No candidate body can change a Tool contract or the output limit.
-            # Its own key: another run of this rejection must not replace the finding.
-            incidents.attention(refinement._hash((identity + ':implementation').encode()),
+            # Its own key: an ordinary run of this rejection must not replace the
+            # finding, and an edit to the definition must not raise it again.
+            incidents.attention(_incident(run['task_ref'], 'implementation', rejected['tool'],
+                                          rejection or rejected['reason']),
                                 run_id, run['task_ref'], finding, rejected['reason'])
             _INSPECTED_RUNS.add(run_id)
             continue
