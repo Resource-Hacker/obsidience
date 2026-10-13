@@ -565,7 +565,7 @@ class ConversationRuntime:
             await self._report_task_outcome(
                 {"status": "failed", "run_id": activity_completion.get("run_id")}, source=source, generation=generation,
             )
-            return {"status": "failed", "summary": message}
+            return {"status": "failed", "summary": message, "run_id": activity_completion.get("run_id")}
         finally:
             if recall is not None:
                 await discard_recall(recall)

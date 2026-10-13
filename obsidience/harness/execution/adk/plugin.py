@@ -251,7 +251,7 @@ class AgentPlugin(BasePlugin):
         self.strikes['invalid'] = 0
         return None
 
-    async def dispatch(self, name: str, args: dict) -> dict:
+    async def dispatch(self, name: str, args: dict, *, raw_observation: bool = False) -> dict:
         """One admitted call through the capability core; rendered as the Tool result."""
         from .. import executor
         async with self._calls:  # One Tool at a time, like the native single-call step.
@@ -282,7 +282,7 @@ class AgentPlugin(BasePlugin):
                 self.strikes['completion'] = 0
             if outcome.kind in {'completed', 'waiting'}:
                 return _text(json.dumps(self.ctx.get('completion') or {'status': self.ex.status}))
-            blocks = [{'type': 'text', 'text': observation_text(
+            blocks = [{'type': 'text', 'text': outcome.observation if raw_observation else observation_text(
                 outcome.observation, self._budget_nudge() if outcome.kind == 'returned' else '')}]
             images = ([('', outcome.image_png)] if outcome.image_png is not None else []) + list(outcome.frames)
             for label, raw in images:
@@ -385,9 +385,9 @@ class AgentPlugin(BasePlugin):
         }
         return names, modes
 
-    async def operate(self, name: str, args: dict) -> list[dict]:
+    async def operate(self, name: str, args: dict, *, raw_observation: bool = False) -> list[dict]:
         """A controller-originated call (plain-text completion, explicit command)."""
-        response = self.admit(name, args) or await self.dispatch(name, args)
+        response = self.admit(name, args) or await self.dispatch(name, args, raw_observation=raw_observation)
         return response['content']
 
     # Model steps -------------------------------------------------------

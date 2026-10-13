@@ -56,7 +56,7 @@ async def _run_owner_media(plugin: AgentPlugin, command: dict, session_id: str, 
             from ...interfaces.api.media import claim_source_preview, source_fingerprint
             proof = claim_source_preview(command['preview_token'], command['request_id'])
             blocks = await plugin.operate('media.library', {
-                'action': 'search', 'query': proof['query'], 'type': proof['type']})
+                'action': 'search', 'query': proof['query'], 'type': proof['type']}, raw_observation=True)
             metadata_page = json.loads(next(block['text'] for block in blocks if block.get('type') == 'text'))
             matches = [row for row in metadata_page.get('matches', [])
                        if isinstance(row, dict) and all(row.get(key) == proof[key]
@@ -66,7 +66,7 @@ async def _run_owner_media(plugin: AgentPlugin, command: dict, session_id: str, 
             args = {'action': 'candidates', 'metadata_id': matches[0]['metadata_id']}
             if proof['type'] == 'series':
                 args.update(season=proof['season'], episode=proof['episode'])
-            blocks = await plugin.operate('media.library', args)
+            blocks = await plugin.operate('media.library', args, raw_observation=True)
             source_page = json.loads(next(block['text'] for block in blocks if block.get('type') == 'text'))
             exact = []
             for row in source_page.get('candidates', []):
@@ -82,7 +82,7 @@ async def _run_owner_media(plugin: AgentPlugin, command: dict, session_id: str, 
             selected = command['selection']
             blocks = await plugin.operate('media.library', {
                 'action': 'select', 'item_id': selected['item_id'],
-                'media_source_id': selected['media_source_id']})
+                'media_source_id': selected['media_source_id']}, raw_observation=True)
             result = json.loads(next(block['text'] for block in blocks if block.get('type') == 'text'))
             candidate = result.get('id') if result.get('status') == 'completed' else None
             binding = (ctx.get('_media_candidates') or {}).get(candidate)
@@ -105,7 +105,7 @@ async def _run_owner_media(plugin: AgentPlugin, command: dict, session_id: str, 
                 args['position'] = command['position']
             call = {'name': 'tv.control', 'args': args}
         ctx['_reflex_proposal'] = deepcopy(call)
-        result = await plugin.operate(call['name'], call['args'])
+        result = await plugin.operate(call['name'], call['args'], raw_observation=True)
         verified = ctx.get('_reflex_command_verified') is True
         if operation == 'acquire':
             receipt = json.loads(next(block['text'] for block in result if block.get('type') == 'text'))
