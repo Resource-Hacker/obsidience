@@ -102,10 +102,13 @@ silence is not clipped.
 
 Speech can afford 0.3 s; the chirp that opens the line cannot (owner: it must be as snappy as
 possible). So while the Executive waits for its name the stream is on its own speaker and the
-opening chirp plays there directly. Once the line is open and that chirp has ended, while the
-owner speaks, `voice.py` moves the stream onto the Snapcast sink: the "accepted" chirp, the
-reply and the closing chirp play on both speakers in step, and then it moves back. (The reply
-follows the "accepted" chirp without a gap, so there is no later quiet moment to move in.) It
+opening chirp plays there directly. Once the line is open and that chirp has ended, and only
+while the owner is speaking, `voice.py` moves the stream onto the Snapcast sink: the "accepted"
+chirp, the reply and the closing chirp play on both speakers in step, and then it moves back.
+The owner's voice is the one safely quiet moment: the "accepted" chirp cannot start before
+speech has ended and been judged, and the reply follows that chirp without a gap (moved in the
+first milliseconds of the "accepted" chirp, the stream stalled for two seconds). A command
+finished before the stream could move is answered on the desk speakers alone. It
 reads those moments from the Harness (`/ws/trace` chirp lines, `/ws/realtime` state) and the
 television's presence from the Snapcast server; without any of them, or when the Executive
 speaks from another speaker than the desk client's, the voice stays on its own speaker. The

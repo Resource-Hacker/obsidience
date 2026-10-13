@@ -11,10 +11,13 @@ buffer. The price is that buffer: sound on this route starts about 0.3 s later.
 Speech can afford that; the chirp that opens the line cannot (owner, 2026-10-12: it must be as
 snappy as possible). So the speech worker's one playback stream is on its own speaker while
 the Executive waits for its name, and the opening chirp plays there directly, as it always
-did. Once the line is open and that chirp has ended, while the owner speaks, the stream moves
-onto the Snapcast sink: the "accepted" chirp, the reply and the chirp that closes it then play
-on both speakers in step. (The reply follows the "accepted" chirp without a gap, so there is
-no later quiet moment to move in.) After the closing chirp the stream goes back. Without a
+did. Once the line is open and that chirp has ended, and only while the owner is speaking, the
+stream moves onto the Snapcast sink: the "accepted" chirp, the reply and the chirp that closes
+it then play on both speakers in step. The owner's voice is the one moment that is safely
+quiet: the "accepted" chirp cannot start until speech has ended and been judged, and the reply
+follows that chirp without a gap. (Moved in the first milliseconds of the "accepted" chirp,
+the stream stalled for two seconds.) A command finished before the stream could move is
+answered on the desk speakers alone. After the closing chirp the stream goes back. Without a
 television client, the desk client, the Harness or the Snapcast server, the voice simply
 stays on its own speaker.
 
@@ -58,9 +61,10 @@ DRAIN = 0.25
 # The opening chirp is queued within milliseconds of the line opening; a line that has been open
 # this long without one was opened inside a sentence and has none.
 CHIRP_GRACE = 0.2
-# An exchange normally ends with its closing chirp. Should that never come, it ends once the line
-# has been closed and nothing has played for this long.
-QUIET_LIMIT = 10.0
+# An exchange ends with its closing chirp, however long the Executive works before it speaks.
+# Should that chirp never come, the exchange ends once the line has been closed and nothing has
+# played or been said for this long.
+QUIET_LIMIT = 120.0
 
 
 class State:
@@ -71,22 +75,24 @@ class State:
         self.lock = threading.Lock()
         self.listening = False     # A television client and the desk client are connected.
         self.harness = False
-        self.line_open = False     # The Executive listens for a command (or is in a conversation).
+        self.line_open = False     # The Executive listens for a command.
+        self.speaking = False      # The owner is speaking.
         self.opened_at = None      # Monotonic time the line opened, until this exchange's route is decided.
         self.chirping = False      # The opening chirp is being written.
-        self.exchange = None       # Monotonic time since which this exchange takes the Snapcast route.
+        self.clear_at = 0.0        # Monotonic time the opening chirp's tail has left the worker's buffer.
+        self.exchange = False      # This exchange takes the Snapcast route.
         self.quiet_since = None    # Monotonic time since which the line is closed and nothing plays.
-        self.move_after = 0.0      # Not before this monotonic time (a chirp's tail is draining).
+        self.move_after = 0.0      # Not before this monotonic time (a closing chirp's tail is draining).
 
     def cue(self, name, edge):
         with self.lock:
             now = time.monotonic()
             if name == 'ready':
                 self.chirping = edge == 'started'
-                if edge == 'finished' and self.line_open:
-                    self.exchange, self.opened_at, self.move_after = now, None, now + DRAIN
+                if edge == 'finished':
+                    self.clear_at = now + DRAIN
             elif name in CLOSING and edge == 'finished':
-                self.exchange, self.opened_at, self.move_after = None, None, now + DRAIN
+                self.exchange, self.opened_at, self.move_after = False, None, now + DRAIN
         self.changed.set()
 
     def voice_state(self, state):
@@ -95,13 +101,14 @@ class State:
             running = bool(state.get('ready'))
             line_open = running and bool(state.get('command_open'))
             if line_open and not self.line_open:
-                self.opened_at = now
+                self.opened_at, self.clear_at = now, 0.0
             self.line_open = line_open
+            self.speaking = running and bool(state.get('user_speaking'))
             if not running:
-                self.exchange = self.opened_at = None  # No voice at all: nothing to keep in step.
-            # The line also closes when a command is taken, with the reply still to come: only
-            # silence after that ends an exchange whose closing chirp never came.
-            quiet = not line_open and (state.get('playback') or {}).get('status', 'idle') == 'idle'
+                self.exchange, self.opened_at = False, None  # No voice at all: nothing to keep in step.
+            # The line also closes when a command is taken, with the reply still to come.
+            quiet = (not line_open and not self.speaking
+                     and (state.get('playback') or {}).get('status', 'idle') == 'idle')
             self.quiet_since = (self.quiet_since or now) if quiet else None
         self.changed.set()
 
@@ -110,18 +117,20 @@ class State:
         with self.lock:
             now = time.monotonic()
             again = None
-            if self.opened_at is not None and not self.chirping:
-                if now - self.opened_at >= CHIRP_GRACE:
-                    self.exchange, self.opened_at = now, None  # No opening chirp for this line.
-                else:
-                    again = self.opened_at + CHIRP_GRACE
-            if self.exchange is not None and self.quiet_since is not None:
+            if not self.exchange and self.line_open and self.opened_at is not None and not self.chirping:
+                # No opening chirp follows a line opened inside a sentence; one that was played
+                # must have left the buffer.
+                ready = max(self.opened_at + CHIRP_GRACE, self.clear_at)
+                if now < ready:
+                    again = ready
+                elif self.speaking:
+                    self.exchange, self.opened_at = True, None
+            if self.exchange and self.quiet_since is not None:
                 if now - self.quiet_since >= QUIET_LIMIT:
-                    self.exchange = None
+                    self.exchange = False
                 else:
                     again = min(again or float('inf'), self.quiet_since + QUIET_LIMIT)
-            together = self.harness and self.listening and self.exchange is not None
-            return together, self.move_after, again
+            return self.harness and self.listening and self.exchange, self.move_after, again
 
 
 def follow_trace(state, stopping):
@@ -168,7 +177,8 @@ def follow_voice(state, stopping):
         except Exception as error:  # noqa: BLE001
             log.debug('voice state: %s', type(error).__name__)
         with state.lock:
-            state.harness, state.line_open, state.exchange, state.opened_at, state.quiet_since = False, False, None, None, None
+            state.harness, state.line_open, state.speaking, state.exchange, state.opened_at, state.quiet_since = (
+                False, False, False, False, None, None)
         state.changed.set()
         stopping.wait(2)
 
