@@ -1,0 +1,6 @@
+FROM docker.io/library/archlinux:base
+RUN pacman -Syu --noconfirm --needed waydroid socat dbus && pacman -Scc --noconfirm \
+ && printf '#!/bin/sh\nexit 0\n' > /usr/local/bin/modprobe && chmod 0755 /usr/local/bin/modprobe
+COPY entrypoint.sh /usr/local/bin/tv-android
+RUN chmod 0755 /usr/local/bin/tv-android
+ENTRYPOINT ["/usr/local/bin/tv-android"]

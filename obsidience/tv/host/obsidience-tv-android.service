@@ -1,0 +1,40 @@
+[Unit]
+Description=Obsidience TV Android (Android TV in its own container, shown in the TV session)
+# An unmodified Waydroid with the WayDroid-ATV image runs inside a rootful Podman container that
+# has its own binderfs, cgroup namespace, bridge network and D-Bus, so it never meets the Waydroid
+# TFT uses on the host. Its window (app_id "Waydroid") is a client of the TV compositor only, and
+# its sound goes to the TV's private audio server. The compositor's socket is bind-mounted, so
+# this unit stops and starts with the session.
+Requires=obsidience-tv-session.service obsidience-tv-audio-pulse.service
+After=obsidience-tv-session.service obsidience-tv-audio-pulse.service
+PartOf=obsidience-tv-session.service
+
+[Service]
+Type=exec
+# Image, Android state and Podman's own store live under ~/.local/share/obsidience-tv-android
+# (home filesystem); nothing of this instance is in the default container store.
+ExecStartPre=/bin/sh -c 'for i in $(seq 100); do [ -s %t/obsidience-tv/wayland ] && exit 0; sleep 0.1; done; exit 1'
+ExecStart=/bin/sh -c 'exec sudo -n podman \
+    --root %h/.local/share/obsidience-tv-android/containers \
+    --runroot /run/obsidience-tv-android/storage --tmpdir /run/obsidience-tv-android/libpod \
+    run --rm --replace --name obsidience-tv-android \
+    --privileged --cgroupns=private --pids-limit=-1 \
+    --network obsidience-tv --ip 10.89.240.2 --hostname obsidience-tv \
+    -e IGPU_PCI=0000:7a:00.0 \
+    -v %h/.local/share/obsidience-tv-android/images:/etc/waydroid-extra/images:ro \
+    -v %h/.local/share/obsidience-tv-android/state:/var/lib/waydroid \
+    -v %t/$(cat %t/obsidience-tv/wayland):/run/tv/wayland-0 \
+    -v %t/obsidience-tv/pulse/native:/run/tv/pulse/native \
+    localhost/obsidience-tv-android:1'
+ExecStop=/usr/bin/sudo -n podman \
+    --root %h/.local/share/obsidience-tv-android/containers \
+    --runroot /run/obsidience-tv-android/storage --tmpdir /run/obsidience-tv-android/libpod \
+    stop -t 30 obsidience-tv-android
+# The entrypoint ends on the stop signal after stopping Android.
+SuccessExitStatus=143
+TimeoutStopSec=45
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

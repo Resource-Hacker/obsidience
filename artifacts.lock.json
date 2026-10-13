@@ -458,6 +458,32 @@
       "license": "GPL-3.0-only",
       "apk_sha256": "a871f6190365386ef3ac5722a016d4da015ee1555631ec257f6e5dc3f4a45fe0",
       "integration": "Unmodified upstream release APK sideloaded on the Fire TV (package com.limelight) as the display client of the PC-hosted TV; paired with the Sunshine host. Client settings chosen for television, not games: 4K, 60 FPS, 80 Mbps, frame pacing 'Prefer smoothest video', connection warnings off. Local copy: ~/backups/obsidience-tv-moonlight-20261012/apk/."
+    },
+    "waydroid_android_tv_image": {
+      "repository": "https://github.com/WayDroid-ATV/waydroid-androidtv-builds",
+      "version": "20260403 (Android TV 16, LineageOS 23.0; VANILLA system and MAINLINE vendor, x86_64)",
+      "license": "GPL-3.0 (build repository); the images are AOSP/LineageOS (Apache-2.0 and others) and carry proprietary Widevine L3 and ARM translation libraries",
+      "system_zip_sha256": "87ab9e155d52e528ee361eb62c53a8df7338a97b195217d1c3e7fdb22ce8ec2f",
+      "vendor_zip_sha256": "8b8b176c7d3b34719889f3c891d86b98af8dbbb2f737a970e89302fa3d0cf077",
+      "system_img_sha256": "b5fc36814fd11b1889d02ef62073741b8aa30e90936cdfdbf0e18e2f3303baec",
+      "vendor_img_sha256": "5c7aee74d827c278a7fad1add5ddfed7a353ec64a3f2075467fb0c74d059eb60",
+      "integration": "Staged 2026-10-12 as the Android TV instance of the PC-hosted TV. Unmodified release images (archive digests as GitHub reports them for the release assets; no signature, one maintainer) mounted read-only from ~/.local/share/obsidience-tv-android/images into the obsidience-tv-android container. Only that container uses them; TFT's Waydroid and /var/lib/waydroid are separate and untouched. Contract and measurements: obsidience/tv/host/README.md."
+    },
+    "waydroid_tv_container": {
+      "repository": "https://github.com/waydroid/waydroid",
+      "version": "1.6.3 (Arch package waydroid 1.6.3-1 with lxc 1:7.0.0-2, inside the container image)",
+      "license": "GPL-3.0",
+      "base_image": "docker.io/library/archlinux:base@sha256:3c64b538588416593f69a1aebd2f2ec0f2541b29159f32556fa7def2167147a0",
+      "image": "localhost/obsidience-tv-android:1 (id eacf037d1717, built 2026-10-12 from obsidience/tv/host/android)",
+      "integration": "Unmodified distribution packages (waydroid, socat, dbus) in a rootful Podman container kept in its own store under ~/.local/share/obsidience-tv-android/containers. Obsidience code is the Containerfile and the entrypoint only: a private cgroup namespace with PID 1 in init.scope so LXC's payload lands inside the container's scope, a private binderfs, device nodes reduced to the integrated GPU's render node, private system and session buses, the session run as the owner of the TV compositor's socket, and an ADB relay to Android's fixed address. No Waydroid or image file is patched; the host's waydroid package and TFT's instance are not used."
+    },
+    "smarttube": {
+      "repository": "https://github.com/yuliskov/SmartTube",
+      "version": "32.56 stable (release 32.56s, SmartTube_stable_32.56_x86.apk)",
+      "license": "MIT",
+      "apk_sha256": "b3887fb9e7482d7b9c6d0bfc5a1dbb120e678aa8a9bc54a1363a8135a698cb5a",
+      "signing_certificate_sha256": "109735aa24fe85e2e1623ebb3b1ecc4bf4263f4c6374e4411d646bfa2eda482a",
+      "integration": "Unmodified publisher release APK (x86 build, runs without ARM translation) installed by ADB in the Android TV instance; its v1 and v2 signer is the certificate pinned for the television's copy. Install an update only when it carries that certificate. Local copy: ~/.local/share/obsidience-tv-android/apps/."
     }
   }
 }

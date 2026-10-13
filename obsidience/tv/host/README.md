@@ -15,6 +15,7 @@ the place where channels load.
 | `obsidience-tv-player.service` | `mpv --idle` in that compositor; JSON IPC at `$XDG_RUNTIME_DIR/obsidience-tv-player.sock`, used by the tuner only |
 | `obsidience-tv-tuner.service` | `tuner.py` (system Python with streamlink): the one owner of the player's IPC socket and of what plays; control socket `$XDG_RUNTIME_DIR/obsidience-tv/tuner.sock` |
 | `obsidience-tv-sunshine.service` | Sunshine (HEVC on the mode's GPU: NVENC on the RTX 4080, or VAAPI on the integrated GPU), connected only to that compositor and that audio server |
+| `obsidience-tv-android.service` | Android TV in its own container (section below); its window is one more client of that compositor. Staged 2026-10-12, not installed or enabled yet |
 | `obsidience-tv-mode@.service` | One run of `mode <normal\|gaming>`, started by GameMode |
 
 The session publishes its Wayland socket name in `$XDG_RUNTIME_DIR/obsidience-tv/wayland`;
@@ -158,6 +159,102 @@ a muxed stream's `substreams`, each opened through its own `open()` (the tuner t
 readers there) and reporting advertisements through `is_paused()`; and the muxer's
 `pipes` (released on close, or a writer waits forever for an ffmpeg that is gone) and
 `process` (reaped on close).
+
+## Android TV instance (staged 2026-10-12)
+
+TV apps run on the workstation, not on Fire OS: an unmodified Waydroid 1.6.3 with the
+WayDroid-ATV image (Android TV 16, LineageOS 23.0, build 20260403, no Google services) runs
+inside the rootful Podman container `obsidience-tv-android`, built from `android/`
+(`Containerfile`, `entrypoint.sh`). The container has its own binderfs, cgroup namespace,
+bridge network and D-Bus, so it never meets the Waydroid TFT uses on the host. Its window
+(`app_id` `Waydroid`) is a client of the TV compositor. It needs a workspace of its own
+(`assign [app_id="Waydroid"] workspace android` in the sway configuration; not added yet):
+sway keeps one fullscreen window per workspace and tiles the others, which would resize
+Android's display. `swaymsg workspace android` then shows it and `workspace 1` the player.
+Android stays awake while its workspace is hidden, so switching back shows it at once. A mode
+switch restarts the session and this unit with it (Android is back in 11-13 s).
+
+Everything it owns is under `~/.local/share/obsidience-tv-android`: `dl/` and `images/` (the
+verified release archives and the two images, read-only in the container), `state/` (Waydroid
+configuration and Android's data), `apps/` (verified APKs) and `containers/` (Podman's store
+for this image). Podman is always called with `--root` that store, `--runroot
+/run/obsidience-tv-android/storage --tmpdir /run/obsidience-tv-android/libpod`: the root
+filesystem had no unallocated Btrfs space on 2026-10-12 and an image commit into the default
+store failed there.
+
+Rules:
+
+- Never use the host's `waydroid` command for this instance (it always addresses TFT's), never
+  `--cgroupns=host`, and never mount the host's `/dev`, `/run/dbus` or runtime directory.
+  The LXC payload cgroup must be below the container's own scope
+  (`machine.slice/libpod-<id>.scope/container/lxc.payload.waydroid`), never at the top of
+  `/sys/fs/cgroup`, where TFT's compatibility hook looks.
+- The entrypoint removes input, camera, sound, framebuffer and NVIDIA nodes from the container's
+  private `/dev` before Waydroid lists devices, and keeps one render node, the integrated GPU's.
+  Android therefore has no `/dev/uhid`: keys reach it by `adb shell input keyevent` or through
+  the compositor, never through a virtual HID device.
+- The Waydroid session runs as the owner of the compositor's socket. The image starts its
+  composer as the session's user without capabilities and the socket is owner-only; a session
+  run as root cannot open it ("Couldn't open Wayland display" in a restart loop).
+- Android's display is the compositor's output: 3840x2160 at density 640 or 1920x1080 at
+  density 320, chosen by the image. `persist.waydroid.width`/`height` pin a size but the
+  window is then shown unscaled (a quarter of a 3840x2160 output).
+- Loop devices are host-wide: a running Android holds about 42 of them for its APEX images
+  (TFT's does the same), which is why the entrypoint makes 256 loop nodes.
+
+Measured 2026-10-12 with private compositors configured like this session (launcher navigated
+at 8 keys a second; frame statistics from `dumpsys gfxinfo`):
+
+| Compositor | Android display | Frames over one refresh | Compositor CPU |
+| --- | --- | --- | --- |
+| RTX 4080, GLES2 (normal mode) | 3840x2160 | 30% (median frame 36 ms) | 27% of a core |
+| RTX 4080, GLES2 | 1920x1080 pinned, shown unscaled | 0% (5 ms) | 14% |
+| RTX 4080, Vulkan (`WLR_RENDERER=vulkan`) | 3840x2160 | 0% (5 ms) | 1% |
+| Integrated GPU, GLES2 | 3840x2160 | 0% (5 ms) | 0.4% |
+| Integrated GPU, GLES2, 1920x1080 output (gaming mode) | 1920x1080 | 0.1% (12 ms, with the live session also on that GPU) | 0.7% |
+
+Android renders on the integrated GPU and hands the compositor LINEAR dmabufs; the RTX 4080
+samples them without a copy (a test client sending 59 MB frames at 63 a second cost the
+compositor 3% of a core from either GPU). With Android's own 3840x2160 frames the GLES2
+compositor on the RTX 4080 spends its time inside the NVIDIA driver and Android misses
+refreshes; the cause is not isolated. Not measured: Sunshine capturing Android's frames, and
+video playback (no network without the firewall rule below).
+
+Other numbers: first start to `sys.boot_completed` 14 s, later starts 11-13 s, stop 1 s;
+SmartTube cold start 0.15 s; key to next frame 15 ms through the compositor and 63 ms by ADB;
+idle 1% of a core and 1.9 GiB (2.8 GiB at 3840x2160).
+
+Keys through the compositor must be real evdev scancodes from a virtual keyboard that stays
+connected (Waydroid forwards the scancode and ignores the keymap; Android adds its
+`wayland_keyboard` only while the seat has a keyboard). `wtype` invents a keymap and sends
+codes 1, 2, 3..., so its first key arrives as Escape, which Android reads as Back.
+
+Setting it up again from nothing (the staged copy already has all of this):
+
+    D=~/.local/share/obsidience-tv-android; P="sudo podman --root $D/containers --runroot /run/obsidience-tv-android/storage --tmpdir /run/obsidience-tv-android/libpod"
+    # images: release 20260403 of WayDroid-ATV/waydroid-androidtv-builds, digests in artifacts.lock.json
+    $P build --network host -t localhost/obsidience-tv-android:1 obsidience/tv/host/android
+    sudo podman network create --disable-dns --subnet 10.89.240.0/24 --interface-name obstv0 obsidience-tv
+    systemctl --user start obsidience-tv-android       # first start initialises state/ from the images
+    # once: the workstation's ADB public key (never the private key), then the setup wizard
+    $P exec -i obsidience-tv-android lxc-attach -P /var/lib/waydroid/lxc -n waydroid --clear-env -- \
+      /system/bin/sh -c 'cat >> /data/misc/adb/adb_keys && chown system:shell /data/misc/adb/adb_keys && chmod 0640 /data/misc/adb/adb_keys && settings put global adb_enabled 1 && setprop ctl.restart adbd' < ~/.android/adbkey.pub
+    adb connect 10.89.240.2:5555                        # reachable from the workstation only
+
+Android reaches the network only with a route rule, which is not installed (without it only
+ICMP passes the firewall, so apps show "Unable to resolve host"):
+`sudo ufw route allow in on obstv0 out on enp12s0 comment 'Obsidience TV Android'`.
+Starting a container on the bridge sets `net.ipv4.ip_forward=1` until reboot.
+
+Not yet checked: TFT running beside it (start TFT with this instance up; its payload must be
+`/sys/fs/cgroup/lxc.payload.waydroid` and its compatibility hook must attach), pacing on the
+television's panel, hardware video decoding, and the remote's keys.
+
+Rollback: `systemctl --user disable --now obsidience-tv-android`; `adb disconnect
+10.89.240.2:5555`; `sudo podman network rm obsidience-tv`; the ufw route rule if it was added;
+`sudo rm -rf ~/.local/share/obsidience-tv-android /run/obsidience-tv-android`. No host package
+was installed for it.
+
 
 ## Television side
 
