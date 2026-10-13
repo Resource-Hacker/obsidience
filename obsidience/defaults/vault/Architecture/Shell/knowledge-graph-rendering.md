@@ -100,8 +100,8 @@ a ripple in the node's color spreads across that layer, and the glass, its
 dust and its seeds ride it. The Articles a route ends on send the strongest
 ripple, and lit nodes keep sending softer ones in turn until the thinking
 ends. The seed of a consulted or hovered node swells and burns amber. Ripples
-start only at nodes the path has actually lit. Hover and activity labels are captions on
-a dark plate with a leader to their node, drawn over the graph.
+start only at nodes the path has actually lit. Labels keep their boxed,
+branch-accented style and are drawn last, over the glass.
 
 ## Scoped graphs and Library
 

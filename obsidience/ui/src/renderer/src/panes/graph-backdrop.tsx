@@ -1180,6 +1180,7 @@ export function GraphBackdrop({
         branch: branch.toLowerCase(),
         radius: node.radius,
         accent: palette.core,
+        accentSoft: palette.ring,
       });
     }
     for (const satellite of satellites) {
@@ -1193,6 +1194,7 @@ export function GraphBackdrop({
           branch: satellite.agentId === "library" ? "knowledge" : "agent",
           radius: node.radius,
           accent: palette.core,
+          accentSoft: palette.ring,
         });
       }
     }

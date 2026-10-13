@@ -575,7 +575,7 @@ export class ProviderGraphScene {
         role: root ? "root" : section ? "section" : "claim", depth: root ? 0 : section ? 1 : 2,
         branch: node.kind, radius: Math.max(3, radius * this.host.clientHeight
           / (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * depth)),
-        accent: node.color,
+        accent: node.color, accentSoft: node.color,
       });
     }
     // Provider activity already owns the node pulse; do not add a second ring.
