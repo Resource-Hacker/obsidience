@@ -313,3 +313,9 @@ udp 47998-48000, 48002, 48010.
 Measure on the TV, not on the workstation: `dumpsys SurfaceFlinger --latency
 "SurfaceView - com.limelight/com.limelight.Game#0"` lists presented frames (every
 interval should be one refresh), and Moonlight's logcat shows discarded audio.
+
+Black or half-drawn frames do not show in refresh timing. `flashcheck ADB_SERIAL [SECONDS]`
+records the television's own screen and counts frames that are suddenly dark between two
+bright ones. With the compositor's Vulkan renderer on the RTX 4080 it found 5 in 90 s (frames
+black above a tear line: Sunshine read its capture buffer before the compositor had finished
+drawing it); with the GLES2 renderer none in 170 s. The GLES2 renderer is the setting.
