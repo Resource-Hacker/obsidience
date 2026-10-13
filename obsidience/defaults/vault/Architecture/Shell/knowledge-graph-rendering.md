@@ -6,6 +6,7 @@ sources:
 - resource: obsidience/harness/knowledge/index.py
 - resource: obsidience/ui/src/renderer/src/components/themes/obsidience/knowledge-3d.ts
 - resource: obsidience/ui/src/renderer/src/components/themes/obsidience/knowledge-3d-cloud.ts
+- resource: obsidience/ui/src/renderer/src/components/themes/obsidience/knowledge-3d-shell.ts
 - resource: obsidience/ui/src/renderer/src/components/themes/obsidience/knowledge-3d-scene.tsx
 - resource: obsidience/ui/src/renderer/src/panes/graph-backdrop.tsx
 - resource: obsidience/harness/interfaces/api/app.py
@@ -74,6 +75,30 @@ cooling schedule. The final contact fit adds no settling pass, idle audit, fixed
 bearings, named-branch cases or separate solver clock. Compatible refreshes
 retain the fitted radius along with positions, velocities and cooling.
 A rotating 3D projection can still put distinct branches in front of each other.
+
+## Layered glass
+
+`knowledge-3d-shell.ts` draws each ball's layout layers as glass shells.
+Layers closer than a small tolerance share a shell, at most four per ball. A
+shell is a sheen of fine drifting level lines and depth-of-field dust, added
+as light behind the node sprites. It creates no force nodes, picking targets
+or activity routes, and it follows the solver's positions without changing
+them.
+
+Each node presses a crater into its own layer's shell. The node's size and
+its number of links set the crater's depth and width, and the crater always
+clears the node's icon. A crater holds a seed, an orb of slowly turning dust
+in the node's branch color, over a colored glow from the crater floor. The
+shell nearest the core is the most solid and the outermost the clearest. The
+Glass group in Graph settings sets inner and outer solidity, crater depth,
+crater glow, seed glow, sheen lines and dust for each graph.
+
+A scan plane crosses every ball from bottom to top and lights the glass it
+passes: slow and pale at rest, quick and amber while that ball's Agent is
+thinking. It adds to the thinking path below and attests nothing by itself;
+the path still shows what was actually consulted. Hover and activity labels
+are captions on a dark plate with a leader to their node, drawn over the
+graph.
 
 ## Scoped graphs and Library
 

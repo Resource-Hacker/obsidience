@@ -6,7 +6,8 @@ import { GraphPublisher, type GraphControl } from "@/surfaces/graph-stream";
 // point-sprite shader procedurally replicates the 2D canvas painter — the
 // offset highlight gradient disc, dark rim, ring stroke, depth glow, and
 // per-node alpha. The scene is a dumb renderer: every color/radius/scale/
-// alpha arrives prepared from the backdrop's shared styling helpers.
+// alpha arrives prepared from the backdrop's shared styling helpers. Around
+// the nodes each ball wears layered glass shells (owner 2026-10-12).
 //
 // Consolidation (owner 2026-08-04): the MAIN executive ball is built by the
 // SAME createKnowledge3dCloud cloud implementation as every satellite
@@ -283,6 +284,8 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
       azimuth: 0,
       polar: KNOWLEDGE_3D_INITIAL_POLAR,
       distance: framed * KNOWLEDGE_3D_INITIAL_DOLLY,
+      /** The wheel sets a destination; the frame loop eases toward it. */
+      targetDistance: framed * KNOWLEDGE_3D_INITIAL_DOLLY,
       dragging: false,
       downX: 0,
       downY: 0,
@@ -344,6 +347,8 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
       uPulse: { value: 0 },
       uSpeechLevel: { value: 0 },
       uTime: { value: 0 },
+      uFocusSwing: { value: 0 },
+      uPixelRatio: { value: 1 },
     };
     const sharedParticleTime = { value: 0 };
     // The scene module owns the canonical shader strings; every cloud —
@@ -596,6 +601,7 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
       camera.updateProjectionMatrix();
       applyViewAnchor();
       viewportUniform.value.set(width * pixelRatio, height * pixelRatio);
+      uniforms.uPixelRatio.value = pixelRatio;
       updatePerspectiveUniform();
     }
     const observer = new ResizeObserver(resize);
@@ -699,8 +705,8 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
 
     function onWheel(event: WheelEvent): void {
       event.preventDefault();
-      orbit.distance = clampKnowledge3dDolly(
-        orbit.distance * (event.deltaY > 0 ? 1.08 : 0.92),
+      orbit.targetDistance = clampKnowledge3dDolly(
+        orbit.targetDistance * Math.exp(event.deltaY * 0.001),
         framed,
       );
       orbit.interactingUntil = performance.now() + 1200;
@@ -956,6 +962,14 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
       const shaderTime = (now % 3_600_000) / 1000;
       const tuning = current.tuning;
       uniforms.uTime.value = shaderTime;
+      // The focal plane breathes from the near face to just past the centre
+      // every fourteen seconds, so the dust drifts in and out of focus.
+      const breath = (now % 14_000) / 14_000;
+      const ease = (from: number, to: number) => {
+        const t = Math.min(1, Math.max(0, (breath - from) / (to - from)));
+        return t * t * (3 - 2 * t);
+      };
+      uniforms.uFocusSwing.value = -0.75 + (ease(0.1, 0.4) - ease(0.6, 0.9));
       // Live tuning rides the cloud's own uniform writes — node glow,
       // styles, the whole-graph render transform (group scale + matched
       // uModelScale + screen-px beam widths), dash frequency and streaks.
@@ -1421,6 +1435,8 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
       if (!interacting && focusBlend < 0.5) {
         orbit.azimuth += tuning.yawSpeed * dt;
       }
+      orbit.distance += (orbit.targetDistance - orbit.distance) * (1 - Math.exp(-dt * 12));
+      if (Math.abs(orbit.targetDistance - orbit.distance) > 0.05) orbit.interactingUntil = now + 1200;
       applyCamera();
       // Painter's algorithm: each cloud re-sorts its sprite draw order
       // back-to-front in cloud-local space (worldToLocal folds translation,
@@ -1428,8 +1444,8 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
       mainCloud?.sortSprites(camera.position);
       // Inter-cloud occlusion: every material renders depthTest:false, so
       // clouds occlude by draw order alone — farthest cloud first. Each
-      // cloud keeps its intra offsets (beams 0, orbs 1, streaks 2) inside
-      // a base block of 4 per rank.
+      // cloud keeps its intra offsets (beams and glass 0, orbs 1, streaks 2)
+      // inside a base block of 4 per rank.
       if (satelliteClouds.size) {
         const ranked: Array<{ distance: number; children: THREE.Object3D[] }> =
           [];
@@ -1452,6 +1468,14 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
             child.renderOrder = rank * 4 + (child.renderOrder % 4);
           }
         });
+      }
+      // The scan plane: a slow survey at rest, the amber pass while an agent
+      // thinks (its own Task sweep for a satellite).
+      mainCloud?.driveScan(dt, Boolean(retainedFocus) && tendrilPhase === "thinking");
+      for (const [agentId, cloud] of satelliteClouds) {
+        const state = sweepStates.get(agentId);
+        cloud.driveScan(dt, Boolean(state) && state!.fadeStartedAt < 0
+          && (state!.sweep.phase ?? "thinking") === "thinking");
       }
       // Labels follow the same admitted path and frame clock as their beams.
       const activeLabelNodeIds = new Set<string>();
@@ -1477,6 +1501,8 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
         Boolean(retainedFocus),
         now,
       );
+      mainCloud?.prepare(renderer);
+      for (const cloud of satelliteClouds.values()) cloud.prepare(renderer);
       renderPreviews();
       // Preview passes borrow these buffers and may use a different camera.
       if ([...previews.values()].some(preview => preview.publisher.hasViewers)) {

@@ -1,8 +1,15 @@
 import * as THREE from "three";
 
+// Labels are survey callouts: a thin leader from the marked point to an
+// underlined caption in monospace capitals, on a dark plate so it reads in
+// front of whatever the graph draws behind it. Amber marks the points an
+// agent is consulting.
 const MAX_LABELS = 18;
-const LABEL_FILL = "rgba(2, 8, 14, 0.86)";
-const LABEL_TEXT = "rgba(240, 249, 255, 0.98)";
+const LABEL_PLATE = "rgba(3, 3, 4, 0.88)";
+const LABEL_TEXT = "#ffffff";
+const LABEL_DIM = "rgba(255, 255, 255, 0.66)";
+const LABEL_AMBER = "#ff9a3c";
+const LINE_HEIGHT = 15;
 
 export interface Knowledge3dLabelMeta {
   label: string;
@@ -11,13 +18,18 @@ export interface Knowledge3dLabelMeta {
   branch: string;
   radius: number;
   accent: string;
-  accentSoft: string;
 }
 
 interface LabelLayout {
   id: string;
   meta: Knowledge3dLabelMeta;
   lines: string[];
+  /** Dim second caption: where the point sits in the hierarchy. */
+  note: string;
+  fontSize: number;
+  letterSpacing: number;
+  /** The caption hangs to this side of its point. */
+  outward: number;
   width: number;
   height: number;
   centerX: number;
@@ -36,12 +48,10 @@ interface LabelSprite {
 interface LeaderLine {
   geometry: THREE.BufferGeometry;
   line: THREE.Line;
-  material: THREE.LineDashedMaterial;
+  material: THREE.LineBasicMaterial;
 }
 
 interface ActiveNodeSprites {
-  focus: THREE.Sprite;
-  focusMaterial: THREE.SpriteMaterial;
   wave: THREE.Sprite;
   waveMaterial: THREE.SpriteMaterial;
 }
@@ -61,7 +71,7 @@ export interface Knowledge3dLabelLayer {
 }
 
 function labelLines(label: string, maximumLineLength = 24): string[] {
-  const normalized = label.trim().replace(/\s+/gu, " ");
+  const normalized = label.trim().replace(/\s+/gu, " ").toUpperCase();
   if (normalized.length <= maximumLineLength || !normalized.includes(" ")) {
     return [normalized];
   }
@@ -108,22 +118,23 @@ function layoutLabels(
       return [];
     }
     const point = { x: point01.x * width, y: point01.y * height };
-    const lines = labelLines(meta.label, meta.role === "root" ? 28 : 24);
-    const characterWidth =
-      meta.role === "root" ? 10.7 : meta.role === "section" ? 7.35 : 7;
-    const textWidth =
-      Math.max(...lines.map((line) => line.length)) * characterWidth;
-    const boxWidth = Math.max(48, textWidth + 24);
-    const boxHeight = lines.length * 13 + 10;
+    const root = meta.role === "root";
+    const lines = labelLines(meta.label, root ? 28 : 24);
+    const note = root ? "" : [meta.branch, meta.role === "claim" ? "article" : `level ${meta.depth}`]
+      .filter(Boolean).join(" \u00b7 ").toUpperCase();
+    const fontSize = root ? 14 : meta.role === "section" ? 12 : 11.5;
+    const letterSpacing = fontSize * (root ? 0.32 : 0.08);
+    // Monospace advance is 0.6 em.
+    const textWidth = Math.max(
+      ...lines.map((line) => line.length * (fontSize * 0.6 + letterSpacing)),
+      note.length * (9 * 0.6 + 1.2),
+    );
+    const boxWidth = Math.max(40, textWidth + 14);
+    const boxHeight = lines.length * LINE_HEIGHT + (note ? 12 : 0) + 8;
     const outward = point.x >= width / 2 ? 1 : -1;
-    const offset =
-      meta.role === "root" ? 36 : meta.role === "section" ? 30 : 18;
-    let centerX =
-      meta.role === "root"
-        ? point.x
-        : point.x + outward * (offset + boxWidth / 2);
-    let centerY =
-      meta.role === "root" ? point.y - offset - boxHeight / 2 : point.y - 6;
+    const reach = root ? 0 : meta.role === "section" ? 22 : 16;
+    let centerX = root ? point.x : point.x + outward * (reach + boxWidth / 2);
+    let centerY = point.y - (root ? 34 : 20) - boxHeight / 2;
     centerX = Math.max(
       boxWidth / 2 + 8,
       Math.min(width - boxWidth / 2 - 8, centerX),
@@ -168,18 +179,22 @@ function layoutLabels(
       };
     }
     occupied.push(bounds);
-    const endX = Math.max(bounds.left, Math.min(bounds.right, point.x));
-    const endY = Math.max(bounds.top, Math.min(bounds.bottom, point.y));
+    // The leader meets the near end of the caption's underline.
+    const endX = outward > 0 ? bounds.left : bounds.right;
+    const endY = bounds.bottom - 0.5;
     const deltaX = endX - point.x;
     const deltaY = endY - point.y;
     const distance = Math.max(1, Math.hypot(deltaX, deltaY));
-    const startRadius =
-      meta.role === "root" ? 22 : meta.role === "section" ? 16 : 9;
+    const startRadius = meta.role === "section" ? 9 : 5;
     return [
       {
         id,
         meta,
         lines,
+        note,
+        fontSize,
+        letterSpacing,
+        outward,
         width: boxWidth,
         height: boxHeight,
         centerX,
@@ -197,59 +212,10 @@ function layoutLabels(
   });
 }
 
-function roundedRectangle(
-  context: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  radius: number,
-): void {
-  const corner = Math.min(radius, width / 2, height / 2);
-  context.beginPath();
-  context.moveTo(x + corner, y);
-  context.lineTo(x + width - corner, y);
-  context.quadraticCurveTo(x + width, y, x + width, y + corner);
-  context.lineTo(x + width, y + height - corner);
-  context.quadraticCurveTo(
-    x + width,
-    y + height,
-    x + width - corner,
-    y + height,
-  );
-  context.lineTo(x + corner, y + height);
-  context.quadraticCurveTo(x, y + height, x, y + height - corner);
-  context.lineTo(x, y + corner);
-  context.quadraticCurveTo(x, y, x + corner, y);
-  context.closePath();
-}
-
-function drawCenteredSpacedText(
-  context: CanvasRenderingContext2D,
-  text: string,
-  centerX: number,
-  centerY: number,
-  letterSpacing: number,
-): void {
-  const characters = [...text];
-  const widths = characters.map(
-    (character) => context.measureText(character).width,
-  );
-  const total =
-    widths.reduce((sum, value) => sum + value, 0) +
-    Math.max(0, characters.length - 1) * letterSpacing;
-  let cursor = centerX - total / 2;
-  context.textAlign = "left";
-  for (let index = 0; index < characters.length; index += 1) {
-    context.fillText(characters[index], cursor, centerY);
-    cursor += widths[index] + letterSpacing;
-  }
-}
-
 function createLabelTexture(
   layout: LabelLayout,
   pixelRatio: number,
-  focusActive: boolean,
+  active: boolean,
 ): THREE.CanvasTexture {
   const scale = Math.max(1, Math.min(2, pixelRatio));
   const canvas = document.createElement("canvas");
@@ -258,59 +224,33 @@ function createLabelTexture(
   const context = canvas.getContext("2d");
   if (!context) throw new Error("Unable to create label canvas");
   context.scale(scale, scale);
-
-  const inset = layout.meta.depth === 1 ? 0.8 : 0.5;
-  roundedRectangle(
-    context,
-    inset,
-    inset,
-    layout.width - inset * 2,
-    layout.height - inset * 2,
-    layout.meta.depth === 1 ? 3 : 2,
-  );
-  context.fillStyle = LABEL_FILL;
-  context.fill();
-  context.strokeStyle =
-    layout.meta.depth === 1 ? layout.meta.accent : layout.meta.accentSoft;
-  context.lineWidth = layout.meta.depth === 1 ? 1.1 : 0.75;
-  context.setLineDash(focusActive ? [4, 7] : []);
-  context.stroke();
-  context.setLineDash([]);
-
-  context.beginPath();
-  context.moveTo(3, 4);
-  context.lineTo(3, layout.height - 4);
-  context.strokeStyle = layout.meta.accent;
-  context.lineWidth = 2.2;
-  context.stroke();
-
-  let fontSize = 10.5;
-  let fontWeight = 400;
-  let letterSpacing = 0.26;
-  if (layout.meta.role === "root") {
-    fontSize = 14;
-    fontWeight = 600;
-    letterSpacing = 1.96;
-  } else if (layout.meta.role === "section") {
-    fontWeight = 600;
-    fontSize = layout.meta.depth === 1 ? 12.5 : layout.meta.depth === 2 ? 11.5 : 10.5;
-    letterSpacing = fontSize * (layout.meta.depth === 1 ? 0.115 : layout.meta.depth === 2 ? 0.09 : 0.075);
-  }
-  context.font = `${fontWeight} ${fontSize}px "JetBrains Mono", ui-monospace, monospace`;
-  context.fillStyle =
-    layout.meta.role === "root" ? "rgba(224, 242, 254, 0.9)" : LABEL_TEXT;
+  const root = layout.meta.role === "root";
+  const right = layout.outward < 0 && !root;
+  const edge = root ? layout.width / 2 : right ? layout.width - 7 : 7;
+  context.textAlign = root ? "center" : right ? "right" : "left";
   context.textBaseline = "middle";
-  const firstLineY =
-    layout.height / 2 - ((layout.lines.length - 1) * 13) / 2;
+  context.fillStyle = LABEL_PLATE;
+  context.fillRect(0, 0, layout.width, layout.height);
+  context.font = `400 ${layout.fontSize}px "JetBrains Mono", ui-monospace, monospace`;
+  context.letterSpacing = `${layout.letterSpacing}px`;
+  context.fillStyle = active ? LABEL_AMBER : LABEL_TEXT;
   layout.lines.forEach((line, index) => {
-    drawCenteredSpacedText(
-      context,
-      line,
-      layout.width / 2,
-      firstLineY + index * 13,
-      letterSpacing,
-    );
+    // Canvas letter spacing trails each glyph; recentre the root caption.
+    context.fillText(line, edge + (root ? layout.letterSpacing / 2 : 0), 4 + LINE_HEIGHT / 2 + index * LINE_HEIGHT);
   });
+  if (layout.note) {
+    context.font = '400 9px "JetBrains Mono", ui-monospace, monospace';
+    context.letterSpacing = "1.2px";
+    context.fillStyle = LABEL_DIM;
+    context.fillText(layout.note, edge, 4 + layout.lines.length * LINE_HEIGHT + 6);
+  }
+  if (!root) {
+    context.fillStyle = active ? LABEL_AMBER : LABEL_TEXT;
+    context.fillRect(0, layout.height - 1, layout.width, 1);
+    // A small square in the branch colour ties the caption to its branch.
+    context.fillStyle = layout.meta.accent;
+    context.fillRect(right ? layout.width - 3 : 0, layout.height - 3, 3, 3);
+  }
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
@@ -320,18 +260,16 @@ function createLabelTexture(
   return texture;
 }
 
-function createRingTexture(fillAlpha: number, strokeAlpha: number): THREE.CanvasTexture {
+function createRingTexture(): THREE.CanvasTexture {
   const canvas = document.createElement("canvas");
   canvas.width = 96;
   canvas.height = 96;
   const context = canvas.getContext("2d");
   if (!context) throw new Error("Unable to create active-node canvas");
   context.beginPath();
-  context.arc(48, 48, 42, 0, Math.PI * 2);
-  context.fillStyle = `rgba(255, 255, 255, ${fillAlpha})`;
-  context.fill();
-  context.strokeStyle = `rgba(255, 255, 255, ${strokeAlpha})`;
-  context.lineWidth = 3;
+  context.arc(48, 48, 44, 0, Math.PI * 2);
+  context.strokeStyle = "rgba(255, 255, 255, 0.9)";
+  context.lineWidth = 2;
   context.stroke();
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
@@ -344,16 +282,17 @@ function createRingTexture(fillAlpha: number, strokeAlpha: number): THREE.Canvas
 function labelSignature(
   layout: LabelLayout,
   pixelRatio: number,
-  focusActive: boolean,
+  active: boolean,
 ): string {
   return [
     layout.meta.label,
     layout.meta.role,
     layout.meta.depth,
+    layout.meta.branch,
     layout.meta.accent,
-    layout.meta.accentSoft,
+    layout.outward,
     pixelRatio,
-    focusActive ? 1 : 0,
+    active ? 1 : 0,
   ].join("|");
 }
 
@@ -372,8 +311,7 @@ export function createKnowledge3dLabelLayer(): Knowledge3dLabelLayer {
   const labelSprites = new Map<string, LabelSprite>();
   const leaderLines = new Map<string, LeaderLine>();
   const activeSprites = new Map<string, ActiveNodeSprites>();
-  const focusTexture = createRingTexture(0.13, 0.9);
-  const waveTexture = createRingTexture(0.035, 0.82);
+  const waveTexture = createRingTexture();
   let width = 1;
   let height = 1;
   let pixelRatio = 1;
@@ -390,8 +328,7 @@ export function createKnowledge3dLabelLayer(): Knowledge3dLabelLayer {
     entry.material.dispose();
   };
   const disposeActive = (entry: ActiveNodeSprites): void => {
-    scene.remove(entry.focus, entry.wave);
-    entry.focusMaterial.dispose();
+    scene.remove(entry.wave);
     entry.waveMaterial.dispose();
   };
 
@@ -424,12 +361,13 @@ export function createKnowledge3dLabelLayer(): Knowledge3dLabelLayer {
       }
 
       labels.forEach((layout, index) => {
-        const signature = labelSignature(layout, pixelRatio, focusActive);
+        const active = focusActive && activeNodeIds.has(layout.id);
+        const signature = labelSignature(layout, pixelRatio, active);
         let label = labelSprites.get(layout.id);
         if (!label || label.signature !== signature) {
           if (label) disposeLabel(label);
           const material = new THREE.SpriteMaterial({
-            map: createLabelTexture(layout, pixelRatio, focusActive),
+            map: createLabelTexture(layout, pixelRatio, active),
             transparent: true,
             depthTest: false,
             depthWrite: false,
@@ -455,11 +393,8 @@ export function createKnowledge3dLabelLayer(): Knowledge3dLabelLayer {
               THREE.DynamicDrawUsage,
             ),
           );
-          const material = new THREE.LineDashedMaterial({
-            color: layout.meta.accent,
-            dashSize: 3,
-            gapSize: 6,
-            opacity: 0.72,
+          const material = new THREE.LineBasicMaterial({
+            opacity: 0.9,
             transparent: true,
             depthTest: false,
             depthWrite: false,
@@ -475,10 +410,10 @@ export function createKnowledge3dLabelLayer(): Knowledge3dLabelLayer {
         positions.setXYZ(0, layout.startX, height - layout.startY, 0);
         positions.setXYZ(1, layout.endX, height - layout.endY, 0);
         positions.needsUpdate = true;
-        leader.material.color.set(layout.meta.accent);
-        leader.line.computeLineDistances();
+        leader.material.color.set(active ? LABEL_AMBER : "#ffffff");
       });
 
+      // A consulted point pings: a thin amber ring opens and fades.
       const wantedActive = new Set<string>();
       for (const id of activeNodeIds) {
         const point = projected.get(id);
@@ -487,41 +422,24 @@ export function createKnowledge3dLabelLayer(): Knowledge3dLabelLayer {
         wantedActive.add(id);
         let active = activeSprites.get(id);
         if (!active) {
-          const focusMaterial = new THREE.SpriteMaterial({
-            map: focusTexture,
-            transparent: true,
-            depthTest: false,
-            depthWrite: false,
-            toneMapped: false,
-          });
           const waveMaterial = new THREE.SpriteMaterial({
             map: waveTexture,
+            color: LABEL_AMBER,
             transparent: true,
             depthTest: false,
             depthWrite: false,
             toneMapped: false,
           });
-          const focus = new THREE.Sprite(focusMaterial);
           const wave = new THREE.Sprite(waveMaterial);
-          focus.renderOrder = 12;
           wave.renderOrder = 11;
-          scene.add(wave, focus);
-          active = { focus, focusMaterial, wave, waveMaterial };
+          scene.add(wave);
+          active = { wave, waveMaterial };
           activeSprites.set(id, active);
         }
-        const x = point.x * width;
-        const y = height - point.y * height;
-        const radius = meta.radius + (meta.role === "claim" ? 4 : 3);
-        const phase = (now / 3800 + stablePhase(id)) % 1;
-        const waveAmount = 0.5 - Math.cos(phase * Math.PI * 2) * 0.5;
-        active.focus.position.set(x, y, 0);
-        active.wave.position.set(x, y, 0);
-        active.focus.scale.setScalar(radius * 2);
-        active.wave.scale.setScalar((radius + 7) * 2 * (0.78 + waveAmount * 0.64));
-        active.focusMaterial.color.set(meta.accent);
-        active.waveMaterial.color.set(meta.accent);
-        active.focusMaterial.opacity = 0.82;
-        active.waveMaterial.opacity = 0.08 + waveAmount * 0.54;
+        const phase = (now / 1400 + stablePhase(id)) % 1;
+        active.wave.position.set(point.x * width, height - point.y * height, 0);
+        active.wave.scale.setScalar((meta.radius + 5 + phase * 10) * 2);
+        active.waveMaterial.opacity = 0.75 * (1 - phase);
       }
       for (const [id, entry] of activeSprites) {
         if (!wantedActive.has(id)) {
@@ -543,7 +461,6 @@ export function createKnowledge3dLabelLayer(): Knowledge3dLabelLayer {
       leaderLines.clear();
       for (const entry of activeSprites.values()) disposeActive(entry);
       activeSprites.clear();
-      focusTexture.dispose();
       waveTexture.dispose();
       scene.clear();
     },

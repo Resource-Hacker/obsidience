@@ -208,6 +208,18 @@ export interface Knowledge3dTuning {
   velocityDecay: number;
   /** Node depth-glow attenuation (1 = the 2D palette alpha). */
   nodeGlow: number;
+  /** The layered glass: how solid the shell nearest the core and the
+   *  outermost shell are (shells between interpolate), how deep nodes press
+   *  their craters, the coloured glow rising from a crater's floor, how
+   *  brightly its seed of dust shines, and the density of the sheen's lines
+   *  and of the dust on the glass. */
+  shellInner: number;
+  shellOuter: number;
+  craterDepth: number;
+  craterGlow: number;
+  seedGlow: number;
+  sheenLines: number;
+  shellDust: number;
   /** Beam widths in CSS px (soft glow envelope, not the core line). */
   tendrilWidth: number;
   branchWidth: number;
@@ -285,6 +297,13 @@ export const DEFAULT_KNOWLEDGE_3D_TUNING: Knowledge3dTuning = {
   chargeStrength: 30,
   velocityDecay: 0.35,
   nodeGlow: 0.6,
+  shellInner: 1,
+  shellOuter: 0.35,
+  craterDepth: 1,
+  craterGlow: 1,
+  seedGlow: 1,
+  sheenLines: 1,
+  shellDust: 1,
   tendrilWidth: 12,
   branchWidth: 8,
   articleWidth: 2,
@@ -350,6 +369,13 @@ export interface Knowledge3dTuningField {
  *  so a stale persisted value can never leave the sanctioned range. */
 export const KNOWLEDGE_3D_TUNING_FIELDS: readonly Knowledge3dTuningField[] = [
   { key: "branchClearance", label: "Branch clearance", group: "Layout", min: 0.5, max: 2, step: 0.05, description: "Space around nodes and branches. Lower values pack the sphere closer; higher values make it grow. Article and node sizes stay the same." },
+  { key: "shellInner", label: "Inner shell", group: "Glass", min: 0, max: 1.5, step: 0.05, description: "How solid the glass shell nearest the core is. Shells between the inner and outer one fall in between." },
+  { key: "shellOuter", label: "Outer shell", group: "Glass", min: 0, max: 1.5, step: 0.05, description: "How solid the outermost glass shell is. Lower values let the inner layers show through." },
+  { key: "craterDepth", label: "Crater depth", group: "Glass", min: 0, max: 2, step: 0.05, description: "How deeply nodes press into their shell. Larger and better linked nodes always press deeper than small ones." },
+  { key: "craterGlow", label: "Crater glow", group: "Glass", min: 0, max: 2, step: 0.05, description: "Coloured glow rising from the floor of each crater, in its node's colour." },
+  { key: "seedGlow", label: "Seed glow", group: "Glass", min: 0, max: 2, step: 0.05, description: "Brightness of the orb of dust inside each crater." },
+  { key: "sheenLines", label: "Sheen lines", group: "Glass", min: 0.3, max: 2, step: 0.05, description: "Density of the fine lines drawn on each shell and inside its craters." },
+  { key: "shellDust", label: "Dust", group: "Glass", min: 0, max: 2, step: 0.05, description: "Amount of fine dust lying on the glass." },
   { key: "yawSpeed", label: "Rotation speed", group: "Motion", mainOnly: true, min: 0, max: 0.2, step: 0.005, description: "Camera rotation around all graphs. Pauses while dragging or focused on a satellite." },
   { key: "automaticSweepSpeed", label: "Automatic speed", group: "Thinking", min: 0, max: 1, step: 1, toggle: true, description: "Reveal the packet at a readable pace, keep paths flowing through speech, and fade when playback ends. Turn this off to set the reveal speed." },
   { key: "sweepSpeed", label: "Animation speed", group: "Thinking", min: 0.1, max: 3, step: 0.05, description: "Speed of the continuous path reveal when Automatic speed is off. Speech never skips unfinished links." },

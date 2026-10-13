@@ -63,7 +63,7 @@ function KnowledgeStage() {
       aria-label={library ? "Knowledge Library stage" : "Agent knowledge stage"}
       data-obsidience-theme="obsidience"
       data-obsidience-shell-surface="knowledge"
-      className="fixed inset-0 overflow-hidden bg-[#02060c] text-cyan-50"
+      className="fixed inset-0 overflow-hidden bg-[#030304] text-cyan-50"
     >
       {showGraph && (surfaceId !== "samsung" || lockMode) ? (
         <span

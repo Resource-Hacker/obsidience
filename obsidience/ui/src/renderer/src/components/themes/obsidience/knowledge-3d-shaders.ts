@@ -222,11 +222,6 @@ void main() {
     // Depth glow: gradient from 0.25r (palette glow) to glowScale*r (clear).
     float glowT = clamp((r - 0.25) / max(vGlowScale - 0.25, 1e-3), 0.0, 1.0);
     float glowA = vGlow.a * uGlowScale * (1.0 - glowT) * (1.0 + 0.45 * vSpeech);
-#ifdef KNOWLEDGE_COMPACT
-    // The separate additive light pass owns diffuse glow. Keep this quad
-    // small enough that authored cores/rings do not shade the entire halo.
-    glowA = 0.0;
-#endif
     acc = vGlow.rgb * glowA;
     accA = glowA;
     acc = vRing.rgb * ringA + acc * (1.0 - ringA);
@@ -390,16 +385,10 @@ void main() {
       float boxInside = 1.0 - smoothstep(-aa, aa, boxDistance);
       float boxEdge = 1.0 - smoothstep(aa * 0.35, aa * 1.8, abs(boxDistance));
       float halo = exp(-max(0.0, boxDistance) * 5.5) * (1.0 - boxInside);
-#ifdef KNOWLEDGE_COMPACT
-      halo = 0.0;
-#endif
       if (uArticleStyle < 4.5) {
         float heart = exp(-dot(p, p) * 7.0);
         float flare = (1.0 - smoothstep(0.018, 0.09, min(abs(p.x), abs(p.y))))
           * (1.0 - smoothstep(0.25, 1.2, r));
-#ifdef KNOWLEDGE_COMPACT
-        flare *= 1.0 - smoothstep(0.6, 1.0, r);
-#endif
         float jewelA = clamp(boxInside + halo * 0.52 + flare * 0.45, 0.0, 1.0)
           * effAlpha;
         vec3 jewel = mix(vCore, vec3(1.0), clamp(heart + flare * 0.5, 0.0, 0.88));
@@ -435,10 +424,6 @@ void main() {
         ? (1.0 - smoothstep(0.015, 0.085, min(abs(p.x), abs(p.y))))
           * (1.0 - smoothstep(0.3, 2.6, r)) * (0.35 + boost * 0.4)
         : 0.0;
-#ifdef KNOWLEDGE_COMPACT
-      halo = 0.0;
-      flare *= 1.0 - smoothstep(0.6, 1.0, r);
-#endif
       float orbA = clamp(disc + halo + flare, 0.0, 1.0) * effAlpha;
       vec3 orbColor =
         (orb * disc + haloTint * (halo + flare) * (1.0 - disc)) /
@@ -451,7 +436,6 @@ void main() {
       accA = ringA + accA * (1.0 - ringA);
     }
   }
-#ifndef KNOWLEDGE_COMPACT
   if (vActivity.w > 0.5) {
     // A local event halo leaves the authored branch colors and comet paths
     // intact. Reads breathe, Tools beat faster, commits radiate, failures flash.
@@ -469,7 +453,6 @@ void main() {
     acc = vActivity.rgb * alpha + acc * (1.0 - alpha);
     accA = alpha + accA * (1.0 - alpha);
   }
-#endif
   if (accA <= 0.004) discard;
   vec3 color = acc / max(accA, 1e-4);
   color = mix(color, vec3(1.0), boost * 0.45);
@@ -477,58 +460,6 @@ void main() {
 #ifdef KNOWLEDGE_PROVIDER
   gl_FragColor.a *= uProviderOpacity;
 #endif
-}
-`;
-
-// Only light: no procedural core/shape work over the large translucent
-// quad. Addition is order independent; semantic cores retain their painter
-// ordering. Actual activity shares the original arrival/opacity gate.
-export const POINT_LIGHT_FRAGMENT_SHADER = `
-uniform float uTime;
-uniform float uGlowScale;
-uniform float uActivityOpacity;
-uniform float uArticleStyle;
-varying vec3 vCore;
-varying vec4 vGlow;
-varying vec4 vStyle;
-varying float vGlowScale;
-varying float vDiscFrac;
-varying float vRadiusPx;
-varying float vFocus;
-varying vec4 vActivity;
-varying float vTwinkle;
-varying float vSpeech;
-void main() {
-  vec2 p = (gl_PointCoord - 0.5) * 2.0 / max(vDiscFrac, 1e-4);
-  float r2 = dot(p, p);
-  float r = sqrt(r2);
-  float boost = vStyle.x > 0.5 ? vFocus : max(vFocus, vTwinkle);
-  float spread = vStyle.x > 0.5 ? max(1.2, vGlowScale * 0.65) : 1.4;
-  float light = exp(-r2 * 3.0 / (spread * spread));
-  float strength = vStyle.x > 0.5 ? vGlow.a * 0.65 : vStyle.w * 0.28;
-  if (vStyle.x < 0.5 && uArticleStyle > 1.5 && uArticleStyle < 2.5) strength = 0.0;
-  // Distant dots stay fine; selected dots retain their light at any distance.
-  float detail = mix(smoothstep(0.6, 3.0, vRadiusPx), 1.0, clamp(boost, 0.0, 1.0));
-  float alpha = light * strength * uGlowScale * detail
-    * (1.0 + boost * 1.5 + vSpeech * 0.45);
-  vec3 color = mix(vCore, vec3(1.0), 0.18);
-  if (vActivity.w > 0.5) {
-    float mode = vActivity.w;
-    float rate = mode > 4.5 ? 11.0 : (mode < 1.5 ? 3.0 : (mode < 2.5 ? 8.0 : 2.0));
-    float beat = 0.5 + 0.5 * sin(uTime * rate);
-    if (mode > 4.5) beat = pow(beat, 3.0);
-    bool committed = mode > 3.5 && mode < 4.5;
-    float wave = committed ? fract(uTime * 0.8) : 0.0;
-    float ring = exp(-pow((r - 1.12 - wave * 0.65) / max(0.10, 1.6 / vRadiusPx), 2.0));
-    float activity = ring * (committed ? (1.0 - wave) : (0.35 + beat * 0.6))
-      * uActivityOpacity * clamp(vFocus, 0.0, 1.0);
-    color = mix(color, vActivity.rgb, activity / max(alpha + activity, 1e-4));
-    alpha += activity;
-  }
-  // Fade the edge before the quad ends, so even a large light has no box.
-  alpha *= 1.0 - smoothstep(0.82, 1.0, length(gl_PointCoord - 0.5) * 2.0);
-  if (alpha <= 0.004) discard;
-  gl_FragColor = vec4(color, min(1.0, alpha));
 }
 `;
 
@@ -711,10 +642,6 @@ void main() {
   float t = abs(vAcross);
   float band = (1.0 - smoothstep(0.88, 1.0, t)) * 0.24;
   float core = 1.0 - smoothstep(0.14, 0.24, t);
-  float dormant = band;
-#ifdef KNOWLEDGE_FILAMENT
-  dormant = (1.0 - smoothstep(0.02, 0.16, t)) * 0.28;
-#endif
   if (vP < 0.0 || uBeamP < vP) {
 #ifdef KNOWLEDGE_SELECTION
     discard;
@@ -731,13 +658,12 @@ void main() {
       return;
     }
     if (vDormant < 0.5) discard;
-    // The same quiet scaffold remains underneath the fading activity front.
-    gl_FragColor = vec4(vColor, uOpacity * dormant);
+    gl_FragColor = vec4(vColor, uOpacity * band);
     return;
   }
 ${PATH_TIMELINE_GLSL}
 #ifndef KNOWLEDGE_SELECTION
-  if (vDormant > 0.5) gl_FragColor.a += uOpacity * dormant * (1.0 - uPathOpacity);
+  if (vDormant > 0.5) gl_FragColor.a += uOpacity * band * (1.0 - uPathOpacity);
 #endif
 }
 `;
@@ -770,10 +696,6 @@ void main() {
   float t = abs(vAcross);
   float band = (1.0 - smoothstep(0.88, 1.0, t)) * 0.24;
   float core = 1.0 - smoothstep(0.14, 0.24, t);
-  float dormant = min(1.0, band + core);
-#ifdef KNOWLEDGE_FILAMENT
-  dormant *= 0.32;
-#endif
 #ifdef KNOWLEDGE_REVIEW_EFFECT
   float uPathOpacity = 1.0;
   bool pending = vReview.x < 0.5;
@@ -791,8 +713,9 @@ void main() {
   if (vP < 0.0 || uBeamP < vP) {
     // Dormant: static checkered dashes at the tuned opacity.
     if (fract(vArc * uDashFreq) > 0.55) discard;
+    float profile = min(1.0, band + core);
     gl_FragColor =
-      vec4(mix(vColor, vec3(1.0), core * 0.2), uOpacity * dormant);
+      vec4(mix(vColor, vec3(1.0), core * 0.2), uOpacity * profile);
 #ifdef KNOWLEDGE_PROVIDER
     gl_FragColor.a *= vLinkOpacity;
 #endif
@@ -800,7 +723,7 @@ void main() {
   }
 ${PATH_TIMELINE_GLSL}
 #ifndef KNOWLEDGE_REVIEW_EFFECT
-  if (fract(vArc * uDashFreq) <= 0.55) gl_FragColor.a += uOpacity * dormant * (1.0 - uPathOpacity);
+  if (fract(vArc * uDashFreq) <= 0.55) gl_FragColor.a += uOpacity * min(1.0, band + core) * (1.0 - uPathOpacity);
 #endif
 #ifdef KNOWLEDGE_REVIEW_EFFECT
   if (!pending) gl_FragColor.a *= 1.0 - smoothstep(1.9,

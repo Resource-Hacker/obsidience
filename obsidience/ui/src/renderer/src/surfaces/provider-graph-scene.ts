@@ -575,7 +575,7 @@ export class ProviderGraphScene {
         role: root ? "root" : section ? "section" : "claim", depth: root ? 0 : section ? 1 : 2,
         branch: node.kind, radius: Math.max(3, radius * this.host.clientHeight
           / (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * depth)),
-        accent: node.color, accentSoft: node.color,
+        accent: node.color,
       });
     }
     // Provider activity already owns the node pulse; do not add a second ring.
@@ -685,10 +685,10 @@ export class ProviderGraphScene {
   private frame = (time: number) => {
     this.raf = 0;
     if (this.disposed || !this.visible) return;
-    // A 240-Hz desktop does not require 240 full graph/video frames per second.
-    // Idle spin needs only 15 Hz; retain 60 Hz for direct interaction/activity.
+    // A 240-Hz desktop does not require 240 full graph/video frames per second;
+    // 60 keeps the idle spin as smooth as direct interaction.
     const spinning = this.canSpin();
-    const fps = spinning && !this.paintNodes.size && !this.layoutPending && this.layoutAlpha <= 0.006 ? 15 : 60;
+    const fps = 60;
     const wait = 1000 / fps - 0.5 - (time - this.lastPaint);
     if (wait > 0) { this.sleep(wait); return; }
     this.lastPaint = time;

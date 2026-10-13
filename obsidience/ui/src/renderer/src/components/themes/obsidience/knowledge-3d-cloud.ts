@@ -12,10 +12,10 @@
 //     pattern);
 //   - satellites namespace their node ids (agent:<id>/<nodeId>) at the
 //     projection/pointer boundary; the main cloud uses raw ids.
-// Everything else — sprites, depth prepass, spoke/branch/cross beams,
-// shooting-star streaks, subtree hover, focus reveal, path timeline — is
-// the same code with per-cloud uniforms fed by that cloud's own tuning
-// record from the Graph Tuning pane.
+// Everything else — sprites, depth prepass, the layered glass shells,
+// spoke/branch/cross links, shooting-star streaks, subtree hover, focus
+// reveal, path timeline — is the same code with per-cloud uniforms fed by
+// that cloud's own tuning record from the Graph Tuning pane.
 import * as THREE from "three";
 import {
   captureKnowledge3dLayout,
@@ -47,12 +47,19 @@ import {
 } from "./knowledge-3d";
 import type { ForceSimulation } from "d3-force-3d";
 import { KNOWLEDGE_CROSS_SEGMENTS as CROSS_SEGMENTS, writeKnowledgeCrossRoute } from "./knowledge-3d-links";
-import { KNOWLEDGE_LINK_APPROVAL_DURATION_MS, POINT_LIGHT_FRAGMENT_SHADER } from "./knowledge-3d-shaders";
-import { createKnowledge3dLightLayer } from "./knowledge-3d-light";
+import { KNOWLEDGE_LINK_APPROVAL_DURATION_MS } from "./knowledge-3d-shaders";
+import { createKnowledge3dShells, type Knowledge3dOptics } from "./knowledge-3d-shell";
 export { KNOWLEDGE_LINK_APPROVAL_DURATION_MS };
 
-/** Only the inexpensive additive light pass extends beyond the glyph. */
-const LEAF_LIGHT_EXTENT = 3.2;
+/** Leaf sprites carry the plasma-orb halo and star flare, so the quad
+ *  extends well past the disc (owner 2026-08-02: the 3D articles are the
+ *  same jewel-star plasma orbs as the 2D map). */
+const LEAF_SPRITE_EXTENT = 3.2;
+
+/** Seconds for the scan plane to cross a ball: a slow ambient survey, and
+ *  the quicker amber pass that marks an agent thinking. */
+const SURVEY_SWEEP_SECONDS = 11;
+const THINKING_SWEEP_SECONDS = 2.2;
 
 export const KNOWLEDGE_ACTIVITY_FADE_MS = 420;
 const SELECTION_TRANSITION_MS = 340;
@@ -141,6 +148,9 @@ export interface Knowledge3dCloudDeps {
     uPulse: { value: number };
     uSpeechLevel: { value: number };
     uTime: { value: number };
+    /** The Scene's breathing focal plane, in cloud radii from each centre. */
+    uFocusSwing: { value: number };
+    uPixelRatio: { value: number };
   };
   viewportUniform: { value: THREE.Vector2 };
 }
@@ -215,6 +225,10 @@ export interface Knowledge3dCloud {
   ): void;
   nodeWorldPosition(rawId: string, out: THREE.Vector3): boolean;
   sortSprites(cameraPosition: THREE.Vector3): void;
+  /** Advance this cloud's scan plane; `thinking` selects the amber pass. */
+  driveScan(dtSeconds: number, thinking: boolean): void;
+  /** Resurvey the glass if the solver moved its nodes. Before any render. */
+  prepare(renderer: THREE.WebGLRenderer): void;
   dispose(scene: THREE.Scene): void;
 }
 
@@ -346,7 +360,6 @@ export function createKnowledge3dCloud(
   positionAttribute.setUsage(THREE.DynamicDrawUsage);
   const radii = new Float32Array(nodes.length);
   const extents = new Float32Array(nodes.length);
-  const lightExtents = new Float32Array(nodes.length);
   const glowScales = new Float32Array(nodes.length);
   const cores = new Float32Array(nodes.length * 3);
   const darks = new Float32Array(nodes.length * 3);
@@ -359,9 +372,9 @@ export function createKnowledge3dCloud(
   nodes.forEach((node, index) => {
     seeds[index] = (index * 0.6180339887) % 1;
     radii[index] = nodeRadius(node);
-    extents[index] = node.subject || node.autoCurated
-      ? Math.max(1.15, node.ringScale + 0.3) : 1.15;
-    lightExtents[index] = Math.max(2.2, node.subject ? node.glowScale : LEAF_LIGHT_EXTENT);
+    extents[index] = node.subject
+      ? Math.max(node.glowScale, node.ringScale + 0.3)
+      : LEAF_SPRITE_EXTENT;
     glowScales[index] = node.glowScale;
     const core = deps.parseColor(node.core);
     const dark = deps.parseColor(node.dark);
@@ -445,7 +458,6 @@ export function createKnowledge3dCloud(
     uRingStyle: ringStyleUniform,
   };
   const material = new THREE.ShaderMaterial({
-    defines: { KNOWLEDGE_COMPACT: 1 },
     uniforms: pointUniforms,
     vertexShader: deps.pointVertexShader,
     fragmentShader: deps.pointFragmentShader,
@@ -459,26 +471,6 @@ export function createKnowledge3dCloud(
   points.frustumCulled = false;
   points.renderOrder = 1;
   group.add(points);
-  // Share node attributes, but keep an unsorted light buffer with its own
-  // extent. No duplicate positions, activity owner or sorting for glow.
-  const lightGeometry = new THREE.BufferGeometry();
-  for (const [name, attribute] of Object.entries(geometry.attributes)) {
-    lightGeometry.setAttribute(name, attribute);
-  }
-  lightGeometry.setAttribute("aExtent", new THREE.BufferAttribute(lightExtents, 1));
-  const lightMaterial = new THREE.ShaderMaterial({
-    uniforms: pointUniforms,
-    vertexShader: deps.pointVertexShader,
-    fragmentShader: POINT_LIGHT_FRAGMENT_SHADER,
-    transparent: true, depthWrite: false, depthTest: false,
-    blending: THREE.AdditiveBlending,
-  });
-  const lights = new THREE.Points(lightGeometry, lightMaterial);
-  lights.name = "knowledge-node-light";
-  lights.frustumCulled = false;
-  lights.renderOrder = 0;
-  group.add(lights);
-  disposables.push(lightGeometry, lightMaterial);
   const depthMaterial = new THREE.ShaderMaterial({
     uniforms: pointUniforms,
     vertexShader: deps.pointVertexShader,
@@ -493,6 +485,36 @@ export function createKnowledge3dCloud(
   depthPoints.frustumCulled = false;
   depthPoints.renderOrder = 1;
   group.add(depthPoints);
+
+  // --- The layered glass around the nodes. Each ball is its own subject:
+  // focus and scan are measured from its centre. A node presses its shell by
+  // its size and by how many links meet at it.
+  const optics: Knowledge3dOptics = {
+    uTime: deps.sharedUniforms.uTime,
+    uPerspective: deps.sharedUniforms.uPerspective,
+    uFocusSwing: deps.sharedUniforms.uFocusSwing,
+    uPixelRatio: deps.sharedUniforms.uPixelRatio,
+    uReach: { value: 1 },
+    uModelScale: modelScaleUniform,
+    uScan: { value: new THREE.Vector3(-2, 0, 0) },
+  };
+  const layout = captureKnowledge3dLayout(simulation);
+  const linkCounts = new Float32Array(nodes.length);
+  for (const edge of edges) {
+    const a = indexById.get(edge.source), b = indexById.get(edge.target);
+    if (a !== undefined && b !== undefined) { linkCounts[a] += 1; linkCounts[b] += 1; }
+  }
+  const shells = createKnowledge3dShells({
+    positions,
+    layers: Float32Array.from(nodes, (node) => layout?.fractions.get(node.id) ?? 0),
+    sizes: radii,
+    weights: radii.map((radius, index) => radius * Math.sqrt(1 + linkCounts[index])),
+    tints: cores, detail: isMain ? 1 : input.tuning.ballScale, optics,
+  });
+  shells.applyTuning(input.tuning);
+  // Glass only adds light and draws in the beams' slot, behind the node sprites.
+  for (const layer of shells.layers) group.add(layer);
+  disposables.push(shells);
 
   // --- Taxonomy beams: the main ball's TWO-mesh split — root SPOKES
   // (tendril width, dormant per Brain lines) and deeper BRANCHES (depth
@@ -604,7 +626,6 @@ export function createKnowledge3dCloud(
     }
     beamGeometry.setIndex(new THREE.BufferAttribute(indices, 1));
     const beamMaterial = new THREE.ShaderMaterial({
-      defines: { KNOWLEDGE_FILAMENT: 1 },
       uniforms,
       vertexShader: deps.beamVertexShader,
       fragmentShader: deps.taxonomyFragmentShader,
@@ -710,24 +731,6 @@ export function createKnowledge3dCloud(
     branchUniforms,
   );
 
-  const lightLayer = createKnowledge3dLightLayer({
-    ids: nodeIds, positions, radii, colors: cores,
-    branches: [
-      ...spokePairs.filter((_, index) => spokeDormant[index] > 0.5),
-      ...branchPairs.filter((_, index) => branchDormant[index] > 0.5),
-    ],
-    uniforms: {
-      uPerspective: deps.sharedUniforms.uPerspective,
-      uTime: deps.sharedUniforms.uTime,
-      uModelScale: modelScaleUniform,
-      uGlowScale: glowScaleUniform,
-      uBranchOpacity: branchUniforms.uOpacity,
-    },
-    pixelRatio,
-  });
-  group.add(lightLayer.points);
-  disposables.push(lightLayer);
-
   // --- Article cross-links: curved checkered gradient beams. ---
   const crossQuadCount = crossPairs.length * CROSS_SEGMENTS;
   const crossGeometry = new THREE.BufferGeometry();
@@ -827,7 +830,6 @@ export function createKnowledge3dCloud(
     uDashFreq: { value: input.tuning.dashFrequency },
   };
   const crossMaterial = new THREE.ShaderMaterial({
-    defines: { KNOWLEDGE_FILAMENT: 1 },
     uniforms: crossUniforms,
     vertexShader: deps.beamVertexShader,
     fragmentShader: deps.crossFragmentShader,
@@ -903,8 +905,8 @@ export function createKnowledge3dCloud(
   const streakLines = new THREE.LineSegments(streakGeometry, streakMaterial);
   streakLines.frustumCulled = false;
   streakLines.visible = streakCount > 0;
-  // Intra-cloud draw slots (beams 0, orbs 1, streaks 2): everything is
-  // depthTest:false except the streaks, so draw order IS the front/behind
+  // Intra-cloud draw slots (beams and glass 0, orbs 1, streaks 2): everything
+  // is depthTest:false except the streaks, so draw order IS the front/behind
   // resolution — a streak passing in FRONT of a node must paint after the
   // node sprite (behind is handled by the opaque depth prepass). The
   // scene's inter-cloud ranking preserves these slots via renderOrder % 4.
@@ -991,13 +993,15 @@ export function createKnowledge3dCloud(
     const arcArray = arcs.array as Float32Array;
     const streakStart = streakGeometry.getAttribute("aStart") as THREE.BufferAttribute;
     const streakEnd = streakGeometry.getAttribute("aEnd") as THREE.BufferAttribute;
+    // Raw array writes: this runs for every link on every settling tick.
+    const startArray = startAttr.array as Float32Array;
+    const endArray = endAttr.array as Float32Array;
+    const streakStartArray = streakStart.array as Float32Array;
+    const streakEndArray = streakEnd.array as Float32Array;
     pairs.forEach(([a, b], pair) => {
       const reversed = nodeIds[a] > nodeIds[b];
-      const first = reversed ? b : a;
-      const last = reversed ? a : b;
-      writeKnowledgeCrossRoute(crossRoute,
-        [positions[first * 3], positions[first * 3 + 1], positions[first * 3 + 2]],
-        [positions[last * 3], positions[last * 3 + 1], positions[last * 3 + 2]]);
+      writeKnowledgeCrossRoute(crossRoute, positions, positions,
+        (reversed ? b : a) * 3, (reversed ? a : b) * 3);
       let arc = 0;
       for (let segment = 0; segment < CROSS_SEGMENTS; segment++) {
         const start = (reversed ? CROSS_SEGMENTS - segment : segment) * 3;
@@ -1006,8 +1010,13 @@ export function createKnowledge3dCloud(
           crossRoute[end + 1] - crossRoute[start + 1], crossRoute[end + 2] - crossRoute[start + 2]);
         const quad = pair * CROSS_SEGMENTS + segment;
         for (let vertex = 0; vertex < 4; vertex++) {
-          startAttr.setXYZ(quad * 4 + vertex, crossRoute[start], crossRoute[start + 1], crossRoute[start + 2]);
-          endAttr.setXYZ(quad * 4 + vertex, crossRoute[end], crossRoute[end + 1], crossRoute[end + 2]);
+          const at = (quad * 4 + vertex) * 3;
+          startArray[at] = crossRoute[start];
+          startArray[at + 1] = crossRoute[start + 1];
+          startArray[at + 2] = crossRoute[start + 2];
+          endArray[at] = crossRoute[end];
+          endArray[at + 1] = crossRoute[end + 1];
+          endArray[at + 2] = crossRoute[end + 2];
           arcArray[quad * 4 + vertex] = arc + (vertex >= 2 ? length : 0);
         }
         // Repeat the exact line segment for each streak. The shader clips its
@@ -1015,9 +1024,13 @@ export function createKnowledge3dCloud(
         // bend instead of drawing a chord through the hierarchy's inner layers.
         for (let streak = 0; streak < streaksPerLink; streak++) {
           for (let tip = 0; tip < 2; tip++) {
-            const vertex = ((pair * streaksPerLink + streak) * CROSS_SEGMENTS + segment) * 2 + tip;
-            streakStart.setXYZ(vertex, crossRoute[start], crossRoute[start + 1], crossRoute[start + 2]);
-            streakEnd.setXYZ(vertex, crossRoute[end], crossRoute[end + 1], crossRoute[end + 2]);
+            const at = (((pair * streaksPerLink + streak) * CROSS_SEGMENTS + segment) * 2 + tip) * 3;
+            streakStartArray[at] = crossRoute[start];
+            streakStartArray[at + 1] = crossRoute[start + 1];
+            streakStartArray[at + 2] = crossRoute[start + 2];
+            streakEndArray[at] = crossRoute[end];
+            streakEndArray[at + 1] = crossRoute[end + 1];
+            streakEndArray[at + 2] = crossRoute[end + 2];
           }
         }
         arc += length;
@@ -1034,7 +1047,7 @@ export function createKnowledge3dCloud(
     syncReviewPositions();
   };
   const syncAllPositions = (): void => {
-    lightLayer.syncPositions();
+    shells.invalidate();
     syncStraightBeams(spokes);
     syncStraightBeams(branches);
     syncCrossPositions();
@@ -1222,6 +1235,10 @@ export function createKnowledge3dCloud(
 
   const localCamera = new THREE.Vector3();
   const projectionVector = new THREE.Vector3();
+  // The scan plane starts below the ball and changes between the survey and
+  // the thinking pass only between crossings.
+  let scanAt = -1.2;
+  let scanWarmth = 0;
 
   return {
     agentId,
@@ -1257,7 +1274,7 @@ export function createKnowledge3dCloud(
     },
     applyRelationEffects,
     applyTuning(live: Knowledge3dTuning, ratio: number) {
-      lightLayer.setPixelRatio(ratio);
+      shells.applyTuning(live);
       glowScaleUniform.value = live.nodeGlow;
       const ballFactor = renderBallScale(live);
       modelScaleUniform.value = ballFactor;
@@ -1542,12 +1559,21 @@ export function createKnowledge3dCloud(
       }
       sortOrder.sort((a, b) => sortDepths[b] - sortDepths[a]);
       const indexArray = drawIndex.array as Uint32Array;
-      let changed = false;
       for (let i = 0; i < sortOrder.length; i += 1) {
-        if (indexArray[i] !== sortOrder[i]) changed = true;
         indexArray[i] = sortOrder[i];
       }
-      if (changed) drawIndex.needsUpdate = true;
+      drawIndex.needsUpdate = true;
+    },
+    driveScan(dtSeconds, thinking) {
+      const wanted = thinking ? 1 : 0;
+      // Change character only between crossings, never mid-ball.
+      if (scanWarmth !== wanted && (scanAt <= -1.15 || scanAt >= 1.15)) scanWarmth = wanted;
+      scanAt += dtSeconds * 2.4 / (scanWarmth ? THINKING_SWEEP_SECONDS : SURVEY_SWEEP_SECONDS);
+      if (scanAt > 1.2) scanAt = -1.2;
+      optics.uScan.value.set(scanAt, scanWarmth ? 3 : 1.4, scanWarmth);
+    },
+    prepare(renderer) {
+      shells.prepare(renderer);
     },
     dispose(scene) {
       clearReview();
