@@ -1,0 +1,125 @@
+--- a/hindsight_api/engine/providers/codex_llm.py
++++ b/hindsight_api/engine/providers/codex_llm.py
+@@ -130,15 +130,13 @@
+ # ``llm_timeout`` / the per-operation override.
+ _DEFAULT_CODEX_TIMEOUT = 120.0
+ 
+-# Hard ceiling on one SSE response body, counted in decoded characters (so a
+-# multi-byte body is cut off a little later than the name suggests, which is
+-# fine for a backstop). The Codex backend can wedge
+-# into runaway generation and emit megabytes of deltas for a request whose real
+-# answer is a few hundred bytes (issue #3898); a structured-output call bounded
+-# by ``max_completion_tokens`` never approaches this, so blowing past it means
+-# the stream is not going to end on its own.
+-_MAX_SSE_BODY_CHARS = 4 * 1024 * 1024
+-
++# Separate generated string deltas from SSE framing, repeated snapshots and
++# encrypted reasoning. These are resource ceilings, not model token limits:
++# this backend does not send the caller's max_completion_tokens parameter.
++_MAX_SSE_BODY_BYTES = 64 * 1024 * 1024
++_MAX_SSE_LINE_CHARS = 4 * 1024 * 1024
++_MAX_SSE_DELTA_CHARS = 4 * 1024 * 1024
++_SSE_READ_BYTES = 64 * 1024
+ 
+ # The characters ``str.splitlines`` breaks a line on.
+ _LINE_BREAK_RE = re.compile("[\n\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029]")
+@@ -843,44 +841,76 @@
+             ) from e
+ 
+     async def _iter_sse_lines(self, response: aiohttp.ClientResponse) -> AsyncIterator[str]:
+-        """Yield SSE lines, abandoning the response if the body runs away.
+-
+-        The deadline in ``_stream_request`` already bounds wall time; this bounds
+-        volume, so a backend generating at speed is cut off in seconds rather than
+-        held onto until the deadline expires. Volume is counted as the body
+-        arrives, so a runaway that never emits a line break is caught too.
+-
+-        Lines split the way ``str.splitlines`` does (what httpx's ``aiter_lines``
+-        did), including a ``\\r\\n`` that straddles two chunks. aiohttp's own line
+-        reader is not used: it raises on a line longer than its buffer limit.
++        """Yield SSE lines with separate wire, line and generated-delta bounds.
++
++        The request wall deadline remains authoritative. Framing and repeated
++        item snapshots are not generated deltas. Count string deltas, including
++        reasoning and tool arguments, without logging or retaining their text.
++        Keep splitlines/CRLF behavior unchanged and bound each network read.
+         """
+         decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+         pending: list[str] = []
+-        seen_chars = 0
+-        async for chunk in response.content.iter_any():
++        pending_chars = seen_bytes = seen_chars = event_count = delta_chars = 0
++        event_type = ""
++
++        def reject(limit: str, line_chars: int = 0) -> None:
++            raise CodexRunawayStreamError(
++                f"Codex SSE resource limit={limit}; body_bytes={seen_bytes}; body_chars={seen_chars}; "
++                f"events={event_count}; delta_chars={delta_chars}; "
++                f"line_chars={line_chars}; pending_chars={pending_chars}"
++            )
++
++        def account(line: str) -> str:
++            nonlocal event_count, delta_chars, event_type
++            if len(line) > _MAX_SSE_LINE_CHARS:
++                reject("line", len(line))
++            if line.startswith("event: "):
++                event_type = line[7:]
++            elif line.startswith("data: "):
++                event_count += 1
++                try:
++                    data = json.loads(line[6:])
++                except json.JSONDecodeError:
++                    return line
++                if isinstance(data, dict):
++                    kind = data.get("type", "")
++                    delta = data.get("delta")
++                    is_delta = event_type.endswith(".delta") or (isinstance(kind, str) and kind.endswith(".delta"))
++                    if is_delta and isinstance(delta, str):
++                        delta_chars += len(delta)
++                        if delta_chars > _MAX_SSE_DELTA_CHARS:
++                            reject("delta", len(line))
++            return line
++
++        async for chunk in response.content.iter_chunked(_SSE_READ_BYTES):
++            seen_bytes += len(chunk)
++            if seen_bytes > _MAX_SSE_BODY_BYTES:
++                reject("body")
+             text = decoder.decode(chunk)
+             seen_chars += len(text)
+-            if seen_chars > _MAX_SSE_BODY_CHARS:
+-                raise CodexRunawayStreamError(
+-                    f"Codex response exceeded {_MAX_SSE_BODY_CHARS} characters without completing; "
+-                    "abandoning the stream"
+-                )
+             if not _LINE_BREAK_RE.search(text):
+-                # Still inside one line: defer the join so a long line costs linear time.
++                # Defer the join so a long line costs linear time.
+                 pending.append(text)
++                pending_chars += len(text)
++                if pending_chars > _MAX_SSE_LINE_CHARS:
++                    reject("line", pending_chars)
+                 continue
+             lines = ("".join(pending) + text).splitlines(keepends=True)
+             pending = []
+-            # The last piece is incomplete unless it ends on a break — and a lone
+-            # "\r" may be the first half of a "\r\n" the next chunk completes.
++            pending_chars = 0
+             last = lines[-1]
+             if not _LINE_BREAK_RE.match(last[-1]) or last.endswith("\r"):
+                 pending.append(lines.pop())
++                pending_chars = len(pending[0])
++                if pending_chars > _MAX_SSE_LINE_CHARS:
++                    reject("line", pending_chars)
+             for line in lines:
+-                yield line.splitlines()[0]
+-        rest = "".join(pending) + decoder.decode(b"", final=True)
++                yield account(line.splitlines()[0])
++        tail = decoder.decode(b"", final=True)
++        seen_chars += len(tail)
++        rest = "".join(pending) + tail
+         for line in rest.splitlines():
+-            yield line
++            yield account(line)
+ 
+     async def _parse_sse_stream(self, response: aiohttp.ClientResponse) -> str:
+         """

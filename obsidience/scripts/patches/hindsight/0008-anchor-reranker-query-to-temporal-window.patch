@@ -1,0 +1,24 @@
+--- a/hindsight_api/engine/memory_engine.py
++++ b/hindsight_api/engine/memory_engine.py
+@@ -9915,8 +9915,20 @@
+ 
+                     # Ensure reranker is initialized (for lazy initialization mode)
+                     await reranker_instance.ensure_initialized()
++                    # Resolve relative dates for the cross-encoder only, preserving
++                    # the parsed window's calendar dates and timezone.
++                    rerank_query = query
++                    if detected_temporal_constraint:
++                        rerank_start, rerank_end = detected_temporal_constraint
++                        if rerank_start is not None and rerank_end is not None:
++                            rerank_start_label = rerank_start.strftime("%B %d, %Y").replace(" 0", " ")
++                            rerank_end_label = rerank_end.strftime("%B %d, %Y").replace(" 0", " ")
++                            if rerank_start.date() == rerank_end.date():
++                                rerank_query += f" Asked date: {rerank_start_label}."
++                            else:
++                                rerank_query += f" Asked date range: {rerank_start_label} through {rerank_end_label}."
+                     reranked = await reranker_instance.rerank(
+-                        query, merged_candidates,
++                        rerank_query, merged_candidates,
+                         cancellation=request_context.cancellation if request_context is not None else None,
+                     )
+                     scored_results = reranked.results

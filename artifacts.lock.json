@@ -287,6 +287,42 @@
               "installed_sha256": "94f8ee7be9fa5caf1471dcb658eaa19e38cf66d10c58667b4f8b70e99165e90a"
             }
           ]
+        },
+        {
+          "path": "obsidience/scripts/patches/hindsight/0008-anchor-reranker-query-to-temporal-window.patch",
+          "purpose": "Resolve a detected bounded temporal window into calendar-date text for the cross-encoder query only. Preserve the original retrieval query, parsed offset, stored memories, candidate budgets and ranking score contract. Apply after 0002.",
+          "patch_sha256": "aa4549db01bb58278b24ea9a9946643bea97147eef52ad97390fff531d0622f3",
+          "files": [
+            {
+              "path": "hindsight_api/engine/memory_engine.py",
+              "preimage_sha256": "2abff48637b49ab6489b0541d7c5e377923d8e4d7aae861c1ae6a484c122d27d",
+              "installed_sha256": "8f6b01acc7843b5b0533046db5b258fd6485de0786c0f82aa582c6b56730ab9d"
+            }
+          ]
+        },
+        {
+          "path": "obsidience/scripts/patches/hindsight/0009-preserve-month-only-query-range.patch",
+          "purpose": "Expand an explicitly named month-only dateparser match to the first and last days of its resolved month. Preserve the parsed year and reference offset; explicit day, year, relative and pre-existing range paths remain unchanged. Apply after 0004.",
+          "patch_sha256": "6548ae3aa84ed97ebaef4d53e7574eec2338cf59649eb0d7aeb9b4481a9d62b7",
+          "files": [
+            {
+              "path": "hindsight_api/engine/query_analyzer.py",
+              "preimage_sha256": "3a807f30b1e26011c244c1e1177a9154aaf1774a8bf05b3c389ea009d2acd507",
+              "installed_sha256": "4f983a2421c7532d351c2abf9363326f092c9af002cfa5fe16776ad2b362d722"
+            }
+          ]
+        },
+        {
+          "path": "obsidience/scripts/patches/hindsight/0010-codex-sse-volume-accounting.patch",
+          "purpose": "Bound Codex streaming by separate 64 MiB incoming wire bytes, 4 Mi-character line and generated-string-delta ceilings. Preserve the request wall deadline and semantic parsers; do not count SSE framing as generated output. Reject with numeric-only counters and retain native operation retry semantics.",
+          "patch_sha256": "8f37bd355db8ad86ff30d7324a2ca6abda16ff8082217354856ef1dd7f2aead6",
+          "files": [
+            {
+              "path": "hindsight_api/engine/providers/codex_llm.py",
+              "preimage_sha256": "96bd66c02f42a7239b2b8fe3eb998a4ae7e1c9df0d1d2781cb342587e76c8b4d",
+              "installed_sha256": "ed9c250d2bef2b57508d4b31d814005efb604b20887e2f849acff647b3988e23"
+            }
+          ]
         }
       ]
     },

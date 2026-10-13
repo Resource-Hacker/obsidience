@@ -1,0 +1,42 @@
+--- a/hindsight_api/engine/query_analyzer.py
++++ b/hindsight_api/engine/query_analyzer.py
+@@ -5,6 +5,7 @@
+ structured information like temporal constraints.
+ """
+ 
++import calendar
+ import logging
+ import re
+ import threading
+@@ -451,7 +452,7 @@
+         # by longest span, so an explicit date ("in May", "2026-06-10") always
+         # beats an earlier weak word regardless of position. See issue #2768.
+         scored_results = [
+-            (_date_match_score(text), len(text), date)
++            (_date_match_score(text), len(text), text, date)
+             for text, date in results
+             if not is_embedded_cjk_dateparser_match(query, text)
+         ]
+@@ -461,7 +462,7 @@
+             return QueryAnalysis(temporal_constraint=None)
+ 
+         # Highest signal score wins; ties broken by the longest matched span.
+-        _, _, parsed_date = max(scored_results, key=lambda entry: (entry[0], entry[1]))
++        match_score, _, matched_text, parsed_date = max(scored_results, key=lambda entry: (entry[0], entry[1]))
+ 
+         # dateparser answers with a naive date on the reference's own calendar. Keep the
+         # reference offset, so the window is that local day rather than the same date in UTC.
+@@ -471,6 +472,13 @@
+         # Create constraint for single day
+         start_date = parsed_date.replace(hour=0, minute=0, second=0, microsecond=0)
+         end_date = parsed_date.replace(hour=23, minute=59, second=59, microsecond=999999)
++        # A month-only match borrows the anchor's day from dateparser. Keep its
++        # resolved year/offset, but cover the month the query actually named.
++        # Digits, weekdays and relative/period words score differently, so exact
++        # dates and more specific matches retain their existing day constraint.
++        if match_score == 50 and set(_TOKEN_RE.findall(matched_text.lower())) & _MONTH_WORDS:
++            start_date = start_date.replace(day=1)
++            end_date = end_date.replace(day=calendar.monthrange(parsed_date.year, parsed_date.month)[1])
+ 
+         return QueryAnalysis(temporal_constraint=TemporalConstraint(start_date=start_date, end_date=end_date))
+ 
