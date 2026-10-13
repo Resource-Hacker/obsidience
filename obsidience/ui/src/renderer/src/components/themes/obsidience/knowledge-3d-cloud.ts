@@ -56,8 +56,18 @@ export { KNOWLEDGE_LINK_APPROVAL_DURATION_MS };
  *  same jewel-star plasma orbs as the 2D map). */
 const LEAF_SPRITE_EXTENT = 3.2;
 
-/** Seconds for the resting survey plane to cross a ball. */
-const SURVEY_SWEEP_SECONDS = 11;
+/** Where along its link a comet starts and how fast it travels, in link
+ *  lengths per shader second. The shader and the landing clock share these. */
+const streakPhase = (streak: number): number => (streak * 0.37) % 1;
+const streakSpeed = (streak: number): number => 0.09 + ((streak * 0.61) % 1) * 0.1;
+
+/** A comet landing on a node: how brightly the node twinkles and for how
+ *  long, the small ripple it sends (strength, spread in radians, seconds),
+ *  and the least time between two such ripples on one ball. */
+const LANDING_TWINKLE = 0.6;
+const LANDING_TWINKLE_SECONDS = 0.45;
+const LANDING_RIPPLE = [0.3, 0.5, 1.1] as const;
+const LANDING_RIPPLE_GAP_SECONDS = 0.18;
 
 export const KNOWLEDGE_ACTIVITY_FADE_MS = 420;
 const SELECTION_TRANSITION_MS = 340;
@@ -223,8 +233,9 @@ export interface Knowledge3dCloud {
   ): void;
   nodeWorldPosition(rawId: string, out: THREE.Vector3): boolean;
   sortSprites(cameraPosition: THREE.Vector3): void;
-  /** Advance this cloud's glass: the resting survey plane, and the ripples
-   *  its lit nodes send across their shells while its Agent is thinking. */
+  /** Advance this cloud's glass: the twinkle and small ripple where a link
+   *  comet lands, and the ripples the thinking route sends while its Agent
+   *  is thinking. */
   driveGlass(dtSeconds: number, thinking: boolean): void;
   /** Resurvey the glass if the solver moved its nodes. Before any render. */
   prepare(renderer: THREE.WebGLRenderer): void;
@@ -495,7 +506,6 @@ export function createKnowledge3dCloud(
     uPixelRatio: deps.sharedUniforms.uPixelRatio,
     uReach: { value: 1 },
     uModelScale: modelScaleUniform,
-    uScan: { value: new THREE.Vector2(-2, 0) },
   };
   const layout = captureKnowledge3dLayout(simulation);
   const linkCounts = new Float32Array(nodes.length);
@@ -868,8 +878,8 @@ export function createKnowledge3dCloud(
     const tips = new Float32Array(streakVertices);
     const ranges = new Float32Array(streakVertices * 2);
     for (let streak = 0; streak < streakCount; streak += 1) {
-      const phase = (streak * 0.37) % 1;
-      const speed = 0.09 + ((streak * 0.61) % 1) * 0.1;
+      const phase = streakPhase(streak);
+      const speed = streakSpeed(streak);
       for (let segment = 0; segment < CROSS_SEGMENTS; segment++) {
         for (let end = 0; end < 2; end++) {
           const vertex = (streak * CROSS_SEGMENTS + segment) * 2 + end;
@@ -1213,8 +1223,10 @@ export function createKnowledge3dCloud(
     });
     attribute.needsUpdate = true;
   };
+  const glassFocus = new Float32Array(nodes.length);
   const applyHoverLevels = (): void => {
     let dirty = false;
+    let glassDirty = false;
     for (let i = 0; i < nodeIds.length; i += 1) {
       const inSubtree = hoverSubtree?.has(nodeIds[i]) ?? false;
       const hoverLevel =
@@ -1224,28 +1236,35 @@ export function createKnowledge3dCloud(
             ? KNOWLEDGE_3D_HOVER_ARTICLE_LEVEL
             : 0;
       const level = Math.max(revealLevels[i], selectionLevels[i], hoverLevel);
-      if (Math.abs(focusLevels[i] - level) > 0.01) {
-        focusLevels[i] = level;
+      if (Math.abs(glassFocus[i] - level) > 0.01) {
+        glassFocus[i] = level;
+        glassDirty = true;
+      }
+      // A landing comet's twinkle shows on the node's icon only.
+      const shown = Math.max(level, sparks[i] * sparks[i] * LANDING_TWINKLE);
+      if (Math.abs(focusLevels[i] - shown) > 0.01) {
+        focusLevels[i] = shown;
         dirty = true;
       }
     }
-    if (dirty) {
-      focusAttribute.needsUpdate = true;
-      shells.setFocus(focusLevels);
-    }
+    if (dirty) focusAttribute.needsUpdate = true;
+    if (glassDirty) shells.setFocus(glassFocus);
   };
 
   const localCamera = new THREE.Vector3();
   const projectionVector = new THREE.Vector3();
-  // The survey plane starts below the ball and yields while the Agent thinks.
-  let scanAt = -1.2;
-  let thinking = 0;
   // Which nodes the thinking front has reached on the current route. They
   // keep sending soft ripples, one node at a time.
   let passed = new Uint8Array(nodes.length);
   let reached = new Uint8Array(nodes.length);
   let rippleDue = 0;
   let rippleTurn = 0;
+  // Comets ride the article links on the shader clock; the same arithmetic
+  // here tells when each one lands on the node at its link's far end.
+  const landingCycles = new Int32Array(streakCount);
+  const sparks = new Float32Array(nodes.length);
+  let landingClock = Number.NaN;
+  let landingRippleDue = 0;
 
   return {
     agentId,
@@ -1588,10 +1607,31 @@ export function createKnowledge3dCloud(
       drawIndex.needsUpdate = true;
     },
     driveGlass(dtSeconds, active) {
-      thinking += ((active ? 1 : 0) - thinking) * (1 - Math.exp(-dtSeconds / 0.35));
-      scanAt += dtSeconds * 2.4 / SURVEY_SWEEP_SECONDS;
-      if (scanAt > 1.2) scanAt = -1.2;
-      optics.uScan.value.set(scanAt, 1.4 * (1 - thinking));
+      // A comet lands when its head wraps past the end of its link.
+      const clock = deps.particleTime.value * streakUniforms.uSpeedScale.value;
+      // The shader clock wraps hourly; resynchronise instead of landing them all.
+      const resync = !(clock >= landingClock);
+      landingClock = clock;
+      landingRippleDue -= dtSeconds;
+      let twinkling = false;
+      for (let streak = 0; streak < streakCount; streak += 1) {
+        const cycle = Math.floor(clock * streakSpeed(streak) + streakPhase(streak));
+        if (cycle === landingCycles[streak]) continue;
+        landingCycles[streak] = cycle;
+        if (resync) continue;
+        const node = crossPairs[Math.floor(streak / streaksPerLink)][1];
+        sparks[node] = 1;
+        if (landingRippleDue <= 0) {
+          landingRippleDue = LANDING_RIPPLE_GAP_SECONDS;
+          shells.ripple(node, ...LANDING_RIPPLE);
+        }
+      }
+      for (let i = 0; i < sparks.length; i += 1) {
+        if (sparks[i] <= 0) continue;
+        sparks[i] = Math.max(0, sparks[i] - dtSeconds / LANDING_TWINKLE_SECONDS);
+        twinkling = true;
+      }
+      if (twinkling) applyHoverLevels();
       // While the Agent thinks, each node its path has reached sends another,
       // softer ripple in turn, so the glass keeps moving where the thought is.
       rippleDue -= dtSeconds;

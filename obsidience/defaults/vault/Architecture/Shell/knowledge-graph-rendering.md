@@ -94,17 +94,22 @@ solid and the outer ones the clearest. The Glass group in Graph settings sets
 each layer's solidity, counted outward from the core, and the crater depth,
 crater glow, seed glow, sheen lines and dust for each graph.
 
-At rest a pale survey plane crosses every ball from bottom to top and lights
-the glass it passes. While a ball's Agent is thinking, every node on the
-route drops into its own shell like a stone into water as the thinking front
-reaches it, inner layers included: a ripple in the node's color spreads
-across that layer, and the glass, its dust and its seeds ride it. The
-Articles a route ends on send the strongest ripple, and reached nodes keep
-sending softer ones in turn until the thinking ends. A ripple marks the
-front's passage, as the route beam does; only the seed of a consulted or
-hovered node swells and burns amber. Ripples start only at nodes on the
-actual route. Labels are captions in light
-capitals inside a thin box in the branch color, with a leader to their node,
+At rest the glass answers the comets that ride the article links: where one
+lands, its node twinkles and sends a small, short ripple across its layer in
+its own color. A ball starts only a few such ripples a second however many
+comets it carries.
+
+While a ball's Agent is thinking, every node on the route drops into its own
+shell like a stone into water as the thinking front reaches it, inner layers
+included: a ripple in the node's color spreads across that layer, and the
+glass, its dust and its seeds ride it. The Articles a route ends on send the
+strongest ripple, and reached nodes keep sending softer ones in turn until
+the thinking ends. A thinking ripple marks the front's passage, as the route
+beam does, and starts only at a node on the actual route; only the seed of a
+consulted or hovered node swells and burns amber.
+
+Labels are captions in light capitals inside a thin box in the branch color,
+with a grey hairline between title and location and a leader to their node,
 drawn last, over the glass. A consulted node also wears a faint disc and a
 breathing ring in its branch color.
 

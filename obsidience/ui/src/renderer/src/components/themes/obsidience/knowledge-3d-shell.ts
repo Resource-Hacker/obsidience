@@ -19,8 +19,6 @@ export interface Knowledge3dOptics {
   /** Outer radius in cloud-local units, and the group's render scale. */
   uReach: { value: number };
   uModelScale: { value: number };
-  /** The resting survey plane: height in cloud radii (-1 bottom, 1 top), gain. */
-  uScan: { value: THREE.Vector2 };
 }
 
 const OPTICS_GLSL = `
@@ -29,9 +27,9 @@ uniform float uPixelRatio;
 uniform float uReach;
 uniform float uModelScale;
 uniform float uTime;
-uniform vec2 uScan;
 uniform vec4 uDrops[8];     // bearing; age, 0 as it lands to 1 when spent
 uniform vec4 uDropTints[8]; // colour; strength
+uniform float uDropSpans[8]; // how far the ring spreads in its life, radians
 // Depth past the cloud centre in cloud radii: -1 nearest, +1 farthest.
 float knowledgeDepth(vec4 view) {
   return ((modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0)).z - view.z) / max(uReach * uModelScale, 1e-3);
@@ -43,24 +41,22 @@ float knowledgeFog(float depth) {
 float knowledgeConfusion(float depth) {
   return min(abs(depth - uFocusSwing) * 4.5, 18.0) * uPixelRatio;
 }
-// Brightness gain where the survey plane passes a cloud-local point.
-float knowledgeScan(vec3 local) {
-  float plane = local.y / max(uReach, 1e-3) - uScan.x;
-  return uScan.y * exp(-plane * plane * 700.0);
-}
-// A node the thinking path lights drops into its shell like a stone into
-// water: a short train of crests spreads across the shell from the node's
-// bearing, in the node's colour, fading as it goes. Returns the height of the
-// glass here (positive on a crest) and the colour its crests carry.
-float thinkingWave(vec3 direction, out vec3 tint) {
+// A node drops into its shell like a stone into water: a short train of
+// crests spreads across the shell from the node's bearing, in the node's
+// colour, fading as it goes. A wide drop crosses the whole layer; a small one
+// is the same ripple in miniature. Returns the height of the glass here
+// (positive on a crest) and the colour its crests carry.
+float rippleWave(vec3 direction, out vec3 tint) {
   float wave = 0.0;
   float weight = 0.0;
   tint = vec3(0.0);
   for (int drop = 0; drop < 8; drop++) {
     float age = uDrops[drop].w;
     if (age >= 1.0) continue;
-    // Radians from the node, less how far its ring has spread.
-    float offset = acos(clamp(dot(direction, uDrops[drop].xyz), -1.0, 1.0)) - age * 2.4;
+    // Radians from the node, less how far its ring has spread, in units of
+    // a full-size ripple.
+    float offset = (acos(clamp(dot(direction, uDrops[drop].xyz), -1.0, 1.0)) - age * uDropSpans[drop])
+      * 2.4 / uDropSpans[drop];
     float height = sin(offset * 20.0) * exp(-offset * offset * 14.0)
       * (1.0 - age) * (1.0 - age) * uDropTints[drop].w;
     wave += height;
@@ -167,7 +163,7 @@ ${SHELL_GLSL}
 void main() {
   vSt = position.xy;
   vec3 direction = sphereDirection(vSt);
-  vWave = thinkingWave(direction, vWaveTint);
+  vWave = rippleWave(direction, vWaveTint);
   vec4 view = modelViewMatrix * vec4(shellPoint(direction, texture2D(uSurvey, vSt).a, 0.0, vWave), 1.0);
   vFog = knowledgeFog(knowledgeDepth(view));
   // Glass shows at its edge: how nearly this bearing is seen side-on.
@@ -186,7 +182,6 @@ uniform float uLevels;
 uniform float uRings;
 uniform float uSolid;
 uniform float uGlow;
-uniform vec2 uScan;
 varying vec2 vSt;
 varying float vFog;
 varying float vEdge;
@@ -201,20 +196,17 @@ void main() {
   float line = 1.0 - smoothstep(0.25, 1.2, abs(fract(level - 0.5) - 0.5) / max(spacing, 1e-5));
   line = mix(line, min(spacing, 1.0), smoothstep(0.4, 0.95, spacing));
   float weight = mod(floor(level + 0.5), 5.0) < 0.5 ? 0.5 : 0.2;
-  // The survey plane at rest and a ripple's crest while thinking light the
-  // glass the same way; a crest carries the colour of the node that sent it.
-  float plane = height - uScan.x;
+  // A ripple's crest lights the glass in the colour of the node that sent it.
   float crest = max(vWave, 0.0);
-  float scan = uScan.y * exp(-plane * plane * 350.0) + 3.0 * crest;
   vec3 tint = vec3(0.62 + field.r - field.g, 0.62 + field.g, 0.62 - field.r - field.g);
   vec3 color = mix(mix(tint, vec3(0.78, 1.0, 0.94), 0.86), mix(vec3(1.0), vWaveTint, min(1.0, crest * 3.0)),
-    min(1.0, scan * 0.45));
+    min(1.0, crest * 1.35));
   float edge = vEdge * vEdge * vEdge * vEdge * 0.07;
   // A crater glows from its floor in its node's colour. The glow does not
   // thin with the glass, so a clear shell still shows where its nodes rest.
   vec3 glow = mix(tint, vec3(1.0), 0.2) * field.a * field.a * uGlow;
   // A crest shows even on a clear shell.
-  gl_FragColor = knowledgeLight((color * (line * weight * (1.0 + scan) + edge) * (uSolid + 0.6 * crest) + glow) * vFog);
+  gl_FragColor = knowledgeLight((color * (line * weight * (1.0 + 3.0 * crest) + edge) * (uSolid + 0.6 * crest) + glow) * vFog);
 }
 `;
 
@@ -241,7 +233,7 @@ void main() {
     normalize(vec3(east, 0.012, north)), normalize(vec3(-0.45, 0.8, 0.4))));
   bool haze = aRandom.z > 0.0;
   vec3 waveTint;
-  float wave = thinkingWave(aDirection, waveTint);
+  float wave = rippleWave(aDirection, waveTint);
   vec3 local = shellPoint(aDirection, field.a, aRandom.z, wave);
   vec4 view = modelViewMatrix * vec4(local, 1.0);
   gl_Position = projectionMatrix * view;
@@ -258,19 +250,18 @@ void main() {
     ? 0.16 * aRandom.w * smoothstep(0.25, 0.85, field.a)
     : shade * (0.5 + 0.5 * field.a) * (0.55 + 0.45 * aRandom.w);
   float crest = max(wave, 0.0);
-  float scan = knowledgeScan(local) + 3.0 * crest;
   // uGain is set for a ball about 450 canvas pixels in radius; a smaller
   // one carries the same light per area instead of clotting.
   vec4 centre = modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0);
   float apparent = uReach * uModelScale * uPerspective / max(1.0, -centre.z) / 450.0;
-  vAlpha = light * energy * twinkle * knowledgeFog(depth) * (1.0 + scan) * uGain * min(1.0, apparent * apparent);
+  vAlpha = light * energy * twinkle * knowledgeFog(depth) * (1.0 + 3.0 * crest) * uGain * min(1.0, apparent * apparent);
   // Dust thins away from the craters; a point that is not shown is moved off
   // screen here instead of being rasterised and discarded.
   if (aRandom.y > 0.3 + 0.7 * smoothstep(0.0, 0.6, field.a) || vAlpha < 0.004) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
   vRing = smoothstep(5.0, 15.0, confusion / uPixelRatio);
   vec3 tint = vec3(0.62 + field.r - field.g, 0.62 + field.g, 0.62 - field.r - field.g);
   vColor = mix(haze ? vec3(0.88, 0.94, 1.0) : mix(tint, vec3(1.0), 0.6),
-    mix(vec3(1.0), waveTint, min(1.0, crest * 3.0)), min(1.0, scan * 0.45));
+    mix(vec3(1.0), waveTint, min(1.0, crest * 3.0)), min(1.0, crest * 1.35));
 }
 `;
 
@@ -300,7 +291,7 @@ void main() {
   // rides and brightens with any ripple that crosses its node.
   float focus = texelFetch(uNodes, ivec2(int(aMote.w), 2), 0).y;
   vec3 waveTint;
-  float wave = thinkingWave(node.xyz, waveTint);
+  float wave = rippleWave(node.xyz, waveTint);
   orb *= 1.0 + 0.3 * focus;
   float turn = uTime * aRandom.z * 0.0017453293 + aRandom.y * 6.2831853;
   float along = dot(node.xyz, aMote.xyz);
@@ -316,17 +307,15 @@ void main() {
   float size = base + confusion;
   gl_PointSize = size;
   float twinkle = 0.75 + 0.25 * sin(uTime * (0.7 + aRandom.x * 2.5) + aRandom.y * 61.0);
-  float scan = knowledgeScan(local);
   vec4 centre = modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0);
   float apparent = uReach * uModelScale * uPerspective / max(1.0, -centre.z) / 450.0;
   // Fading toward the edge of the seed.
   vAlpha = (1.0 - 0.75 * dot(aMote.xyz, aMote.xyz)) * (0.45 + 0.55 * aRandom.y)
-    * base * base / (size * size) * twinkle * knowledgeFog(depth) * (1.0 + scan)
+    * base * base / (size * size) * twinkle * knowledgeFog(depth)
     * uGain * (1.0 + 2.5 * focus + 2.0 * max(wave, 0.0)) * min(1.0, apparent * apparent);
   vRing = smoothstep(5.0, 15.0, confusion / uPixelRatio);
   vec3 tint = vec3(0.62 + shape.x - shape.y, 0.62 + shape.y, 0.62 - shape.x - shape.y);
-  vColor = mix(mix(mix(tint, vec3(1.0), 0.3), mix(AMBER, vec3(1.0), 0.25), focus),
-    vec3(1.0), min(1.0, scan * 0.3));
+  vColor = mix(mix(tint, vec3(1.0), 0.3), mix(AMBER, vec3(1.0), 0.25), focus);
 }
 `;
 
@@ -348,7 +337,8 @@ void main() {
 
 /** A ball never carries more shells than this; closer layers share one. */
 const MAX_SHELLS = 4;
-/** Seconds a ripple takes to spread across its shell and fade. */
+/** A full ripple crosses most of its shell (radians) in this many seconds. */
+const RIPPLE_SPREAD = 2.4;
 const RIPPLE_SECONDS = 2.6;
 /** The rim stands this far above a shell's nodes, as a fraction of the layer
  *  radius. A crater's floor lies below its node, and its mouth reaches toward
@@ -376,8 +366,10 @@ export interface Knowledge3dShells {
   applyTuning(glass: Knowledge3dGlass): void;
   /** Each node's highlight (thinking reveal, selection, hover), 0 to 1. */
   setFocus(levels: Float32Array): void;
-  /** Send a ripple across a node's shell from where the node rests. */
-  ripple(node: number, strength: number): void;
+  /** Send a ripple across a node's shell from where the node rests. By
+   *  default it crosses the whole layer; a small one names a shorter spread
+   *  (radians) and life (seconds). */
+  ripple(node: number, strength: number, spread?: number, seconds?: number): void;
   /** Let the ripples spread. */
   advance(dtSeconds: number): void;
   /** Call after the solver moved its nodes. */
@@ -493,10 +485,12 @@ export function createKnowledge3dShells(options: {
     const survey = { value: null as THREE.Texture | null };
     const shape = { value: new THREE.Vector2(1, 0) };
     const levels = (detail > 0.6 ? 56 : 30) * reach;
-    // Eight ripples at a time: bearing and age, colour and strength. Spent.
+    // Eight ripples at a time, all spent to begin with: bearing and age,
+    // colour and strength, and how far each spreads.
     const drops = { value: new Float32Array(32) }, dropTints = { value: new Float32Array(32) };
+    const dropSpans = { value: new Float32Array(8).fill(1) };
     for (let drop = 0; drop < 8; drop++) drops.value[drop * 4 + 3] = 1;
-    const rippling = { uDrops: drops, uDropTints: dropTints };
+    const rippling = { uDrops: drops, uDropTints: dropTints, uDropSpans: dropSpans };
     const glassMaterial = new THREE.ShaderMaterial({
       uniforms: {
         ...optics, ...rippling, uSurvey: survey, uShell: shape, uSolid: { value: 1 }, uGlow: { value: 0 },
@@ -562,7 +556,8 @@ export function createKnowledge3dShells(options: {
     drawn.push(seeds);
     disposables.push(texture, surveyMaterial, glassMaterial, dustGeometry, dustMaterial, seedGeometry, seedMaterial);
     return { members, press, data, texture, surveyMaterial, survey, shape, width, levels,
-      drops: drops.value, dropTints: dropTints.value, nextDrop: 0,
+      drops: drops.value, dropTints: dropTints.value, dropSpans: dropSpans.value,
+      dropSeconds: new Float32Array(8).fill(1), nextDrop: 0,
       glass: glassMaterial.uniforms, dust: dustMaterial.uniforms, seeds: seedMaterial.uniforms,
       // Light per point for full dust at this shell's size.
       dustGain: 0.9 * 170_000 * reach * reach / dustCount,
@@ -620,7 +615,7 @@ export function createKnowledge3dShells(options: {
   return {
     layers: drawn,
     invalidate() { dirty = true; },
-    ripple(node, strength) {
+    ripple(node, strength, spread = RIPPLE_SPREAD, seconds = RIPPLE_SECONDS) {
       for (const shell of shells) {
         const slot = shell.members.indexOf(node);
         if (slot < 0) continue;
@@ -630,13 +625,15 @@ export function createKnowledge3dShells(options: {
         // The node's colour, lifted a little toward white so it reads as light.
         shell.dropTints.set([0.25 + 0.75 * tints[node * 3], 0.25 + 0.75 * tints[node * 3 + 1],
           0.25 + 0.75 * tints[node * 3 + 2], strength], drop * 4);
+        shell.dropSpans[drop] = spread;
+        shell.dropSeconds[drop] = seconds;
       }
     },
     advance(dtSeconds) {
       for (const shell of shells) {
         for (let drop = 0; drop < 8; drop++) {
           const age = shell.drops[drop * 4 + 3];
-          if (age < 1) shell.drops[drop * 4 + 3] = Math.min(1, age + dtSeconds / RIPPLE_SECONDS);
+          if (age < 1) shell.drops[drop * 4 + 3] = Math.min(1, age + dtSeconds / shell.dropSeconds[drop]);
         }
       }
     },

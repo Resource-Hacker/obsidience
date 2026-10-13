@@ -1469,8 +1469,9 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
           }
         });
       }
-      // The glass: a slow survey plane at rest, ripples across every shell
-      // while an agent thinks (its own Task sweep for a satellite).
+      // The glass: a twinkle and a small ripple wherever a link comet lands,
+      // and ripples along the route while an agent thinks (its own Task sweep
+      // for a satellite).
       mainCloud?.driveGlass(dt, Boolean(retainedFocus) && tendrilPhase === "thinking");
       for (const [agentId, cloud] of satelliteClouds) {
         const state = sweepStates.get(agentId);
