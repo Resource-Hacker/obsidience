@@ -365,7 +365,8 @@ def notifications() -> list[dict]:
     if path.is_file():
         files = _evaluation_files()
         for row in json.loads(path.read_text()):
-            if (recovered_operational_incident(row.get('run_id', ''))
+            # A job's finding names its Audit run; the incident is the origin's.
+            if (recovered_operational_incident(row.get('origin_run_id') or row.get('run_id', ''))
                     or superseding_evaluation(row, files)):
                 continue
             reason = row.get('reason', '')
@@ -536,13 +537,14 @@ def recovered_operational_incident(run_id: str) -> str | None:
     return None
 
 
-def attention(identity: str, run_id: str, task: str, reason: str, detail: str = '') -> None:
+def attention(identity: str, run_id: str, task: str, reason: str, detail: str = '', origin: str = '') -> None:
     path = refinement._root() / 'optimization-attention.json'
     rows = json.loads(path.read_text()) if path.is_file() else []
     before = list(rows)
     rows = [row for row in rows if row['key'] != identity
             and not (reason and row.get('run_id') == run_id and row.get('task') == task)]
     if reason:
-        rows.append({'key': identity, 'run_id': run_id, 'task': task, 'reason': reason[:1000], 'detail': detail[:2000]})
+        rows.append({'key': identity, 'run_id': run_id, 'task': task, 'reason': reason[:1000], 'detail': detail[:2000],
+                     **({'origin_run_id': origin} if origin else {})})
     if rows != before:
         _atomic_write(path, json.dumps(rows[-64:], sort_keys=True))

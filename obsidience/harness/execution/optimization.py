@@ -457,7 +457,8 @@ async def optimize(case_id: str, context: dict) -> dict:
         if report['verdict'] != 'passed' and (not baseline or not all(row.get('passed') for row in baseline)):
             attention(case_id, context['run_id'], document.get('task', EXECUTIVE),
                       'AutoSaddler exhausted its bounded improvement attempt: ' + report['verdict'],
-                      'Evidence and candidate history: ' + result['source_path'])
+                      'Evidence and candidate history: ' + result['source_path'],
+                      origin=str((document.get('origin') or {}).get('id') or ''))
         from ..knowledge.vault import _atomic_write
         _atomic_write(refinement._root() / 'executive/jobs' / case_id / 'report.json', json.dumps(result, sort_keys=True))
         return result
