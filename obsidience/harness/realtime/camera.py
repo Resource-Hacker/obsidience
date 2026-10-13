@@ -149,8 +149,11 @@ class _Look:
         try:
             await _join(begin)
         except ValueError as exc:
+            # The power readback comes after the begin, so name the recovery here.
+            hint = (" Use wake:true with look if the camera is asleep or tracking has stopped."
+                    if str(exc) == "camera_tracker_not_running" else "")
             raise CameraCaptureError(f"The camera cannot turn {self.direction} now ({exc}). "
-                                     "A look needs the running owner tracker.") from exc
+                                     "A look needs the running owner tracker." + hint) from exc
         except asyncio.CancelledError:
             # The join drained the begin first, so the look exists.
             self.id = begin.result()

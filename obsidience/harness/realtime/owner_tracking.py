@@ -46,8 +46,8 @@ VISION_FAILURES = {"camera_capture_ended", "camera_capture_error",
 MESSAGE_BYTES = 65536
 # One look step per picture direction as a motor pose change (yaw, pitch): the
 # follow law shows that the view goes picture-right as yaw falls and down as
-# pitch rises. Goals stay inside the limits by more than the helper's .75
-# degree stop margin, or they would never be reached.
+# pitch rises. A step ends inside the limits by more than the helper's .75
+# degree stop margin, or it would never be reached.
 LOOK_STEPS = {"left": (30., 0.), "right": (-30., 0.), "up": (0., -15.), "down": (0., 15.)}
 LOOK_INSET = 1.5
 _LOOK_IDS = itertools.count(1)
@@ -398,10 +398,17 @@ class Tracker:
             pose = (pose["yaw"], pose["pitch"])
             look = self._look
             start = pose if look is None or look["phase"] == "returning" else look["goal"]
+            # The pose can rest outside the limits. Only the stepped axis moves,
+            # to the inset limit at most and never back across its start; the
+            # return aims inside the limits, where the helper lets it arrive.
             self._look = {
                 "id": next(_LOOK_IDS), "direction": direction, "phase": "moving",
-                "origin": pose if look is None else look["origin"],
-                "goal": tuple(max(low+LOOK_INSET, min(high-LOOK_INSET, at+move))
+                "origin": look["origin"] if look is not None else tuple(
+                    max(low+LOOK_INSET, min(high-LOOK_INSET, at))
+                    for at, (low, high) in zip(pose, self._limits)),
+                "goal": tuple(at if not move else
+                              max(at, min(high-LOOK_INSET, at+move)) if move > 0 else
+                              min(at, max(low+LOOK_INSET, at+move))
                               for at, move, (low, high) in zip(start, step, self._limits)),
                 "deadline": time.monotonic()+8, "settled_mono": None, "still": 0, "pose": None}
             self._home_verified = False
@@ -454,8 +461,10 @@ class Tracker:
         look["pose"] = pose
         look["still"] = look["still"]+1 if still else 0
         if look["phase"] == "moving" and look["still"] >= 2:
-            # Hold so that a following look composes before the return.
-            look.update(phase="holding", settled_mono=now, deadline=now+5)
+            # Hold so that a following look composes before the return, and not
+            # less than the moving deadline: a look with no room settles at once,
+            # long before the capture's power readback lets it take the picture.
+            look.update(phase="holding", settled_mono=now, deadline=max(now+5, look["deadline"]))
         elif returning and (error < .3 or now >= look["deadline"]):
             # Home stays unverified: nobody seen for four seconds still goes home.
             self._clear_look()

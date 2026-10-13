@@ -336,9 +336,12 @@ def begin_look(direction: str) -> int:
 
 def end_look(look_id: int) -> None:
     """Send that look back now, after a failed or cancelled capture."""
-    with _LOCK:
-        if _tracker is not None:
-            _tracker.end_look(look_id)
+    # Without _LOCK: a recovery or wake holds it for seconds, and the capture
+    # that waits here cannot be cancelled. A tracker being closed has already
+    # cleared its look, and ids are never reused, so a stale reference is inert.
+    tracker = _tracker
+    if tracker is not None:
+        tracker.end_look(look_id)
 
 
 def enroll() -> dict:
