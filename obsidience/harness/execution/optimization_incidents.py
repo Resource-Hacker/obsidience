@@ -377,9 +377,11 @@ def notifications() -> list[dict]:
             reason = row.get('reason', '')
             evidence_gap = ('no complete decision evidence' in reason or 'no complete text-only provider prompt' in reason
                             or 'dependency changed:' in reason or 'original operational outcome is not an instruction grade' in reason)
-            if evidence_gap or reason.startswith('Awaiting independent accepted decisions'):
+            if (evidence_gap or reason.startswith('Awaiting independent accepted decisions')
+                    or reason.startswith('Implementation finding')):
                 # No owner action can repair these; they stay in the attention
-                # record and health status instead of Review.
+                # record and health status instead of Review. A dead-end run is
+                # already in Review as its own failed Task.
                 continue
             if reason == 'AutoSaddler exhausted its bounded improvement attempt: not_improved':
                 reason = 'No instruction candidate met the quality gate; the current instructions were kept.'
