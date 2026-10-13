@@ -13,6 +13,8 @@ const LINE_HEIGHT = 13;
 
 export interface Knowledge3dLabelMeta {
   label: string;
+  /** Where the node lives, shown under its title. Omit for a bare title. */
+  note?: string;
   role: "root" | "section" | "claim";
   depth: number;
   branch: string;
@@ -69,8 +71,9 @@ export interface Knowledge3dLabelLayer {
   dispose: () => void;
 }
 
-function labelLines(label: string, maximumLineLength = 24): string[] {
-  const normalized = label.trim().replace(/\s+/gu, " ").toUpperCase();
+function labelLines(label: string, maximumLineLength: number, capitals: boolean): string[] {
+  const spaced = label.trim().replace(/\s+/gu, " ");
+  const normalized = capitals ? spaced.toUpperCase() : spaced;
   if (normalized.length <= maximumLineLength || !normalized.includes(" ")) {
     return [normalized];
   }
@@ -96,6 +99,7 @@ function layoutLabels(
   metadata: ReadonlyMap<string, Knowledge3dLabelMeta>,
   width: number,
   height: number,
+  capitals: boolean,
 ): LabelLayout[] {
   const occupied: Array<{
     left: number;
@@ -118,9 +122,8 @@ function layoutLabels(
     }
     const point = { x: point01.x * width, y: point01.y * height };
     const root = meta.role === "root";
-    const lines = labelLines(meta.label, root ? 28 : 24);
-    const note = root ? "" : [meta.branch, meta.role === "claim" ? "article" : `level ${meta.depth}`]
-      .filter(Boolean).join(" \u00b7 ").toUpperCase();
+    const lines = labelLines(meta.label, root ? 28 : 24, capitals);
+    const note = capitals ? (meta.note ?? "").toUpperCase() : meta.note ?? "";
     const fontSize = root ? 13 : meta.role === "section" ? 10.5 : 10;
     const letterSpacing = fontSize * (root ? 0.32 : 0.08);
     // Monospace advance is 0.6 em.
@@ -281,6 +284,7 @@ function labelSignature(
 ): string {
   return [
     layout.meta.label,
+    layout.note,
     layout.meta.role,
     layout.meta.depth,
     layout.meta.branch,
@@ -297,7 +301,10 @@ function stablePhase(id: string): number {
   return (Math.abs(hash) % 1000) / 1000;
 }
 
-export function createKnowledge3dLabelLayer(): Knowledge3dLabelLayer {
+/** `capitals` sets titles and notes in capitals, as the Knowledge graph's
+ *  captions are; other graphs keep their records' own spelling. */
+export function createKnowledge3dLabelLayer(options: { capitals?: boolean } = {}): Knowledge3dLabelLayer {
+  const capitals = options.capitals === true;
   const scene = new THREE.Scene();
   const camera = new THREE.OrthographicCamera(0, 1, 1, 0, -10, 10);
   camera.position.z = 1;
@@ -340,7 +347,7 @@ export function createKnowledge3dLabelLayer(): Knowledge3dLabelLayer {
     },
 
     update(projected, labelIds, activeNodeIds, metadata, now) {
-      const labels = layoutLabels(labelIds, projected, metadata, width, height);
+      const labels = layoutLabels(labelIds, projected, metadata, width, height, capitals);
       const wantedLabels = new Set(labels.map((entry) => entry.id));
       for (const [id, entry] of labelSprites) {
         if (!wantedLabels.has(id)) {

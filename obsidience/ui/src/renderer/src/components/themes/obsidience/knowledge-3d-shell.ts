@@ -497,7 +497,8 @@ export function createKnowledge3dShells(options: {
         uLevels: { value: levels }, uRings: { value: 7 },
       },
       vertexShader: GLASS_VERTEX, fragmentShader: GLASS_FRAGMENT,
-      side: THREE.DoubleSide, ...ADDITIVE,
+      // Added light needs no back-then-front ordering: one draw, both faces.
+      side: THREE.DoubleSide, forceSinglePass: true, ...ADDITIVE,
     });
     const glass = new THREE.Mesh(glassGeometry, glassMaterial);
     glass.name = "knowledge-shell-glass";

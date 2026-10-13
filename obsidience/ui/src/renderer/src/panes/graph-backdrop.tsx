@@ -5,7 +5,7 @@
  *  never enters the Executive article tree. Wikilinks render as cross-link
  *  tendrils distinct from hierarchy edges. */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { GraphPublisher } from "@/surfaces/graph-stream";
 import type { ProviderNode } from "@/surfaces/provider-graph-scene";
 import {
@@ -155,6 +155,12 @@ function latestActivityTransaction(entries: ActivityWireEntry[], playbackRunId =
 interface ThinkingRoute {
   nodeIds: Set<string>;
   pathSpec: Knowledge3dPathSpec;
+}
+
+/** A label's second line: the branch a node lives in and what it is there. */
+function labelNote(node: Knowledge3dRenderNode, branch: string): string | undefined {
+  if (node.role === "root") return undefined;
+  return `${branch} \u00b7 ${node.role === "section" ? `level ${node.depth ?? 0}` : "article"}`;
 }
 
 interface GraphCloud {
@@ -1063,7 +1069,6 @@ export function GraphBackdrop({
         agentId: name,
         nodes: satNodes,
         edges: satEdges,
-        tuning: satelliteTunings[name] ?? loadGraphTuning(name),
       };
     });
     // The Library is the shared green satellite. Tool nodes represent the
@@ -1166,7 +1171,6 @@ export function GraphBackdrop({
       agentId: "library",
       nodes: libraryRenderNodes,
       edges: libraryRenderEdges,
-      tuning: satelliteTunings.library ?? loadGraphTuning("library"),
     };
     const satellites = [...agentSatellites, librarySatellite];
     const labelMetadata = new Map<string, Knowledge3dLabelMeta>();
@@ -1175,6 +1179,7 @@ export function GraphBackdrop({
       const palette = paletteOf(node.id);
       labelMetadata.set(node.id, {
         label: titles.current.get(node.id) ?? node.id,
+        note: labelNote(node, branch),
         role: node.role === "root" || node.role === "section" ? node.role : "claim",
         depth: node.depth ?? 0,
         branch: branch.toLowerCase(),
@@ -1188,6 +1193,7 @@ export function GraphBackdrop({
         const id = knowledgeAgentNodeId(satellite.agentId, node.id);
         labelMetadata.set(id, {
           label: titles.current.get(id) ?? node.id,
+          note: labelNote(node, satellite.agentId === "library" ? "knowledge" : "agent"),
           role: node.role === "root" || node.role === "section" ? node.role : "claim",
           depth: node.depth ?? 0,
           branch: satellite.agentId === "library" ? "knowledge" : "agent",
@@ -1197,7 +1203,11 @@ export function GraphBackdrop({
       }
     }
     return { nodes: renderNodes, edges: renderEdges, satellites, labelMetadata, reviewScopes, articleLinks: linkPairs };
-  }, [graph, displayAliases, hub, satelliteTunings, viewport, tuning]);
+    // Tuning stays out of this model except for the three layout scales: a
+    // slider step must not replace the node arrays every cloud is built from.
+  }, [graph, displayAliases, hub, viewport, tuning.ring2dPeers, tuning.ring2dBranches, tuning.ring2dArticles]);
+  const satelliteTuning = useCallback((agentId: string) =>
+    satelliteTunings[agentId] ?? loadGraphTuning(agentId), [satelliteTunings]);
 
   // Only the Scene receives the visual spring preview. Thinking paths, Reader
   // selection and accepted graph state continue to use the accepted model.
@@ -1324,10 +1334,13 @@ export function GraphBackdrop({
   }, [activity, operations, model, renderedActivityRefs, displayAliases, graph.navigation]);
   const scopedCloud = graphScope === MAIN_GRAPH_ID ? presentation
     : presentation.satellites.find(cloud => cloud.agentId === graphScope);
+  // Each satellite's tuning joins its cloud here, at the Scene boundary.
   const agentSatellites = useMemo(() => graphScope === MAIN_GRAPH_ID
-    ? presentation.satellites.filter(cloud => cloud.agentId !== "library") : [], [presentation.satellites, graphScope]);
-  const scopedTuning = graphScope === MAIN_GRAPH_ID ? tuning
-    : model.satellites.find(cloud => cloud.agentId === graphScope)?.tuning ?? tuning;
+    ? presentation.satellites.filter(cloud => cloud.agentId !== "library")
+      .map(cloud => ({ ...cloud, tuning: satelliteTuning(cloud.agentId) }))
+    : [], [presentation.satellites, graphScope, satelliteTuning]);
+  const scopedTuning = graphScope !== MAIN_GRAPH_ID && model.satellites.some(cloud => cloud.agentId === graphScope)
+    ? satelliteTuning(graphScope) : tuning;
   const scopedId = (id: string) => graphScope === MAIN_GRAPH_ID ? id : knowledgeAgentNodeId(graphScope, id);
   const localId = (id: string | null) => {
     if (!id) return null;
@@ -1358,12 +1371,11 @@ export function GraphBackdrop({
     }];
     return operationClouds.slice(1).flatMap(({ agentId, route, key, phase, accents }) => {
       if (!route) return [];
-      const satellite = model.satellites.find((entry) => entry.agentId === agentId)!;
-      const speed = satellite.tuning.automaticSweepSpeed >= 0.5
+      const speed = satelliteTuning(agentId).automaticSweepSpeed >= 0.5
         ? 1 / READABLE_SWEEP_SECONDS : undefined;
       return [{ agentId, spec: route.pathSpec, nodeIds: route.nodeIds, accents, key, phase, hold: true, speed }];
     });
-  }, [activity, model.satellites, satelliteTest, operationClouds]);
+  }, [activity, satelliteTuning, satelliteTest, operationClouds]);
 
   const selected = selectedId ? parseKnowledgeAgentNodeId(selectedId) : null;
   const selectionPath = useMemo(() => {

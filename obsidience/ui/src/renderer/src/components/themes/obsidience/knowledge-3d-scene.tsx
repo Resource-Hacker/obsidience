@@ -278,7 +278,7 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
 
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(FOV_DEGREES, 1, 1, 4000);
-    const labelLayer = createKnowledge3dLabelLayer();
+    const labelLayer = createKnowledge3dLabelLayer({ capitals: true });
     const framed = knowledge3dFramedDistance(FOV_DEGREES);
     const orbit = {
       azimuth: 0,

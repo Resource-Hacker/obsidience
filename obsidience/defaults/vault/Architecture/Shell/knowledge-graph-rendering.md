@@ -92,7 +92,8 @@ in the node's branch color, over a colored glow from the crater floor. Each
 shell has its own solidity; by default the one nearest the core is the most
 solid and the outer ones the clearest. The Glass group in Graph settings sets
 each layer's solidity, counted outward from the core, and the crater depth,
-crater glow, seed glow, sheen lines and dust for each graph.
+crater glow, seed glow, sheen lines, dust and comet ripple time for each
+graph.
 
 At rest the glass answers the comets that ride the article links: where one
 lands, its node twinkles and sends a small, short ripple across its layer in

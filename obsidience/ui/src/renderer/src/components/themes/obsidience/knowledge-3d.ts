@@ -211,8 +211,9 @@ export interface Knowledge3dTuning {
   /** The layered glass: how solid each shell is, counted outward from the
    *  core (a ball with fewer shells ignores the rest), how deep nodes press
    *  their craters, the coloured glow rising from a crater's floor, how
-   *  brightly its seed of dust shines, and the density of the sheen's lines
-   *  and of the dust on the glass. */
+   *  brightly its seed of dust shines, the density of the sheen's lines and
+   *  of the dust on the glass, and the seconds a landing link comet's ripple
+   *  takes to spread and fade. */
   shellLayer1: number;
   shellLayer2: number;
   shellLayer3: number;
@@ -222,6 +223,7 @@ export interface Knowledge3dTuning {
   seedGlow: number;
   sheenLines: number;
   shellDust: number;
+  cometRipple: number;
   /** Beam widths in CSS px (soft glow envelope, not the core line). */
   tendrilWidth: number;
   branchWidth: number;
@@ -308,6 +310,7 @@ export const DEFAULT_KNOWLEDGE_3D_TUNING: Knowledge3dTuning = {
   seedGlow: 1,
   sheenLines: 1,
   shellDust: 1,
+  cometRipple: 2.2,
   tendrilWidth: 12,
   branchWidth: 8,
   articleWidth: 2,
@@ -382,6 +385,7 @@ export const KNOWLEDGE_3D_TUNING_FIELDS: readonly Knowledge3dTuningField[] = [
   { key: "seedGlow", label: "Seed glow", group: "Glass", min: 0, max: 2, step: 0.05, description: "Brightness of the orb of dust inside each crater." },
   { key: "sheenLines", label: "Sheen lines", group: "Glass", min: 0.3, max: 2, step: 0.05, description: "Density of the fine lines drawn on each shell and inside its craters." },
   { key: "shellDust", label: "Dust", group: "Glass", min: 0, max: 2, step: 0.05, description: "Amount of fine dust lying on the glass." },
+  { key: "cometRipple", label: "Comet ripple", group: "Glass", min: 0.5, max: 6, step: 0.1, description: "Seconds the small ripple takes to spread and fade where a link comet lands. Longer is slower." },
   { key: "yawSpeed", label: "Rotation speed", group: "Motion", mainOnly: true, min: 0, max: 0.2, step: 0.005, description: "Camera rotation around all graphs. Pauses while dragging or focused on a satellite." },
   { key: "automaticSweepSpeed", label: "Automatic speed", group: "Thinking", min: 0, max: 1, step: 1, toggle: true, description: "Reveal the packet at a readable pace, keep paths flowing through speech, and fade when playback ends. Turn this off to set the reveal speed." },
   { key: "sweepSpeed", label: "Animation speed", group: "Thinking", min: 0.1, max: 3, step: 0.05, description: "Speed of the continuous path reveal when Automatic speed is off. Speech never skips unfinished links." },

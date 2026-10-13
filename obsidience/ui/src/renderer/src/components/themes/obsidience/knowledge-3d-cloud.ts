@@ -62,12 +62,13 @@ const streakPhase = (streak: number): number => (streak * 0.37) % 1;
 const streakSpeed = (streak: number): number => 0.09 + ((streak * 0.61) % 1) * 0.1;
 
 /** A comet landing on a node: how brightly the node twinkles and for how
- *  long, the small ripple it sends (strength, spread in radians, seconds),
- *  and the least time between two such ripples on one ball. */
+ *  long, and the small ripple it sends (strength, spread in radians). The
+ *  ripple's duration is tuned; a ball starts at most seven in that time, so
+ *  each runs its course on a shell that carries eight. */
 const LANDING_TWINKLE = 0.6;
 const LANDING_TWINKLE_SECONDS = 0.45;
-const LANDING_RIPPLE = [0.3, 0.5, 1.1] as const;
-const LANDING_RIPPLE_GAP_SECONDS = 0.18;
+const LANDING_RIPPLE = [0.3, 0.5] as const;
+const LANDING_RIPPLES_AT_ONCE = 7;
 
 export const KNOWLEDGE_ACTIVITY_FADE_MS = 420;
 const SELECTION_TRANSITION_MS = 340;
@@ -1257,6 +1258,9 @@ export function createKnowledge3dCloud(
   // keep sending soft ripples, one node at a time.
   let passed = new Uint8Array(nodes.length);
   let reached = new Uint8Array(nodes.length);
+  // A cloud rebuilt under a lit route adopts it quietly instead of rippling
+  // every reached node at once.
+  let routeSeen = false;
   let rippleDue = 0;
   let rippleTurn = 0;
   // Comets ride the article links on the shader clock; the same arithmetic
@@ -1265,6 +1269,7 @@ export function createKnowledge3dCloud(
   const sparks = new Float32Array(nodes.length);
   let landingClock = Number.NaN;
   let landingRippleDue = 0;
+  let landingRippleSeconds = input.tuning.cometRipple;
 
   return {
     agentId,
@@ -1301,6 +1306,7 @@ export function createKnowledge3dCloud(
     applyRelationEffects,
     applyTuning(live: Knowledge3dTuning, ratio: number) {
       shells.applyTuning(live);
+      landingRippleSeconds = live.cometRipple;
       glowScaleUniform.value = live.nodeGlow;
       const ballFactor = renderBallScale(live);
       modelScaleUniform.value = ballFactor;
@@ -1573,9 +1579,10 @@ export function createKnowledge3dCloud(
         const index = indexById.get(id);
         if (index === undefined || solidFront < arrival) continue;
         reached[index] = 1;
-        if (!passed[index]) shells.ripple(index, nodes[index].subject ? 0.7 : 1);
+        if (!passed[index] && routeSeen) shells.ripple(index, nodes[index].subject ? 0.7 : 1);
       }
       [passed, reached] = [reached, passed];
+      routeSeen = true;
     },
     nodeWorldPosition(rawId, out) {
       const index = indexById.get(rawId);
@@ -1622,8 +1629,8 @@ export function createKnowledge3dCloud(
         const node = crossPairs[Math.floor(streak / streaksPerLink)][1];
         sparks[node] = 1;
         if (landingRippleDue <= 0) {
-          landingRippleDue = LANDING_RIPPLE_GAP_SECONDS;
-          shells.ripple(node, ...LANDING_RIPPLE);
+          landingRippleDue = landingRippleSeconds / LANDING_RIPPLES_AT_ONCE;
+          shells.ripple(node, ...LANDING_RIPPLE, landingRippleSeconds);
         }
       }
       for (let i = 0; i < sparks.length; i += 1) {
