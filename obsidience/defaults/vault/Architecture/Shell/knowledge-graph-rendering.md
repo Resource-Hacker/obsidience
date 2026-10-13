@@ -88,9 +88,10 @@ them.
 Each node presses a crater into its own layer's shell. The node's size and
 its number of links set the crater's depth and width, and the crater always
 clears the node's icon. A crater holds a seed, an orb of slowly turning dust
-in the node's branch color, over a colored glow from the crater floor. The
-shell nearest the core is the most solid and the outermost the clearest. The
-Glass group in Graph settings sets inner and outer solidity, crater depth,
+in the node's branch color, over a colored glow from the crater floor. Each
+shell has its own solidity; by default the one nearest the core is the most
+solid and the outer ones the clearest. The Glass group in Graph settings sets
+each layer's solidity, counted outward from the core, and the crater depth,
 crater glow, seed glow, sheen lines and dust for each graph.
 
 At rest a pale survey plane crosses every ball from bottom to top and lights

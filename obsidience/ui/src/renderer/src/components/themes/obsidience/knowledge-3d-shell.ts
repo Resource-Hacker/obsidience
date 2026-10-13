@@ -2,10 +2,11 @@
 // force layout, each a sheen of fine contour lines and depth-of-field dust.
 // Every node rests in a crater of its own layer's shell — wider and deeper
 // the larger and better linked the node — and fills it with a seed: an orb of
-// slowly turning dust in its branch colour. The shell nearest the core is the
-// most solid and the outermost the clearest. The shells follow the actual
-// layout; they add no force nodes, picking targets or activity routes, and
-// being pure added light they need no sorting or depth test.
+// slowly turning dust in its branch colour. Each shell has its own solidity;
+// by default the one nearest the core is the most solid and the outer ones
+// the clearest. The shells follow the actual layout; they add no force nodes,
+// picking targets or activity routes, and being pure added light they need no
+// sorting or depth test.
 import * as THREE from "three";
 
 /** Shared by every glass layer of a cloud. */
@@ -358,8 +359,10 @@ const MOUTH = [0.55, 0.85];
 
 /** The Glass tuning group; see Knowledge3dTuning. */
 export interface Knowledge3dGlass {
-  shellInner: number;
-  shellOuter: number;
+  shellLayer1: number;
+  shellLayer2: number;
+  shellLayer3: number;
+  shellLayer4: number;
   craterDepth: number;
   craterGlow: number;
   seedGlow: number;
@@ -649,11 +652,9 @@ export function createKnowledge3dShells(options: {
         craterDepth = glass.craterDepth;
         dirty = true;
       }
+      const layers = [glass.shellLayer1, glass.shellLayer2, glass.shellLayer3, glass.shellLayer4];
       shells.forEach((shell, order) => {
-        // Most solid nearest the core, clearest outermost.
-        const solid = shells.length > 1
-          ? glass.shellInner + (glass.shellOuter - glass.shellInner) * order / (shells.length - 1)
-          : (glass.shellInner + glass.shellOuter) / 2;
+        const solid = layers[order];
         shell.glass.uSolid.value = solid;
         shell.glass.uLevels.value = shell.levels * glass.sheenLines;
         shell.glass.uRings.value = 7 * glass.sheenLines;
