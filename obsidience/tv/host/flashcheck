@@ -8,7 +8,7 @@ set -euo pipefail
 serial=$1 seconds=${2:-120}
 work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
 adb -s "$serial" shell "screenrecord --time-limit $seconds --size 1280x720 --bit-rate 8000000 /sdcard/obsidience-flashcheck.mp4" >/dev/null
-adb -s "$serial" pull /sdcard/obsidience-flashcheck.mp4 "$work/rec.mp4" >/dev/null
+adb -s "$serial" pull /sdcard/obsidience-flashcheck.mp4 "$work/rec.mp4" >/dev/null 2>&1
 adb -s "$serial" shell rm -f /sdcard/obsidience-flashcheck.mp4
 ffmpeg -v error -i "$work/rec.mp4" -vf "scale=160:90,signalstats,metadata=print:key=lavfi.signalstats.YAVG:file=-" -f null - 2>/dev/null |
 python3 -c '
