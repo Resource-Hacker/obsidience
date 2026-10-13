@@ -191,11 +191,19 @@ stays disabled. The keys take another road, which creates no kernel input device
    `host:transport:<television>` then `localabstract:obsidience-tv`): no forward exists that
    could be left behind or removed by the Harness, and no `adb` command runs that could start a
    server inside the unit. It never connects ADB to the television; the Harness does.
-3. While the agent grants keys, `remote.py` holds one `zwp_virtual_keyboard_v1` in the TV
-   compositor with the stock keymap and sends each key as its evdev scancode (table in
-   `remote.py`: arrows, Enter, Escape, Menu, Play/Pause, Rewind, Fast forward) to whatever
-   window that compositor focuses. A connection that ends releases held keys and removes the
-   keyboard. Key repeat is the receiving program's business.
+3. `remote.py` holds one `zwp_virtual_keyboard_v1` in the TV compositor with the stock keymap
+   for as long as the unit runs and, while the agent grants keys, sends each key as its evdev
+   scancode (table in `remote.py`: arrows, Enter, Escape, Menu, Play/Pause, Rewind, Fast
+   forward) to whatever window that compositor focuses. A connection that ends releases held
+   keys. Key repeat is the receiving program's business.
+
+The keyboard stays while the television is off, on purpose. It is the seat's only keyboard, so
+when it comes or goes Android sees a hardware keyboard appear or vanish and restarts the activity
+in front; SmartTube's player then plays its last video again although it had been stopped, unseen
+and audible behind the channel. Until 2026-10-13 the keyboard existed only while the agent
+granted keys, so every time the television went off or on a stopped video resumed (once it played
+through the night). Restarting this unit alone still does that once: afterwards read
+`tv.control`'s state, or stop Android's player (`cmd media_session dispatch stop`).
 
 It fails closed: `remote.py` reads the compositor's socket name from
 `$XDG_RUNTIME_DIR/obsidience-tv/wayland`, connects by that path, and refuses (exit 78, not

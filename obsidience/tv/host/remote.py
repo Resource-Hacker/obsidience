@@ -28,8 +28,13 @@ virtual-keyboard global or a registered television, this exits with status 78, w
 not restart. The agent is reached through the ADB server that is already running, as one stream to
 the television's `obsidience-tv` socket: there is no forward to leave behind (or for the Harness to
 remove), and no adb command that could start a server inside this unit. While the agent cannot be
-reached the television keeps its keys and no keyboard exists here; a connection that ends releases
-what was held and removes the keyboard.
+reached the television keeps its keys and the keyboard here types nothing; a connection that ends
+releases what was held.
+
+The keyboard exists for as long as this unit runs, whether or not the television is on. A keyboard
+that joins or leaves the seat is a hardware change to every window of the session: Android restarts
+the activity in front on it, and SmartTube's player then plays its last video again, unseen behind
+the channel (2026-10-13: it played through the night after the television went off).
 """
 from __future__ import annotations
 
@@ -196,13 +201,22 @@ def agent(serial):
 
 
 class Remote:
-    """One agent connection at a time and, while it grants keys, one virtual keyboard."""
+    """One virtual keyboard and one agent connection at a time, which types on it while it grants keys."""
 
     def __init__(self, serial, display, seat, manager):
-        self.serial, self.display, self.seat, self.manager = serial, display, seat, manager
+        self.serial, self.display = serial, display
         self.poller = select.poll()
         self.poller.register(display.get_fd(), select.POLLIN)
-        self.link = self.keyboard = None
+        self.keyboard = manager.create_virtual_keyboard(seat)
+        fd = os.memfd_create('obsidience-tv-keymap')
+        try:
+            os.write(fd, KEYMAP)
+            self.keyboard.keymap(1, fd, len(KEYMAP))  # WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1
+            if display.roundtrip() < 0:
+                raise RuntimeError('the TV compositor did not take the keyboard')
+        finally:
+            os.close(fd)
+        self.link, self.granted = None, False
         self.buffer = b''
         self.held = set()
         self.asked = self.offset = 0.0
@@ -213,7 +227,7 @@ class Remote:
         while True:
             if self.link is None:
                 self._connect()
-            events = self.poller.poll(None if self.keyboard is not None else RETRY * 1000)
+            events = self.poller.poll(None if self.granted else RETRY * 1000)
             if not events and self.link is not None:
                 self._disconnect('the TV agent does not answer')  # Connected, and silent about keys.
             for fd, _mask in events:
@@ -240,12 +254,11 @@ class Remote:
                 pass
             self.link.close()
         self.link, self.buffer = None, b''
-        if self.keyboard is not None:
+        if self.granted:
             for key in self.held:
                 self.keyboard.key(_now(), key, 0)
-            self.keyboard.destroy()
             self.display.flush()
-            self.keyboard = None
+            self.granted = False
             self.held.clear()
             log.warning('TV agent disconnected (%s): the television keeps its keys', why)
         elif why != self.fault:  # One line per reason, not one per attempt.
@@ -275,27 +288,18 @@ class Remote:
             if message.get('id') == 1:
                 if not self._granted(message, received):
                     return
-            elif message.get('event') == 'key' and self.keyboard is not None:
+            elif message.get('event') == 'key' and self.granted:
                 self._key(message, received)
         self.display.flush()
 
     def _granted(self, reply, received):
-        """The answer to the request for keys: with it the keyboard appears in the TV session."""
+        """The answer to the request for keys: from it on the agent's keys are typed."""
         if reply.get('ok') is not True or reply.get('keys') is not True:
             self._disconnect('the TV agent grants no keys: ' + str(reply.get('error', 'version 1?'))[:80])
             return False
         # Host monotonic clock minus the television's uptime clock, at the middle of the round trip.
         self.offset = (self.asked + received) * 500 - reply.get('now', 0)
-        keyboard = self.manager.create_virtual_keyboard(self.seat)
-        fd = os.memfd_create('obsidience-tv-keymap')
-        try:
-            os.write(fd, KEYMAP)
-            keyboard.keymap(1, fd, len(KEYMAP))  # WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1
-            if self.display.roundtrip() < 0:
-                raise RuntimeError('the TV compositor did not take the keyboard')
-        finally:
-            os.close(fd)
-        self.keyboard, self.fault = keyboard, None
+        self.granted, self.fault = True, None
         log.info('TV agent connected: remote keys are typed into the TV session (answer in %.0f ms)',
                  (received - self.asked) * 1000)
         return True
