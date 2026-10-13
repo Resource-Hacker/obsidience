@@ -130,7 +130,7 @@ function layoutLabels(
       note.length * (8 * 0.6 + 1.2),
     );
     const boxWidth = Math.max(40, textWidth + 14);
-    const boxHeight = lines.length * LINE_HEIGHT + (note ? 11 : 0) + 8;
+    const boxHeight = lines.length * LINE_HEIGHT + (note ? 17 : 0) + 8;
     const outward = point.x >= width / 2 ? 1 : -1;
     const reach = root ? 0 : meta.role === "section" ? 22 : 16;
     let centerX = root ? point.x : point.x + outward * (reach + boxWidth / 2);
@@ -241,10 +241,16 @@ function createLabelTexture(
     context.fillText(line, edge + (root ? layout.letterSpacing / 2 : 0), 4 + LINE_HEIGHT / 2 + index * LINE_HEIGHT);
   });
   if (layout.note) {
+    // A hairline in the branch colour parts the title from where it lives.
+    const rule = 4 + layout.lines.length * LINE_HEIGHT + 2;
+    context.globalAlpha = 0.6;
+    context.fillStyle = layout.meta.accent;
+    context.fillRect(6, rule, layout.width - 12, 1);
+    context.globalAlpha = 1;
     context.font = '300 8px "JetBrains Mono", ui-monospace, monospace';
     context.letterSpacing = "1.2px";
     context.fillStyle = LABEL_DIM;
-    context.fillText(layout.note, edge, 4 + layout.lines.length * LINE_HEIGHT + 5);
+    context.fillText(layout.note, edge, rule + 9);
   }
 
   const texture = new THREE.CanvasTexture(canvas);
