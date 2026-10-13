@@ -275,6 +275,18 @@
               "installed_sha256": "8813c82bc70ffa7b31c02ebc1cb17a6417e23f3cf8f85eee28c8bcf4b442a68d"
             }
           ]
+        },
+        {
+          "path": "obsidience/scripts/patches/hindsight/0007-rank-fact-before-provenance.patch",
+          "purpose": "Place the qualified memory text before its dates and provenance context in native cross-encoder input. Preserve the stored text, dates, context, types, candidate and token budgets, cancellation and score handling. Apply after 0002.",
+          "patch_sha256": "2455adedf1d4aaf1ad450394b6fab3fc0d144a5e2bf6fb27997dfbff1ea52156",
+          "files": [
+            {
+              "path": "hindsight_api/engine/search/reranking.py",
+              "preimage_sha256": "29bb0e701c8472dcc413260dfc8395989ca41d86a7d63c6e42a998cff17e1a0a",
+              "installed_sha256": "94f8ee7be9fa5caf1471dcb658eaa19e38cf66d10c58667b4f8b70e99165e90a"
+            }
+          ]
         }
       ]
     },
