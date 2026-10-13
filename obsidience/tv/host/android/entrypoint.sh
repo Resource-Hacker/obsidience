@@ -70,6 +70,12 @@ if "properties" not in cfg:
 cfg["properties"].update({
     "atv.setup.bt_remote_pairing": "false",
     "persist.waydroid.suspend": "false",
+    # The image's codec service asks for twice as many output buffers as decoder threads, one thread
+    # per CPU by default, and dies on buffer slot 64: with 32 CPUs, on every video (README).
+    "debug.ffmpeg-codec2.threads": "4",
+    # A headless output reports a frame as presented when it is committed, which is no clock to
+    # take vsync from (Android composed 51 frames a second): let its vsync run free at 60 Hz.
+    "persist.waydroid.no_presentation": "true",
 })
 with open(path, "w") as f:
     cfg.write(f)

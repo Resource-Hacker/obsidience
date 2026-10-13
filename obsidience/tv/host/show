@@ -1,0 +1,113 @@
+#!/usr/bin/python3
+"""Obsidience TV show: which source the TV session shows.
+
+  show player    the channel player (with its break view)
+  show android   the Android TV instance
+  show status    print the source shown now
+
+The TV compositor keeps each source on a workspace of its own (sway.conf) and shows one of them.
+This asks it to show another one and reads its answer back: the source it prints is the one
+shown, and the exit status is 0 only when that is the one asked for. A source that has no window
+on its workspace is refused, because the television would show an empty screen.
+
+Nothing is started, stopped or paused here. A source that is not shown keeps running and keeps
+sounding, so whoever switches also ends what the other one plays (the tuner's channel, Android's
+video; tv.control does both).
+
+Fail closed, like the remote: the compositor is the one whose control socket the TV session
+published ($XDG_RUNTIME_DIR/obsidience-tv/sway), connected by path, and the process behind that
+socket must run in obsidience-tv-session.service. No environment variable or default can point
+this at the desktop.
+"""
+from __future__ import annotations
+
+import json
+import os
+import socket
+import struct
+import sys
+from pathlib import Path
+
+RUNTIME = Path(os.environ.get('XDG_RUNTIME_DIR') or f'/run/user/{os.getuid()}') / 'obsidience-tv'
+# The unit whose compositor may be asked.
+SESSION = 'obsidience-tv-session.service'
+# Source: its workspace and the window that must be there (sway.conf assigns them).
+SOURCES = {'player': ('player', 'obsidience-tv-player'), 'android': ('android', 'Waydroid')}
+# sway's control protocol (i3 IPC): magic, payload length, message type, payload; the reply is JSON.
+MAGIC = b'i3-ipc'
+RUN_COMMAND, GET_WORKSPACES, GET_TREE = 0, 1, 4
+
+
+class Compositor:
+    """One connection to the TV session's compositor; refuses any other."""
+
+    def __init__(self):
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.settimeout(5)
+        self.sock.connect((RUNTIME / 'sway').read_text().strip())
+        pid = struct.unpack('3i', self.sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))[0]
+        if not Path(f'/proc/{pid}/cgroup').read_text().strip().endswith('/' + SESSION):
+            raise PermissionError(f'the compositor behind the published socket does not run in {SESSION}')
+
+    def _exactly(self, count):
+        data = b''
+        while len(data) < count:
+            chunk = self.sock.recv(count - len(data))
+            if not chunk:
+                raise ConnectionError('the TV compositor closed its connection')
+            data += chunk
+        return data
+
+    def ask(self, kind, payload=''):
+        body = payload.encode()
+        self.sock.sendall(MAGIC + struct.pack('<II', len(body), kind) + body)
+        size, _kind = struct.unpack('<II', self._exactly(len(MAGIC) + 8)[len(MAGIC):])
+        return json.loads(self._exactly(size))
+
+    def shown(self):
+        """The source whose workspace the output shows, or that workspace's own name."""
+        name = next((space['name'] for space in self.ask(GET_WORKSPACES) if space.get('visible')), '')
+        return next((source for source, (workspace, _window) in SOURCES.items() if workspace == name), name)
+
+    def present(self, source):
+        """Whether the source's window is on its workspace."""
+        workspace, window = SOURCES[source]
+
+        def windows(node):
+            yield node.get('app_id')
+            for child in node.get('nodes', []) + node.get('floating_nodes', []):
+                yield from windows(child)
+
+        def workspaces(node):
+            if node.get('type') == 'workspace':
+                yield node
+            else:
+                for child in node.get('nodes', []):
+                    yield from workspaces(child)
+        return any(space.get('name') == workspace and window in windows(space)
+                   for space in workspaces(self.ask(GET_TREE)))
+
+    def show(self, source):
+        if not self.present(source):
+            sys.exit(f'{source} has no window in the TV session; the television keeps showing {self.shown()}')
+        if not all(reply.get('success') for reply in self.ask(RUN_COMMAND, 'workspace ' + SOURCES[source][0])):
+            raise OSError('the TV compositor refused to switch')
+
+
+def main(argv):
+    if len(argv) != 2 or argv[1] not in (*SOURCES, 'status'):
+        sys.exit('usage: show player|android|status')
+    try:
+        compositor = Compositor()
+        if argv[1] != 'status' and compositor.shown() != argv[1]:
+            compositor.show(argv[1])
+        now = compositor.shown()
+    except (OSError, ValueError) as error:
+        sys.exit(f'The TV session did not answer: {error}')
+    print(now, flush=True)
+    if argv[1] not in ('status', now):
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    main(sys.argv)

@@ -19,8 +19,9 @@ the place where channels load.
 | `obsidience-tv-android.service` | Android TV in its own container (section below); its window is one more client of that compositor. Staged 2026-10-12, not installed or enabled yet |
 | `obsidience-tv-mode@.service` | One run of `mode <1080p\|default>`, started by GameMode |
 
-The session publishes its Wayland socket name in `$XDG_RUNTIME_DIR/obsidience-tv/wayland`;
-the player and Sunshine wait for it. Stopping the session stops both, and the tuner with
+The session publishes its Wayland socket name in `$XDG_RUNTIME_DIR/obsidience-tv/wayland`
+(the player and Sunshine wait for it) and its control socket in `.../obsidience-tv/sway`
+(`show` reads it). Stopping the session stops both, and the tuner with
 them. The tuner is not part of the Harness: a channel keeps playing while the Harness
 restarts.
 
@@ -231,12 +232,74 @@ WayDroid-ATV image (Android TV 16, LineageOS 23.0, build 20260403, no Google ser
 inside the rootful Podman container `obsidience-tv-android`, built from `android/`
 (`Containerfile`, `entrypoint.sh`). The container has its own binderfs, cgroup namespace,
 bridge network and D-Bus, so it never meets the Waydroid TFT uses on the host. Its window
-(`app_id` `Waydroid`) is a client of the TV compositor. It needs a workspace of its own
-(`assign [app_id="Waydroid"] workspace android` in the sway configuration; not added yet):
-sway keeps one fullscreen window per workspace and tiles the others, which would resize
-Android's display. `swaymsg workspace android` then shows it and `workspace 1` the player.
-Android stays awake while its workspace is hidden, so switching back shows it at once. A mode
-switch restarts the session and this unit with it (Android is back in 11-13 s).
+(`app_id` `Waydroid`) is a client of the TV compositor. A mode switch restarts the session and
+this unit with it (Android is back in 11-13 s).
+
+The television shows one source at a time. `sway.conf` gives each a workspace of its own
+(`player`: the channel player and its break view; `android`: this instance; sway keeps one
+fullscreen window per workspace and tiles the others, which would resize Android's display) and
+the session starts on `player`. `show player|android|status` (this directory) is the one place
+that switches: it asks the session's compositor, and only that one (the process behind the
+published control socket must run in `obsidience-tv-session.service`), prints the source then
+shown, exits 0 only when that is the one asked for, and refuses a source that has no window (an
+empty screen). It starts and stops nothing. A source that is not shown keeps running: Android
+kept playing, sounding and decoding at full rate while hidden, and its picture was back within
+one screenshot (0.2 s) of the switch. So whoever switches also ends what the other source plays;
+`tv.control` does (the tuner's `stop`, Android's `cmd media_session dispatch stop`).
+
+`tv.control` opens a YouTube video here instead of in the Fire OS app whenever this instance
+answers on its ADB address: one `am start` of the watch link in SmartTube, the media session's
+`playing` as the readback, `show android`, then Moonlight on the television as for a channel
+(`obsidience/harness/capabilities/tv/android.py` is the client). Live streams stay on Fire OS.
+
+Two properties are required, and `entrypoint.sh` sets both on the first start (in
+`state/waydroid.cfg`; to change one later, stop the unit and edit `[properties]` there and the
+same line in `state/waydroid_base.prop`):
+
+- `debug.ffmpeg-codec2.threads=4`. Every video decoder of this image is in its ffmpeg codec
+  service, which announces an output delay of twice its thread count, by default one thread per
+  CPU: 64 frames on this 32-thread CPU. Android 16 then gives the decoder more than 64 buffer
+  slots, and the service's slot tables hold 64: it died on slot 64 (`SIGILL` from a failed CFI
+  check in `C2BufferQueueBlockPool::fetchFromIgbp_l`, 115 crashes out of 115 at that slot) within
+  a second of every 720p and 1080p start, hardware or software, and the player looped on
+  restarts. With 4 the delay is 8. Hardware decoding uses one thread anyway.
+- `persist.waydroid.no_presentation=true`. A headless output is no clock: it reports a frame
+  as presented when the client commits it. Android's composer set its next vsync 16.7 ms after
+  that report, so each frame's own latency was added to the next one and Android composed about
+  51 frames a second (measured: of 12,036 frames a 1080p60 video queued in 200 s, SurfaceFlinger
+  replaced 1,925 before showing them, 16%; the player counted none as dropped). Without the
+  feedback its vsync runs free at 60 Hz.
+
+SmartTube's video preset is set to "1080p 60fps vp9" (player, HQ button, Video presets). Left on
+automatic it chose 2160p60 for a 1920x1080 display, which this GPU did not carry (85% of frames
+dropped; measured before the two properties, not again after).
+
+Video playback, measured 2026-10-12 on a private compositor like mode `1080p` (integrated GPU,
+GLES2, 1920x1080) while the live session ran on the same GPU and Sunshine encoded its stream there
+(integrated GPU 48-67% busy with the instance idle, 69-80% during a run; the instance's own
+picture was not encoded):
+
+| | 1080p60 VP9, 200 s | 1080p60 VP9, 200 s | 1080p30 H.264, 190 s |
+| --- | --- | --- | --- |
+| Frames the player dropped (its log) | 0 of 12,050 | 0 of 11,987 | 0 of 5,715 |
+| Frames SurfaceFlinger showed / replaced unseen | 12,043 / 0 | 11,994 / 0 | 5,712 / 0 |
+| New frames the compositor received | 12,039 (59.95 a second) | 11,986 (60.01) | 5,711 (29.98) |
+| Frames one refresh late | 12 (0.10%) | 0 | 12 (0.21%) |
+| CPU, whole instance | 15% of a core | 14% | 34% |
+| Memory | 2.1 GiB | 2.1 GiB | 2.1 GiB |
+
+Decoding is VA-API on the integrated GPU without a copy (`c2.ffmpeg.vp9.decoder`,
+`c2.ffmpeg.h264.decoder`; the decoder's process spent 30% of the time on the GPU's decode engine
+and 15% on its conversion to RGB). `media.sf.hwaccel=0` selects software decoding in the same
+service: no frame lost over 45 s of 1080p60, at 28% of a core for the decoder. From the link to a
+playing session: 0.8 s while SmartTube plays something else, 0.9-1.8 s with it in the background,
+1.8-2.1 s with it stopped. Sound reached the audio server without a gap. Pause and resume through
+`cmd media_session dispatch` took 25 ms and read back from the session.
+
+Android's low-memory killer reads the workstation's memory pressure, not its own: during one
+episode on the host (memory pressure `full avg10` 24%, 17 GiB written to swap by other programs)
+it killed 42 processes in 20 s, SmartTube in front among them. Not solved (`ro.lmk.*` is the
+place to look); playback simply ends and the launcher shows.
 
 Everything it owns is under `~/.local/share/obsidience-tv-android`: `dl/` and `images/` (the
 verified release archives and the two images, read-only in the container), `state/` (Waydroid
@@ -281,8 +344,7 @@ Android renders on the integrated GPU and hands the compositor LINEAR dmabufs; t
 samples them without a copy (a test client sending 59 MB frames at 63 a second cost the
 compositor 3% of a core from either GPU). With Android's own 3840x2160 frames the GLES2
 compositor on the RTX 4080 spends its time inside the NVIDIA driver and Android misses
-refreshes; the cause is not isolated. Not measured: Sunshine capturing Android's frames, and
-video playback (no network without the firewall rule below).
+refreshes; the cause is not isolated. Not measured: Sunshine capturing Android's frames.
 
 Other numbers: first start to `sys.boot_completed` 14 s, later starts 11-13 s, stop 1 s;
 SmartTube cold start 0.15 s; key to next frame 15 ms through the compositor and 63 ms by ADB;
@@ -305,14 +367,15 @@ Setting it up again from nothing (the staged copy already has all of this):
       /system/bin/sh -c 'cat >> /data/misc/adb/adb_keys && chown system:shell /data/misc/adb/adb_keys && chmod 0640 /data/misc/adb/adb_keys && settings put global adb_enabled 1 && setprop ctl.restart adbd' < ~/.android/adbkey.pub
     adb connect 10.89.240.2:5555                        # reachable from the workstation only
 
-Android reaches the network only with a route rule, which is not installed (without it only
+Android reaches the network only with a route rule (installed 2026-10-12; without it only
 ICMP passes the firewall, so apps show "Unable to resolve host"):
 `sudo ufw route allow in on obstv0 out on enp12s0 comment 'Obsidience TV Android'`.
 Starting a container on the bridge sets `net.ipv4.ip_forward=1` until reboot.
 
 Not yet checked: TFT running beside it (start TFT with this instance up; its payload must be
 `/sys/fs/cgroup/lxc.payload.waydroid` and its compatibility hook must attach), pacing on the
-television's panel, hardware video decoding, and the remote's keys.
+television's panel (every number above is from the workstation's side of the stream), a video
+at the `4k` mode's 3840x2160 display, and the remote's keys in SmartTube.
 
 Rollback: `systemctl --user disable --now obsidience-tv-android`; `adb disconnect
 10.89.240.2:5555`; `sudo podman network rm obsidience-tv`; the ufw route rule if it was added;
