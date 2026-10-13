@@ -149,7 +149,7 @@ def wait_idle(limit: float = 900) -> None:
                     or realtime.get("phase") in {"thinking", "speaking"})
             tasks = get("/api/tasks")
             busy = busy or any(task.get("execution", {}).get("state") not in
-                               {"idle", "blocked", "failed"} for task in tasks)
+                               {"idle", "blocked", "failed", "needs_attention"} for task in tasks)
             # The conversation's live owner, not historical run rows, decides
             # whether a turn is active. This subscription sends no command.
             from websockets.sync.client import connect
@@ -224,11 +224,15 @@ def restart(owner: str) -> None:
             require_provider_idle()
         shutil.copy2(source, destination)
         subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
+        old_pid = subprocess.check_output(["systemctl", "--user", "show", name,
+                                           "-p", "MainPID", "--value"], text=True).strip()
         subprocess.run(["systemctl", "--user", "restart", "--no-block", name], check=True)
         deadline = time.monotonic() + 40
         while time.monotonic() < deadline:
             try:
-                if provider_health(provider).get("ready") is True:
+                new_pid = subprocess.check_output(["systemctl", "--user", "show", name,
+                                                   "-p", "MainPID", "--value"], text=True).strip()
+                if new_pid not in {"0", old_pid} and provider_health(provider).get("ready") is True:
                     return
             except Exception:
                 pass
