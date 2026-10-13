@@ -219,12 +219,12 @@ def _obsbot_control(*args: str) -> str:
     return completed.stdout.strip()
 
 
-def obsbot_camera_state() -> dict[str, bool]:
-    """Return the cached physical camera state, reading the SDK once at startup."""
+def obsbot_camera_state(*, refresh: bool = False) -> dict[str, bool]:
+    """Read physical power on request; cached state is only an owner/UI hint."""
 
     global _OBSBOT_CAMERA_ACTIVE
     with _CAMERA_LOCK:
-        if _OBSBOT_CAMERA_ACTIVE is None:
+        if refresh or _OBSBOT_CAMERA_ACTIVE is None:
             status = _obsbot_control("status")
             match = re.search(r"(?:^|\s)dev_status=(\d+)(?:\s|$)", status)
             if match is None:
@@ -242,12 +242,17 @@ def set_obsbot_camera_active(active: object) -> dict[str, bool]:
     with _CAMERA_LOCK:
         from . import tracking
         tracking.set_intent(active)
-        if not active:
-            tracking.stop()
+        # Native sleep/wake can park the gimbal while V4L2 still emits blank
+        # frames. Drain the prior generation and its home/recognition latches
+        # before power changes; resume only after actual Run readback.
+        tracking.stop()
+        _OBSBOT_CAMERA_ACTIVE = None
         _obsbot_control("camera", "on" if active else "off")
         _OBSBOT_CAMERA_ACTIVE = active
         if active:
-            tracking.start()
+            state = tracking.start()
+            if state.get("enabled") and state.get("state") not in {"starting", "running"}:
+                raise RuntimeError(state.get("error") or "Camera tracking could not start")
         return {"active": active}
 
 

@@ -218,11 +218,8 @@ Rectangle {
         selectedDevice = null
         phase = "waiting"
         errorMessage = ""
-        request("POST", "/api/hardware/camera", {"active": false}, function() {
-            // The pane owns only its view; a successful close needs no UI update.
-        }, function() {
-            // Realtime may own the camera and correctly reject power-off with 409.
-        })
+        // Release this preview only. Physical power and continuous tracking
+        // belong to the media owner, independently of pane visibility.
     }
 
     function fail(message) {
@@ -241,7 +238,6 @@ Rectangle {
 
     Component.onDestruction: {
         captureRequested = false
-        request("POST", "/api/hardware/camera", {"active": false}, function() {}, function() {})
     }
 
     onVisibleChanged: {

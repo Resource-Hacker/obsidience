@@ -220,10 +220,6 @@ def _recover_once(reason, source, revision):
                     raise RuntimeError("The selected physical camera identity changed")
                 if reason in {"camera_motor_unresponsive", "endpoint_add"}:
                     media._obsbot_control("camera", "on")
-                if reason == "camera_motor_unresponsive":
-                    media._obsbot_control("tracking-zone", "off")
-                    media._obsbot_control("off")
-                    media._obsbot_control("center")  # Native helper must fence and verify zero position.
                 state = start()
                 if state.get("state") not in {"starting", "running"}:
                     raise RuntimeError(state.get("error") or "Camera owner did not reacquire")
@@ -285,6 +281,9 @@ def start() -> dict:
             # Native tracking and software PTZ must never compete for the motor.
             _obsbot_control("tracking-zone", "off")
             _obsbot_control("off")
+            # A wake may leave the head in its parked position. Establish and
+            # verify the straight-ahead view before custom tracking can steer.
+            _obsbot_control("center")
             tracker = Tracker()
             config["on_failure"] = lambda reason: _post(reason, tracker)
             config["on_motion"] = lambda: _post("motor_motion_verified", tracker)

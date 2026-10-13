@@ -67,6 +67,15 @@ def _check_cancel(cancel_event: Any) -> None:
         raise asyncio.CancelledError
 
 
+def _is_obsbot(device: str) -> bool:
+    usb = (Path("/sys/class/video4linux") / Path(device).name / "device").resolve().parent
+    try:
+        return ((usb / "idVendor").read_text().strip() == "3564"
+                and (usb / "idProduct").read_text().strip() == "fef9")
+    except OSError:
+        return False
+
+
 async def _read_bounded(stream: asyncio.StreamReader, maximum: int) -> bytes:
     result = bytearray()
     while chunk := await stream.read(min(65536, maximum + 1 - len(result))):
@@ -99,14 +108,7 @@ async def wake_selected_camera(*, cancel_event: Any = None) -> None:
     async with _CAPTURE_LOCK:
         _check_cancel(cancel_event)
         device, _name, identity = _selected()
-        physical = Path("/sys/class/video4linux") / Path(device).name / "device"
-        usb = physical.resolve().parent
-        try:
-            selected_obsbot = ((usb / "idVendor").read_text().strip() == "3564"
-                              and (usb / "idProduct").read_text().strip() == "fef9")
-        except OSError:
-            selected_obsbot = False
-        if not selected_obsbot:
+        if not _is_obsbot(device):
             raise CameraCaptureError("Wake is supported only for the selected OBSBOT Tiny 2 Lite.")
         # An explicit wake must reach the hardware owner even when capture is
         # fresh. A running tracker does not attest delivery of this power request.
@@ -127,6 +129,19 @@ async def _capture(cancel_event: Any) -> CameraCapture:
     async with _CAPTURE_LOCK:
         _check_cancel(cancel_event)
         device, name, identity = _selected()
+        if _is_obsbot(device):
+            # Sleeping hardware can still clock blank V4L2 frames. Fresh pixels
+            # and a cached power flag do not attest an awake physical camera.
+            readback = asyncio.create_task(asyncio.to_thread(media.obsbot_camera_state, refresh=True))
+            try:
+                await _join(readback)
+            except (RuntimeError, OSError, subprocess.TimeoutExpired) as exc:
+                raise CameraCaptureError("The physical camera power state could not be verified.") from exc
+            _check_cancel(cancel_event)
+            if not readback.result()["active"]:
+                raise CameraCaptureError("The selected camera is asleep. Use wake:true for a requested camera wake.")
+            if _selected()[2] != identity:
+                raise CameraCaptureError("The selected camera changed.", code="camera_changed")
         from . import tracking
         tracking_state = await asyncio.to_thread(tracking.snapshot)
         if tracking_state.get("enabled"):
