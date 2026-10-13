@@ -484,17 +484,21 @@ def repair_attempt_count(context: dict) -> int:
                and entry.get("not_dispatched") is not True for entry in trace)
 
 
+def eligible_rows(context: dict) -> list[dict]:
+    """The same-run status snapshot's plan rows that permit a recovery operation."""
+    snapshot = context.get("_harness_snapshot")
+    plan = snapshot.get("repair_plan") if isinstance(snapshot, dict) else None
+    if not isinstance(plan, list):
+        return []
+    return [row for row in plan if isinstance(row, dict) and row.get("operation") in {"retry", "settle"}]
+
+
 def available_tools(allowed: list[str], context: dict) -> list[str]:
     """Expose the same fresh-inspection prerequisite as Repair completion."""
     if context.get("task") == REPAIR_TASK and "harness.status" in allowed:
-        snapshot = context.get("_harness_snapshot")
-        if not isinstance(snapshot, dict):
+        if not isinstance(context.get("_harness_snapshot"), dict):
             return ["harness.status"]
-        plan = snapshot.get("repair_plan")
-        if (repair_attempt_count(context) >= PASS_ATTEMPT_LIMIT
-                or not isinstance(plan, list)
-                or not any(isinstance(row, dict) and row.get("operation") in {"retry", "settle"}
-                           for row in plan)):
+        if repair_attempt_count(context) >= PASS_ATTEMPT_LIMIT or not eligible_rows(context):
             return [name for name in allowed if name != "harness.repair"]
     return allowed
 

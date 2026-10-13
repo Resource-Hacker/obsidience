@@ -189,8 +189,9 @@ class ReadPage:
             return self.original
         end = self.offset + keep
         if self.tool == "vault.read":
+            # Advertised argument order, the only one the decoder emits.
             recovery = json.dumps({"ref": self.citation, "offset": end,
-                                   "expected_sha256": self.revision}, ensure_ascii=False, sort_keys=True)
+                                   "expected_sha256": self.revision}, ensure_ascii=False)
             return (
                 f"Observation:\n{self.header}"
                 f"Context projection of an earlier Article page: characters {self.offset}-{end} "

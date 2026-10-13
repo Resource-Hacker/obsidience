@@ -36,8 +36,8 @@ from ..capability_core import (
     OBSERVATION_CONTEXT_FIELD, CapabilityExecution, foreground_checkpoint, observation_text, run_capability,
 )
 from ..native_turn import (
-    NO_TOOL_CALL_FEEDBACK, adopt_fast_lane, argument_diagnostic, settle_model_step, step_budget_notice,
-    task_tool_schemas, tool_schemas, unavailable_text,
+    NO_TOOL_CALL_FEEDBACK, OUTPUT_LIMIT_FEEDBACK, adopt_fast_lane, argument_diagnostic, settle_model_step,
+    step_budget_notice, task_tool_schemas, tool_schemas, unavailable_text,
 )
 from ...config import CONFIG
 from ...models import runtime as model_runtime
@@ -365,12 +365,12 @@ class AgentPlugin(BasePlugin):
         return observation, {'repeat_blocked': True, 'not_dispatched': True}
 
     def _decision_tools(self) -> tuple[list[str], dict]:
-        """This Task step's Tools and the active proposal/completion schema modes."""
+        """This Task step's Tools and the active proposal, completion and Repair schema modes."""
         from ...capabilities.source.read import available_tools
         from ...capabilities.task.complete import (
             available_tools as completion_tools, completion_prerequisite_error, completion_requires_no_change,
         )
-        from ..repair import available_tools as repair_tools
+        from ..repair import available_tools as repair_tools, eligible_rows
         context = getattr(self.evaluation, 'schema_context', self.ctx)
         names = completion_tools(repair_tools(available_tools(self.ex.allowed, context), context), context)
         if context.get('task') == 'Tasks/audit' and (context.get('params') or {}).get('optimization_case'):
@@ -382,6 +382,7 @@ class AgentPlugin(BasePlugin):
                               else 'link' if context.get('task') == 'Tasks/link' else ''),
             'completion_no_change': completion_requires_no_change(context) and not self.task.meta.get('acceptance'),
             'completion_blocked': bool(completion_prerequisite_error(context)),
+            'repair_rows': eligible_rows(context),
         }
         return names, modes
 
@@ -577,7 +578,8 @@ class AgentPlugin(BasePlugin):
             if self.strike('action', 'three consecutive replies without a valid action block'):
                 self.emit('error', f'{self.agent_name} produced no valid action', [self.ex.summary, reason])
                 return
-            self.feedback = NO_TOOL_CALL_FEEDBACK
+            # A reply cut off at the output limit is a truncated call, not a missing one.
+            self.feedback = OUTPUT_LIMIT_FEEDBACK if reason == 'max-tokens' else NO_TOOL_CALL_FEEDBACK
             return
         self.feedback = await settle_model_step(self, self.operate, text, bool(calls), reason,
                                                 allowed=self.advertised, ctx=self.ctx, trace=self.trace,

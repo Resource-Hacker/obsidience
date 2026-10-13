@@ -234,7 +234,10 @@ def _argument_schemas() -> dict[str, dict]:
         "window.place": obj({"target":target,"destination":obj({"surface":surface,"tile":tile},("surface",))},("target","destination")),
         "vault.search": {"anyOf":[obj({"query":text(300),"scope":bounded_scope},("query",)),
                                   obj({"queries":array(text(300),10,1),"scope":bounded_scope},("queries",))]},
-        "vault.read": {"anyOf":[obj({key:value,"offset":integer,"expected_sha256":{"type":"string","pattern":"^[0-9a-f]{64}$"}},(key,))
+        "vault.read": {"anyOf":[obj({key:value,
+                "offset":{**integer,"description":"Continuation only: the end character of this Article's previous page. Write ref first, then offset, then expected_sha256. Omit for the first page."},
+                "expected_sha256":{"type":"string","pattern":"^[0-9a-f]{64}$",
+                    "description":"Continuation only: the view_sha256 returned with the previous page. Required with an offset above 0."}},(key,))
             for key,value in (("ref",text(500)),("refs",array(text(500),10,1)))]},
         "vault.list":obj({"folder":text(512,empty=True),"offset":integer}),
         "vault.propose":{"anyOf":[
@@ -331,13 +334,20 @@ def argument_schema(name: str) -> dict:
 
 
 def action_schema(allowed: list[str], *, completion_no_change: bool = False, completion_blocked: bool = False,
-                  proposal_mode: str = "") -> dict:
+                  proposal_mode: str = "", repair_rows: list[dict] | tuple = ()) -> dict:
     """Constrain Tool arguments and the active completion contract, not its evidence."""
     if not allowed or set(allowed) - set(REGISTRY):
         raise ValueError("Action schema requires exact registered capabilities")
     choices = []
     for name in sorted(set(allowed)):
         args = argument_schema(name)
+        if name == "harness.repair" and repair_rows:
+            # Declare only the call the inspected plan permits: a Task row takes
+            # task and run_id, the Hindsight row takes component. A plan holding
+            # both kinds keeps both alternatives.
+            kinds = {"component" in row for row in repair_rows}
+            if len(kinds) == 1:
+                args = args["anyOf"][1 if kinds.pop() else 0]
         if name == "vault.propose" and proposal_mode == "link":
             args = args["anyOf"][0]
             args["properties"]["action"] = {"const": "update"}

@@ -285,19 +285,24 @@ and never invent tool names.
 NO_TOOL_CALL_FEEDBACK = ('No native Tool call was returned. Call exactly one authorized Tool; '
                          'finish with task.complete.')
 
+OUTPUT_LIMIT_FEEDBACK = ('The reply reached the output limit before its native Tool call was complete; '
+                         'nothing was dispatched. Send one complete call with short arguments.')
 
-def task_tool_schemas(names, *, completion_no_change=False, completion_blocked=False, proposal_mode=''):
+
+def task_tool_schemas(names, *, completion_no_change=False, completion_blocked=False, proposal_mode='',
+                      repair_rows=()):
     """A specialist step's native schemas: its narrowed Tools under the active contract.
 
-    The proposal and completion modes shape vault.propose and task.complete as the
-    step's contract requires; the complete code-owned schema is still validated
-    before dispatch and the capability owner enforces the contract.
+    The proposal, completion and Repair modes shape vault.propose, task.complete and
+    harness.repair as the step's contract requires; the complete code-owned schema is
+    still validated before dispatch and the capability owner enforces the contract.
     """
     from ..capabilities.registry import action_schema
     schemas = []
     for name in sorted(names):
         choice = action_schema([name], completion_no_change=completion_no_change,
-                               completion_blocked=completion_blocked, proposal_mode=proposal_mode)['anyOf'][0]
+                               completion_blocked=completion_blocked, proposal_mode=proposal_mode,
+                               repair_rows=repair_rows)['anyOf'][0]
         parameters = native_schema(choice['properties']['args'])
         if name == 'task.complete' and completion_no_change and not completion_blocked:
             # The template's flat union loses the successful branch's required
@@ -306,9 +311,16 @@ def task_tool_schemas(names, *, completion_no_change=False, completion_blocked=F
             parameters['required'] = ['summary', 'status', 'outcome', 'evidence']
             parameters['properties']['outcome']['description'] = (
                 'Use no_change for a completed inspection; use an empty string for failed.')
-            parameters['properties']['evidence']['description'] = (
-                'For completed inspection, cite the exact inspected Source and any claimed Article reads. '
-                'For failed status, an empty list is allowed. Never invent evidence.')
+            evidence = parameters['properties']['evidence']
+            evidence['description'] = (
+                'For completed inspection, one short citation per item: the exact inspected Source address '
+                'and the reference of each Article read in full, never pasted text. The explanation goes in '
+                'summary. For failed status, an empty list is allowed. Never invent evidence.')
+            # native_schema drops bounds. Let the decoder enforce the code-owned
+            # ones for evidence only: the engine's bounded strings cannot contain '<'.
+            registered = _argument_schemas()['task.complete']['properties']['evidence']
+            evidence['maxItems'] = registered['maxItems']
+            evidence['items']['maxLength'] = registered['items']['maxLength']
         schemas.append({'name': name, 'description': DESCRIPTIONS[name],
                         'parameters': parameters})
     return schemas
@@ -341,10 +353,16 @@ def argument_diagnostic(name, args) -> str | None:
     if not errors:
         return None
     path = '.'.join(map(str, errors[0].absolute_path)) or 'arguments'
-    guidance = json.dumps(native_schema(_argument_schemas()[name]), separators=(',', ':'))
+    schema = _argument_schemas()[name]
+    if 'anyOf' in schema:
+        # The advertised union of the alternatives accepts calls that mix them.
+        guidance = 'Use exactly one of these argument structures: ' + ' or '.join(
+            json.dumps(native_schema(branch), separators=(',', ':')) for branch in schema['anyOf'])
+    else:
+        guidance = 'Use this argument structure: ' + json.dumps(native_schema(schema), separators=(',', ':'))
     sent = json.dumps(args, separators=(',', ':'))[:300]
     diagnostic = (f'Invalid {name} {path}: {errors[0].validator} constraint ({errors[0].validator_value!r}). '
-                  f'You sent: {sent}. Use this argument structure: {guidance}')
+                  f'You sent: {sent}. {guidance}')
     if name == 'computer.act':
         diagnostic += (' The previous image was consumed without input. If a click is still needed, '
                        'first observe again and choose a new point. If the goal was already visible, '

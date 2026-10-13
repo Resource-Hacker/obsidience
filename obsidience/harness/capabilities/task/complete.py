@@ -601,12 +601,26 @@ def _completion_error(
                           and not ref.startswith("Agents/") and not note.runtime_observation}
             if candidates:
                 reads = context.get("_article_reads", {})
-                if not all(reads.get(ref, {}).get("complete") is True
-                           and reads[ref].get("article_sha256") == hashlib.sha256(note.text().encode()).hexdigest()
-                           for ref, note in candidates.items()):
+                calls = []
+                for ref, note in candidates.items():
+                    read = reads.get(ref, {})
+                    current = read.get("article_sha256") == hashlib.sha256(note.text().encode()).hexdigest()
+                    if current and read.get("complete") is True:
+                        continue
+                    start, end = (read.get("ranges") or [[None, None]])[0]
+                    # Name the exact next call, in the advertised argument order.
+                    if current and start == 0 and read.get("view_sha256"):
+                        calls.append(f"{ref} is read to character {end} of {read.get('total_characters')}: vault.read "
+                                     + json.dumps({"ref": ref, "offset": end, "expected_sha256": read["view_sha256"]},
+                                                  ensure_ascii=False))
+                    else:
+                        calls.append(f"{ref} has no read of its current text: vault.read "
+                                     + json.dumps({"ref": ref}, ensure_ascii=False))
+                if calls:
                     return ("Curate evidence cites an Article without a complete current read. "
-                            "Read the cited Article, or omit it if the search lead was unrelated; "
-                            "no-change may cite the bound Hindsight Source and explain why no recommendation is useful.")
+                            "Finish reading each cited Article, or omit it if the search lead was unrelated: "
+                            + "; ".join(calls) + ". no-change may cite the bound Hindsight Source; "
+                            "explain why no recommendation is useful in summary, not in evidence.")
             for item in context.get("trace", []):
                 if item.get("tool") != "task.create" or item.get("not_dispatched"):
                     continue

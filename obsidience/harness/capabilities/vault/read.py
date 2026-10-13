@@ -161,6 +161,11 @@ def _read(note, inbound: list[str], offset: int, expected: str | None, context: 
         "complete": merged == [[0, len(view)]],
     }
     context.setdefault("_last_context_refs", []).append(note.ref)
-    state = "End of Article view." if end == len(view) else f"Continue at offset {end} with the same expected_sha256."
+    if end == len(view):
+        state = "End of Article view."
+    else:
+        # The exact continuation, in the advertised argument order the decoder emits.
+        state = (f"Incomplete: {len(view) - end} characters remain. Next page: vault.read "
+                 + json.dumps({"ref": note.ref, "offset": end, "expected_sha256": revision}, ensure_ascii=False))
     identity = json.dumps({"ref": note.ref, "view_sha256": revision}, ensure_ascii=False, sort_keys=True)
     return True, f"Article: {identity}\nCharacters {offset}-{end} of {len(view)}. {state}\n\n{view[offset:end]}"
