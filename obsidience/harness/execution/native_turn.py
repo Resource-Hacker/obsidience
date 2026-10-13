@@ -296,8 +296,19 @@ def task_tool_schemas(names, *, completion_no_change=False, completion_blocked=F
     for name in sorted(names):
         choice = action_schema([name], completion_no_change=completion_no_change,
                                completion_blocked=completion_blocked, proposal_mode=proposal_mode)['anyOf'][0]
+        parameters = native_schema(choice['properties']['args'])
+        if name == 'task.complete' and completion_no_change and not completion_blocked:
+            # The template's flat union loses the successful branch's required
+            # fields. Keep them explicit in both branches; failure can use an
+            # empty classification and evidence list without inventing evidence.
+            parameters['required'] = ['summary', 'status', 'outcome', 'evidence']
+            parameters['properties']['outcome']['description'] = (
+                'Use no_change for a completed inspection; use an empty string for failed.')
+            parameters['properties']['evidence']['description'] = (
+                'For completed inspection, cite the exact inspected Source and any claimed Article reads. '
+                'For failed status, an empty list is allowed. Never invent evidence.')
         schemas.append({'name': name, 'description': DESCRIPTIONS[name],
-                        'parameters': native_schema(choice['properties']['args'])})
+                        'parameters': parameters})
     return schemas
 
 

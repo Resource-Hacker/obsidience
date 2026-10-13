@@ -379,15 +379,21 @@ class ExecutivePrompts:
                           'rationale': text}
             instruction = 'Select one existing accepted parent ID.'
         elif kind == 'diagnose_patch':
+            body = data['candidate']['identity']
+            anchors = [line for line in body.splitlines()
+                       if line.strip() and len(line) <= 1000 and body.count(line) == 1]
+            if not anchors:
+                raise ValueError('The instruction body has no unique bounded line to edit')
             properties = {'schema_version': {'const': 'autosaddler-diagnosis-patch/v1'},
                           'edits': {'type': 'array', 'minItems': 1, 'maxItems': 3, 'items': {
                               'type': 'object', 'properties': {
-                                  'old': {'type': 'string', 'minLength': 1, 'maxLength': 1000},
+                                  'old': {'type': 'string', 'enum': anchors},
                                   'new': {'type': 'string', 'maxLength': 1500}},
                               'required': ['old', 'new'], 'additionalProperties': False}},
                           'diagnosis': {'type': 'string', 'maxLength': 1000}}
             instruction = ('Diagnose the observed failure and return one to three small exact text edits to the supplied Agent identity or Runbook. '
-                           'Each old string must occur exactly once in the current body; new replaces that string. '
+                           'Select each old string from the supplied enum of exact body lines, including its indentation. '
+                           'New replaces that line and may contain newlines. Never reflow or paraphrase the old text. '
                            'Return only the edits, never repeat the complete body. '
                            'Keep its identity, owner preferences, Article links and unrelated functionality. Make the smallest '
                            'instruction correction. Do not add case-specific answers, names, new capabilities, authority, '
@@ -530,6 +536,11 @@ async def run(case_id, document, audit, context):
                  'resolved': bool(event.payload.get('logical_operation_id')
                                   and event.payload['logical_operation_id'] in completed_operations)}
                 for event in store.events_of_type('SessionFailed')]
+    evaluated_change = any(candidate_id != seed_id for candidate_id in rows)
+    failures.extend({'session': 'mutation',
+                     'error': str(event.payload.get('verification_failure', 'Mutation rejected'))[:1000],
+                     'resolved': evaluated_change}
+                    for event in store.events_of_type('MutationRejected'))
     if failure:
         failures.append(failure)
     if any(not item.get('resolved') for item in failures):

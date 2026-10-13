@@ -352,14 +352,16 @@ def notifications() -> list[dict]:
 
 
 def superseding_evaluation(row: dict) -> str | None:
-    """A complete, receipt-attested replacement resolves an old engine failure.
+    """A receipt-attested replacement resolves an old engine or baseline failure.
 
     Candidate quality remains with the replacement report and its own finding.
     This only removes a superseded incomplete-evaluation warning from the live
     projection; neither historical report nor attention evidence is modified.
     """
     from . import optimization
-    if row.get('reason') != 'AutoSaddler exhausted its bounded improvement attempt: incomplete':
+    reason = row.get('reason')
+    baseline_failure = reason == 'AutoSaddler exhausted its bounded improvement attempt: not_improved'
+    if not baseline_failure and reason != 'AutoSaddler exhausted its bounded improvement attempt: incomplete':
         return None
     try:
         previous = refinement._load('executive/cases', row['key'])
@@ -378,6 +380,14 @@ def superseding_evaluation(row: dict) -> str | None:
             if current.get('origin') != previous['origin'] or current.get('subject') != previous.get('subject'):
                 continue
             report = refinement._load('executive/reports', result['report_id'])
+            if baseline_failure:
+                # An unchanged, fully passing baseline proves a code repair of
+                # this exact incident. A merely newer unsuccessful search or an
+                # un-applied instruction candidate cannot clear its warning.
+                baseline = report.get('observations', {}).get(report.get('seed_id'), [])
+                if (result['comparison']['counts'].get('parent_passed') != optimization.DECISION_CASE_COUNT * optimization.EVALUATION_REPETITIONS
+                        or not baseline or not all(item.get('passed') and not item.get('error') for item in baseline)):
+                    continue
             run = INDEX.run(report['audit_run_id'])
             expected = optimization._report_result(result['report_id'], report)
             if report['verdict'] == 'passed' and isinstance(result.get('proposal'), str):
