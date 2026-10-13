@@ -64,6 +64,9 @@ Vault or fabricate accepted metadata. Keep `enabled:false` until the intended
 bindings, client lifecycle and first destination verification are ready.
 Configuration changes require the normal guarded Harness deploy; the running
 client rejects a changed configuration until it acquires a new snapshot.
+For a private config or credential-unit change with no source change, use
+`obsidience/scripts/deploy --restart harness`; the same idle/readiness checks
+apply. Enabling the adapter does not grant a Skill or start any media.
 
 ## Exact local playback
 

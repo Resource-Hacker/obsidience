@@ -254,6 +254,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--rollback", action="store_true")
+    parser.add_argument("--restart", action="append", default=[],
+                        choices=("harness", "tv-player", "tv-tuner", "media-catalogue"),
+                        help="Include an affected owner after a private configuration change")
     args = parser.parse_args()
     dirty = sorted(set(git("diff", "--name-only", "HEAD").splitlines()
                        + git("ls-files", "--others", "--exclude-standard").splitlines()))
@@ -271,6 +274,9 @@ def main() -> None:
     base = previous if args.rollback else last
     changed = git("diff", "--name-only", f"{base}..{head}").splitlines() if base else ["obsidience/harness/", "obsidience/shell/", "obsidience/ui/"]
     owners = targets(changed)
+    owners = list(dict.fromkeys([*owners, *args.restart]))
+    if "tv-player" in owners and "tv-tuner" not in owners:
+        owners.append("tv-tuner")
     for owner in tuple(owners):
         if owner not in {"tv-player", "tv-tuner"}:
             continue
