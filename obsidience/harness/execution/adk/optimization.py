@@ -314,14 +314,16 @@ class IdentityHarnessSpace(ComponentMapHarnessSpace):
         if not isinstance(edits, (list, tuple)) or not 1 <= len(edits) <= 3:
             raise ValueError('An identity candidate requires one to three exact edits')
         body = json.loads((session.workspace / 'candidate.json').read_text())['identity']
+        edited = set()
         for edit in edits:
             if not isinstance(edit, Mapping) or set(edit) != {'old', 'new'}:
                 raise ValueError('Each identity edit requires old and new text only')
             old, new = edit['old'], edit['new']
             if (not isinstance(old, str) or not 1 <= len(old) <= 1000
                     or not isinstance(new, str) or len(new) > 1500 or old == new
-                    or body.count(old) != 1):
-                raise ValueError('An identity edit must uniquely match the current body')
+                    or old in edited or body.count(old) != 1):
+                raise ValueError('Each identity edit must uniquely match a distinct line in the current body')
+            edited.add(old)
             body = body.replace(old, new, 1)
         self.apply_updates(session, {'identity': body})
 
@@ -385,7 +387,7 @@ class ExecutivePrompts:
             if not anchors:
                 raise ValueError('The instruction body has no unique bounded line to edit')
             properties = {'schema_version': {'const': 'autosaddler-diagnosis-patch/v1'},
-                          'edits': {'type': 'array', 'minItems': 1, 'maxItems': 3, 'items': {
+                          'edits': {'type': 'array', 'minItems': 1, 'maxItems': 3, 'uniqueItems': True, 'items': {
                               'type': 'object', 'properties': {
                                   'old': {'type': 'string', 'enum': anchors},
                                   'new': {'type': 'string', 'maxLength': 1500}},
@@ -393,6 +395,7 @@ class ExecutivePrompts:
                           'diagnosis': {'type': 'string', 'maxLength': 1000}}
             instruction = ('Diagnose the observed failure and return one to three small exact text edits to the supplied Agent identity or Runbook. '
                            'Select each old string from the supplied enum of exact body lines, including its indentation. '
+                           'Edit each old line at most once; do not repeat an instruction. '
                            'New replaces that line and may contain newlines. Never reflow or paraphrase the old text. '
                            'Return only the edits, never repeat the complete body. '
                            'Keep its identity, owner preferences, Article links and unrelated functionality. Make the smallest '

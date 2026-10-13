@@ -442,10 +442,8 @@ class AgentPlugin(BasePlugin):
             # A contract trial evaluates the exact captured provider prompt, which
             # already carries its model-family guidance; never append it twice.
             payload['messages'] = deepcopy(captured)
-            if self.task_mode:
-                # As the specialist loop always did, the trial's own decision
-                # budget follows the captured prompt.
-                payload['messages'].append({'role': 'user', 'content': step_budget_notice(self.max_steps)})
+            # The captured receipt already carries the live decision budget.
+            # Keep the trial's internal limit out of the replayed instructions.
         menu = None
         if self.fast_lane:
             from ..fast_lane import candidates
