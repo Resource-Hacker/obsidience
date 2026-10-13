@@ -363,9 +363,10 @@ def notifications() -> list[dict]:
     rows = []
     path = refinement._root() / 'optimization-attention.json'
     if path.is_file():
+        files = _evaluation_files()
         for row in json.loads(path.read_text()):
             if (recovered_operational_incident(row.get('run_id', ''))
-                    or superseding_evaluation(row)):
+                    or superseding_evaluation(row, files)):
                 continue
             reason = row.get('reason', '')
             evidence_gap = ('no complete decision evidence' in reason or 'no complete text-only provider prompt' in reason
@@ -381,25 +382,32 @@ def notifications() -> list[dict]:
     return rows
 
 
-def superseding_evaluation(row: dict) -> str | None:
-    """A receipt-attested replacement resolves an old engine or baseline failure.
+# File-attested replacement reports per finding, for one state of the attention
+# record and job reports. The scheduler tick then repeats only the ledger reads.
+_REPLACEMENTS: dict = {}
 
-    Candidate quality remains with the replacement report and its own finding.
-    A new finding replaces an older finding for the same incident; an entirely
-    passing baseline may resolve it. Historical reports and attention remain.
-    """
+
+def _evaluation_files() -> tuple:
+    """Identify the attention record and job reports as last written."""
+    root = refinement._root()
+    attention_path = root / 'optimization-attention.json'
+    return (attention_path.stat().st_mtime_ns if attention_path.is_file() else 0,
+            tuple(sorted((path.parent.name, path.stat().st_mtime_ns)
+                         for path in (root / 'executive/jobs').glob('*/report.json'))))
+
+
+def _replacement_reports(row: dict, baseline_failure: bool) -> list[dict]:
+    """Attest from job artifacts alone which reports may replace this finding, newest first."""
     from . import optimization
-    reason = row.get('reason')
-    baseline_failure = reason == 'AutoSaddler exhausted its bounded improvement attempt: not_improved'
-    if not baseline_failure and reason != 'AutoSaddler exhausted its bounded improvement attempt: incomplete':
-        return None
+    found = []
     try:
         previous = refinement._load('executive/cases', row['key'])
-        old_run = INDEX.run(row['run_id'])
-        if not old_run or not previous.get('origin'):
-            return None
+        if not previous.get('origin'):
+            return found
         paths = sorted((refinement._root() / 'executive/jobs').glob('*/report.json'),
                        key=lambda p: p.stat().st_mtime, reverse=True)[:64]
+        attention_path = refinement._root() / 'optimization-attention.json'
+        findings = json.loads(attention_path.read_text()) if attention_path.is_file() else []
         for path in paths:
             if path.is_symlink() or path.stat().st_size > 16_000 or path.parent.name == row['key']:
                 continue
@@ -410,8 +418,6 @@ def superseding_evaluation(row: dict) -> str | None:
             if current.get('origin') != previous['origin'] or current.get('subject') != previous.get('subject'):
                 continue
             report = refinement._load('executive/reports', result['report_id'])
-            attention_path = refinement._root() / 'optimization-attention.json'
-            findings = json.loads(attention_path.read_text()) if attention_path.is_file() else []
             replacement_finding = any(
                 finding.get('key') == report['case_id']
                 and finding.get('run_id') == report['audit_run_id']
@@ -430,22 +436,55 @@ def superseding_evaluation(row: dict) -> str | None:
                     and baseline and all(item.get('passed') and not item.get('error') for item in baseline))
                 if not baseline_passed and not replacement_finding:
                     continue
-            run = INDEX.run(report['audit_run_id'])
+            audit_run_id = report['audit_run_id']
             expected = optimization._report_result(result['report_id'], report)
             if report['verdict'] == 'passed' and isinstance(result.get('proposal'), str):
                 expected['proposal'] = result['proposal']
-            if (result != expected or report['case_id'] != path.parent.name or not run
-                    or run['status'] not in {'completed', 'review', 'failed'}
-                    or run['task_ref'] != optimization.AUDITOR
-                    or not run.get('finished') or run['finished'] <= (old_run.get('finished') or 0)):
+            if result != expected or report['case_id'] != path.parent.name:
                 continue
             encoded = json.dumps(json.dumps(result, sort_keys=True), sort_keys=True).encode()
             signature = 'harness.optimize:sha256:' + refinement._hash(json.dumps({'case_id': report['case_id']}, sort_keys=True).encode())
+            found.append({'case_id': report['case_id'], 'audit_run_id': audit_run_id, 'signature': signature,
+                          'result_chars': len(encoded), 'result_sha256': refinement._hash(encoded)})
+    except (ValueError, OSError, KeyError, TypeError):
+        pass  # Nothing after unattestable evidence may resolve the finding.
+    return found
+
+
+def superseding_evaluation(row: dict, files: tuple | None = None) -> str | None:
+    """A receipt-attested replacement resolves an old engine or baseline failure.
+
+    Candidate quality remains with the replacement report and its own finding.
+    A new finding replaces an older finding for the same incident; an entirely
+    passing baseline may resolve it. Historical reports and attention remain.
+    """
+    from . import optimization
+    reason = row.get('reason')
+    baseline_failure = reason == 'AutoSaddler exhausted its bounded improvement attempt: not_improved'
+    if not baseline_failure and reason != 'AutoSaddler exhausted its bounded improvement attempt: incomplete':
+        return None
+    try:
+        old_run = INDEX.run(row['run_id'])
+        if not old_run:
+            return None
+        files = files or _evaluation_files()
+        if _REPLACEMENTS.get('files') != files:
+            _REPLACEMENTS.clear()
+            _REPLACEMENTS['files'] = files
+        if (row['key'], reason) not in _REPLACEMENTS:
+            _REPLACEMENTS[row['key'], reason] = _replacement_reports(row, baseline_failure)
+        for candidate in _REPLACEMENTS[row['key'], reason]:
+            run = INDEX.run(candidate['audit_run_id'])
+            if (not run or run['status'] not in {'completed', 'review', 'failed'}
+                    or run['task_ref'] != optimization.AUDITOR
+                    or not run.get('finished') or run['finished'] <= (old_run.get('finished') or 0)):
+                continue
             if any(call.get('tool') == 'harness.optimize' and call.get('status') == 'returned'
-                   and call.get('signature') == signature and call.get('result_chars') == len(encoded)
-                   and call.get('result_sha256') == refinement._hash(encoded)
+                   and call.get('signature') == candidate['signature']
+                   and call.get('result_chars') == candidate['result_chars']
+                   and call.get('result_sha256') == candidate['result_sha256']
                    for call in (INDEX.tool_run_receipts(run['id']) or {}).get('calls', [])):
-                return report['case_id']
+                return candidate['case_id']
     except (ValueError, OSError, KeyError, TypeError):
         pass
     return None
