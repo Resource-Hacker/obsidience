@@ -56,7 +56,8 @@ def _post(reason, source=None):
 
 
 def _enqueue(reason, source):
-    if reason == "motor_motion_verified" and _recovery_state.get("state") != "verifying_motor":
+    if reason == "motor_motion_verified" and (_recovery_state.get("state") not in {"verifying_motor", "reacquired"}
+                                               or _recovery_state.get("motor_motion_verified")):
         return
     if _events is not None and not _events.full():
         _events.put_nowait((reason, source, _intent_revision))
@@ -158,10 +159,11 @@ def _recover_once(reason, source, revision):
             if source is not None and source is not _tracker:
                 return
             if reason == "motor_motion_verified":
-                if (_recovery_state.get("state") == "verifying_motor"
+                if (_recovery_state.get("state") in {"verifying_motor", "reacquired"}
                         and _tracker is not None and _tracker.snapshot().get("fresh")
                         and _tracker.snapshot().get("state") == "running"):
-                    _recovery_state = {**_recovery_state, "state": "recovered",
+                    state = "recovered" if _recovery_state["state"] == "verifying_motor" else "reacquired"
+                    _recovery_state = {**_recovery_state, "state": state,
                                        "motor_motion_verified": True}
                 return
             if reason == "endpoint_remove":
@@ -207,7 +209,9 @@ def _recover_once(reason, source, revision):
                 _recovery_state = {"state": "recovery_failed", "error": reason,
                                    "attempted": True}
                 return
-            _attempted = True
+            # A new USB generation needs ordinary acquisition, not a fault reset;
+            # leave its one automatic fault-recovery allowance available.
+            _attempted = reason != "endpoint_add"
             _recovery_state = {"state": "recovering", "reason": reason, "attempted": True}
             stop()
             try:
