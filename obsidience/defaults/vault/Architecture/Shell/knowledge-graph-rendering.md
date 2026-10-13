@@ -94,12 +94,13 @@ Glass group in Graph settings sets inner and outer solidity, crater depth,
 crater glow, seed glow, sheen lines and dust for each graph.
 
 At rest a pale survey plane crosses every ball from bottom to top and lights
-the glass it passes. While a ball's Agent is thinking, ripples spread across
-each of its shells from changing points, like drops into water: the glass,
-its dust and its seeds ride them, and their crests carry amber light. The
-seed of a consulted or hovered node swells and burns amber. The ripples add
-to the thinking path below and attest nothing by themselves; the path still
-shows what was actually consulted. Hover and activity labels are captions on
+the glass it passes. While a ball's Agent is thinking, each node drops into
+its shell like a stone into water at the moment the thinking path lights it:
+a ripple in the node's color spreads across that layer, and the glass, its
+dust and its seeds ride it. The Articles a route ends on send the strongest
+ripple, and lit nodes keep sending softer ones in turn until the thinking
+ends. The seed of a consulted or hovered node swells and burns amber. Ripples
+start only at nodes the path has actually lit. Hover and activity labels are captions on
 a dark plate with a leader to their node, drawn over the graph.
 
 ## Scoped graphs and Library

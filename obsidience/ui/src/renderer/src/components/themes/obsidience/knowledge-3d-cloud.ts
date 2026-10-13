@@ -223,8 +223,8 @@ export interface Knowledge3dCloud {
   ): void;
   nodeWorldPosition(rawId: string, out: THREE.Vector3): boolean;
   sortSprites(cameraPosition: THREE.Vector3): void;
-  /** Advance this cloud's glass: the resting survey plane, and ripples
-   *  across every shell while its Agent is thinking. */
+  /** Advance this cloud's glass: the resting survey plane, and the ripples
+   *  its lit nodes send across their shells while its Agent is thinking. */
   driveGlass(dtSeconds: number, thinking: boolean): void;
   /** Resurvey the glass if the solver moved its nodes. Before any render. */
   prepare(renderer: THREE.WebGLRenderer): void;
@@ -496,7 +496,6 @@ export function createKnowledge3dCloud(
     uReach: { value: 1 },
     uModelScale: modelScaleUniform,
     uScan: { value: new THREE.Vector2(-2, 0) },
-    uThink: { value: 0 },
   };
   const layout = captureKnowledge3dLayout(simulation);
   const linkCounts = new Float32Array(nodes.length);
@@ -1238,8 +1237,12 @@ export function createKnowledge3dCloud(
 
   const localCamera = new THREE.Vector3();
   const projectionVector = new THREE.Vector3();
-  // The survey plane starts below the ball.
+  // The survey plane starts below the ball and yields while the Agent thinks.
   let scanAt = -1.2;
+  let thinking = 0;
+  // Lit nodes keep sending soft ripples, one node at a time.
+  let rippleDue = 0;
+  let rippleTurn = 0;
 
   return {
     agentId,
@@ -1530,6 +1533,9 @@ export function createKnowledge3dCloud(
         }
         reveal *= opacity;
         if (Math.abs(revealLevels[i] - reveal) > 0.001) {
+          // The moment the path lights a node it drops into its shell; the
+          // Articles the route ends on send the strongest ripple.
+          if (revealLevels[i] < 0.5 && reveal >= 0.5) shells.ripple(i, nodes[i].subject ? 0.7 : 1);
           revealLevels[i] = reveal;
           dirty = true;
         }
@@ -1565,15 +1571,25 @@ export function createKnowledge3dCloud(
       }
       drawIndex.needsUpdate = true;
     },
-    driveGlass(dtSeconds, thinking) {
-      // Ripples rise and settle over about a third of a second.
-      const think = optics.uThink;
-      think.value += ((thinking ? 1 : 0) - think.value) * (1 - Math.exp(-dtSeconds / 0.35));
-      if (think.value < 0.001) think.value = 0;
+    driveGlass(dtSeconds, active) {
+      thinking += ((active ? 1 : 0) - thinking) * (1 - Math.exp(-dtSeconds / 0.35));
       scanAt += dtSeconds * 2.4 / SURVEY_SWEEP_SECONDS;
       if (scanAt > 1.2) scanAt = -1.2;
-      // The survey plane yields to the ripples.
-      optics.uScan.value.set(scanAt, 1.4 * (1 - think.value));
+      optics.uScan.value.set(scanAt, 1.4 * (1 - thinking));
+      // While the Agent thinks, each node its path has lit sends another,
+      // softer ripple in turn, so the glass keeps moving where the thought is.
+      rippleDue -= dtSeconds;
+      if (active && rippleDue <= 0) {
+        rippleDue = 0.45;
+        for (let step = 0; step < nodes.length; step += 1) {
+          const index = (rippleTurn + step) % nodes.length;
+          if (revealLevels[index] < 0.5) continue;
+          shells.ripple(index, nodes[index].subject ? 0.35 : 0.5);
+          rippleTurn = index + 1;
+          break;
+        }
+      }
+      shells.advance(dtSeconds);
     },
     prepare(renderer) {
       shells.prepare(renderer);
