@@ -744,6 +744,13 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
     function sleepUntil(deadline: number, now: number): void {
       if (rafId) return;
       window.clearTimeout(wakeTimer);
+      // At 60 Hz, waiting a full interval and then requesting rAF can miss
+      // the next refresh. Follow display callbacks at smooth cadence; the
+      // deadline gate still skips surplus callbacks on 120/240 Hz outputs.
+      if (deadline - now <= 1000 / 60 + KNOWLEDGE_3D_FRAME_EARLY_TOLERANCE_MS) {
+        rafId = requestAnimationFrame(frame);
+        return;
+      }
       wakeTimer = window.setTimeout(wake,
         Math.max(1, deadline - now - KNOWLEDGE_3D_FRAME_EARLY_TOLERANCE_MS));
     }
@@ -837,6 +844,7 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
       uniforms.uPerspective.value = side * pixelRatio / (2 * Math.tan(FOV_DEGREES * Math.PI / 360));
       for (const preview of active) {
         const cloud = preview.cloud()!; positionPreview(preview, cloud);
+        cloud.sortSprites(preview.camera.position);
         for (const [child] of visibility) child.visible = child === cloud.group;
         renderer.clear(true, true, true); renderer.render(scene, preview.camera);
         const transfer = preview.canvas.getContext("2d")!;
@@ -1470,6 +1478,11 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
         now,
       );
       renderPreviews();
+      // Preview passes borrow these buffers and may use a different camera.
+      if ([...previews.values()].some(preview => preview.publisher.hasViewers)) {
+        mainCloud?.sortSprites(camera.position);
+        for (const cloud of satelliteClouds.values()) cloud.sortSprites(camera.position);
+      }
       renderer.clear(true, true, true);
       renderer.render(scene, camera);
       renderer.clearDepth();

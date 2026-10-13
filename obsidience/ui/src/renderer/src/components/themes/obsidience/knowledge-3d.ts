@@ -38,12 +38,9 @@ export const KNOWLEDGE_3D_WORLD_SPAN = 190;
  *  the 2D KNOWLEDGE_AMBIENT_MAX_RENDER_SCALE (1.047 drift peak) obligation
  *  into the camera frustum. */
 export const KNOWLEDGE_3D_FRAME_MARGIN = 1.08;
-/** Render cadences (fps). Interaction runs at the 2D pipeline's 30 fps
- *  cap; idle ambient rotation renders at half cadence in every profile
- *  (owner 2026-10-08: idle spin capped at 15 fps, timer-driven). The thinking
- *  sweep runs at 60 fps (owner 2026-08-02: "the line should feel like it
- *  is filling up the beam fluidly" — a 33 ms gate beats unevenly against
- *  the 120 Hz kiosk display and made the traveling fronts stutter). */
+/** Maximum presentation runs smoothly at 60 fps, including idle rotation.
+ *  Other profiles retain the economical idle/interaction cadences. Keeping
+ *  a ceiling avoids spending 240 fps on a slowly rotating desktop graph. */
 export const KNOWLEDGE_3D_ACTIVE_FPS = 30;
 export const KNOWLEDGE_3D_SWEEP_FPS = 60;
 export const KNOWLEDGE_3D_IDLE_FPS = 15;
@@ -85,16 +82,15 @@ export function knowledge3dFrameIntervalMs(options: {
   interacting: boolean;
   animationProfile?: GraphicsAnimationProfile;
 }): number {
+  if (options.animationProfile === "maximum") return 1000 / KNOWLEDGE_3D_SWEEP_FPS;
   if (!options.focusActive && !options.interacting) return 1000 / KNOWLEDGE_3D_IDLE_FPS;
-  if (options.animationProfile === "maximum") return 0;
   return options.focusActive
     ? 1000 / KNOWLEDGE_3D_SWEEP_FPS
     : 1000 / KNOWLEDGE_3D_ACTIVE_FPS;
 }
 
 /** Advance a capped-frame deadline without discarding residual time. `null`
- *  means the frame is not due. Maximum/native-refresh mode uses interval 0 for
- *  active motion and therefore accepts every requestAnimationFrame callback. */
+ *  means the frame is not due. Interval 0 accepts every display callback. */
 export function advanceKnowledge3dFrameDeadline(
   previousDeadline: number,
   now: number,

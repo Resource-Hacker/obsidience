@@ -47,13 +47,12 @@ import {
 } from "./knowledge-3d";
 import type { ForceSimulation } from "d3-force-3d";
 import { KNOWLEDGE_CROSS_SEGMENTS as CROSS_SEGMENTS, writeKnowledgeCrossRoute } from "./knowledge-3d-links";
-import { KNOWLEDGE_LINK_APPROVAL_DURATION_MS } from "./knowledge-3d-shaders";
+import { KNOWLEDGE_LINK_APPROVAL_DURATION_MS, POINT_LIGHT_FRAGMENT_SHADER } from "./knowledge-3d-shaders";
+import { createKnowledge3dLightLayer } from "./knowledge-3d-light";
 export { KNOWLEDGE_LINK_APPROVAL_DURATION_MS };
 
-/** Leaf sprites carry the plasma-orb halo and star flare, so the quad
- *  extends well past the disc (owner 2026-08-02: the 3D articles are the
- *  same jewel-star plasma orbs as the 2D map). */
-const LEAF_SPRITE_EXTENT = 3.2;
+/** Only the inexpensive additive light pass extends beyond the glyph. */
+const LEAF_LIGHT_EXTENT = 3.2;
 
 export const KNOWLEDGE_ACTIVITY_FADE_MS = 420;
 const SELECTION_TRANSITION_MS = 340;
@@ -347,6 +346,7 @@ export function createKnowledge3dCloud(
   positionAttribute.setUsage(THREE.DynamicDrawUsage);
   const radii = new Float32Array(nodes.length);
   const extents = new Float32Array(nodes.length);
+  const lightExtents = new Float32Array(nodes.length);
   const glowScales = new Float32Array(nodes.length);
   const cores = new Float32Array(nodes.length * 3);
   const darks = new Float32Array(nodes.length * 3);
@@ -359,9 +359,9 @@ export function createKnowledge3dCloud(
   nodes.forEach((node, index) => {
     seeds[index] = (index * 0.6180339887) % 1;
     radii[index] = nodeRadius(node);
-    extents[index] = node.subject
-      ? Math.max(node.glowScale, node.ringScale + 0.3)
-      : LEAF_SPRITE_EXTENT;
+    extents[index] = node.subject || node.autoCurated
+      ? Math.max(1.15, node.ringScale + 0.3) : 1.15;
+    lightExtents[index] = Math.max(2.2, node.subject ? node.glowScale : LEAF_LIGHT_EXTENT);
     glowScales[index] = node.glowScale;
     const core = deps.parseColor(node.core);
     const dark = deps.parseColor(node.dark);
@@ -445,6 +445,7 @@ export function createKnowledge3dCloud(
     uRingStyle: ringStyleUniform,
   };
   const material = new THREE.ShaderMaterial({
+    defines: { KNOWLEDGE_COMPACT: 1 },
     uniforms: pointUniforms,
     vertexShader: deps.pointVertexShader,
     fragmentShader: deps.pointFragmentShader,
@@ -458,6 +459,26 @@ export function createKnowledge3dCloud(
   points.frustumCulled = false;
   points.renderOrder = 1;
   group.add(points);
+  // Share node attributes, but keep an unsorted light buffer with its own
+  // extent. No duplicate positions, activity owner or sorting for glow.
+  const lightGeometry = new THREE.BufferGeometry();
+  for (const [name, attribute] of Object.entries(geometry.attributes)) {
+    lightGeometry.setAttribute(name, attribute);
+  }
+  lightGeometry.setAttribute("aExtent", new THREE.BufferAttribute(lightExtents, 1));
+  const lightMaterial = new THREE.ShaderMaterial({
+    uniforms: pointUniforms,
+    vertexShader: deps.pointVertexShader,
+    fragmentShader: POINT_LIGHT_FRAGMENT_SHADER,
+    transparent: true, depthWrite: false, depthTest: false,
+    blending: THREE.AdditiveBlending,
+  });
+  const lights = new THREE.Points(lightGeometry, lightMaterial);
+  lights.name = "knowledge-node-light";
+  lights.frustumCulled = false;
+  lights.renderOrder = 0;
+  group.add(lights);
+  disposables.push(lightGeometry, lightMaterial);
   const depthMaterial = new THREE.ShaderMaterial({
     uniforms: pointUniforms,
     vertexShader: deps.pointVertexShader,
@@ -583,6 +604,7 @@ export function createKnowledge3dCloud(
     }
     beamGeometry.setIndex(new THREE.BufferAttribute(indices, 1));
     const beamMaterial = new THREE.ShaderMaterial({
+      defines: { KNOWLEDGE_FILAMENT: 1 },
       uniforms,
       vertexShader: deps.beamVertexShader,
       fragmentShader: deps.taxonomyFragmentShader,
@@ -688,6 +710,24 @@ export function createKnowledge3dCloud(
     branchUniforms,
   );
 
+  const lightLayer = createKnowledge3dLightLayer({
+    ids: nodeIds, positions, radii, colors: cores,
+    branches: [
+      ...spokePairs.filter((_, index) => spokeDormant[index] > 0.5),
+      ...branchPairs.filter((_, index) => branchDormant[index] > 0.5),
+    ],
+    uniforms: {
+      uPerspective: deps.sharedUniforms.uPerspective,
+      uTime: deps.sharedUniforms.uTime,
+      uModelScale: modelScaleUniform,
+      uGlowScale: glowScaleUniform,
+      uBranchOpacity: branchUniforms.uOpacity,
+    },
+    pixelRatio,
+  });
+  group.add(lightLayer.points);
+  disposables.push(lightLayer);
+
   // --- Article cross-links: curved checkered gradient beams. ---
   const crossQuadCount = crossPairs.length * CROSS_SEGMENTS;
   const crossGeometry = new THREE.BufferGeometry();
@@ -787,6 +827,7 @@ export function createKnowledge3dCloud(
     uDashFreq: { value: input.tuning.dashFrequency },
   };
   const crossMaterial = new THREE.ShaderMaterial({
+    defines: { KNOWLEDGE_FILAMENT: 1 },
     uniforms: crossUniforms,
     vertexShader: deps.beamVertexShader,
     fragmentShader: deps.crossFragmentShader,
@@ -993,6 +1034,7 @@ export function createKnowledge3dCloud(
     syncReviewPositions();
   };
   const syncAllPositions = (): void => {
+    lightLayer.syncPositions();
     syncStraightBeams(spokes);
     syncStraightBeams(branches);
     syncCrossPositions();
@@ -1215,6 +1257,7 @@ export function createKnowledge3dCloud(
     },
     applyRelationEffects,
     applyTuning(live: Knowledge3dTuning, ratio: number) {
+      lightLayer.setPixelRatio(ratio);
       glowScaleUniform.value = live.nodeGlow;
       const ballFactor = renderBallScale(live);
       modelScaleUniform.value = ballFactor;
@@ -1499,10 +1542,12 @@ export function createKnowledge3dCloud(
       }
       sortOrder.sort((a, b) => sortDepths[b] - sortDepths[a]);
       const indexArray = drawIndex.array as Uint32Array;
+      let changed = false;
       for (let i = 0; i < sortOrder.length; i += 1) {
+        if (indexArray[i] !== sortOrder[i]) changed = true;
         indexArray[i] = sortOrder[i];
       }
-      drawIndex.needsUpdate = true;
+      if (changed) drawIndex.needsUpdate = true;
     },
     dispose(scene) {
       clearReview();
