@@ -286,7 +286,9 @@ NO_TOOL_CALL_FEEDBACK = ('No native Tool call was returned. Call exactly one aut
                          'finish with task.complete.')
 
 OUTPUT_LIMIT_FEEDBACK = ('The reply reached the output limit before its native Tool call was complete; '
-                         'nothing was dispatched. Send one complete call with short arguments.')
+                         'nothing was dispatched. Send one complete call; keep citations and summaries short. '
+                         'If a required Article body or Source content cannot fit, finish with task.complete '
+                         'status failed instead of shortening it.')
 
 
 def task_tool_schemas(names, *, completion_no_change=False, completion_blocked=False, proposal_mode='',
@@ -354,12 +356,15 @@ def argument_diagnostic(name, args) -> str | None:
         return None
     path = '.'.join(map(str, errors[0].absolute_path)) or 'arguments'
     schema = _argument_schemas()[name]
-    if 'anyOf' in schema:
-        # The advertised union of the alternatives accepts calls that mix them.
-        guidance = 'Use exactly one of these argument structures: ' + ' or '.join(
-            json.dumps(native_schema(branch), separators=(',', ':')) for branch in schema['anyOf'])
-    else:
-        guidance = 'Use this argument structure: ' + json.dumps(native_schema(schema), separators=(',', ':'))
+    # The advertised union of the alternatives accepts calls that mix them. List
+    # each alternative the fixed values sent can still select, or all when none can.
+    branches = schema.get('anyOf', [schema])
+    branches = [branch for branch in branches if isinstance(args, dict) and all(
+        key not in args or args[key] in value.get('enum', [value.get('const')])
+        for key, value in branch.get('properties', {}).items() if 'enum' in value or 'const' in value)] or branches
+    guidance = ('Use this argument structure: ' if len(branches) == 1
+                else 'Use exactly one of these argument structures: ') + ' or '.join(
+        json.dumps(native_schema(branch), separators=(',', ':')) for branch in branches)
     sent = json.dumps(args, separators=(',', ':'))[:300]
     diagnostic = (f'Invalid {name} {path}: {errors[0].validator} constraint ({errors[0].validator_value!r}). '
                   f'You sent: {sent}. {guidance}')
