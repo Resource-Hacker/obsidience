@@ -92,13 +92,15 @@ in the node's branch color, over a colored glow from the crater floor. Each
 shell has its own solidity; by default the one nearest the core is the most
 solid and the outer ones the clearest. The Glass group in Graph settings sets
 each layer's solidity, counted outward from the core, and the crater depth,
-crater glow, seed glow, sheen lines, dust and comet ripple time for each
-graph.
+crater glow, seed glow, sheen lines and dust for each graph.
 
-At rest the glass answers the comets that ride the article links: where one
-lands, its node twinkles and sends a small, short ripple across its layer in
-its own color. A ball starts only a few such ripples a second however many
-comets it carries.
+At rest the graph answers the comets that ride the article links: where one
+lands on an Article, the Article swells to twice its size and back in half a
+second, flares and dims over a second, and sends a small ripple across its
+layer in its own color. A branch node is large already, so it keeps its size
+and flares only faintly. A ball starts only a few such ripples at a time
+however many comets it carries. The Beams group in Graph settings sets the
+swell, both flares, their durations and the ripple's.
 
 While a ball's Agent is thinking, every node on the route drops into its own
 shell like a stone into water as the thinking front reaches it, inner layers
@@ -106,8 +108,9 @@ included: a ripple in the node's color spreads across that layer, and the
 glass, its dust and its seeds ride it. The Articles a route ends on send the
 strongest ripple, and reached nodes keep sending softer ones in turn until
 the thinking ends. A thinking ripple marks the front's passage, as the route
-beam does, and starts only at a node on the actual route; only the seed of a
-consulted or hovered node swells and burns amber.
+beam does, and starts only at a node on the actual route. The seed of a
+consulted or hovered node swells and burns amber; a passed node's does so
+faintly.
 
 Labels are captions in light capitals inside a thin box in the branch color,
 with a grey hairline between title and location and a leader to their node,
@@ -146,14 +149,19 @@ states the operation and outcome. Tool/Skill packet glow still means instruction
 were supplied; an operation halo identifies an actual call.
 
 Concurrent operations keep independent identities and exact ref groups. Each
-cloud uses the same existing sweep and shader clock. Cross-links may animate only
-when both endpoints occur in the same supplied group; hierarchy ancestors carry
-route beams without becoming consulted Articles. The Executive packet stays lit
+cloud uses the same existing sweep and shader clock. A supplied Article's
+cross-links carry the beam one hop, to the Articles it is linked with. Those
+Articles and the hierarchy ancestors on the route are passed, not consulted:
+they glow at under half strength and wear the breathing ring as the front
+reaches them, take no label, and light no further link. Only supplied refs
+ignite fully. The Executive packet stays lit
 through speech, including its measured voice envelope. Called Tools and their
 returned refs remain lit for that run and its queued/playing reply, retaining
 their real outcome labels. The conversation owner publishes graph completion
-after reply commitment and speech handoff. Playback completion starts a 420 ms
-eased fade of the beams and node glow; text-only completion uses the same fade.
+after reply commitment and speech handoff. The lit route then lingers six
+seconds after playback or a text-only reply completes, and leaves with a
+420 ms eased fade of the beams and node glow. While a route is lit the whole
+constellation swells about four percent and drifts by under one.
 Independent edit/Review notices retain their finite six-second display window.
 Reconnect restores only current operation state; transport loss clears
 unverified running visuals. No additional model call, polling loop, layout

@@ -211,9 +211,8 @@ export interface Knowledge3dTuning {
   /** The layered glass: how solid each shell is, counted outward from the
    *  core (a ball with fewer shells ignores the rest), how deep nodes press
    *  their craters, the coloured glow rising from a crater's floor, how
-   *  brightly its seed of dust shines, the density of the sheen's lines and
-   *  of the dust on the glass, and the seconds a landing link comet's ripple
-   *  takes to spread and fade. */
+   *  brightly its seed of dust shines, and the density of the sheen's lines
+   *  and of the dust on the glass. */
   shellLayer1: number;
   shellLayer2: number;
   shellLayer3: number;
@@ -223,7 +222,16 @@ export interface Knowledge3dTuning {
   seedGlow: number;
   sheenLines: number;
   shellDust: number;
+  /** Where a link comet lands: the seconds its ripple takes to spread and
+   *  fade, how large an Article grows (2 doubles it) and for how long, and
+   *  how brightly it flares and for how long. A branch node keeps its size
+   *  and flares by its own, smaller amount. */
   cometRipple: number;
+  cometSwell: number;
+  cometSwellSeconds: number;
+  cometGlow: number;
+  cometNodeGlow: number;
+  cometGlowSeconds: number;
   /** Beam widths in CSS px (soft glow envelope, not the core line). */
   tendrilWidth: number;
   branchWidth: number;
@@ -311,6 +319,11 @@ export const DEFAULT_KNOWLEDGE_3D_TUNING: Knowledge3dTuning = {
   sheenLines: 1,
   shellDust: 1,
   cometRipple: 2.2,
+  cometSwell: 2,
+  cometSwellSeconds: 0.5,
+  cometGlow: 1,
+  cometNodeGlow: 0.2,
+  cometGlowSeconds: 1,
   tendrilWidth: 12,
   branchWidth: 8,
   articleWidth: 2,
@@ -385,7 +398,6 @@ export const KNOWLEDGE_3D_TUNING_FIELDS: readonly Knowledge3dTuningField[] = [
   { key: "seedGlow", label: "Seed glow", group: "Glass", min: 0, max: 2, step: 0.05, description: "Brightness of the orb of dust inside each crater." },
   { key: "sheenLines", label: "Sheen lines", group: "Glass", min: 0.3, max: 2, step: 0.05, description: "Density of the fine lines drawn on each shell and inside its craters." },
   { key: "shellDust", label: "Dust", group: "Glass", min: 0, max: 2, step: 0.05, description: "Amount of fine dust lying on the glass." },
-  { key: "cometRipple", label: "Comet ripple", group: "Glass", min: 0.5, max: 6, step: 0.1, description: "Seconds the small ripple takes to spread and fade where a link comet lands. Longer is slower." },
   { key: "yawSpeed", label: "Rotation speed", group: "Motion", mainOnly: true, min: 0, max: 0.2, step: 0.005, description: "Camera rotation around all graphs. Pauses while dragging or focused on a satellite." },
   { key: "automaticSweepSpeed", label: "Automatic speed", group: "Thinking", min: 0, max: 1, step: 1, toggle: true, description: "Reveal the packet at a readable pace, keep paths flowing through speech, and fade when playback ends. Turn this off to set the reveal speed." },
   { key: "sweepSpeed", label: "Animation speed", group: "Thinking", min: 0.1, max: 3, step: 0.05, description: "Speed of the continuous path reveal when Automatic speed is off. Speech never skips unfinished links." },
@@ -419,6 +431,13 @@ export const KNOWLEDGE_3D_TUNING_FIELDS: readonly Knowledge3dTuningField[] = [
   { key: "streakSpeed", label: "Light speed", group: "Beams", min: 0.1, max: 4, step: 0.1, description: "Travel speed of the light streaks riding the article links." },
   { key: "streakSpan", label: "Light length", group: "Beams", min: 0.01, max: 0.2, step: 0.005, description: "Length of each traveling light streak." },
   { key: "streakCount", label: "Light count", group: "Beams", min: 0, max: 8, step: 1, description: "Light streaks per article link. Zero disables them (rebuilds the geometry)." },
+  // Where a link comet lands (owner 2026-10-12).
+  { key: "cometSwell", label: "Comet swell", group: "Beams", min: 1, max: 3, step: 0.05, description: "How large an Article grows when a link comet lands on it. 2 doubles it; 1 leaves it alone. Branch nodes keep their size." },
+  { key: "cometSwellSeconds", label: "Swell time", group: "Beams", min: 0.1, max: 2, step: 0.05, description: "Seconds an Article takes to grow and shrink back when a comet lands." },
+  { key: "cometGlow", label: "Comet glow", group: "Beams", min: 0, max: 1, step: 0.05, description: "How brightly an Article flares when a link comet lands on it." },
+  { key: "cometNodeGlow", label: "Comet glow, nodes", group: "Beams", min: 0, max: 1, step: 0.05, description: "How brightly a branch node flares when a link comet lands on it. Nodes are large already, so this stays low." },
+  { key: "cometGlowSeconds", label: "Glow time", group: "Beams", min: 0.2, max: 3, step: 0.05, description: "Seconds an Article or node takes to brighten and dim again when a comet lands." },
+  { key: "cometRipple", label: "Comet ripple", group: "Beams", min: 0.5, max: 6, step: 0.1, description: "Seconds the small ripple takes to spread and fade across the glass where a comet lands. Longer is slower." },
   { key: "lineArticles", label: "Article", group: "Beams", min: 0, max: 1, step: 1, toggle: true, description: "Keep article spokes visible at rest. They always light while thinking rides them." },
   { key: "lineBranches", label: "Branch", group: "Beams", min: 0, max: 1, step: 1, toggle: true, description: "Keep the deeper structural tubes visible at rest." },
   { key: "linePeers", label: "Brain", group: "Beams", min: 0, max: 1, step: 1, toggle: true, description: "Keep the core-to-branch spokes visible at rest. Normally only the thinking path lights them." },

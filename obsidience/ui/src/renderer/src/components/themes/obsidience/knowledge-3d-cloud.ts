@@ -61,12 +61,13 @@ const LEAF_SPRITE_EXTENT = 3.2;
 const streakPhase = (streak: number): number => (streak * 0.37) % 1;
 const streakSpeed = (streak: number): number => 0.09 + ((streak * 0.61) % 1) * 0.1;
 
-/** A comet landing on a node: how brightly the node twinkles and for how
- *  long, and the small ripple it sends (strength, spread in radians). The
- *  ripple's duration is tuned; a ball starts at most seven in that time, so
- *  each runs its course on a shell that carries eight. */
-const LANDING_TWINKLE = 0.6;
-const LANDING_TWINKLE_SECONDS = 0.45;
+/** How brightly a node the thinking route only passes glows, against 1 for
+ *  a node the Agent was actually given. */
+const PASSED_GLOW = 0.45;
+
+/** The small ripple a landing comet sends (strength, spread in radians). Its
+ *  duration is tuned; a ball starts at most seven in that time, so each runs
+ *  its course on a shell that carries eight. */
 const LANDING_RIPPLE = [0.3, 0.5] as const;
 const LANDING_RIPPLES_AT_ONCE = 7;
 
@@ -230,6 +231,8 @@ export interface Knowledge3dCloud {
     spec: Knowledge3dPathSpec | null,
     solidFront: number,
     focus?: { active: boolean; nodeIds: ReadonlySet<string>;
+      /** Waypoints and linked Articles the route passes: a softer glow. */
+      passedIds?: ReadonlySet<string>;
       accents?: ReadonlyMap<string, { color: string; mode: number }>; opacity?: number } | null,
   ): void;
   nodeWorldPosition(rawId: string, out: THREE.Vector3): boolean;
@@ -431,6 +434,10 @@ export function createKnowledge3dCloud(
   const focusAttribute = new THREE.BufferAttribute(focusLevels, 1);
   focusAttribute.setUsage(THREE.DynamicDrawUsage);
   geometry.setAttribute("aFocus", focusAttribute);
+  const swells = new Float32Array(nodes.length);
+  const swellAttribute = new THREE.BufferAttribute(swells, 1);
+  swellAttribute.setUsage(THREE.DynamicDrawUsage);
+  geometry.setAttribute("aSwell", swellAttribute);
   const activityLevels = new Float32Array(nodes.length * 4);
   const activityAttribute = new THREE.BufferAttribute(activityLevels, 4);
   activityAttribute.setUsage(THREE.DynamicDrawUsage);
@@ -1241,8 +1248,8 @@ export function createKnowledge3dCloud(
         glassFocus[i] = level;
         glassDirty = true;
       }
-      // A landing comet's twinkle shows on the node's icon only.
-      const shown = Math.max(level, sparks[i] * sparks[i] * LANDING_TWINKLE);
+      // A landing comet's flare shows on the node's icon only.
+      const shown = Math.max(level, landingGlows[i]);
       if (Math.abs(focusLevels[i] - shown) > 0.01) {
         focusLevels[i] = shown;
         dirty = true;
@@ -1266,10 +1273,12 @@ export function createKnowledge3dCloud(
   // Comets ride the article links on the shader clock; the same arithmetic
   // here tells when each one lands on the node at its link's far end.
   const landingCycles = new Int32Array(streakCount);
-  const sparks = new Float32Array(nodes.length);
+  // Seconds since a comet last landed on each node, and the flare that gives.
+  const landingAges = new Float32Array(nodes.length).fill(Infinity);
+  const landingGlows = new Float32Array(nodes.length);
   let landingClock = Number.NaN;
   let landingRippleDue = 0;
-  let landingRippleSeconds = input.tuning.cometRipple;
+  let landing = input.tuning;
 
   return {
     agentId,
@@ -1306,7 +1315,7 @@ export function createKnowledge3dCloud(
     applyRelationEffects,
     applyTuning(live: Knowledge3dTuning, ratio: number) {
       shells.applyTuning(live);
-      landingRippleSeconds = live.cometRipple;
+      landing = live;
       glowScaleUniform.value = live.nodeGlow;
       const ballFactor = renderBallScale(live);
       modelScaleUniform.value = ballFactor;
@@ -1535,8 +1544,15 @@ export function createKnowledge3dCloud(
           focus !== undefined && focus !== null
             ? focus.active && focus.nodeIds.has(nodeIds[i])
             : true;
+        // A node the route only passes glows softly as the front reaches it.
+        const passing = !gated && focus?.active === true && focus.passedIds?.has(nodeIds[i]) === true;
         let reveal = 0;
-        if (gated && spec) {
+        if (passing && spec) {
+          const arrival = spec.routeArrival?.get(nodeIds[i]);
+          if (arrival !== undefined) {
+            reveal = PASSED_GLOW * Math.min(1, Math.max(0, (solidFront - arrival) / revealWindow));
+          }
+        } else if (gated && spec) {
           // Nodes ignite as the SOLID line reaches their plan arrival; a
           // focus-set node the plan never routed (e.g. a relation-reached
           // endpoint) ramps at the route end, never instantly (main-ball
@@ -1621,6 +1637,7 @@ export function createKnowledge3dCloud(
       const resync = !(clock >= landingClock);
       landingClock = clock;
       landingRippleDue -= dtSeconds;
+      const span = Math.max(landing.cometSwellSeconds, landing.cometGlowSeconds);
       let twinkling = false;
       for (let streak = 0; streak < streakCount; streak += 1) {
         const cycle = Math.floor(clock * streakSpeed(streak) + streakPhase(streak));
@@ -1628,18 +1645,30 @@ export function createKnowledge3dCloud(
         landingCycles[streak] = cycle;
         if (resync) continue;
         const node = crossPairs[Math.floor(streak / streaksPerLink)][1];
-        sparks[node] = 1;
+        // A node already answering a comet finishes before it answers another.
+        if (landingAges[node] >= span) landingAges[node] = 0;
         if (landingRippleDue <= 0) {
-          landingRippleDue = landingRippleSeconds / LANDING_RIPPLES_AT_ONCE;
-          shells.ripple(node, ...LANDING_RIPPLE, landingRippleSeconds);
+          landingRippleDue = landing.cometRipple / LANDING_RIPPLES_AT_ONCE;
+          shells.ripple(node, ...LANDING_RIPPLE, landing.cometRipple);
         }
       }
-      for (let i = 0; i < sparks.length; i += 1) {
-        if (sparks[i] <= 0) continue;
-        sparks[i] = Math.max(0, sparks[i] - dtSeconds / LANDING_TWINKLE_SECONDS);
+      // An Article swells and shrinks back over one curve and flares and dims
+      // over another, each a half sine of its own length. A branch node is
+      // large already: it keeps its size and flares far less.
+      for (let i = 0; i < landingAges.length; i += 1) {
+        if (landingAges[i] >= span) continue;
+        const age = landingAges[i] += dtSeconds;
+        const branch = nodes[i].subject;
+        swells[i] = !branch && age < landing.cometSwellSeconds
+          ? (landing.cometSwell - 1) * Math.sin(Math.PI * age / landing.cometSwellSeconds) : 0;
+        landingGlows[i] = age < landing.cometGlowSeconds
+          ? (branch ? landing.cometNodeGlow : landing.cometGlow) * Math.sin(Math.PI * age / landing.cometGlowSeconds) : 0;
         twinkling = true;
       }
-      if (twinkling) applyHoverLevels();
+      if (twinkling) {
+        swellAttribute.needsUpdate = true;
+        applyHoverLevels();
+      }
       // While the Agent thinks, each node its path has reached sends another,
       // softer ripple in turn, so the glass keeps moving where the thought is.
       rippleDue -= dtSeconds;

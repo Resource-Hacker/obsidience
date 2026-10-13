@@ -70,7 +70,7 @@ import { previewLinkReviewCloud, projectLinkReviewEffects, recordLinkApproval, t
 import { claimShellKnowledgePresenter, onShellReaderSelection, type GraphSource } from "@/lib/shell-client";
 
 const ROOT_ID = "@vault";
-const FOCUS_LINGER_MS = 650; // Let the completion pulse finish before the Scene fades.
+const FOCUS_LINGER_MS = 6_000; // The lit route stays on screen this long after its run ends.
 const READABLE_SWEEP_SECONDS = 1.6; // Initial branch travel; relationship tails keep this pace.
 
 interface ActivityWireEntry {
@@ -153,7 +153,11 @@ function latestActivityTransaction(entries: ActivityWireEntry[], playbackRunId =
 }
 
 interface ThinkingRoute {
+  /** Supplied refs: these ignite fully and take their labels. */
   nodeIds: Set<string>;
+  /** Hierarchy waypoints and Articles one link from a supplied one: the beam
+   *  passes them and they glow softly, without a label. */
+  passedIds: Set<string>;
   pathSpec: Knowledge3dPathSpec;
 }
 
@@ -195,7 +199,10 @@ function isArticleEndpoint(node: GraphNode): boolean {
   return node.kind !== "agent";
 }
 
-function buildThinkingRoute(cloud: GraphCloud, refs: readonly string[], refGroups: readonly (readonly string[])[] = [refs]): ThinkingRoute | null {
+/** `refGroups` are the supplied refs again, one group per run: their Articles'
+ *  links carry the beam. A route built without them (Reader selection) keeps
+ *  to its hierarchy path. */
+function buildThinkingRoute(cloud: GraphCloud, refs: readonly string[], refGroups: readonly (readonly string[])[] = []): ThinkingRoute | null {
   const byId = new Map(cloud.nodes.map((node) => [node.id, node]));
   const targets = [...new Set(refs)].filter((ref) => byId.has(ref));
   if (targets.length === 0) return null;
@@ -225,15 +232,19 @@ function buildThinkingRoute(cloud: GraphCloud, refs: readonly string[], refGroup
   const root = cloud.nodes.find((node) => node.role === "root");
   if (!root) return null;
   routeNodeIds.add(root.id);
-  // Keep the branching comets between supplied Articles. A relationship or
-  // hierarchy waypoint is not evidence that another Article entered the packet.
+  // A supplied Article's links carry the beam one hop, to the Articles it is
+  // linked with (owner 2026-10-12: the branching tail of the Electron build).
+  // Neither such an Article nor a hierarchy waypoint is evidence that it
+  // entered the packet: both are passed, never consulted, and a passed node
+  // lights no further link.
+  const linked = new Set(refGroups.flat().filter((ref) => nodeIds.has(ref)));
   for (const edge of edges) {
-    if (edge.taxonomy || !nodeIds.has(edge.source) || !nodeIds.has(edge.target)) continue;
-    // Same-run packet and returned refs share context. Separate runs and owner
-    // operations never acquire connections merely by appearing together.
-    if (!refGroups.some((group) => group.includes(edge.source) && group.includes(edge.target))) continue;
+    if (edge.taxonomy || (!linked.has(edge.source) && !linked.has(edge.target))) continue;
     activeEdgeIds.add(edge.id);
+    routeNodeIds.add(edge.source);
+    routeNodeIds.add(edge.target);
   }
+  const passedIds = new Set([...routeNodeIds].filter((id) => !nodeIds.has(id)));
   const positions = new Map(cloud.nodes.map((node) => [node.id, { x: node.x, y: node.y }]));
   const plan = computeKnowledgeSweepPlan(
     root.id,
@@ -247,14 +258,14 @@ function buildThinkingRoute(cloud: GraphCloud, refs: readonly string[], refGroup
   // A root-only acknowledgement has no beam to travel before Brain can light.
   // Keep the normal sweep timing for every route that reaches another node.
   if (nodeIds.size === 1 && nodeIds.has(root.id) && activeEdgeIds.size === 0) {
-    return { nodeIds, pathSpec: { ...pathSpec,
+    return { nodeIds, passedIds, pathSpec: { ...pathSpec,
       firstNodeProgress: 0, firstArticleProgress: 0, maxProgress: 0,
     } };
   }
-  // Calculate beam timing through the full hierarchy first, then restrict node
-  // ignition (including satellite sweeps and labels) to the supplied refs. The
+  // Calculate beam timing through the full route first, then restrict full
+  // ignition and labels (including satellite sweeps) to the supplied refs. The
   // full timing stays available for what marks the front's passage.
-  return { nodeIds, pathSpec: { ...pathSpec,
+  return { nodeIds, passedIds, pathSpec: { ...pathSpec,
     routeArrival: pathSpec.nodeArrival,
     nodeArrival: new Map([...pathSpec.nodeArrival].filter(([id]) => nodeIds.has(id))),
   } };
@@ -467,8 +478,8 @@ export function GraphBackdrop({
       }
       if (next.status === "idle" && next.playback_id && next.playback_id === previous.playback_id
         && next.run_id === previous.run_id) {
-        // Release at audio end; the Scene finishes any remaining links before fading.
-        finishRun(next.run_id, Date.now(), 0);
+        // Audio has ended; the route lingers like a text-only one before the Scene fades.
+        finishRun(next.run_id);
       }
       const transaction = activityTransaction.current;
       if (next.status !== "idle" && next.run_id) {
@@ -1248,7 +1259,7 @@ export function GraphBackdrop({
     const pool = leaves.length > 0 ? leaves : cloud.nodes.filter((node) => node.role !== "root");
     if (pool.length === 0) return;
     const target = pool[Math.floor(Math.random() * pool.length)];
-    const route = buildThinkingRoute(cloud, [target.id]);
+    const route = buildThinkingRoute(cloud, [target.id], [[target.id]]);
     if (!route) return;
     activityKey.current += 1;
     const key = activityKey.current;
@@ -1368,6 +1379,7 @@ export function GraphBackdrop({
       agentId: satelliteTest.agentId,
       spec: satelliteTest.route.pathSpec,
       nodeIds: satelliteTest.route.nodeIds,
+      passedIds: satelliteTest.route.passedIds,
       key: satelliteTest.key,
       hold: false,
     }];
@@ -1375,7 +1387,8 @@ export function GraphBackdrop({
       if (!route) return [];
       const speed = satelliteTuning(agentId).automaticSweepSpeed >= 0.5
         ? 1 / READABLE_SWEEP_SECONDS : undefined;
-      return [{ agentId, spec: route.pathSpec, nodeIds: route.nodeIds, accents, key, phase, hold: true, speed }];
+      return [{ agentId, spec: route.pathSpec, nodeIds: route.nodeIds, passedIds: route.passedIds,
+        accents, key, phase, hold: true, speed }];
     });
   }, [activity, satelliteTuning, satelliteTest, operationClouds]);
 
@@ -1487,6 +1500,7 @@ export function GraphBackdrop({
           edges={scopedCloud?.edges ?? []}
           hub={hub}
           focusNodeIds={mainRoute?.nodeIds ?? new Set<string>()}
+          passedNodeIds={mainRoute?.passedIds}
           pathSpec={mainRoute?.pathSpec ?? null}
           focusActive={Boolean(mainPhase)}
           focusKey={mainActivity.key}

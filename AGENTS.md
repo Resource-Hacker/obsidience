@@ -72,8 +72,10 @@ and runs on the same ADK loop and capability core.
 
 Preserve fresh target binding, observation leases, cancellation, Review,
 completion verification and no replay of uncertain input. A schema advertisement
-is not an Article read or evidence of invocation. Thinking glow uses only the
-actual supplied context and Tool-return refs; links never expand that set.
+is not an Article read or evidence of invocation. Full thinking ignition and
+labels use only the actual supplied context and Tool-return refs. The route's
+hierarchy waypoints and the Articles one link from a supplied one may carry a
+visibly softer passage glow; nothing lights beyond that one link.
 
 Use the existing Article writer and owner API for live Vault changes. UI,
 Source, graph projections, default templates and Git never become competing

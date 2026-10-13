@@ -93,6 +93,10 @@ export interface Knowledge3dSceneProps {
   edges: Knowledge3dRenderEdge[];
   hub: { x: number; y: number };
   focusNodeIds: ReadonlySet<string>;
+  /** Hierarchy waypoints and Articles one link from a supplied one: the
+   *  route passes them, so they glow softly and wear the ring, without the
+   *  full ignition or a label. */
+  passedNodeIds?: ReadonlySet<string>;
   /** Sweep-plan windows per beam key — the thinking rides the REAL beams
    *  (owner 2026-08-02): a beam head travels the path first, the solid
    *  center line launches when the head reaches the first node, the whole
@@ -140,6 +144,7 @@ export interface Knowledge3dSceneProps {
     key: string | number;
     phase?: KnowledgeFocusPhase;
     nodeIds?: ReadonlySet<string>;
+    passedIds?: ReadonlySet<string>;
     accents?: ReadonlyMap<string, { color: string; mode: number }>;
     /** Readable automatic reveal speed; absent means use the graph slider. */
     speed?: number;
@@ -299,13 +304,18 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
     // then shifts the whole rendered frame so that shared center sits
     // concentric with the background arc reactor.
     const viewAnchor = { x: 0.5, y: 0.5 };
+    // While a question is being worked on the whole constellation swells a
+    // few percent and drifts by under one, as it did before the move to the
+    // shell: `swell` eases in and out, `drift` is this frame's camera share.
+    let swell = 0;
+    const drift = { scale: 1, x: 0, y: 0 };
     function applyViewAnchor(): void {
       if (!width || !height) return;
       camera.setViewOffset(
         width,
         height,
-        (0.5 - viewAnchor.x) * width,
-        (0.5 - viewAnchor.y) * height,
+        (0.5 - viewAnchor.x - drift.x) * width,
+        (0.5 - viewAnchor.y - drift.y) * height,
         width,
         height,
       );
@@ -334,7 +344,7 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
     let solidProgress = 0;
     let glowStartedAt = -1;
     let mainFadeStartedAt = -1;
-    let retainedFocus: Pick<Knowledge3dSceneProps, "pathSpec" | "focusNodeIds" | "activityAccents" | "focusPhase" | "focusKey" | "tuning"> | null = null;
+    let retainedFocus: Pick<Knowledge3dSceneProps, "pathSpec" | "focusNodeIds" | "passedNodeIds" | "activityAccents" | "focusPhase" | "focusKey" | "tuning"> | null = null;
     let appliedFocusKey: string | number | null = null;
     let selectionMoving = false;
 
@@ -576,8 +586,8 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
       // in so the small ball fills the frame; drag/wheel keep working
       // around the blended center.
       const distance =
-        clampKnowledge3dDolly(orbit.distance, framed) * (1 - focusBlend) +
-        Math.max(34, orbit.distance * 0.42) * focusBlend;
+        (clampKnowledge3dDolly(orbit.distance, framed) * (1 - focusBlend) +
+        Math.max(34, orbit.distance * 0.42) * focusBlend) / drift.scale;
       camera.position.set(
         focusPoint.x + distance * Math.sin(polar) * Math.sin(orbit.azimuth),
         focusPoint.y + distance * Math.cos(polar),
@@ -1217,6 +1227,7 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
       mainCloud?.applyFocusReveal(spec ?? null, solidProgress, {
         active: Boolean(retainedFocus),
         nodeIds: focus.focusNodeIds,
+        passedIds: focus.passedNodeIds,
         accents: focus.activityAccents,
         opacity: pathOpacity,
       });
@@ -1340,7 +1351,8 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
           opacity,
         );
         cloud.applyFocusReveal(state.spec, solid, {
-          active: true, nodeIds: sweep.nodeIds ?? new Set(sweep.spec.nodeArrival.keys()), accents: sweep.accents,
+          active: true, nodeIds: sweep.nodeIds ?? new Set(sweep.spec.nodeArrival.keys()),
+          passedIds: sweep.passedIds, accents: sweep.accents,
           opacity,
         });
         if (flowAge < 0 || state.pulseStartedAt >= 0 || state.fadeStartedAt >= 0) {
@@ -1437,6 +1449,17 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
       }
       orbit.distance += (orbit.targetDistance - orbit.distance) * (1 - Math.exp(-dt * 12));
       if (Math.abs(orbit.targetDistance - orbit.distance) > 0.05) orbit.interactingUntil = now + 1200;
+      // One slow turn every twenty seconds: between 3.5% and 4.7% closer.
+      const breathing = swell > 0;
+      swell += ((retainedFocus ? 1 : 0) - swell) * (1 - Math.exp(-dt / 0.6));
+      if (swell < 0.001) swell = 0;
+      if (breathing || swell > 0) {
+        const turn = (now % 20_000) / 20_000 * Math.PI * 2;
+        drift.scale = 1 + swell * (0.041 + 0.006 * Math.sin(turn * 2));
+        drift.x = swell * 0.008 * Math.sin(turn);
+        drift.y = swell * 0.007 * Math.cos(turn * 2);
+        applyViewAnchor();
+      }
       applyCamera();
       // Painter's algorithm: each cloud re-sorts its sprite draw order
       // back-to-front in cloud-local space (worldToLocal folds translation,
@@ -1479,25 +1502,34 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
           && (state!.sweep.phase ?? "thinking") === "thinking");
       }
       // Labels follow the same admitted path and frame clock as their beams.
+      // A node the route only passes wears the ring without a label.
       const activeLabelNodeIds = new Set<string>();
+      const ringNodeIds = new Set<string>();
       if (current.showActivityLabels && retainedFocus && spec) {
         for (const [id, arrival] of spec.nodeArrival) {
           if (focus.focusNodeIds.has(id) && arrival <= solidProgress) activeLabelNodeIds.add(id);
         }
+        for (const [id, arrival] of spec.routeArrival ?? []) {
+          if (focus.passedNodeIds?.has(id) && arrival <= solidProgress) ringNodeIds.add(id);
+        }
       }
       for (const [agentId, state] of current.showActivityLabels ? sweepStates : []) {
+        const reached = state.progress - state.spec.firstNodeProgress;
         for (const [id, arrival] of state.spec.nodeArrival) {
-          if ((!state.sweep.nodeIds || state.sweep.nodeIds.has(id))
-            && arrival <= state.progress - state.spec.firstNodeProgress) {
+          if ((!state.sweep.nodeIds || state.sweep.nodeIds.has(id)) && arrival <= reached) {
             activeLabelNodeIds.add(knowledgeAgentNodeId(agentId, id));
           }
         }
+        for (const [id, arrival] of state.spec.routeArrival ?? []) {
+          if (state.sweep.passedIds?.has(id) && arrival <= reached) ringNodeIds.add(knowledgeAgentNodeId(agentId, id));
+        }
       }
       const labelIds = [...new Set([...current.labelIds, ...activeLabelNodeIds])];
+      for (const id of activeLabelNodeIds) ringNodeIds.add(id);
       labelLayer.update(
-        labelIds.length ? projectAll() : emptyProjection,
+        labelIds.length || ringNodeIds.size ? projectAll() : emptyProjection,
         labelIds,
-        activeLabelNodeIds,
+        ringNodeIds,
         current.labelMetadata,
         now,
       );

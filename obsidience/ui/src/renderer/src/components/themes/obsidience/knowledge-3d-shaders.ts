@@ -43,6 +43,7 @@ attribute vec4 aRing;
 attribute vec4 aGlow;
 attribute vec4 aStyle; // (subject, ringScale, ringWidthPx, baseAlpha)
 attribute float aFocus;
+attribute float aSwell; // extra size as a fraction: 1 doubles the node
 attribute vec4 aActivity;
 attribute float aSeed;
 attribute float aCurate;
@@ -106,6 +107,7 @@ void main() {
   // 2D parity: active/hovered discs grow ~2.5px, not a multiplicative bloom.
   float swell = 1.0 + aFocus * (0.10 + 0.06 * uPulse);
   swell *= 1.0 + 0.32 * vSpeech;
+  swell *= 1.0 + aSwell;
   float radiusPx = aRadius * uModelScale * swell * uPerspective / max(1.0, -mvPosition.z);
 #ifdef KNOWLEDGE_MEMORY
   // The same orbs read as a quiet ribbon at distance and reveal their full
