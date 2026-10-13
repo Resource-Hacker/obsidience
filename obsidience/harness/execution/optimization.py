@@ -32,6 +32,11 @@ STALE_CASE_ERRORS = frozenset({
 })
 
 
+def _incident(task_ref: str, definition: str, tool: str, text: str) -> str:
+    reason = re.sub(r'[0-9a-f]{8}-[0-9a-f-]{27,}', '<source>', text)
+    return refinement._hash(refinement._json([task_ref, definition, tool, reason]).encode())
+
+
 def reconcile_rejections(notes: list) -> None:
     """Send receipt-proven rejected steps to Audit, even when the Task recovered.
 
@@ -78,17 +83,25 @@ def reconcile_rejections(notes: list) -> None:
         if incidents.recovered_operational_incident(run_id):
             _INSPECTED_RUNS.add(run_id)
             continue
-        rejected = None
+        rejected = terminal = rejection = legacy = None
         # The compact public trace may clip long rejection details. Prefer the
         # complete decision capture and its exact committed receipt when present.
         captured = refinement._root() / 'incidents' / (run_id + '.json')
         if captured.is_file():
             try:
-                for identity in json.loads(captured.read_text()):
-                    sample = refinement._load('decisions', identity)
-                    if sample.get('rejected') and incidents._receipt_matches(sample):
-                        rejected = {'tool': sample['tool'], 'reason': str(sample['result'])[:1500]}
-                        break
+                samples = [refinement._load('decisions', identity)
+                           for identity in json.loads(captured.read_text())]
+                attested = [sample for sample in samples
+                            if sample.get('rejected') and incidents._receipt_matches(sample)]
+                # The run's unrecovered rejection is its last one.
+                if attested and attested[-1] is samples[-1]:
+                    terminal, result = samples[-1], samples[-1]['result']
+                    rejected = {'tool': terminal['tool'], 'reason': str(result)[:1500]}
+                    # The model's evidence, outcome and summary vary between
+                    # occurrences of one failure; the validator's text does not.
+                    if isinstance(result, dict):
+                        rejection = f"Completion rejected: {result.get('error', '')}."[:1500]
+                    legacy = (attested[0]['tool'], str(attested[0]['result'])[:1500])
             except (ValueError, OSError, KeyError, TypeError):
                 pass  # Retained public evidence can still establish the incident.
         for entry in entries if rejected is None else []:
@@ -123,11 +136,21 @@ def reconcile_rejections(notes: list) -> None:
         if subject is None:
             continue
         definition = hashlib.sha256((CONFIG.vault_dir / subject.path).read_bytes()).hexdigest()
-        reason = re.sub(r'[0-9a-f]{8}-[0-9a-f-]{27,}', '<source>', rejected['reason'])
-        identity = hashlib.sha256(refinement._json(
-            [run['task_ref'], definition, rejected['tool'], reason]).encode()).hexdigest()
+        identity = _incident(run['task_ref'], definition, rejected['tool'], rejection or rejected['reason'])
+        # A failed run without a rejected step has no decision to improve.
+        finding = None if rejected['tool'] == 'execution' else incidents.contract_dead_end(run, entries, terminal)
+        if finding:
+            # No candidate body can change a Tool contract or the output limit.
+            # Its own key: another run of this rejection must not replace the finding.
+            incidents.attention(refinement._hash((identity + ':implementation').encode()),
+                                run_id, run['task_ref'], finding, rejected['reason'])
+            _INSPECTED_RUNS.add(run_id)
+            continue
         receipt_id = 'autosaddler-incident-' + identity
-        prior = INDEX.run(receipt_id)
+        # Jobs admitted before the identity became the validator's text hashed the
+        # run's first rejected result verbatim; they stay deduplicated.
+        prior = INDEX.run(receipt_id) or (legacy and INDEX.run(
+            'autosaddler-incident-' + _incident(run['task_ref'], definition, *legacy)))
         if prior is not None:
             # Dispatch is not evaluation completion. A settled stale case with
             # no report may be prepared once for the new implementation, while

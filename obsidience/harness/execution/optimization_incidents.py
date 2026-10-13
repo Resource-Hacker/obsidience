@@ -154,7 +154,8 @@ def prepare(run_id: str) -> dict:
         raise ValueError('This historical execution has no complete decision evidence; retain its receipts for implementation review')
     samples = [refinement._load('decisions', identity) for identity in json.loads(path.read_text())]
     selected, errors = None, []
-    for sample in samples:
+    # The unrecovered rejection is the run's last; it corrected the earlier ones itself.
+    for sample in samples[-1:]:
         try:
             current = revalidate(sample)
             valid, _reason = validate_decision(current, current['tool'], current['args'])
@@ -280,6 +281,32 @@ def recover_capture(run_id: str) -> None:
         messages.extend([{'role': 'assistant', 'content': json.dumps({'tool': name, 'args': args})},
                          {'role': 'user', 'content': 'Observation:\n' + (result if isinstance(result, str) else json.dumps(result))}])
         context['trace'].append(entry)
+
+
+def contract_dead_end(run: dict, entries: list, sample: dict | None) -> str | None:
+    """Name a terminal failure that no Agent or Runbook body edit can correct.
+
+    A cited Article that vault.read returned only in part, and a run that ended
+    without a dispatchable Tool call, are Tool-contract or code findings.
+    """
+    found = []
+    if sample is not None and sample['tool'] == 'task.complete':
+        evidence = sample['args'].get('evidence')
+        cited = '\n'.join(str(item) for item in evidence) if isinstance(evidence, list) else ''
+        for ref, read in sample['context'].get('_article_reads', {}).items():
+            if read.get('complete') is False and ref in cited:
+                found.append(f'the rejected completion cites [[{ref}]], which vault.read returned only in part '
+                             f'(ranges {read.get("ranges")} of {read.get("total_characters")} characters)')
+    summary = str(run.get('summary') or '')
+    last = entries[-1] if entries and isinstance(entries[-1], dict) else {}
+    limit = last.get('finish_reason') == 'max-tokens' or 'ended with max-tokens' in summary
+    if run['status'] in {'failed', 'blocked'} and (
+            limit or 'valid action block' in summary or 'invalid native Tool calls' in summary):
+        found.append(f'the run ended on "{summary[:200]}"' + (' with its last reply cut off at the output limit' if limit else ''))
+    if not found:
+        return None
+    return ('Implementation finding, not an instruction failure: ' + '; '.join(found)
+            + f'. Run {run["id"]}; no optimization job was admitted.')
 
 
 def validate_decision(sample: dict, tool: str, args: dict) -> tuple[bool, str]:
