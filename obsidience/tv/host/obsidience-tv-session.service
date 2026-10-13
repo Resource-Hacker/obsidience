@@ -16,7 +16,7 @@ Environment=XDG_CURRENT_DESKTOP=sway
 UnsetEnvironment=WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE
 ExecStartPre=/usr/bin/install -d -m 0700 %t/obsidience-tv
 ExecStartPre=/usr/bin/rm -f %t/obsidience-tv/wayland
-ExecStart=/usr/bin/env WLR_RENDER_DRM_DEVICE=${TV_RENDER_NODE} /usr/bin/sway --unsupported-gpu -c ${TV_SWAY_CONFIG}
+ExecStart=/usr/bin/env WLR_RENDER_DRM_DEVICE=${TV_RENDER_NODE} WLR_RENDERER=${TV_RENDERER} /usr/bin/sway --unsupported-gpu -c ${TV_SWAY_CONFIG}
 ExecStopPost=/usr/bin/rm -f %t/obsidience-tv/wayland
 Restart=on-failure
 RestartSec=3

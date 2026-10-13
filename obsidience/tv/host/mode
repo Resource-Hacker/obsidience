@@ -7,6 +7,8 @@
           when the last one exits: ~/.config/gamemode.ini starts obsidience-tv-mode@<mode>.
 
   mode normal|gaming   switch; nothing happens when the TV is already in that mode
+  mode reload          restart the session in its current mode (after a change to its units or
+                       mode files), putting the channel and the stream back like a switch
   mode client          make the television's Moonlight ask for the current mode's stream size
   mode status          print the current mode
 
@@ -216,9 +218,9 @@ def listening():
         return False
 
 
-def switch(mode):
+def switch(mode, reload=False):
     before = current()
-    if before == mode:
+    if before == mode and not reload:
         say(f'TV mode is already {mode}')
         return
     playing = tuner({'op': 'state'})
@@ -262,14 +264,14 @@ def main():
     if op == 'status':
         say(current())
         return
-    if op not in ('normal', 'gaming', 'client'):
+    if op not in ('normal', 'gaming', 'reload', 'client'):
         raise SystemExit(__doc__)
     RUNTIME.mkdir(mode=0o700, exist_ok=True)
     with open(RUNTIME / 'mode.lock', 'w') as lock:  # One switch at a time; a second waits its turn.
         fcntl.flock(lock, fcntl.LOCK_EX)
         if op == 'client':
             sys.exit(0 if client(Television(), restart=False) else 1)
-        switch(op)
+        switch(current() if op == 'reload' else op, reload=op == 'reload')
 
 
 if __name__ == '__main__':
