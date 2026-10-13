@@ -344,10 +344,9 @@ def action_schema(allowed: list[str], *, completion_no_change: bool = False, com
         if name == "harness.repair" and repair_rows:
             # Declare only the call the inspected plan permits: a Task row takes
             # task and run_id, the Hindsight row takes component. A plan holding
-            # both kinds keeps both alternatives.
-            kinds = {"component" in row for row in repair_rows}
-            if len(kinds) == 1:
-                args = args["anyOf"][1 if kinds.pop() else 0]
+            # both kinds declares the Task call first: their union cannot complete
+            # it once run_id is written, and every attempt needs a fresh plan.
+            args = args["anyOf"][0 if any("component" not in row for row in repair_rows) else 1]
         if name == "vault.propose" and proposal_mode == "link":
             args = args["anyOf"][0]
             args["properties"]["action"] = {"const": "update"}
