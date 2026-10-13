@@ -56,6 +56,7 @@ interface ActiveNodeSprites {
   focusMaterial: THREE.SpriteMaterial;
   wave: THREE.Sprite;
   waveMaterial: THREE.SpriteMaterial;
+  born: number;
 }
 
 export interface Knowledge3dLabelLayer {
@@ -441,7 +442,7 @@ export function createKnowledge3dLabelLayer(options: { capitals?: boolean } = {}
           focus.renderOrder = 12;
           wave.renderOrder = 11;
           scene.add(wave, focus);
-          active = { focus, focusMaterial, wave, waveMaterial };
+          active = { focus, focusMaterial, wave, waveMaterial, born: now };
           activeSprites.set(id, active);
         }
         const x = point.x * width;
@@ -451,12 +452,16 @@ export function createKnowledge3dLabelLayer(options: { capitals?: boolean } = {}
         const waveAmount = 0.5 - Math.cos(phase * Math.PI * 2) * 0.5;
         active.focus.position.set(x, y, 0);
         active.wave.position.set(x, y, 0);
-        active.focus.scale.setScalar(radius * 2);
-        active.wave.scale.setScalar((radius + 7) * 2 * (0.78 + waveAmount * 0.64));
+        // The pair pops on as the front arrives: small, past full size, then settled.
+        const age = Math.min(1, (now - active.born) / 340);
+        const pop = age < 0.55 ? 0.35 + (age / 0.55) * 0.95 : 1.3 - ((age - 0.55) / 0.45) * 0.3;
+        const shown = Math.min(1, age / 0.55);
+        active.focus.scale.setScalar(radius * 2 * pop);
+        active.wave.scale.setScalar((radius + 7) * 2 * (0.78 + waveAmount * 0.64) * pop);
         active.focusMaterial.color.set(meta.accent);
         active.waveMaterial.color.set(meta.accent);
-        active.focusMaterial.opacity = 0.82;
-        active.waveMaterial.opacity = 0.08 + waveAmount * 0.54;
+        active.focusMaterial.opacity = 0.82 * shown;
+        active.waveMaterial.opacity = (0.08 + waveAmount * 0.54) * shown;
       }
       for (const [id, entry] of activeSprites) {
         if (!wantedActive.has(id)) {
