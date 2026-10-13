@@ -52,12 +52,6 @@ export function memoryInitialOffset(id: string) {
   return {y: Math.cos(angle) * radius, z: Math.sin(angle) * radius};
 }
 
-/** A bank's memory in glass layers by how connected each record is: the
- *  share of the bank, most connected first, that makes each layer from the
- *  core outward. A small bank carries fewer layers. */
-export function memoryLayerShares(count: number): number[] {
-  return count < 24 ? [1] : count < 160 ? [0.3, 1] : [0.12, 0.45, 1];
-}
 /** Shared entities are broad context; semantic and evidence links are specific. */
 export function memoryRelationshipWeight(edge: ProviderEdge): number {
   const weight = Number.isFinite(edge.weight) ? Math.max(0, Math.min(1, edge.weight!)) : 1;

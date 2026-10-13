@@ -4,7 +4,7 @@ import { GraphPublisher, type GraphControl } from "./graph-stream";
 import { providerGraphAssets, providerLinkIndex } from "./provider-graph-assets";
 import { CODE_STRUCTURE } from "./code-spherical-layout";
 import { createKnowledge3dLabelLayer, type Knowledge3dLabelMeta } from "@/components/themes/obsidience/knowledge-3d-labels";
-import { memoryTimeAxis, memoryInitialOffset, memoryRelationshipWeight, memoryLens, memoryLensX, memoryLayerShares, type MemoryLens, type MemoryTimeAxis } from "./memory-time-layout";
+import { memoryTimeAxis, memoryInitialOffset, memoryRelationshipWeight, memoryLens, memoryLensX, type MemoryLens, type MemoryTimeAxis } from "./memory-time-layout";
 import { createMemoryGlass, type MemoryGlass } from "./memory-glass";
 import { loadGraphTuning, MAIN_GRAPH_ID } from "@/lib/graph-tuning";
 
@@ -34,26 +34,6 @@ type LayoutPoint = {x: number; y: number; z: number; vx?: number; vy?: number; v
 export type ProviderPresentation = Pick<GraphPublisher, "publishCatalog" | "publishState" | "frame" | "dispose">;
 export type ProviderPresentationFactory = (canvas: HTMLCanvasElement, command: (command: GraphControl) => void,
   redraw: () => void, consumers: (count: number) => void) => ProviderPresentation;
-/** Each record's glass layer, 0 for the core: its rank in the bank by how many
- *  connections it has, the plain order of time aside, which every record has
- *  alike. */
-function memoryLayers(nodes: readonly ProviderNode[], edges: readonly ProviderEdge[]): Uint8Array {
-  const index = new Map(nodes.map((node, i) => [node.id, i]));
-  const links = new Float32Array(nodes.length);
-  for (const edge of edges) {
-    if (edge.kind === "temporal") continue;
-    const source = index.get(edge.source), target = index.get(edge.target);
-    if (source === undefined || target === undefined || source === target) continue;
-    links[source] += 1; links[target] += 1;
-  }
-  const ranked = [...links.keys()].sort((a, b) => links[b] - links[a] || a - b);
-  const shares = memoryLayerShares(nodes.length);
-  const layers = new Uint8Array(nodes.length);
-  ranked.forEach((node, rank) => {
-    layers[node] = shares.findIndex(share => rank < Math.max(1, Math.round(share * nodes.length)));
-  });
-  return layers;
-}
 /** One disposable renderer; provider layout workers share its visible lifetime. */
 export class ProviderGraphScene {
   readonly presentation: ProviderPresentation;
@@ -132,8 +112,8 @@ export class ProviderGraphScene {
     this.scene.add(this.group);
     this.scene.add(this.timeGuides);
     if (!code) {
-      // A memory stream wears the Knowledge orb's glass and follows the orb's
-      // saved Glass settings.
+      // A memory stream carries one layer of the Knowledge orb's glass, which
+      // follows the orb's saved Glass settings.
       this.glass = createMemoryGlass();
       this.glass.applyTuning(loadGraphTuning(MAIN_GRAPH_ID));
       this.scene.add(this.glass.group);
@@ -371,7 +351,10 @@ export class ProviderGraphScene {
       this.glass.setRecords({
         positions: this.points.geometry.getAttribute("position").array as Float32Array,
         positionTexture: assets.positions, radii, tints: this.nodeColors,
-        layers: memoryLayers(this.nodes, this.edges),
+        // Connections: every link but the plain order of time, which each
+        // record has alike.
+        links: Float32Array.from(this.nodes, node => (this.linkIndex.adjacency.get(node.id) || [])
+          .filter(edge => this.edges[edge].kind !== "temporal").length),
         weights: Float32Array.from(this.nodes, (node, i) => radii[i] * Math.sqrt(1
           + (this.linkIndex.adjacency.get(node.id) || []).reduce((sum, edge) => sum + memoryRelationshipWeight(this.edges[edge]), 0))),
       });

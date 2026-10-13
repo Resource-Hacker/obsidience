@@ -731,8 +731,8 @@ Linux services -> Hyprland -> adapter/hyprland -> Shell API -> one Quickshell ho
   sectors, bearings, named-branch cases or second solver clock. Links follow their shells
   between exact endpoints. Pending Link previews exist only in the Scene; rejection removes
   only that preview; never restore an old whole-graph snapshot. Memory is an organic
-  chronological tube that winds into its own helix; its glass follows that helix in
-  layers by how connected a record is, and never moves a record; Code anchors its project and never displays layout fallbacks
+  chronological tube that winds into its own helix; one layer of glass twists with
+  it around the best connected records and never moves a record; Code anchors its project and never displays layout fallbacks
   as relationships. Proximity never attests a relationship.
 - **Thinking animation** ignites and labels exactly the supplied packet and Tool-return
   refs. Ancestors and the Articles one link from a supplied one are passed, not consulted:

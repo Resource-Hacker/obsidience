@@ -1,16 +1,13 @@
-// A memory stream drawn inside blown glass, in the manner of the Knowledge
-// orb: up to three sleeves nested about the stream's own winding centre line,
-// so the glass follows the helix the memories settle into, each sleeve taking
-// the stream's real outline, with a sheen of fine lines and depth-of-field
-// dust.
-// The sleeves sort the bank by how connected its memories are: the hubs lie
-// in the core sleeve, the most solid, and the loosely linked ones in the
-// outermost, the clearest. A record lying near its own sleeve presses a crater
-// into it — wider and deeper the larger and better linked the record — and
-// every record carries a seed of slowly turning dust in its own colour. The
-// glass follows the records as they are displayed, lens included; it adds no
-// force nodes or picking targets, and being pure added light it needs no
-// sorting or depth test.
+// One layer of the Knowledge orb's glass for a memory stream, twisting through
+// it. The stream itself is drawn as it always was. The glass follows the
+// memories that matter most, the best connected: its centre line is where
+// they lie along time, so it winds with the helix the bank settles into, and
+// it is as wide as they spread. Those records press craters into it — wider
+// and deeper the larger and better linked — and carry a seed of slowly turning
+// dust in their own colour; every other record is left as it was. The glass
+// follows the records as they are displayed, lens included; it adds no force
+// nodes or picking targets, and being pure added light it needs no sorting or
+// depth test.
 import * as THREE from "three";
 import {
   ADDITIVE, BOKEH_FRAGMENT, LIGHT_GLSL, NOISE_GLSL, type Knowledge3dGlass,
@@ -22,18 +19,18 @@ const PROFILE = 160;
 const SURVEY = [1024, 256] as const;
 /** The smooth maximum that joins neighbouring craters; it fits a half float. */
 const SHARPNESS = "8.0";
-/** Each sleeve's share of the stream's outline, innermost first, by how many
- *  a bank carries. */
-const SHARES = [[1], [0.55, 1], [0.36, 0.68, 1]];
-/** Sheen lines around each sleeve, innermost first. Fives, so the heavier
- *  fifth line also meets itself where the sleeve closes. */
-const LINES = [15, 20, 30];
-/** The outline stands this far above the stream's outermost records. A
- *  crater's floor lies this far below its sleeve by [lightest, heaviest], as
- *  fractions of the sleeve's radius; a record lying deeper still takes its
- *  crater down with it by at most DEEPER, and one far from its sleeve presses
- *  none. The mouth reaches this share of the way to a neighbour. */
-const RIM = 0.05;
+/** The share of a bank, best connected first, that the glass belongs to. */
+const CORE = 0.15;
+/** The glass stands this many times as far from its centre line as its
+ *  records typically lie, so most of them rest just inside it. */
+const WIDTH = 1.35;
+/** Sheen lines around the glass. Fives, so the heavier fifth line also meets
+ *  itself where the glass closes. */
+const LINES = [15];
+/** A crater's floor lies this far below the glass by [lightest, heaviest], as
+ *  fractions of its radius; a record lying deeper still takes its crater down
+ *  with it by at most DEEPER, and one far from the glass presses none. The
+ *  mouth reaches this share of the way to a neighbour. */
 const FLOOR = [0.02, 0.07];
 const DEEPER = 0.1;
 const MOUTH = [0.55, 0.85];
@@ -334,8 +331,8 @@ export interface MemoryGlassRecords {
   weights: Float32Array;
   /** Colour per record, three floats. */
   tints: Float32Array;
-  /** Which sleeve each record belongs to, 0 for the core. */
-  layers: Uint8Array;
+  /** How many connections each record has. */
+  links: Float32Array;
 }
 
 export interface MemoryGlass {
@@ -486,7 +483,8 @@ export function createMemoryGlass(): MemoryGlass {
   let records: MemoryGlassRecords | null = null;
   let count = 0;
   let craters = new Float32Array(0), shapes = new Float32Array(0);
-  let presses = new Float32Array(0);
+  let presses = new Float32Array(0), pulls = new Float32Array(0);
+  let core = new Uint8Array(0), cored = 1;
   const raw = new Float32Array(PROFILE), rim = new Float32Array(PROFILE), scratch = new Float32Array(PROFILE);
   const tally = new Float32Array(PROFILE), centreY = new Float32Array(PROFILE), centreZ = new Float32Array(PROFILE);
   // The slices of the last survey, for placing a ripple about the centre line.
@@ -498,129 +496,119 @@ export function createMemoryGlass(): MemoryGlass {
 
   const survey = (): boolean => {
     if (!records || !count) return false;
-    const { positions, radii, layers } = records;
+    const { positions, radii } = records;
     let first = Infinity, last = -Infinity;
     for (let i = 0; i < count; i++) {
       first = Math.min(first, positions[i * 3]);
       last = Math.max(last, positions[i * 3]);
     }
-    // The stream winds about the time axis as its records settled: its centre
-    // line is where they lie near each slice, read closely so the turns of
-    // the helix survive, then eased.
     const slice = Math.max(6, (last - first) / 110);
     const window = 2;
     const start = first - (2 * window + 1) * slice;
     const slices = Math.min(PROFILE, Math.ceil((last - first) / slice) + 4 * window + 3);
     const span = (slices - 1) * slice;
+    // The glass's centre line: where the well connected lie near each slice,
+    // each record counted by its pull, eased so the glass twists smoothly with
+    // the helix the bank settles into.
     raw.fill(0); scratch.fill(0); tally.fill(0);
-    let tiers = 1;
+    let from = slices, to = -1;
     for (let i = 0; i < count; i++) {
       const at = Math.round((positions[i * 3] - start) / slice);
-      raw[at] += positions[i * 3 + 1]; scratch[at] += positions[i * 3 + 2]; tally[at] += 1;
-      tiers = Math.max(tiers, layers[i] + 1);
+      raw[at] += pulls[i] * positions[i * 3 + 1]; scratch[at] += pulls[i] * positions[i * 3 + 2]; tally[at] += pulls[i];
+      from = Math.min(from, at); to = Math.max(to, at);
     }
     let up = NaN, out = NaN;
     for (let at = 0; at < slices; at++) {
       let y = 0, z = 0, near = 0;
-      for (let other = Math.max(0, at - 1); other <= Math.min(slices - 1, at + 1); other++) {
-        y += raw[other]; z += scratch[other]; near += tally[other];
+      for (let other = Math.max(0, at - window); other <= Math.min(slices - 1, at + window); other++) {
+        const share = 1 - Math.abs(other - at) / (window + 1);
+        y += raw[other] * share; z += scratch[other] * share; near += tally[other] * share;
       }
-      if (near) { up = y / near; out = z / near; }
+      if (near > 0) { up = y / near; out = z / near; }
       centreY[at] = up; centreZ[at] = out;
     }
     // Before the first record the centre line lies where it first appears.
     for (let at = slices - 1; at >= 0; at--) {
       if (Number.isNaN(centreY[at])) { centreY[at] = up; centreZ[at] = out; } else { up = centreY[at]; out = centreZ[at]; }
     }
-    for (const centre of [centreY, centreZ]) {
-      for (let pass = 0; pass < 2; pass++) {
-        scratch.set(centre);
+    const ease = (values: Float32Array, open: boolean, passes: number) => {
+      for (let pass = 0; pass < passes; pass++) {
+        scratch.set(values);
         for (let at = 0; at < slices; at++) {
-          centre[at] = (scratch[Math.max(0, at - 1)] + 2 * scratch[at] + scratch[Math.min(slices - 1, at + 1)]) / 4;
+          // An open end falls to nothing; a closed one holds its own value.
+          const before = at ? scratch[at - 1] : open ? 0 : scratch[at];
+          const after = at < slices - 1 ? scratch[at + 1] : open ? 0 : scratch[at];
+          values[at] = (before + 2 * scratch[at] + after) / 4;
         }
       }
-    }
+    };
+    ease(centreY, false, 5); ease(centreZ, false, 5);
     const centred = (values: Float32Array, x: number) => {
       const along = (x - start) / slice, at = Math.min(slices - 2, Math.max(0, Math.floor(along)));
       return values[at] + (values[at + 1] - values[at]) * (along - at);
     };
     frame = { start, slice, slices };
-    // Its outline: the farthest any record reaches from that centre line near
-    // each slice, widened so it clears them and eased so the glass swells and
-    // necks gently. The window is wider than the easing, so the outline still
-    // clears every record, and it falls to nothing past both ends.
+    // Its radius: how far from that line the well connected typically lie,
+    // and a little more, closing past the first and last record.
     raw.fill(0);
     for (let i = 0; i < count; i++) {
       const x = positions[i * 3], at = Math.round((x - start) / slice);
-      raw[at] = Math.max(raw[at], Math.hypot(positions[i * 3 + 1] - centred(centreY, x),
-        positions[i * 3 + 2] - centred(centreZ, x)) + radii[i]);
+      raw[at] += pulls[i] * ((positions[i * 3 + 1] - centred(centreY, x)) ** 2 + (positions[i * 3 + 2] - centred(centreZ, x)) ** 2);
     }
-    // A neck never closes between the first and last record.
-    for (let at = 2 * window + 1; at < slices - 2 * window - 1; at++) raw[at] = Math.max(raw[at], 12);
     const outline = rim.subarray(0, PROFILE);
-    outline.fill(0);
+    let held = 0;
     for (let at = 0; at < slices; at++) {
-      let reach = 0;
-      for (let near = Math.max(0, at - window); near <= Math.min(slices - 1, at + window); near++) reach = Math.max(reach, raw[near]);
-      outline[at] = reach;
+      let spread = 0, near = 0;
+      for (let other = Math.max(0, at - window); other <= Math.min(slices - 1, at + window); other++) {
+        const share = 1 - Math.abs(other - at) / (window + 1);
+        spread += raw[other] * share; near += tally[other] * share;
+      }
+      if (near > 0) held = WIDTH * Math.sqrt(spread / near) + 6;
+      outline[at] = at >= from - 1 && at <= to + 1 ? held : 0;
     }
-    scratch.set(outline);
-    for (let at = 0; at < slices; at++) {
-      outline[at] = ((at ? scratch[at - 1] : 0) + 2 * scratch[at] + (at < slices - 1 ? scratch[at + 1] : 0)) / 4;
-    }
+    ease(outline, true, 3);
     let greatest = 0, mean = 0, occupied = 0;
     profileData.fill(0);
     for (let at = 0; at < slices; at++) {
-      if (outline[at] > 0) outline[at] = outline[at] * (1 + RIM * craterDepth) + 6 * Math.min(1, outline[at] / 14);
       if (outline[at] > 0) { greatest = Math.max(greatest, outline[at]); mean += outline[at]; occupied += 1; }
       profileData.set([THREE.DataUtils.toHalfFloat(outline[at]), THREE.DataUtils.toHalfFloat(centreY[at]),
         THREE.DataUtils.toHalfFloat(centreZ[at])], at * 4);
     }
-    mean /= Math.max(1, occupied);
-    // Each sleeve stands at its share of that outline.
-    const shares = SHARES[tiers - 1];
-    const reaches = [0, 0, 0], spacings = [0, 0, 0], members = [0, 0, 0];
-    for (let i = 0; i < count; i++) members[layers[i]] += 1;
-    sleeves.forEach((sleeve, order) => {
-      sleeve.glass.visible = sleeve.dust.visible = order < tiers && members[order] > 0;
-      if (order >= tiers) return;
-      reaches[order] = shares[order] * greatest;
-      const area = occupied * slice * Math.PI * 2 * mean * shares[order];
-      // How far apart this sleeve's records lie, were they spread evenly.
-      sleeve.spacing = spacings[order] = Math.sqrt(area / Math.max(1, members[order]));
-      // Dust shows in proportion to the sleeve's radius where it lies.
-      sleeve.density = DUST_PER_SLEEVE * (occupied / slices) * (mean / greatest) / area;
-    });
     if (!(greatest > 0)) return false;
+    mean /= occupied;
     profile.needsUpdate = true;
     shared.uAxis.value.set(start, span, greatest, slices);
+    const [sleeve] = sleeves;
+    const area = occupied * slice * Math.PI * 2 * mean;
+    // How far apart the glass's records lie, were they spread evenly over it.
+    sleeve.spacing = Math.sqrt(area / cored);
+    // Dust shows in proportion to the glass's radius where it lies.
+    sleeve.density = DUST_PER_SLEEVE * (occupied / slices) * (mean / greatest) / area;
 
-    // A record presses its own sleeve where it lies near it: fully just under
-    // the glass, less the farther it is from it, and deeper for a heavier one.
-    const deepest = [1e-4, 1e-4, 1e-4];
+    // One of its records presses the glass where it lies near it: fully just
+    // inside, less the farther it is from it, and deeper for a heavier one.
+    let deepest = 1e-4;
     for (let i = 0; i < count; i++) {
-      const order = layers[i];
+      craters[i * 4 + 3] = 0;
+      if (!core[i]) continue;
       const x = positions[i * 3];
       const y = positions[i * 3 + 1] - centred(centreY, x), z = positions[i * 3 + 2] - centred(centreZ, x);
       const reach = centred(outline, x);
-      const sleeve = shares[order] * reach;
-      const band = (shares[order] - (order ? shares[order - 1] : 0)) * reach;
-      const under = sleeve - Math.hypot(y, z);
-      const away = Math.min(1, Math.max(0, (Math.abs(under) / Math.max(band, 1e-3) - 0.35) / 0.55));
-      const depth = (Math.min(Math.max(0, under), DEEPER * sleeve)
-        + (FLOOR[0] + (FLOOR[1] - FLOOR[0]) * presses[i]) * sleeve * craterDepth) * (1 - away * away * (3 - 2 * away));
+      const under = reach - Math.hypot(y, z);
+      const away = Math.min(1, Math.max(0, (Math.abs(under) / Math.max(reach, 1e-3) - 0.35) / 0.55));
+      const depth = (Math.min(Math.max(0, under), DEEPER * reach)
+        + (FLOOR[0] + (FLOOR[1] - FLOOR[0]) * presses[i]) * reach * craterDepth) * (1 - away * away * (3 - 2 * away));
       craters.set([(x - start) / span, (Math.atan2(z, y) / (Math.PI * 2) + 1) % 1,
         // The mouth always clears the record's own icon.
-        Math.max(2.4 * radii[i], (MOUTH[0] + (MOUTH[1] - MOUTH[0]) * presses[i]) * spacings[order]), depth], i * 4);
-      shapes[i * 4 + 2] = sleeve;
-      shapes[i * 4 + 3] = order;
-      deepest[order] = Math.max(deepest[order], depth);
+        Math.max(2.4 * radii[i], (MOUTH[0] + (MOUTH[1] - MOUTH[0]) * presses[i]) * sleeve.spacing), depth], i * 4);
+      shapes[i * 4 + 2] = reach;
+      deepest = Math.max(deepest, depth);
     }
-    for (let i = 0; i < count; i++) craters[i * 4 + 3] /= deepest[layers[i]];
+    for (let i = 0; i < count; i++) craters[i * 4 + 3] /= deepest;
     (pressGeometry.getAttribute("aCrater") as THREE.BufferAttribute).needsUpdate = true;
     (pressGeometry.getAttribute("aShape") as THREE.BufferAttribute).needsUpdate = true;
     pressMaterial.uniforms.uSpan.value = span;
-    sleeves.forEach((sleeve, order) => sleeve.shape.set(shares[order] ?? 1, reaches[order], deepest[order]));
+    sleeve.shape.set(1, greatest, deepest);
     seedMaterial.uniforms.uSleeve.value.set(1, greatest, 0);
     return true;
   };
@@ -633,6 +621,14 @@ export function createMemoryGlass(): MemoryGlass {
       craters = new Float32Array(count * 4);
       shapes = new Float32Array(count * 4);
       presses = new Float32Array(count);
+      // The glass belongs to the best connected records, and each record draws
+      // its centre line by how connected it is beside the bank's great hubs.
+      const ranked = [...next.links.keys()].sort((a, b) => next.links[b] - next.links[a] || a - b);
+      cored = Math.max(1, Math.round(CORE * count));
+      core = new Uint8Array(count);
+      for (let rank = 0; rank < cored && rank < count; rank++) core[ranked[rank]] = 1;
+      const hub = Math.max(1, next.links[ranked[Math.floor(count * 0.005)] ?? 0] ?? 1);
+      pulls = Float32Array.from(next.links, (links) => 0.02 + Math.pow(Math.min(1, links / hub), 1.5));
       let lightest = Infinity, heaviest = 0;
       for (let i = 0; i < count; i++) {
         lightest = Math.min(lightest, next.weights[i]);
@@ -646,6 +642,7 @@ export function createMemoryGlass(): MemoryGlass {
         const r = next.tints[i * 3], g = next.tints[i * 3 + 1], b = next.tints[i * 3 + 2];
         shapes[i * 4] = (r - b) / 2;
         shapes[i * 4 + 1] = (2 * g - r - b) / 4;
+        if (!core[i]) continue;
         for (let mote = Math.round(8 + 16 * presses[i]); mote > 0; mote--) {
           const y = random() * 2 - 1, angle = random() * Math.PI * 2, ring = Math.sqrt(1 - y * y), radius = Math.sqrt(random());
           motes.push(Math.cos(angle) * ring * radius, y * radius, Math.sin(angle) * ring * radius);
@@ -679,7 +676,7 @@ export function createMemoryGlass(): MemoryGlass {
         craterDepth = glass.craterDepth;
         dirty = true;
       }
-      const solids = [glass.shellLayer1, glass.shellLayer2, glass.shellLayer3];
+      const solids = [glass.shellLayer1];
       sleeves.forEach((sleeve, order) => {
         sleeve.glassUniforms.uSolid.value = solids[order] * PRESENCE;
         // Whole fives, so the lines and the heavier fifth one meet where the
@@ -695,7 +692,7 @@ export function createMemoryGlass(): MemoryGlass {
     resize(pixelRatio) { shared.uPixelRatio.value = pixelRatio; },
     ripple(record) {
       if (!records || record >= count) return;
-      const sleeve = sleeves[records.layers[record]];
+      const [sleeve] = sleeves;
       const drop = sleeve.nextDrop;
       sleeve.nextDrop = (drop + 1) % 8;
       const { positions, tints } = records;
