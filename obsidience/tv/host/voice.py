@@ -150,6 +150,7 @@ def follow_clients(state, stopping):
     while not stopping.is_set():
         try:
             with socket.create_connection(CONTROL, 3) as sock:
+                sock.settimeout(None)  # It waits for the server's next notification, however long.
                 reader = sock.makefile('rb')
                 while not stopping.is_set():
                     sock.sendall(b'{"id":1,"jsonrpc":"2.0","method":"Server.GetStatus"}\r\n')
