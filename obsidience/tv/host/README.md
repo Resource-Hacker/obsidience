@@ -100,14 +100,17 @@ later. Measured at the desk microphone: the television 46 ms behind the desk spe
 steady to a few ms, which the owner judged in step by ear; sound that starts after a long
 silence is not clipped.
 
-Speech can afford 0.3 s; the chirps cannot. So `voice.py` puts the stream on the Snapcast sink
-only from the end of the "accepted" chirp (after the owner's words, before the reply) to the
-end of the chirp that closes the reply. The opening chirp and the "accepted" chirp play on
-the desk speakers directly. It reads those moments from the Harness (`/ws/trace` chirp lines,
-`/ws/realtime` state) and the television's presence from the Snapcast server; without any of
-them, or when the Executive speaks from another speaker than the desk client's, the voice
-stays on its own speaker. The echo reference is unchanged: it is the monitor of the physical
-speaker, which carries the voice whichever way it arrives there.
+Speech can afford 0.3 s; the chirp that opens the line cannot (owner: it must be as snappy as
+possible). So while the Executive waits for its name the stream is on its own speaker and the
+opening chirp plays there directly. Once the line is open and that chirp has ended, while the
+owner speaks, `voice.py` moves the stream onto the Snapcast sink: the "accepted" chirp, the
+reply and the closing chirp play on both speakers in step, and then it moves back. (The reply
+follows the "accepted" chirp without a gap, so there is no later quiet moment to move in.) It
+reads those moments from the Harness (`/ws/trace` chirp lines, `/ws/realtime` state) and the
+television's presence from the Snapcast server; without any of them, or when the Executive
+speaks from another speaker than the desk client's, the voice stays on its own speaker. The
+echo reference is unchanged: it is the monitor of the physical speaker, which carries the
+voice whichever way it arrives there.
 
 Tried first and dropped: sending the voice through Sunshine's own audio stream and delaying
 the desk speakers by a fixed amount. That path's delay wandered between about 190 and 270 ms

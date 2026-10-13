@@ -8,13 +8,15 @@ sink, obsidience_tv_voice; one client plays on the desk speakers (obsidience-tv-
 and one on the television (the Snapcast app there), each at the server's time plus the server's
 buffer. The price is that buffer: sound on this route starts about 0.3 s later.
 
-Speech can afford that; the chirps cannot (owner, 2026-10-12: the chirp that opens the line must
-be as snappy as possible). So the speech worker's one playback stream is on the Snapcast sink
-only while a reply is spoken: from the end of the "accepted" chirp, which follows the owner's
-words and precedes the reply by the model's thinking time, to the end of the chirp that closes
-the reply. The opening chirp and the "accepted" chirp play on the desk speakers directly, as
-they always did. Without a television client, the desk client, the Harness or the Snapcast
-server, the voice simply stays on its own speaker.
+Speech can afford that; the chirp that opens the line cannot (owner, 2026-10-12: it must be as
+snappy as possible). So the speech worker's one playback stream is on its own speaker while
+the Executive waits for its name, and the opening chirp plays there directly, as it always
+did. Once the line is open and that chirp has ended, while the owner speaks, the stream moves
+onto the Snapcast sink: the "accepted" chirp, the reply and the chirp that closes it then play
+on both speakers in step. (The reply follows the "accepted" chirp without a gap, so there is
+no later quiet moment to move in.) After the closing chirp the stream goes back. Without a
+television client, the desk client, the Harness or the Snapcast server, the voice simply
+stays on its own speaker.
 
 Nothing else is touched: the worker still plays one stream, and the microphone's echo reference
 is still the monitor of the physical speaker, which carries the voice whichever way it arrives.
@@ -53,7 +55,10 @@ CLOSING = {'complete', 'cancel', 'error'}
 # A chirp's last samples are still in the worker's output buffer when it reports the chirp
 # written (40 ms chunks plus the audio server's buffer); the stream moves once they have left.
 DRAIN = 0.25
-# A reply longer than this without its closing chirp is not waited for.
+# The opening chirp is queued within milliseconds of the line opening; a line that has been open
+# this long without one was opened inside a sentence and has none.
+CHIRP_GRACE = 0.2
+# An exchange longer than this without its closing chirp is not waited for.
 TURN_LIMIT = 300.0
 
 
@@ -63,37 +68,49 @@ class State:
     def __init__(self):
         self.changed = threading.Event()
         self.lock = threading.Lock()
-        self.listening = False   # A television client and the desk client are connected.
-        self.turn_since = None   # Monotonic time the current reply's route began to matter.
-        self.move_after = 0.0    # Not before this monotonic time (a chirp's tail is draining).
-        self.playback_idle = True
+        self.listening = False     # A television client and the desk client are connected.
         self.harness = False
+        self.line_open = False     # The Executive listens for a command (or is in a conversation).
+        self.opened_at = None      # Monotonic time the line opened, until this exchange's route is decided.
+        self.chirping = False      # The opening chirp is being written.
+        self.exchange = None       # Monotonic time since which this exchange takes the Snapcast route.
+        self.move_after = 0.0      # Not before this monotonic time (a chirp's tail is draining).
 
     def cue(self, name, edge):
         with self.lock:
             now = time.monotonic()
-            if edge != 'finished':
-                return
-            if name == 'accepted':
-                self.turn_since, self.move_after = now, now + DRAIN
-            elif name in CLOSING:
-                self.turn_since, self.move_after = None, now + DRAIN
+            if name == 'ready':
+                self.chirping = edge == 'started'
+                if edge == 'finished' and self.line_open:
+                    self.exchange, self.opened_at, self.move_after = now, None, now + DRAIN
+            elif name in CLOSING and edge == 'finished':
+                self.exchange, self.opened_at, self.move_after = None, None, now + DRAIN
         self.changed.set()
 
     def voice_state(self, state):
         with self.lock:
-            self.playback_idle = (state.get('playback') or {}).get('status', 'idle') == 'idle'
-            if not state.get('ready'):
-                self.turn_since = None  # No voice at all: nothing to keep in step.
+            line_open = bool(state.get('ready')) and bool(state.get('command_open'))
+            if line_open and not self.line_open:
+                self.opened_at = time.monotonic()
+            elif not line_open:
+                self.exchange = self.opened_at = None  # The line closed: back to the direct route.
+            self.line_open = line_open
         self.changed.set()
 
     def wanted(self):
-        """(together, earliest monotonic time to act)."""
+        """(together, earliest monotonic time to act, when to look again or None)."""
         with self.lock:
             now = time.monotonic()
-            if self.turn_since is not None and now - self.turn_since > TURN_LIMIT:
-                self.turn_since = None
-            return self.harness and self.listening and self.turn_since is not None, self.move_after
+            again = None
+            if self.opened_at is not None and not self.chirping:
+                if now - self.opened_at >= CHIRP_GRACE:
+                    self.exchange, self.opened_at = now, None  # No opening chirp for this line.
+                else:
+                    again = self.opened_at + CHIRP_GRACE
+            if self.exchange is not None and now - self.exchange > TURN_LIMIT:
+                self.exchange = None
+            together = self.harness and self.listening and self.line_open and self.exchange is not None
+            return together, self.move_after, again
 
 
 def follow_trace(state, stopping):
@@ -140,7 +157,7 @@ def follow_voice(state, stopping):
         except Exception as error:  # noqa: BLE001
             log.debug('voice state: %s', type(error).__name__)
         with state.lock:
-            state.harness, state.turn_since = False, None
+            state.harness, state.line_open, state.exchange, state.opened_at = False, False, None, None
         state.changed.set()
         stopping.wait(2)
 
@@ -250,19 +267,15 @@ def main():
     for follow in (follow_trace, follow_voice, follow_clients, follow_streams):
         threading.Thread(target=follow, args=(state, stopping), name=follow.__name__, daemon=True).start()
     try:
+        again = None
         while not stopping.is_set():
-            state.changed.wait()
+            state.changed.wait(None if again is None else max(0.0, again - time.monotonic()))
             state.changed.clear()
-            together, earliest = state.wanted()
+            together, earliest, again = state.wanted()
             wait = earliest - time.monotonic()
             if wait > 0:
                 stopping.wait(wait)  # A chirp's tail leaves the worker's buffer first.
-                together, _ = state.wanted()
-            if together and not state.playback_idle:
-                # The reply already sounds: moving now would split it. This reply stays direct.
-                with state.lock:
-                    state.turn_since = None
-                continue
+                together, _, again = state.wanted()
             try:
                 route(together, desk)
             except (OSError, ValueError, subprocess.TimeoutExpired) as error:
