@@ -1,0 +1,22 @@
+[Unit]
+Description=Obsidience Media source discovery (Prowlarr)
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/Projects/obsidience/obsidience/media/provider-launch prowlarr
+WorkingDirectory=%h/.local/share/obsidience-media/prowlarr
+LoadCredentialEncrypted=obsidience-media-prowlarr:%h/.config/credentials/obsidience-media-prowlarr.cred
+UMask=0077
+CPUWeight=25
+IOWeight=25
+MemoryHigh=512M
+MemoryMax=1G
+TasksMax=128
+NoNewPrivileges=true
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

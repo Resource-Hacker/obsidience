@@ -1,0 +1,25 @@
+[Unit]
+Description=Obsidience Media virtual storage (Tiramisu)
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/Projects/obsidience/obsidience/media/provider-launch tiramisu
+WorkingDirectory=%h/.local/share/obsidience-media/tiramisu
+RuntimeDirectory=obsidience-media-tiramisu
+RuntimeDirectoryMode=0700
+UMask=0077
+CPUWeight=25
+CPUQuota=200%
+IOWeight=25
+MemoryHigh=1G
+MemoryMax=2G
+TasksMax=256
+# The provider rejects new opens on TERM, then waits for existing readers.
+# Killing it or lazily unmounting would destroy owned live reads.
+TimeoutStopSec=infinity
+SendSIGKILL=no
+Restart=no
+
+[Install]
+WantedBy=default.target

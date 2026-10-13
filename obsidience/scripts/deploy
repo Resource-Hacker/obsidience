@@ -68,7 +68,37 @@ def targets(changed: list[str]) -> list[str]:
         owners.append("tv-tuner")
     if "obsidience/media/obsidience-media-jellyfin.container" in changed:
         owners.append("media-catalogue")
+    for provider in ("prowlarr", "tiramisu"):
+        if (f"obsidience/media/obsidience-media-{provider}.service" in changed
+                or "obsidience/media/provider-launch" in changed
+                or (provider == "tiramisu" and "obsidience/media/tiramisu-owner-sockets.patch" in changed)):
+            owners.append("media-" + provider)
     return owners
+
+
+def provider_health(provider: str) -> dict:
+    if provider == "tiramisu":
+        import httpx
+        path = f"/run/user/{os.getuid()}/obsidience-media-tiramisu/control.sock"
+        with httpx.Client(transport=httpx.HTTPTransport(uds=path), timeout=3, trust_env=False) as client:
+            response = client.get("http://localhost/health")
+            response.raise_for_status()
+            return response.json()
+    with urllib.request.urlopen("http://127.0.0.1:9696/ping", timeout=3) as response:
+        return {"ready": response.status == 200}
+
+
+def require_provider_idle() -> None:
+    unit = subprocess.run(["systemctl", "--user", "is-active", "--quiet",
+                           "obsidience-media-tiramisu.service"])
+    if unit.returncode != 0:
+        return
+    try:
+        state = provider_health("tiramisu")
+        if state.get("readers") != 0 or state.get("pumps") != 0 or not state.get("ready"):
+            raise ValueError("virtual media has active readers or unavailable state")
+    except Exception as error:
+        sys.exit(f"Media provider deployment deferred: {error}; nothing restarted.")
 
 
 def tuner_state() -> dict:
@@ -182,7 +212,29 @@ def check_voice(limit: float = 90) -> str | None:
 
 
 def restart(owner: str) -> None:
-    if owner == "harness":
+    if owner in {"media-tiramisu", "media-prowlarr"}:
+        provider = owner.removeprefix("media-")
+        name = f"obsidience-media-{provider}.service"
+        source = ROOT / "obsidience/media" / name
+        destination = pathlib.Path.home() / ".config/systemd/user" / name
+        if not destination.exists():
+            print(f"{provider} is not installed; provider installation remains explicit.")
+            return
+        if provider == "tiramisu":
+            require_provider_idle()
+        shutil.copy2(source, destination)
+        subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
+        subprocess.run(["systemctl", "--user", "restart", "--no-block", name], check=True)
+        deadline = time.monotonic() + 40
+        while time.monotonic() < deadline:
+            try:
+                if provider_health(provider).get("ready") is True:
+                    return
+            except Exception:
+                pass
+            time.sleep(.5)
+        sys.exit(f"{provider} has not become ready; inspect its owner, never force an active unmount.")
+    elif owner == "harness":
         subprocess.run(["systemctl", "--user", "restart", "obsidience-harness-dev.service"], check=True)
         wait_ready()
     elif owner == "shell":
@@ -255,7 +307,7 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--rollback", action="store_true")
     parser.add_argument("--restart", action="append", default=[],
-                        choices=("harness", "tv-player", "tv-tuner", "media-catalogue"),
+                        choices=("harness", "tv-player", "tv-tuner", "media-catalogue", "media-tiramisu", "media-prowlarr"),
                         help="Include an affected owner after a private configuration change")
     args = parser.parse_args()
     dirty = sorted(set(git("diff", "--name-only", "HEAD").splitlines()
@@ -312,6 +364,8 @@ def main() -> None:
         wait_idle()
         if any(owner in owners for owner in ("tv-player", "tv-tuner")):
             require_tv_idle()
+        if "media-tiramisu" in owners:
+            require_provider_idle()
     if args.rollback:
         # Check the live owners before changing even the source checkout.
         git("revert", "--no-edit", f"{previous}..HEAD")

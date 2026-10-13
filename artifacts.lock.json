@@ -584,7 +584,27 @@
       "image": "docker.io/jellyfin/jellyfin",
       "image_platform": "linux/amd64",
       "image_digest": "sha256:da3cd1e48322a35e4b60f3d0a49fca2649e7acce90346dd6e42db777f94e3bbd",
-      "integration": "Optional catalogue through supported authenticated Items/System REST reads. Official unmodified rootless container, read-only media roots, no GPU devices; server owns catalogue and client delivery independently of television; existing tuner/mpv owns only the TV destination. Unit: obsidience/media/obsidience-media-jellyfin.container. No Jellyfin code copied. Media feature defaults disabled; no Tiramisu provider adopted."
+      "integration": "Optional catalogue through supported authenticated Items/System REST reads. Official unmodified rootless container, read-only media roots, no GPU devices; server owns catalogue and client delivery independently of television; existing tuner/mpv owns only the TV destination. Unit: obsidience/media/obsidience-media-jellyfin.container. No Jellyfin code copied. Media feature defaults disabled. Native M3U live television uses curated broadcaster sources; no additional plugin."
+    },
+    "tiramisu": {
+      "repository": "https://github.com/MrRobotoGit/tiramisu",
+      "version": "1.11.4",
+      "revision": "1d761b88b9cd7b4cb3d9b02ae432dff2b0848484",
+      "license": "GPL-3.0",
+      "binary_sha256": "1d02dc133ac636e5d7d9a3e6b76f372b35f41b31b92184685a8aa85598116d86",
+      "patch": "obsidience/media/tiramisu-owner-sockets.patch",
+      "patch_sha256": "a4c1fb9e2773c185378496fb26c23da42f554230ae63f48ac56e7918225ee8f7",
+      "build": "Go 1.27.1; CGO_CFLAGS=-O2 -std=gnu17; go build -trimpath -ldflags=-s -w -X main.AppVersion=v1.11.4-obsidience1",
+      "integration": "Optional native FUSE provider. Local patch replaces control and embedded engine TCP with owner-only Unix sockets, limits public operations, exposes actual reader readiness, disables LAN dashboard discovery and SMB watchdog in private mode, and drains readers before ordinary unmount. No lazy unmount, service restart loop, NAT mapping or scheduler. Unmodified torrent/FUSE implementation; copied license and module manifest accompany binary. Disk warmup disabled because pinned eviction does not protect live readers; bounded memory streaming cache only."
+    },
+    "prowlarr_discovery": {
+      "repository": "https://github.com/Prowlarr/Prowlarr",
+      "version": "2.6.5.5623",
+      "revision": "12c327808314a7cae1b7301935ee10cabc19609f",
+      "license": "GPL-3.0",
+      "artifact": "Prowlarr.master.2.6.5.5623.linux-core-x64.tar.gz",
+      "sha256": "c0824e9f0e9c79e085882f6143041be5c2cde0519baa59e9477d9e4dcbe1b5e3",
+      "integration": "Unmodified official standalone release, used only as source discovery behind its authenticated loopback API. Initial public indexer is built-in TorrentsCSV. No download client, Arr automation stack, RSS acquisition or watchlist. API key supplied privately through a systemd credential."
     }
   }
 }

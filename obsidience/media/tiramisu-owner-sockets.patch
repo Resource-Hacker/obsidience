@@ -1,0 +1,279 @@
+diff --git a/internal/gostorm/server.go b/internal/gostorm/server.go
+index 07e3f2a..62fcb79 100644
+--- a/internal/gostorm/server.go
++++ b/internal/gostorm/server.go
+@@ -5,6 +5,7 @@ import (
+ 	"os"
+ 	"path/filepath"
+ 	"strconv"
++	"tiramisu/internal/localapi"
+ 
+ 	"tiramisu/internal/gostorm/log"
+ 	"tiramisu/internal/gostorm/settings"
+@@ -46,6 +47,15 @@ func Start() {
+ 			os.Exit(1)
+ 		}
+ 	}
++	if localapi.Enabled() {
++		if settings.Args.Ssl {
++			log.TLogln("TLS incompatible with private Unix transport")
++			os.Exit(1)
++		}
++		go cleanCache()
++		web.Start()
++		return
++	}
+ 	// http checks
+ 	if settings.Args.Port == "" {
+ 		settings.Args.Port = "8090"
+diff --git a/internal/gostorm/web/server.go b/internal/gostorm/web/server.go
+index aaebef3..bc2e9bd 100644
+--- a/internal/gostorm/web/server.go
++++ b/internal/gostorm/web/server.go
+@@ -4,6 +4,7 @@ import (
+ 	"net"
+ 	"os"
+ 	"sort"
++	"tiramisu/internal/localapi"
+ 
+ 	"tiramisu/internal/gostorm/log"
+ 	"tiramisu/internal/gostorm/settings"
+@@ -56,6 +57,15 @@ func Start() {
+ 
+ 	api.SetupRoute(route)
+ 
++	if localapi.Enabled() {
++		listener, err := localapi.Listen("engine")
++		if err != nil {
++			log.TLogln("Private engine listener failed")
++			os.Exit(1)
++		}
++		go func() { waitChan <- route.RunListener(listener) }()
++		return
++	}
+ 	// check if https enabled
+ 	if settings.Ssl {
+ 		// if no cert and key files set in db/settings, generate new self-signed cert and key files
+diff --git a/internal/syncer/engines/gostorm.go b/internal/syncer/engines/gostorm.go
+index f71f338..9d3d722 100644
+--- a/internal/syncer/engines/gostorm.go
++++ b/internal/syncer/engines/gostorm.go
+@@ -15,6 +15,7 @@ import (
+ 
+ 	"tiramisu/internal/catalog"
+ 	"tiramisu/internal/library"
++	"tiramisu/internal/localapi"
+ )
+ 
+ // GoStormClient handles HTTP operations with the GoStorm engine.
+@@ -30,6 +31,7 @@ func NewGoStormClient(baseURL string) *GoStormClient {
+ 		httpClient: &http.Client{
+ 			Timeout: 30 * time.Second,
+ 			Transport: &http.Transport{
++				DialContext:         localapi.Dial,
+ 				MaxIdleConns:        10,
+ 				MaxIdleConnsPerHost: 5,
+ 				IdleConnTimeout:     30 * time.Second,
+diff --git a/main.go b/main.go
+index 4593a19..3a17f9b 100644
+--- a/main.go
++++ b/main.go
+@@ -43,6 +43,7 @@ import (
+ 	tsutils "tiramisu/internal/gostorm/utils"
+ 	"tiramisu/internal/gostorm/web"
+ 	"tiramisu/internal/library"
++	"tiramisu/internal/localapi"
+ 	"tiramisu/internal/lockmgr"
+ 	"tiramisu/internal/metadb"
+ 	"tiramisu/internal/monitor/collector"
+@@ -1197,6 +1198,9 @@ func (n *VirtualMkvNode) Setattr(ctx context.Context, f fs.FileHandle, in *fuse.
+ }
+ 
+ func (n *VirtualMkvNode) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, syscall.Errno) {
++	if localapi.Draining.Load() {
++		return nil, 0, syscall.EBUSY
++	}
+ 	if gc().LogLevel == "DEBUG" {
+ 		logger.Printf("=== OPEN VIRTUAL === path=%s", n.vMeta.Path)
+ 	}
+@@ -4547,6 +4551,9 @@ func checkHardwareSupport() {
+ }
+ 
+ func main() {
++	if localapi.Enabled() {
++		http.DefaultTransport.(*http.Transport).DialContext = localapi.Dial
++	}
+ 	checkHardwareSupport()
+ 
+ 	var dbPath string
+@@ -5333,21 +5340,53 @@ func main() {
+ 	http.HandleFunc("/api/logs", dashHandler.Logs)
+ 	http.HandleFunc("/api/plex-thumb", dashHandler.PlexThumb)
+ 	http.HandleFunc("/api/kill-stream/", dashHandler.KillStream)
+-	safeGo(func() {
+-		monCollector.Run(backgroundStopChan)
+-	})
++	if !localapi.Enabled() {
++		safeGo(func() { monCollector.Run(backgroundStopChan) })
++	}
+ 	logger.Printf("[Dashboard] enabled at :%d/dashboard", gc().MetricsPort)
+ 
+-	go http.ListenAndServe(fmt.Sprintf(":%d", gc().MetricsPort), nil)
++	if localapi.Enabled() {
++		http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
++			readers, pumps := 0, 0
++			activeHandles.Range(func(_, _ interface{}) bool { readers++; return true })
++			activePumps.Range(func(_, _ interface{}) bool { pumps++; return true })
++			w.Header().Set("Content-Type", "application/json")
++			json.NewEncoder(w).Encode(map[string]interface{}{"ready": localapi.Mounted.Load() && web.BTS != nil, "draining": localapi.Draining.Load(), "readers": readers, "pumps": pumps, "discovery_configured": gc().Prowlarr.Enabled && gc().Prowlarr.APIKey != ""})
++		})
++		listener, listenErr := localapi.Listen("control")
++		if listenErr != nil {
++			log.Fatal(listenErr)
++		}
++		go func() {
++			srv := &http.Server{Handler: http.HandlerFunc(localapi.Control), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8192}
++			if err := srv.Serve(listener); err != nil {
++				log.Fatal(err)
++			}
++		}()
++	} else {
++		go http.ListenAndServe(fmt.Sprintf(":%d", gc().MetricsPort), nil)
++	}
+ 
+ 	// Graceful shutdown: saves inode map and sync caches before exit.
+ 	sigChan := make(chan os.Signal, 1)
+ 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+ 	var server *fuse.Server // Declare here to be accessible in goroutine
+ 	var err error           // Declare err here too
++	shutdownDone := make(chan struct{})
+ 	go func() {
+ 		sig := <-sigChan
+ 		logger.Printf("Received signal %v, initiating graceful shutdown...", sig)
++		if localapi.Enabled() {
++			localapi.Draining.Store(true)
++			// Preserve active readers. Never lazy-unmount or kill a busy virtual filesystem.
++			for server != nil {
++				if unmountErr := server.Unmount(); unmountErr == nil {
++					break
++				}
++				logger.Printf("Waiting for owned virtual readers to drain")
++				time.Sleep(time.Second)
++			}
++		}
+ 
+ 		// Save inode map before exit
+ 		if globalInodeMap != nil {
+@@ -5384,7 +5423,7 @@ func main() {
+ 		}
+ 
+ 		// Try to unmount gracefully
+-		if server != nil {
++		if server != nil && !localapi.Enabled() {
+ 			server.Unmount()
+ 		}
+ 
+@@ -5392,6 +5431,7 @@ func main() {
+ 			logger.Printf("Graceful shutdown complete, exiting with %d to request a restart...", restartExitCode)
+ 			os.Exit(restartExitCode)
+ 		}
++		close(shutdownDone)
+ 		logger.Println("Graceful shutdown complete, exiting...")
+ 		os.Exit(0)
+ 	}()
+@@ -5413,7 +5453,7 @@ func main() {
+ 		NegativeTimeout: &negativeTimeout,
+ 		MountOptions: fuse.MountOptions{
+ 			MaxInflightRequestBytes: maxInflight,
+-			AllowOther:              true,
++			AllowOther:              !localapi.Enabled(),
+ 			MaxBackground:           gc().ConcurrencyLimit,
+ 			// MaxWrite:                 1024 * 1024,
+ 			MaxWrite: 4 * 1024 * 1024, // Samba Turbo: 4MB write buffer
+@@ -5424,6 +5464,7 @@ func main() {
+ 			SyncRead:                 false,           // ENABLED ASYNC READS for 4K performance
+ 			// NFS Export: Stable filesystem identification
+ 			FsName: "tiramisu",
++			Name:   "tiramisu",
+ 		},
+ 		UID: gc().UID, // Default file ownership: pi user (1000)
+ 		GID: gc().GID, // Default file ownership: pi group (1000)
+@@ -5432,12 +5473,18 @@ func main() {
+ 		log.Fatal(err)
+ 	}
+ 
++	localapi.Mounted.Store(true)
+ 	logger.Printf("FUSE mounted at %s with VirtualMkvRoot, all systems active", mount)
+ 
+-	go smbdWatchdog()
++	if !localapi.Enabled() {
++		go smbdWatchdog()
++	}
+ 	go ttffCleanupLoop()
+ 
+ 	server.Wait()
++	if localapi.Draining.Load() {
++		<-shutdownDone
++	}
+ }
+ 
+ // smbdWatchdog detects smbd processes stuck in D-state (uninterruptible FUSE I/O).
+diff --git a/internal/localapi/localapi.go b/internal/localapi/localapi.go
+new file mode 100644
+index 0000000..3e8fb87
+--- /dev/null
++++ b/internal/localapi/localapi.go
+@@ -0,0 +1,53 @@
++// Obsidience installation transport: HTTP semantics over owner-only Unix sockets.
++package localapi
++
++import (
++	"context"
++	"net"
++	"net/http"
++	"os"
++	"path/filepath"
++	"sync/atomic"
++	"time"
++)
++
++var Draining atomic.Bool
++var Mounted atomic.Bool
++
++func Enabled() bool { return os.Getenv("TIRAMISU_SOCKET_DIR") != "" }
++func Listen(name string) (net.Listener, error) {
++	path := filepath.Join(os.Getenv("TIRAMISU_SOCKET_DIR"), name+".sock")
++	// Never unlink another live or stale listener. systemd owns the private runtime directory.
++	listener, err := net.Listen("unix", path)
++	if err == nil {
++		err = os.Chmod(path, 0600)
++		if err != nil {
++			listener.Close()
++		}
++	}
++	return listener, err
++}
++func Dial(ctx context.Context, network, address string) (net.Conn, error) {
++	if Enabled() && address == "127.0.0.1:8090" {
++		network, address = "unix", filepath.Join(os.Getenv("TIRAMISU_SOCKET_DIR"), "engine.sock")
++	}
++	return (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext(ctx, network, address)
++}
++func Control(w http.ResponseWriter, r *http.Request) {
++	if Draining.Load() {
++		http.Error(w, "provider draining", 503)
++		return
++	}
++	// No configuration, scheduler, destructive library or engine proxy endpoints.
++	allowed := r.Method == "GET" && (r.URL.Path == "/health" || r.URL.Path == "/api/library/list" || r.URL.Path == "/api/prowlarr/search") || r.Method == "POST" && r.URL.Path == "/api/library/add"
++	if !allowed {
++		http.NotFound(w, r)
++		return
++	}
++	if r.ContentLength > 16384 {
++		http.Error(w, "request too large", 413)
++		return
++	}
++	r.Body = http.MaxBytesReader(w, r.Body, 16384)
++	http.DefaultServeMux.ServeHTTP(w, r)
++}

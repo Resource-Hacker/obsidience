@@ -1,0 +1,31 @@
+#!/usr/bin/python
+"""Private provider bootstrap; secrets stay in credential files/process memory."""
+import json
+import os
+from pathlib import Path
+import sys
+
+home = Path.home()
+state = home / '.local/share/obsidience-media'
+installed = home / '.local/opt/obsidience-media'
+provider = sys.argv[1]
+credential_dir = Path(os.environ['CREDENTIALS_DIRECTORY']) if os.environ.get('CREDENTIALS_DIRECTORY') else None
+if provider == 'prowlarr':
+    key = (credential_dir / 'obsidience-media-prowlarr').read_text().strip()
+    os.environ['PROWLARR__AUTH__APIKEY'] = key
+    os.execv(str(installed / 'prowlarr-current/Prowlarr'),
+             ['Prowlarr', '-nobrowser', '-data=' + str(state / 'prowlarr')])
+elif provider == 'tiramisu':
+    config = json.loads((state / 'tiramisu/config.json').read_text())
+    if config.get('prowlarr', {}).get('enabled'):
+        config['prowlarr']['api_key'] = (credential_dir / 'obsidience-media-prowlarr').read_text().strip()
+    runtime_config = Path(os.environ['RUNTIME_DIRECTORY']) / 'config.json'
+    runtime_config.write_text(json.dumps(config))
+    runtime_config.chmod(0o600)
+    os.environ['MKV_PROXY_CONFIG_PATH'] = str(runtime_config)
+    os.environ['TIRAMISU_LOG_DIR'] = str(state / 'tiramisu/logs')
+    os.environ['TIRAMISU_SOCKET_DIR'] = os.environ['RUNTIME_DIRECTORY']
+    os.execv(str(installed / 'tiramisu-current/tiramisu'),
+             ['tiramisu', '--path', str(state / 'tiramisu')])
+else:
+    raise SystemExit('Unknown provider')
