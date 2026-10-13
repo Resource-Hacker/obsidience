@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 """Deploy the committed working tree to the live services, or roll it back.
 
-The live services run from this checkout, so a deploy is: require committed
-state, wait for an idle moment, restart only the owners whose files changed
-since the last deployed commit, verify health, and record the commit. A
-rollback reverts the commits since the previous deploy and deploys that.
+The live services run from this checkout, so a deploy is: require that what
+its restarts load is committed, wait for an idle moment, restart only the
+owners whose files changed since the last deployed commit, verify health, and
+record the commit. A rollback reverts the commits since the previous deploy
+and deploys that.
+
+Several sessions work in this checkout at once. Another session's uncommitted
+file stops a deploy only where a restart would load it: in an owner this
+deploy restarts. Elsewhere it is named and left alone.
 
     obsidience/scripts/deploy            # deploy HEAD
     obsidience/scripts/deploy --dry-run  # show what would restart
@@ -137,10 +142,11 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--rollback", action="store_true")
     args = parser.parse_args()
-    if git("status", "--porcelain", "--untracked-files=no"):
-        sys.exit("Tracked changes are uncommitted; commit them before deploying.")
+    dirty = git("diff", "--name-only", "HEAD").splitlines()
     last = json.loads(RECORD.read_text()).get("commit") if RECORD.is_file() else None
     if args.rollback:
+        if dirty:
+            sys.exit("Tracked changes are uncommitted; commit them before rolling back.")
         history = [json.loads(line) for line in LOG.read_text().splitlines()] if LOG.is_file() else []
         if len(history) < 2:
             sys.exit("No previous deploy is recorded.")
@@ -152,6 +158,12 @@ def main() -> None:
     head = git("rev-parse", "HEAD")
     changed = git("diff", "--name-only", f"{last}..{head}").splitlines() if last else ["obsidience/harness/", "obsidience/shell/", "obsidience/ui/"]
     owners = targets(changed)
+    unfinished = [path for path in dirty if set(targets([path])) & set(owners)]
+    if unfinished:
+        sys.exit("This deploy restarts " + ", ".join(owners) + ", which would load uncommitted changes; "
+                 "commit them first: " + ", ".join(unfinished))
+    if dirty:
+        print("Note: uncommitted and not part of this deploy:", ", ".join(dirty))
     if "obsidience/scripts/llm.sh" in changed:
         print("Note: llm.sh changed; restart obsidience-gemma.service deliberately (not automatic).")
     print(f"deploy {last and last[:7]} -> {head[:7]}; restart: {', '.join(owners) or 'nothing'}")
