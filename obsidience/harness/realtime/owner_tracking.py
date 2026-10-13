@@ -125,6 +125,7 @@ class Tracker:
                             "target_center": None, "inference_ms": None, "pose_read_ms": None,
                             "motor_ms": None, "motor_commands": 0, "reported_speed": None,
                             "submitted_speed": None, "feedback_age_s": None, "velocity_submitted": False,
+                            "awake": None,
                             "body_count": 0, "body_id": None, "bound_body_id": None,
                             "framing_anchor": None, "look": None,
                             "motion_reason": "holding", "motor_state": "idle",
@@ -215,7 +216,7 @@ class Tracker:
         with self._lock:
             if not self._current(generation):
                 return
-            self._status.update(state="failed", error=reason, target="unknown")
+            self._status.update(state="failed", error=reason, target="unknown", awake=None)
             if self._enrolling():
                 self._status["enrollment"] = {"state": "cancelled",
                                               "samples": self._status["enrollment"].get("samples", 0)}
@@ -539,13 +540,20 @@ class Tracker:
             # The previous nonzero speed is never replayed.
             self._fail(generation, "camera_velocity_delivery_uncertain" if velocity is not None else "camera_pose_unavailable")
             return None
+        # Power as the helper's own SDK connection last read it (1 run, 3 sleep,
+        # 4 privacy): awake, asleep, or None when unread, older than five
+        # seconds or from a helper that predates the report.
+        power, power_age = data.get("dev_status"), data.get("status_age_s")
+        awake = (power == 1 if type(power) is int and power in (1, 3, 4)
+                 and type(power_age) in (int, float) and 0 <= power_age <= 5 else None)
         with self._lock:
             if not self._current(generation):
                 return None
             self._status.update(pose={"yaw": round(pose[0],2), "pitch": round(pose[1],2)},
                                 reported_speed={"yaw": round(reported[0],3), "pitch": round(reported[1],3)},
                                 submitted_speed={"yaw": round(submitted[0],3), "pitch": round(submitted[1],3)},
-                                feedback_age_s=round(feedback_age,3), velocity_submitted=velocity is not None)
+                                feedback_age_s=round(feedback_age,3), velocity_submitted=velocity is not None,
+                                awake=awake)
             self._status["motor_ms" if velocity is not None else "pose_read_ms"] = round(
                 float(time.monotonic()-operation_started)*1000,1)
             self._velocity = submitted
@@ -693,7 +701,7 @@ class Tracker:
                 connection, owned = self._connection, self._socket
                 self._helper = self._vision = self._connection = self._socket = None
                 self._threads = []
-                self._status.update(state="stopped", target="unknown")
+                self._status.update(state="stopped", target="unknown", awake=None)
         if helper is not None:
             for pipe in (helper.stdin, helper.stdout, helper.stderr):
                 if pipe is not None:

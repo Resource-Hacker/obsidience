@@ -210,11 +210,20 @@ async def _awake_recently(identity: tuple[object, ...]) -> bool:
 
 
 async def _capture(cancel_event: Any, turn: _Look) -> CameraCapture:
+    global _awake_verified
     async with _CAPTURE_LOCK, turn as look_id:
         _check_cancel(cancel_event)
         device, name, identity = _selected()
         from . import tracking
-        if _is_obsbot(device) and not await _awake_recently(identity):
+        tracking_state = await asyncio.to_thread(tracking.snapshot)
+        # The tracker's motor helper reports the power state its own SDK
+        # connection keeps reading. Only without that report is it read here.
+        awake = (tracking_state.get("awake")
+                 if tracking_state.get("state") in {"starting", "running"} else None)
+        if _is_obsbot(device) and awake is False:
+            _awake_verified = None
+            raise CameraCaptureError("The selected camera is asleep. Use wake:true for a requested camera wake.")
+        if _is_obsbot(device) and awake is None and not await _awake_recently(identity):
             # Sleeping hardware can still clock blank V4L2 frames. Fresh pixels
             # and a cached power flag do not attest an awake physical camera.
             readback = asyncio.create_task(asyncio.to_thread(media.obsbot_camera_state, refresh=True))
@@ -227,7 +236,6 @@ async def _capture(cancel_event: Any, turn: _Look) -> CameraCapture:
                 raise CameraCaptureError("The selected camera is asleep. Use wake:true for a requested camera wake.")
             if _selected()[2] != identity:
                 raise CameraCaptureError("The selected camera changed.", code="camera_changed")
-            global _awake_verified
             _awake_verified = (time.monotonic(), identity)
         tracking_state = await asyncio.to_thread(tracking.snapshot)
         if tracking_state.get("enabled"):

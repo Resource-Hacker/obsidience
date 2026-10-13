@@ -29,6 +29,18 @@ struct Feedback {
     Clock::time_point at{};
     bool valid=false;
 };
+// Power state (Device::DevStatus: 1 run, 3 sleep, 4 privacy; -1 unread) as the
+// SDK's own device thread fetches it about every two seconds and pushes it
+// after a successful read. Reported only; this adds no SDK request.
+static std::atomic<int> dev_status(-1);
+static std::atomic<long long> status_at_ns(0);
+static long long now_ns() {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch()).count();
+}
+static void status_pushed(void *,const void *data) {
+    dev_status=static_cast<const Device::CameraStatus *>(data)->tiny.dev_status;
+    status_at_ns=now_ns();
+}
 int main() {
     std::signal(SIGTERM,signal_stop); std::signal(SIGINT,signal_stop); std::signal(SIGPIPE,SIG_IGN);
     dev_set_log_handler(quiet_log,nullptr);
@@ -48,6 +60,9 @@ int main() {
     Feedback feedback;
     if (camera->aiGetGimbalStateR(&feedback.state)!=0) { Devices::get().close(); return 5; }
     feedback.valid=true; feedback.at=Clock::now();
+    camera->setDevStatusCallbackFunc(status_pushed,nullptr);
+    camera->enableDevStatusCallback(true);
+    camera->nextRefreshDevStatus();  // The SDK's next cycle fetches at once.
     std::atomic<bool> running(true);
     // The only other SDK lane reads feedback; main alone writes motor commands.
     // Blocking readback cannot block the input watchdog.
@@ -75,12 +90,15 @@ int main() {
     auto output=[&](bool ready,bool ok,const char *reason) {
         std::lock_guard<std::mutex> guard(feedback.mutex);
         const auto &s=feedback.state;
+        const long long status_at=status_at_ns.load();  // Read before now: the age is never negative.
         std::cout << "{\"ok\":" << (ok?"true":"false") << ",\"ready\":" << (ready?"true":"false")
                   << ",\"error\":\"" << reason << "\",\"yaw_motor\":" << s.yaw_motor
                   << ",\"pitch_motor\":" << s.pitch_motor << ",\"reported_yaw_speed\":" << s.yaw_v
                   << ",\"reported_pitch_speed\":" << s.pitch_v << ",\"feedback_age_s\":" << age(feedback.at)
                   << ",\"feedback_valid\":" << (feedback.valid?"true":"false")
                   << ",\"submitted_yaw_speed\":" << submitted_yaw << ",\"submitted_pitch_speed\":" << submitted_pitch
+                  << ",\"dev_status\":" << dev_status.load()
+                  << ",\"status_age_s\":" << (now_ns()-status_at)/1e9
                   << ",\"velocity_submitted\":true}" << std::endl;
     };
     const bool initial_stop=zero();
@@ -140,6 +158,7 @@ int main() {
     // Fence the queued safety zero before closing the SDK sender.
     Device::AiGimbalStateInfo final_state{};
     camera->aiGetGimbalStateR(&final_state);
+    camera->enableDevStatusCallback(false);
     Devices::get().close();
     return failed?1:0;
 }
