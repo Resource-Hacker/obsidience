@@ -896,6 +896,9 @@ def prompt_line(now=None):
             parts.append(f"volume {volume['index']}/{volume['max']}" + (' muted' if volume['muted'] else ''))
         if state.get('text_input_active'):
             parts.append('text field active')
+        if foreground['app'] == PC_APP:
+            # Said in the line itself: a question about the screen follows the conversation, not a rule.
+            parts.append('its picture is visible to you through observe')
     when = ('live' if live else 'as of this minute' if age <= 0
             else f'last seen {age} min ago; may have changed, observe for what is on now')
     return f"tv ({when}): " + ', '.join(parts).strip()
