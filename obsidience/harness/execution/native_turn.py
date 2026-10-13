@@ -117,13 +117,22 @@ def recall_reply(value, *, refs=False) -> dict:
     presented as "earlier today" when only its recording minute was shown.
     """
     now = datetime.now().astimezone()
-    return {'notice': value.get('notice'),
-            'memories': [_recalled(row, now, refs) for row in value.get('memories', [])]}
+    result = {'notice': value.get('notice'),
+              'memories': [_recalled(row, now, refs) for row in value.get('memories', [])]}
+    if value.get('status') in {'partial', 'unavailable'}:
+        result['status'] = value['status']
+        if value['status'] == 'unavailable':
+            result['notice'] = 'Memory recall unavailable; use observations.recall if historical context is needed.'
+        else:
+            result['notice'] = (str(result['notice'] or '')
+                                + ' One recall query failed; results may be incomplete.').strip()
+    return result
 
 
 def memory_message(recalled: dict) -> str:
     """Exact text of the hook's memory message (JSON.stringify of the reply), or '' when it adds none."""
-    return json.dumps(recalled, ensure_ascii=False, separators=(',', ':')) if recalled['memories'] else ''
+    return (json.dumps(recalled, ensure_ascii=False, separators=(',', ':'))
+            if recalled['memories'] or recalled.get('status') in {'partial', 'unavailable'} else '')
 
 
 def recall_query(text, conversation_id=None, before_sequence=None):

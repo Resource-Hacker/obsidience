@@ -42,13 +42,27 @@ history importer and separate coding wiki are deliberately not mounted.
    readable history, and already queued observation Link occurrences keep
    their existing execution path.
 5. The ADK conversation log owns the continuous conversation; its provider
-   window bounds the active context, and recall carries what precedes the
-   window (there is no summary compaction). Automatic recall has a 750 ms deadline; the
+   window bounds the active context without summary compaction. At an idle edge,
+   a window beyond six exchanges or 4,000 estimated tokens normally rebases to
+   the newest three exchanges within 2,000 tokens, always keeping at least two.
+   Eligible exchanges await confirmed extraction before eviction. Delayed
+   extraction allows overlap through 12 exchanges or 8,000 tokens; beyond either
+   threshold the window rebases and tells the model that some earlier exchanges
+   are not yet confirmed recallable. These are overlap thresholds, not absolute
+   caps on two unusually large exchanges. A content-free sequence range records
+   the gap; its warning clears only after all eligible exchanges in that range
+   have confirmed extraction receipts. Withheld diagnostics do not delay rebasing.
+   Automatic recall has a 750 ms deadline; the
    explicit scoped `observations.recall` Tool permits six seconds. Neither
    path calls generative Reflect or treats memory as current screen evidence.
    Automatic recall queries the owner request alone and, concurrently under the
    same deadline, the request joined with the owner request it follows; the
-   second result fills one of the three slots. Every recall sends the local
+   second result fills one of the three slots. Each query can succeed independently:
+   a failed query leaves the successful results available with a compact `partial`
+   notice. If neither succeeds, the model receives an `unavailable` notice even
+   with no memories. Healthy recall gains no status text. Timeout or owner
+   cancellation cancels and joins unfinished requests; owner cancellation propagates.
+   Every recall sends the local
    time as `query_timestamp`, so "today" and "yesterday" resolve on the owner's
    calendar. The port, not Hindsight's `prefer_observations`, drops an
    observation/source pair, keeping the better-ranked one. The model sees each
@@ -68,6 +82,26 @@ CPU ONNX embeddings and FlashRank consume no CUDA model allocation.
 Conversation requests and Harness Task objectives have distinct provenance
 labels. A scheduled or triggered Task objective does not establish a direct
 owner request; its accepted public report remains an unverified agent report.
+Completed-turn intake admits up to 262,144 characters per role and a combined
+524,544-character envelope, including controller labels. Both roles are retained
+in full after secret redaction; oversized input or redaction expansion is rejected
+rather than silently truncating the conversation. Exact retries keep their source
+identity and original date. Compatibility with former 16K envelopes only completes
+still-pending payloads in place; already acknowledged deliveries are not replayed.
+
+`POST /api/turns/complete` synchronously reports durable `inserted`, `duplicate`
+or `withheld` state, or `disabled` intake. Disabled intake returns `accepted: false`;
+identity conflicts return HTTP 409, oversized input 413, and failed durable recording
+503. An outbox insert does not prove native extraction. Its `pending` row becomes
+`accepted` only after Hindsight acknowledges the exact operation ID and its payload
+is cleared. For eligible conversation exchanges, `extracted` additionally requires
+the exact native `batch_retain` parent and every child to be completed, with each
+child bound to that parent and reporting zero extraction errors and a valid
+nonnegative outcome count. A valid zero-fact extraction is allowed. The existing
+delivery/health path collects these content-free receipts; webhooks only wake it.
+Diagnostic `memory_writeback: false` turns reserve their `withheld` identity before
+execution, so an interrupted turn, continuation or startup recovery cannot retain
+them later.
 
 An owner maintenance marker at `state/hindsight-maintenance.json` pauses outbox
 delivery, mental-model handoffs, admission of memory-event Curate occurrences,
@@ -117,6 +151,15 @@ Heimdall repair path. Accepted Knowledge and unverified Memory remain distinct
 owners. Backpressure from pending execution, FIFO or Review is not a provider
 fault and never authorizes bypassing a hold, replaying uncertain effects or
 approving wiki changes.
+
+An independent queued Curate occurrence can pass a failed, blocked or interrupted
+occurrence when its complete Tool receipts permit that transition. Two exact `task.create`
+rejections prove no Task was enqueued: the forbidden delegation from a
+memory-triggered Curate, and a scheduled Curate's maintenance candidate fields
+not matching its controller result. The scheduler requires a returned receipt,
+the current `Tools/task.create` content hash, and the exact rejection result hash
+and length. Generic errors, missing receipts and uncertain effects do not qualify;
+the failed run is preserved and its call is never replayed.
 
 ## Deployment contract
 
@@ -257,7 +300,8 @@ not repeated. Exhausted or unsupported failures appear in the existing Review
 notification queue. Neither notifications nor memory can approve wiki changes.
 Recall health is reported separately from storage/worker health, with content-free
 per-budget counts, timeout counts and durations for the current Harness lifetime.
-Three failures among the latest twenty completed calls in fifteen minutes mark
+Partial results and unavailable recalls both count as failures for this health
+window. Three failures among the latest twenty completed calls in fifteen minutes mark
 the provider degraded through the same status/Audit path. A new lifetime or an
 expired window says `not_observed`, not recall-verified. STOP interruptions are
 counted separately, never as failures or successes. Recall failures authorize no

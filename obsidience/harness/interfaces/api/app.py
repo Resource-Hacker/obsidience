@@ -1960,7 +1960,8 @@ async def completed_turn(payload: dict):
         raise HTTPException(400, "turn fields must be strings")
     if not user.strip() or not assistant.strip() or not thread_id or not external_turn_id:
         raise HTTPException(400, "completed turn is incomplete")
-    if len(user) > 256 * 1024 or len(assistant) > 256 * 1024:
+    from ...memory.hindsight import MEMORY, MAX_TURN_CHARS, MemoryContentTooLarge, MemoryDeliveryConflict
+    if len(user) > MAX_TURN_CHARS or len(assistant) > MAX_TURN_CHARS:
         raise HTTPException(413, "completed turn exceeds the bounded handoff size")
     # The external developer agent that completed the turn; Codex is the
     # historical default, so existing Codex turn identities are unchanged.
@@ -1970,8 +1971,6 @@ async def completed_turn(payload: dict):
     turn_id = hashlib.sha256(
         f"{source}\0{thread_id}\0{external_turn_id}".encode()
     ).hexdigest()[:24]
-    from ...memory.hindsight import queue_turn_complete
-
     timestamp = payload.get("timestamp")
     if timestamp is not None:
         from datetime import datetime
@@ -1980,17 +1979,23 @@ async def completed_turn(payload: dict):
                 raise ValueError("timezone required")
         except ValueError as cause:
             raise HTTPException(400, "timestamp must be an ISO date with timezone") from cause
-    queued = queue_turn_complete(
-        "Agents/Executive/Executive",
-        user,
-        assistant,
-        source=source,
-        turn_id=turn_id,
-        timestamp=timestamp,
-    )
+    try:
+        delivery = MEMORY.completed_status(
+            "Agents/Executive/Executive", user, assistant, source=source,
+            identifier=turn_id, timestamp=timestamp,
+        )
+    except MemoryContentTooLarge as cause:
+        raise HTTPException(413, str(cause)) from cause
+    except MemoryDeliveryConflict as cause:
+        raise HTTPException(409, str(cause)) from cause
+    except Exception as cause:
+        # Never acknowledge a lost insert as an idempotent duplicate. The hook
+        # remains fail-open for the coding agent and records this failed handoff.
+        raise HTTPException(503, f"Memory delivery could not be recorded ({type(cause).__name__})") from cause
     return {
-        "accepted": True,
-        "queued_tasks": queued,
+        "accepted": delivery != "disabled",
+        "delivery_status": delivery,
+        "queued_tasks": int(delivery == "inserted"),
         "raw_persisted": False,
         "turn_hash": turn_id,
     }

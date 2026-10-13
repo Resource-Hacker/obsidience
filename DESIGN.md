@@ -220,8 +220,13 @@ neighbours); (9) history projected from the native conversation (no conversation
   completion records are audit-only; execution and prewarm share the projection.
 - **Window**: the provider sees the conversation from one anchor owner message on; the
   anchor moves only at an idle edge once the window outgrows its bound
-  (`conversation_window`). Hindsight recall and `observations.recall` carry earlier
-  context. There is no summary compaction.
+  (`conversation_window`). Normal limits are six exchanges / 4K estimated tokens,
+  rebasing to three / 2K with at least two exchanges. Eligible exchanges await
+  confirmed native extraction; delays allow overlap through 12 / 8K before rebasing
+  with an explicit missing-memory warning. The two-exchange minimum remains, so
+  these are overlap thresholds, not absolute token caps. A content-free gap range
+  keeps that warning until extraction is confirmed. Hindsight recall and
+  `observations.recall` supply earlier context when available; no summary compaction.
 - **Completion checks**: every computer Tool used needs its own verified receipt; a later
   Tool cannot conceal a failure. Unlock claims need this run's verified `session.unlock`;
   open/launch/navigate claims need verified `application.launch`, `window.activate` or
@@ -418,6 +423,11 @@ neighbours); (9) history projected from the native conversation (no conversation
   recording a no-effect receipt and advancing one FIFO head atomically. Controller
   receipts may attest that staging never began; known no-publication rejections match
   committed result hashes; a pending Review dependency blocks retry without spending it.
+  Complete Tool receipt coverage may let an independent queued Curate occurrence pass
+  a terminal run with an exact returned `task.create` rejection for forbidden memory-event
+  delegation or mismatched scheduled maintenance candidate fields. The current Tool hash
+  and complete result hash/length must match. The old run remains; no call is replayed,
+  and generic errors grant no recovery.
 - **Health and Repair** (event-driven; no scheduled model inspection; Check is retired):
   startup, Task completion and one inotify observer over Source and Vault drive
   reconciliation off the event loop. The status Tool and Tasks pane share one current-issue
@@ -527,11 +537,19 @@ full current reads, unrelated hits do not.
   observations new IDs; old IDs survive only in history); no Article placement authority;
   native edges stay in the Memory view. Missing provider configuration fails startup,
   never falls back silently.
-- Recall is bounded (automatic tighter than explicit `observations.recall`); failure never
-  authorizes replay. Native settings own consolidation; reconnect preserves pauses.
-  Conversation requests and Task objectives carry distinct provenance labels; original
-  dates, order and journals are preserved. Diagnostic turns set
-  `memory_writeback: false` and are never delivered later.
+- Recall is bounded (automatic tighter than explicit `observations.recall`); concurrent
+  queries succeed independently under one deadline. Successful results survive another
+  query's failure with a compact partial notice; total failure remains model-visible even
+  without hits. Unfinished requests are cancelled and joined; owner cancellation propagates.
+  Failure never authorizes replay. Native settings own consolidation; reconnect preserves pauses.
+- Conversation requests and Task objectives carry distinct provenance labels. Intake
+  preserves both full sanitized roles within explicit bounds and rejects oversized content;
+  original dates, identities and journals survive retries. External completed-turn responses
+  distinguish durable insertion, duplication, withholding and disabled intake. Native
+  acknowledgment (`accepted`) differs from confirmed extraction (`extracted`): the latter
+  requires the exact completed parent/children and explicit error-free child outcomes.
+  Diagnostic turns reserve `withheld` identities before execution when
+  `memory_writeback: false`; continuations and startup recovery cannot deliver them later.
 - Hindsight keeps three Executive mental models current after consolidation (owner
   preferences and permissions, workstation changes, recent decisions). A changed page
   version becomes one attested Source and one `observations.memory.ready` occurrence

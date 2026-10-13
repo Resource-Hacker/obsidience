@@ -182,15 +182,22 @@ def _preflight_rejection(call: dict, note: Note) -> str | None:
                 candidates.add(json.dumps(result, sort_keys=True))
         except (ValueError, OSError, KeyError):
             pass
-    elif (tool == "task.create" and note.ref == "Tasks/curate"
-          and (note.meta.get("params") or {}).get("event") == "observations.memory.ready"):
+    elif tool == "task.create" and note.ref == "Tasks/curate":
         try:
             if call["tool_sha256"] != hashlib.sha256((CONFIG.vault_dir / "Tools/task.create.md").read_bytes()).hexdigest():
                 return None
         except OSError:
             return None
-        candidates = {"Task activation rejected: memory-triggered Curate compares its bound mental-model "
-                      "page with Knowledge and stages proposals itself; it delegates no Task."}
+        event = (note.meta.get("params") or {}).get("event")
+        if event == "observations.memory.ready":
+            candidates = {"Task activation rejected: memory-triggered Curate compares its bound mental-model "
+                          "page with Knowledge and stages proposals itself; it delegates no Task."}
+        elif event == "schedule":
+            # _maintenance_params rejects this exact mismatch before enqueue_event.
+            # Its returned receipt can release unrelated queued work; no call is replayed.
+            candidates = {"Task activation rejected: maintenance candidate fields do not match the controller result."}
+        else:
+            return None
     elif tool == "source.handoff" and note.ref == LEARN_TASK_REF:
         from ..knowledge.source import research_source_binding
 
@@ -1761,6 +1768,7 @@ def _independent_occurrence(task: Note, incoming: dict) -> bool:
     append_only = {"source.ingest", "source.handoff", "observations.retain", "observations.temporary.append", "task.complete"}
     return all(call.get("status") == "returned" and (
         call.get("read_only") is True or call.get("read_only") == 1 or call.get("tool") in append_only
+        or (call.get("tool") == "task.create" and _preflight_rejection(call, task) is not None)
     ) for call in coverage["calls"])
 
 

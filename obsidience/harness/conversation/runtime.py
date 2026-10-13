@@ -376,6 +376,12 @@ class ConversationRuntime:
         async with self._lock:
             await self.cancel(stop_playback=source == "text", reason=f"{source}.final")
             user_turn = await self._conversation.append(role="user", source=source, text=clean)
+            if not memory_writeback:
+                # Reserve before execution can commit a reply or continuation.
+                # A failed reservation aborts admission; restart cannot leak it.
+                from ..memory.hindsight import MEMORY
+                MEMORY.withhold(EXECUTIVE_AGENT_REF,
+                                source="conversation:" + str(user_turn["conversation_id"]), identifier=str(user_turn["id"]))
             self._steering = TurnSteering(user_turn["id"], self._publish_active_turn)
             turn_task = asyncio.create_task(
                 self._run_turn(clean, self._generation, user_turn, source=source,
@@ -504,9 +510,6 @@ class ConversationRuntime:
             if memory_writeback:
                 MEMORY.completed("Agents/Executive/Executive", text, reply,
                                  source="conversation:" + str(user_turn["conversation_id"]), identifier=str(user_turn["id"]))
-            else:
-                MEMORY.withhold("Agents/Executive/Executive",
-                                source="conversation:" + str(user_turn["conversation_id"]), identifier=str(user_turn["id"]))
             if source == "realtime" and result.get("voice_confirmation") != "cue_only":
                 await self._speak_public(reply, generation, turn_id=str(user_turn["id"]),
                                          run_id=str(result.get("run_id") or ""),

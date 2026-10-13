@@ -190,6 +190,9 @@ def _settled_commands(messages: list[dict]) -> list[dict]:
 
 WINDOW_NOTICE = ('[Earlier conversation is outside this window. Ask observations.recall for '
                  'earlier requests, decisions and results; never guess them.]')
+WINDOW_PENDING_NOTICE = ('[Earlier conversation is outside this window, and some exchanges are not yet '
+                         'confirmed available in memory. Use observations.recall, but do not assume it '
+                         'covers those exchanges. State when missing context prevents an answer; never guess it.]')
 
 
 def windowed(messages: list[dict], anchor: str | None) -> list[dict]:
@@ -208,8 +211,11 @@ def windowed(messages: list[dict], anchor: str | None) -> list[dict]:
         return messages
     kept = [message for message in messages[:start] if message['role'] == 'system'
             or message_producer(message) in {'obsidience.context', 'obsidience.memory'}]
+    state = _window_state()
+    text = (WINDOW_PENDING_NOTICE if state.get('anchor') == anchor and state.get('retention_gap')
+            else WINDOW_NOTICE)
     notice = {'role': 'user', 'source': {'kind': 'plugin:obsidience.window'},
-              'content': [{'type': 'text', 'text': WINDOW_NOTICE}]}
+              'content': [{'type': 'text', 'text': text}]}
     return [*kept, notice, *messages[start:]]
 
 
@@ -424,6 +430,7 @@ def request_payload(messages, spec, effort, tools, *, task=False):
 # later (35 s at worst, measured), so only the newest few stay verbatim.
 WINDOW_KEEP = (3, 2_000)      # exchanges, estimated tokens kept by a rebase (at least two exchanges)
 WINDOW_LIMIT = (6, 4_000)     # a window beyond either rebases at the next idle edge
+WINDOW_OVERLAP_LIMIT = (12, 8_000)  # outage overlap thresholds; retain the two-exchange minimum
 _WINDOW_KEY = 'conversation_window_anchor'
 _window: dict | None = None
 
@@ -458,7 +465,7 @@ def _estimate(messages: list[dict]) -> int:
 
 
 def rebase_window(conversation_id: str, messages: list[dict] | None) -> str | None:
-    """At an idle edge, move an outgrown window's anchor forward; return a new anchor.
+    """At an idle edge, rebase or update its retention notice; return the anchor.
 
     messages is the ADK conversation log's native view of this conversation.
     """
@@ -467,26 +474,71 @@ def rebase_window(conversation_id: str, messages: list[dict] | None) -> str | No
     if messages is None or CONFIG.extras.get('conversation_window', True) is False:
         return None
     owners = [index for index, message in enumerate(messages) if message.get('source', {}).get('kind') == 'user']
+    if not owners:
+        return None
     anchor = window_anchor(conversation_id)
     start = next((n for n, index in enumerate(owners) if messages[index].get('id') == anchor), 0)
-    if (len(owners) - start <= WINDOW_LIMIT[0]
-            and _estimate(messages[owners[start]:] if owners else []) <= WINDOW_LIMIT[1]):
-        return None
-    # Keep the newest exchanges within WINDOW_KEEP, never fewer than two, so a
-    # follow-up always sees the exchange it answers.
-    keep = len(owners) - 2
-    while (keep - 1 > start and len(owners) - keep < WINDOW_KEEP[0]
-           and _estimate(messages[owners[keep - 1]:]) <= WINDOW_KEEP[1]):
-        keep -= 1
-    if keep <= start:
-        return None
-    state = {'conversation_id': conversation_id, 'anchor': messages[owners[keep]]['id']}
+    previous = _window_state()
+    if previous.get('conversation_id') != conversation_id:
+        previous = {}
+    gap = previous.get('retention_gap')
+    ids = [messages[index]['id'] for index in owners[start:]]
     from ..knowledge.index import INDEX
+    with INDEX.lock:
+        sequences = dict(INDEX.db.execute(
+            'SELECT id,sequence FROM conversation_turns WHERE conversation_id=? AND id IN ('
+            + ','.join('?' for _ in ids) + ')', (conversation_id, *ids)).fetchall())
+        # A gap is just two sequence bounds, never copied conversation. Check a
+        # bounded prefix each idle edge; it only shrinks across attested receipts.
+        gap_rows = INDEX.db.execute(
+            "SELECT id,sequence FROM conversation_turns WHERE conversation_id=? AND role='user' "
+            'AND sequence>=? AND sequence<=? ORDER BY sequence LIMIT 32',
+            (conversation_id, gap['first'], gap['last'])).fetchall() if gap else []
+    if any(identifier not in sequences for identifier in ids):
+        raise ValueError('Conversation window is missing its exact owner-turn ledger row')
+    from ..memory.hindsight import MEMORY
+    pending = MEMORY.pending_extractions(conversation_id, [*ids, *(row[0] for row in gap_rows)])
+    if gap:
+        first_pending = next((sequence for identifier, sequence in gap_rows if identifier in pending), None)
+        if first_pending is not None:
+            gap = {**gap, 'first': first_pending}
+        elif len(gap_rows) == 32:
+            gap = {**gap, 'first': gap_rows[-1][1] + 1}
+        else:
+            gap = None
+    size = _estimate(messages[owners[start]:])
+    keep = start
+    if len(owners) - start > WINDOW_LIMIT[0] or size > WINDOW_LIMIT[1]:
+        # Keep the newest exchanges within WINDOW_KEEP, never fewer than two,
+        # so a follow-up always sees the exchange it answers.
+        keep = len(owners) - 2
+        while (keep - 1 > start and len(owners) - keep < WINDOW_KEEP[0]
+               and _estimate(messages[owners[keep - 1]:]) <= WINDOW_KEEP[1]):
+            keep -= 1
+        blocked = next((n for n in range(start, keep) if messages[owners[n]]['id'] in pending), None)
+        if blocked is not None:
+            if len(owners) - start <= WINDOW_OVERLAP_LIMIT[0] and size <= WINDOW_OVERLAP_LIMIT[1]:
+                keep = blocked
+            else:
+                first = sequences[messages[owners[blocked]]['id']]
+                last = sequences[messages[owners[keep]]['id']] - 1
+                gap = {'first': min(first, gap['first']) if gap else first,
+                       'last': max(last, gap['last']) if gap else last}
+    anchor = messages[owners[keep]]['id'] if keep > start else anchor
+    if not anchor:
+        return None
+    state = {'conversation_id': conversation_id, 'anchor': anchor}
+    if gap:
+        state['retention_gap'] = gap
+    if state == previous:
+        return None
+    projection_changed = (state['anchor'] != previous.get('anchor')
+                          or bool(gap) != bool(previous.get('retention_gap')))
     with INDEX.lock, INDEX.db:
         INDEX.db.execute('INSERT OR REPLACE INTO conversation_state(key,value) VALUES(?,?)',
                          (_WINDOW_KEY, json.dumps(state)))
     _window = state
-    return state['anchor']
+    return state['anchor'] if projection_changed else None
 
 
 async def measure_view(value: dict | None, conversation_id: str, spec, *,
@@ -498,7 +550,9 @@ async def measure_view(value: dict | None, conversation_id: str, spec, *,
     """
     if value is None:
         return None
-    key = (value['revision'], window_anchor(conversation_id), repr(spec), before_sequence, pending_text)
+    window = _window_state()
+    gap = bool(window.get('retention_gap')) if window.get('conversation_id') == conversation_id else False
+    key = (value['revision'], window_anchor(conversation_id), gap, repr(spec), before_sequence, pending_text)
     cached = value.get('_context_count')
     if cached and cached[0] == key:
         return cached[1]

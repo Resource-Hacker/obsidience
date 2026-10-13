@@ -27,6 +27,8 @@ from ..config import CONFIG
 from ..knowledge.index import INDEX
 
 LOG = logging.getLogger(__name__)
+MAX_TURN_CHARS = 256 * 1024
+MAX_MEMORY_CHARS = 2 * MAX_TURN_CHARS + 256  # Both admitted roles and controller labels.
 EVENT = "observations.memory.ready"
 CURATE = "Tasks/curate"
 EXECUTIVE = "Agents/Executive/Executive"
@@ -157,6 +159,14 @@ def _quota_reset(operation: dict) -> float:
     return 0
 
 
+class MemoryContentTooLarge(ValueError):
+    """The full sanitized delivery exceeds the admitted memory envelope."""
+
+
+class MemoryDeliveryConflict(ValueError):
+    """An existing delivery identity belongs to different source bytes."""
+
+
 class Hindsight:
     def __init__(self):
         self.client = None
@@ -188,6 +198,9 @@ class Hindsight:
         # One FIFO outbox writer for Executive conversation completions, owned
         # by start()/close(), keeps their SQLite insert off the event loop.
         self.writer = None
+        # Content-free operation checks requested by the provider window. The
+        # existing delivery/health wake path owns their reads and cleanup.
+        self.extraction_checks = {}
 
     @property
     def enabled(self):
@@ -258,6 +271,7 @@ class Hindsight:
         if self.client:
             await self.client.aclose()
         self.task = self.client = None
+        self.extraction_checks.clear()
 
     def enqueue(self, agent_ref, text, *, source, identifier, related_refs=(), timestamp=None, previous_text=None):
         if not self.enabled or not text.strip():
@@ -266,7 +280,13 @@ class Hindsight:
         bank = bank_for(agent_ref)
         self.banks[bank] = agent_ref
         operation = str(uuid.uuid5(uuid.NAMESPACE_URL, f"obsidience:{agent_ref}:{source}:{identifier}"))
-        content = _redact(text, 16000)
+        if len(text) > MAX_MEMORY_CHARS:
+            raise MemoryContentTooLarge("Memory content exceeds the bounded handoff size")
+        # Redaction can expand short secret-shaped values. Give it room, then
+        # reject an oversized sanitized envelope instead of dropping either role.
+        content = _redact(text, 2 * MAX_MEMORY_CHARS)
+        if len(content) > MAX_MEMORY_CHARS:
+            raise MemoryContentTooLarge("Sanitized memory content exceeds the bounded handoff size")
         metadata = {"agent_ref": agent_ref, "origin": source, "origin_id": identifier,
                     "related_refs": json.dumps(list(related_refs)), "trust": "unverified"}
         # Keep timestamp outside the identity comparison so retrying the same
@@ -277,19 +297,20 @@ class Hindsight:
             if existing[0][2] == "withheld":
                 return False
             if existing[0][0] != digest:
-                previous_digest = hashlib.sha256(json.dumps(
-                    [_redact(previous_text, 16000), metadata], sort_keys=True).encode()).hexdigest() if previous_text else ""
-                if existing[0][0] != previous_digest:
-                    raise ValueError("Memory transaction identity was reused with different content")
-                # Only the controller-owned provenance label changed. Preserve
-                # accepted transaction identities; fix still-queued envelopes
-                # without replaying delivery or changing their original dates.
+                legacy_digests = {hashlib.sha256(json.dumps(
+                    [_redact(old, 16000), metadata], sort_keys=True).encode()).hexdigest()
+                    for old in (text, previous_text) if old is not None}
+                if existing[0][0] not in legacy_digests:
+                    raise MemoryDeliveryConflict("Memory transaction identity was reused with different content")
+                # Recognize the former 16K envelope and provenance label. Accepted
+                # deliveries stay untouched; only queued content is completed in
+                # place, without replay or a change to its original timestamp.
                 if existing[0][2] == "pending":
                     payload = json.loads(existing[0][1])
                     payload["content"] = content
                     self._sql("UPDATE memory_deliveries SET content_hash=?,payload=? "
                               "WHERE id=? AND content_hash=? AND state='pending'",
-                              (digest, json.dumps(payload), operation, previous_digest))
+                              (digest, json.dumps(payload), operation, existing[0][0]))
             return False
         # Hindsight writes its Event Date from this value's own offset. The
         # owner's local offset keeps evening events on the owner's date.
@@ -344,8 +365,23 @@ class Hindsight:
         self._sql("INSERT OR IGNORE INTO memory_deliveries(id,bank,content_hash,payload,state,created_at) "
                   "VALUES(?,?,?,?,?,?)", (operation, bank_for(agent_ref), "", "", "withheld", time.time()))
 
-    def _completed(self, agent_ref, user, assistant, *, source, identifier, timestamp=None):
+    def completed_status(self, agent_ref, user, assistant, *, source, identifier, timestamp=None):
+        """Synchronously attest the durable outcome of an external completed turn."""
+        if not self.enabled:
+            return "disabled"
+        if self._completed(agent_ref, user, assistant, source=source, identifier=identifier,
+                           timestamp=timestamp, raise_errors=True):
+            return "inserted"
+        operation = str(uuid.uuid5(uuid.NAMESPACE_URL, f"obsidience:{agent_ref}:{source}:{identifier}"))
+        rows = self._sql("SELECT state FROM memory_deliveries WHERE id=?", (operation,))
+        if not rows or rows[0][0] not in {"pending", "accepted", "extracted", "withheld"}:
+            raise RuntimeError("Memory delivery has no acknowledged durable state")
+        return "withheld" if rows[0][0] == "withheld" else "duplicate"
+
+    def _completed(self, agent_ref, user, assistant, *, source, identifier, timestamp=None, raise_errors=False):
         try:
+            if len(user) > MAX_TURN_CHARS or len(assistant) > MAX_TURN_CHARS:
+                raise MemoryContentTooLarge("Completed turn exceeds the bounded handoff size")
             label = ("Harness Task objective (not a direct owner message)"
                      if source.startswith("task:") else "Owner request")
             return self.enqueue(agent_ref, f"{label}:\n{user}\n\n"
@@ -356,6 +392,8 @@ class Hindsight:
         except Exception as exc:
             self.error = f"Memory delivery could not be recorded ({type(exc).__name__})"
             LOG.warning(self.error)
+            if raise_errors:
+                raise
             return False
 
     async def api(self, method, path, **kwargs):
@@ -396,6 +434,82 @@ class Hindsight:
         # Other native settings, including consolidation pauses, stay owned by
         # Hindsight configuration and are not overwritten on reconnect.
 
+    def pending_extractions(self, conversation_id, turn_ids):
+        """Eligible exchanges without an attested native extraction completion.
+
+        The window supplies a bounded set of owner-turn identities. Failed turns
+        without an accepted answer and deliberately withheld diagnostics do not
+        wait for a retain that will never be submitted. An async acknowledgement
+        alone is never proof that history is recallable.
+        """
+        turn_ids = list(dict.fromkeys(turn_ids))
+        if not turn_ids:
+            self.extraction_checks.clear()
+            return set()
+        marks = ",".join("?" for _ in turn_ids)
+        eligible = {row[0] for row in self._sql(
+            "SELECT u.id FROM conversation_turns u WHERE u.conversation_id=? AND u.id IN (" + marks + ") "
+            "AND u.role='user' AND u.state='final' AND EXISTS (SELECT 1 FROM conversation_turns a "
+            "WHERE a.reply_to=u.id AND a.role='assistant' AND a.state IN ('final','interrupted'))",
+            (conversation_id, *turn_ids))}
+        operations = {turn: str(uuid.uuid5(uuid.NAMESPACE_URL,
+                      f"obsidience:{EXECUTIVE}:conversation:{conversation_id}:{turn}")) for turn in turn_ids}
+        states = dict(self._sql("SELECT id,state FROM memory_deliveries WHERE id IN (" + marks + ")",
+                                tuple(operations.values())))
+        pending = {turn for turn in eligible if states.get(operations[turn]) not in {"extracted", "withheld"}}
+        bank = bank_for(EXECUTIVE)
+        checks = {operations[turn]: bank for turn in turn_ids
+                  if turn in pending and states.get(operations[turn]) == "accepted"}
+        checks = dict(list(checks.items())[:64])
+        if checks != self.extraction_checks:
+            self.extraction_checks = checks
+            if checks:
+                self.wake.set()
+        return pending
+
+    async def _refresh_extractions(self):
+        """Attest the exact retain operation, never the success webhook's body."""
+        try:
+            async with asyncio.timeout(3):
+                for identifier, bank in tuple(self.extraction_checks.items()):
+                    if identifier not in self.extraction_checks:
+                        continue
+                    # A failing first receipt must not starve later checks on
+                    # the next ordinary health wake.
+                    self.extraction_checks.pop(identifier)
+                    self.extraction_checks[identifier] = bank
+                    receipt = await self.api("GET", bank + "/operations/" + identifier)
+                    children = receipt.get("child_operations")
+                    if (receipt.get("operation_id") == identifier
+                            and receipt.get("operation_type") == "batch_retain"
+                            and receipt.get("status") == "completed"
+                            and isinstance(children, list) and children
+                            and all(child.get("status") == "completed" for child in children)):
+                        # A completed retain can still contain silently dropped
+                        # facts. The parent lists only child statuses; read each
+                        # child's native outcome before discarding its exchange.
+                        for child in children:
+                            child_id = child.get("operation_id")
+                            outcome = await self.api("GET", bank + "/operations/" + str(child_id))
+                            metadata = outcome.get("result_metadata") or {}
+                            if not (outcome.get("operation_id") == child_id
+                                    and outcome.get("operation_type") == "retain"
+                                    and outcome.get("status") == "completed"
+                                    and metadata.get("parent_operation_id") == identifier
+                                    and type(metadata.get("extraction_errors_count")) is int
+                                    and metadata["extraction_errors_count"] == 0
+                                    and type(metadata.get("unit_ids_count")) is int
+                                    and metadata["unit_ids_count"] >= 0):
+                                break
+                        else:
+                            self._sql("UPDATE memory_deliveries SET state='extracted' "
+                                      "WHERE id=? AND bank=? AND state='accepted'", (identifier, bank))
+                            self.extraction_checks.pop(identifier, None)
+        except (httpx.HTTPError, TimeoutError, RuntimeError) as exc:
+            # Leave the acknowledgement unconfirmed. The existing health tick
+            # wakes this owner again; no inferred success or retry scheduler.
+            LOG.warning("Hindsight extraction receipt unavailable (%s)", type(exc).__name__)
+
     async def _run(self):
         known = set()
         retry_delay = 1
@@ -418,7 +532,11 @@ class Hindsight:
                     if response.get("operation_id") != identifier:
                         raise RuntimeError("Hindsight did not acknowledge the exact delivery identity")
                     self._sql("UPDATE memory_deliveries SET payload='',state='accepted' WHERE id=?", (identifier,))
+                    if (str(json.loads(payload).get("metadata", {}).get("origin", "")).startswith("conversation:")
+                            and len(self.extraction_checks) < 64):
+                        self.extraction_checks[identifier] = bank
                     self.dirty.add(bank)
+                await self._refresh_extractions()
                 for bank in tuple(self.dirty):
                     await self.refresh(bank)
                     self.dirty.discard(bank)
@@ -735,18 +853,47 @@ class Hindsight:
                 "include": {"entities": None, "source_facts": {"max_tokens": 0}}}
         queries = [query[:3000]] + ([f"{query}\n{previous}"[:3000]] if previous else [])
         try:
-            async with asyncio.timeout(timeout):
-                pages = await asyncio.gather(*(self.api(
-                    "POST", bank + "/memories/recall", json={**body, "query": text}) for text in queries))
+            requests = [asyncio.create_task(self.api(
+                "POST", bank + "/memories/recall", json={**body, "query": text})) for text in queries]
+            try:
+                completed, _pending = await asyncio.wait(requests, timeout=timeout)
+            finally:
+                # asyncio.wait leaves unfinished HTTP calls running on timeout
+                # or owner cancellation. Drain them before recording a result.
+                for request in requests:
+                    if not request.done():
+                        request.cancel()
+                await asyncio.gather(*requests, return_exceptions=True)
+            pages, failures = [], []
+            for request in requests:
+                # Keep the query's slot even when it failed: the standalone and
+                # contextual results retain their existing merge priority.
+                if request not in completed:
+                    pages.append(None)
+                    failures.append("timeout")
+                    continue
+                try:
+                    pages.append(request.result())
+                except (httpx.HTTPError, TimeoutError, RuntimeError) as exc:
+                    pages.append(None)
+                    failures.append("timeout" if isinstance(exc, (TimeoutError, httpx.TimeoutException))
+                                    else "provider_error")
+            reason = "timeout" if "timeout" in failures else "provider_error"
+            if all(page is None for page in pages):
+                return record({
+                    "status": "unavailable", "notice": "Memory recall unavailable; no historical memory supplied.",
+                    "memories": [], "reason": reason})
             memories = [{"ref": memory_ref(bank, str(r["id"])), "text": r.get("text", ""),
                          "type": r.get("fact_type", r.get("type", "")),
                          "occurred_start": r.get("occurred_start"), "mentioned_at": r.get("mentioned_at")}
-                        for r in _merged([page.get("results", []) for page in pages], limit, max_tokens)]
+                        for r in _merged([(page or {}).get("results", []) for page in pages], limit, max_tokens)]
             if not speculative:
                 from ..execution import activity
                 activity.emit_operation("search", "returned", [r["ref"] for r in memories],
                                         label="Memories recalled", graph_id="memory:" + bank)
-            return record({"status": "returned", "notice": RECALL_NOTICE, "memories": memories})
+            return record({"status": "partial" if failures else "returned",
+                           "notice": RECALL_NOTICE, "memories": memories,
+                           **({"reason": reason} if failures else {})})
         except asyncio.CancelledError:
             record({"status": "interrupted"})
             raise
@@ -758,7 +905,7 @@ class Hindsight:
     def _record_recall(self, budget, started, result):
         budget = budget if budget in {"low", "mid", "high"} else "other"
         stats = self.recalls.setdefault(budget, {
-            "attempts": 0, "returned": 0, "empty": 0, "unavailable": 0,
+            "attempts": 0, "returned": 0, "partial": 0, "empty": 0, "unavailable": 0,
             "timeouts": 0, "interrupted": 0, "recent": deque(maxlen=20)})
         stats["attempts"] += 1
         stats[result["status"]] += 1
@@ -769,7 +916,8 @@ class Hindsight:
         stats["last_status"] = result["status"]
         # STOP/client cancellation is not a provider failure or a successful recall.
         if result["status"] != "interrupted":
-            stats["recent"].append((time.monotonic(), result["status"] == "unavailable", result["duration_ms"]))
+            stats["recent"].append((time.monotonic(), result["status"] in {"partial", "unavailable"},
+                                    result["duration_ms"]))
         return result
 
     def recall_status(self):

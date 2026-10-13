@@ -29,7 +29,9 @@ from . import sessions
 from .plugin import AgentPlugin, acquire_model
 from .tools import capability_tools
 from ..capability_core import foreground_checkpoint
-from ..native_turn import command_summary, cue_only, step_budget_notice, steering_context, tool_schemas, turn_recall
+from ..native_turn import (
+    command_summary, cue_only, memory_message, step_budget_notice, steering_context, tool_schemas, turn_recall,
+)
 from ...config import CONFIG
 
 EXECUTIVE = 'Agents/Executive/Executive'
@@ -201,9 +203,8 @@ async def run_adk_session(task, model, messages, allowed, ctx, agent_name, effor
             if not continuation and not plugin.task_mode:
                 recalled = await turn_recall(ctx, query, emit=plugin.emit, run=run, evaluation=evaluation,
                                              context_text=messages[1]['content'] if len(messages) > 1 else '')
-                if recalled['memories']:
-                    parts.append(sessions.part(json.dumps(recalled, ensure_ascii=False, separators=(',', ':')),
-                                               'plugin:obsidience.memory', run=run))
+                if memory := memory_message(recalled):
+                    parts.append(sessions.part(memory, 'plugin:obsidience.memory', run=run))
             agent = LlmAgent(name=sessions.AGENT, model=sessions.model(model, effort), instruction='',
                              tools=capability_tools(allowed, plugin),
                              disallow_transfer_to_parent=True, disallow_transfer_to_peers=True)
