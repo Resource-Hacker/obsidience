@@ -1,0 +1,16 @@
+[Unit]
+Description=Obsidience TV voice router (the Executive's voice takes the Snapcast route while the television listens)
+Requires=obsidience-tv-voice-server.service
+After=obsidience-tv-voice-server.service obsidience-tv-voice-desk.service
+PartOf=obsidience-tv-voice-server.service
+
+[Service]
+Type=exec
+EnvironmentFile=/home/wissenschafter/Projects/obsidience/obsidience/tv/host/voice/desk.env
+ExecStart=/usr/bin/python3 /home/wissenschafter/Projects/obsidience/obsidience/tv/host/voice.py
+Restart=on-failure
+RestartSec=2
+UMask=0077
+
+[Install]
+WantedBy=default.target

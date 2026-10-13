@@ -458,6 +458,20 @@
       "license": "Apache-2.0",
       "integration": "Selected 2026-10-12 for the TV remote: obsidience-tv-remote.service (obsidience/tv/host/remote.py, system Python) imports the unmodified distribution package as its Wayland client library, as a client of the TV session's compositor only. The package has no binding for zwp_virtual_keyboard_v1 (wlroots' virtual-keyboard-unstable-v1, which the TV session's sway implements), so remote.py declares that protocol's two interfaces and their requests itself through pywayland's protocol_core classes; no code or protocol text is copied. After a package update check that the unit still starts and types (obsidience/tv/host/README.md)."
     },
+    "snapcast": {
+      "repository": "https://github.com/badaix/snapcast",
+      "version": "0.35.0 (built from the AUR recipe snapcast 0.35.0-1 with PipeWire support, installed as a pacman package; Snapper 362-364)",
+      "license": "GPL-3.0-or-later",
+      "integration": "Selected 2026-10-12 for the Executive's voice on the television in step with the desk speakers: obsidience-tv-voice-server.service runs the unmodified snapserver with obsidience/tv/host/voice/snapserver.conf (its PipeWire source is the sink obsidience_tv_voice), obsidience-tv-voice-desk.service the unmodified snapclient on the Executive's speaker, and obsidience/tv/host/voice.py only moves the speech worker's stream onto that sink while a reply is spoken. The package's own system units stay disabled."
+    },
+    "snapdroid": {
+      "repository": "https://github.com/snapcast/snapdroid",
+      "version": "0.29.0.2 (Snapcast-signed-v0.29.0.2.apk, package de.badaix.snapcast)",
+      "license": "GPL-3.0-or-later",
+      "sha256": "cd835c12ae3bf084ef06064333599040559a871fee48e83f3539e89224b40010",
+      "signer_sha256": "9e79fe820bdb6ef742bedd13ad3e7c42c444ce534e98b26c6e7e586f76986518",
+      "integration": "Sideloaded unmodified on the registered television as the Snapcast client that plays the Executive's voice through the television's speakers. It finds the server by mDNS and needs the server's stream port 1704 and control port 1705 (ufw admits only the television)."
+    },
     "moonlight_android": {
       "repository": "https://github.com/moonlight-stream/moonlight-android",
       "version": "12.2 (app-nonRoot-release.apk)",

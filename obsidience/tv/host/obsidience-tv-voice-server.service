@@ -1,0 +1,15 @@
+[Unit]
+Description=Obsidience TV voice server (Snapcast: one voice, desk speakers and television in step)
+# Not part of the TV session: sound in step needs no picture. Without a television client the
+# router leaves the voice on its direct route and this server idles.
+
+[Service]
+Type=exec
+ExecStartPre=/usr/bin/install -d -m 0700 %h/.local/state/obsidience-tv/snapserver
+ExecStart=/usr/bin/snapserver -c /home/wissenschafter/Projects/obsidience/obsidience/tv/host/voice/snapserver.conf
+Restart=on-failure
+RestartSec=2
+UMask=0077
+
+[Install]
+WantedBy=default.target

@@ -80,6 +80,39 @@ A switch between modes takes 26-34 s on the television (about 10 s until the cha
 again on the other GPU, the rest is Moonlight's setting and reconnect); `mode reload`, with
 no change of size, about 15 s.
 
+## The Executive's voice on the television
+
+Owner request, 2026-10-12: the television as a second speaker for the Executive's voice, in
+step with the desk speakers. A second speaker over Wi-Fi is in step only if both speakers play
+each moment of sound at an agreed time, which is what Snapcast is for.
+
+| Unit | Owns |
+| --- | --- |
+| `obsidience-tv-voice-server.service` | `snapserver` with `voice/snapserver.conf`: its PipeWire source is the sink `obsidience_tv_voice`; stream port 1704 and control port 1705 (the firewall admits only the television) |
+| `obsidience-tv-voice-desk.service` | `snapclient` (host id `obsidience-desk`) on the Executive's physical speaker, named in `voice/desk.env` |
+| `obsidience-tv-voice.service` | `voice.py`: moves the speech worker's one playback stream onto `obsidience_tv_voice` while a reply is spoken, and back |
+
+On the television the Snapcast app (`de.badaix.snapcast` 0.29.0.2, sideloaded unmodified)
+finds the server by mDNS; its client runs as a foreground service and keeps playing while
+Moonlight is in front. Each client plays every chunk at the server's time plus the server's
+`buffer` (300 ms) and keeps correcting its clock, so the voice on this route starts 0.3 s
+later. Measured at the desk microphone: the television 46 ms behind the desk speakers,
+steady to a few ms, which the owner judged in step by ear; sound that starts after a long
+silence is not clipped.
+
+Speech can afford 0.3 s; the chirps cannot. So `voice.py` puts the stream on the Snapcast sink
+only from the end of the "accepted" chirp (after the owner's words, before the reply) to the
+end of the chirp that closes the reply. The opening chirp and the "accepted" chirp play on
+the desk speakers directly. It reads those moments from the Harness (`/ws/trace` chirp lines,
+`/ws/realtime` state) and the television's presence from the Snapcast server; without any of
+them, or when the Executive speaks from another speaker than the desk client's, the voice
+stays on its own speaker. The echo reference is unchanged: it is the monitor of the physical
+speaker, which carries the voice whichever way it arrives there.
+
+Tried first and dropped: sending the voice through Sunshine's own audio stream and delaying
+the desk speakers by a fixed amount. That path's delay wandered between about 190 and 270 ms
+within minutes.
+
 ## Boundaries
 
 - Sunshine never sees the desktop: it is a client of the TV compositor only, and its

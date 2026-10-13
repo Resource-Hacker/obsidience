@@ -1,0 +1,17 @@
+[Unit]
+Description=Obsidience TV voice, desk speakers (Snapcast client on the Executive's speaker)
+Requires=obsidience-tv-voice-server.service
+After=obsidience-tv-voice-server.service
+PartOf=obsidience-tv-voice-server.service
+
+[Service]
+Type=exec
+EnvironmentFile=/home/wissenschafter/Projects/obsidience/obsidience/tv/host/voice/desk.env
+# The host id is how the router tells this client from the television's.
+ExecStart=/usr/bin/snapclient tcp://127.0.0.1:1704 --hostID obsidience-desk --player pipewire --soundcard ${VOICE_DESK_SINK} --logsink stdout --logfilter *:notice
+Restart=on-failure
+RestartSec=2
+UMask=0077
+
+[Install]
+WantedBy=default.target
