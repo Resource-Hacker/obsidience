@@ -18,9 +18,10 @@ export interface Knowledge3dOptics {
   /** Outer radius in cloud-local units, and the group's render scale. */
   uReach: { value: number };
   uModelScale: { value: number };
-  /** The scan plane: height in cloud radii (-1 bottom, 1 top), gain, and how
-   *  far its light turns amber (0 ambient survey, 1 thinking). */
-  uScan: { value: THREE.Vector3 };
+  /** The resting survey plane: height in cloud radii (-1 bottom, 1 top), gain. */
+  uScan: { value: THREE.Vector2 };
+  /** Thinking: 0 at rest, 1 while the cloud's Agent thinks. */
+  uThink: { value: number };
 }
 
 const OPTICS_GLSL = `
@@ -28,7 +29,10 @@ uniform float uFocusSwing;
 uniform float uPixelRatio;
 uniform float uReach;
 uniform float uModelScale;
-uniform vec3 uScan;
+uniform float uTime;
+uniform vec2 uScan;
+uniform float uThink;
+uniform float uOrder; // this shell's place: 0 nearest the core, 1 outermost
 // Depth past the cloud centre in cloud radii: -1 nearest, +1 farthest.
 float knowledgeDepth(vec4 view) {
   return ((modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0)).z - view.z) / max(uReach * uModelScale, 1e-3);
@@ -40,10 +44,32 @@ float knowledgeFog(float depth) {
 float knowledgeConfusion(float depth) {
   return min(abs(depth - uFocusSwing) * 4.5, 18.0) * uPixelRatio;
 }
-// Brightness gain where the scan plane passes a cloud-local point.
+// Brightness gain where the survey plane passes a cloud-local point.
 float knowledgeScan(vec3 local) {
   float plane = local.y / max(uReach, 1e-3) - uScan.x;
   return uScan.y * exp(-plane * plane * 700.0);
+}
+// Thinking falls into the glass like rain into water. Each shell takes four
+// drops at a time; every fall lands on a fresh bearing and spreads a short
+// train of crests across the shell, fading as it goes. Positive on a crest.
+float dropHash(float n) {
+  return fract(sin(n * 127.1) * 43758.5453);
+}
+float thinkingWave(vec3 direction) {
+  float wave = 0.0;
+  for (int drop = 0; drop < 4; drop++) {
+    float seed = float(drop) * 7.31 + uOrder * 53.7;
+    float clock = uTime / (2.2 + 1.3 * dropHash(seed)) + dropHash(seed + 1.7);
+    float fall = floor(clock);
+    float age = fract(clock);
+    float y = 2.0 * dropHash(seed + fall * 3.17) - 1.0;
+    float turn = 6.28318530718 * dropHash(seed + fall * 5.91 + 2.3);
+    vec3 centre = vec3(sqrt(1.0 - y * y) * cos(turn), y, sqrt(1.0 - y * y) * sin(turn));
+    // Radians from the impact, less how far its ring has spread.
+    float offset = acos(clamp(dot(direction, centre), -1.0, 1.0)) - age * 2.4;
+    wave += sin(offset * 20.0) * exp(-offset * offset * 14.0) * (1.0 - age) * (1.0 - age);
+  }
+  return wave * uThink;
 }
 `;
 
@@ -124,8 +150,9 @@ void main() {
 const SHELL_GLSL = `
 uniform sampler2D uSurvey;
 uniform vec2 uShell; // rim radius, deepest crater, in cloud-local units
-vec3 shellPoint(vec3 direction, float depth, float lift) {
-  return direction * (uShell.x * (1.0 + lift) - uShell.y * depth);
+// A crest lifts the glass by a twentieth of its radius.
+vec3 shellPoint(vec3 direction, float depth, float lift, float wave) {
+  return direction * (uShell.x * (1.0 + lift + 0.05 * wave) - uShell.y * depth);
 }
 `;
 
@@ -133,13 +160,15 @@ const GLASS_VERTEX = `
 varying vec2 vSt;
 varying float vFog;
 varying float vEdge;
+varying float vWave;
 ${OPTICS_GLSL}
 ${SPHERE_GLSL}
 ${SHELL_GLSL}
 void main() {
   vSt = position.xy;
   vec3 direction = sphereDirection(vSt);
-  vec4 view = modelViewMatrix * vec4(shellPoint(direction, texture2D(uSurvey, vSt).a, 0.0), 1.0);
+  vWave = thinkingWave(direction);
+  vec4 view = modelViewMatrix * vec4(shellPoint(direction, texture2D(uSurvey, vSt).a, 0.0, vWave), 1.0);
   vFog = knowledgeFog(knowledgeDepth(view));
   // Glass shows at its edge: how nearly this bearing is seen side-on.
   vEdge = 1.0 - abs(dot(normalize(normalMatrix * direction), normalize(view.xyz)));
@@ -157,10 +186,11 @@ uniform float uLevels;
 uniform float uRings;
 uniform float uSolid;
 uniform float uGlow;
-uniform vec3 uScan;
+uniform vec2 uScan;
 varying vec2 vSt;
 varying float vFog;
 varying float vEdge;
+varying float vWave;
 ${LIGHT_GLSL}
 void main() {
   vec4 field = texture2D(uSurvey, vSt);
@@ -170,22 +200,26 @@ void main() {
   float line = 1.0 - smoothstep(0.25, 1.2, abs(fract(level - 0.5) - 0.5) / max(spacing, 1e-5));
   line = mix(line, min(spacing, 1.0), smoothstep(0.4, 0.95, spacing));
   float weight = mod(floor(level + 0.5), 5.0) < 0.5 ? 0.5 : 0.2;
+  // The survey plane at rest and a ripple's crest while thinking light the
+  // glass the same way; the crest carries amber.
   float plane = height - uScan.x;
-  float scan = uScan.y * exp(-plane * plane * 350.0);
+  float crest = max(vWave, 0.0);
+  float scan = uScan.y * exp(-plane * plane * 350.0) + 3.0 * crest;
   vec3 tint = vec3(0.62 + field.r - field.g, 0.62 + field.g, 0.62 - field.r - field.g);
-  vec3 color = mix(mix(tint, vec3(0.78, 1.0, 0.94), 0.86), mix(vec3(1.0), AMBER, uScan.z), min(1.0, scan * 0.3));
+  vec3 color = mix(mix(tint, vec3(0.78, 1.0, 0.94), 0.86), mix(vec3(1.0), AMBER, min(1.0, crest * 2.0)),
+    min(1.0, scan * 0.3));
   float edge = vEdge * vEdge * vEdge * vEdge * 0.07;
   // A crater glows from its floor in its node's colour. The glow does not
   // thin with the glass, so a clear shell still shows where its nodes rest.
   vec3 glow = mix(tint, vec3(1.0), 0.2) * field.a * field.a * uGlow;
-  gl_FragColor = knowledgeLight((color * (line * weight * (1.0 + scan) + edge) * uSolid + glow) * vFog);
+  // A crest shows even on a clear shell.
+  gl_FragColor = knowledgeLight((color * (line * weight * (1.0 + scan) + edge) * (uSolid + 0.6 * crest) + glow) * vFog);
 }
 `;
 
 const DUST_VERTEX = `
 attribute vec3 aDirection;
 attribute vec4 aRandom; // size, keep, lift, twinkle phase
-uniform float uTime;
 uniform float uPerspective;
 uniform float uGain;
 uniform float uTexel;
@@ -205,7 +239,8 @@ void main() {
   float shade = 0.22 + 0.78 * max(0.0, dot(
     normalize(vec3(east, 0.012, north)), normalize(vec3(-0.45, 0.8, 0.4))));
   bool haze = aRandom.z > 0.0;
-  vec3 local = shellPoint(aDirection, field.a, aRandom.z);
+  float wave = thinkingWave(aDirection);
+  vec3 local = shellPoint(aDirection, field.a, aRandom.z, wave);
   vec4 view = modelViewMatrix * vec4(local, 1.0);
   gl_Position = projectionMatrix * view;
   float depth = knowledgeDepth(view);
@@ -220,17 +255,20 @@ void main() {
   float light = haze
     ? 0.16 * aRandom.w * smoothstep(0.25, 0.85, field.a)
     : shade * (0.5 + 0.5 * field.a) * (0.55 + 0.45 * aRandom.w);
-  float scan = knowledgeScan(local);
+  float crest = max(wave, 0.0);
+  float scan = knowledgeScan(local) + 3.0 * crest;
   // uGain is set for a ball about 450 canvas pixels in radius; a smaller
   // one carries the same light per area instead of clotting.
   vec4 centre = modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0);
   float apparent = uReach * uModelScale * uPerspective / max(1.0, -centre.z) / 450.0;
-  vAlpha = aRandom.y > 0.3 + 0.7 * smoothstep(0.0, 0.6, field.a) ? 0.0
-    : light * energy * twinkle * knowledgeFog(depth) * (1.0 + scan) * uGain * min(1.0, apparent * apparent);
+  vAlpha = light * energy * twinkle * knowledgeFog(depth) * (1.0 + scan) * uGain * min(1.0, apparent * apparent);
+  // Dust thins away from the craters; a point that is not shown is moved off
+  // screen here instead of being rasterised and discarded.
+  if (aRandom.y > 0.3 + 0.7 * smoothstep(0.0, 0.6, field.a) || vAlpha < 0.004) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
   vRing = smoothstep(5.0, 15.0, confusion / uPixelRatio);
   vec3 tint = vec3(0.62 + field.r - field.g, 0.62 + field.g, 0.62 - field.r - field.g);
   vColor = mix(haze ? vec3(0.88, 0.94, 1.0) : mix(tint, vec3(1.0), 0.6),
-    mix(vec3(1.0), AMBER, uScan.z), min(1.0, scan * 0.3));
+    mix(vec3(1.0), AMBER, min(1.0, crest * 2.0)), min(1.0, scan * 0.3));
 }
 `;
 
@@ -242,7 +280,6 @@ attribute vec4 aMote;   // place in the unit ball, node slot
 attribute vec3 aRandom; // size, phase, turns per hour
 uniform sampler2D uNodes;
 uniform vec2 uShell;
-uniform float uTime;
 uniform float uPerspective;
 uniform float uGain;
 varying float vAlpha;
@@ -257,12 +294,17 @@ void main() {
   // mouth; along the node's bearing it is no taller than the crater is deep.
   float mouth = shape.z * shape.w;
   float orb = min(max(1.8 * texelFetch(uNodes, ivec2(int(aMote.w), 2), 0).x, 0.55 * mouth), 0.9 * mouth);
+  // A consulted or hovered node's seed swells and burns amber, and a seed
+  // rides and brightens with any ripple that crosses its node.
+  float focus = texelFetch(uNodes, ivec2(int(aMote.w), 2), 0).y;
+  float wave = thinkingWave(node.xyz);
+  orb *= 1.0 + 0.3 * focus;
   float turn = uTime * aRandom.z * 0.0017453293 + aRandom.y * 6.2831853;
   float along = dot(node.xyz, aMote.xyz);
   vec3 turned = aMote.xyz * cos(turn) + cross(node.xyz, aMote.xyz) * sin(turn)
     + node.xyz * along * (1.0 - cos(turn));
   turned -= node.xyz * along * (1.0 - min(1.0, node.w * uShell.y / max(orb, 1e-4)));
-  vec3 local = node.xyz * shape.w + turned * orb;
+  vec3 local = node.xyz * shape.w * (1.0 + 0.05 * wave) + turned * orb;
   vec4 view = modelViewMatrix * vec4(local, 1.0);
   gl_Position = projectionMatrix * view;
   float depth = knowledgeDepth(view);
@@ -277,10 +319,11 @@ void main() {
   // Fading toward the edge of the seed.
   vAlpha = (1.0 - 0.75 * dot(aMote.xyz, aMote.xyz)) * (0.45 + 0.55 * aRandom.y)
     * base * base / (size * size) * twinkle * knowledgeFog(depth) * (1.0 + scan)
-    * uGain * min(1.0, apparent * apparent);
+    * uGain * (1.0 + 2.5 * focus + 2.0 * max(wave, 0.0)) * min(1.0, apparent * apparent);
   vRing = smoothstep(5.0, 15.0, confusion / uPixelRatio);
   vec3 tint = vec3(0.62 + shape.x - shape.y, 0.62 + shape.y, 0.62 - shape.x - shape.y);
-  vColor = mix(mix(tint, vec3(1.0), 0.3), mix(vec3(1.0), AMBER, uScan.z), min(1.0, scan * 0.3));
+  vColor = mix(mix(mix(tint, vec3(1.0), 0.3), mix(AMBER, vec3(1.0), 0.25), focus),
+    vec3(1.0), min(1.0, scan * 0.3));
 }
 `;
 
@@ -324,6 +367,8 @@ export interface Knowledge3dShells {
   /** Glass, dust and seeds for every shell; add them to the cloud's group. */
   layers: readonly THREE.Object3D[];
   applyTuning(glass: Knowledge3dGlass): void;
+  /** Each node's highlight (thinking reveal, selection, hover), 0 to 1. */
+  setFocus(levels: Float32Array): void;
   /** Call after the solver moved its nodes. */
   invalidate(): void;
   /** Resurvey if the layout moved since the last frame. */
@@ -408,7 +453,7 @@ export function createKnowledge3dShells(options: {
     const reach = band[band.length - 1];
     const width = detail > 0.6 && reach > 0.6 ? 1024 : 512;
     // Row 0: bearing and relative crater depth. Row 1: chroma, mouth, radius.
-    // Row 2: icon radius.
+    // Row 2: icon radius, focus.
     const data = new Float32Array(count * 12);
     const texture = new THREE.DataTexture(data, count, 3, THREE.RGBAFormat, THREE.FloatType);
     texture.minFilter = texture.magFilter = THREE.NearestFilter;
@@ -437,9 +482,10 @@ export function createKnowledge3dShells(options: {
     const survey = { value: null as THREE.Texture | null };
     const shape = { value: new THREE.Vector2(1, 0) };
     const levels = (detail > 0.6 ? 56 : 30) * reach;
+    const place = { value: bands.length > 1 ? order / (bands.length - 1) : 0.5 };
     const glassMaterial = new THREE.ShaderMaterial({
       uniforms: {
-        ...optics, uSurvey: survey, uShell: shape, uSolid: { value: 1 }, uGlow: { value: 0 },
+        ...optics, uOrder: place, uSurvey: survey, uShell: shape, uSolid: { value: 1 }, uGlow: { value: 0 },
         uLevels: { value: levels }, uRings: { value: 7 },
       },
       vertexShader: GLASS_VERTEX, fragmentShader: GLASS_FRAGMENT,
@@ -465,7 +511,7 @@ export function createKnowledge3dShells(options: {
     dustGeometry.setAttribute("aRandom", new THREE.BufferAttribute(randoms, 4));
     const dustMaterial = new THREE.ShaderMaterial({
       uniforms: {
-        ...optics, uSurvey: survey, uShell: shape, uTexel: { value: 1 / width }, uGain: { value: 0 },
+        ...optics, uOrder: place, uSurvey: survey, uShell: shape, uTexel: { value: 1 / width }, uGain: { value: 0 },
       },
       vertexShader: DUST_VERTEX, fragmentShader: BOKEH_FRAGMENT, ...ADDITIVE,
     });
@@ -493,7 +539,7 @@ export function createKnowledge3dShells(options: {
     seedGeometry.setAttribute("aMote", new THREE.BufferAttribute(motes, 4));
     seedGeometry.setAttribute("aRandom", new THREE.BufferAttribute(moteRandoms, 3));
     const seedMaterial = new THREE.ShaderMaterial({
-      uniforms: { ...optics, uNodes: { value: texture }, uShell: shape, uGain: { value: 0 } },
+      uniforms: { ...optics, uOrder: place, uNodes: { value: texture }, uShell: shape, uGain: { value: 0 } },
       vertexShader: SEED_VERTEX, fragmentShader: BOKEH_FRAGMENT, ...ADDITIVE,
     });
     const seeds = new THREE.Points(seedGeometry, seedMaterial);
@@ -559,6 +605,13 @@ export function createKnowledge3dShells(options: {
   return {
     layers: drawn,
     invalidate() { dirty = true; },
+    setFocus(levels) {
+      for (const shell of shells) {
+        const count = shell.members.length;
+        shell.members.forEach((node, slot) => { shell.data[(2 * count + slot) * 4 + 1] = levels[node]; });
+        shell.texture.needsUpdate = true;
+      }
+    },
     applyTuning(glass) {
       if (glass.craterDepth !== craterDepth) {
         craterDepth = glass.craterDepth;
@@ -582,13 +635,12 @@ export function createKnowledge3dShells(options: {
       skipped = 0;
       dirty = false;
       if (!survey()) { show(false); return; }
-      const float = renderer.extensions.has("EXT_color_buffer_float")
-        && renderer.extensions.has("OES_texture_float_linear");
       const previous = renderer.getRenderTarget();
       for (const shell of shells) {
         if (!shell.target) {
           shell.target = new THREE.WebGLRenderTarget(shell.width, shell.width / 2, {
-            type: float ? THREE.FloatType : THREE.HalfFloatType, format: THREE.RGBAFormat,
+            // Half floats resolve every level and filter without an extension.
+            type: THREE.HalfFloatType, format: THREE.RGBAFormat,
             minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
             wrapS: THREE.RepeatWrapping, wrapT: THREE.ClampToEdgeWrapping,
             depthBuffer: false, generateMipmaps: false,

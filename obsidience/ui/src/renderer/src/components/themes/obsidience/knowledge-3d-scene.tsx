@@ -1469,12 +1469,12 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
           }
         });
       }
-      // The scan plane: a slow survey at rest, the amber pass while an agent
-      // thinks (its own Task sweep for a satellite).
-      mainCloud?.driveScan(dt, Boolean(retainedFocus) && tendrilPhase === "thinking");
+      // The glass: a slow survey plane at rest, ripples across every shell
+      // while an agent thinks (its own Task sweep for a satellite).
+      mainCloud?.driveGlass(dt, Boolean(retainedFocus) && tendrilPhase === "thinking");
       for (const [agentId, cloud] of satelliteClouds) {
         const state = sweepStates.get(agentId);
-        cloud.driveScan(dt, Boolean(state) && state!.fadeStartedAt < 0
+        cloud.driveGlass(dt, Boolean(state) && state!.fadeStartedAt < 0
           && (state!.sweep.phase ?? "thinking") === "thinking");
       }
       // Labels follow the same admitted path and frame clock as their beams.

@@ -56,10 +56,8 @@ export { KNOWLEDGE_LINK_APPROVAL_DURATION_MS };
  *  same jewel-star plasma orbs as the 2D map). */
 const LEAF_SPRITE_EXTENT = 3.2;
 
-/** Seconds for the scan plane to cross a ball: a slow ambient survey, and
- *  the quicker amber pass that marks an agent thinking. */
+/** Seconds for the resting survey plane to cross a ball. */
 const SURVEY_SWEEP_SECONDS = 11;
-const THINKING_SWEEP_SECONDS = 2.2;
 
 export const KNOWLEDGE_ACTIVITY_FADE_MS = 420;
 const SELECTION_TRANSITION_MS = 340;
@@ -225,8 +223,9 @@ export interface Knowledge3dCloud {
   ): void;
   nodeWorldPosition(rawId: string, out: THREE.Vector3): boolean;
   sortSprites(cameraPosition: THREE.Vector3): void;
-  /** Advance this cloud's scan plane; `thinking` selects the amber pass. */
-  driveScan(dtSeconds: number, thinking: boolean): void;
+  /** Advance this cloud's glass: the resting survey plane, and ripples
+   *  across every shell while its Agent is thinking. */
+  driveGlass(dtSeconds: number, thinking: boolean): void;
   /** Resurvey the glass if the solver moved its nodes. Before any render. */
   prepare(renderer: THREE.WebGLRenderer): void;
   dispose(scene: THREE.Scene): void;
@@ -496,7 +495,8 @@ export function createKnowledge3dCloud(
     uPixelRatio: deps.sharedUniforms.uPixelRatio,
     uReach: { value: 1 },
     uModelScale: modelScaleUniform,
-    uScan: { value: new THREE.Vector3(-2, 0, 0) },
+    uScan: { value: new THREE.Vector2(-2, 0) },
+    uThink: { value: 0 },
   };
   const layout = captureKnowledge3dLayout(simulation);
   const linkCounts = new Float32Array(nodes.length);
@@ -1230,15 +1230,16 @@ export function createKnowledge3dCloud(
         dirty = true;
       }
     }
-    if (dirty) focusAttribute.needsUpdate = true;
+    if (dirty) {
+      focusAttribute.needsUpdate = true;
+      shells.setFocus(focusLevels);
+    }
   };
 
   const localCamera = new THREE.Vector3();
   const projectionVector = new THREE.Vector3();
-  // The scan plane starts below the ball and changes between the survey and
-  // the thinking pass only between crossings.
+  // The survey plane starts below the ball.
   let scanAt = -1.2;
-  let scanWarmth = 0;
 
   return {
     agentId,
@@ -1564,13 +1565,15 @@ export function createKnowledge3dCloud(
       }
       drawIndex.needsUpdate = true;
     },
-    driveScan(dtSeconds, thinking) {
-      const wanted = thinking ? 1 : 0;
-      // Change character only between crossings, never mid-ball.
-      if (scanWarmth !== wanted && (scanAt <= -1.15 || scanAt >= 1.15)) scanWarmth = wanted;
-      scanAt += dtSeconds * 2.4 / (scanWarmth ? THINKING_SWEEP_SECONDS : SURVEY_SWEEP_SECONDS);
+    driveGlass(dtSeconds, thinking) {
+      // Ripples rise and settle over about a third of a second.
+      const think = optics.uThink;
+      think.value += ((thinking ? 1 : 0) - think.value) * (1 - Math.exp(-dtSeconds / 0.35));
+      if (think.value < 0.001) think.value = 0;
+      scanAt += dtSeconds * 2.4 / SURVEY_SWEEP_SECONDS;
       if (scanAt > 1.2) scanAt = -1.2;
-      optics.uScan.value.set(scanAt, scanWarmth ? 3 : 1.4, scanWarmth);
+      // The survey plane yields to the ripples.
+      optics.uScan.value.set(scanAt, 1.4 * (1 - think.value));
     },
     prepare(renderer) {
       shells.prepare(renderer);

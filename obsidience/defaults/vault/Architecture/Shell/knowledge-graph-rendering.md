@@ -93,12 +93,14 @@ shell nearest the core is the most solid and the outermost the clearest. The
 Glass group in Graph settings sets inner and outer solidity, crater depth,
 crater glow, seed glow, sheen lines and dust for each graph.
 
-A scan plane crosses every ball from bottom to top and lights the glass it
-passes: slow and pale at rest, quick and amber while that ball's Agent is
-thinking. It adds to the thinking path below and attests nothing by itself;
-the path still shows what was actually consulted. Hover and activity labels
-are captions on a dark plate with a leader to their node, drawn over the
-graph.
+At rest a pale survey plane crosses every ball from bottom to top and lights
+the glass it passes. While a ball's Agent is thinking, ripples spread across
+each of its shells from changing points, like drops into water: the glass,
+its dust and its seeds ride them, and their crests carry amber light. The
+seed of a consulted or hovered node swells and burns amber. The ripples add
+to the thinking path below and attest nothing by themselves; the path still
+shows what was actually consulted. Hover and activity labels are captions on
+a dark plate with a leader to their node, drawn over the graph.
 
 ## Scoped graphs and Library
 
