@@ -58,14 +58,22 @@ the first game registers and `obsidience-tv-mode@default.service` when the last 
 (both WoW launchers use GameMode). With 1080p as the default both do nothing; they matter
 when the mode was set to `4k`. The commands return at once, so a game's start never waits.
 
-The stream's size is whatever Moonlight asks for: its "Video resolution" setting, which
-cannot be set from outside the app. So `mode` changes that setting on the television's
-screen over ADB (host list, settings button, "Video resolution", the entry by name), reads
-it back from the same list, and remembers the value in
+The stream's size and rate are whatever Moonlight asks for: its "Video resolution" and
+"Video frame rate" settings, which cannot be set from outside the app. So `mode` changes
+them on the television's screen over ADB (host list, settings button, the setting, the entry
+by name), reads each back from the same list, and remembers the values in
 `~/.local/state/obsidience-tv/moonlight-resolution` so that nothing is touched when it
 already fits. Moonlight then chooses its default bit rate for that size. A television that
 is off, unreachable or showing another app is left alone; `tv.control` runs `mode client`
 before it next starts the stream. A stream started by hand in between asks for the old size.
+
+A 30 fps stream at 3840x2160 was tried (owner's question, 2026-10-12: live channels are
+30 fps anyway) and is not a mode. On the integrated GPU that size saturates the GPU itself,
+not only its encoder: 27.9 frames a second reached the panel and 28% of them stayed for one
+or three refreshes instead of two. On the RTX 4080, with the desktop busy, every frame
+arrived (29.96) but 9.8% were off that two-refresh cadence, in bursts every 30-40 s: at 30
+frames a second each frame has to land in one particular pair of the panel's 60.07 refreshes.
+The 60 fps stream at 1920x1080 skipped 0.5-1% in the same conditions.
 
 A switch between modes takes 26-34 s on the television (about 10 s until the channel plays
 again on the other GPU, the rest is Moonlight's setting and reconnect); `mode reload`, with

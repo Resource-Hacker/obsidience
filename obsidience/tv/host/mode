@@ -24,10 +24,11 @@ default). A switch sets or removes that link and restarts the session, which res
 other three. It then puts back what the switch itself took away: the channel that was
 playing, and the stream on the television when the television was showing it.
 
-Moonlight asks the host for the size in its own "Video resolution" setting, which it offers
-no way to set from outside, and the integrated GPU cannot encode 3840x2160 at 60 frames a
-second. So that setting is changed on the television's screen, by name, and read back; the
-last value set is remembered so that nothing is touched when it already fits. A television
+Moonlight asks the host for the size and rate in its own "Video resolution" and "Video frame
+rate" settings, which it offers no way to set from outside, and the integrated GPU cannot
+encode 3840x2160 at 60 frames a second. So those settings are changed on the television's
+screen, by name, and read back; the last values set are remembered so that nothing is
+touched when they already fit. A television
 that is off, unreachable or showing another app is left alone: `mode client` runs again
 before the Harness next starts the stream (tv.control).
 """
@@ -182,40 +183,48 @@ class Television:
 
 
 def client(tv, restart):
-    """Make Moonlight's "Video resolution" the current mode's; start the stream again when asked.
+    """Make Moonlight's "Video resolution" and "Video frame rate" the current mode's; start the
+    stream again when asked.
 
-    True when the setting fits afterwards. Moonlight is restarted for it, so this runs only when
+    True when the settings fit afterwards. Moonlight is restarted for it, so this runs only when
     Moonlight is (or is about to be) what the television shows.
     """
-    wanted = settings(current())['TV_CLIENT_RESOLUTION']
+    mode = settings(current())
+    wanted = {'Video resolution': mode['TV_CLIENT_RESOLUTION'], 'Video frame rate': mode['TV_CLIENT_FPS']}
+    record = ', '.join(wanted.values())
     try:
-        fits = CLIENT_STATE.read_text().strip() == wanted
+        fits = CLIENT_STATE.read_text().strip() == record
     except OSError:
         fits = False
     if not fits:
-        # Moonlight 12.2: host list -> settings button -> "Video resolution", a list of entries
-        # (360p ... 1080p, 1440p, 4K) with the selected one checked.
+        # Moonlight 12.2: host list -> settings button -> a setting's title opens a list of
+        # entries (360p ... 1080p, 1440p, 4K; 30 FPS, 60 FPS) with the selected one checked.
         tv.shell(tv.guard + f'am force-stop {MOONLIGHT} && am start -n {MOONLIGHT}/.PcView')
+        if not tv.press('settingsButton'):
+            say('Moonlight did not show its settings; its stream size is unchanged')
+            return False
 
-        def entries():
-            """Open the setting's list: {entry: (x, y, checked)}; {} when Moonlight does not show it."""
-            if not tv.press('title', 'Video resolution'):
+        def entries(title):
+            """Open a setting's list: {entry: (x, y, checked)}; {} when Moonlight does not show it."""
+            if not tv.press('title', title):
                 return {}
             return {text: (x, y, checked) for text, _ident, x, y, checked in tv.find('text1')}
 
-        listed = tv.press('settingsButton') and entries()
-        if not listed or wanted not in listed:
-            say('Moonlight did not show its video resolutions; its stream size is unchanged')
-            return False
-        if not listed[wanted][2]:
-            tv.tap(*listed[wanted][:2])  # Selecting an entry closes the list.
-            listed = entries()  # Read back from the list itself.
-            if not listed.get(wanted, (0, 0, False))[2]:
-                say(f'Moonlight does not show {wanted} as its video resolution')
+        for title, entry in wanted.items():
+            listed = entries(title)
+            if entry not in listed:
+                say(f'Moonlight did not show {entry} under {title}; nothing more is changed')
                 return False
-            say(f'Moonlight video resolution set to {wanted}')
+            if not listed[entry][2]:
+                tv.tap(*listed[entry][:2])  # Selecting an entry closes the list.
+                listed = entries(title)  # Read back from the list itself.
+                if not listed.get(entry, (0, 0, False))[2]:
+                    say(f'Moonlight does not show {entry} as its {title.lower()}')
+                    return False
+                say(f'Moonlight {title.lower()} set to {entry}')
+            tv.press('button2')  # Cancel closes the list.
         CLIENT_STATE.parent.mkdir(parents=True, exist_ok=True)
-        CLIENT_STATE.write_text(wanted + '\n')
+        CLIENT_STATE.write_text(record + '\n')
         tv.shell(tv.guard + f'am force-stop {MOONLIGHT}')
     if restart:
         say('stream shown on the television' if tv.stream() else 'Moonlight did not show the stream')
