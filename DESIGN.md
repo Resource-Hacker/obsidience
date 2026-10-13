@@ -356,7 +356,10 @@ neighbours); (9) history projected from the native conversation (no conversation
   request, never replayed; no continuous observation or recording. Optional owner
   tracking keeps one stream, local face embeddings (never photos/video) and the sole motor
   connection; recognition is personalization, never authentication. Agent video feeds are
-  never cameras.
+  never cameras. Optional `look` (left, right, up or down, as seen in the picture) asks that
+  tracker to turn one bounded step for this request before the frame; its motor loop alone
+  steers there, holds briefly so looks compose, and returns to following by itself, at
+  once after a failed or cancelled capture.
 - `tv.control`: one private identity-bound LAN television through upstream ADB;
   discrete power with display/wake readback, registered app launch, backend state read from
   Android services (foreground app, audio-service playback, volume/mute, media sessions, text
