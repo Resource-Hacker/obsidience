@@ -570,6 +570,11 @@ class Tracker:
                     pose = feedback
                     with self._lock:
                         self._advance_look(pose)
+                        if self._home_verified and max(abs(home-at) for home,at in zip(self._home,pose)) > 1:
+                            # The idle head creeps about two degrees a minute with
+                            # zero speed submitted. Having reached home once does
+                            # not hold it: let return_home bring it back.
+                            self._home_verified = False
                         motion = self._desired_motion
                         fresh = (motion is not None and motion["generation"] == generation
                                  and time.monotonic()-motion["at"] <= self._max_age
