@@ -277,7 +277,8 @@ neighbours); (9) history projected from the native conversation (no conversation
   results carry the remaining decision budget; a third identical call is refused before
   dispatch. Foreground demand cancels only unfinished inference.
 - Each step advertises only the Tools its controller state allows, with schemas that
-  follow the active proposal and completion contract; the complete code-owned contract
+  follow the active proposal and completion contract and, in a Repair step, the call
+  its inspected plan permits; the complete code-owned contract
   is validated before dispatch. Source-bound Learn exposes only
   `source.read` and `task.complete` until a complete matching-hash read receipt exists.
   Evidence-bound completions need explicit failed status on non-success branches; Review
@@ -581,6 +582,9 @@ full current reads, unrelated hits do not.
 - Five distinct cases × five repetitions; automatic suites pair the rejection with four
   accepted controls from other runs (never duplicates; waits visibly when short); rubrics
   are the actual validators; unsupported contracts and code defects are explicit findings.
+  A job is admitted for a run's last rejection only; a run that ended in a Tool-contract
+  dead end (a partly read cited Article, no dispatchable call, the output limit) is
+  recorded as an implementation finding and admits no job.
 - Candidates change only Agent/Runbook bodies; all cases must pass, training improve and
   Tool counts hold; the latency bound applies only to Executive at reasoning `none`.
   Publication revalidates inputs, code, model and the returned receipt; owner-set
