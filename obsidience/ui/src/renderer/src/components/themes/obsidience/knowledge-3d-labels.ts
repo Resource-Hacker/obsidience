@@ -8,6 +8,7 @@ const MAX_LABELS = 18;
 const LABEL_FILL = "rgba(3, 3, 4, 0.86)";
 const LABEL_TEXT = "#ffffff";
 const LABEL_DIM = "rgba(255, 255, 255, 0.62)";
+const LABEL_RULE = "rgba(255, 255, 255, 0.3)";
 const LINE_HEIGHT = 13;
 
 export interface Knowledge3dLabelMeta {
@@ -235,12 +236,10 @@ function createLabelTexture(
     context.fillText(line, edge, 4 + LINE_HEIGHT / 2 + index * LINE_HEIGHT);
   });
   if (layout.note) {
-    // A hairline in the branch colour parts the title from where it lives.
+    // A grey hairline parts the title from where it lives.
     const rule = 4 + layout.lines.length * LINE_HEIGHT + 2;
-    context.globalAlpha = 0.6;
-    context.fillStyle = layout.meta.accent;
+    context.fillStyle = LABEL_RULE;
     context.fillRect(6, rule, layout.width - 12, 1);
-    context.globalAlpha = 1;
     context.font = '300 8px "JetBrains Mono", ui-monospace, monospace';
     context.letterSpacing = "1.2px";
     context.fillStyle = LABEL_DIM;
