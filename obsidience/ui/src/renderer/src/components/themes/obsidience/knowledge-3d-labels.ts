@@ -1,14 +1,13 @@
 import * as THREE from "three";
 
-// Labels are survey callouts: a thin leader from the marked point to an
-// underlined caption in light monospace capitals, with no box. A dark outline
-// keeps the caption in front of whatever the graph draws behind it, and a
-// small square carries the branch colour.
+// Labels are survey callouts: a thin leader from the marked point to a caption
+// in light monospace capitals, inside a thin box in the branch colour. The
+// box's dark fill keeps the caption in front of whatever the graph draws
+// behind it.
 const MAX_LABELS = 18;
+const LABEL_FILL = "rgba(3, 3, 4, 0.86)";
 const LABEL_TEXT = "#ffffff";
 const LABEL_DIM = "rgba(255, 255, 255, 0.62)";
-const LABEL_RULE = "rgba(255, 255, 255, 0.8)";
-const LABEL_OUTLINE = "rgba(3, 3, 4, 0.94)";
 const LINE_HEIGHT = 13;
 
 export interface Knowledge3dLabelMeta {
@@ -52,6 +51,8 @@ interface LeaderLine {
 }
 
 interface ActiveNodeSprites {
+  focus: THREE.Sprite;
+  focusMaterial: THREE.SpriteMaterial;
   wave: THREE.Sprite;
   waveMaterial: THREE.SpriteMaterial;
 }
@@ -128,8 +129,8 @@ function layoutLabels(
       ...lines.map((line) => line.length * (fontSize * 0.6 + letterSpacing)),
       note.length * (8 * 0.6 + 1.2),
     );
-    const boxWidth = Math.max(40, textWidth + 10);
-    const boxHeight = lines.length * LINE_HEIGHT + (note ? 11 : 0) + 6;
+    const boxWidth = Math.max(40, textWidth + 14);
+    const boxHeight = lines.length * LINE_HEIGHT + (note ? 11 : 0) + 8;
     const outward = point.x >= width / 2 ? 1 : -1;
     const reach = root ? 0 : meta.role === "section" ? 22 : 16;
     let centerX = root ? point.x : point.x + outward * (reach + boxWidth / 2);
@@ -178,7 +179,7 @@ function layoutLabels(
       };
     }
     occupied.push(bounds);
-    // The leader meets the near end of the caption's underline.
+    // The leader meets the box at its near lower corner.
     const endX = outward > 0 ? bounds.left : bounds.right;
     const endY = bounds.bottom - 0.5;
     const deltaX = endX - point.x;
@@ -224,40 +225,26 @@ function createLabelTexture(
   context.scale(scale, scale);
   const root = layout.meta.role === "root";
   const right = layout.outward < 0 && !root;
-  const edge = root ? layout.width / 2 : right ? layout.width - 5 : 5;
+  const edge = root ? layout.width / 2 : right ? layout.width - 7 : 7;
+  context.fillStyle = LABEL_FILL;
+  context.fillRect(0, 0, layout.width, layout.height);
+  context.strokeStyle = layout.meta.accent;
+  context.lineWidth = 1;
+  context.strokeRect(0.5, 0.5, layout.width - 1, layout.height - 1);
   context.textAlign = root ? "center" : right ? "right" : "left";
   context.textBaseline = "middle";
-  // The outline is what puts a caption in front: bright lines behind it stop
-  // at the glyphs' edge. (No Canvas2D shadow blur: Qt WebEngine's GPU Skia
-  // path has aborted on it.)
-  context.strokeStyle = LABEL_OUTLINE;
-  context.lineWidth = 4;
-  context.lineJoin = "round";
-  const write = (text: string, x: number, y: number) => {
-    context.strokeText(text, x, y);
-    context.fillText(text, x, y);
-  };
   context.font = `300 ${layout.fontSize}px "JetBrains Mono", ui-monospace, monospace`;
   context.letterSpacing = `${layout.letterSpacing}px`;
   context.fillStyle = LABEL_TEXT;
   layout.lines.forEach((line, index) => {
     // Canvas letter spacing trails each glyph; recentre the root caption.
-    write(line, edge + (root ? layout.letterSpacing / 2 : 0), 3 + LINE_HEIGHT / 2 + index * LINE_HEIGHT);
+    context.fillText(line, edge + (root ? layout.letterSpacing / 2 : 0), 4 + LINE_HEIGHT / 2 + index * LINE_HEIGHT);
   });
   if (layout.note) {
     context.font = '300 8px "JetBrains Mono", ui-monospace, monospace';
     context.letterSpacing = "1.2px";
     context.fillStyle = LABEL_DIM;
-    write(layout.note, edge, 3 + layout.lines.length * LINE_HEIGHT + 5);
-  }
-  if (!root) {
-    context.fillStyle = LABEL_OUTLINE;
-    context.fillRect(0, layout.height - 2, layout.width, 2);
-    context.fillStyle = LABEL_RULE;
-    context.fillRect(0, layout.height - 1, layout.width, 1);
-    // A small square in the branch colour ties the caption to its branch.
-    context.fillStyle = layout.meta.accent;
-    context.fillRect(right ? layout.width - 3 : 0, layout.height - 3, 3, 3);
+    context.fillText(layout.note, edge, 4 + layout.lines.length * LINE_HEIGHT + 5);
   }
 
   const texture = new THREE.CanvasTexture(canvas);
@@ -268,16 +255,18 @@ function createLabelTexture(
   return texture;
 }
 
-function createRingTexture(): THREE.CanvasTexture {
+function createRingTexture(fillAlpha: number, strokeAlpha: number): THREE.CanvasTexture {
   const canvas = document.createElement("canvas");
   canvas.width = 96;
   canvas.height = 96;
   const context = canvas.getContext("2d");
   if (!context) throw new Error("Unable to create active-node canvas");
   context.beginPath();
-  context.arc(48, 48, 44, 0, Math.PI * 2);
-  context.strokeStyle = "rgba(255, 255, 255, 0.9)";
-  context.lineWidth = 2;
+  context.arc(48, 48, 42, 0, Math.PI * 2);
+  context.fillStyle = `rgba(255, 255, 255, ${fillAlpha})`;
+  context.fill();
+  context.strokeStyle = `rgba(255, 255, 255, ${strokeAlpha})`;
+  context.lineWidth = 3;
   context.stroke();
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
@@ -317,7 +306,8 @@ export function createKnowledge3dLabelLayer(): Knowledge3dLabelLayer {
   const labelSprites = new Map<string, LabelSprite>();
   const leaderLines = new Map<string, LeaderLine>();
   const activeSprites = new Map<string, ActiveNodeSprites>();
-  const waveTexture = createRingTexture();
+  const focusTexture = createRingTexture(0.13, 0.9);
+  const waveTexture = createRingTexture(0.035, 0.82);
   let width = 1;
   let height = 1;
   let pixelRatio = 1;
@@ -334,7 +324,8 @@ export function createKnowledge3dLabelLayer(): Knowledge3dLabelLayer {
     entry.material.dispose();
   };
   const disposeActive = (entry: ActiveNodeSprites): void => {
-    scene.remove(entry.wave);
+    scene.remove(entry.focus, entry.wave);
+    entry.focusMaterial.dispose();
     entry.waveMaterial.dispose();
   };
 
@@ -415,9 +406,9 @@ export function createKnowledge3dLabelLayer(): Knowledge3dLabelLayer {
         positions.setXYZ(0, layout.startX, height - layout.startY, 0);
         positions.setXYZ(1, layout.endX, height - layout.endY, 0);
         positions.needsUpdate = true;
+        leader.material.color.set(layout.meta.accent);
       });
 
-      // A consulted point pings: a thin ring in its branch colour opens and fades.
       const wantedActive = new Set<string>();
       for (const id of activeNodeIds) {
         const point = projected.get(id);
@@ -426,6 +417,13 @@ export function createKnowledge3dLabelLayer(): Knowledge3dLabelLayer {
         wantedActive.add(id);
         let active = activeSprites.get(id);
         if (!active) {
+          const focusMaterial = new THREE.SpriteMaterial({
+            map: focusTexture,
+            transparent: true,
+            depthTest: false,
+            depthWrite: false,
+            toneMapped: false,
+          });
           const waveMaterial = new THREE.SpriteMaterial({
             map: waveTexture,
             transparent: true,
@@ -433,17 +431,27 @@ export function createKnowledge3dLabelLayer(): Knowledge3dLabelLayer {
             depthWrite: false,
             toneMapped: false,
           });
+          const focus = new THREE.Sprite(focusMaterial);
           const wave = new THREE.Sprite(waveMaterial);
+          focus.renderOrder = 12;
           wave.renderOrder = 11;
-          scene.add(wave);
-          active = { wave, waveMaterial };
+          scene.add(wave, focus);
+          active = { focus, focusMaterial, wave, waveMaterial };
           activeSprites.set(id, active);
         }
-        const phase = (now / 1400 + stablePhase(id)) % 1;
-        active.wave.position.set(point.x * width, height - point.y * height, 0);
-        active.wave.scale.setScalar((meta.radius + 5 + phase * 10) * 2);
+        const x = point.x * width;
+        const y = height - point.y * height;
+        const radius = meta.radius + (meta.role === "claim" ? 4 : 3);
+        const phase = (now / 3800 + stablePhase(id)) % 1;
+        const waveAmount = 0.5 - Math.cos(phase * Math.PI * 2) * 0.5;
+        active.focus.position.set(x, y, 0);
+        active.wave.position.set(x, y, 0);
+        active.focus.scale.setScalar(radius * 2);
+        active.wave.scale.setScalar((radius + 7) * 2 * (0.78 + waveAmount * 0.64));
+        active.focusMaterial.color.set(meta.accent);
         active.waveMaterial.color.set(meta.accent);
-        active.waveMaterial.opacity = 0.75 * (1 - phase);
+        active.focusMaterial.opacity = 0.82;
+        active.waveMaterial.opacity = 0.08 + waveAmount * 0.54;
       }
       for (const [id, entry] of activeSprites) {
         if (!wantedActive.has(id)) {
@@ -465,6 +473,7 @@ export function createKnowledge3dLabelLayer(): Knowledge3dLabelLayer {
       leaderLines.clear();
       for (const entry of activeSprites.values()) disposeActive(entry);
       activeSprites.clear();
+      focusTexture.dispose();
       waveTexture.dispose();
       scene.clear();
     },

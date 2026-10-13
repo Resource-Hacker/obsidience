@@ -102,9 +102,10 @@ Articles a route ends on send the strongest ripple, and reached nodes keep
 sending softer ones in turn until the thinking ends. A ripple marks the
 front's passage, as the route beam does; only the seed of a consulted or
 hovered node swells and burns amber. Ripples start only at nodes on the
-actual route. Labels are captions without a
-box: light capitals with a dark outline, a leader to their node, an underline
-and a small square in the branch color, drawn last, over the glass.
+actual route. Labels are captions in light
+capitals inside a thin box in the branch color, with a leader to their node,
+drawn last, over the glass. A consulted node also wears a faint disc and a
+breathing ring in its branch color.
 
 ## Scoped graphs and Library
 
