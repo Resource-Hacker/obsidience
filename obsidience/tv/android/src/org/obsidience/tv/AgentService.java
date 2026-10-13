@@ -1,6 +1,7 @@
 package org.obsidience.tv;
 
 import android.accessibilityservice.AccessibilityService;
+import android.accessibilityservice.AccessibilityServiceInfo;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
@@ -27,6 +28,8 @@ import android.util.Log;
 import android.util.TypedValue;
 import android.view.Display;
 import android.view.Gravity;
+import android.view.InputDevice;
+import android.view.KeyEvent;
 import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
@@ -53,11 +56,12 @@ import java.util.regex.Pattern;
  * Obsidience's TV agent. The system keeps an enabled accessibility service bound
  * (and rebinds it after reboot), so this service hosts everything: the socket
  * server, foreground tracking, the UI tree, media sessions, volume, on-screen
- * notices and the skip-ad watch. All state is owned by the main thread.
+ * notices, the skip-ad watch and the remote's keys for the computer's stream. All
+ * state is owned by the main thread.
  */
-public class AgentService extends AccessibilityService {
+public class AgentService extends AccessibilityService implements Server.Requests {
     static final String TAG = "ObsidienceTv";
-    static final int VERSION = 1;
+    static final int VERSION = 2;
     static volatile AgentService instance;
 
     /** Visible labels of skip-ad controls: "Skip", "Skip ad", "Skip Ads ›". */
@@ -72,6 +76,18 @@ public class AgentService extends AccessibilityService {
             "rewinding", "buffering", "error", "connecting", "skipping_to_previous", "skipping_to_next",
             "skipping_to_queue_item"};
     private static final int MUSIC = AudioManager.STREAM_MUSIC;
+    /** Moonlight's stream activity: the only place where the remote's keys are taken from the TV. */
+    private static final String STREAM_PACKAGE = "com.limelight";
+    private static final String STREAM_ACTIVITY = "com.limelight.Game";
+    /** The keys a host client can get. No other key is ever consumed; Home does not even arrive. */
+    private static final List<Integer> REMOTE_KEYS = Arrays.asList(
+            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT,
+            KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_BACK,
+            KeyEvent.KEYCODE_MENU, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_MEDIA_REWIND,
+            KeyEvent.KEYCODE_MEDIA_FAST_FORWARD);
+    /** USB identity of the Harness's virtual remote (tv.control): its keys are meant for the TV. */
+    private static final int HARNESS_VENDOR = 0x1209;
+    private static final int HARNESS_PRODUCT = 0x7476;
 
     final Handler main = new Handler(Looper.getMainLooper());
     private Server server;
@@ -109,6 +125,11 @@ public class AgentService extends AccessibilityService {
 
     private TextView notice;
 
+    private final Set<Server.Client> keyClients = new HashSet<>();
+    private final Set<Integer> heldKeys = new HashSet<>();
+    private boolean keyFilter;
+    private int streamWindow = -1;
+
     // ---- lifecycle ------------------------------------------------------------------------
 
     @Override protected void onServiceConnected() {
@@ -131,7 +152,7 @@ public class AgentService extends AccessibilityService {
         registerReceiver(receiver, filter, null, main);
         audio.registerAudioPlaybackCallback(players, main);
         watchSessions();
-        server = new Server(main, this::handle);
+        server = new Server(main, this);
         try {
             server.start();
         } catch (IOException e) {
@@ -163,6 +184,10 @@ public class AgentService extends AccessibilityService {
         if (sessionsWatched) media.removeOnActiveSessionsChangedListener(sessionsListener);
         setControllers(new ArrayList<>());
         hideNotice();
+        // The system forgets the key filter with the connection; a new one starts without it.
+        keyClients.clear();
+        heldKeys.clear();
+        keyFilter = false;
         main.removeCallbacksAndMessages(null);
         Log.i(TAG, "agent stopped");
     }
@@ -179,6 +204,8 @@ public class AgentService extends AccessibilityService {
                 fgPackage = pkg.toString();
                 fgActivity = cls.toString();
                 dreaming = fgActivity.endsWith("DreamActivity");
+                if (streamInFront()) streamWindow = event.getWindowId();
+                updateKeyFilter();
             }
             changed();
         } else if (type == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
@@ -290,7 +317,7 @@ public class AgentService extends AccessibilityService {
     }
 
     /** One request, on the main thread. */
-    JSONObject handle(JSONObject request) {
+    @Override public JSONObject handle(Server.Client client, JSONObject request) {
         Object id = request.opt("id");
         try {
             JSONObject result;
@@ -307,6 +334,7 @@ public class AgentService extends AccessibilityService {
                 case "transport": result = transport(request); break;
                 case "notice": result = notice(request.getString("text"), request.optInt("ms", 4000)); break;
                 case "config": result = config(request); break;
+                case "keys": result = keys(client, request.getBoolean("on")); break;
                 default: return error(id, "unknown op");
             }
             return result.put("id", id == null ? JSONObject.NULL : id).put("ok", true);
@@ -639,6 +667,104 @@ public class AgentService extends AccessibilityService {
             } catch (JSONException ignored) { }
             return;
         }
+    }
+
+    // ---- remote keys ----------------------------------------------------------------------
+
+    /** A host client asks for the remote's keys, or stops asking; `now` lets it compare clocks. */
+    private JSONObject keys(Server.Client client, boolean on) throws JSONException {
+        if (on ? keyClients.add(client) : keyClients.remove(client)) keyClientsChanged();
+        return new JSONObject().put("keys", on).put("now", SystemClock.uptimeMillis());
+    }
+
+    /** What a client asked for ends with its connection. */
+    @Override public void gone(Server.Client client) {
+        if (keyClients.remove(client)) keyClientsChanged();
+    }
+
+    private void keyClientsChanged() {
+        Log.i(TAG, "keys asked for by " + keyClients.size() + " client(s)");
+        updateKeyFilter();
+    }
+
+    private boolean streamInFront() {
+        return STREAM_PACKAGE.equals(fgPackage) && STREAM_ACTIVITY.equals(fgActivity);
+    }
+
+    /**
+     * The system hands this service key events only while they have somewhere to go: a host
+     * client asked for them and the stream is in front. At any other time the TV handles its
+     * keys exactly as it does without this agent.
+     */
+    private void updateKeyFilter() {
+        boolean wanted = !keyClients.isEmpty() && streamInFront();
+        if (wanted == keyFilter) return;
+        AccessibilityServiceInfo info = getServiceInfo();
+        if (info == null) return;
+        if (wanted) info.flags |= AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS;
+        else info.flags &= ~AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS;
+        setServiceInfo(info);
+        keyFilter = wanted;
+        Log.i(TAG, "key filter " + (wanted ? "on" : "off"));
+        if (!wanted) releaseKeys();
+    }
+
+    /** Without the filter no key-up arrives here: what a host still holds is released there now. */
+    private void releaseKeys() {
+        for (int code : heldKeys) pushKey(code, false, SystemClock.uptimeMillis());
+        heldKeys.clear();
+    }
+
+    private void pushKey(int code, boolean down, long time) {
+        try {
+            String line = new JSONObject().put("event", "key").put("code", code).put("down", down)
+                    .put("t", time).put("sent", SystemClock.uptimeMillis()).toString() + "\n";
+            for (Server.Client client : keyClients) client.send(line);
+        } catch (JSONException ignored) { }
+    }
+
+    /**
+     * Called only while the key filter is on. A first press of a remote key is consumed (kept
+     * from Moonlight) and pushed to the asking clients when the stream's own window has input
+     * focus, and a consumed press is followed to its release. Repeats are swallowed: the host's
+     * programs repeat on their own. Every other key passes untouched. The log names key codes
+     * and nothing else.
+     */
+    @Override protected boolean onKeyEvent(KeyEvent event) {
+        int code = event.getKeyCode();
+        int action = event.getAction();
+        if (action == KeyEvent.ACTION_UP) {
+            if (!heldKeys.remove(code)) return false;
+            pushKey(code, false, event.getEventTime());
+            Log.i(TAG, "key " + code + " up consumed");
+            return true;
+        }
+        if (action != KeyEvent.ACTION_DOWN) return false;
+        if (event.getRepeatCount() > 0) return heldKeys.contains(code);
+        String passed = passed(event);
+        if (passed != null) {
+            heldKeys.remove(code);
+            Log.i(TAG, "key " + code + " down passed: " + passed + " (device " + event.getDeviceId() + ")");
+            return false;
+        }
+        heldKeys.add(code);
+        pushKey(code, true, event.getEventTime());
+        Log.i(TAG, "key " + code + " down consumed (device " + event.getDeviceId() + ")");
+        return true;
+    }
+
+    /** Why a first key press is left to the TV; null when it goes to the host. */
+    private String passed(KeyEvent event) {
+        if (!REMOTE_KEYS.contains(event.getKeyCode())) return "not a remote key";
+        if (keyClients.isEmpty()) return "no client asks";
+        InputDevice device = event.getDevice();
+        if (device != null && device.getVendorId() == HARNESS_VENDOR
+                && device.getProductId() == HARNESS_PRODUCT) return "the Harness's remote";
+        // A dialog over the stream (Moonlight's "Connection terminated") must keep its keys.
+        for (AccessibilityWindowInfo window : getWindows()) {
+            if (window.isFocused()) return window.getId() == streamWindow ? null : "another window has focus";
+        }
+        return "no focused window";
     }
 
     // ---- config ---------------------------------------------------------------------------

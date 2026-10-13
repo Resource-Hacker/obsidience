@@ -1,0 +1,27 @@
+[Unit]
+Description=Obsidience TV remote (the television's remote keys, typed into the TV compositor only)
+# The TV agent on the television hands over the remote's keys while Moonlight's stream is in front;
+# remote.py replays them through a Wayland virtual keyboard in the TV session. No kernel input
+# device exists and Sunshine's input stays disabled. Not Harness code: the remote keeps working
+# while the Harness is stopped. remote.py finds the compositor by the socket name the session
+# published and checks who is behind it, so this unit's environment names no compositor at all.
+Requires=obsidience-tv-session.service
+After=obsidience-tv-session.service
+PartOf=obsidience-tv-session.service
+
+[Service]
+Type=exec
+UnsetEnvironment=WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE
+# Wait for the session to publish its socket name (bounded).
+ExecStartPre=/bin/sh -c 'for i in $(seq 100); do [ -s %t/obsidience-tv/wayland ] && exit 0; sleep 0.1; done; exit 1'
+# The system Python: pywayland is a distribution package.
+ExecStart=/usr/bin/python3 /home/wissenschafter/Projects/obsidience/obsidience/tv/host/remote.py
+Restart=on-failure
+RestartSec=2
+# 78: remote.py refused (the compositor is not the TV session's, it offers no virtual keyboard, or
+# no television is registered). A restart cannot cure that.
+RestartPreventExitStatus=78
+UMask=0077
+
+[Install]
+WantedBy=default.target

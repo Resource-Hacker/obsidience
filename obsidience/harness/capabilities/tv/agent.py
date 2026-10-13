@@ -13,7 +13,9 @@ the transport and the fallback (tv.control reads over ADB whenever this is None)
 Protocol: newline-delimited JSON. A request {id, op, ...} gets one reply with that
 id and ok; {event: 'state', state} is pushed when the foreground, power, volume,
 media players or media sessions change, {event: 'ad_skipped', ...} after the app
-clicked a skip-ad control.
+clicked a skip-ad control. Version 2 also hands the remote's keys to a client that
+asks for them ({op: 'keys', on}); that client is the TV host's remote unit
+(obsidience/tv/host/remote.py), never the Harness, and nothing here asks.
 """
 from __future__ import annotations
 
@@ -31,7 +33,7 @@ import time
 
 PACKAGE = 'org.obsidience.tv'
 # Pinned app version: android:versionCode in obsidience/tv/android/AndroidManifest.xml.
-VERSION = 1
+VERSION = 2
 SERVICE = PACKAGE + '/.AgentService'
 LISTENER = PACKAGE + '/' + PACKAGE + '.MediaListener'
 SOCKET = 'obsidience-tv'

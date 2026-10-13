@@ -452,6 +452,12 @@
       "license": "BSD-2-Clause",
       "integration": "Selected 2026-10-12 for the TV tuner: obsidience-tv-tuner.service (obsidience/tv/host/tuner.py, system Python) imports the unmodified distribution package as a library and uses its Pluto plugin to open a live channel, mux its separate video and audio with the system ffmpeg and drop the advertisement segments. Beyond the public session, plugin and stream API the tuner takes a muxed stream's readers as its substreams open, reads their is_paused(), releases the muxer's pipes and reaps its process on close, and re-points one Pluto plugin instance by its url setter; check those after a package update (obsidience/tv/host/README.md)."
     },
+    "pywayland": {
+      "repository": "https://github.com/flacjacket/pywayland",
+      "version": "0.4.19 (CachyOS package python-pywayland 0.4.19-1.1)",
+      "license": "Apache-2.0",
+      "integration": "Selected 2026-10-12 for the TV remote: obsidience-tv-remote.service (obsidience/tv/host/remote.py, system Python) imports the unmodified distribution package as its Wayland client library, as a client of the TV session's compositor only. The package has no binding for zwp_virtual_keyboard_v1 (wlroots' virtual-keyboard-unstable-v1, which the TV session's sway implements), so remote.py declares that protocol's two interfaces and their requests itself through pywayland's protocol_core classes; no code or protocol text is copied. After a package update check that the unit still starts and types (obsidience/tv/host/README.md)."
+    },
     "moonlight_android": {
       "repository": "https://github.com/moonlight-stream/moonlight-android",
       "version": "12.2 (app-nonRoot-release.apk)",

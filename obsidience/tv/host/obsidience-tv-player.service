@@ -14,9 +14,12 @@ EnvironmentFile=-%t/obsidience-tv/mode.env
 # Frame timing and the GPU that renders (the TV compositor's; left to itself the player may
 # pick another card) come from the TV mode (modes/*.env). Decoding stays on the CPU.
 # Warnings go to the journal: a stalled stream must leave its reason there.
+# The TV remote's keys reach this window when it has the focus (obsidience-tv-remote.service). None
+# is bound: mpv's default bindings would seek in a live stream, pause it or leave full screen, and
+# what plays is the tuner's business. An unbound key is not worth a journal line (input=error).
 # Wait for the session to publish its socket name (bounded).
 ExecStartPre=/bin/sh -c 'for i in $(seq 100); do [ -s %t/obsidience-tv/wayland ] && exit 0; sleep 0.1; done; exit 1'
-ExecStart=/bin/sh -c 'WAYLAND_DISPLAY=$(cat %t/obsidience-tv/wayland) exec /usr/bin/mpv --no-config --no-input-terminal --msg-level=all=warn --idle=yes --force-window=yes --fs --wayland-app-id=obsidience-tv-player --vulkan-device=${TV_VULKAN_DEVICE} --video-sync=${TV_VIDEO_SYNC} --cache=yes --demuxer-max-bytes=64MiB --input-ipc-server=%t/obsidience-tv-player.sock'
+ExecStart=/bin/sh -c 'WAYLAND_DISPLAY=$(cat %t/obsidience-tv/wayland) exec /usr/bin/mpv --no-config --no-input-terminal --msg-level=all=warn,input=error --input-default-bindings=no --idle=yes --force-window=yes --fs --wayland-app-id=obsidience-tv-player --vulkan-device=${TV_VULKAN_DEVICE} --video-sync=${TV_VIDEO_SYNC} --cache=yes --demuxer-max-bytes=64MiB --input-ipc-server=%t/obsidience-tv-player.sock'
 ExecStopPost=/usr/bin/rm -f %t/obsidience-tv-player.sock
 Restart=on-failure
 RestartSec=2

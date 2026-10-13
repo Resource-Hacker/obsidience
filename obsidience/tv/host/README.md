@@ -15,6 +15,7 @@ the place where channels load.
 | `obsidience-tv-player.service` | `mpv --idle` in that compositor; JSON IPC at `$XDG_RUNTIME_DIR/obsidience-tv-player.sock`, used by the tuner only |
 | `obsidience-tv-tuner.service` | `tuner.py` (system Python with streamlink): the one owner of the player's IPC socket and of what plays; control socket `$XDG_RUNTIME_DIR/obsidience-tv/tuner.sock` |
 | `obsidience-tv-sunshine.service` | Sunshine (HEVC on the mode's GPU: NVENC on the RTX 4080, or VAAPI on the integrated GPU), connected only to that compositor and that audio server |
+| `obsidience-tv-remote.service` | `remote.py` (system Python with pywayland): the television's remote keys, typed into that compositor through a virtual keyboard (section below). Not installed or enabled yet |
 | `obsidience-tv-android.service` | Android TV in its own container (section below); its window is one more client of that compositor. Staged 2026-10-12, not installed or enabled yet |
 | `obsidience-tv-mode@.service` | One run of `mode <normal\|gaming>`, started by GameMode |
 
@@ -91,7 +92,54 @@ showing.
   `/etc/udev/rules.d`) parks them on seat `seat-obsidience-tv`, `/etc/keyd/default.conf`
   excludes `1209:0002`, and the desktop's `hyprland.lua` disables them by name.
   `input-check` proves the isolation (exit 0) and fails closed. The TV remote does not
-  reach the workstation; a remote path is designed but not built (it bypasses Sunshine).
+  reach the workstation: its keys reach the TV session only, by a path that bypasses
+  Sunshine (next section).
+
+## The remote
+
+Moonlight sends the Fire TV remote as a gamepad (no Back, no Play/Pause), and Sunshine's input
+stays disabled. The keys take another road, which creates no kernel input device:
+
+1. The TV agent (`org.obsidience.tv`, version 2, `obsidience/tv/android`) asks Fire OS for key
+   events only while a host client has asked for keys **and** Moonlight's stream activity
+   (`com.limelight/.Game`) is in front. It then consumes a first press of Up, Down, Left, Right,
+   Select, Back, Menu, Play/Pause, Rewind or Fast forward when the stream's own window has input
+   focus (a Moonlight dialog keeps its keys), and pushes the press and the release to the clients
+   that asked. Repeats are swallowed. Home is never consumed and leaves the stream; keys from the
+   Harness's virtual remote pass through. Without a client, or once it is gone, the television
+   handles its keys exactly as it does without the agent. An agent that has just started (an
+   update, a television restart) learns that the stream is in front the next time the stream's
+   window takes the focus.
+2. `obsidience-tv-remote.service` runs `remote.py`, that client. It opens one stream to the
+   agent's socket through the ADB server that is already running (the server's host protocol,
+   `host:transport:<television>` then `localabstract:obsidience-tv`): no forward exists that
+   could be left behind or removed by the Harness, and no `adb` command runs that could start a
+   server inside the unit. It never connects ADB to the television; the Harness does.
+3. While the agent grants keys, `remote.py` holds one `zwp_virtual_keyboard_v1` in the TV
+   compositor with the stock keymap and sends each key as its evdev scancode (table in
+   `remote.py`: arrows, Enter, Escape, Menu, Play/Pause, Rewind, Fast forward) to whatever
+   window that compositor focuses. A connection that ends releases held keys and removes the
+   keyboard. Key repeat is the receiving program's business.
+
+It fails closed: `remote.py` reads the compositor's socket name from
+`$XDG_RUNTIME_DIR/obsidience-tv/wayland`, connects by that path, and refuses (exit 78, not
+restarted) unless the process behind the socket runs in `obsidience-tv-session.service` and
+offers the virtual-keyboard global. The unit's environment names no compositor.
+
+The player ignores every key (`--input-default-bindings=no` in its unit): mpv's defaults would
+seek in a live stream, pause it or leave full screen. The break view already did the same.
+
+Measured 2026-10-12 against a private compositor and a stand-in for the agent: from the agent's
+push to the key at a client of the compositor 0.1 ms (median of 400 events, largest 0.5 ms);
+ten keys arrive as scancodes 103, 108, 105, 106, 28, 1, 127, 164, 168 and 208;
+`/proc/bus/input/devices` does not change. Not measured: the television's side (whether Fire OS
+hands these keys to the agent, and the time across ADB over Wi-Fi). `remote.py --debug` logs each
+key with the time it spent in the agent, on the way, and here.
+
+Rollback: `systemctl --user disable --now obsidience-tv-remote` (the agent then takes no key);
+remove the unit copy. Agent version 1 again: uninstall `org.obsidience.tv` (a lower version does
+not install over a higher one), set `VERSION = 1` in `harness/capabilities/tv/agent.py` and let
+the Harness install and enable it.
 
 ## Playing something
 

@@ -4,8 +4,8 @@
      pinned by obsidience/harness/capabilities/tv/agent.py VERSION. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="org.obsidience.tv"
-    android:versionCode="1"
-    android:versionName="1">
+    android:versionCode="2"
+    android:versionName="2">
 
     <uses-sdk android:minSdkVersion="30" android:targetSdkVersion="30" />
 

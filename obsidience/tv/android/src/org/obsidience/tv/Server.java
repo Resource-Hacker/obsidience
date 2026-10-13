@@ -24,6 +24,8 @@ import java.util.concurrent.Executors;
  * user, so ADB's key authentication is the authentication; any other peer uid
  * except root is refused. Newline-delimited JSON: each request line is answered
  * with one line carrying its id; state changes are pushed as {event: ...} lines.
+ * Several clients are served at once (the Harness and the TV host's remote unit);
+ * the service is told when one is gone, so what a client asked for ends with it.
  *
  * Requests are handled on the service's main thread (one owner of its state);
  * socket writes go through one writer thread so the main thread never blocks.
@@ -33,7 +35,11 @@ final class Server implements Runnable {
     private static final int MAX_LINE = 64 * 1024;
     private static final int MAX_CLIENTS = 4;
 
-    interface Requests { JSONObject handle(JSONObject request); }
+    interface Requests {
+        JSONObject handle(Client client, JSONObject request);
+        /** The client's connection ended; called once, on the main thread. */
+        void gone(Client client);
+    }
 
     private final Handler main;
     private final Requests handler;
@@ -104,7 +110,7 @@ final class Server implements Runnable {
         try { peer.close(); } catch (IOException ignored) { }
     }
 
-    private final class Client extends Thread {
+    final class Client extends Thread {
         private final LocalSocket peer;
         private OutputStream out;
 
@@ -132,7 +138,7 @@ final class Server implements Runnable {
                     main.post(() -> {
                         JSONObject response;
                         try {
-                            response = handler.handle(new JSONObject(text));
+                            response = handler.handle(Client.this, new JSONObject(text));
                         } catch (Exception e) {
                             response = AgentService.error(null, "bad request: " + e.getMessage());
                         }
@@ -161,7 +167,7 @@ final class Server implements Runnable {
         }
 
         void close() {
-            clients.remove(this);
+            if (clients.remove(this)) main.post(() -> handler.gone(this));
             closeQuietly(peer);
         }
     }
