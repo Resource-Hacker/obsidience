@@ -591,11 +591,11 @@
       "version": "1.11.4",
       "revision": "1d761b88b9cd7b4cb3d9b02ae432dff2b0848484",
       "license": "GPL-3.0",
-      "binary_sha256": "1d02dc133ac636e5d7d9a3e6b76f372b35f41b31b92184685a8aa85598116d86",
+      "binary_sha256": "1a411fc5b822956007a840577000602de841f4b10ca39536c7e4d5f5abbfb945",
       "patch": "obsidience/media/tiramisu-owner-sockets.patch",
-      "patch_sha256": "a4c1fb9e2773c185378496fb26c23da42f554230ae63f48ac56e7918225ee8f7",
-      "build": "Go 1.27.1; CGO_CFLAGS=-O2 -std=gnu17; go build -trimpath -ldflags=-s -w -X main.AppVersion=v1.11.4-obsidience1",
-      "integration": "Optional native FUSE provider. Local patch replaces control and embedded engine TCP with owner-only Unix sockets, limits public operations, exposes actual reader readiness, disables LAN dashboard discovery and SMB watchdog in private mode, and drains readers before ordinary unmount. No lazy unmount, service restart loop, NAT mapping or scheduler. Unmodified torrent/FUSE implementation; copied license and module manifest accompany binary. Disk warmup disabled because pinned eviction does not protect live readers; bounded memory streaming cache only."
+      "patch_sha256": "82512a338d175c536118ab629333d97e6fd85cbdef397c5e2efcf48161181cc8",
+      "build": "Go 1.27.1; CGO_CFLAGS=-O2 -std=gnu17; go build -trimpath -ldflags=-s -w -X main.AppVersion=v1.11.4-obsidience2",
+      "integration": "Optional native FUSE provider. Local patch replaces control and embedded engine TCP with owner-only Unix sockets, limits public operations, exposes actual reader readiness, disables LAN dashboard discovery and SMB watchdog in private mode, and drains readers before ordinary unmount. No lazy unmount, service restart loop, NAT mapping or scheduler. Unmodified torrent/FUSE implementation; copied license and module manifest accompany binary. Disk warmup disabled because pinned eviction does not protect live readers; bounded memory streaming cache only. Private mode parses strict JSON and rejects malformed configuration before starting providers."
     },
     "prowlarr_discovery": {
       "repository": "https://github.com/Prowlarr/Prowlarr",

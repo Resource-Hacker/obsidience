@@ -1,3 +1,31 @@
+diff --git a/internal/config/config.go b/internal/config/config.go
+index 25fb3d2..05cd926 100644
+--- a/internal/config/config.go
++++ b/internal/config/config.go
+@@ -8,6 +8,7 @@ import (
+ 	"strconv"
+ 	"strings"
+ 	"time"
++	"tiramisu/internal/localapi"
+ 	"tiramisu/internal/prowlarr"
+ 
+ 	"github.com/google/uuid"
+@@ -471,8 +472,14 @@ func LoadConfig() Config {
+ 	// 3. Try to load JSON
+ 	if data, err := os.ReadFile(cfg.ConfigPath); err == nil {
+ 		// V138: Support comments in JSON by stripping them before unmarshaling
+-		cleanData := stripJSONComments(data)
++		cleanData := data
++		if !localapi.Enabled() {
++			cleanData = stripJSONComments(data)
++		}
+ 		if err := json.Unmarshal(cleanData, &cfg); err != nil {
++			if localapi.Enabled() {
++				log.Fatal("Invalid private provider configuration")
++			}
+ 			log.Printf("[Config] WARNING: Failed to parse %s: %v", cfg.ConfigPath, err)
+ 		} else {
+ 			log.Printf("[Config] Loaded settings from %s", cfg.ConfigPath)
 diff --git a/internal/gostorm/server.go b/internal/gostorm/server.go
 index 07e3f2a..62fcb79 100644
 --- a/internal/gostorm/server.go

@@ -20,7 +20,7 @@ elif provider == 'tiramisu':
     if config.get('prowlarr', {}).get('enabled'):
         config['prowlarr']['api_key'] = (credential_dir / 'obsidience-media-prowlarr').read_text().strip()
     runtime_config = Path(os.environ['RUNTIME_DIRECTORY']) / 'config.json'
-    runtime_config.write_text(json.dumps(config))
+    runtime_config.write_text(json.dumps(config, indent=2))
     runtime_config.chmod(0o600)
     os.environ['MKV_PROXY_CONFIG_PATH'] = str(runtime_config)
     os.environ['TIRAMISU_LOG_DIR'] = str(state / 'tiramisu/logs')
