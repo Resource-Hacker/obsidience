@@ -51,6 +51,18 @@ async def _run_owner_media(plugin: AgentPlugin, command: dict, session_id: str, 
     result = None
     try:
         operation = command['operation']
+        required = ({'media.library', 'media.acquire'} if operation == 'acquire' else
+                    {'media.library', 'tv.control'} if operation == 'play' else
+                    {'application.launch'} if operation == 'server' else {'tv.control'})
+        if missing := required - set(plugin.ex.allowed):
+            await plugin.operate('task.complete', {
+                'status': 'failed',
+                'summary': 'Media needs an accepted Executive Skill grant for '
+                           + ', '.join(sorted(missing)) + '. Resolve it in Review before starting this operation.'})
+            if not plugin.ex.done:
+                raise RuntimeError('Media prerequisite completion was not accepted')
+            settled = True
+            return
         acquisition_choice = None
         if operation == 'acquire':
             from ...interfaces.api.media import claim_source_preview, source_fingerprint
