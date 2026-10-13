@@ -773,7 +773,8 @@ async def lifespan(app: FastAPI):
         app.state.shell_scene = shell_scene.SCENE
         resources.push_async_callback(realtime.RUNTIME.shutdown)
         from ...realtime import tracking as camera_tracking
-        resources.push_async_callback(asyncio.to_thread, camera_tracking.stop)
+        resources.push_async_callback(camera_tracking.close_lifecycle)
+        await camera_tracking.open_lifecycle()
         await realtime.RUNTIME.restore()
         await asyncio.to_thread(camera_tracking.restore)
         resources.push_async_callback(conversation_runtime.RUNTIME.cancel)

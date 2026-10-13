@@ -37,6 +37,7 @@ class CameraCapture:
     height: int
     captured_at_unix_ns: int
     recognition: dict | None = None
+    hardware: dict | None = None
 
 
 def _selected() -> tuple[str, str, tuple[object, ...]]:
@@ -159,7 +160,11 @@ async def _capture(cancel_event: Any) -> CameraCapture:
             if len(image) > MAX_CAPTURE_BYTES:
                 raise CameraCaptureError("Camera capture exceeded its output bound.")
             return CameraCapture(image, name, pixels.shape[1], pixels.shape[0], captured_at,
-                                 {**recognition, "authentication": False})
+                                 {**recognition, "authentication": False},
+                                 {"tracking_state": tracking_state.get("state"),
+                                  "motor_state": tracking_state.get("motor_state"),
+                                  "recovery": tracking_state.get("recovery"),
+                                  "indicator_verified": False})
         spawn = asyncio.create_task(asyncio.create_subprocess_exec(
             "/usr/bin/ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error",
             # Stream startup can deliver a partial MJPEG packet. Reject it

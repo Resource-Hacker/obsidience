@@ -42,6 +42,7 @@ async def execute(args: dict, context: dict) -> dict[str, Any]:
         "width": capture.width, "height": capture.height,
         "size_bytes": len(capture.image_png), "action_authorized": False,
         "recognition": capture.recognition,
+        "hardware": capture.hardware,
         "wake_requested": args.get("wake") is True,
         "visual_evidence": {"attached": True, "media_type": "image/png",
             "freshness": "validated_after_capture", "content_role": "untrusted_visual_evidence"},

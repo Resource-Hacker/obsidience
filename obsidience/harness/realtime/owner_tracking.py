@@ -96,6 +96,7 @@ class Tracker:
             self._lost_since = time.monotonic()
             self._last_message = self._lost_since
             self._home_verified = False
+            self._motion_watch = [None, None]
             self._desired_motion = None
             self._status = {"state": "starting", "name": str(name)[:96],
                             "enrolled": False, "frames": 0, "inferences": 0,
@@ -210,6 +211,14 @@ class Tracker:
                 except ProcessLookupError:
                     pass
             self._shutdown_vision()
+        notify = self._config.get("on_failure")
+        if callable(notify):
+            # The lifecycle owner schedules recovery outside our threads/locks.
+            # Calling close here would join the failing thread itself.
+            try:
+                notify(reason)
+            except Exception:
+                logging.exception("Camera failure notification failed")
 
     def _shutdown_vision(self):
         # Control EOF makes the child stop and drain its FFmpeg stream.
@@ -437,6 +446,37 @@ class Tracker:
                         fresh = (motion is not None and motion["generation"] == generation
                                  and time.monotonic()-motion["at"] <= self._max_age
                                  and not self._enrolling())
+                    # SDK readbacks can keep returning success with frozen motor
+                    # angles. Evaluate actual bounded submissions, never requested
+                    # speed (the helper clamps it to zero near physical limits).
+                    binding = (motion["reason"], motion["binding"]) if fresh else None
+                    progressed = False
+                    for axis, (position, speed) in enumerate(zip(pose, self._velocity)):
+                        window = self._motion_watch[axis]
+                        if not fresh or abs(speed) < 1.5:
+                            self._motion_watch[axis] = None
+                            continue
+                        direction = 1 if speed > 0 else -1
+                        if (window is None or window["binding"] != binding
+                                or window["direction"] != direction or tick-window["last"] > .45):
+                            window = {"binding": binding, "direction": direction,
+                                      "position": position, "since": tick, "last": tick}
+                            self._motion_watch[axis] = window
+                        elif abs(position-window["position"]) >= .2:
+                            progressed = True
+                            window.update(position=position, since=tick)
+                        elif tick-window["since"] >= 5:
+                            self._fail(generation, "camera_motor_unresponsive")
+                            return
+                        window["last"] = tick
+                    if progressed:
+                        notify = self._config.get("on_motion")
+                        if callable(notify):
+                            # Queue-only callback: motor ownership stays here.
+                            try:
+                                notify()
+                            except Exception:
+                                logging.exception("Camera motion notification failed")
                     wanted = (0.,0.)
                     reason = "stopped_no_fresh_target"
                     if fresh and motion["reason"] == "follow":

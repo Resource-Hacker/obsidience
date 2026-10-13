@@ -241,6 +241,7 @@ def set_obsbot_camera_active(active: object) -> dict[str, bool]:
         raise ValueError("camera active must be a boolean")
     with _CAMERA_LOCK:
         from . import tracking
+        tracking.set_intent(active)
         if not active:
             tracking.stop()
         _obsbot_control("camera", "on" if active else "off")
