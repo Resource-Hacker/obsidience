@@ -117,6 +117,19 @@ with a grey hairline between title and location and a leader to their node,
 drawn last, over the glass. A consulted node also wears a faint disc and a
 breathing ring in its branch color.
 
+The Memory streams wear the same glass (`memory-glass.ts`). A bank's records
+lie in three layers about the time axis, one for each kind of memory:
+observations at the core, the world facts around them, experiences outermost.
+The memory layout holds each record near its layer's radius while time still
+fixes its place along the axis, so the threads from an observation to its
+evidence run outward through the layers. Each layer is a glass sleeve that
+follows its own records and closes past its first and last one, the core the
+most solid. Every record presses a crater into its sleeve by its size and
+links and carries a seed; a crater shows its rings once it is large enough on
+screen to hold them. A record touched by a memory operation sends one ripple
+across its sleeve in its own color. The sleeves use the Knowledge orb's saved
+Glass settings and dim while a record is inspected.
+
 ## Scoped graphs and Library
 
 The four separate Agent clouds remain independently populated and retain their
