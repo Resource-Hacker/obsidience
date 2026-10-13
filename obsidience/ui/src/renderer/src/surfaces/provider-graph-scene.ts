@@ -206,7 +206,7 @@ export class ProviderGraphScene {
       materials.forEach(material => material.dispose());
     }
     this.clearSprites(this.timeGuides);
-    this.labels.update(new Map(), [], this.noLabelActivity, new Map(), false, 0);
+    this.labels.update(new Map(), [], this.noLabelActivity, new Map(), 0);
   }
   private clearGhost() {
     if (!this.ghost) return;
@@ -575,11 +575,11 @@ export class ProviderGraphScene {
         role: root ? "root" : section ? "section" : "claim", depth: root ? 0 : section ? 1 : 2,
         branch: node.kind, radius: Math.max(3, radius * this.host.clientHeight
           / (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * depth)),
-        accent: node.color, accentSoft: node.color,
+        accent: node.color,
       });
     }
     // Provider activity already owns the node pulse; do not add a second ring.
-    this.labels.update(projected, [...projected.keys()], this.noLabelActivity, metadata, false, now);
+    this.labels.update(projected, [...projected.keys()], this.noLabelActivity, metadata, now);
   }
   private setHover(id: string) {
     if (this.hovered === id) return;
@@ -802,7 +802,7 @@ export class ProviderGraphScene {
     if (this.labelsDirty) {
       this.labelsDirty = false;
       if (this.transition?.kind === "enter" && !this.transition.unfolding)
-        this.labels.update(new Map(), [], this.noLabelActivity, new Map(), false, 0);
+        this.labels.update(new Map(), [], this.noLabelActivity, new Map(), 0);
       else this.updateDetailLabels(scale);
     }
     this.renderer.render(this.scene, this.camera);

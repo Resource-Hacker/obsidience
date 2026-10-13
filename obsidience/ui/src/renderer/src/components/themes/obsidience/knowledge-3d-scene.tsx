@@ -1498,7 +1498,6 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
         labelIds,
         activeLabelNodeIds,
         current.labelMetadata,
-        Boolean(retainedFocus),
         now,
       );
       mainCloud?.prepare(renderer);
