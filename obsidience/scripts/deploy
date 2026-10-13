@@ -63,7 +63,9 @@ def targets(changed: list[str]) -> list[str]:
     if "obsidience/tv/host/obsidience-tv-player.service" in changed:
         owners.append("tv-player")
     if (any(p in {"obsidience/tv/host/tuner.py", "obsidience/tv/host/obsidience-tv-tuner.service",
-                  "obsidience/harness/media/config.py", "obsidience/harness/media/sources.py"} for p in changed)
+                  "obsidience/harness/media/config.py", "obsidience/harness/media/sources.py",
+                  "obsidience/harness/media/source_probe.py", "obsidience/harness/media/progress.py",
+                  "obsidience/harness/media/jellyfin.py"} for p in changed)
             or "tv-player" in owners):
         owners.append("tv-tuner")
     if "obsidience/media/obsidience-media-jellyfin.container" in changed:
@@ -99,6 +101,26 @@ def require_provider_idle() -> None:
             raise ValueError("virtual media has active readers or unavailable state")
     except Exception as error:
         sys.exit(f"Media provider deployment deferred: {error}; nothing restarted.")
+
+
+def require_catalogue_idle() -> None:
+    """A provider restart must not interrupt independently playing Jellyfin clients."""
+    if subprocess.run(["systemctl", "--user", "is-active", "--quiet",
+                       "obsidience-media-jellyfin.service"]).returncode != 0:
+        return
+    try:
+        config = json.loads((STATE / "media.json").read_text())["catalogue"]
+        credential = (pathlib.Path(f"/run/user/{os.getuid()}/credentials/obsidience-harness-dev.service")
+                      / config["credential"]).read_text().strip()
+        request = urllib.request.Request(config["url"] + "/Sessions", headers={
+            "Authorization": 'MediaBrowser Client="Obsidience Media", Device="Deployment", '
+                             'DeviceId="obsidience-media-deploy", Version="1", Token="' + credential + '"'})
+        with urllib.request.urlopen(request, timeout=3) as response:
+            sessions = json.loads(response.read(262145))
+        if not isinstance(sessions, list) or any(row.get("NowPlayingItem") for row in sessions):
+            raise ValueError("active or unknown catalogue playback")
+    except Exception:
+        sys.exit("Media deployment deferred: catalogue playback is active or could not be verified idle.")
 
 
 def tuner_state() -> dict:
@@ -221,6 +243,7 @@ def restart(owner: str) -> None:
             print(f"{provider} is not installed; provider installation remains explicit.")
             return
         if provider == "tiramisu":
+            require_catalogue_idle()
             require_provider_idle()
         shutil.copy2(source, destination)
         subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
@@ -266,6 +289,7 @@ def restart(owner: str) -> None:
             time.sleep(.2)
         sys.exit("TV owner did not return idle and ready; inspect its journal.")
     elif owner == "media-catalogue":
+        require_catalogue_idle()
         unit = "obsidience-media-jellyfin.container"
         source = ROOT / "obsidience/media" / unit
         destination = pathlib.Path.home() / ".config/containers/systemd" / unit
@@ -369,7 +393,10 @@ def main() -> None:
         if any(owner in owners for owner in ("tv-player", "tv-tuner")):
             require_tv_idle()
         if "media-tiramisu" in owners:
+            require_catalogue_idle()
             require_provider_idle()
+        elif "media-catalogue" in owners:
+            require_catalogue_idle()
     if args.rollback:
         # Check the live owners before changing even the source checkout.
         git("revert", "--no-edit", f"{previous}..HEAD")

@@ -5,6 +5,8 @@ After=network-online.target
 [Service]
 Type=simple
 ExecStart=%h/Projects/obsidience/obsidience/media/provider-launch tiramisu
+ExecStartPost=%h/Projects/obsidience/obsidience/media/provider-launch ready
+TimeoutStartSec=40
 WorkingDirectory=%h/.local/share/obsidience-media/tiramisu
 RuntimeDirectory=obsidience-media-tiramisu
 RuntimeDirectoryMode=0700

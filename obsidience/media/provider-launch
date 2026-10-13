@@ -4,13 +4,35 @@ import json
 import os
 from pathlib import Path
 import sys
+import time
 
 home = Path.home()
 state = home / '.local/share/obsidience-media'
 installed = home / '.local/opt/obsidience-media'
 provider = sys.argv[1]
 credential_dir = Path(os.environ['CREDENTIALS_DIRECTORY']) if os.environ.get('CREDENTIALS_DIRECTORY') else None
-if provider == 'prowlarr':
+if provider == 'ready':
+    import httpx
+    config = json.loads((state / 'tiramisu/config.json').read_text())
+    mount = config['fuse_mount_path']
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        try:
+            mounts = Path('/proc/self/mountinfo').read_text().splitlines()
+            mounted = any(line.split()[4] == mount and
+                          line.split(' - ', 1)[1].split()[:2] == ['fuse.tiramisu', 'tiramisu']
+                          for line in mounts if ' - ' in line)
+            with httpx.Client(transport=httpx.HTTPTransport(uds=str(Path(os.environ['RUNTIME_DIRECTORY']) / 'control.sock')),
+                              timeout=2, trust_env=False) as client:
+                health = client.get('http://localhost/health')
+                health.raise_for_status()
+                if mounted and health.json().get('ready') is True:
+                    raise SystemExit(0)
+        except (OSError, ValueError, httpx.HTTPError):
+            pass
+        time.sleep(.2)
+    raise SystemExit('Tiramisu mount has not become ready; catalogue startup withheld')
+elif provider == 'prowlarr':
     key = (credential_dir / 'obsidience-media-prowlarr').read_text().strip()
     os.environ['PROWLARR__AUTH__APIKEY'] = key
     os.execv(str(installed / 'prowlarr-current/Prowlarr'),
