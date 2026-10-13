@@ -24,9 +24,14 @@ history importer and separate coding wiki are deliberately not mounted.
    and standing permissions", "Workstation state changes" and "Recent decisions
    and commitments". The adapter creates any missing one from the existing
    delivery task; an existing model, including owner refinements, is never
-   overwritten. Hindsight refreshes them after consolidation with delta edits
-   over consolidated observations, at most once per six hours per model, using
-   its own configured provider chain. Mental-model refreshes have no webhook,
+   overwritten. Hindsight fully regenerates them after consolidation, at most
+   once per six hours per model, using its configured provider. The default trigger
+   permits observations plus raw world/experience facts, so reflection can check
+   source evidence; it excludes other mental models to avoid recycling their
+   summaries. In Hindsight 0.10.3, this enables an initial observation search and
+   raw-fact recall on each refresh. The 1,536-token page target is not a hard
+   provider-output or cost cap. Existing models need a separate native trigger
+   update; provisioning preserves their current settings. Mental-model refreshes have no webhook,
    so the existing 30-second health tick lists model metadata. A changed page
    (content hash) becomes one immutable, attested Source and one
    `observations.memory.ready` occurrence for Alexandria's Curate Task, bound to
@@ -69,7 +74,9 @@ history importer and separate coding wiki are deliberately not mounted.
    memory's local recording minute with its age ("4 days ago").
 
 The mental models ask about owner preferences, workstation changes and
-decisions.
+decisions. Their background refresh does not require a standing prompt summary:
+`memory_summary = false` keeps those pages out of the conversation prompt while
+preserving bounded per-turn recall, explicit inspection and Curate handoffs.
 
 Hindsight's native configuration selects the extraction/consolidation provider;
 inspect the installation's selected environment rather than assuming a model.
@@ -82,6 +89,10 @@ CPU ONNX embeddings and FlashRank consume no CUDA model allocation.
 Conversation requests and Harness Task objectives have distinct provenance
 labels. A scheduled or triggered Task objective does not establish a direct
 owner request; its accepted public report remains an unverified agent report.
+New external Codex and Claude Code deliveries identify their reporting assistant
+in retain context, separately from the bank owner. Content/metadata hashes and
+existing delivery payloads stay unchanged, so an acknowledged retry is not
+re-extracted and queued deliveries keep their original context.
 Completed-turn intake admits up to 262,144 characters per role and a combined
 524,544-character envelope, including controller labels. Both roles are retained
 in full after secret redaction; oversized input or redaction expansion is rejected
@@ -174,6 +185,7 @@ patch --forward -d <hindsight-venv>/lib/python3.13/site-packages -p1 < obsidienc
 patch --forward -d <hindsight-venv>/lib/python3.13/site-packages -p1 < obsidience/scripts/patches/hindsight/0002-bound-cpu-reranking-and-cancellation.patch
 patch --forward -d <hindsight-venv>/lib/python3.13/site-packages -p1 < obsidience/scripts/patches/hindsight/0003-openrouter-daily-quota-reset.patch
 patch --forward -d <hindsight-venv>/lib/python3.13/site-packages -p1 < obsidience/scripts/patches/hindsight/0004-keep-reference-offset-in-parsed-dates.patch
+patch --forward -d <hindsight-venv>/lib/python3.13/site-packages -p1 < obsidience/scripts/patches/hindsight/0005-allow-exact-combined-scope-union-updates.patch
 ```
 
 Initialize a private PostgreSQL cluster with UTF-8, local peer authentication,
@@ -315,6 +327,15 @@ Disabling Hindsight preserves its database and queued handoffs; it does not enab
 an alternate memory implementation.
 
 Memory uses Hindsight's native `world`, `experience` and `observation` types.
+`world` records facts about others and the environment; `experience` records the
+bank agent's own actions and experiences. This is a perspective distinction,
+not a confidence or truth rating: an external assistant's report about its own
+work is not the Executive's experience merely because the Executive owns the bank.
+`observation` is a consolidation derived from source facts; a mental model is a
+longer synthesis answering a standing question. All remain attributed, unverified
+history. Current working context and fresh Tool evidence retain their execution
+owners, while accepted Knowledge and permissions retain their Article/Review
+owners. A memory or mental-model page never supplies new authority.
 The Memory pane offers All memories and filters for those types, alongside the
 existing Agent bank selector, entities, original dates and source evidence. No
 custom category schema is installed. Memory types do not create Article folders

@@ -1,0 +1,58 @@
+--- a/hindsight_api/engine/consolidation/consolidator.py
++++ b/hindsight_api/engine/consolidation/consolidator.py
+@@ -2335,9 +2335,9 @@
+     4. Prepare every action connection-free, then apply them in ONE transaction
+     5. Returns one result dict per memory, in the same order as `memories`
+ 
+-    Per-fact security: action execution validates each learning_id against the
+-    observations that were recalled specifically for that fact, so cross-tag
+-    updates cannot occur.
++    Update targets must be in this bank's recalled union and eligible through
++    per-fact recall or the exact default combined scope. Alternate scopes keep
++    the per-fact gate.
+ 
+     Args:
+         obs_tags_override: When set, use these tags for observation recall and
+@@ -2513,17 +2513,35 @@
+         if not source_mems:
+             _log_unresolved_action("update", update.source_fact_ids, update.text, perf)
+             return None
+-        # Security: the observation must have been recalled for at least one of the source facts
+-        if not any(update.observation_id in per_fact_obs_ids.get(str(m["id"]), set()) for m in source_mems):
+-            logger.debug(
+-                f"Batch consolidation: rejected update — observation {update.observation_id} "
+-                f"not in any source fact's recall"
+-            )
+-            return None
++        # Every target must be in this bank's permission-filtered recalled union.
+         model = next((m for m in union_observations if str(m.id) == update.observation_id), None)
+         if model is None:
+             logger.debug(f"Update skipped: observation {update.observation_id} not found in recall results")
+             return None
++        # Per-fact recall is relevance-limited. In the default combined pass, a
++        # target shown for a sibling fact is also eligible when its exact scope
++        # matches every cited fact. Keep the original guard for alternate scopes,
++        # unknown sources/tags, and targets outside that exact scope.
++        if not any(update.observation_id in per_fact_obs_ids.get(str(m["id"]), set()) for m in source_mems):
++            same_combined_scope = (
++                obs_tags_override is None
++                and isinstance(model.tags, list)
++                and set(model.tags) == set(fact_tags)
++                and len(source_mems) == len(update.source_fact_ids)
++                and all(
++                    isinstance(m.get("tags"), list)
++                    and set(m["tags"]) == set(fact_tags)
++                    and "observation_scopes" in m
++                    and _parse_observation_scopes(m) in (None, "combined")
++                    for m in source_mems
++                )
++            )
++            if not same_combined_scope:
++                logger.debug(
++                    f"Batch consolidation: rejected update — observation {update.observation_id} "
++                    f"not in any source fact's recall or the exact combined scope"
++                )
++                return None
+         agg = _aggregate_source_fields(source_mems, tags=fact_tags)
+         source_memory_ids = [m["id"] for m in source_mems]
+         # Preflight: if every source memory is already gone, skip BEFORE the slow embed. The write

@@ -252,6 +252,17 @@
               "installed_sha256": "3a807f30b1e26011c244c1e1177a9154aaf1774a8bf05b3c389ea009d2acd507"
             }
           ]
+        },
+        {
+          "path": "obsidience/scripts/patches/hindsight/0005-allow-exact-combined-scope-union-updates.patch",
+          "purpose": "Permit same-bank recalled observation updates in the exact default combined scope when relevance-limited per-fact recall omitted the target. Preserve alternate-scope guards, source checks, liveness, locking and native provenance.",
+          "files": [
+            {
+              "path": "hindsight_api/engine/consolidation/consolidator.py",
+              "preimage_sha256": "179a31850031074a783216398a6789d150b626c63012208ffbe89bdd2e9e0fd8",
+              "installed_sha256": "b6e6c388bad2711d9955436e6a866063fdef8cd3030cc9a881159f790eefa872"
+            }
+          ]
         }
       ]
     },
