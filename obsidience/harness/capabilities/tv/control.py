@@ -1160,8 +1160,21 @@ def _show_stream(row, cancel, context):
     while time.monotonic() < deadline:
         _wait(cancel, .3)
         if shown():
+            _start_voice_client(row, cancel)
             return True
     raise ValueError('Moonlight did not show the PC stream on the TV')
+
+
+def _start_voice_client(row, cancel):
+    """Start the television's Snapcast client, which plays the Executive's voice in step with the
+    desk speakers (obsidience/tv/host/voice.py). It does not start itself after the television
+    restarts; its own receiver starts it without touching what the screen shows. Best effort:
+    without it the voice simply stays on the desk speakers."""
+    try:
+        _shell(row, cancel, _guard(row) + 'am broadcast -a de.badaix.snapcast.START_SERVICE '
+               '-n de.badaix.snapcast/.BroadcastReceiver >/dev/null 2>&1; true')
+    except (OSError, ValueError):
+        pass
 
 
 def _pc_opened(row, cancel, context, action, link, title, effect, power, extra, run=None):
