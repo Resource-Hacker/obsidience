@@ -1,0 +1,28 @@
+# Install as ~/.config/containers/systemd/obsidience-media-jellyfin.container.
+# Independent media server and catalogue. TV playback is one optional client.
+[Unit]
+Description=Obsidience Media catalogue (Jellyfin)
+
+[Container]
+Image=docker.io/jellyfin/jellyfin@sha256:da3cd1e48322a35e4b60f3d0a49fca2649e7acce90346dd6e42db777f94e3bbd
+ContainerName=obsidience-media-jellyfin
+UserNS=keep-id
+PublishPort=127.0.0.1:8096:8096
+Volume=%h/.local/share/obsidience-media/jellyfin:/config
+Volume=%h/.cache/obsidience-media/jellyfin:/cache
+Volume=%h/Media/Obsidience/Movies:/media/movies:ro
+Volume=%h/Media/Obsidience/TV:/media/tv:ro
+NoNewPrivileges=true
+DropCapability=all
+PodmanArgs=--cpus=2 --memory=2g --pids-limit=256
+
+[Service]
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=90
+CPUWeight=25
+IOWeight=25
+UMask=0077
+
+[Install]
+WantedBy=default.target

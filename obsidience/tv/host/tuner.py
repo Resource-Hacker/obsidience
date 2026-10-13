@@ -13,12 +13,16 @@ Control: newline-delimited JSON on the unix socket tuner.sock in $XDG_RUNTIME_DI
 reply per request, {"ok": true, "state": {...}} or {"ok": false, "error": "..."}.
   {"op": "play", "provider": "pluto", "channel": "<24 hex digits>", "title": "...", "wait": seconds}
   {"op": "play", "url": "https://...", "title": "...", "wait": seconds}
+  {"op": "play", "provider": "local", <exact private catalogue source>, "title": "...", "wait": seconds}
   {"op": "pause"}  {"op": "resume"}  {"op": "stop"}  {"op": "state"}
 play replaces whatever plays and answers once the new play left `loading` (its first picture, a
 break it was tuned into, or failed), or after `wait` seconds (0 when absent). state: playback
 idle | loading | playing | break | paused | failed, title, video [width, height] once a picture
 shows, since (epoch seconds of the last playback change), player (whether the player answers),
 provider and channel for a channel, reason for failed.
+Local playback is loading until exact playlist identity and first-picture evidence agree,
+then playing_verified. Its source DTO omits filesystem paths and includes an unpredictable
+generation; finite EOF returns idle with an ended receipt, never a live-channel retry.
 
 A stream address carries a session token: none is logged or returned, only titles and channel ids.
 """
@@ -42,6 +46,12 @@ import threading
 import time
 
 from streamlink import Streamlink
+
+# The tuner uses the same private source admission contract as the Harness, without
+# importing its runtime or owning a second catalogue client.
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+from harness.media.config import MediaUnavailable, load_config
+from harness.media.sources import admit
 
 log = logging.getLogger('tuner')
 
@@ -90,6 +100,7 @@ class Player:
         self._replies = queue.SimpleQueue()
         self._sock = None
         self._ident = 0
+        self.generation = 0
 
     def reach(self):
         """Whether the player answers, connecting when needed."""
@@ -116,8 +127,10 @@ class Player:
         except OSError:
             sock.close()
             raise
+        self.generation += 1
         self._sock = sock
-        threading.Thread(target=self._read, args=(sock,), name='player-ipc', daemon=True).start()
+        self.on_event({'event': 'connected'}, self.generation)
+        threading.Thread(target=self._read, args=(sock, self.generation), name='player-ipc', daemon=True).start()
         for ident, name in enumerate(self.OBSERVED, 1):
             self._ask(('observe_property', ident, name))
 
@@ -143,7 +156,7 @@ class Player:
             raise ValueError(f"The player refused {command[0]}: {str(reply.get('error'))[:100]}")
         return reply.get('data')
 
-    def _read(self, sock):
+    def _read(self, sock, generation):
         buffer = b''
         try:
             while chunk := sock.recv(65536):
@@ -153,7 +166,7 @@ class Player:
                 for line in lines:
                     message = json.loads(line)
                     if 'event' in message:
-                        self.on_event(message)
+                        self.on_event(message, generation)
                     else:
                         self._replies.put((sock, message))
         except (OSError, ValueError):
@@ -163,7 +176,7 @@ class Player:
                 self._sock = None
             sock.close()  # Cleanup paired with the connection; observed properties and overlays end with it.
             self._replies.put((sock, None))
-            self.on_event({'event': 'disconnected'})
+            self.on_event({'event': 'disconnected'}, generation)
 
     def close(self):
         sock = self._sock
@@ -177,10 +190,16 @@ class Player:
 class Play:
     """One thing the tuner was asked to play, and what was acquired for it."""
 
-    def __init__(self, number, title, provider=None, channel=None, url=None):
+    def __init__(self, number, title, provider=None, channel=None, url=None, local=None, identity=None,
+                 local_config=None, generation=None):
         self.number, self.title, self.provider, self.channel, self.url = number, title, provider, channel, url
+        self.local, self.identity = local, identity
+        self.local_config = local_config
+        self.generation = generation if local is not None else None
+        self.verified = False
         # For the journal: a title and a channel id, never an address.
-        self.name = f'{title!r} ({provider} {channel})' if channel else f'{title!r} (address)'
+        self.name = (f'{title!r} ({provider} {channel})' if channel else
+                     f'{title!r} (local media)' if local is not None else f'{title!r} (address)')
         self.requested = time.monotonic()
         self.cancelled = threading.Event()
         self.phase = 'loading'  # loading (no picture yet), playing or failed
@@ -215,6 +234,11 @@ class Play:
             else:
                 for reader in self.readers:
                     _quietly(reader.close)
+
+    def close_local(self):
+        with self._closing:
+            if self.local is not None:
+                self.local.close()
 
 
 def _close(stream):
@@ -297,7 +321,10 @@ class Tuner:
         self.plays = 0
         self.properties = {}
         self.entry = None  # The playlist entry the player started last.
+        self.restart_entry = None  # A first picture may precede the loadfile reply.
         self.finished = (None, None)  # The entry it ended last, and why.
+        self.local_files = {}  # Keep admitted descriptors through matching unload events.
+        self.ended = None  # A bounded terminal receipt for the most recent finite local file.
         self.playback, self.since = 'idle', time.time()
         self.closed = False
         self.presenter = threading.Thread(target=self._present, name='presenter', daemon=True)
@@ -330,7 +357,8 @@ class Tuner:
         playback = ('idle' if play is None else 'failed' if play.phase == 'failed' else
                     'paused' if paused and play.phase == 'playing' else
                     'break' if play.breaking is not None else
-                    'loading' if play.phase == 'loading' or starved else 'playing')
+                    'loading' if play.phase == 'loading' or starved else
+                    'playing_verified' if play.local is not None else 'playing')
         if playback != self.playback:
             log.info('%s: %s -> %s', play.name if play is not None else 'player', self.playback, playback)
             self.playback, self.since = playback, time.time()
@@ -348,43 +376,85 @@ class Tuner:
                      'since': round(self.since, 1), 'player': reached}
             if play is not None and play.channel:
                 state.update(provider=play.provider, channel=play.channel)
+            if play is not None and play.local is not None:
+                state.update(provider='local', generation=play.generation, source=play.identity,
+                             verification='verified' if play.verified and play.picture is not None else 'unverified')
+            if self.ended is not None:
+                state['ended'] = self.ended
             if play is not None and play.phase == 'failed':
                 state['reason'] = play.reason
             return state
 
-    def _event(self, event):
+    def _event(self, event, generation):
         """The player's events, on its reader thread: state only, never a command."""
         name = event.get('event')
         with self.lock:
+            if generation != self.player.generation:
+                return  # An obsolete connection cannot change the replacement's state.
             play = self.play
-            if name == 'property-change':
+            if name == 'connected':
+                self.properties.clear()
+                self.entry, self.restart_entry, self.finished = None, None, (None, None)
+                for number, held in list(self.local_files.items()):
+                    if held is not play or held.phase != 'loading':
+                        held.close_local()
+                        del self.local_files[number]
+            elif name == 'property-change':
                 self.properties[event.get('name')] = event.get('data')
             elif name == 'start-file':
                 self.entry = event.get('playlist_entry_id')
+                self.restart_entry = None
             elif name == 'playback-restart':
                 # The replaced file's events come first; only this play's own picture counts.
-                if play is not None and play.phase == 'loading' and play.entry is not None and play.entry == self.entry:
-                    play.phase, play.picture = 'playing', time.monotonic()
-                    log.info('%s: picture %.1f s after the request', play.name, play.picture - play.requested)
+                self.restart_entry = self.entry
+                self._picture()
             elif name == 'end-file':
                 self.finished = (event.get('playlist_entry_id'), event.get('reason'))
                 self._finish()
             elif name == 'disconnected':
                 self.properties.clear()
                 self.entry = None
-                if play is not None and play.url:
+                self.restart_entry = None
+                for held in self.local_files.values():
+                    held.close_local()
+                self.local_files.clear()
+                if play is not None and (play.url or play.local is not None):
                     play.phase, play.reason = 'failed', 'the player closed its connection'
             else:
                 return
             self._refresh()
 
+    def _picture(self):
+        """Admit a first picture only for the assigned entry (lock held)."""
+        play = self.play
+        if (play is not None and play.phase == 'loading' and play.entry is not None
+                and play.entry == self.entry == self.restart_entry
+                and (play.local is None or play.verified)):
+            play.phase, play.picture = 'playing', time.monotonic()
+            log.info('%s: picture %.1f s after the request', play.name, play.picture - play.requested)
+
     def _finish(self):
-        """An address the player finished or gave up ends its play (lock held).
+        """A finite source the player finished or gave up ends its play (lock held).
 
         A channel's own thread sees its stream end. The player can end a file before the play
         knows its entry, so both the event and the loaded entry come through here.
         """
         play, (entry, reason) = self.play, self.finished
+        for number, held in list(self.local_files.items()):
+            if held.entry is not None and held.entry == entry:
+                held.close_local()
+                del self.local_files[number]
+                if (self.ended is not None and self.ended.get('generation') == held.generation
+                        and self.ended.get('outcome') == 'stopping'):
+                    self.ended['outcome'] = 'stopped' if reason in ('stop', 'eof') else 'failed'
+        if play is not None and play.local is not None and play.entry is not None and play.entry == entry:
+            self.ended = {'generation': play.generation, 'source': play.identity,
+                          'outcome': 'ended' if reason == 'eof' else 'failed'}
+            if reason == 'eof':
+                self.play = None
+            else:
+                play.phase, play.reason = 'failed', 'local media playback ended without verified completion'
+            return
         if play is not None and play.url and play.entry is not None and play.entry == entry:
             if reason == 'eof':
                 self.play = None
@@ -447,7 +517,45 @@ class Tuner:
                 raise ValueError('play takes a title of 1-160 characters')
             if isinstance(wait, bool) or not isinstance(wait, (int, float)) or not 0 <= wait <= 60:
                 raise ValueError('wait takes 0-60 seconds')
+            if message.get('provider') == 'local':
+                local_fields = {'op', 'provider', 'root_id', 'relative_path', 'revision',
+                                'catalogue_instance', 'item_id', 'media_source_id', 'source_revision',
+                                'title', 'wait', 'generation'}
+                if set(message) - local_fields:
+                    raise ValueError('local media takes one exact source identity')
+                generation = message.get('generation')
+                if not isinstance(generation, str) or not re.fullmatch(r'[0-9a-f]{32}', generation):
+                    raise ValueError('local media takes one exact request generation')
+                descriptor = {key: message.get(key) for key in ('provider', 'root_id', 'relative_path', 'revision')}
+                identity = {key: message.get(key) for key in
+                            ('provider', 'root_id', 'revision', 'catalogue_instance', 'item_id',
+                             'media_source_id', 'source_revision')}
+                if any(not isinstance(identity[key], str) or not identity[key]
+                       or len(identity[key]) > 256 or re.search(r'[\x00-\x1f]', identity[key])
+                       for key in identity):
+                    raise ValueError('local media takes exact bounded source identifiers')
+                with self.lock:
+                    if len(self.local_files) >= 8:
+                        raise ValueError('local media has unresolved player unloads')
+                config = load_config()
+                if not config.get('enabled'):
+                    raise ValueError('local media is disabled')
+                if identity['catalogue_instance'] != (config.get('catalogue') or {}).get('instance_id'):
+                    raise ValueError('local media catalogue identity changed')
+                local = admit(config, descriptor)
+                try:
+                    self._start(title, {'provider': 'local', 'local': local, 'identity': identity,
+                                        'local_config': config, 'generation': generation}, wait)
+                except Exception:
+                    with self.lock:
+                        adopted = any(held.local is local for held in self.local_files.values())
+                    if not adopted:
+                        local.close()
+                    raise
+                return self.state()
             if 'url' in message:
+                if 'provider' in message or 'channel' in message:
+                    raise ValueError('play takes one source')
                 url = message['url']
                 if (not isinstance(url, str) or not url.startswith('https://') or len(url) > 8000
                         or re.search(r'[\s\x00-\x1f"\'`\\<>]', url)):
@@ -464,13 +572,33 @@ class Tuner:
                 with self.lock:
                     if self.play is None or self.play.phase == 'failed':
                         raise ValueError('Nothing is playing')
+                    if self.play.local is not None:
+                        raise ValueError('local pause and resume require identity-bound VOD controls')
                 self.player.command('set_property', 'pause', op == 'pause')
                 paused = self.player.command('get_property', 'pause')
             with self.lock:
                 self.properties['pause'] = paused  # The player's own readback; its event confirms it.
                 self._refresh()
         elif op == 'stop':
-            self._replace(None)
+            expected = None
+            if 'generation' in message or 'source' in message:
+                generation, source = message.get('generation'), message.get('source')
+                if (set(message) != {'op', 'generation', 'source'}
+                        or not isinstance(generation, str) or not re.fullmatch(r'[0-9a-f]{32}', generation)
+                        or not isinstance(source, dict)):
+                    raise ValueError('local stop takes the exact observed generation and source')
+                expected = (generation, source)
+            self._replace(None, expected=expected)
+            if expected is not None:
+                with self.lock:
+                    confirmed = self.lock.wait_for(
+                        lambda: self.ended is None or self.ended.get('generation') != expected[0]
+                        or self.ended.get('outcome') != 'stopping', timeout=TIMEOUT)
+                    stopped = (confirmed and self.ended is not None
+                               and self.ended.get('generation') == expected[0]
+                               and self.ended.get('outcome') == 'stopped')
+                if not stopped or self.player.command('get_property', 'idle-active') is not True:
+                    raise ValueError('the player did not verify the exact local stop')
         elif op != 'state':
             raise ValueError('op is play, pause, resume, stop or state')
         return self.state()
@@ -484,15 +612,32 @@ class Tuner:
         with self.lock:
             self.lock.wait_for(lambda: self.play is not play or self.playback != 'loading', timeout=wait)
 
-    def _replace(self, play, wait=False):
+    def _replace(self, play, wait=False, expected=None):
         """Make play (or nothing) the current play and release everything the previous one held.
 
         Closing a stream waits for its downloads in flight (0.4-3 s measured), so the previous
         play is released beside the new one's start; wait makes the caller see it through.
         """
         with self.control:
+            if play is not None and play.local is not None:
+                # Last admission check happens before the existing picture is replaced.
+                if load_config() != play.local_config:
+                    raise MediaUnavailable('media_config_changed')
+                play.local.validate()
             with self.lock:
+                if expected is not None:
+                    current = self.play
+                    if (current is None or current.local is None
+                            or (current.generation, current.identity) != expected):
+                        raise ValueError('local playback changed before stop')
+                if play is not None and play.local is not None and len(self.local_files) >= 8:
+                    raise ValueError('local media has unresolved player unloads')
                 old, self.play = self.play, play
+                self.ended = ({'generation': old.generation, 'source': old.identity,
+                               'outcome': 'stopping' if expected is not None else 'stopped'}
+                              if play is None and old is not None and old.local is not None else None)
+                if play is not None and play.local is not None:
+                    self.local_files[play.number] = play
                 self._refresh()
             if old is not None:
                 old.cancelled.set()
@@ -503,6 +648,8 @@ class Tuner:
                     self.player.command('stop')
                 if play is not None and play.url:
                     self._load(play, play.url)
+                elif play is not None and play.local is not None:
+                    self._load(play, f'/proc/{os.getpid()}/fd/{play.local.fd}')
                 elif play is not None:
                     # The channel resolves while the previous play is released below.
                     play.thread = threading.Thread(target=self._run, args=(play,), name=f'play-{play.number}')
@@ -532,6 +679,13 @@ class Tuner:
     def _load(self, play, path):
         """Tell the player to load this play's file in place of whatever it shows (control held)."""
         options = {**_FAST_START, 'force-media-title': play.title}
+        if play.local is not None:
+            options = {'force-media-title': play.title, 'demuxer': 'lavf',
+                       'demuxer-lavf-format': play.local.format,
+                       'demuxer-lavf-o': 'protocol_whitelist=file', 'access-references': 'no',
+                       'autoload-files': 'no', 'sub-auto': 'no', 'audio-file-auto': 'no',
+                       'cover-art-auto': 'no', 'loop-file': 'no', 'loop-playlist': 'no',
+                       'resume-playback': 'no'}
         if play.channel:
             options.update(_CUSHION)
         self.player.command('set_property', 'pause', False)
@@ -539,7 +693,25 @@ class Tuner:
         with self.lock:
             play.entry = entry
             self._finish()
+            self._picture()
             self._refresh()
+        if play.local is not None:
+            playlist = self.player.command('get_property', 'playlist')
+            matches = (isinstance(entry, int) and not isinstance(entry, bool)
+                       and isinstance(playlist, list) and len(playlist) == 1
+                       and isinstance(playlist[0], dict)
+                       and playlist[0].get('id') == entry and playlist[0].get('filename') == path)
+            with self.lock:
+                if self.play is not play or play.phase == 'failed':
+                    return
+                if not matches:
+                    play.phase, play.reason = 'failed', 'the player did not verify the exact local media entry'
+                else:
+                    play.verified = True
+                    self._picture()
+                self._refresh()
+            if not matches:
+                self.player.command('stop')  # One bounded cleanup, never another load.
 
     # A channel
 
@@ -719,6 +891,10 @@ class Tuner:
         except (OSError, ValueError):
             pass
         self.player.close()
+        with self.lock:
+            for held in self.local_files.values():
+                held.close_local()
+            self.local_files.clear()
 
 
 class _NoAddresses(logging.Filter):
@@ -738,7 +914,7 @@ class _Connection(socketserver.StreamRequestHandler):
                 if not isinstance(message, dict):
                     raise ValueError('A request is one JSON object')
                 reply = {'ok': True, 'state': self.server.tuner.request(message)}
-            except ValueError as error:
+            except (ValueError, MediaUnavailable) as error:
                 reply = {'ok': False, 'error': str(error)[:200]}
             except OSError:
                 reply = {'ok': False, 'error': 'The player does not answer'}

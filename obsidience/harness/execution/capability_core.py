@@ -297,7 +297,7 @@ async def run_capability(ex, name: str, args: dict, *, execute, execute_async, s
     elif ((name in {"camera.observe", "computer.observe", "computer.act"}
            or name == "tv.control" and args.get("action") not in {
                "on", "off", "find", "volume", "volume_up", "volume_down", "mute", "unmute", "pause", "resume",
-               "notice"})
+               "notice", "stop"})
           and "vision" not in ex.model.capabilities):
         observation = json.dumps({
             "observation": {

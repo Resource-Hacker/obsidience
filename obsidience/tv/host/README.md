@@ -513,3 +513,24 @@ records the television's own screen and counts frames that are suddenly dark bet
 bright ones. With the compositor's Vulkan renderer on the RTX 4080 it found 5 in 90 s (frames
 black above a tear line: Sunshine read its capture buffer before the compositor had finished
 drawing it); with the GLES2 renderer none in 170 s. The GLES2 renderer is the setting.
+
+## Optional Obsidience Media destination
+
+The TV is one playback destination of the independent [media server](../../media/README.md).
+Its catalogue and client delivery do not depend on these TV units. The optional
+local-file variant extends this tuner, not the compositor, Sunshine or remote
+keyboard. It is disabled until private media configuration explicitly enables it.
+
+`play` with `provider:local` admits one approved regular MP4/M4V or Matroska/WebM
+file by private root, relative path and file revision, plus catalogue instance,
+item, media-source and source-revision identities. The typed client supplies a
+fresh request generation. Paths remain request-only; readback exposes sanitized
+identity and generation. `playing_verified` requires the matching playlist entry
+and playback event; `loading` after the bounded wait remains unverified. Finite
+EOF returns idle with an `ended` receipt and never runs channel reconnection.
+
+`stop` with the exact observed local source and generation confirms unload and
+idle before success. Generic pause/resume reject local files until the VOD
+control slice supplies identity-bound controls. Existing channel and Android
+transport paths are preserved. Restart the tuner/player only through the guarded
+deployer at an idle boundary; never restart this compositor for a media change.

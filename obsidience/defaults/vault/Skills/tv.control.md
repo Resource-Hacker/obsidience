@@ -9,6 +9,17 @@ obsidience:
 
 ## Runtime
 
+For an explicitly selected library item on this TV, use `find` with `app: library`
+and the query, then `open` its exact current-turn `id`. The catalogue is an
+independent media service; this Tool only owns its TV playback destination.
+Library open revalidates the item, edition/episode, source revision and approved
+local file before dispatch. Only verified source/generation and TV-route
+readback establishes playback. `stop` stops the observed local generation; it
+does not delete media. Pending or uncertain playback must never be resent.
+Local pause/resume, seek, track selection and saved resume are not yet supplied
+by this first slice; report them as unavailable. Existing live TV and Android
+transport behavior is unchanged.
+
 Use tv.control for the current owner's television request. "TV on" and "TV off" mean the one registered TV, with action:on or off; confirm only verified power readback.
 
 For "what's on the TV?" or the TV's status, call `observe` and answer from its `tv` state: the app, the title this Harness opened (and for a Pluto channel what airs now), whether it is playing or paused, and the volume. A `tv (live)` metadata line is pushed by the TV itself: answer what is on from it. An aged line (last seen N min ago) may be stale: observe before saying what is on now. Do not describe a title the state does not name; if Harness did not open the current content, say which app is playing. Playback `inactivity_ad` means Pluto stopped the channel after long inactivity and loops advertisements; say so plainly, and `resume` returns to the channel. Volume, mute, pause and resume are instant spoken commands; live channels (Pluto live TV) are broadcasts that cannot pause, so offer mute instead.

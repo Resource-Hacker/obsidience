@@ -19,7 +19,10 @@ Gemma (obsidience/scripts/llm.sh) is never restarted automatically.
 """
 import argparse
 import json
+import os
 import pathlib
+import shutil
+import socket
 import sqlite3
 import subprocess
 import sys
@@ -57,7 +60,54 @@ def targets(changed: list[str]) -> list[str]:
         owners.append("shell")
     if any(p.startswith("obsidience/ui/") for p in changed):
         owners.append("ui")
+    if "obsidience/tv/host/obsidience-tv-player.service" in changed:
+        owners.append("tv-player")
+    if (any(p in {"obsidience/tv/host/tuner.py", "obsidience/tv/host/obsidience-tv-tuner.service",
+                  "obsidience/harness/media/config.py", "obsidience/harness/media/sources.py"} for p in changed)
+            or "tv-player" in owners):
+        owners.append("tv-tuner")
+    if "obsidience/media/obsidience-media-jellyfin.container" in changed:
+        owners.append("media-catalogue")
     return owners
+
+
+def tuner_state() -> dict:
+    runtime = pathlib.Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+        sock.settimeout(3)
+        sock.connect(str(runtime / "obsidience-tv/tuner.sock"))
+        sock.sendall(b'{"op":"state"}\n')
+        with sock.makefile('rb') as response:
+            line = response.readline(65537)
+    if len(line) > 65536:
+        raise ValueError("Tuner reply exceeds bound")
+    reply = json.loads(line)
+    if not reply.get("ok") or not isinstance(reply.get("state"), dict):
+        raise ValueError("Tuner state unavailable")
+    return reply["state"]
+
+
+def require_tv_idle() -> None:
+    """Refuse before restarting any owner if the TV's playback is active or unknown."""
+    try:
+        state = tuner_state()
+        if not state.get("player") or state.get("playback") != "idle":
+            raise ValueError("TV player is active or unavailable")
+        if subprocess.run(["systemctl", "--user", "is-active", "--quiet", "obsidience-tv-android.service"]).returncode == 0:
+            sys.path.insert(0, str(ROOT))
+            from obsidience.harness.capabilities.tv.android import state as android_state
+            android = android_state()
+            if android is None or android.get("playback") != "idle":
+                raise ValueError("TV Android playback is active or unavailable")
+    except (OSError, ValueError) as error:
+        sys.exit(f"TV deployment deferred: {error}; nothing restarted. Stop playback at an owner-selected boundary.")
+
+
+def install_tv_unit(name: str) -> None:
+    destination = pathlib.Path.home() / ".config/systemd/user" / name
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(ROOT / "obsidience/tv/host" / name, destination)
+    subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
 
 
 def wait_idle(limit: float = 900) -> None:
@@ -67,10 +117,30 @@ def wait_idle(limit: float = 900) -> None:
             realtime = get("/api/realtime")
             busy = (realtime.get("playback", {}).get("status") not in (None, "idle")
                     or realtime.get("phase") in {"thinking", "speaking"})
-        except OSError:
-            busy = False  # The Harness is down; nothing to interrupt.
-        # Any running run: an interrupted background Task needs a manual retry.
-        busy = busy or ledger("SELECT count(*) FROM runs WHERE status='running'")[0][0] > 0
+            tasks = get("/api/tasks")
+            busy = busy or any(task.get("execution", {}).get("state") not in
+                               {"idle", "blocked", "failed"} for task in tasks)
+            # The conversation's live owner, not historical run rows, decides
+            # whether a turn is active. This subscription sends no command.
+            from websockets.sync.client import connect
+            with connect("ws://127.0.0.1:8765/ws/chat", open_timeout=3,
+                         close_timeout=1, max_size=4 * 1024 * 1024) as ws:
+                for _ in range(8):
+                    message = json.loads(ws.recv(timeout=3))
+                    if message.get("type") == "active_turn":
+                        busy = busy or bool(message.get("turn_id"))
+                        break
+                else:
+                    raise ValueError("Conversation active-turn state unavailable")
+        except Exception as error:
+            unit = subprocess.run(["systemctl", "--user", "show", "obsidience-harness-dev.service",
+                                   "-p", "ActiveState", "-p", "MainPID"],
+                                  capture_output=True, text=True, timeout=3)
+            fields = dict(line.split("=", 1) for line in unit.stdout.splitlines() if "=" in line)
+            if (unit.returncode == 0 and fields.get("MainPID") == "0"
+                    and fields.get("ActiveState") in {"inactive", "failed"}):
+                return  # A confirmed stopped owner has no live turn to interrupt.
+            sys.exit(f"Cannot establish an idle Harness: {type(error).__name__}; nothing restarted.")
         if not busy:
             return
         time.sleep(3)
@@ -120,6 +190,49 @@ def restart(owner: str) -> None:
     elif owner == "ui":
         subprocess.run(["npm", "--prefix", str(ROOT / "obsidience" / "ui"), "run", "build"], check=True)
         subprocess.run(["systemctl", "--user", "restart", "obsidience-shell-knowledge.service"], check=True)
+    elif owner in {"tv-player", "tv-tuner"}:
+        require_tv_idle()
+        unit = "obsidience-" + owner + ".service"
+        install_tv_unit(unit)
+        if owner == "tv-player":
+            install_tv_unit("obsidience-tv-tuner.service")
+        subprocess.run(["systemctl", "--user", "restart", unit], check=True)
+        # Restarting the required player stops the tuner; restore that same owner.
+        subprocess.run(["systemctl", "--user", "start", "obsidience-tv-tuner.service"], check=True)
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            try:
+                state = tuner_state()
+                if state.get("player") and state.get("playback") == "idle":
+                    return
+            except (OSError, ValueError):
+                pass
+            time.sleep(.2)
+        sys.exit("TV owner did not return idle and ready; inspect its journal.")
+    elif owner == "media-catalogue":
+        unit = "obsidience-media-jellyfin.container"
+        source = ROOT / "obsidience/media" / unit
+        destination = pathlib.Path.home() / ".config/containers/systemd" / unit
+        if not destination.exists():
+            print("Media catalogue is not installed; provider installation remains explicit.")
+            return
+        if not source.is_file():
+            print("Media unit removed from code; retaining the independently installed provider and data. "
+                  "Provider rollback requires its matching configuration/data backup.")
+            return
+        shutil.copy2(source, destination)
+        subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
+        subprocess.run(["systemctl", "--user", "restart", "obsidience-media-jellyfin.service"], check=True)
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            try:
+                with urllib.request.urlopen("http://127.0.0.1:8096/health", timeout=3) as response:
+                    if response.status == 200:
+                        return
+            except OSError:
+                pass
+            time.sleep(.5)
+        sys.exit("Media catalogue did not become healthy")
 
 
 def failures_since(started: float) -> list[str]:
@@ -142,8 +255,10 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--rollback", action="store_true")
     args = parser.parse_args()
-    dirty = git("diff", "--name-only", "HEAD").splitlines()
+    dirty = sorted(set(git("diff", "--name-only", "HEAD").splitlines()
+                       + git("ls-files", "--others", "--exclude-standard").splitlines()))
     last = json.loads(RECORD.read_text()).get("commit") if RECORD.is_file() else None
+    previous = None
     if args.rollback:
         if dirty:
             sys.exit("Tracked changes are uncommitted; commit them before rolling back.")
@@ -151,13 +266,20 @@ def main() -> None:
         if len(history) < 2:
             sys.exit("No previous deploy is recorded.")
         previous = history[-2]["commit"]
-        if args.dry_run:
-            print("would revert", git("log", "--oneline", f"{previous}..HEAD"))
-            return
-        git("revert", "--no-edit", f"{previous}..HEAD")
+        print("would revert", git("log", "--oneline", f"{previous}..HEAD"))
     head = git("rev-parse", "HEAD")
-    changed = git("diff", "--name-only", f"{last}..{head}").splitlines() if last else ["obsidience/harness/", "obsidience/shell/", "obsidience/ui/"]
+    base = previous if args.rollback else last
+    changed = git("diff", "--name-only", f"{base}..{head}").splitlines() if base else ["obsidience/harness/", "obsidience/shell/", "obsidience/ui/"]
     owners = targets(changed)
+    for owner in tuple(owners):
+        if owner not in {"tv-player", "tv-tuner"}:
+            continue
+        unit = subprocess.run(["systemctl", "--user", "show", f"obsidience-{owner}.service",
+                               "-p", "LoadState", "--value"],
+                              capture_output=True, text=True, check=True)
+        if unit.stdout.strip() == "not-found":
+            owners.remove(owner)
+            print(f"{owner} is not installed; the optional TV destination is not started by media deployment.")
     unfinished = [path for path in dirty if set(targets([path])) & set(owners)]
     if unfinished:
         sys.exit("This deploy restarts " + ", ".join(owners) + ", which would load uncommitted changes; "
@@ -171,8 +293,27 @@ def main() -> None:
         return
     started = time.time()
     if owners:
+        if "harness" in owners:
+            # Do not restart first and then discover that an existing dependency
+            # fault makes the normal readiness gate impossible to satisfy.
+            try:
+                baseline = get("/api/realtime")
+            except OSError:
+                baseline = {}  # A down Harness can still be recovered normally.
+            if baseline.get("phase") == "error" and baseline.get("ready") is not True:
+                sys.exit("Deployment deferred before any restart: Realtime is already in error; "
+                         "resolve its existing dependency fault before the normal readiness check.")
         wait_idle()
+        if any(owner in owners for owner in ("tv-player", "tv-tuner")):
+            require_tv_idle()
+    if args.rollback:
+        # Check the live owners before changing even the source checkout.
+        git("revert", "--no-edit", f"{previous}..HEAD")
+        head = git("rev-parse", "HEAD")
+    if owners:
         for owner in owners:
+            if owner == "tv-tuner" and "tv-player" in owners:
+                continue  # The player restart already restored the tuner with its current unit.
             restart(owner)
         time.sleep(5)
     failures = failures_since(started)

@@ -575,6 +575,16 @@
       "apk_sha256": "b3887fb9e7482d7b9c6d0bfc5a1dbb120e678aa8a9bc54a1363a8135a698cb5a",
       "signing_certificate_sha256": "109735aa24fe85e2e1623ebb3b1ecc4bf4263f4c6374e4411d646bfa2eda482a",
       "integration": "Unmodified publisher release APK (x86 build, runs without ARM translation) installed by ADB in the Android TV instance; its v1 and v2 signer is the certificate pinned for the television's copy. Install an update only when it carries that certificate. Local copy: ~/.local/share/obsidience-tv-android/apps/."
+    },
+    "jellyfin_catalogue": {
+      "repository": "https://github.com/jellyfin/jellyfin",
+      "version": "12.2.0",
+      "revision": "ca0f16eb7c195f720a1493ed469a27c4657db0c6",
+      "license": "GPL-2.0",
+      "image": "docker.io/jellyfin/jellyfin",
+      "image_platform": "linux/amd64",
+      "image_digest": "sha256:da3cd1e48322a35e4b60f3d0a49fca2649e7acce90346dd6e42db777f94e3bbd",
+      "integration": "Optional catalogue through supported authenticated Items/System REST reads. Official unmodified rootless container, read-only media roots, no GPU devices; server owns catalogue and client delivery independently of television; existing tuner/mpv owns only the TV destination. Unit: obsidience/media/obsidience-media-jellyfin.container. No Jellyfin code copied. Media feature defaults disabled; no Tiramisu provider adopted."
     }
   }
 }

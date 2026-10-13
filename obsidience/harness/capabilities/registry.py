@@ -22,7 +22,7 @@ MODEL_RESOURCE_TOOLS = frozenset({"model.configure", "model.benchmark", "harness
 # Reviewed implementation policy; Article prose cannot declare an effect safe.
 READ_ONLY_CAPABILITIES = frozenset({
     "source.read", "vault.read", "vault.search", "vault.list", "vault.validate", "harness.status",
-    "task.inspect", "review.inspect", "vault.maintenance", "observations.recall",
+    "task.inspect", "review.inspect", "vault.maintenance", "observations.recall", "media.library",
 })
 
 _CAPABILITY_NAMES = (
@@ -31,6 +31,7 @@ _CAPABILITY_NAMES = (
     "lights.set",
     "tv.control",
     "media.pause",
+    "media.library",
     "computer.act",
     "computer.observe",
     "computer.replay",
@@ -198,6 +199,12 @@ def _argument_schemas() -> dict[str, dict]:
             "url":text(2000)},("application",)),
         "camera.observe": obj({"query":text(500), "wake":{"type":"boolean"}},("query",)),
         "media.pause": obj({"query":text(128, empty=True)}),
+        "media.library": {"anyOf": [
+            obj({"action":{"const":"browse"}, "query":text(120,empty=True),
+                 "offset":{"type":"integer","minimum":0,"maximum":100000},
+                 "limit":{"type":"integer","minimum":1,"maximum":20}}, ("action",)),
+            obj({"action":{"const":"select"},"item_id":text(64),"media_source_id":text(128)},
+                ("action","item_id","media_source_id"))]},
         "computer.observe": obj({"target":observe_target,"query":text(500)},("query",)),
         "computer.replay": obj({"query":text(500),"seconds":{"type":"integer","minimum":5,"maximum":60},
             "surface":surface},("query",)),
@@ -230,7 +237,7 @@ def _argument_schemas() -> dict[str, dict]:
         "task.inspect":obj({"task":text(512),"run_id":text(128)},("task",)),
         "review.inspect":obj({"task":text(512),"proposal":text(512)}),
         "session.unlock":obj({}),
-        "tv.control":{"anyOf":[obj({"action":{"enum":["on","off","observe","volume_up","volume_down","mute","unmute","pause","resume"]}},("action",)),
+        "tv.control":{"anyOf":[obj({"action":{"enum":["on","off","observe","volume_up","volume_down","mute","unmute","pause","resume","stop"]}},("action",)),
             obj({"action":{"const":"volume"},"level":{"type":"integer","minimum":0,"maximum":100,
                 "description":"Exact TV volume level 0-100."}},("action","level")),
             obj({"action":{"const":"play"},"query":text(120),"app":text(32)},("action","query")),

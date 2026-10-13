@@ -21,6 +21,7 @@ from PIL import Image
 from . import agent as _agent
 from . import android as _android
 from . import player as _player
+from ...media.config import MediaUnavailable
 
 _LOCK = threading.Lock()
 # Android keycodes for `input keyevent`, the fallback when the virtual remote cannot run.
@@ -598,7 +599,7 @@ def _pc_state(state):
         state['pc'] = pc
         playback = pc['playback'] if pc and pc['playback'] != 'idle' else None
         # A commercial break is the channel playing: the tuner skips the advertisements behind its card.
-        state['playback'] = 'playing' if playback == 'break' else playback
+        state['playback'] = 'playing' if playback in ('break', 'playing_verified') else playback
         if playback == 'break':
             state['note'] = BREAK_NOTE
         else:
@@ -793,8 +794,10 @@ def _with_opened(state, started, fetch=True):
                                 # (on the PC route: the PC player still plays that title, or the
                                 # Android instance still plays the run this Harness started).
                                 'still_playing': opened['app'] == state['foreground']['app']
-                                and (pc.get('playback') in ('playing', 'break')
+                                and (pc.get('playback') in ('playing', 'playing_verified', 'break')
                                      and (pc.get('run') == opened['player'] if pc.get('source') == 'android'
+                                          else pc.get('generation') == opened['player']
+                                          if isinstance(pc.get('source'), dict)
                                           else pc.get('title') == opened['title'])
                                      if opened['app'] == PC_APP else started(opened['player']))}
         channel = PLUTO_CHANNEL.fullmatch(opened['link'])
@@ -1005,6 +1008,10 @@ def _reach_pc(row, cancel, context, power, action, tv):
     pc, opened = tv['pc'], tv.get('last_opened') or {}
     if pc is None:
         raise ValueError('The PC player does not answer')
+    if pc.get('provider') == 'local':
+        return {'status': 'failed', 'delivery': 'not_dispatched', 'effect_applied': False,
+                'correction_allowed': True,
+                'failure': 'Local media pause and resume require the next VOD control slice; use stop to end playback.'}
     idle = pc['playback'] in ('idle', 'failed')
     if idle and action == 'resume':
         return {'status': 'failed', 'delivery': 'not_dispatched', 'effect_applied': False, 'correction_allowed': True,
@@ -1265,6 +1272,9 @@ def _remember_opened(alias, link, title, player):
 def _find(args, context):
     """Read-only content resolution; nothing is sent to the TV."""
     query = args['query']
+    if args.get('app') == 'library':
+        from ..media.library import find
+        return find(query, context)
     apps = _inventory()['apps']
     wanted = [args['app']] if 'app' in args else ['pluto', 'youtube']
     candidates, errors = [], []
@@ -1295,6 +1305,88 @@ def _bind(candidates, context):
         candidate['id'] = 'c' + str(len(bound) + 1)
         bound[candidate['id']] = (candidate['app'], candidate.pop('url'), candidate['title'], candidate['by'],
                                   candidate.get('duration') == 'live or unknown')
+
+
+def _open_media(candidate_id, context, row, cancel):
+    """One exact catalogue selection through the same TV and playback owners."""
+    from ...media import service
+    binding = (context.get('_media_candidates') or {}).get(candidate_id)
+    if binding is None:
+        return {'status': 'failed', 'delivery': 'not_dispatched', 'effect_applied': False,
+                'correction_allowed': True, 'failure': 'Select library content in this turn before opening it.'}
+    source = service.catalogue().revalidate(binding)
+    token = 'media:' + source['source_revision']
+    attempted = context.setdefault('_tv_attempted', set())
+    if token in attempted:
+        raise ValueError('This media source was already attempted in this turn; do not replay it')
+    if not _player.available():
+        raise ValueError('The existing TV player is unavailable')
+    # Phase 1 never silently wakes or replaces a disconnected TV route.
+    raw, _boot, _ad = _preamble(row, cancel, _POWER_READ, timeout=4)
+    power = _parse_power(raw)
+    if power != {'wakefulness': 'Awake', 'display': 'ON'}:
+        return {'status': 'failed', 'delivery': 'not_dispatched', 'effect_applied': False,
+                'correction_allowed': True, 'failure': 'Turn the registered TV on before opening library media.'}
+    previous_source = _show('status')
+    if previous_source not in ('player', 'android'):
+        raise ValueError('The TV session source is unavailable')
+    android = _android.state()
+    if previous_source == 'android' and android is None:
+        raise ValueError('Cannot verify the Android source is stopped before switching')
+    attempted.add(token)
+    if cancel is not None and cancel.is_set():
+        raise InterruptedError('TV command cancelled before media dispatch')
+    context['_tv_effect_uncertain'] = True
+    if android and android.get('playback') != 'idle' and not _android.stop():
+        raise ValueError('The previous Android playback did not stop; no library item was loaded')
+    if cancel is not None and cancel.is_set():
+        raise InterruptedError('TV command cancelled after source stop')
+    if previous_source != 'player' and _show('player') != 'player':
+        raise ValueError('The TV session did not select its existing player')
+    title = binding.get('title') or 'Library item'
+    result = _player.play_local(source, title, cancel)
+    expected = {key: source[key] for key in ('provider', 'root_id', 'revision',
+                                            'catalogue_instance', 'item_id', 'media_source_id', 'source_revision')}
+    if (result.get('playback') != 'playing_verified' or not result.get('generation')
+            or result.get('source') != expected):
+        context['_tv_navigation_applied'] = True
+        return {'status': 'completed', 'delivery': 'acknowledged', 'action': 'open',
+                'effect_applied': True, 'must_not_replay': True, 'playback_started': False,
+                'route': 'pc', 'source': 'player', 'pc': result,
+                'note': 'The request was sent once. Playback is pending or unverified; observe, never resend.'}
+    _show_stream(row, cancel, context)
+    # Re-read both ends after source switching; a superseding play cannot certify this selection.
+    current = _player.state() or {}
+    if (current.get('generation') != result['generation'] or current.get('source') != expected
+            or current.get('playback') != 'playing_verified' or _show('status') != 'player'
+            or not _stream_shown(_window(row, cancel)) or _stream_unobstructed() is not True):
+        raise ValueError('The selected media and TV route could not both be verified')
+    link = 'library:' + source['catalogue_instance'] + ':' + source['item_id'] + ':' + source['source_revision']
+    _remember_opened(PC_APP, link, title, result['generation'])
+    tv = _state(row, cancel, power)
+    context['_tv_effect_uncertain'] = False
+    context.pop('_tv_navigation_applied', None)
+    return {'status': 'completed', 'delivery': 'verified', 'action': 'open', 'effect_applied': True,
+            'must_not_replay': True, 'route': 'pc', 'source': 'player', 'playback_started': True,
+            'pc': current, 'tv': tv,
+            'note': 'The exact catalogue source started in the existing player and the TV shows its PC route. '
+                    'Physical picture and sound acceptance remain separate.'}
+
+
+def _stop_media(context, cancel):
+    current = _player.state() or {}
+    if not isinstance(current.get('source'), dict) or not current.get('generation'):
+        return {'status': 'failed', 'delivery': 'not_dispatched', 'effect_applied': False,
+                'correction_allowed': True, 'failure': 'No local library playback is active.'}
+    if cancel is not None and cancel.is_set():
+        raise InterruptedError('TV command cancelled before stop')
+    context['_tv_effect_uncertain'] = True
+    result = _player.stop_local(current['generation'], current['source'], cancel=cancel)
+    if result.get('playback') != 'idle':
+        raise ValueError('The selected local playback did not read back stopped')
+    context['_tv_effect_uncertain'] = False
+    return {'status': 'completed', 'delivery': 'verified', 'action': 'stop', 'effect_applied': True,
+            'must_not_replay': True, 'generation': current['generation'], 'pc': result}
 
 
 _LIVE_WORDS = {'news', 'weather', 'live', 'forecast', 'headlines', *_TOPICS}
@@ -1643,7 +1735,7 @@ def _execute(args, context):
     if not isinstance(args, dict):
         raise ValueError('TV arguments must be an object')
     action = args.get('action')
-    fields = {'on': [set()], 'off': [set()], 'observe': [set()], 'launch': [{'app'}],
+    fields = {'on': [set()], 'off': [set()], 'observe': [set()], 'stop': [set()], 'launch': [{'app'}],
               'key': [{'key'}], 'keys': [{'keys'}], 'text': [{'text'}],
               'find': [{'query'}, {'query', 'app'}], 'play': [{'query'}, {'query', 'app'}],
               'open': [{'id'}, {'url'}], 'volume': [{'level'}], 'notice': [{'text'}],
@@ -1667,12 +1759,13 @@ def _execute(args, context):
                                or not re.fullmatch(r'[^\x00-\x1f\x7f]{1,200}', args['text'].strip())):
         raise ValueError('notice takes 1-200 characters of text')
     if action in ('find', 'play') and (not isinstance(args['query'], str) or not 1 <= len(args['query'].strip()) <= 120
-                                       or args.get('app', 'pluto') not in {'pluto', 'youtube'}):
-        raise ValueError(f'{action} takes a 1-120 character query and optional app pluto|youtube')
+                                       or args.get('app', 'pluto') not in ({'pluto', 'youtube', 'library'}
+                                                                          if action == 'find' else {'pluto', 'youtube'})):
+        raise ValueError(f'{action} takes a 1-120 character query; find also supports app library')
     if action == 'find':
         try:
             return _find({**args, 'query': args['query'].strip()}, context)
-        except (OSError, ValueError, KeyError) as error:
+        except (OSError, ValueError, KeyError, MediaUnavailable) as error:
             return {'status': 'failed', 'delivery': 'not_dispatched', 'effect_applied': False,
                     'correction_allowed': True, 'failure': str(error)}
     if action == 'play':
@@ -1694,6 +1787,10 @@ def _execute(args, context):
             raise ValueError('App is not registered on this TV; observe to list apps')
         if action != 'observe' and uncertain_before:
             raise ValueError('An earlier TV effect is uncertain; stop effects and report it')
+        if action == 'stop':
+            return _stop_media(context, cancel)
+        if action == 'open' and str(args.get('id', '')).startswith('m'):
+            return _open_media(args['id'], context, row, cancel)
         attempted = context.setdefault('_tv_attempted', set())
         opening = action in ('open', 'play')
         extra = {'query': args['query'].strip(), 'chosen': chosen, 'alternatives': alternatives} if action == 'play' else {}
@@ -1971,7 +2068,7 @@ def _execute(args, context):
                 'note': ('Playback verified from the TV audio state.' if started else
                          'Input delivered once; inspect the fresh evidence before claiming the requested outcome.'),
                 **extra, **result}
-    except (OSError, ValueError, KeyError, IndexError) as error:
+    except (OSError, ValueError, KeyError, IndexError, MediaUnavailable) as error:
         if delivery == 'not_dispatched' and context.get('_tv_effect_uncertain') and not uncertain_before:
             delivery = 'uncertain'  # A target-state readback failed after its effect was sent.
         return {'status': 'failed', 'delivery': delivery, 'effect_applied': None if delivery != 'not_dispatched' else False,

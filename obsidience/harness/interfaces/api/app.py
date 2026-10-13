@@ -747,6 +747,9 @@ async def lifespan(app: FastAPI):
         resources.callback(trace.stop)
         await llm.start_provider_client()
         resources.push_async_callback(llm.close_provider_client)
+        from ...media import service as media_service
+        await asyncio.to_thread(media_service.start)
+        resources.push_async_callback(asyncio.to_thread, media_service.close)
         from ...memory.hindsight import MEMORY
         await MEMORY.start()
         resources.push_async_callback(MEMORY.close)

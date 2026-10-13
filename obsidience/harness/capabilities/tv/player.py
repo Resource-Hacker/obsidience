@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import socket
 import time
 
@@ -33,10 +34,14 @@ def _ask(request, limit=TIMEOUT, cancel=None):
 
     OSError when the tuner does not answer in time, ValueError when it refuses the request.
     """
+    if cancel is not None and cancel.is_set():
+        raise InterruptedError('TV command cancelled before dispatch')
     deadline = time.monotonic() + limit
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:  # Cleanup paired with the acquisition.
         sock.settimeout(TIMEOUT)
         sock.connect(SOCKET)
+        if cancel is not None and cancel.is_set():
+            raise InterruptedError('TV command cancelled before dispatch')
         sock.sendall((json.dumps(request) + '\n').encode())
         buffer = b''
         while b'\n' not in buffer:
@@ -68,6 +73,8 @@ def state():
     advertisement break: the tuner plays none of it and shows a break card until the programme
     returns by itself), paused or failed (with reason); title is the one play gave it; video is
     [width, height] once a picture shows; since is when playback last changed (epoch seconds).
+    Local files use playing_verified plus an exact sanitized source and generation.
+    Finite EOF returns idle with its terminal ended receipt; it is never reopened.
     """
     try:
         tuner = _ask({'op': 'state'})
@@ -93,6 +100,51 @@ def play(source, title, cancel=None, limit=START_LIMIT):
     """
     tuner = _ask({'op': 'play', **source, 'title': title, 'wait': limit}, limit + TIMEOUT, cancel)
     return tuner.get('playback') in ('playing', 'break') and tuner.get('title') == title
+
+
+def play_local(source: dict, title: str, cancel=None, limit: float = START_LIMIT) -> dict:
+    """Dispatch one admitted catalogue source once and return its complete readback.
+
+    Only ``playing_verified`` with matching source identity and a fresh generation
+    establishes playback. Loading, failed, or a terminal EOF receipt is returned
+    explicitly; the caller must not replace that result with title matching or
+    retry an uncertain dispatch. Paths are request-only and never returned.
+    """
+    fields = ('provider', 'root_id', 'relative_path', 'revision', 'catalogue_instance',
+              'item_id', 'media_source_id', 'source_revision')
+    if (not isinstance(source, dict) or set(source) not in (set(fields), set(fields) | {'title'})
+            or source.get('provider') != 'local' or source.get('title', title) != title):
+        raise ValueError('local playback takes one exact catalogue source')
+    expected = {key: source[key] for key in fields if key != 'relative_path'}
+    request_generation = secrets.token_hex(16)
+    tuner = _ask({'op': 'play', **source, 'title': title, 'wait': limit,
+                  'generation': request_generation}, limit + TIMEOUT, cancel)
+    actual = tuner.get('source')
+    # A short finite file can end before the bounded request returns. Its receipt
+    # identifies that EOF, without pretending it remains on the screen.
+    if actual is None and isinstance(tuner.get('ended'), dict):
+        actual = tuner['ended'].get('source')
+    if actual != expected:
+        raise ValueError('The TV tuner did not confirm the requested local source')
+    generation = tuner.get('generation') or (tuner.get('ended') or {}).get('generation')
+    if generation != request_generation:
+        raise ValueError('The TV tuner did not confirm the playback generation')
+    if tuner.get('playback') == 'playing_verified' and tuner.get('verification') != 'verified':
+        raise ValueError('The TV tuner did not verify local playback')
+    return tuner
+
+
+def stop_local(generation: str, source: dict, cancel=None) -> dict:
+    """Stop only the exact observed local generation; never a replacement source."""
+    # The tuner waits once for the matching unload and its idle readback.
+    tuner = _ask({'op': 'stop', 'generation': generation, 'source': source},
+                 limit=4 * TIMEOUT, cancel=cancel)
+    ended = tuner.get('ended')
+    if (tuner.get('playback') != 'idle' or not isinstance(ended, dict)
+            or ended.get('generation') != generation or ended.get('source') != source
+            or ended.get('outcome') != 'stopped'):
+        raise ValueError('The TV tuner did not confirm the exact local stop')
+    return tuner
 
 
 def pause(paused=True):
