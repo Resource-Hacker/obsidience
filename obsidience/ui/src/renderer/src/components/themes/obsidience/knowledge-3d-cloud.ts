@@ -1563,7 +1563,8 @@ export function createKnowledge3dCloud(
         if (Math.abs(revealLevels[i] - reveal) > 0.001) {
           // A lit node the route never passed (a relation-reached endpoint)
           // drops into its shell as it lights.
-          if (revealLevels[i] < 0.5 && reveal >= 0.5 && !spec?.nodeArrival.has(nodeIds[i])) {
+          if (revealLevels[i] < 0.5 && reveal >= 0.5
+              && !(spec?.routeArrival ?? spec?.nodeArrival)?.has(nodeIds[i])) {
             shells.ripple(i, nodes[i].subject ? 0.7 : 1);
           }
           revealLevels[i] = reveal;
@@ -1575,7 +1576,7 @@ export function createKnowledge3dCloud(
       // reaches it, inner layers included; the Articles a route ends on send
       // the strongest ripple.
       reached.fill(0);
-      for (const [id, arrival] of spec?.nodeArrival ?? []) {
+      for (const [id, arrival] of spec?.routeArrival ?? spec?.nodeArrival ?? []) {
         const index = indexById.get(id);
         if (index === undefined || solidFront < arrival) continue;
         reached[index] = 1;

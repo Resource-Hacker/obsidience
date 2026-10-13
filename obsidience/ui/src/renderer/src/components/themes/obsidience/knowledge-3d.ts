@@ -1413,6 +1413,10 @@ export interface Knowledge3dPathEdgeSpan {
 export interface Knowledge3dPathSpec {
   edgeSpans: ReadonlyMap<string, Knowledge3dPathEdgeSpan>;
   nodeArrival: ReadonlyMap<string, number>;
+  /** When the front reaches every node on the route, hierarchy waypoints
+   *  included. A waypoint carries the beam and ripples its glass as the front
+   *  passes; only nodeArrival's nodes ignite. Absent means nodeArrival. */
+  routeArrival?: ReadonlyMap<string, number>;
   /** Arrival of the FIRST node out of the Brain — the solid center-line
    *  front launches when the beam head crosses this (owner 2026-08-02:
    *  "the beam goes first, then the solid line starts moving once the
@@ -1503,8 +1507,11 @@ export function extendKnowledge3dPathSpec(
   const nodeArrival = new Map([...next.nodeArrival].map(([id, arrival]) => [id,
     previous.nodeArrival.get(id) ?? arrival + offset,
   ]));
+  const routeArrival = next.routeArrival && new Map([...next.routeArrival].map(([id, arrival]) => [id,
+    previous.routeArrival?.get(id) ?? arrival + offset,
+  ]));
   return {
-    edgeSpans, nodeArrival,
+    edgeSpans, nodeArrival, routeArrival,
     firstNodeProgress: previous.firstNodeProgress,
     firstArticleProgress: previous.firstArticleProgress,
     maxProgress: Math.max(0, ...[...edgeSpans.values()].map(span => span.to), ...nodeArrival.values()),

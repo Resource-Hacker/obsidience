@@ -252,8 +252,10 @@ function buildThinkingRoute(cloud: GraphCloud, refs: readonly string[], refGroup
     } };
   }
   // Calculate beam timing through the full hierarchy first, then restrict node
-  // ignition (including satellite sweeps and labels) to the supplied refs.
+  // ignition (including satellite sweeps and labels) to the supplied refs. The
+  // full timing stays available for what marks the front's passage.
   return { nodeIds, pathSpec: { ...pathSpec,
+    routeArrival: pathSpec.nodeArrival,
     nodeArrival: new Map([...pathSpec.nodeArrival].filter(([id]) => nodeIds.has(id))),
   } };
 }
