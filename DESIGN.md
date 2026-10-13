@@ -731,15 +731,17 @@ Linux services -> Hyprland -> adapter/hyprland -> Shell API -> one Quickshell ho
   sectors, bearings, named-branch cases or second solver clock. Links follow their shells
   between exact endpoints. Pending Link previews exist only in the Scene; rejection removes
   only that preview; never restore an old whole-graph snapshot. Memory is an organic
-  chronological tube; Code anchors its project and never displays layout fallbacks as
-  relationships. Proximity never attests a relationship.
-- **Thinking animation** shows exactly the supplied packet and Tool-return refs: never
-  expand through adjacency; cross-links only between endpoints of the same original group;
-  ancestors carry beams only; Tool/Skill glow means instructions supplied, not called.
+  chronological tube in three layers by kind (observations at the core, world facts,
+  experiences outermost); Code anchors its project and never displays layout fallbacks
+  as relationships. Proximity never attests a relationship.
+- **Thinking animation** ignites and labels exactly the supplied packet and Tool-return
+  refs. Ancestors and the Articles one link from a supplied one are passed, not consulted:
+  the beam reaches them and they glow visibly softer, unlabelled; nothing lights beyond
+  that one link. Tool/Skill glow means instructions supplied, not called.
   Activity comes only from context supplied, Tool dispatch/results, intentional Reader
   loads, committed writes and Review outcomes, never hidden reasoning; "returned" is not
   real-world success. Speech holds the packet through
-  playback, then fades; STOP clears it. Operations are presentation, never replay
+  playback; a finished route lingers six seconds, then fades; STOP clears it. Operations are presentation, never replay
   authority; never infer completion from animation.
 - **Code activity** observes public coding-agent MCP call/result records and file changes,
   emitting only fixed labels and returned identities, never reasoning, messages,
