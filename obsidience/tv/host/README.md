@@ -270,16 +270,33 @@ udp 47998-48000, 48002, 48010.
 
 ## Known limits (measured 2026-10-12)
 
-- Sunshine sends 60 frames a second on average but unevenly (interval 3-38 ms, standard
-  deviation about 5 ms; `sudo python3 framesniff.py IFACE SECONDS` reads its outgoing
-  packets). Its Wayland capture polls: it asks for a frame on an exact 16.67 ms clock
-  and each request completes only at the compositor's next buffer commit, 0.7-24 ms
-  later (mean 11-13 ms at the 60 Hz mode, measured with `WAYLAND_DEBUG=1`); conversion
-  and NVENC add 6.4 ms with a 2.8 ms spread. A 120 Hz output mode cuts the wait to about
-  2 ms but then only commits with new content complete a capture, so the spacing stays
-  uneven. With "smoothest" pacing the TV hides this except for a burst of skipped
-  refreshes (about 8 s, 0.5% overall) roughly every 7 minutes, when the stream clock
-  drifts past the TV's refresh. Not solved; an event-driven capture is the direction.
+- The television cannot show a 60 fps stream without repeats: its panel refreshes at
+  60.071 Hz (SurfaceFlinger's measured period, 16.647 ms; the mode is advertised as
+  60.000004), so about once in 14 s a refresh has no new frame, whatever the host does.
+  That floor is 0.12% of refreshes; 30 fps programmes meet the same one on any player.
+- Sunshine sends each frame the moment its encode finishes, 3-30 ms after the capture
+  and different for every frame (a shared GPU; `sudo python3 framesniff.py IFACE SECONDS`
+  reads its outgoing packets). Left alone, Moonlight's "smoothest" pacing showed that as
+  minutes without a skipped refresh and then about 20 s with 10-18 skipped a second,
+  every 5-6 minutes (0.6-0.8% overall). `tvpace.c` is preloaded into Sunshine by its
+  unit and holds the first packet of each frame until the frame's slot on an even 60 fps
+  grid, placed just behind the slowest recent frame: video leaves about 20-35 ms later,
+  sound does not. With it the television skipped 1-5 refreshes at each 14 s crossing and
+  had no long burst (0.4-0.5% overall, 13 minutes). It holds only frames of a steady
+  60 fps stream and passes everything else through; once a minute the journal says how
+  many frames missed their slot (`tvpace: ... late`). The dynamic loader starts Sunshine
+  because glibc ignores `LD_PRELOAD` for a program with file capabilities; Sunshine then
+  runs without them, which Wayland capture does not need. The unit builds the library
+  when it is missing or older than its source. After a `sunshine` update check the two
+  packet layouts it reads (its header comment names them) and that the journal still
+  counts frames.
+- A break view's start and end each cost the stream about 20 frames (0.4 s) while the
+  second player's window appears or goes.
+- Do not raise the output's refresh rate to even the captures: at 120-1000 Hz the player's
+  pictures are sampled badly (with 30 fps video 13-40% of the pictures stayed on screen for
+  one or three stream frames instead of two, against 4-8% at 60 Hz, measured on a private
+  copy of this stack), and Sunshine's portal capture halves 60 fps content. Details of
+  those measurements: commit message history and `AGENTS.local.md`.
 - wlroots' headless output re-arms a whole-millisecond frame timer after each commit, so
   a "60 Hz" output is not a 60.00 Hz clock (clients estimate 62-70 Hz).
 - History, solved by the tuner: FFmpeg's HLS reader (mpv's) cannot play Pluto across an
