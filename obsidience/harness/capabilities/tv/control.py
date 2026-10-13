@@ -86,6 +86,9 @@ PLUTO_CHANNEL = re.compile(r'https://pluto\.tv/[a-z]{2}/live-tv/([a-z0-9-]{1,80}
 MOONLIGHT = 'com.limelight'
 PC_APP = 'pc'
 STREAM_HOST, STREAM_APP = 'Obsidience', 'Obsidience TV'
+# The television's Snapcast client, started and stopped by its own receiver ({} is START or STOP).
+VOICE_CLIENT = ('am broadcast -a de.badaix.snapcast.{}_SERVICE -n de.badaix.snapcast/.BroadcastReceiver '
+                '>/dev/null 2>&1')
 _SUNSHINE_STATE = Path.home() / '.config' / 'sunshine' / 'sunshine_state.json'
 _TV_MODE = Path(__file__).resolve().parents[3] / 'tv' / 'host' / 'mode'
 # The PC route has two sources and the TV session shows one of them (obsidience/tv/host/show): the
@@ -680,6 +683,7 @@ def _pushed(row):
             # Looping ads push often; the mark stays until a screen read clears it.
             state.update(playback='inactivity_ad', note=previous.get('note'))
         _LAST['state'] = state
+        _voice_follows(row, previous, state)
         _schedule_pluto_check()
     return consume
 
@@ -838,7 +842,9 @@ def _warm():
         row = _inventory()
         _tail, boot, _ad = _preamble(row, None, _POWER_READ, timeout=4)
         if _agent.session(row, None, boot, _pushed(row)) is not None and (reply := _ask('state')) is not None:
+            previous = _LAST['state']
             _LAST['state'] = _pluto_inactivity(_from_agent(row, reply, fetch=False))
+            _voice_follows(row, previous, _LAST['state'])
     except Exception as error:  # The TV may be off or away; the line stays marked as aged.  # noqa: BLE001
         _agent.log.info('TV agent warm-up skipped: %s', error)
     finally:
@@ -1160,21 +1166,31 @@ def _show_stream(row, cancel, context):
     while time.monotonic() < deadline:
         _wait(cancel, .3)
         if shown():
-            _start_voice_client(row, cancel)
+            _voice_client(row, cancel, 'START')
             return True
     raise ValueError('Moonlight did not show the PC stream on the TV')
 
 
-def _start_voice_client(row, cancel):
-    """Start the television's Snapcast client, which plays the Executive's voice in step with the
-    desk speakers (obsidience/tv/host/voice.py). It does not start itself after the television
-    restarts; its own receiver starts it without touching what the screen shows. Best effort:
-    without it the voice simply stays on the desk speakers."""
+def _voice_client(row, cancel, verb):
+    """START or STOP the television's Snapcast client, which plays the Executive's voice in step
+    with the desk speakers (obsidience/tv/host/voice.py). It does not start itself after the
+    television restarts and does not stop when the television sleeps; its own receiver does both
+    without touching what the screen shows. Best effort: without it the voice simply stays on
+    the desk speakers."""
     try:
-        _shell(row, cancel, _guard(row) + 'am broadcast -a de.badaix.snapcast.START_SERVICE '
-               '-n de.badaix.snapcast/.BroadcastReceiver >/dev/null 2>&1; true')
+        _shell(row, cancel, _guard(row) + VOICE_CLIENT.format(verb) + '; true')
     except (OSError, ValueError):
         pass
+
+
+def _voice_follows(row, previous, state):
+    """Keep that client running exactly while the screen is on, when a state read shows the screen
+    went off or came on without a power command of ours (its remote, a sleep timer). The voice
+    router then answers a television that is off on the desk speakers alone, directly."""
+    was, now = ((known or {}).get('power', {}).get('screen') for known in (previous, state))
+    if now is not None and (was == 'off') != (now == 'off'):
+        threading.Thread(target=_voice_client, args=(row, None, 'STOP' if now == 'off' else 'START'),
+                         daemon=True).start()
 
 
 def _pc_opened(row, cancel, context, action, link, title, effect, power, extra, run=None):
@@ -1831,10 +1847,15 @@ def _execute(args, context):
                 _remember_power(state)
                 if action == 'off':
                     _stop_pc_player()
+                _voice_client(row, cancel, 'START' if action == 'on' else 'STOP')
                 return {'status': 'completed', 'delivery': 'verified', 'action': action,
                         'power': state, 'effect_applied': woke,
                         **({'woke': 'wake-on-lan from network standby'} if woke else {})}
-            command = 'input keyevent KEYCODE_WAKEUP' if action == 'on' else 'input keyevent KEYCODE_SLEEP'
+            # The television's Snapcast client goes with the screen (_voice_follows): stopped ahead
+            # of the sleep key, so the answer to this very command is not sent by way of a set that
+            # is off. Braces keep both commands behind the identity guard.
+            command = ('{ input keyevent KEYCODE_WAKEUP; ' + VOICE_CLIENT.format('START') + '; }' if action == 'on'
+                       else '{ ' + VOICE_CLIENT.format('STOP') + '; input keyevent KEYCODE_SLEEP; }')
         elif action == 'launch':
             package = row['apps'][args['app']]
             resolved = _shell(row, cancel, _guard(row) + 'cmd package resolve-activity --brief '
