@@ -186,6 +186,7 @@ patch --forward -d <hindsight-venv>/lib/python3.13/site-packages -p1 < obsidienc
 patch --forward -d <hindsight-venv>/lib/python3.13/site-packages -p1 < obsidience/scripts/patches/hindsight/0003-openrouter-daily-quota-reset.patch
 patch --forward -d <hindsight-venv>/lib/python3.13/site-packages -p1 < obsidience/scripts/patches/hindsight/0004-keep-reference-offset-in-parsed-dates.patch
 patch --forward -d <hindsight-venv>/lib/python3.13/site-packages -p1 < obsidience/scripts/patches/hindsight/0005-allow-exact-combined-scope-union-updates.patch
+patch --forward -d <hindsight-venv>/lib/python3.13/site-packages -p1 < obsidience/scripts/patches/hindsight/0006-bank-speaker-perspective.patch
 ```
 
 Initialize a private PostgreSQL cluster with UTF-8, local peer authentication,
@@ -331,6 +332,11 @@ Memory uses Hindsight's native `world`, `experience` and `observation` types.
 bank agent's own actions and experiences. This is a perspective distinction,
 not a confidence or truth rating: an external assistant's report about its own
 work is not the Executive's experience merely because the Executive owns the bank.
+The sixth native patch makes the extraction prompt and schema descriptions agree
+on that perspective. Classification follows the substantive actor, so a Codex
+report of the Executive's own action remains an Executive experience, with its
+reporting attribution and uncertainty preserved. The native schema still emits
+`assistant` for these facts and stores that value as `experience`.
 `observation` is a consolidation derived from source facts; a mental model is a
 longer synthesis answering a standing question. All remain attributed, unverified
 history. Current working context and fresh Tool evidence retain their execution

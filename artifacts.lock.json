@@ -180,7 +180,7 @@
       "version": "0.10.3",
       "license": "MIT",
       "package": "hindsight-api-slim[local-onnx]==0.10.3",
-      "integration": "Separate local PostgreSQL/pgvector memory server; CPU ONNX embedding and FlashRank reranking. The ADK Executive loop takes bounded automatic recall through the Obsidience memory port. Supported async retain operation IDs, webhooks, memory graph/list APIs and immutable Source handoffs replace the ordinary Temporary-memory writer. The read-only Memory pane consumes native graph identities separately from accepted Articles. The ADK conversation log and its provider window own live conversation/context; Alexandria Curate and owner Review own durable wiki recommendations. Memory inference borrows preemptible idle capacity from the existing model owner. No coding-agent git-history importer, second wiki or generative reflect call is mounted.",
+      "integration": "Separate local PostgreSQL/pgvector memory server; CPU embeddings and FlashRank reranking. The ADK Executive loop takes bounded automatic recall through the Obsidience memory port. Supported async retain operation IDs, webhooks, memory graph/list APIs and immutable Source handoffs replace the ordinary Temporary-memory writer. Native world, experience and observation types retain their perspective and provenance; background mental models can check raw source facts. The read-only Memory pane consumes native graph identities separately from accepted Articles. The ADK conversation log and its provider window own live conversation/context; Alexandria Curate and owner Review own durable wiki recommendations. Extraction, consolidation and optional reflection use the native configured provider. No coding-agent git-history importer, second wiki or second memory owner is mounted.",
       "cordis_reference": {
         "package": "@vectorize-io/hindsight-coding-agents",
         "version": "0.6.1",
@@ -261,6 +261,18 @@
               "path": "hindsight_api/engine/consolidation/consolidator.py",
               "preimage_sha256": "179a31850031074a783216398a6789d150b626c63012208ffbe89bdd2e9e0fd8",
               "installed_sha256": "b6e6c388bad2711d9955436e6a866063fdef8cd3030cc9a881159f790eefa872"
+            }
+          ]
+        },
+        {
+          "path": "obsidience/scripts/patches/hindsight/0006-bank-speaker-perspective.patch",
+          "purpose": "Classify native retain facts from the bank agent's perspective by the substantive actor, keeping external assistant reports and genuine bank-agent actions distinct. Update prompt and structured-schema descriptions consistently; preserve enum values, source attribution, uncertainty and conversion logic.",
+          "patch_sha256": "b83dc81fc8a3039c8fe0eef773a3d717ea57ec8e6d69bbd228bfd2a4bd4e4699",
+          "files": [
+            {
+              "path": "hindsight_api/engine/retain/fact_extraction.py",
+              "preimage_sha256": "4da3d73c6525ef72c0b1d87d6e6ece73e90f94ab469699c7e2aa52c8536f9da9",
+              "installed_sha256": "8813c82bc70ffa7b31c02ebc1cb17a6417e23f3cf8f85eee28c8bcf4b442a68d"
             }
           ]
         }

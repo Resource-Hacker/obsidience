@@ -1,0 +1,75 @@
+--- a/hindsight_api/engine/retain/fact_extraction.py
++++ b/hindsight_api/engine/retain/fact_extraction.py
+@@ -276,7 +276,7 @@
+     occurred_start: str | None = Field(default=None, description="ISO timestamp for events")
+     occurred_end: str | None = Field(default=None, description="ISO timestamp for event end")
+     fact_type: Literal["world", "assistant"] = Field(
+-        description="'world' = objective/external facts, including user preferences, rules, corrections, and constraints even when stated during a conversation. 'assistant' = actions, experiences, or observations the assistant/agent actually performed."
++        description="Classify the substantive actor of the fact, not its reporting speaker. 'assistant' = actions, attempts, observations, decisions, or experiences attributed by the source to the memory-bank agent itself, even when an external speaker reports them. 'world' = other actors' actions or reports about their own work, plus user preferences, rules, corrections, constraints and other external facts. Use Context and explicit metadata to identify the bank's agent; keep reporter and actor distinct. Reported or uncertain bank-agent actions still use assistant, with those qualifications preserved; this label does not certify truth. Merely mentioning the bank's agent as a component, recipient or beneficiary does not make it the actor."
+     )
+     entities: list[str] = Field(
+         default_factory=list, description='People, places, concepts - plain strings, e.g. ["Alice", "Kubernetes"]'
+@@ -429,7 +429,7 @@
+     )
+ 
+     fact_type: Literal["world", "assistant"] = Field(
+-        description="'world' = objective/external facts about the user, other people, events, general knowledge, preferences, rules, corrections, or constraints. 'assistant' = actions, experiences, or observations the assistant/agent actually performed (e.g., 'I changed X', 'I discovered Y')."
++        description="Classify the substantive actor of the fact, not its reporting speaker. 'assistant' = actions, attempts, observations, decisions, or experiences attributed by the source to the memory-bank agent itself, even when an external speaker reports them. 'world' = other actors' actions or reports about their own work, plus user preferences, rules, corrections, constraints and other external facts. Use Context and explicit metadata to identify the bank's agent; keep reporter and actor distinct. Reported or uncertain bank-agent actions still use assistant, with those qualifications preserved; this label does not certify truth. Merely mentioning the bank's agent as a component, recipient or beneficiary does not make it the actor."
+     )
+ 
+     entities: list[str] = Field(
+@@ -486,7 +486,7 @@
+     occurred_start: str | None = Field(default=None, description="WHEN the event happened (ISO timestamp).")
+     occurred_end: str | None = Field(default=None, description="WHEN the event ended (ISO timestamp).")
+     fact_type: Literal["world", "assistant"] = Field(
+-        description="'world' = about the user/others, including user preferences, rules, corrections, and constraints. 'assistant' = actions or experiences the assistant/agent actually performed."
++        description="Classify the substantive actor of the fact, not its reporting speaker. 'assistant' = actions, attempts, observations, decisions, or experiences attributed by the source to the memory-bank agent itself, even when an external speaker reports them. 'world' = other actors' actions or reports about their own work, plus user preferences, rules, corrections, constraints and other external facts. Use Context and explicit metadata to identify the bank's agent; keep reporter and actor distinct. Reported or uncertain bank-agent actions still use assistant, with those qualifications preserved; this label does not certify truth. Merely mentioning the bank's agent as a component, recipient or beneficiary does not make it the actor."
+     )
+     entities: list[str] = Field(
+         default_factory=list,
+@@ -535,7 +535,7 @@
+     occurred_start: str | None = Field(default=None, description="ISO timestamp for events")
+     occurred_end: str | None = Field(default=None, description="ISO timestamp for event end")
+     fact_type: Literal["world", "assistant"] = Field(
+-        description="'world' = objective/external facts. 'assistant' = first-person actions, experiences, or observations by the speaker."
++        description="Classify the substantive actor of the fact, not its reporting speaker. 'assistant' = actions, attempts, observations, decisions, or experiences attributed by the source to the memory-bank agent itself, even when an external speaker reports them. 'world' = other actors' actions or reports about their own work, plus user preferences, rules, corrections, constraints and other external facts. Use Context and explicit metadata to identify the bank's agent; keep reporter and actor distinct. Reported or uncertain bank-agent actions still use assistant, with those qualifications preserved; this label does not certify truth. Merely mentioning the bank's agent as a component, recipient or beneficiary does not make it the actor."
+     )
+     entities: list[str] = Field(
+         default_factory=list, description='People, places, concepts - plain strings, e.g. ["Alice", "Kubernetes"]'
+@@ -1087,9 +1087,11 @@
+ - "event": Specific datable occurrence (set occurred_start/end)
+ - "conversation": Ongoing state, preference, trait (no dates)
+ 
+-fact_type:
+-- "world": Objective/external facts, including the user's preferences, rules, corrections, constraints, plans, traits, or context. These stay "world" even when the user states them during an assistant interaction (e.g., "User prefers browser_navigate over web_search", "User corrected the project deadline").
+-- "assistant": Actions, experiences, or observations the assistant/agent actually performed (e.g., "I changed X", "I discovered Y", "I debugged Z"). Use this for the assistant/agent doing, trying, learning, deciding, recommending, or responding — not merely for user facts mentioned in conversation.
++fact_type is classified from the memory-bank agent's perspective by the substantive actor of each fact, NOT by the outer reporting clause, first-person grammar, or the generic label "assistant":
++- "world": Objective/external facts, including the user's preferences, rules, corrections, constraints, plans, traits, or context. These stay "world" even when stated during an assistant interaction. Another assistant doing its own work, making its own proposal or recommendation, or reporting its own actions is also "world", including its first-person "I changed X" statements.
++- "assistant": Use this when the source attributes an action, attempt, observation, decision, recommendation, response, or experience to the bank's OWN agent. This remains "assistant" when an external speaker reports the bank agent's action: in "External assistant reports that the bank agent answered from stale context", the bank agent is the actor and the type is "assistant". Preserve who reported it and all uncertainty, failure, proposed-versus-completed, and historical qualifications. The classification does not require independent verification or certify the claim as true.
++Use Context and explicit metadata to identify the bank's agent, and source roles to distinguish that agent from the reporting speaker and actual actor. Bank ownership does not identify a transcript's speaker. Merely mentioning the bank's agent as a component, recipient, beneficiary, or subject of someone else's work does not make it the actor: "External assistant repaired the bank agent" is "world".
++Keep distinct actor claims separate when combining them would obscure their different perspectives; otherwise retain useful context without unnecessary splitting. Do not replace an external actor with the bank's agent, or replace the bank's agent when the source identifies it as the actor.
+ 
+ ══════════════════════════════════════════════════════════════════════════
+ TEMPORAL HANDLING
+@@ -1205,7 +1207,7 @@
+ - Extract all entities (people, places, organizations, objects, concepts).
+ - Extract temporal information (occurred_start, occurred_end, fact_kind, when).
+ - Extract location (where) and people (who).
+-- fact_type: use "world" for user preferences, rules, corrections, constraints, traits, and other objective facts, even when stated during an assistant interaction. Use "assistant" only for actions or experiences the assistant/agent actually performed."""
++- fact_type: classify the substantive actor, not the reporting speaker. Use "world" for user preferences, rules, corrections, constraints, traits, other external facts, and external assistants' own actions or reports about their own work. Use "assistant" for actions or experiences the source attributes to the bank's own agent, including externally reported or uncertain actions. Use Context and explicit metadata to identify the bank's agent; preserve source attribution and uncertainty, without treating the type as verification."""
+ 
+ VERBATIM_FACT_EXTRACTION_PROMPT = _BASE_FACT_EXTRACTION_PROMPT.format(
+     language_section="{language_section}",
+@@ -1313,8 +1315,10 @@
+ FACT TYPE
+ ══════════════════════════════════════════════════════════════════════════
+ 
+-- **world**: User's life, preferences, rules, corrections, constraints, other people, and events (facts that would exist without this conversation)
+-- **assistant**: Actions or experiences the assistant/agent actually performed while helping the user (requests, recommendations, help)
++Classify from the memory-bank agent's perspective by the substantive actor, NOT the outer reporting clause or first-person grammar. Use Context and explicit metadata to identify the bank's agent and source roles to distinguish reporter from actor; bank ownership does not identify a transcript's speaker.
++- **world**: User's life, preferences, rules, corrections, constraints, other people, events, and external assistants doing their own work, making their own proposals or recommendations, or reporting their own actions.
++- **assistant**: Use this for actions, attempts, observations, decisions, recommendations, responses, or experiences attributed by the source to the bank's OWN agent, even when an external speaker reports them. Preserve reporter attribution, uncertainty, failures, proposed-versus-completed status, and historical qualifications. Independent verification is not required for this classification, and the label does not certify truth.
++Merely mentioning the bank's agent as a component, recipient, beneficiary, or subject of someone else's work does not make it the actor. Keep distinct actor claims separate when combining them would obscure their different perspectives; otherwise retain useful context without unnecessary splitting.
+   ⚠️ CRITICAL for assistant facts: ALWAYS capture the user's request/question in the fact!
+   Include: what the user asked, what problem they wanted solved, what context they provided
+ 
