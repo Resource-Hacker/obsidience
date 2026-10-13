@@ -4,7 +4,7 @@ import { GraphPublisher, type GraphControl } from "./graph-stream";
 import { providerGraphAssets, providerLinkIndex } from "./provider-graph-assets";
 import { CODE_STRUCTURE } from "./code-spherical-layout";
 import { createKnowledge3dLabelLayer, type Knowledge3dLabelMeta } from "@/components/themes/obsidience/knowledge-3d-labels";
-import { memoryTimeAxis, memoryInitialOffset, memoryRelationshipWeight, memoryLens, memoryLensX, memoryLayer, memoryLayerRadii, type MemoryLens, type MemoryTimeAxis } from "./memory-time-layout";
+import { memoryTimeAxis, memoryInitialOffset, memoryRelationshipWeight, memoryLens, memoryLensX, memoryLayerShares, type MemoryLens, type MemoryTimeAxis } from "./memory-time-layout";
 import { createMemoryGlass, type MemoryGlass } from "./memory-glass";
 import { loadGraphTuning, MAIN_GRAPH_ID } from "@/lib/graph-tuning";
 
@@ -34,6 +34,26 @@ type LayoutPoint = {x: number; y: number; z: number; vx?: number; vy?: number; v
 export type ProviderPresentation = Pick<GraphPublisher, "publishCatalog" | "publishState" | "frame" | "dispose">;
 export type ProviderPresentationFactory = (canvas: HTMLCanvasElement, command: (command: GraphControl) => void,
   redraw: () => void, consumers: (count: number) => void) => ProviderPresentation;
+/** Each record's glass layer, 0 for the core: its rank in the bank by how many
+ *  connections it has, the plain order of time aside, which every record has
+ *  alike. */
+function memoryLayers(nodes: readonly ProviderNode[], edges: readonly ProviderEdge[]): Uint8Array {
+  const index = new Map(nodes.map((node, i) => [node.id, i]));
+  const links = new Float32Array(nodes.length);
+  for (const edge of edges) {
+    if (edge.kind === "temporal") continue;
+    const source = index.get(edge.source), target = index.get(edge.target);
+    if (source === undefined || target === undefined || source === target) continue;
+    links[source] += 1; links[target] += 1;
+  }
+  const ranked = [...links.keys()].sort((a, b) => links[b] - links[a] || a - b);
+  const shares = memoryLayerShares(nodes.length);
+  const layers = new Uint8Array(nodes.length);
+  ranked.forEach((node, rank) => {
+    layers[node] = shares.findIndex(share => rank < Math.max(1, Math.round(share * nodes.length)));
+  });
+  return layers;
+}
 /** One disposable renderer; provider layout workers share its visible lifetime. */
 export class ProviderGraphScene {
   readonly presentation: ProviderPresentation;
@@ -351,7 +371,7 @@ export class ProviderGraphScene {
       this.glass.setRecords({
         positions: this.points.geometry.getAttribute("position").array as Float32Array,
         positionTexture: assets.positions, radii, tints: this.nodeColors,
-        layers: Uint8Array.from(this.nodes, node => memoryLayer(node.kind)),
+        layers: memoryLayers(this.nodes, this.edges),
         weights: Float32Array.from(this.nodes, (node, i) => radii[i] * Math.sqrt(1
           + (this.linkIndex.adjacency.get(node.id) || []).reduce((sum, edge) => sum + memoryRelationshipWeight(this.edges[edge]), 0))),
       });
@@ -416,11 +436,10 @@ export class ProviderGraphScene {
     const pairs = new Float32Array(edges.length * 3);
     edges.forEach((edge, i) => pairs.set([indices.get(edge.source)!, indices.get(edge.target)!, memoryRelationshipWeight(edge)], i * 3));
     // Full-bank physics is independent of filters, selection, search and lens.
-    const layers = memoryLayerRadii(members.length, this.timeAxis?.length ?? 640);
     worker.postMessage({type: "init", alpha: this.layoutAlpha, pairs,
       nodes: members.map((node, i) => {
         const p = this.layoutPositions.get(node.id)!;
-        return {id: String(i), ...p, fx: p.x, layer: layers[memoryLayer(node.kind)]};
+        return {id: String(i), ...p, fx: p.x};
       })}, [pairs.buffer]);
   }
   private updateLinks() {

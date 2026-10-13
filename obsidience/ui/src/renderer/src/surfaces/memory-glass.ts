@@ -1,14 +1,16 @@
 // A memory stream drawn inside blown glass, in the manner of the Knowledge
-// orb: one sleeve about the time axis for each kind of memory, nested in the
-// order the layout holds them — observations at the core, world facts around
-// them, experiences outermost. Each sleeve follows its own records' real
-// outline, with a sheen of fine lines and depth-of-field dust. Every record
-// rests in a crater of its own sleeve — wider and deeper the larger and
-// better linked the record — and carries a seed of slowly turning dust in its
-// own colour. The core sleeve is the most solid and the outermost the
-// clearest. The glass follows the records as they are displayed, lens
-// included; it adds no force nodes or picking targets, and being pure added
-// light it needs no sorting or depth test.
+// orb: up to three sleeves nested about the stream's own winding centre line,
+// so the glass follows the helix the memories settle into, each sleeve taking
+// the stream's real outline, with a sheen of fine lines and depth-of-field
+// dust.
+// The sleeves sort the bank by how connected its memories are: the hubs lie
+// in the core sleeve, the most solid, and the loosely linked ones in the
+// outermost, the clearest. A record lying near its own sleeve presses a crater
+// into it — wider and deeper the larger and better linked the record — and
+// every record carries a seed of slowly turning dust in its own colour. The
+// glass follows the records as they are displayed, lens included; it adds no
+// force nodes or picking targets, and being pure added light it needs no
+// sorting or depth test.
 import * as THREE from "three";
 import {
   ADDITIVE, BOKEH_FRAGMENT, LIGHT_GLSL, NOISE_GLSL, type Knowledge3dGlass,
@@ -20,14 +22,18 @@ const PROFILE = 160;
 const SURVEY = [1024, 256] as const;
 /** The smooth maximum that joins neighbouring craters; it fits a half float. */
 const SHARPNESS = "8.0";
+/** Each sleeve's share of the stream's outline, innermost first, by how many
+ *  a bank carries. */
+const SHARES = [[1], [0.55, 1], [0.36, 0.68, 1]];
 /** Sheen lines around each sleeve, innermost first. Fives, so the heavier
  *  fifth line also meets itself where the sleeve closes. */
 const LINES = [15, 20, 30];
-/** The rim stands this far above where a sleeve's records lie, and a crater's
- *  floor this far below it by [lightest, heaviest], as fractions of the
- *  sleeve's radius; a record lying deeper still takes its crater down with it
- *  by at most DEEPER. The mouth reaches this share of the way to a neighbour. */
-const RIM = 0.03;
+/** The outline stands this far above the stream's outermost records. A
+ *  crater's floor lies this far below its sleeve by [lightest, heaviest], as
+ *  fractions of the sleeve's radius; a record lying deeper still takes its
+ *  crater down with it by at most DEEPER, and one far from its sleeve presses
+ *  none. The mouth reaches this share of the way to a neighbour. */
+const RIM = 0.05;
 const FLOOR = [0.02, 0.07];
 const DEEPER = 0.1;
 const MOUTH = [0.55, 0.85];
@@ -51,22 +57,23 @@ const FLOOR_GLOW = 0.35;
 const STREAM_GLSL = `
 uniform sampler2D uProfile;
 uniform vec4 uAxis;    // first slice's x, length, greatest radius, slices in use
-uniform vec4 uChannel; // which of the profile's outlines is this sleeve's
-uniform vec2 uSleeve;  // this sleeve's greatest radius, deepest crater
+uniform vec3 uSleeve;  // this sleeve's share of the outline, greatest radius, deepest crater
 uniform float uTime;
 uniform float uPixelRatio;
 uniform float uZoom;  // canvas pixels per unit at the stream
 uniform float uCalm;
 uniform vec4 uDrops[8];     // x, angle, unused, age: 0 as it lands to 1 when spent
 uniform vec4 uDropTints[8]; // colour; strength
-// This sleeve's radius at a place along time, 0 to 1.
-float outline(float along) {
-  return dot(texture2D(uProfile, vec2((along * (uAxis.w - 1.0) + 0.5) / ${PROFILE}.0, 0.5)), uChannel);
+// The stream at a place along time, 0 to 1: this sleeve's radius there, and
+// where the stream's centre line lies off the time axis.
+vec3 streamAt(float along) {
+  vec4 at = texture2D(uProfile, vec2((along * (uAxis.w - 1.0) + 0.5) / ${PROFILE}.0, 0.5));
+  return vec3(at.r * uSleeve.x, at.gb);
 }
 // Depth past the axis in units of the stream's greatest radius: -1 on the
 // near wall, +1 on the far one.
-float streamDepth(vec4 view, float x) {
-  return ((modelViewMatrix * vec4(x, 0.0, 0.0, 1.0)).z - view.z) / max(uAxis.z, 1e-3);
+float streamDepth(vec4 view, vec3 centre) {
+  return ((modelViewMatrix * vec4(centre, 1.0)).z - view.z) / max(uAxis.z, 1e-3);
 }
 float streamFog(float depth) {
   return exp(-max(0.0, depth + 0.55) * 1.15);
@@ -99,12 +106,11 @@ float rippleWave(float x, float angle, float radius, out vec3 tint) {
   return wave;
 }
 // A place on the cratered sleeve: along time and around the axis, 0 to 1.
-vec3 streamPoint(vec2 st, float depth, float lift, float wave) {
-  float rim = outline(st.x);
-  // Past the sleeve's last record there is no glass for a ripple to lift.
-  float radius = rim > 0.0 ? max(0.0, rim * (1.0 + lift) - uSleeve.y * depth + 0.03 * uAxis.z * wave) : 0.0;
+vec3 streamPoint(vec2 st, vec3 at, float depth, float lift, float wave) {
+  // Past the stream's last record there is no glass for a ripple to lift.
+  float radius = at.x > 0.0 ? max(0.0, at.x * (1.0 + lift) - uSleeve.z * depth + 0.03 * uAxis.z * wave) : 0.0;
   float angle = st.y * 6.28318530718;
-  return vec3(uAxis.x + st.x * uAxis.y, radius * cos(angle), radius * sin(angle));
+  return vec3(uAxis.x + st.x * uAxis.y, at.y + radius * cos(angle), at.z + radius * sin(angle));
 }
 `;
 
@@ -178,10 +184,11 @@ void main() {
   vSt = position.xy;
   float angle = vSt.y * 6.28318530718;
   float x = uAxis.x + vSt.x * uAxis.y;
-  float rim = outline(vSt.x);
+  vec3 at = streamAt(vSt.x);
+  float rim = at.x;
   vWave = rippleWave(x, angle, rim, vWaveTint);
-  vec4 view = modelViewMatrix * vec4(streamPoint(vSt, texture2D(uSurvey, vSt).a, 0.0, vWave), 1.0);
-  vFog = streamFog(streamDepth(view, x));
+  vec4 view = modelViewMatrix * vec4(streamPoint(vSt, at, texture2D(uSurvey, vSt).a, 0.0, vWave), 1.0);
+  vFog = streamFog(streamDepth(view, vec3(x, at.yz)));
   // Glass shows at its edge: how nearly this wall is seen side-on.
   vEdge = 1.0 - abs(dot(normalize(normalMatrix * vec3(0.0, cos(angle), sin(angle))), normalize(view.xyz)));
   vSwell = rim / max(uAxis.z, 1e-3);
@@ -243,12 +250,13 @@ void main() {
     normalize(vec3(east, 0.012, north)), normalize(vec3(-0.45, 0.8, 0.4))));
   bool haze = aRandom.z > 0.0;
   float x = uAxis.x + st.x * uAxis.y;
-  float rim = outline(st.x);
+  vec3 at = streamAt(st.x);
+  float rim = at.x;
   vec3 waveTint;
   float wave = rippleWave(x, st.y * 6.28318530718, rim, waveTint);
-  vec4 view = modelViewMatrix * vec4(streamPoint(st, field.a, aRandom.z, wave), 1.0);
+  vec4 view = modelViewMatrix * vec4(streamPoint(st, at, field.a, aRandom.z, wave), 1.0);
   gl_Position = projectionMatrix * view;
-  float depth = streamDepth(view, x);
+  float depth = streamDepth(view, vec3(x, at.yz));
   float confusion = streamConfusion(depth);
   float base = (1.0 + aRandom.x * 1.3) * uPixelRatio;
   float size = base + confusion;
@@ -265,7 +273,7 @@ void main() {
   // Dust lies evenly over the glass, so a narrow stretch carries less of it,
   // and thins away from the craters. A point that is not shown is moved off
   // screen here instead of being rasterised and discarded.
-  if (position.z * uSleeve.x > rim || aRandom.y > 0.55 + 0.45 * smoothstep(0.0, 0.6, field.a)
+  if (position.z * uSleeve.y > rim || aRandom.y > 0.55 + 0.45 * smoothstep(0.0, 0.6, field.a)
       || vAlpha < 0.004) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
   vRing = smoothstep(5.0, 15.0, confusion / uPixelRatio);
   vec3 tint = vec3(0.62 + field.r - field.g, 0.62 + field.g, 0.62 - field.r - field.g);
@@ -290,14 +298,15 @@ ${STREAM_GLSL}
 void main() {
   vec3 record = texture2D(uPositions,
     (vec2(mod(aSeed.w, uTextureSize), floor(aSeed.w / uTextureSize)) + 0.5) / uTextureSize).xyz;
-  float radius = length(record.yz);
-  vec3 outward = radius > 1e-3 ? vec3(0.0, record.yz / radius) : vec3(0.0, 1.0, 0.0);
+  vec3 centre = vec3(record.x, streamAt((record.x - uAxis.x) / uAxis.y).yz);
+  float radius = length(record.yz - centre.yz);
+  vec3 outward = radius > 1e-3 ? vec3(0.0, (record.yz - centre.yz) / radius) : vec3(0.0, 1.0, 0.0);
   float turn = uTime * aRandom.z * 0.0017453293 + aRandom.y * 6.2831853;
   vec3 turned = position * cos(turn) + cross(outward, position) * sin(turn)
     + outward * dot(outward, position) * (1.0 - cos(turn));
   vec4 view = modelViewMatrix * vec4(record + turned * aSeed.z, 1.0);
   gl_Position = projectionMatrix * view;
-  float depth = streamDepth(view, record.x);
+  float depth = streamDepth(view, centre);
   float confusion = streamConfusion(depth);
   float base = (1.0 + aRandom.x * 1.3) * uPixelRatio;
   float size = base + confusion;
@@ -325,7 +334,7 @@ export interface MemoryGlassRecords {
   weights: Float32Array;
   /** Colour per record, three floats. */
   tints: Float32Array;
-  /** Which sleeve each record rests on, 0 for the core. */
+  /** Which sleeve each record belongs to, 0 for the core. */
   layers: Uint8Array;
 }
 
@@ -418,14 +427,13 @@ export function createMemoryGlass(): MemoryGlass {
     return state / 4294967296;
   };
 
-  const sleeves = LINES.map((lines, order) => {
+  const sleeves = LINES.map((lines) => {
     const survey = target(THREE.LinearFilter);
     const drops = { value: new Float32Array(32) }, dropTints = { value: new Float32Array(32) };
     for (let drop = 0; drop < 8; drop++) drops.value[drop * 4 + 3] = 1;
     const uniforms = {
       ...shared, uDrops: drops, uDropTints: dropTints, uSurvey: { value: survey.texture },
-      uChannel: { value: new THREE.Vector4(+(order === 0), +(order === 1), +(order === 2), 0) },
-      uSleeve: { value: new THREE.Vector2(1, 0) },
+      uSleeve: { value: new THREE.Vector3(1, 1, 0) },
     };
     const glassMaterial = new THREE.ShaderMaterial({
       uniforms: { ...uniforms, uSolid: { value: 1 }, uGlow: { value: 0 }, uLevels: { value: lines }, uRings: { value: 7 } },
@@ -466,7 +474,7 @@ export function createMemoryGlass(): MemoryGlass {
 
   const seedMaterial = new THREE.ShaderMaterial({
     uniforms: {
-      ...shared, uSleeve: { value: new THREE.Vector2(1, 0) }, uChannel: { value: new THREE.Vector4() },
+      ...shared, uSleeve: { value: new THREE.Vector3(1, 1, 0) },
       uDrops: { value: new Float32Array(32) }, uDropTints: { value: new Float32Array(32) },
       uPositions: { value: null as THREE.Texture | null }, uTextureSize: { value: 1 }, uGain: { value: 0 },
     },
@@ -479,8 +487,10 @@ export function createMemoryGlass(): MemoryGlass {
   let count = 0;
   let craters = new Float32Array(0), shapes = new Float32Array(0);
   let presses = new Float32Array(0);
-  const raw = new Float32Array(PROFILE), tally = new Float32Array(PROFILE);
-  const rim = new Float32Array(PROFILE * 3), scratch = new Float32Array(PROFILE);
+  const raw = new Float32Array(PROFILE), rim = new Float32Array(PROFILE), scratch = new Float32Array(PROFILE);
+  const tally = new Float32Array(PROFILE), centreY = new Float32Array(PROFILE), centreZ = new Float32Array(PROFILE);
+  // The slices of the last survey, for placing a ripple about the centre line.
+  let frame = { start: 0, slice: 1, slices: 2 };
   let dirty = true;
   let craterDepth = 1;
   let calm = 1;
@@ -494,78 +504,115 @@ export function createMemoryGlass(): MemoryGlass {
       first = Math.min(first, positions[i * 3]);
       last = Math.max(last, positions[i * 3]);
     }
-    // Each sleeve's outline: how far from the axis its own records lie near
-    // each slice, smoothed so the glass swells and necks gently, falling to
-    // nothing past the sleeve's first and last record.
-    const slice = Math.max(6, (last - first) / 100);
-    const window = Math.max(2, Math.ceil(56 / slice));
+    // The stream winds about the time axis as its records settled: its centre
+    // line is where they lie near each slice, read closely so the turns of
+    // the helix survive, then eased.
+    const slice = Math.max(6, (last - first) / 110);
+    const window = 2;
     const start = first - (2 * window + 1) * slice;
     const slices = Math.min(PROFILE, Math.ceil((last - first) / slice) + 4 * window + 3);
     const span = (slices - 1) * slice;
-    profileData.fill(0);
-    let greatest = 0;
-    const reaches = [0, 0, 0], spacings = [0, 0, 0];
-    sleeves.forEach((sleeve, order) => {
-      raw.fill(0); tally.fill(0);
-      let members = 0, from = slices, to = -1, sum = 0;
-      for (let i = 0; i < count; i++) {
-        if (layers[i] !== order) continue;
-        const at = Math.round((positions[i * 3] - start) / slice);
-        const reach = Math.hypot(positions[i * 3 + 1], positions[i * 3 + 2]);
-        raw[at] += reach; tally[at] += 1;
-        members += 1; sum += reach; from = Math.min(from, at); to = Math.max(to, at);
+    raw.fill(0); scratch.fill(0); tally.fill(0);
+    let tiers = 1;
+    for (let i = 0; i < count; i++) {
+      const at = Math.round((positions[i * 3] - start) / slice);
+      raw[at] += positions[i * 3 + 1]; scratch[at] += positions[i * 3 + 2]; tally[at] += 1;
+      tiers = Math.max(tiers, layers[i] + 1);
+    }
+    let up = NaN, out = NaN;
+    for (let at = 0; at < slices; at++) {
+      let y = 0, z = 0, near = 0;
+      for (let other = Math.max(0, at - 1); other <= Math.min(slices - 1, at + 1); other++) {
+        y += raw[other]; z += scratch[other]; near += tally[other];
       }
-      sleeve.glass.visible = sleeve.dust.visible = members > 0;
-      if (!members) return;
-      const outline = rim.subarray(order * PROFILE, (order + 1) * PROFILE);
-      for (let at = 0; at < slices; at++) {
-        let reach = 0, near = 0;
-        for (let other = Math.max(0, at - window); other <= Math.min(slices - 1, at + window); other++) {
-          reach += raw[other]; near += tally[other];
-        }
-        // The sleeve stays a tube across a stretch of time that holds none of
-        // its records.
-        outline[at] = near ? reach / near : at > from && at < to ? sum / members : 0;
-      }
-      for (let pass = 1; pass < window; pass++) {
-        scratch.set(outline);
+      if (near) { up = y / near; out = z / near; }
+      centreY[at] = up; centreZ[at] = out;
+    }
+    // Before the first record the centre line lies where it first appears.
+    for (let at = slices - 1; at >= 0; at--) {
+      if (Number.isNaN(centreY[at])) { centreY[at] = up; centreZ[at] = out; } else { up = centreY[at]; out = centreZ[at]; }
+    }
+    for (const centre of [centreY, centreZ]) {
+      for (let pass = 0; pass < 2; pass++) {
+        scratch.set(centre);
         for (let at = 0; at < slices; at++) {
-          outline[at] = ((at ? scratch[at - 1] : 0) + 2 * scratch[at] + (at < slices - 1 ? scratch[at + 1] : 0)) / 4;
+          centre[at] = (scratch[Math.max(0, at - 1)] + 2 * scratch[at] + scratch[Math.min(slices - 1, at + 1)]) / 4;
         }
       }
-      let mean = 0, occupied = 0;
-      for (let at = 0; at < slices; at++) {
-        if (outline[at] > 0) outline[at] = outline[at] * (1 + RIM * craterDepth) + 2 * Math.min(1, outline[at] / 14);
-        if (outline[at] > 0) { reaches[order] = Math.max(reaches[order], outline[at]); mean += outline[at]; occupied += 1; }
-        profileData[at * 4 + order] = THREE.DataUtils.toHalfFloat(outline[at]);
-      }
-      mean /= Math.max(1, occupied);
-      greatest = Math.max(greatest, reaches[order]);
-      const area = occupied * slice * Math.PI * 2 * mean;
+    }
+    const centred = (values: Float32Array, x: number) => {
+      const along = (x - start) / slice, at = Math.min(slices - 2, Math.max(0, Math.floor(along)));
+      return values[at] + (values[at + 1] - values[at]) * (along - at);
+    };
+    frame = { start, slice, slices };
+    // Its outline: the farthest any record reaches from that centre line near
+    // each slice, widened so it clears them and eased so the glass swells and
+    // necks gently. The window is wider than the easing, so the outline still
+    // clears every record, and it falls to nothing past both ends.
+    raw.fill(0);
+    for (let i = 0; i < count; i++) {
+      const x = positions[i * 3], at = Math.round((x - start) / slice);
+      raw[at] = Math.max(raw[at], Math.hypot(positions[i * 3 + 1] - centred(centreY, x),
+        positions[i * 3 + 2] - centred(centreZ, x)) + radii[i]);
+    }
+    // A neck never closes between the first and last record.
+    for (let at = 2 * window + 1; at < slices - 2 * window - 1; at++) raw[at] = Math.max(raw[at], 12);
+    const outline = rim.subarray(0, PROFILE);
+    outline.fill(0);
+    for (let at = 0; at < slices; at++) {
+      let reach = 0;
+      for (let near = Math.max(0, at - window); near <= Math.min(slices - 1, at + window); near++) reach = Math.max(reach, raw[near]);
+      outline[at] = reach;
+    }
+    scratch.set(outline);
+    for (let at = 0; at < slices; at++) {
+      outline[at] = ((at ? scratch[at - 1] : 0) + 2 * scratch[at] + (at < slices - 1 ? scratch[at + 1] : 0)) / 4;
+    }
+    let greatest = 0, mean = 0, occupied = 0;
+    profileData.fill(0);
+    for (let at = 0; at < slices; at++) {
+      if (outline[at] > 0) outline[at] = outline[at] * (1 + RIM * craterDepth) + 6 * Math.min(1, outline[at] / 14);
+      if (outline[at] > 0) { greatest = Math.max(greatest, outline[at]); mean += outline[at]; occupied += 1; }
+      profileData.set([THREE.DataUtils.toHalfFloat(outline[at]), THREE.DataUtils.toHalfFloat(centreY[at]),
+        THREE.DataUtils.toHalfFloat(centreZ[at])], at * 4);
+    }
+    mean /= Math.max(1, occupied);
+    // Each sleeve stands at its share of that outline.
+    const shares = SHARES[tiers - 1];
+    const reaches = [0, 0, 0], spacings = [0, 0, 0], members = [0, 0, 0];
+    for (let i = 0; i < count; i++) members[layers[i]] += 1;
+    sleeves.forEach((sleeve, order) => {
+      sleeve.glass.visible = sleeve.dust.visible = order < tiers && members[order] > 0;
+      if (order >= tiers) return;
+      reaches[order] = shares[order] * greatest;
+      const area = occupied * slice * Math.PI * 2 * mean * shares[order];
       // How far apart this sleeve's records lie, were they spread evenly.
-      sleeve.spacing = spacings[order] = Math.sqrt(area / members);
+      sleeve.spacing = spacings[order] = Math.sqrt(area / Math.max(1, members[order]));
       // Dust shows in proportion to the sleeve's radius where it lies.
-      sleeve.density = DUST_PER_SLEEVE * (occupied / slices) * (mean / reaches[order]) / area;
+      sleeve.density = DUST_PER_SLEEVE * (occupied / slices) * (mean / greatest) / area;
     });
     if (!(greatest > 0)) return false;
     profile.needsUpdate = true;
     shared.uAxis.value.set(start, span, greatest, slices);
 
-    // Every record presses its own sleeve, deeper for a heavier record and for
-    // one that lies beneath the rest.
+    // A record presses its own sleeve where it lies near it: fully just under
+    // the glass, less the farther it is from it, and deeper for a heavier one.
     const deepest = [1e-4, 1e-4, 1e-4];
     for (let i = 0; i < count; i++) {
       const order = layers[i];
-      const x = positions[i * 3], y = positions[i * 3 + 1], z = positions[i * 3 + 2];
-      const along = (x - start) / slice, at = Math.min(slices - 2, Math.max(0, Math.floor(along)));
-      const outline = rim[order * PROFILE + at]
-        + (rim[order * PROFILE + at + 1] - rim[order * PROFILE + at]) * (along - at);
-      const depth = Math.min(Math.max(0, outline - Math.hypot(y, z)), DEEPER * outline)
-        + (FLOOR[0] + (FLOOR[1] - FLOOR[0]) * presses[i]) * outline * craterDepth;
+      const x = positions[i * 3];
+      const y = positions[i * 3 + 1] - centred(centreY, x), z = positions[i * 3 + 2] - centred(centreZ, x);
+      const reach = centred(outline, x);
+      const sleeve = shares[order] * reach;
+      const band = (shares[order] - (order ? shares[order - 1] : 0)) * reach;
+      const under = sleeve - Math.hypot(y, z);
+      const away = Math.min(1, Math.max(0, (Math.abs(under) / Math.max(band, 1e-3) - 0.35) / 0.55));
+      const depth = (Math.min(Math.max(0, under), DEEPER * sleeve)
+        + (FLOOR[0] + (FLOOR[1] - FLOOR[0]) * presses[i]) * sleeve * craterDepth) * (1 - away * away * (3 - 2 * away));
       craters.set([(x - start) / span, (Math.atan2(z, y) / (Math.PI * 2) + 1) % 1,
         // The mouth always clears the record's own icon.
         Math.max(2.4 * radii[i], (MOUTH[0] + (MOUTH[1] - MOUTH[0]) * presses[i]) * spacings[order]), depth], i * 4);
-      shapes[i * 4 + 2] = outline;
+      shapes[i * 4 + 2] = sleeve;
       shapes[i * 4 + 3] = order;
       deepest[order] = Math.max(deepest[order], depth);
     }
@@ -573,7 +620,8 @@ export function createMemoryGlass(): MemoryGlass {
     (pressGeometry.getAttribute("aCrater") as THREE.BufferAttribute).needsUpdate = true;
     (pressGeometry.getAttribute("aShape") as THREE.BufferAttribute).needsUpdate = true;
     pressMaterial.uniforms.uSpan.value = span;
-    sleeves.forEach((sleeve, order) => sleeve.shape.set(reaches[order], deepest[order]));
+    sleeves.forEach((sleeve, order) => sleeve.shape.set(shares[order] ?? 1, reaches[order], deepest[order]));
+    seedMaterial.uniforms.uSleeve.value.set(1, greatest, 0);
     return true;
   };
 
@@ -651,7 +699,11 @@ export function createMemoryGlass(): MemoryGlass {
       const drop = sleeve.nextDrop;
       sleeve.nextDrop = (drop + 1) % 8;
       const { positions, tints } = records;
-      sleeve.drops.set([positions[record * 3], Math.atan2(positions[record * 3 + 2], positions[record * 3 + 1]), 0, 0], drop * 4);
+      const x = positions[record * 3];
+      const along = (x - frame.start) / frame.slice, at = Math.min(frame.slices - 2, Math.max(0, Math.floor(along)));
+      const centre = (values: Float32Array) => values[at] + (values[at + 1] - values[at]) * (along - at);
+      sleeve.drops.set([x, Math.atan2(positions[record * 3 + 2] - centre(centreZ),
+        positions[record * 3 + 1] - centre(centreY)), 0, 0], drop * 4);
       // The record's colour, lifted a little toward white so it reads as light.
       sleeve.dropTints.set([0.25 + 0.75 * tints[record * 3], 0.25 + 0.75 * tints[record * 3 + 1],
         0.25 + 0.75 * tints[record * 3 + 2], 1], drop * 4);
@@ -693,7 +745,7 @@ export function createMemoryGlass(): MemoryGlass {
         pressMaterial.uniforms.uOrder.value = order;
         renderer.setRenderTarget(press);
         renderer.render(pressScene, surveyCamera);
-        resolveMaterial.uniforms.uPlace.value.set(axis.y / axis.z, sleeve.shape.x / axis.z, order * 7.3);
+        resolveMaterial.uniforms.uPlace.value.set(axis.y / axis.z, sleeve.shape.y / axis.z, order * 7.3);
         renderer.setRenderTarget(sleeve.survey);
         renderer.render(resolveScene, surveyCamera);
       });

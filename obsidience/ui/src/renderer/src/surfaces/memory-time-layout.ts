@@ -52,21 +52,12 @@ export function memoryInitialOffset(id: string) {
   return {y: Math.cos(angle) * radius, z: Math.sin(angle) * radius};
 }
 
-/** A bank's memory in layers about the time axis, innermost first:
- *  observations distilled from the rest, the world facts, then the
- *  experiences. Any other kind rests with the experiences. */
-const MEMORY_LAYERS = ["observation", "world", "experience"];
-export function memoryLayer(kind: string): number {
-  const layer = MEMORY_LAYERS.indexOf(kind);
-  return layer < 0 ? MEMORY_LAYERS.length - 1 : layer;
+/** A bank's memory in glass layers by how connected each record is: the
+ *  share of the bank, most connected first, that makes each layer from the
+ *  core outward. A small bank carries fewer layers. */
+export function memoryLayerShares(count: number): number[] {
+  return count < 24 ? [1] : count < 160 ? [0.3, 1] : [0.12, 0.45, 1];
 }
-/** Each layer's radius for a bank of this many records along a time axis of
- *  this length: wide enough that neighbours lie about forty units apart. */
-export function memoryLayerRadii(count: number, length: number): number[] {
-  const outer = Math.min(420, Math.max(60, count * 1600 / (Math.PI * 2 * length * 2.07)));
-  return [0.38 * outer, 0.69 * outer, outer];
-}
-
 /** Shared entities are broad context; semantic and evidence links are specific. */
 export function memoryRelationshipWeight(edge: ProviderEdge): number {
   const weight = Number.isFinite(edge.weight) ? Math.max(0, Math.min(1, edge.weight!)) : 1;
@@ -75,11 +66,9 @@ export function memoryRelationshipWeight(edge: ProviderEdge): number {
   return weight * kind;
 }
 
-/** The organic layout: time fixes x and the forces own y/z. A record given a
- * `layer` radius is held near it about the time axis (owner 2026-10-12: one
- * layer per kind of memory); without any, the stream is the earlier loose
- * tube. The inspection lens never feeds transformed positions into physics. */
-export function memoryLayout<N extends ForceSimulationNode & {id: string; layer?: number}>(nodes: N[], edges: Iterable<{source: string; target: string; weight: number}>, alpha: number) {
+/** The earlier organic layout, intentionally retained as the owner's preferred
+ * shape. The inspection lens never feeds transformed positions into physics. */
+export function memoryLayout<N extends ForceSimulationNode & {id: string}>(nodes: N[], edges: Iterable<{source: string; target: string; weight: number}>, alpha: number) {
   const byId = new Map(nodes.map(n => [n.id, n]));
   const pairs = new Map<string, {source: string; target: string; weight: number; distance: number; strength: number}>();
   for (const edge of edges) {
@@ -103,19 +92,9 @@ export function memoryLayout<N extends ForceSimulationNode & {id: string; layer?
       .strength((link: typeof links[number]) => link.strength))
     .force("collision", forceCollide(6).strength(0.8))
     .force("center", forceCenter(0, 0, 0))
+    .force("tube-y", forceY(0).strength(0.035))
+    .force("tube-z", forceZ(0).strength(0.035))
     .alphaDecay(0.035).alpha(alpha);
-  if (nodes.some(node => node.layer != null)) {
-    const layers = (strength: number) => {
-      for (const node of nodes) {
-        const y = node.y || 0, z = node.z || 0, radius = Math.hypot(y, z) || 1e-6;
-        const pull = ((node.layer || 0) - radius) * 0.35 * strength / radius;
-        node.vy = (node.vy || 0) + y * pull; node.vz = (node.vz || 0) + z * pull;
-      }
-    };
-    simulation.force("layers", layers);
-  } else {
-    simulation.force("tube-y", forceY(0).strength(0.035)).force("tube-z", forceZ(0).strength(0.035));
-  }
   for (const node of nodes) if (node.fx != null) node.x = node.fx;
   return simulation;
 }

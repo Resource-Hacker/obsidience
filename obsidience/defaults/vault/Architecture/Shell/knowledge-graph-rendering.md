@@ -117,18 +117,19 @@ with a grey hairline between title and location and a leader to their node,
 drawn last, over the glass. A consulted node also wears a faint disc and a
 breathing ring in its branch color.
 
-The Memory streams wear the same glass (`memory-glass.ts`). A bank's records
-lie in three layers about the time axis, one for each kind of memory:
-observations at the core, the world facts around them, experiences outermost.
-The memory layout holds each record near its layer's radius while time still
-fixes its place along the axis, so the threads from an observation to its
-evidence run outward through the layers. Each layer is a glass sleeve that
-follows its own records and closes past its first and last one, the core the
-most solid. Every record presses a crater into its sleeve by its size and
-links and carries a seed; a crater shows its rings once it is large enough on
-screen to hold them. A record touched by a memory operation sends one ripple
-across its sleeve in its own color. The sleeves use the Knowledge orb's saved
-Glass settings and dim while a record is inspected.
+The Memory streams wear the same glass (`memory-glass.ts`). The memory layout
+is unchanged: time fixes each record along the stream and the forces wind the
+bank into its own loose helix. The glass follows that shape: its sleeves are
+nested about the stream's winding centre line, not the straight time axis, and
+take the stream's real outline, closing past its first and last record. The
+sleeves sort the bank by how connected its memories are, the plain order of
+time aside: the best connected belong to the core sleeve, the most solid, and
+the loosely linked to the outermost, the clearest. A record lying near its own
+sleeve presses a crater into it by its size and links, every record carries a
+seed, and a crater shows its rings once it is large enough on screen to hold
+them. A record touched by a memory operation sends one ripple across its
+sleeve in its own color. The sleeves use the Knowledge orb's saved Glass
+settings and dim while a record is inspected.
 
 ## Scoped graphs and Library
 
