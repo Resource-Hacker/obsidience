@@ -1,0 +1,29 @@
+#!/bin/sh
+# Obsidience TV break view: for as long as this runs, the TV shows the workstation screen that
+# holds the Executive graph instead of a channel's frozen last frame. The tuner starts it when a
+# commercial break begins (argument: the channel's title) and ends it when the programme returns.
+#
+# Nothing is rendered twice: the screen recorder captures the desktop output that already shows
+# the graph (encoded on the GPU that drives that output) and a second player shows it in the TV
+# session, whose window rule makes it full screen above the channel's player until it exits.
+# Whatever that desktop screen shows is what the TV shows during a break.
+SCREEN=DP-8
+RECORDER=/var/lib/ai/opt/gpu-screen-recorder-6.1.2-static/bin/gpu-screen-recorder
+# The GPU of the TV compositor, as in obsidience-tv-player.service.
+GPU=4332e1a5-17a8-7e18-5347-5a296549ee81
+
+# No graph to show (its stage is stopped, for example during a game): the break card stays.
+systemctl --user is-active --quiet obsidience-shell-knowledge.service || exit 0
+display=$(cat "$XDG_RUNTIME_DIR/obsidience-tv/wayland") || exit 1
+# A title is listing text: no control characters, and no property expansion by the player.
+title=$(printf %s "$1" | tr -d '\000-\037' | sed 's/\$/$$/g')
+
+# The recorder reads the desktop compositor (this unit's own WAYLAND_DISPLAY); only the player
+# is pointed at the TV session. 30 frames a second of the whole screen, no cursor, no sound.
+"$RECORDER" -w "$SCREEN" -c mkv -k hevc -f 30 -fm cfr -cursor no -keyint 1 2>/dev/null |
+    WAYLAND_DISPLAY=$display /usr/bin/mpv --no-config --no-input-terminal --msg-level=all=error \
+        --no-audio --osc=no --input-default-bindings=no --fs --wayland-app-id=obsidience-tv-break \
+        --vulkan-device="$GPU" --profile=low-latency --untimed --vd-lavc-threads=4 --panscan=1.0 \
+        --osd-level=2 --osd-msg2="$title  ·  Commercial break  ·  Resuming automatically" \
+        --osd-align-x=center --osd-align-y=bottom --osd-margin-y=70 --osd-font-size=30 \
+        --osd-border-size=2 --no-osd-bar -

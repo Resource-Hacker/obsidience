@@ -36,6 +36,7 @@ import select
 import signal
 import socket
 import socketserver
+import subprocess
 import sys
 import threading
 import time
@@ -256,6 +257,19 @@ def _quietly(call, *arguments):
         log.warning('%s: %s', getattr(call, '__qualname__', 'cleanup'), type(error).__name__)
 
 
+def _end(view):
+    """End a break view at once (its whole process group) and reap it.
+
+    Killed, not asked: a view holds only a capture and a window, and the channel's picture
+    returns the moment that window is gone (a player asked to quit kept it for a second).
+    """
+    try:
+        os.killpg(view.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass  # Its group already ended.
+    _quietly(view.wait, 3)
+
+
 def _card(title, elapsed):
     """The break card as ASS events on mpv's 720-line canvas: a dark veil over the last frame, three lines."""
     minutes, seconds = divmod(int(elapsed), 60)
@@ -267,8 +281,8 @@ def _card(title, elapsed):
 
 
 class Tuner:
-    def __init__(self, directory, player):
-        self.directory = directory
+    def __init__(self, directory, player, break_view=None):
+        self.directory, self.break_view = directory, break_view
         self.player = Player(player, self._event)
         # The state below; notified on every change. Never held while the player is commanded:
         # the reader thread needs it for the events that precede a reply.
@@ -286,7 +300,8 @@ class Tuner:
         self.finished = (None, None)  # The entry it ended last, and why.
         self.playback, self.since = 'idle', time.time()
         self.closed = False
-        threading.Thread(target=self._present, name='presenter', daemon=True).start()
+        self.presenter = threading.Thread(target=self._present, name='presenter', daemon=True)
+        self.presenter.start()
         threading.Thread(target=self._warm, name='warm-up', daemon=True).start()
 
     # State
@@ -377,23 +392,42 @@ class Tuner:
                 play.phase, play.reason = 'failed', 'the player could not play this address'
 
     def _present(self):
-        """Draw the break card while a break lasts, its clock once a second, and remove it afterwards."""
-        shown = None
-        while True:
-            with self.lock:
-                self.lock.wait(TICK)
-                if self.closed:
-                    return
-                self._refresh()
-                play = self.play
-                card = (_card(play.title, time.monotonic() - play.breaking)
-                        if play is not None and self.playback == 'break' else None)
-            if card != shown:
-                try:
-                    self.player.command('osd-overlay', 0, 'ass-events' if card else 'none', card or '')
-                    shown = card
-                except (OSError, ValueError):
-                    shown = None  # An overlay ends with the connection that drew it.
+        """Draw the break card while a break lasts, its clock once a second, and remove it afterwards.
+
+        The break view, when one is configured, runs for exactly as long: started once when the
+        break begins and ended with it. Its window covers the card once it has a picture.
+        """
+        shown, breaking, view = None, False, None
+        try:
+            while True:
+                with self.lock:
+                    self.lock.wait(TICK)
+                    if self.closed:
+                        return
+                    self._refresh()
+                    play = self.play
+                    card = (_card(play.title, time.monotonic() - play.breaking)
+                            if play is not None and self.playback == 'break' else None)
+                if (card is not None) != breaking:
+                    breaking = card is not None
+                    if view is not None:
+                        _end(view)
+                        view = None
+                    if breaking and self.break_view:
+                        try:
+                            view = subprocess.Popen([self.break_view, play.title], stdin=subprocess.DEVNULL,
+                                                    start_new_session=True)
+                        except OSError as error:
+                            log.warning('break view did not start (%s)', type(error).__name__)
+                if card != shown:
+                    try:
+                        self.player.command('osd-overlay', 0, 'ass-events' if card else 'none', card or '')
+                        shown = card
+                    except (OSError, ValueError):
+                        shown = None  # An overlay ends with the connection that drew it.
+        finally:
+            if view is not None:
+                _end(view)  # Cleanup paired with its start, whatever ended the presenter.
 
     # Control
 
@@ -670,6 +704,8 @@ class Tuner:
     def close(self):
         with self.lock:
             self.closed = True
+            self.lock.notify_all()
+        self.presenter.join(10)  # It ends its break view.
         try:
             self._replace(None, wait=True)
         except (OSError, ValueError):
@@ -736,6 +772,10 @@ def main():
                         help='where the control socket tuner.sock and the stream FIFOs live')
     parser.add_argument('--player', default=os.path.join(RUNTIME, 'obsidience-tv-player.sock'),
                         help="the player's JSON IPC socket")
+    parser.add_argument('--break-view',
+                        help='a program run for as long as each commercial break lasts, with the title as its '
+                             'argument, and killed when the break ends; it may show something in the TV '
+                             'session in place of the break card')
     args = parser.parse_args()
     os.umask(0o077)
     handler = logging.StreamHandler()
@@ -750,7 +790,7 @@ def main():
     os.makedirs(args.directory, mode=0o700, exist_ok=True)
     path = os.path.join(args.directory, 'tuner.sock')
     _claim(args.directory, path)
-    tuner = Tuner(args.directory, args.player)
+    tuner = Tuner(args.directory, args.player, args.break_view)
     server = _Server(path, tuner)
     for number in (signal.SIGTERM, signal.SIGINT):
         signal.signal(number, lambda *_: threading.Thread(target=server.shutdown, daemon=True).start())

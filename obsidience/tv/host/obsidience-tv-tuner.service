@@ -11,7 +11,7 @@ Type=exec
 # The system Python: streamlink is a distribution package, not part of the Harness environment.
 # Control socket and stream FIFOs live in %t/obsidience-tv; the journal names titles and channel
 # ids only, never a stream address.
-ExecStart=/usr/bin/python3 /home/wissenschafter/Projects/obsidience/obsidience/tv/host/tuner.py
+ExecStart=/usr/bin/python3 /home/wissenschafter/Projects/obsidience/obsidience/tv/host/tuner.py --break-view /home/wissenschafter/Projects/obsidience/obsidience/tv/host/break-view
 Restart=on-failure
 RestartSec=2
 UMask=0077
