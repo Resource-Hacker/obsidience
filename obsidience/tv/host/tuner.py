@@ -413,6 +413,14 @@ class Tuner:
                     if view is not None:
                         _end(view)
                         view = None
+                        try:
+                            # The view's window took the full screen from the player's, and the
+                            # compositor draws an ordinary window on every frame where it hands a
+                            # fullscreen one straight to the output (measured: 17% of the GPU and a
+                            # skipped frame a second on the television).
+                            self.player.command('set_property', 'fullscreen', True)
+                        except (OSError, ValueError):
+                            pass
                     if breaking and self.break_view:
                         try:
                             view = subprocess.Popen([self.break_view, play.title], stdin=subprocess.DEVNULL,

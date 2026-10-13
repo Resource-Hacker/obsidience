@@ -9,16 +9,14 @@ Type=exec
 UnsetEnvironment=DISPLAY HYPRLAND_INSTANCE_SIGNATURE
 # The TV's private audio server, never the desktop's.
 Environment=PIPEWIRE_RUNTIME_DIR=%t/obsidience-tv
-# Frame timing is chosen by measurement on the TV's panel, per compositor GPU (2026-10-12):
-# on the RTX 4080 the compositor's frame feedback is irregular while Sunshine captures
-# (the player estimates 69.7 Hz, jitter 0.3), so display-synced timing skipped refreshes
-# (0.1-0.4%) and audio-clock timing skipped none. On the iGPU it was the other way round.
-# Rendering is pinned to the RTX 4080 (Vulkan UUID), the GPU of the TV compositor; left
-# to itself the player may pick another card. Decoding stays on the CPU.
+EnvironmentFile=/home/wissenschafter/Projects/obsidience/obsidience/tv/host/modes/normal.env
+EnvironmentFile=-%t/obsidience-tv/mode.env
+# Frame timing and the GPU that renders (the TV compositor's; left to itself the player may
+# pick another card) come from the TV mode (modes/*.env). Decoding stays on the CPU.
 # Warnings go to the journal: a stalled stream must leave its reason there.
 # Wait for the session to publish its socket name (bounded).
 ExecStartPre=/bin/sh -c 'for i in $(seq 100); do [ -s %t/obsidience-tv/wayland ] && exit 0; sleep 0.1; done; exit 1'
-ExecStart=/bin/sh -c 'WAYLAND_DISPLAY=$(cat %t/obsidience-tv/wayland) exec /usr/bin/mpv --no-config --no-input-terminal --msg-level=all=warn --idle=yes --force-window=yes --fs --wayland-app-id=obsidience-tv-player --vulkan-device=4332e1a5-17a8-7e18-5347-5a296549ee81 --video-sync=audio --cache=yes --demuxer-max-bytes=64MiB --input-ipc-server=%t/obsidience-tv-player.sock'
+ExecStart=/bin/sh -c 'WAYLAND_DISPLAY=$(cat %t/obsidience-tv/wayland) exec /usr/bin/mpv --no-config --no-input-terminal --msg-level=all=warn --idle=yes --force-window=yes --fs --wayland-app-id=obsidience-tv-player --vulkan-device=${TV_VULKAN_DEVICE} --video-sync=${TV_VIDEO_SYNC} --cache=yes --demuxer-max-bytes=64MiB --input-ipc-server=%t/obsidience-tv-player.sock'
 ExecStopPost=/usr/bin/rm -f %t/obsidience-tv-player.sock
 Restart=on-failure
 RestartSec=2

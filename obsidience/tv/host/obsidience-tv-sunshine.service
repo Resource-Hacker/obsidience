@@ -7,13 +7,16 @@ PartOf=obsidience-tv-session.service
 [Service]
 Type=exec
 UnsetEnvironment=DISPLAY HYPRLAND_INSTANCE_SIGNATURE
-# NVENC on the RTX 4080 only (GPU UUID), never the model GPU.
+# The encoder and its GPU come from the TV mode (modes/*.env) and override sunshine.conf.
+# NVENC, when used, is on the RTX 4080 only (GPU UUID), never the model GPU.
 Environment=CUDA_VISIBLE_DEVICES=GPU-4332e1a5-17a8-7e18-5347-5a296549ee81
 # The TV's private audio server: Sunshine's default-sink switching stays in there.
 Environment=PULSE_SERVER=unix:%t/obsidience-tv/pulse/native
 Environment=PIPEWIRE_RUNTIME_DIR=%t/obsidience-tv
+EnvironmentFile=/home/wissenschafter/Projects/obsidience/obsidience/tv/host/modes/normal.env
+EnvironmentFile=-%t/obsidience-tv/mode.env
 ExecStartPre=/bin/sh -c 'for i in $(seq 100); do [ -s %t/obsidience-tv/wayland ] && exit 0; sleep 0.1; done; exit 1'
-ExecStart=/bin/sh -c 'WAYLAND_DISPLAY=$(cat %t/obsidience-tv/wayland) exec /usr/bin/sunshine /home/wissenschafter/Projects/obsidience/obsidience/tv/host/sunshine.conf'
+ExecStart=/bin/sh -c 'WAYLAND_DISPLAY=$(cat %t/obsidience-tv/wayland) exec /usr/bin/sunshine /home/wissenschafter/Projects/obsidience/obsidience/tv/host/sunshine.conf encoder=${TV_ENCODER} adapter_name=${TV_RENDER_NODE}'
 Restart=on-failure
 RestartSec=3
 UMask=0077

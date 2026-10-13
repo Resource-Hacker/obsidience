@@ -11,15 +11,55 @@ the place where channels load.
 | `obsidience-tv-audio.service` | A private PipeWire server (`$XDG_RUNTIME_DIR/obsidience-tv`), configured only by `audio/` |
 | `obsidience-tv-audio-policy.service` | WirePlumber for that server, policy only, state in the runtime directory |
 | `obsidience-tv-audio-pulse.service` | Its PulseAudio endpoint (Sunshine captures through it) and the idle sink `obsidience_tv` |
-| `obsidience-tv-session.service` | A headless sway compositor with one 3840x2160@60 output, rendered on the RTX 4080 |
+| `obsidience-tv-session.service` | A headless sway compositor with one output; its GPU and size come from the TV mode (below): 3840x2160@60 on the RTX 4080, or 1920x1080@60 on the integrated GPU while a game runs |
 | `obsidience-tv-player.service` | `mpv --idle` in that compositor; JSON IPC at `$XDG_RUNTIME_DIR/obsidience-tv-player.sock`, used by the tuner only |
 | `obsidience-tv-tuner.service` | `tuner.py` (system Python with streamlink): the one owner of the player's IPC socket and of what plays; control socket `$XDG_RUNTIME_DIR/obsidience-tv/tuner.sock` |
-| `obsidience-tv-sunshine.service` | Sunshine (NVENC HEVC on the RTX 4080), connected only to that compositor and that audio server |
+| `obsidience-tv-sunshine.service` | Sunshine (HEVC on the mode's GPU: NVENC on the RTX 4080, or VAAPI on the integrated GPU), connected only to that compositor and that audio server |
+| `obsidience-tv-mode@.service` | One run of `mode <normal\|gaming>`, started by GameMode |
 
 The session publishes its Wayland socket name in `$XDG_RUNTIME_DIR/obsidience-tv/wayland`;
 the player and Sunshine wait for it. Stopping the session stops both, and the tuner with
 them. The tuner is not part of the Harness: a channel keeps playing while the Harness
 restarts.
+
+## Modes
+
+`mode normal|gaming|client|status` (this directory) is the one place that decides which GPU
+carries the TV session.
+
+| Mode | Session and encode | Stream | When |
+| --- | --- | --- | --- |
+| `normal` | RTX 4080, NVENC | 3840x2160, about 63 Mbit/s | Always, unless a game runs |
+| `gaming` | Integrated GPU, VAAPI | 1920x1080, about 15 Mbit/s | While a game runs (owner, 2026-10-12): the game has the RTX 4080 to itself |
+
+`modes/normal.env` and `modes/gaming.env` hold everything that differs (render node, sway
+configuration, the player's Vulkan device and frame timing, Sunshine's encoder, Moonlight's
+resolution entry, the break view's capture size). The session, player, tuner and Sunshine
+units read `normal.env` and then `$XDG_RUNTIME_DIR/obsidience-tv/mode.env`, a link to the
+selected mode's file; without the link (also after a reboot) the mode is normal. A switch
+sets the link, restarts the session (which restarts the other three), asks the tuner for the
+channel that was playing, and, when the television was showing the stream, brings it back.
+
+"A game runs" is GameMode's answer: `~/.config/gamemode.ini` starts
+`obsidience-tv-mode@gaming.service` when the first game registers and
+`obsidience-tv-mode@normal.service` when the last one exits (both WoW launchers use
+GameMode). The commands return at once, so a game's start never waits for the TV.
+
+The integrated GPU cannot encode 3840x2160 at 60 frames a second (44 against 135 at
+1920x1080, measured with the side-panel screen recorders running), and the stream's size is
+whatever Moonlight asks for: its "Video resolution" setting, which cannot be set from
+outside the app. So `mode` changes that setting on the television's screen over ADB (host
+list, settings button, "Video resolution", the entry by name), reads it back from the same
+list, and remembers the value in `~/.local/state/obsidience-tv/moonlight-resolution` so
+that nothing is touched when it already fits. Moonlight then chooses its default bit rate
+for that size. A television that is off, unreachable or showing another app is left alone;
+`tv.control` runs `mode client` before it next starts the stream. A stream started by hand
+in between asks for the old size.
+
+Measured 2026-10-12 on the television: a switch takes 26-34 s (about 10 s until the channel
+plays again on the other GPU, the rest is Moonlight's setting and reconnect); in gaming
+mode the panel skipped 0.07% of refreshes over a commercial break with the break view
+showing.
 
 ## Boundaries
 

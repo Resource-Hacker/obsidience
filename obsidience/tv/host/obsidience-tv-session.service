@@ -7,14 +7,16 @@ Description=Obsidience TV session (headless compositor holding only TV content)
 Type=exec
 Environment=WLR_BACKENDS=headless
 Environment=WLR_LIBINPUT_NO_DEVICES=1
-# Renders on the RTX 4080 (PCI 01:00.0), whose NVENC encodes the 4K stream; the iGPU's
-# encoder is already about half used by the side-panel screen recorders.
-Environment=WLR_RENDER_DRM_DEVICE=/dev/dri/by-path/pci-0000:01:00.0-render
+# The GPU that renders the session and the output's size come from the TV mode (modes/*.env,
+# selected by tv/host/mode): the RTX 4080 at 3840x2160, or the integrated GPU at 1920x1080
+# while a game runs.
+EnvironmentFile=/home/wissenschafter/Projects/obsidience/obsidience/tv/host/modes/normal.env
+EnvironmentFile=-%t/obsidience-tv/mode.env
 Environment=XDG_CURRENT_DESKTOP=sway
 UnsetEnvironment=WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE
 ExecStartPre=/usr/bin/install -d -m 0700 %t/obsidience-tv
 ExecStartPre=/usr/bin/rm -f %t/obsidience-tv/wayland
-ExecStart=/usr/bin/sway --unsupported-gpu -c /home/wissenschafter/Projects/obsidience/obsidience/tv/host/sway.conf
+ExecStart=/usr/bin/env WLR_RENDER_DRM_DEVICE=${TV_RENDER_NODE} /usr/bin/sway --unsupported-gpu -c ${TV_SWAY_CONFIG}
 ExecStopPost=/usr/bin/rm -f %t/obsidience-tv/wayland
 Restart=on-failure
 RestartSec=3

@@ -1,0 +1,276 @@
+#!/usr/bin/python3
+"""Obsidience TV mode: which GPU carries the TV session, and the stream size that goes with it.
+
+  normal  the RTX 4080 renders the session and encodes a 3840x2160 stream.
+  gaming  the integrated GPU renders it and encodes 1920x1080, so a game has the RTX 4080 to
+          itself (owner, 2026-10-12). GameMode enters it when a game registers and leaves it
+          when the last one exits: ~/.config/gamemode.ini starts obsidience-tv-mode@<mode>.
+
+  mode normal|gaming   switch; nothing happens when the TV is already in that mode
+  mode client          make the television's Moonlight ask for the current mode's stream size
+  mode status          print the current mode
+
+The GPU is chosen when the session, player, tuner and Sunshine start, so a switch selects the
+mode's file (modes/<mode>.env, linked from $XDG_RUNTIME_DIR/obsidience-tv/mode.env; no link
+means normal, also after a reboot) and restarts the session, which restarts the other three.
+It then puts back what the switch itself took away: the channel that was playing, and the
+stream on the television when the television was showing it.
+
+Moonlight asks the host for the size in its own "Video resolution" setting, which it offers
+no way to set from outside, and the integrated GPU cannot encode 3840x2160 at 60 frames a
+second. So that setting is changed on the television's screen, by name, and read back; the
+last value set is remembered so that nothing is touched when it already fits. A television
+that is off, unreachable or showing another app is left alone: `mode client` runs again
+before the Harness next starts the stream (tv.control).
+"""
+from __future__ import annotations
+
+import fcntl
+import json
+import os
+import re
+import shlex
+import socket
+import subprocess
+import sys
+import time
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+HOST = Path(__file__).resolve().parent
+RUNTIME = Path(os.environ.get('XDG_RUNTIME_DIR') or f'/run/user/{os.getuid()}') / 'obsidience-tv'
+LINK = RUNTIME / 'mode.env'
+SESSION = 'obsidience-tv-session.service'
+UNITS = (SESSION, 'obsidience-tv-player.service', 'obsidience-tv-tuner.service', 'obsidience-tv-sunshine.service')
+TELEVISION = HOST.parents[1] / 'state' / 'television.json'
+SUNSHINE_STATE = Path.home() / '.config' / 'sunshine' / 'sunshine_state.json'
+# What this script last set Moonlight's "Video resolution" to on the television.
+CLIENT_STATE = Path.home() / '.local' / 'state' / 'obsidience-tv' / 'moonlight-resolution'
+MOONLIGHT = 'com.limelight'
+STREAM_HOST, STREAM_APP = 'Obsidience', 'Obsidience TV'
+
+
+def say(*words):
+    print(*words, flush=True)
+
+
+def current():
+    try:
+        return Path(os.readlink(LINK)).stem
+    except OSError:
+        return 'normal'
+
+
+def settings(mode):
+    return dict(line.split('=', 1) for line in (HOST / 'modes' / f'{mode}.env').read_text().splitlines()
+                if line and not line.startswith('#'))
+
+
+# The tuner
+
+def tuner(request, limit=3.0):
+    """One request to the tuner: its state, or None when it does not answer."""
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.settimeout(limit)
+            sock.connect(str(RUNTIME / 'tuner.sock'))
+            sock.sendall((json.dumps(request) + '\n').encode())
+            buffer = b''
+            while b'\n' not in buffer:
+                chunk = sock.recv(65536)
+                if not chunk:
+                    return None
+                buffer += chunk
+        reply = json.loads(buffer.split(b'\n', 1)[0])
+        return reply.get('state') if reply.get('ok') else None
+    except (OSError, ValueError):
+        return None
+
+
+# The television
+
+class Television:
+    """The registered television over ADB. Every command that has an effect rechecks its identity."""
+
+    def __init__(self):
+        row = json.loads(TELEVISION.read_text())
+        self.adb = ['adb', '-s', f"{row['ip']}:5555"]
+        self.guard = ('test "$(getprop ro.serialno)" = ' + shlex.quote(row['serial'])
+                      + ' && test "$(getprop ro.product.oemmodel)" = ' + shlex.quote(row['model']) + ' && ')
+
+    def shell(self, command, limit=15):
+        done = subprocess.run([*self.adb, 'shell', command], stdin=subprocess.DEVNULL, capture_output=True,
+                              text=True, errors='replace', timeout=limit)
+        if done.returncode:
+            raise OSError('The television did not take the command')
+        return done.stdout
+
+    def front(self):
+        """The activity in front, as package/activity, when the television is awake; else None."""
+        try:
+            out = self.shell(self.guard + "dumpsys power | grep -E '^ *mWakefulness=' ; "
+                             "dumpsys activity activities | grep -m1 -E 'mResumedActivity|topResumedActivity'", 6)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        found = re.search(r'u0 (\S+/\S+)', out)
+        return found[1] if 'mWakefulness=Awake' in out and found else None
+
+    def screen(self):
+        """The labelled things on screen: (text, resource id, centre x, centre y, checked)."""
+        xml = self.shell('uiautomator dump /sdcard/obsidience-mode.xml >/dev/null 2>&1; cat /sdcard/obsidience-mode.xml', 25)
+        nodes = []
+        for node in ET.fromstring(xml[xml.index('<?xml'):]).iter('node'):
+            left, top, right, bottom = map(int, re.findall(r'\d+', node.get('bounds')))
+            nodes.append((node.get('text') or '', (node.get('resource-id') or '').split('/')[-1],
+                          (left + right) // 2, (top + bottom) // 2, node.get('checked') == 'true'))
+        return nodes
+
+    def tap(self, x, y):
+        self.shell(self.guard + f'input tap {x} {y}')
+
+    def find(self, ident, text=None, limit=12.0):
+        """The things on screen with this resource id (and text), once any shows; [] after the limit."""
+        deadline = time.monotonic() + limit
+        while True:
+            try:
+                found = [node for node in self.screen() if node[1] == ident and text in (None, node[0])]
+            except (OSError, ValueError, ET.ParseError, subprocess.TimeoutExpired):
+                found = []  # The screen is changing; read it again.
+            if found or time.monotonic() >= deadline:
+                return found
+            time.sleep(0.3)
+
+    def press(self, ident, text=None):
+        """Tap the one thing with this resource id (and text); False when it does not show."""
+        found = self.find(ident, text)
+        if found:
+            self.tap(found[0][2], found[0][3])
+        return bool(found)
+
+    def stream(self):
+        """Start Moonlight's stream of the TV session, as tv.control does: one start, no key press."""
+        saved = json.loads(SUNSHINE_STATE.read_text())
+        host = (saved.get('root') or {}).get('uniqueid') or saved.get('uniqueid') or ''
+        if not re.fullmatch(r'[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}', host):
+            raise ValueError('Sunshine names no usable host identity')
+        since = time.strftime('%Y-%m-%d %H:%M:%S')
+        # From a stopped Moonlight: one that still shows the ended stream would read as started.
+        self.shell(self.guard + f'am force-stop {MOONLIGHT} && am start -n {MOONLIGHT}/.ShortcutTrampoline '
+                   f'--es UUID {host} --es Name {STREAM_HOST} --es AppName {shlex.quote(STREAM_APP)}')
+        deadline = time.monotonic() + 25
+        while time.monotonic() < deadline:  # The readback is the host's own: Sunshine has a client.
+            if subprocess.run(['journalctl', '--user', '-u', 'obsidience-tv-sunshine.service', '--since', since,
+                               '-g', 'CLIENT CONNECTED', '-q', '-o', 'cat'], capture_output=True).stdout.strip():
+                return True
+            time.sleep(0.5)
+        return False
+
+
+def client(tv, restart):
+    """Make Moonlight's "Video resolution" the current mode's; start the stream again when asked.
+
+    True when the setting fits afterwards. Moonlight is restarted for it, so this runs only when
+    Moonlight is (or is about to be) what the television shows.
+    """
+    wanted = settings(current())['TV_CLIENT_RESOLUTION']
+    try:
+        fits = CLIENT_STATE.read_text().strip() == wanted
+    except OSError:
+        fits = False
+    if not fits:
+        # Moonlight 12.2: host list -> settings button -> "Video resolution", a list of entries
+        # (360p ... 1080p, 1440p, 4K) with the selected one checked.
+        tv.shell(tv.guard + f'am force-stop {MOONLIGHT} && am start -n {MOONLIGHT}/.PcView')
+
+        def entries():
+            """Open the setting's list: {entry: (x, y, checked)}; {} when Moonlight does not show it."""
+            if not tv.press('title', 'Video resolution'):
+                return {}
+            return {text: (x, y, checked) for text, _ident, x, y, checked in tv.find('text1')}
+
+        listed = tv.press('settingsButton') and entries()
+        if not listed or wanted not in listed:
+            say('Moonlight did not show its video resolutions; its stream size is unchanged')
+            return False
+        if not listed[wanted][2]:
+            tv.tap(*listed[wanted][:2])  # Selecting an entry closes the list.
+            listed = entries()  # Read back from the list itself.
+            if not listed.get(wanted, (0, 0, False))[2]:
+                say(f'Moonlight does not show {wanted} as its video resolution')
+                return False
+            say(f'Moonlight video resolution set to {wanted}')
+        CLIENT_STATE.parent.mkdir(parents=True, exist_ok=True)
+        CLIENT_STATE.write_text(wanted + '\n')
+        tv.shell(tv.guard + f'am force-stop {MOONLIGHT}')
+    if restart:
+        say('stream shown on the television' if tv.stream() else 'Moonlight did not show the stream')
+    return True
+
+
+def listening():
+    """Whether Sunshine accepts a client (its pairing and launch port)."""
+    try:
+        socket.create_connection(('127.0.0.1', 47989), 0.5).close()
+        return True
+    except OSError:
+        return False
+
+
+def switch(mode):
+    before = current()
+    if before == mode:
+        say(f'TV mode is already {mode}')
+        return
+    playing = tuner({'op': 'state'})
+    try:
+        tv = Television()
+        showing = (tv.front() or '').startswith(MOONLIGHT + '/')
+    except (OSError, ValueError, KeyError):
+        tv, showing = None, False
+    say(f'TV mode {before} -> {mode}')
+    RUNTIME.mkdir(mode=0o700, exist_ok=True)
+    if mode == 'normal':
+        LINK.unlink(missing_ok=True)
+    else:
+        temp = LINK.with_suffix('.new')
+        temp.unlink(missing_ok=True)
+        temp.symlink_to(HOST / 'modes' / f'{mode}.env')
+        temp.replace(LINK)
+    subprocess.run(['systemctl', '--user', 'restart', SESSION], check=True, timeout=60)
+    deadline = time.monotonic() + 40
+    while time.monotonic() < deadline:
+        active = subprocess.run(['systemctl', '--user', 'is-active', '--quiet', *UNITS]).returncode == 0
+        if active and (tuner({'op': 'state'}) or {}).get('player') and listening():
+            break
+        time.sleep(0.3)
+    else:
+        raise SystemExit('The TV session did not come back; see the journals of the obsidience-tv units')
+    # What the restart took away: the channel, then the stream on the television.
+    if playing and playing.get('channel') and playing.get('playback') in ('loading', 'playing', 'break', 'paused'):
+        again = tuner({'op': 'play', 'provider': playing['provider'], 'channel': playing['channel'],
+                       'title': playing['title'], 'wait': 15}, 20)
+        say(f"channel {playing['title']!r}: {(again or {}).get('playback', 'no answer')}")
+    if showing:
+        try:
+            client(tv, restart=True)
+        except (OSError, ValueError, KeyError, subprocess.TimeoutExpired) as error:
+            say(f'The television was not brought back to the stream ({type(error).__name__})')
+
+
+def main():
+    op = sys.argv[1] if len(sys.argv) == 2 else ''
+    if op == 'status':
+        say(current())
+        return
+    if op not in ('normal', 'gaming', 'client'):
+        raise SystemExit(__doc__)
+    RUNTIME.mkdir(mode=0o700, exist_ok=True)
+    with open(RUNTIME / 'mode.lock', 'w') as lock:  # One switch at a time; a second waits its turn.
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if op == 'client':
+            sys.exit(0 if client(Television(), restart=False) else 1)
+        switch(op)
+
+
+if __name__ == '__main__':
+    main()

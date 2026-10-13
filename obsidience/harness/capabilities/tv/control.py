@@ -85,6 +85,7 @@ MOONLIGHT = 'com.limelight'
 PC_APP = 'pc'
 STREAM_HOST, STREAM_APP = 'Obsidience', 'Obsidience TV'
 _SUNSHINE_STATE = Path.home() / '.config' / 'sunshine' / 'sunshine_state.json'
+_TV_MODE = Path(__file__).resolve().parents[3] / 'tv' / 'host' / 'mode'
 BREAK_NOTE = ('Commercial break on this channel: the PC player plays no advertisements and shows a break card; '
               'the programme resumes by itself.')
 # The content last opened per app, once playback started: {app, link, title,
@@ -1108,6 +1109,12 @@ def _show_stream(row, cancel, context):
         return False
     host = _sunshine_host()
     context['_tv_effect_uncertain'] = True
+    # The stream size Moonlight asks for must fit the GPU the TV session runs on (the TV mode,
+    # obsidience/tv/host/mode): nothing is touched when the size last set already fits.
+    try:
+        subprocess.run([str(_TV_MODE), 'client'], stdin=subprocess.DEVNULL, capture_output=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        _agent.log.info('TV mode client check skipped: %s', type(error).__name__)
     started = _shell(row, cancel, _guard(row) + 'am start -n ' + MOONLIGHT + '/.ShortcutTrampoline --es UUID '
                      + host + ' --es Name ' + STREAM_HOST + ' --es AppName ' + shlex.quote(STREAM_APP))
     if 'Error' in started:

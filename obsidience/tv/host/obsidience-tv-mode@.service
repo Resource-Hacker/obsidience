@@ -1,0 +1,10 @@
+[Unit]
+Description=Obsidience TV mode switch to %i
+# Started without waiting by GameMode's start and end commands (~/.config/gamemode.ini): gaming
+# when a game registers, normal when the last one exits. A switch already running finishes
+# first; see tv/host/mode.
+
+[Service]
+Type=oneshot
+ExecStart=/home/wissenschafter/Projects/obsidience/obsidience/tv/host/mode %i
+TimeoutStartSec=150
