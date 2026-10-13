@@ -9,26 +9,41 @@ obsidience:
 
 ## Runtime
 
-For an explicitly selected library item on this TV, use `find` with `app: library`
-and the query, then `open` its exact current-turn `id`. If this activation already
-has a catalogue selection, open that returned `m...` id directly. A catalogue
-item or media-source GUID is not an open candidate id. An explicit library
-request never falls back to Pluto, YouTube or a similar title; report an
-unavailable or ambiguous library source without substituting one. The catalogue is an
-independent media service; this Tool only owns its TV playback destination.
-Library open revalidates the item, edition/episode, source revision and approved
-local file before dispatch. Only verified source/generation and TV-route
-readback establishes playback. `stop` stops the observed local generation; it
-does not delete media. Pending or uncertain playback must never be resent.
-Local pause/resume, seek, track selection and saved resume are not yet supplied
-by this first slice; report them as unavailable. Existing live TV and Android
-transport behavior is unchanged.
+For movies and episodes, follow the Media Runbook: local catalogue first, then
+configured source discovery when requested. Never substitute a YouTube clip or
+live channel for a requested film or episode. For an explicitly selected Jellyfin item on this TV, use `find` with `app:
+library` and the query, then `open` its exact current-turn `id`. If this
+activation already has a catalogue selection, open that returned id directly.
+A catalogue item or media-source GUID is not an open candidate id. An explicit
+library request never falls back to Pluto, YouTube or a similar title; report an
+unavailable or ambiguous source without substituting one. Library open
+revalidates the exact item, edition/episode, source revision and approved local or identity-bound virtual
+file before dispatch. Only verified source/generation and TV-route readback
+establish playback.
+
+For local VOD controls, use `action: vod` with the exact current `generation`
+and `source` identity returned by VOD state. Use `state` before deciding what
+is playing or which tracks are available. `pause` and `resume` set the target
+state; `seek` uses an absolute position in seconds; `stop` ends the exact
+generation; `track` selects an exact current audio/subtitle `track_id`, with
+`null` turning subtitles off. Each VOD effect is sent at most once and
+read back against that same generation/source. If delivery or readback is
+uncertain, stop effects and report it; never retry with a fresh observation or
+replacement generation. Stopping does not delete or unregister media.
+
+`media.library resume` reads Jellyfin's per-user saved position; it does not
+start a player. For an explicit continue request, use `open` with the exact
+selected id and `resume: true`. The playback owner reads saved progress again
+before its one load command and verifies the started position within five
+seconds. Do not implement resume as a second seek or replay an unverified open.
+The optional TV destination consumes Obsidience Media; it does not become the
+catalogue or acquisition authority. Live TV and Android remain existing routes.
 
 Use tv.control for the current owner's television request. "TV on" and "TV off" mean the one registered TV, with action:on or off; confirm only verified power readback.
 
 For "what's on the TV?" or the TV's status, call `observe` and answer from its `tv` state: the app, the title this Harness opened (and for a Pluto channel what airs now), whether it is playing or paused, and the volume. A `tv (live)` metadata line is pushed by the TV itself: answer what is on from it. An aged line (last seen N min ago) may be stale: observe before saying what is on now. Do not describe a title the state does not name; if Harness did not open the current content, say which app is playing. Playback `inactivity_ad` means Pluto stopped the channel after long inactivity and loops advertisements; say so plainly, and `resume` returns to the channel. Volume, mute, pause and resume are instant spoken commands; live channels (Pluto live TV) are broadcasts that cannot pause, so offer mute instead.
 
-For content without an explicit library or other provider selection (news, weather, a live channel, a show, a movie, a video), call `play` with a short query (optional app pluto|youtube): one call picks and opens the best match (a Pluto live channel that matches the request, else YouTube's top result, a live stream for news and weather) and waits for playback. `playback_started:true` means the chosen content is playing, so complete with that evidence and name `chosen`; a playing channel needs no Select. A Pluto live channel normally starts in about a second because the workstation plays it and the TV shows that stream (`pc stream` in the tv line, `route:"pc"`); the Pluto app, which takes most of a minute, is only its fallback. That stream has no advertisements: during a channel's break the TV shows a break card and the tv line reads `commercial break`; the programme resumes by itself, so say the channel is in a break and do not reload it. YouTube videos open in SmartTube, an ad-free YouTube player: normally the one on the workstation's Android TV instance, which starts in a second or two and which the TV shows like a channel (`pc stream (android)` in the tv line, `route:"pc"`, `source:"android"`), with the TV's own SmartTube as its fallback; live streams open in the TV's YouTube app, which is also the automatic fallback there. On that instance the state names a title only while the video this Harness opened plays on undisturbed; otherwise say YouTube is playing on the PC stream without naming a video. If the owner wanted something else, `open` one of the returned `alternatives` by id. If playback did not start, read the returned screen for the blocker (sign-in, error, loading) and observe once more before deciding. Use `find` then `open` only when the owner wants to choose among results. A specific title on Netflix, Hulu, Tubi or YouTube: `web.search` for its official link, then `open` with `url`. If the TV is off, turn it on once first. This normally takes one play and one check.
+For explicitly live content or web videos (news, weather, a live channel, a YouTube video), call `play` with a short query (optional app pluto|youtube): one call picks and opens the best match (a Pluto live channel that matches the request, else YouTube's top result, a live stream for news and weather) and waits for playback. `playback_started:true` means the chosen content is playing, so complete with that evidence and name `chosen`; a playing channel needs no Select. A Pluto live channel normally starts in about a second because the workstation plays it and the TV shows that stream (`pc stream` in the tv line, `route:"pc"`); the Pluto app, which takes most of a minute, is only its fallback. That stream has no advertisements: during a channel's break the TV shows a break card and the tv line reads `commercial break`; the programme resumes by itself, so say the channel is in a break and do not reload it. YouTube videos open in SmartTube, an ad-free YouTube player: normally the one on the workstation's Android TV instance, which starts in a second or two and which the TV shows like a channel (`pc stream (android)` in the tv line, `route:"pc"`, `source:"android"`), with the TV's own SmartTube as its fallback; live streams open in the TV's YouTube app, which is also the automatic fallback there. On that instance the state names a title only while the video this Harness opened plays on undisturbed; otherwise say YouTube is playing on the PC stream without naming a video. If the owner wanted something else, `open` one of the returned `alternatives` by id. If playback did not start, read the returned screen for the blocker (sign-in, error, loading) and observe once more before deciding. Use `find` then `open` only when the owner wants to choose among results. A specific title on Netflix, Hulu, Tubi or YouTube: `web.search` for its official link, then `open` with `url`. If the TV is off, turn it on once first. This normally takes one play and one check.
 
 For the volume, use `volume` with the exact `level` the owner asked for (0-100); "turn it up/down" is `volume_up`/`volume_down` (5 steps). `mute`, `unmute`, `pause` and `resume` reach that state. All of them read the TV back: report the returned level or state when delivery is verified ("TV volume 15."), and otherwise say it could not be verified. Never use remote keys for volume or playback.
 

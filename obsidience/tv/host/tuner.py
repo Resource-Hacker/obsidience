@@ -51,6 +51,7 @@ from streamlink import Streamlink
 # importing its runtime or owning a second catalogue client.
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from harness.media.config import MediaUnavailable, load_config
+from harness.media.progress import PlaybackProgress
 from harness.media.sources import admit
 
 log = logging.getLogger('tuner')
@@ -80,6 +81,14 @@ _FAST_START = {'demuxer-lavf-analyzeduration': '0.4', 'demuxer-lavf-probesize': 
 # first picture waits for the same margin: a channel tuned in during a break starts as thin.
 _CUSHION = {'cache-pause-wait': '8', 'cache-pause-initial': 'yes'}
 _LINE_LIMIT = 1024 * 1024
+# Exact local seeks accept a fresh settled position within half a second. No
+# keyframe fallback or second seek follows an unverified/uncertain outcome.
+SEEK_TOLERANCE = 0.5
+VOD_LIMIT = 5.0
+# Initial resume readback is taken after the first picture. Five seconds allows
+# normal decode/startup advancement; it never authorizes a correction seek.
+START_TOLERANCE = 5.0
+START_LIMIT = 30.0  # An owned resume verifier waits this long for its first picture.
 
 
 class _Fault(Exception):
@@ -92,7 +101,7 @@ class Player:
     Replies and events arrive on a reader thread. An event handler must never send a command: it
     runs on that thread, which would then wait for a reply only it can read.
     """
-    OBSERVED = ('pause', 'paused-for-cache', 'width', 'height')
+    OBSERVED = ('pause', 'paused-for-cache', 'width', 'height', 'time-pos', 'duration')
 
     def __init__(self, path, on_event):
         self.path, self.on_event = path, on_event
@@ -118,6 +127,16 @@ class Player:
                 self._connect()
             return self._ask(command)
 
+    def bound_command(self, generation, *command, timeout=TIMEOUT):
+        """One command on the already-bound connection, never reconnecting."""
+        with self._sending:
+            if self._sock is None or self.generation != generation:
+                raise ConnectionError('The local player connection changed')
+            result = self._ask(command, timeout)
+            if self._sock is None or self.generation != generation:
+                raise ConnectionError('The local player connection changed')
+            return result
+
     def _connect(self):
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
@@ -134,13 +153,34 @@ class Player:
         for ident, name in enumerate(self.OBSERVED, 1):
             self._ask(('observe_property', ident, name))
 
-    def _ask(self, command):
+    def _ask(self, command, timeout=TIMEOUT):
         sock = self._sock
         if sock is None:
             raise ConnectionError('The player closed its connection')
         self._ident += 1
-        sock.sendall((json.dumps({'command': command, 'request_id': self._ident}) + '\n').encode())
-        deadline = time.monotonic() + TIMEOUT
+        deadline = time.monotonic() + timeout
+        data = memoryview((json.dumps({'command': command, 'request_id': self._ident}) + '\n').encode())
+        try:
+            while data:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError('The player did not accept the command')
+                try:
+                    sent = sock.send(data, socket.MSG_DONTWAIT)
+                    if sent == 0:
+                        raise ConnectionError('The player closed its connection')
+                    data = data[sent:]
+                except BlockingIOError:
+                    if not select.select([], [sock], [], remaining)[1]:
+                        raise TimeoutError('The player did not accept the command')
+        except (OSError, ValueError):
+            # A partial JSON write cannot precede another command on this stream.
+            # End this connection; the uncertain command is never resent.
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            raise
         while True:
             try:
                 origin, reply = self._replies.get(timeout=max(0.0, deadline - time.monotonic()))
@@ -191,12 +231,21 @@ class Play:
     """One thing the tuner was asked to play, and what was acquired for it."""
 
     def __init__(self, number, title, provider=None, channel=None, url=None, local=None, identity=None,
-                 local_config=None, generation=None):
+                 local_config=None, generation=None, start_seconds=None):
         self.number, self.title, self.provider, self.channel, self.url = number, title, provider, channel, url
         self.local, self.identity = local, identity
         self.local_config = local_config
         self.generation = generation if local is not None else None
         self.verified = False
+        self.player_generation = None
+        self.progress = None
+        self.last_vod = None
+        self.final_vod = None
+        self.latest_position = None
+        self.start_seconds = 0 if start_seconds is None else start_seconds
+        self.start_verified = start_seconds is None
+        self.start_readback = None
+        self.start_thread = None
         # For the journal: a title and a channel id, never an address.
         self.name = (f'{title!r} ({provider} {channel})' if channel else
                      f'{title!r} (local media)' if local is not None else f'{title!r} (address)')
@@ -324,7 +373,9 @@ class Tuner:
         self.restart_entry = None  # A first picture may precede the loadfile reply.
         self.finished = (None, None)  # The entry it ended last, and why.
         self.local_files = {}  # Keep admitted descriptors through matching unload events.
+        self.reporters = set()  # Includes a finite file's final report after its descriptor closes.
         self.ended = None  # A bounded terminal receipt for the most recent finite local file.
+        self.ended_progress = None
         self.playback, self.since = 'idle', time.time()
         self.closed = False
         self.presenter = threading.Thread(target=self._present, name='presenter', daemon=True)
@@ -357,33 +408,239 @@ class Tuner:
         playback = ('idle' if play is None else 'failed' if play.phase == 'failed' else
                     'paused' if paused and play.phase == 'playing' else
                     'break' if play.breaking is not None else
-                    'loading' if play.phase == 'loading' or starved else
+                    'loading' if play.phase == 'loading' or starved
+                    or (play.local is not None and not play.start_verified) else
                     'playing_verified' if play.local is not None else 'playing')
         if playback != self.playback:
             log.info('%s: %s -> %s', play.name if play is not None else 'player', self.playback, playback)
             self.playback, self.since = playback, time.time()
         self.lock.notify_all()
 
+    def _state(self, reached):
+        """Current public metadata (lock held); never sends a player command."""
+        self._refresh()
+        play = self.play
+        size = [self.properties.get('width'), self.properties.get('height')]
+        state = {'playback': self.playback, 'title': play.title if play is not None else '',
+                 'video': size if play is not None and play.phase == 'playing'
+                 and all(isinstance(side, int) for side in size) else None,
+                 'since': round(self.since, 1), 'player': reached}
+        if play is not None and play.channel:
+            state.update(provider=play.provider, channel=play.channel)
+        if play is not None and play.local is not None:
+            state.update(provider='local', generation=play.generation, source=play.identity,
+                         verification='verified' if (play.verified and play.picture is not None
+                         and play.start_verified
+                         and play.phase == 'playing' and play.entry == self.entry
+                         and play.player_generation == self.player.generation
+                         and self.player._sock is not None) else 'unverified')
+            if play.progress is not None:
+                state['progress'] = play.progress.snapshot()
+            if play.start_readback is not None:
+                state['start'] = dict(play.start_readback)
+        if self.ended is not None:
+            state['ended'] = dict(self.ended)
+            if self.ended_progress is not None:
+                state['ended']['progress'] = self.ended_progress.snapshot()
+        if play is not None and play.phase == 'failed':
+            state['reason'] = play.reason
+        return state
+
     def state(self):
-        reached = self.player.reach()
+        with self.control:
+            reached = self.player.reach()
+            with self.lock:
+                play = self.play
+                ready = (play is not None and play.local is not None
+                         and play.phase == 'playing' and play.verified and play.start_verified)
+            vod = None
+            if reached and ready:
+                try:
+                    vod = self._read_vod(play, time.monotonic() + VOD_LIMIT)
+                except (OSError, ValueError):
+                    pass  # State stays available; missing fresh VOD evidence grants no control.
+            with self.lock:
+                state = self._state(reached)
+                if self.play is play and vod is not None:
+                    state['vod'] = vod
+                return state
+
+    def _check_local(self, play, ready=True):
+        """Exact current source/entry/connection before and after each bounded read (lock held)."""
+        if (play is None or self.play is not play or play.local is None or play.phase == 'failed'
+                or play.entry is None or self.entry != play.entry
+                or play.player_generation != self.player.generation or self.player._sock is None
+                or (ready and (play.phase != 'playing' or not play.verified or play.picture is None))):
+            raise ValueError('local playback is not the exact verified current source')
+
+    def _vod_command(self, play, deadline, *command):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError('The local VOD readback deadline expired')
         with self.lock:
+            self._check_local(play)
+        result = self.player.bound_command(play.player_generation, *command,
+                                           timeout=min(TIMEOUT, remaining))
+        with self.lock:
+            self._check_local(play)
+        return result
+
+    def _vod_playlist(self, play, deadline):
+        playlist = self._vod_command(play, deadline, 'get_property', 'playlist')
+        path = f'/proc/{os.getpid()}/fd/{play.local.fd}'
+        if (not isinstance(playlist, list) or len(playlist) != 1
+                or not isinstance(playlist[0], dict) or playlist[0].get('id') != play.entry
+                or playlist[0].get('filename') != path
+                or not (playlist[0].get('current') is True or playlist[0].get('playing') is True)):
+            raise ValueError('the exact local playlist entry could not be verified')
+
+    def _read_vod(self, play, deadline):
+        """Fresh finite-file readback between two exact playlist checks (control held)."""
+        self._vod_playlist(play, deadline)
+        values = {}
+        for name in ('time-pos', 'duration', 'seekable', 'pause', 'seeking', 'track-list'):
+            try:
+                values[name] = self._vod_command(play, deadline, 'get_property', name)
+            except ValueError as error:
+                if name not in ('time-pos', 'duration') or 'property unavailable' not in str(error):
+                    raise
+                values[name] = None
+        self._vod_playlist(play, deadline)
+        for name in ('pause', 'seeking', 'seekable'):
+            if type(values[name]) is not bool:
+                raise ValueError('the local player did not return bounded VOD state')
+        tracks = values['track-list']
+        if not isinstance(tracks, list) or len(tracks) > 128:
+            raise ValueError('the local track list is unavailable or exceeded its bound')
+        projected = {'audio': [], 'subtitle': []}
+        selected = {'audio': None, 'subtitle': None}
+        for track in tracks:
+            if not isinstance(track, dict) or track.get('type') not in ('audio', 'sub'):
+                continue
+            kind = 'audio' if track['type'] == 'audio' else 'subtitle'
+            ident = track.get('id')
+            if (type(ident) is not int or not 0 < ident <= 2147483647 or track.get('external') is True
+                    or any(item['id'] == ident for item in projected[kind])):
+                raise ValueError('the local track identity is unsupported')
+            primary = track.get('selected') is True and track.get('main-selection', 0) == 0
+            if primary:
+                if selected[kind] is not None:
+                    raise ValueError('the local track selection is ambiguous')
+                selected[kind] = ident
+            text = lambda key, bound: (re.sub(r'[\x00-\x1f\x7f]', ' ', track[key])[:bound]
+                                       if isinstance(track.get(key), str) else '')
+            projected[kind].append({'id': ident, 'title': text('title', 160),
+                                    'language': text('lang', 32), 'selected': primary,
+                                    'default': track.get('default') is True})
+        def seconds(value):
+            return (round(float(value), 3) if type(value) in (int, float)
+                    and 0 <= value <= 1_000_000_000 else None)
+        vod = {'position': seconds(values['time-pos']), 'duration': seconds(values['duration']),
+               'seekable': values['seekable'], 'paused': values['pause'], 'seeking': values['seeking'],
+               'audio_track': selected['audio'], 'subtitle_track': selected['subtitle'],
+               'tracks': projected, 'observed_at': round(time.time(), 3)}
+        with self.lock:
+            self._check_local(play)
+            play.last_vod = dict(vod)
+            if vod['position'] is not None:
+                play.latest_position = (vod['position'], time.monotonic())
+            self.properties['pause'] = vod['paused']
             self._refresh()
-            play = self.play
-            size = [self.properties.get('width'), self.properties.get('height')]
-            state = {'playback': self.playback, 'title': play.title if play is not None else '',
-                     'video': size if play is not None and play.phase == 'playing'
-                     and all(isinstance(side, int) for side in size) else None,
-                     'since': round(self.since, 1), 'player': reached}
-            if play is not None and play.channel:
-                state.update(provider=play.provider, channel=play.channel)
-            if play is not None and play.local is not None:
-                state.update(provider='local', generation=play.generation, source=play.identity,
-                             verification='verified' if play.verified and play.picture is not None else 'unverified')
-            if self.ended is not None:
-                state['ended'] = self.ended
-            if play is not None and play.phase == 'failed':
-                state['reason'] = play.reason
-            return state
+        return vod
+
+    def _progress_current(self, play):
+        with self.lock:
+            return (self.play is play and not play.cancelled.is_set() and play.phase == 'playing'
+                    and play.verified and play.start_verified and play.player_generation == self.player.generation)
+
+    def _sample_progress(self, play):
+        # A control operation owns this lock first; the reporter never blocks it
+        # and keeps no stale position waiting to be replayed afterwards.
+        if not self.control.acquire(timeout=.2):
+            return None
+        try:
+            with self.lock:
+                self._check_local(play)
+            return self._read_vod(play, time.monotonic() + VOD_LIMIT)
+        finally:
+            self.control.release()
+
+    def _final_progress(self, play):
+        """Final evidence only, never extrapolated from duration (lock held)."""
+        if play.final_vod is not None:
+            return dict(play.final_vod)
+        latest = play.latest_position
+        if latest is None or time.monotonic() - latest[1] > 2:
+            return None
+        return {**(play.last_vod or {}), 'position': latest[0], 'observed_at': round(time.time(), 3)}
+
+    def _local_control(self, message):
+        """One bound VOD target write, then reads only until its postcondition settles."""
+        op = message.get('op')
+        fields = {'op', 'generation', 'source'} | ({'position'} if op == 'seek' else
+                                                 {'kind', 'track_id'} if op == 'track' else set())
+        generation, source = message.get('generation'), message.get('source')
+        if (set(message) != fields or not isinstance(generation, str)
+                or not re.fullmatch(r'[0-9a-f]{32}', generation) or not isinstance(source, dict)):
+            raise ValueError('local VOD takes the exact observed generation and source')
+        if op == 'seek':
+            position = message['position']
+            if type(position) not in (int, float) or not 0 <= position <= 1_000_000_000:
+                raise ValueError('local seek takes a finite nonnegative absolute position')
+        elif op == 'track':
+            kind, track_id = message['kind'], message['track_id']
+            if kind not in ('audio', 'subtitle') or (track_id is not None
+                    and (type(track_id) is not int or not 0 < track_id <= 2147483647)):
+                raise ValueError('local track takes audio or subtitle and an exact id or null for off')
+        deadline = time.monotonic() + VOD_LIMIT
+        with self.control:
+            with self.lock:
+                play = self.play
+                self._check_local(play)
+                if not play.start_verified:
+                    raise ValueError('the local saved start position is still unverified')
+                if (play.generation, play.identity) != (generation, source):
+                    raise ValueError('local playback changed before VOD control')
+            vod = self._read_vod(play, deadline)
+            if op == 'vod-state':
+                with self.lock:
+                    state = self._state(True)
+                return {**state, 'vod': vod}
+            if op in ('pause', 'resume'):
+                target = op == 'pause'
+                matches = lambda value: value['paused'] is target
+                command = ('set_property', 'pause', target)
+            elif op == 'seek':
+                if (not vod['seekable'] or vod['duration'] is None or vod['duration'] <= 0
+                        or position >= vod['duration']):
+                    raise ValueError('local seek requires a seekable finite file and a position before EOF')
+                matches = lambda value: (not value['seeking'] and value['position'] is not None
+                                         and abs(value['position'] - position) <= SEEK_TOLERANCE)
+                command = ('seek', position, 'absolute+exact')
+            else:
+                if track_id is not None and not any(t['id'] == track_id for t in vod['tracks'][kind]):
+                    raise ValueError('the exact track is not in the current local file')
+                matches = lambda value: value[kind + '_track'] == track_id
+                command = ('set_property', 'aid' if kind == 'audio' else 'sid',
+                           track_id if track_id is not None else 'no')
+            changed = not matches(vod)
+            if changed:
+                play.local.validate()
+                self._vod_playlist(play, deadline)
+                self._vod_command(play, deadline, *command)  # Exactly one target write; no retries.
+                while True:
+                    vod = self._read_vod(play, deadline)
+                    if matches(vod):
+                        break
+                    with self.lock:
+                        self.lock.wait(min(.05, max(0, deadline - time.monotonic())))
+            with self.lock:
+                self._check_local(play)
+                state = self._state(True)
+            control = {'action': op, 'verified': True, 'changed': changed}
+            if op == 'seek':
+                control.update(position=position, tolerance=SEEK_TOLERANCE)
+            return {**state, 'vod': vod, 'control': control}
 
     def _event(self, event, generation):
         """The player's events, on its reader thread: state only, never a command."""
@@ -395,12 +652,22 @@ class Tuner:
             if name == 'connected':
                 self.properties.clear()
                 self.entry, self.restart_entry, self.finished = None, None, (None, None)
+                if play is not None and play.local is not None and play.phase != 'loading':
+                    play.phase, play.reason = 'failed', 'the local player connection changed'
+                    if play.progress is not None:
+                        play.progress.disable('progress_player_connection_changed')
                 for number, held in list(self.local_files.items()):
                     if held is not play or held.phase != 'loading':
                         held.close_local()
                         del self.local_files[number]
             elif name == 'property-change':
                 self.properties[event.get('name')] = event.get('data')
+                value = event.get('data')
+                if (event.get('name') == 'time-pos' and type(value) in (int, float)
+                        and 0 <= value <= 1_000_000_000 and play is not None and play.local is not None
+                        and play.phase == 'playing' and play.verified and play.entry == self.entry
+                        and play.player_generation == generation):
+                    play.latest_position = (float(value), time.monotonic())
             elif name == 'start-file':
                 self.entry = event.get('playlist_entry_id')
                 self.restart_entry = None
@@ -420,6 +687,8 @@ class Tuner:
                 self.local_files.clear()
                 if play is not None and (play.url or play.local is not None):
                     play.phase, play.reason = 'failed', 'the player closed its connection'
+                    if play.progress is not None:
+                        play.progress.disable('progress_player_disconnected')
             else:
                 return
             self._refresh()
@@ -431,6 +700,8 @@ class Tuner:
                 and play.entry == self.entry == self.restart_entry
                 and (play.local is None or play.verified)):
             play.phase, play.picture = 'playing', time.monotonic()
+            if play.progress is not None and play.start_verified:
+                play.progress.start()  # Worker owns HTTP; this callback never waits for it.
             log.info('%s: picture %.1f s after the request', play.name, play.picture - play.requested)
 
     def _finish(self):
@@ -442,6 +713,11 @@ class Tuner:
         play, (entry, reason) = self.play, self.finished
         for number, held in list(self.local_files.items()):
             if held.entry is not None and held.entry == entry:
+                if held.progress is not None:
+                    if reason in ('stop', 'eof'):
+                        held.progress.finish(self._final_progress(held), 'stopped' if reason == 'stop' else 'ended')
+                    else:
+                        held.progress.disable('progress_final_outcome_unverified')
                 held.close_local()
                 del self.local_files[number]
                 if (self.ended is not None and self.ended.get('generation') == held.generation
@@ -450,6 +726,7 @@ class Tuner:
         if play is not None and play.local is not None and play.entry is not None and play.entry == entry:
             self.ended = {'generation': play.generation, 'source': play.identity,
                           'outcome': 'ended' if reason == 'eof' else 'failed'}
+            self.ended_progress = play.progress
             if reason == 'eof':
                 self.play = None
             else:
@@ -511,6 +788,9 @@ class Tuner:
 
     def request(self, message):
         op = message.get('op')
+        if op in ('vod-state', 'seek', 'track') or (op in ('pause', 'resume')
+                and ('generation' in message or 'source' in message)):
+            return self._local_control(message)
         if op == 'play':
             title, wait = message.get('title'), message.get('wait', 0)
             if not isinstance(title, str) or not title.strip() or len(title) > 160:
@@ -520,12 +800,16 @@ class Tuner:
             if message.get('provider') == 'local':
                 local_fields = {'op', 'provider', 'root_id', 'relative_path', 'revision',
                                 'catalogue_instance', 'item_id', 'media_source_id', 'source_revision',
-                                'title', 'wait', 'generation'}
+                                'title', 'wait', 'generation', 'start_seconds'}
                 if set(message) - local_fields:
                     raise ValueError('local media takes one exact source identity')
                 generation = message.get('generation')
                 if not isinstance(generation, str) or not re.fullmatch(r'[0-9a-f]{32}', generation):
                     raise ValueError('local media takes one exact request generation')
+                start_seconds = message.get('start_seconds')
+                if 'start_seconds' in message and (type(start_seconds) not in (int, float)
+                        or not 0 <= start_seconds <= 1_000_000_000):
+                    raise ValueError('local start takes a finite nonnegative saved position')
                 descriptor = {key: message.get(key) for key in ('provider', 'root_id', 'relative_path', 'revision')}
                 identity = {key: message.get(key) for key in
                             ('provider', 'root_id', 'revision', 'catalogue_instance', 'item_id',
@@ -545,7 +829,8 @@ class Tuner:
                 local = admit(config, descriptor)
                 try:
                     self._start(title, {'provider': 'local', 'local': local, 'identity': identity,
-                                        'local_config': config, 'generation': generation}, wait)
+                                        'local_config': config, 'generation': generation,
+                                        'start_seconds': start_seconds}, wait)
                 except Exception:
                     with self.lock:
                         adopted = any(held.local is local for held in self.local_files.values())
@@ -588,7 +873,7 @@ class Tuner:
                         or not isinstance(source, dict)):
                     raise ValueError('local stop takes the exact observed generation and source')
                 expected = (generation, source)
-            self._replace(None, expected=expected)
+            stopped_play = self._replace(None, expected=expected)
             if expected is not None:
                 with self.lock:
                     confirmed = self.lock.wait_for(
@@ -597,7 +882,8 @@ class Tuner:
                     stopped = (confirmed and self.ended is not None
                                and self.ended.get('generation') == expected[0]
                                and self.ended.get('outcome') == 'stopped')
-                if not stopped or self.player.command('get_property', 'idle-active') is not True:
+                if (not stopped or self.player.bound_command(stopped_play.player_generation,
+                        'get_property', 'idle-active') is not True):
                     raise ValueError('the player did not verify the exact local stop')
         elif op != 'state':
             raise ValueError('op is play, pause, resume, stop or state')
@@ -607,10 +893,82 @@ class Tuner:
         with self.lock:
             self.plays += 1
             play = Play(self.plays, title, **source)
+            if play.local is not None:
+                play.progress = PlaybackProgress(play.local_config, play.identity, play.generation,
+                                                 lambda: self._sample_progress(play),
+                                                 lambda: self._progress_current(play))
         log.info('%s: play', play.name)
         self._replace(play)
+        if play.local is not None and not play.start_verified:
+            with self.lock:
+                if self.play is play and not self.closed:
+                    play.start_thread = threading.Thread(target=self._complete_start, args=(play,),
+                                                         name=f'start-{play.number}')
+                    play.start_thread.start()  # Play owns it; replacement/shutdown drains it.
         with self.lock:
-            self.lock.wait_for(lambda: self.play is not play or self.playback != 'loading', timeout=wait)
+            self.lock.wait_for(lambda: self.closed or self.play is not play
+                               or self.playback != 'loading', timeout=wait)
+
+    def _complete_start(self, play):
+        """Continue this start after a short caller wait; never reload or seek."""
+        with self.lock:
+            self.lock.wait_for(lambda: self.closed or self.play is not play or play.cancelled.is_set()
+                               or play.phase != 'loading', timeout=START_LIMIT)
+            if self.closed or self.play is not play or play.cancelled.is_set() or play.phase == 'failed':
+                return
+            ready = play.phase == 'playing'
+        if ready:
+            self._verify_start(play)
+            return
+        with self.control:
+            with self.lock:
+                if self.closed or self.play is not play or play.cancelled.is_set():
+                    return
+                play.phase, play.reason = 'failed', 'the saved start did not show a first picture in time'
+                self._refresh()
+            try:
+                self.player.bound_command(play.player_generation, 'stop')
+            except (OSError, ValueError):
+                pass  # One cleanup only; an uncertain start is never replayed.
+
+    def _verify_start(self, play):
+        """Fresh exact-generation proof on the owned start worker, never the IPC reader."""
+        with self.control:
+            with self.lock:
+                if self.closed or self.play is not play or play.cancelled.is_set():
+                    return
+            try:
+                deadline = time.monotonic() + VOD_LIMIT
+                while True:
+                    vod = self._read_vod(play, deadline)
+                    if (vod['duration'] is None or not 0 <= play.start_seconds < vod['duration']
+                            or (play.start_seconds > 0 and not vod['seekable'])):
+                        raise ValueError('the saved start position could not be verified in this file')
+                    if (vod['position'] is not None and not vod['seeking']
+                            and abs(vod['position'] - play.start_seconds) <= START_TOLERANCE):
+                        break
+                    with self.lock:
+                        self.lock.wait(min(.05, max(0, deadline - time.monotonic())))
+                with self.lock:
+                    self._check_local(play)
+                    play.start_verified = True
+                    play.start_readback = {'requested': play.start_seconds, 'position': vod['position'],
+                                           'tolerance': START_TOLERANCE, 'verified': True,
+                                           'observed_at': vod['observed_at']}
+                    if play.progress is not None:
+                        play.progress.start()
+                    self._refresh()
+            except (OSError, ValueError):
+                with self.lock:
+                    current = self.play is play
+                    if current:
+                        play.phase, play.reason = 'failed', 'the saved start position could not be verified'
+                        self._refresh()
+                if current:
+                    try:
+                        self.player.bound_command(play.player_generation, 'stop')
+                    except (OSError, ValueError):
+                        pass  # Uncertain cleanup is never replayed; there is no correction seek/load.
 
     def _replace(self, play, wait=False, expected=None):
         """Make play (or nothing) the current play and release everything the previous one held.
@@ -625,19 +983,38 @@ class Tuner:
                     raise MediaUnavailable('media_config_changed')
                 play.local.validate()
             with self.lock:
+                prior = self.play
+                if expected is not None and (prior is None or (prior.generation, prior.identity) != expected):
+                    raise ValueError('local playback changed before stop')
+            if prior is not None and prior.local is not None and prior.progress is not None:
+                try:
+                    prior.final_vod = self._read_vod(prior, time.monotonic() + VOD_LIMIT)
+                except (OSError, ValueError):
+                    prior.progress.disable('final_position_unavailable')
+            with self.lock:
                 if expected is not None:
                     current = self.play
                     if (current is None or current.local is None
                             or (current.generation, current.identity) != expected):
                         raise ValueError('local playback changed before stop')
+                    self._check_local(current, ready=False)
+                if play is not None and self.closed:
+                    # Admission can finish beside shutdown. Release its acquired
+                    # fd without reconnecting to or loading the player.
+                    play.close_local()
+                    raise MediaUnavailable('tuner_closed')
                 if play is not None and play.local is not None and len(self.local_files) >= 8:
                     raise ValueError('local media has unresolved player unloads')
                 old, self.play = self.play, play
                 self.ended = ({'generation': old.generation, 'source': old.identity,
                                'outcome': 'stopping' if expected is not None else 'stopped'}
                               if play is None and old is not None and old.local is not None else None)
+                self.ended_progress = old.progress if self.ended is not None else None
                 if play is not None and play.local is not None:
                     self.local_files[play.number] = play
+                    self.reporters = {reporter for reporter in self.reporters
+                                      if reporter.thread is not None and reporter.thread.is_alive()}
+                    self.reporters.add(play.progress)
                 self._refresh()
             if old is not None:
                 old.cancelled.set()
@@ -645,7 +1022,10 @@ class Tuner:
             try:
                 if play is None or play.channel:
                     # Nothing of the previous play stays on screen while a channel tunes in.
-                    self.player.command('stop')
+                    if expected is None:
+                        self.player.command('stop')
+                    else:
+                        self.player.bound_command(old.player_generation, 'stop')
                 if play is not None and play.url:
                     self._load(play, play.url)
                 elif play is not None and play.local is not None:
@@ -667,6 +1047,7 @@ class Tuner:
                 release.join()
         if refused is not None and play is None:
             raise refused
+        return old
 
     @staticmethod
     def _release(old):
@@ -675,6 +1056,11 @@ class Tuner:
             old.thread.join(30)  # Its own cleanup follows the closed stream.
             if old.thread.is_alive():
                 log.warning('%s: still releasing', old.name)
+        if old.start_thread is not None and old.start_thread is not threading.current_thread():
+            old.start_thread.join()  # A replaced generation performs no further start effect.
+        if old.progress is not None:
+            old.progress.finished.wait(TIMEOUT)  # Matched unload may follow loadfile's acknowledgement.
+            old.progress.close()
 
     def _load(self, play, path):
         """Tell the player to load this play's file in place of whatever it shows (control held)."""
@@ -685,10 +1071,12 @@ class Tuner:
                        'demuxer-lavf-o': 'protocol_whitelist=file', 'access-references': 'no',
                        'autoload-files': 'no', 'sub-auto': 'no', 'audio-file-auto': 'no',
                        'cover-art-auto': 'no', 'loop-file': 'no', 'loop-playlist': 'no',
-                       'resume-playback': 'no'}
+                       'resume-playback': 'no', 'start': str(play.start_seconds), 'aid': 'auto', 'sid': 'auto'}
         if play.channel:
             options.update(_CUSHION)
         self.player.command('set_property', 'pause', False)
+        with self.lock:
+            play.player_generation = self.player.generation
         entry = (self.player.command('loadfile', path, 'replace', -1, options) or {}).get('playlist_entry_id')
         with self.lock:
             play.entry = entry
@@ -895,6 +1283,11 @@ class Tuner:
             for held in self.local_files.values():
                 held.close_local()
             self.local_files.clear()
+            reporters = tuple(self.reporters)
+        for reporter in reporters:
+            reporter.close()  # EOF may have cleared self.play while its final HTTP report still runs.
+        with self.lock:
+            self.reporters.clear()
 
 
 class _NoAddresses(logging.Filter):

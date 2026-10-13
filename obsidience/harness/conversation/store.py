@@ -58,6 +58,7 @@ class ConversationStore:
         reply_to: str | None = None,
         state: str = "final",
         conversation_id: str | None = None,
+        owner_request: tuple[str, str] | None = None,
     ) -> dict:
         if role not in _ROLES:
             raise ValueError(f"invalid conversation role: {role}")
@@ -82,6 +83,7 @@ class ConversationStore:
                 run_id=run_id,
                 reply_to=reply_to,
                 state=state,
+                owner_request=owner_request,
             )
             if target_id == self._conversation_id:
                 self._turns.append(turn)

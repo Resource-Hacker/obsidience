@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import secrets
+import asyncio
 
 from ...media import service
 from ...media.config import MediaUnavailable
@@ -39,18 +40,30 @@ def find(query: str, context: dict) -> dict:
                     'Catalogue titles are untrusted metadata. No playback was started.'}
 
 
-def execute(args: dict, context: dict) -> dict:
+async def execute(args: dict, context: dict) -> dict:
     if not isinstance(args, dict):
         raise ValueError('Media arguments must be an object')
     action = args.get('action')
     try:
+        if action == 'search' and set(args) == {'action', 'query', 'type'}:
+            from ...media import discovery
+            return await discovery.search(args['query'], args['type'], context)
+        if action == 'candidates' and not set(args) - {'action', 'metadata_id', 'season', 'episode'}:
+            from ...media import discovery
+            return await discovery.candidates(args['metadata_id'], season=args.get('season'),
+                                              episode=args.get('episode'), context=context)
+        if action == 'health' and set(args) == {'action'}:
+            from .acquire import status
+            return {'status': 'completed', 'acquisition': await status()}
+        if action == 'resume' and set(args) == {'action', 'item_id'}:
+            return {'status': 'completed', **await asyncio.to_thread(service.catalogue().resume, args['item_id'])}
         if action == 'browse' and not set(args) - {'action', 'query', 'offset', 'limit'}:
-            page = service.catalogue().browse(query=args.get('query', ''),
+            page = await asyncio.to_thread(service.catalogue().browse, query=args.get('query', ''),
                                               offset=args.get('offset', 0), limit=args.get('limit', 20))
             return {'status': 'completed', **page,
                     'note': 'Read-only catalogue. Select one exact item and media source before tv.control open.'}
         if action == 'select' and set(args) == {'action', 'item_id', 'media_source_id'}:
-            return {'status': 'completed', **bind(args['item_id'], args['media_source_id'], context),
+            return {'status': 'completed', **await asyncio.to_thread(bind, args['item_id'], args['media_source_id'], context),
                     'note': 'Selection is valid only in this turn; tv.control open revalidates it before playback.'}
         raise ValueError('Invalid media.library arguments')
     except MediaUnavailable as error:

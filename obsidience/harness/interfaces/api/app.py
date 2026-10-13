@@ -745,6 +745,8 @@ async def lifespan(app: FastAPI):
     async with AsyncExitStack() as resources:
         trace.start(INDEX)
         resources.callback(trace.stop)
+        from .media import clear_previews
+        resources.callback(clear_previews)
         await llm.start_provider_client()
         resources.push_async_callback(llm.close_provider_client)
         from ...media import service as media_service
@@ -793,6 +795,8 @@ from ...memory.api import router as memory_router
 app.include_router(memory_router)
 from ...graphs.api import router as graph_views_router
 app.include_router(graph_views_router)
+from .media import router as media_router
+app.include_router(media_router)
 
 # Workstation browsers visit arbitrary sites. Only non-browser local clients
 # (Quickshell, CLI, turn bridges, Hindsight; no Origin) and pages served by

@@ -24,19 +24,25 @@ def _path(value: object) -> str:
 def validate_config(value: object) -> dict:
     if not isinstance(value, dict) or type(value.get('enabled', False)) is not bool:
         raise MediaUnavailable('invalid_media_config')
-    if set(value) - {'enabled', 'catalogue', 'roots'}:
+    if set(value) - {'enabled', 'catalogue', 'roots', 'acquisition', 'discovery'}:
         raise MediaUnavailable('invalid_media_config')
     result = {'enabled': value.get('enabled', False), 'roots': []}
     roots = value.get('roots', [])
     if not isinstance(roots, list) or len(roots) > 32:
         raise MediaUnavailable('invalid_media_roots')
     for root in roots:
-        if (not isinstance(root, dict) or set(root) != {'id', 'catalogue_path', 'path'}
+        if (not isinstance(root, dict) or set(root) not in ({'id', 'catalogue_path', 'path'},
+                {'id', 'catalogue_path', 'path', 'mount_path'})
                 or not isinstance(root['id'], str)
                 or not re.fullmatch(r'[a-zA-Z0-9_-]{1,64}', root['id'])):
             raise MediaUnavailable('invalid_media_root')
         result['roots'].append({'id': root['id'], 'path': _path(root['path']),
                                 'catalogue_path': _path(root['catalogue_path'])})
+        if 'mount_path' in root:
+            mount = _path(root['mount_path'])
+            if root['path'] != mount and not root['path'].startswith(mount + '/'):
+                raise MediaUnavailable('invalid_virtual_root')
+            result['roots'][-1]['mount_path'] = mount
     if len({r['id'] for r in result['roots']}) != len(roots):
         raise MediaUnavailable('ambiguous_media_roots')
     for i, root in enumerate(result['roots']):
@@ -79,6 +85,43 @@ def validate_config(value: object) -> dict:
                                'user_id': user, 'credential': credential}
     if result['enabled'] and not roots:
         raise MediaUnavailable('media_roots_not_configured')
+    acquisition = value.get('acquisition')
+    if acquisition is not None:
+        if (not isinstance(acquisition, dict) or set(acquisition) != {'enabled', 'socket', 'instance_id'}
+                or type(acquisition['enabled']) is not bool
+                or not isinstance(acquisition['instance_id'], str)
+                or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', acquisition['instance_id'])):
+            raise MediaUnavailable('invalid_acquisition_config')
+        result['acquisition'] = {**acquisition, 'socket': _path(acquisition['socket'])}
+    discovery = value.get('discovery')
+    if discovery is not None:
+        if (not isinstance(discovery, dict)
+                or set(discovery) != {'enabled', 'provider', 'catalogue_url', 'torrentio_url',
+                                      'max_resolution', 'prefer_languages'}
+                or type(discovery['enabled']) is not bool
+                or discovery['provider'] not in ('torrentio', 'prowlarr')
+                or type(discovery['max_resolution']) is not int
+                or discovery['max_resolution'] not in (720, 1080, 2160)
+                or not isinstance(discovery['prefer_languages'], list)
+                or not 1 <= len(discovery['prefer_languages']) <= 4
+                or any(not isinstance(lang, str) or not re.fullmatch('[a-z]{2}', lang)
+                       for lang in discovery['prefer_languages'])):
+            raise MediaUnavailable('invalid_discovery_config')
+        for key in ('catalogue_url', 'torrentio_url'):
+            url = discovery[key]
+            if not isinstance(url, str) or len(url) > 2048:
+                raise MediaUnavailable('invalid_discovery_url')
+            try:
+                parsed = urlsplit(url)
+                port = parsed.port
+            except ValueError:
+                raise MediaUnavailable('invalid_discovery_url') from None
+            if (parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password
+                    or port is not None
+                    or parsed.query or parsed.fragment or parsed.path not in ('', '/')
+                    or any(ord(c) < 33 for c in url)):
+                raise MediaUnavailable('invalid_discovery_url')
+        result['discovery'] = dict(discovery)
     return result
 
 

@@ -4,6 +4,7 @@ import QtQml
 import Quickshell
 import "../api"
 import "../panes/applications"
+import "../panes/media"
 import "../panes/camera"
 import "../panes/chat"
 import "../panes/displays"
@@ -168,6 +169,17 @@ Scope {
         defaultOpen: false
         defaultZOrder: 36
     }
+    property PanePlacement mediaPlacement: PanePlacement {
+        paneId: "media"
+        authoritative: true
+        defaultSurfaceId: "usb-c"
+        defaultX: 360
+        defaultY: 100
+        defaultWidth: 1120
+        defaultHeight: 820
+        defaultOpen: false
+        defaultZOrder: 40
+    }
     property PanePlacement applicationsPlacement: PanePlacement {
         paneId: "applications"
         authoritative: true
@@ -237,6 +249,7 @@ Scope {
     }
     property Component cameraComponent: Component { CameraPane {} }
     property Component settingsComponent: Component { SettingsPane {} }
+    property Component mediaComponent: Component { MediaPane {} }
     property Component applicationsComponent: Component { ApplicationsPane {} }
     property Component terminalComponent: Component { TerminalPane {} }
     property Component tftCompanionComponent: Component { TftCompanionPane {} }
@@ -356,6 +369,8 @@ Scope {
         {"label": "Settings", "title": "Settings", "icon": "settings", "accent": "#fb923c",
             "placement": settingsPlacement,
             "component": settingsComponent, "minWidth": 680, "minHeight": 440},
+        {"label": "Media", "title": "Media", "icon": "applications", "accent": "#67e8f9",
+            "placement": mediaPlacement, "component": mediaComponent, "minWidth": 720, "minHeight": 500},
         {"label": "Applications", "title": "Applications", "icon": "applications", "accent": "#2dd4bf",
             "placement": applicationsPlacement,
             "component": applicationsComponent, "minWidth": 620, "minHeight": 420},

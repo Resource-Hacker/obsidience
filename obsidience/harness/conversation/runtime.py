@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import time
 from typing import Any, Literal
@@ -359,12 +360,23 @@ class ConversationRuntime:
     async def submit(
         self, text: str, *, source: Literal["text", "realtime"] = "text", wait: bool = True,
         speech_timing: dict | None = None, memory_writeback: bool = True,
+        owner_command: dict | None = None,
     ) -> dict[str, Any]:
         """Bind one exact user turn, independent of microphone state.
 
         memory_writeback=False keeps an owner-controlled diagnostic turn out of
         Hindsight; the turn is otherwise ordinary.
         """
+        owner_request = None
+        if owner_command is not None:
+            from ..execution.commands import owner_media_command, owner_media_text
+            if source != "text":
+                raise ValueError("Typed owner commands require the native text ingress")
+            owner_command = owner_media_command(owner_command)
+            text = owner_media_text(owner_command)
+            digest = hashlib.sha256(json.dumps(owner_command, sort_keys=True, separators=(",", ":"),
+                                                allow_nan=False).encode()).hexdigest()
+            owner_request = (owner_command["request_id"], digest)
         received_ns = time.monotonic_ns()
         clean = text.strip() if source == "text" else " ".join(text.split())
         if not clean:
@@ -374,8 +386,15 @@ class ConversationRuntime:
         ):
             raise RuntimeError("speech transport is not ready")
         async with self._lock:
+            if owner_request is not None:
+                existing = INDEX.owner_command_request(*owner_request)
+                if existing is not None:
+                    return {**existing, "duplicate": True}
+                if self._turn_task is not None and not self._turn_task.done():
+                    raise RuntimeError("The owner conversation is active; wait before submitting a media command")
             await self.cancel(stop_playback=source == "text", reason=f"{source}.final")
-            user_turn = await self._conversation.append(role="user", source=source, text=clean)
+            user_turn = await self._conversation.append(role="user", source=source, text=clean,
+                                                       owner_request=owner_request)
             if not memory_writeback:
                 # Reserve before execution can commit a reply or continuation.
                 # A failed reservation aborts admission; restart cannot leak it.
@@ -386,11 +405,14 @@ class ConversationRuntime:
             turn_task = asyncio.create_task(
                 self._run_turn(clean, self._generation, user_turn, source=source,
                                received_ns=received_ns, speech_timing=speech_timing,
-                               memory_writeback=memory_writeback),
+                               memory_writeback=memory_writeback, owner_command=owner_command),
                 name=f"obsidience-conversation-turn-{user_turn['id']}",
             )
             self._turn_task = turn_task
             turn_task.add_done_callback(lambda _task: self.prepare_idle())
+            if owner_command is not None:
+                turn_task.add_done_callback(lambda finished: self._settle_owner_command(
+                    owner_command["request_id"], finished))
         if not wait:
             return user_turn
         try:
@@ -401,11 +423,23 @@ class ConversationRuntime:
                 return {"status": "interrupted"}
             raise
 
+    def _settle_owner_command(self, request_id: str, task: asyncio.Task) -> None:
+        if task.cancelled():
+            result = {"status": "interrupted"}
+        elif task.exception() is not None:
+            result = {"status": "failed"}
+        else:
+            result = task.result()
+        status = str(result.get("status") or "failed")
+        summary = str(result.get("public_summary") or (result.get("summary") if status == "completed" else "")
+                      or "The media command did not settle successfully. Use its receipt; do not resend.")
+        INDEX.finish_owner_command(request_id, status, result.get("run_id"), summary)
+
     async def _run_turn(
         self, text: str, generation: int, user_turn: dict, *,
         source: Literal["text", "realtime"],
         received_ns: int | None = None, speech_timing: dict | None = None,
-        memory_writeback: bool = True,
+        memory_writeback: bool = True, owner_command: dict | None = None,
     ) -> dict[str, Any]:
         from ..execution.scheduler import foreground_admission
 
@@ -424,7 +458,7 @@ class ConversationRuntime:
             async with foreground_admission("conversation"):
                 return await self._run_admitted_turn(text, generation, user_turn, source=source,
                                                      speech_sequence=sequence,
-                                                     memory_writeback=memory_writeback)
+                                                     memory_writeback=memory_writeback, owner_command=owner_command)
         finally:
             knowledge_activity.emit("admission_completed", [], turn_id=str(user_turn["id"]))
             trace.reset(scope)
@@ -433,6 +467,7 @@ class ConversationRuntime:
         self, text: str, generation: int, user_turn: dict, *,
         source: Literal["text", "realtime"],
         speech_sequence: int | None = None, memory_writeback: bool = True,
+        owner_command: dict | None = None,
     ) -> dict[str, Any]:
         from ..execution.executor import run_conversation
 
@@ -448,7 +483,7 @@ class ConversationRuntime:
             trace.latency("admission", duration_ms=(time.monotonic() - admission_started) * 1000)
             from ..execution.commands import recognize_command
             from ..execution.native_turn import discard_recall, prefetch_recall
-            if recognize_command(text, ["lights.set", "tv.control", "media.pause", "task.complete"]) is None:
+            if owner_command is None and recognize_command(text, ["lights.set", "tv.control", "media.pause", "task.complete"]) is None:
                 # The native memory hook recalls for this exact request after the
                 # agent starts; begin it now so it overlaps preparation and compile.
                 recall = prefetch_recall(task.ref, text, user_turn)
@@ -461,6 +496,8 @@ class ConversationRuntime:
             )
             trace.latency("preparation", duration_ms=(time.monotonic() - preparation_started) * 1000)
             trace.emit("event", f"{task.title} activated", [task.ref, event])
+            if owner_command is not None:
+                params["owner_command"] = owner_command
             params.update({
                 "conversation_id": str(user_turn["conversation_id"]),
                 "reply_to_turn_id": str(user_turn["id"]),

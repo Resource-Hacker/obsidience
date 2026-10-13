@@ -44,6 +44,10 @@ from .tasks import (
 from .vault import Note, Resolver, expand_primitive, iter_notes
 
 _SCHEMA = """
+CREATE TABLE IF NOT EXISTS owner_commands(
+  request_id TEXT PRIMARY KEY, digest TEXT NOT NULL, turn_id TEXT NOT NULL UNIQUE,
+  status TEXT NOT NULL DEFAULT 'admitted', run_id TEXT, summary TEXT
+);
 CREATE TABLE IF NOT EXISTS memory_deliveries(
   id TEXT PRIMARY KEY, bank TEXT NOT NULL, content_hash TEXT NOT NULL,
   payload TEXT NOT NULL, state TEXT NOT NULL, created_at REAL NOT NULL
@@ -2131,6 +2135,7 @@ class Index:
         run_id: str | None,
         reply_to: str | None,
         state: str,
+        owner_request: tuple[str, str] | None = None,
     ) -> dict:
         """Atomically append the next ordered turn to one conversation."""
         if state != "final":
@@ -2185,11 +2190,32 @@ class Index:
                     + ")",
                     row,
                 )
+                if owner_request is not None:
+                    self.db.execute("INSERT INTO owner_commands(request_id,digest,turn_id) VALUES(?,?,?)",
+                                    (*owner_request, row["id"]))
                 self.db.commit()
             except Exception:
                 self.db.rollback()
                 raise
         return row
+
+    def owner_command_request(self, request_id: str, digest: str | None = None) -> dict | None:
+        with self.lock:
+            row = self.db.execute("SELECT digest,turn_id,status,run_id,summary FROM owner_commands WHERE request_id=?",
+                                  (request_id,)).fetchone()
+        if row is None:
+            return None
+        if digest is not None and row[0] != digest:
+            raise ValueError("Request UUID was already used for different command bytes")
+        turn = self.conversation_turn(row[1])
+        return {**turn, "command_status": row[2], "command_run_id": row[3], "command_summary": row[4]} if turn else None
+
+    def finish_owner_command(self, request_id: str, status: str, run_id: str | None, summary: str):
+        with self.lock:
+            self.db.execute("UPDATE owner_commands SET status=?,run_id=?,summary=? "
+                            "WHERE request_id=? AND status='admitted'",
+                            (status, run_id, summary[:2000], request_id))
+            self.db.commit()
 
     def conversation_turns(
         self,

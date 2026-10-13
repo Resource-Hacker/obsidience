@@ -1,116 +1,136 @@
 # Obsidience Media
 
-Obsidience Media is a media server integration. Jellyfin owns the catalogue,
-metadata, item identity and per-user progress. The native Media pane and other
-clients are presentation and playback destinations for that one server. A TV
-is optional: catalogue reads have no TV dependency. The existing TV tuner is
-the first implemented destination adapter, not the product's root owner.
+Jellyfin owns the catalogue, native client delivery and per-user resume. Obsidience
+adds discovery, explicit acquisition, a native Media pane and ordinary capability
+receipts. The television is one optional destination; media bytes never pass
+through the model or the Harness. Local libraries and native Jellyfin Live TV are
+independent of the TV compositor, Sunshine and Moonlight route.
 
-The first slice adds bounded movie/episode queries, exact source selection,
-local-file admission, and a TV open/stop protocol. It does not yet supply the
-native Media pane, tuner progress reporting, seek/track controls, acquisition,
-virtual mounts, remote client access or a migration away from Android.
-Existing live TV remains with its current tuner; the catalogue does not yet
-import its guide. Those are separate delivery gates, not enabled placeholders.
+## Owners and configuration
 
-## Server and private configuration
+The optional integration defaults disabled. Private `obsidience/state/media.json`
+selects one authenticated Jellyfin instance/user, encrypted credential name,
+non-overlapping catalogue/player root mappings and optional acquisition/discovery.
+No credential value belongs in this file, the repository, command arguments or logs.
+The Harness owns its API clients in the existing lifespan; the tuner owns playback
+and progress reporting independently of Harness uptime.
 
-`obsidience-media-jellyfin.container` is a rootless Podman Quadlet for the pinned
-official image in `artifacts.lock.json`. Install it in the owner's
-`~/.config/containers/systemd/` after the installation storage preflight and
-catalogue inventory. It publishes only workstation loopback port 8096, mounts
-`~/Media/Obsidience/Movies` and `~/Media/Obsidience/TV` read-only, and keeps
-private application data/cache outside the source tree. It has no TV, Harness,
-GPU, compositor or desktop service dependency. It does not expose LAN access;
-additional clients need separately configured authenticated reachability.
+The installed provider versions, source revisions, licenses, digests and local
+patches are recorded in `artifacts.lock.json`. The Jellyfin Quadlet publishes
+loopback 8096, mounts media read-only and uses private application data/cache.
+Native clients need authenticated reachability; LAN/public access is not implied
+by installation. No GPU is assigned to catalogue/scanning. Jellyfin may remux
+native streams, while video/audio transcoding remains installation policy.
 
-Use supported Jellyfin startup/user/library APIs for installation. Keep NFO
-saving, media-directory writes, realtime monitoring, chapter/trickplay extraction
-and periodic scans disabled for initially admitted roots. Use one deliberate
-initial scan of the dedicated local roots. `Items/{id}/Refresh` in the pinned
-server does not recursively discover new files; a safe targeted rescan for a
-future virtual root is not established. Do not enable Tiramisu or another
-rescan owner on that assumption.
+Tiramisu is an optional virtual-file provider with owner-only control/engine Unix
+sockets. Its integration exposes health, bounded search/list and one source add;
+configuration, delete, scheduler, telemetry and dashboard endpoints are not exposed.
+Prowlarr supplies configured indexers and requires authentication, including on
+loopback. The adapter currently supports its public TorrentsCSV indexer. Cinemeta
+supplies movie/series identity and exact episode metadata; exact IMDb queries work
+when its name search omits a short film. Ranking applies only to returned eligible
+sources. No provider can promise every title or universal best quality.
 
-The Harness and tuner read ignored `obsidience/state/media.json` (or the private
-`OBSIDIENCE_MEDIA_CONFIG` path). Missing configuration defaults to disabled.
-Its shape is:
+The private Tiramisu service uses bounded RAM caches with persistent media-byte
+caching disabled. There is no complete-offline guarantee. Watchlists, periodic
+sync, automatic upgrades, autonomous playback and another LLM remain disabled.
+Peer networking does not grant control-API access or change router/VPN/firewall policy.
 
-```json
-{
-  "enabled": false,
-  "catalogue": {
-    "url": "http://127.0.0.1:8096",
-    "instance_id": "SERVER_ID_FROM_THIS_INSTALLATION",
-    "user_id": "USER_UUID_FROM_THIS_INSTALLATION",
-    "credential": "obsidience-media-jellyfin"
-  },
-  "roots": [
-    {"id": "movies", "catalogue_path": "/media/movies", "path": "/absolute/approved/Movies"}
-  ]
-}
-```
+## Mount and catalogue lifecycle
 
-Authenticate the intended Jellyfin user/device and encrypt the returned session
-token with `systemd-creds --user` under `~/.config/credentials/`. The Harness
-unit loads that exact credential name with `LoadCredentialEncrypted`; no token
-belongs in JSON, source, unit text, arguments or logs. The adapter uses the
-server's authenticated `MediaBrowser` authorization header with a stable device
-identity. Credential loading alone grants no Obsidience capability.
+Each virtual root adds `mount_path` to its ordinary `id`, `path` and
+`catalogue_path` mapping. Admit only the actual `fuse.tiramisu` mount, its source,
+mount identity and exact provider release/file mapping. A directory alone is not
+readiness. The service readiness check finishes before dependent catalogue startup.
 
-`media.library` has one Tool/Skill pair. Stage it and any Executive Skill grant
-through the existing Article/Review authority; never copy defaults over the live
-Vault or fabricate accepted metadata. Keep `enabled:false` until the intended
-bindings, client lifecycle and first destination verification are ready.
-Configuration changes require the normal guarded Harness deploy; the running
-client rejects a changed configuration until it acquires a new snapshot.
-For a private config or credential-unit change with no source change, use
-`obsidience/scripts/deploy --restart harness`; the same idle/readiness checks
-apply. Enabling the adapter does not grant a Skill or start any media.
+For a rootless Jellyfin container that reads an owner-only FUSE mount, map the host
+owner to container UID/GID zero with `UserNS=keep-id:uid=0,gid=0` and `User=0:0` in
+the installation's private Quadlet drop-in. The process remains rootless on the
+host, capabilities are dropped, and `allow_other` stays disabled. Bind the mount
+read-only and set `BindsTo`, `After` and `PartOf` for its Tiramisu service. This
+installation deliberately suspends Jellyfin if that mount owner fails, including
+local catalogue browsing, instead of risking an empty-library scan. Already-playing
+ordinary local files remain under the tuner and continue independently.
 
-## Exact local playback
+Disable media-directory writes, NFO saving, realtime monitoring, periodic library
+scans, chapter/trickplay extraction and other expensive analysis on virtual libraries.
+One registration owner queues `Items/{folder-id}/Refresh` for the exact configured
+virtual library, using metadata Default and image None. In the pinned server this
+queues folder ValidateChildren, including the initial stream probe. It does not
+refresh unrelated libraries. Admission caps virtual registration at 32 records per
+type, bounding that scan's collection. One exact-path readback distinguishes ready
+from pending; registration success does not claim catalogue or playback success.
 
-`media.library browse` returns bounded records and explicit source choices.
-`select` binds one item/source for the current activation. For the TV destination,
-`tv.control find` with `app:library` also creates current-turn choices, and
-`open` accepts that exact opaque id. It re-resolves the source before dispatch.
-The catalogue adapter never starts a player or streams media bytes.
+Tiramisu rejects new opens on shutdown and waits for existing readers/pumps before
+ordinary unmount. No lazy unmount, forced reader eviction or replacement worker is
+used. Guarded deployment refuses active/unknown Jellyfin sessions and provider reads.
+A failed dependency stops new work; it never creates a second catalogue.
 
-Admission is intentionally narrow in this slice: regular local MP4/M4V or
-Matroska/WebM files, approved non-overlapping roots, no symlinks/traversal or
-network/FUSE filesystems. The file revision includes its root mapping, held
-ancestor identities and file metadata. MP4 reference containers are rejected.
-The tuner opens by its retained file descriptor, forces the admitted demuxer,
-disables external references/automatic companion files, and keeps that reader
-until the matching mpv unload. This is an exact-source boundary, not a claim
-that arbitrary codecs or hostile media parsers have been audited.
+## Capabilities and presentation
 
-A play request carries catalogue instance, item, source, root, source revision,
-file revision and an unpredictable request generation. `playing_verified`
-requires that entry's first playback event and exact playlist readback. The TV
-adapter separately verifies the PC route is shown. `loading` after a bounded
-wait is pending, not a retry instruction. `stop` requires the observed source
-and generation and verifies unload plus idle readback. EOF ends once. Local
-pause/resume are unavailable until their identity-bound VOD implementation.
+`media.library` is a bounded read capability: browse, select, saved resume, health,
+metadata search and source candidates. `media.acquire` registers one exact opaque
+activation-bound candidate. Each has one real execute entrypoint, code-owned schema
+and exact Tool/Skill binding. Accepted Executive grants remain required; repository
+schemas and default Articles alone confer no authority.
 
-The tuner owns the playback lifetime. Harness/catalogue shutdown does not stop
-an already playing local file. Disabling integration rejects new selections and
-opens but leaves ordinary TV routes and stopping the current file available.
-No resume persistence is claimed from this first slice.
+The Media pane pages library records, shows detail and current TV state, previews
+source discovery and submits deterministic owner commands. Commands authenticate
+through the existing native owner token, enter the Executive activation/receipt
+owner and need no model classification. A request UUID binds the complete command;
+reusing it observes the original result rather than dispatching again. An active
+conversation refuses a new button command. Hidden/stale reads are cancelled.
+Button receipts remain durable without creating per-title Hindsight memories.
 
-## Deployment and rollback
+The accepted playback preference may obtain a unique recommended source for an
+exact requested title/episode missing locally. Ambiguous franchises, editions,
+episodes and ties require selection. Browse/search alone never registers anything.
+Acquisition is not purchase authority, automatic season monitoring or autoplay.
 
-Commit only the intended change, then use `obsidience/scripts/deploy --dry-run`
-and the guarded deploy. Tuner/player changes require fresh idle tuner and
-Android evidence before any owner restarts; active or unknown playback defers
-the deployment. The compositor, remote keyboard and locker are not restarted.
-Provider unit changes affect only the installed catalogue service.
+## Playback and resume
 
-Keep the previous image, configuration and application data. Disable integration
-first to stop new operations. Revert code through the existing guarded deploy
-at an idle playback boundary. This does not remove media or undo acquisitions.
-Stopping the catalogue is independent of stopping the TV or Harness. Before a
-server upgrade, use a Jellyfin-supported backup or stop the server and snapshot
-its complete private data; never copy an active SQLite database alone or delete
-WAL files. A code/image rollback does not reverse a database migration. Restore
-the matching data backup with the server stopped if a downgrade requires it.
+The existing tuner is the only controller of its mpv. Sources carry catalogue
+instance, item, media source, root, source revision, file/provider revision and
+playback generation. Local admission holds a no-follow descriptor chain inside
+approved roots and rejects external-reference containers. Virtual admission uses
+one bounded subprocess for actual FUSE reads, retaining blocked-worker ownership;
+read-only source description does not open the media. Only admitted MP4/M4V or
+Matroska/WebM payloads are accepted, with their demuxer constrained explicitly.
+
+First-picture and exact playlist/source evidence establish player start; the TV
+adapter separately verifies the intended PC route. Loading/unverified is not a
+retry instruction. Pause, unpause, absolute seek, track selection and stop bind the
+current source generation and use fresh readback. Seek tolerance is half a second;
+saved-resume start tolerance is five seconds. File EOF ends once, without live
+channel reconnection or next-episode autoplay.
+
+`open` with `resume:true` rereads Jellyfin's stored position and uses it in the one
+load command. It never adds a corrective second play/seek. The tuner reports bounded
+authenticated start/progress/stop events and reads stored user progress back before
+claiming persistence. Reporting failures leave playback running and explicitly
+degrade resume. Reports do not queue for later replay; observed changes by another
+client stop this reporter. Jellyfin provides no atomic compare-and-set, so a race
+between progress read and write remains possible. Physical picture, sound, pane
+interaction and remote acceptance require the owner; a successful build is not that
+acceptance. The existing remote keyboard lifetime and Android route are preserved.
+
+## Deployment, Review and rollback
+
+Compile affected Python, inspect the native pane with its current QML validator and
+use bounded real functional checks. Do not create tests or fixtures. Commit only
+this feature and deploy with `obsidience/scripts/deploy`; it preserves active TV,
+Android, catalogue clients and virtual readers. It never restarts the compositor,
+locker or remote keyboard. Private credential/config changes use the same deploy
+with the exact affected `--restart` owner.
+
+Stage Tool/Skill, procedure and Executive-grant Articles through the existing
+Article/Review API. Do not copy defaults into the live Vault or manufacture approval
+metadata. Review must accept the new capability before its normal ingress can run it.
+
+Disable new integration operations first for rollback. Restore the previous code,
+provider generation and private configuration at an idle boundary with the guarded
+deployer. Preserve acquired content and prior provider generations. Take provider
+backups through supported APIs, SQLite's backup API, or a quiesced complete snapshot;
+never copy an active database file alone or delete WAL sidecars. Code rollback cannot
+reverse a provider database migration. Remove a virtual catalogue bind/dependency
+only while the catalogue is stopped; drain owned readers before stopping its provider.

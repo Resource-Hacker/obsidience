@@ -1,4 +1,4 @@
-"""Read-only Jellyfin catalogue adapter; playback always goes through the tuner.
+"""Jellyfin catalogue adapter; native clients and the optional TV share one server.
 
 API reference: jellyfin/jellyfin ca0f16eb7c195f720a1493ed469a27c4657db0c6
 ItemsController GET Items (userId, ids, fields); SystemController Info/Public.
@@ -99,7 +99,7 @@ class JellyfinCatalogue:
             raise MediaUnavailable('catalogue_unavailable')
         return self.config['catalogue']
 
-    def _get(self, endpoint: str, params: dict | None = None) -> dict:
+    def _get(self, endpoint: str, params: dict | None = None) -> dict | list:
         catalogue = self._catalogue()
         started = time.monotonic()
         try:
@@ -122,7 +122,7 @@ class JellyfinCatalogue:
                     if len(material) > _MAX_BODY or time.monotonic() - started > 5:
                         raise MediaUnavailable('catalogue_response_limit')
                 result = json.loads(material, parse_constant=_invalid_constant)
-                if not isinstance(result, dict):
+                if not isinstance(result, (dict, list)):
                     raise MediaUnavailable('invalid_catalogue_response')
                 return result
         except (httpx.HTTPError, ValueError, UnicodeError):
@@ -131,17 +131,22 @@ class JellyfinCatalogue:
     def _pin(self) -> dict:
         catalogue = self._catalogue()
         info = self._get('/System/Info/Public')
+        if not isinstance(info, dict):
+            raise MediaUnavailable('invalid_catalogue_response')
         if info.get('Id') != catalogue['instance_id']:
             raise MediaUnavailable('catalogue_instance_changed')
         return catalogue
 
     def _query(self, **params) -> dict:
         catalogue = self._catalogue()
-        return self._get('/Items', {'userId': catalogue['user_id'],
-                                   'includeItemTypes': 'Movie,Episode', 'recursive': 'true',
-                                   'fields': 'Path,MediaSources', 'enableImages': 'false',
-                                   'enableUserData': 'false', 'sortBy': 'SortName',
-                                   'sortOrder': 'Ascending', **params})
+        result = self._get('/Items', {'userId': catalogue['user_id'],
+                                      'includeItemTypes': 'Movie,Episode', 'recursive': 'true',
+                                      'fields': 'Path,MediaSources', 'enableImages': 'false',
+                                      'enableUserData': 'false', 'sortBy': 'SortName',
+                                      'sortOrder': 'Ascending', **params})
+        if not isinstance(result, dict):
+            raise MediaUnavailable('invalid_catalogue_response')
+        return result
 
     def _item(self, item_id: str) -> dict:
         page = self._query(ids=_id(item_id), limit=2)
@@ -264,3 +269,95 @@ class JellyfinCatalogue:
         if current != binding:
             raise MediaUnavailable('catalogue_source_changed')
         return current
+
+    def refresh_registered_path(self, path: str, cancel=None) -> dict:
+        """Queue one exact virtual-folder validation and read back its source path."""
+        self._pin()
+        if (not isinstance(path, str) or len(path) > 4096 or not path.startswith('/')
+                or '\\' in path or any(p in ('', '.', '..') for p in path.split('/')[1:])):
+            raise MediaUnavailable('catalogue_source_unavailable')
+        roots = [root for root in self.config['roots']
+                 if path.startswith(root['catalogue_path'] + '/')]
+        if len(roots) != 1:
+            raise MediaUnavailable('catalogue_source_not_mapped')
+        root = roots[0]
+        relative = path[len(root['catalogue_path']) + 1:]
+        if (not relative or PurePosixPath(relative).suffix.lower() not in
+                ('.mp4', '.m4v', '.mkv', '.webm')):
+            raise MediaUnavailable('catalogue_source_unavailable')
+
+        folders = self._get('/Library/VirtualFolders')
+        if not isinstance(folders, list) or len(folders) > 64:
+            raise MediaUnavailable('invalid_virtual_folder_response')
+        matches = [folder for folder in folders if isinstance(folder, dict)
+                   and isinstance(folder.get('Locations'), list)
+                   and root['catalogue_path'] in folder['Locations']]
+        if len(matches) != 1:
+            raise MediaUnavailable('catalogue_root_ambiguous')
+        folder_id = _id(matches[0].get('ItemId'))
+
+        catalogue = self._catalogue()
+        headers = {'Accept': 'application/json', 'Accept-Encoding': 'identity',
+                   'Authorization': ('MediaBrowser Client="Obsidience Media", Device="Workstation", '
+                                     'DeviceId="obsidience-media", Version="1", Token="'
+                                     + _token(catalogue['credential']) + '"')}
+        if cancel is not None and cancel.is_set():
+            return {'status': 'pending', 'reason': 'refresh_skipped_cancelled'}
+        try:
+            with self.client.stream(
+                    'POST', catalogue['url'] + f'/Items/{folder_id}/Refresh',
+                    params={'metadataRefreshMode': 'Default', 'imageRefreshMode': 'None',
+                            'replaceAllMetadata': 'false', 'replaceAllImages': 'false',
+                            'regenerateTrickplay': 'false'}, headers=headers) as response:
+                queued = response.status_code == 204
+        except (httpx.HTTPError, OSError):
+            queued = None
+        if cancel is not None and cancel.is_set():
+            return {'status': 'pending', 'reason': 'catalogue_refresh_interrupted'}
+
+        # Jellyfin queues folder validation asynchronously; verify exact source path,
+        # never a fuzzy title. One bounded read may still legitimately return pending.
+        try:
+            page = self._query(parentId=folder_id, startIndex=0, limit=128)
+        except MediaUnavailable:
+            return {'status': 'pending',
+                    'reason': 'catalogue_refresh_uncertain' if queued is None
+                    else 'catalogue_readback_unavailable'}
+        items = page.get('Items')
+        total = page.get('TotalRecordCount')
+        if (not isinstance(items, list) or len(items) > 128
+                or type(total) is not int or total < 0):
+            return {'status': 'pending', 'reason': 'invalid_catalogue_readback'}
+        found = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            paths = [item.get('Path')]
+            sources = item.get('MediaSources')
+            if isinstance(sources, list) and len(sources) <= 32:
+                paths.extend(source.get('Path') for source in sources
+                             if isinstance(source, dict))
+            if path in paths:
+                found.append(item)
+        if len(found) == 1 and found[0].get('Type') in ('Movie', 'Episode'):
+            return {'status': 'ready', 'item_id': _id(found[0].get('Id')),
+                    'source_path_verified': True}
+        reason = ('catalogue_refresh_uncertain' if queued is None else
+                  'catalogue_readback_ambiguous' if len(found) > 1 else
+                  'catalogue_readback_limit' if total > len(items) else
+                  'catalogue_source_pending')
+        return {'status': 'pending', 'reason': reason}
+
+    def resume(self, item_id: str) -> dict:
+        """Stored per-user progress; never infer persistence from a player clock."""
+        self._pin()
+        page = self._query(ids=_id(item_id), limit=1, enableUserData='true')
+        items = page.get('Items') or []
+        if len(items) != 1 or items[0].get('Id', '').replace('-', '') != _id(item_id):
+            raise MediaUnavailable('catalogue_item_unavailable')
+        data = items[0].get('UserData') or {}
+        ticks = data.get('PlaybackPositionTicks')
+        if type(ticks) is not int or ticks < 0:
+            raise MediaUnavailable('catalogue_resume_unavailable')
+        return {'item_id': _id(item_id), 'position': ticks / 10000000,
+                'played': data.get('Played') is True, 'persistence': 'read_back'}

@@ -297,7 +297,7 @@ async def run_capability(ex, name: str, args: dict, *, execute, execute_async, s
     elif ((name in {"camera.observe", "computer.observe", "computer.act"}
            or name == "tv.control" and args.get("action") not in {
                "on", "off", "find", "volume", "volume_up", "volume_down", "mute", "unmute", "pause", "resume",
-               "notice", "stop"})
+               "notice", "stop", "vod"})
           and "vision" not in ex.model.capabilities):
         observation = json.dumps({
             "observation": {
@@ -453,6 +453,13 @@ async def run_capability(ex, name: str, args: dict, *, execute, execute_async, s
         # The TV adapter has already exhausted its bounded transport/read
         # attempt. Preserve the failure and end this turn's effects.
         ex.ctx["_tv_control_failed"] = True
+        ex.allowed = ["task.complete"]
+    if name == "media.acquire" and (not isinstance(result_object, dict)
+                                    or result_object.get("status") != "completed"
+                                    or result_object.get("delivery") != "verified"):
+        # Registration can persist before transport loss. The adapter reconciles
+        # once; a failed/unknown receipt ends this activation's effects.
+        ex.ctx["_media_acquire_failed"] = True
         ex.allowed = ["task.complete"]
     if name in {"application.launch", "media.pause"} and not (completion_evidence or {}).get("verified"):
         # The capability owns its bounded wait. Failure or uncertainty ends

@@ -38,8 +38,105 @@ EXECUTIVE = 'Agents/Executive/Executive'
 COMMANDS = ('lights.set', 'tv.control', 'media.pause', 'task.complete')
 
 
+async def _run_owner_media(plugin: AgentPlugin, command: dict, session_id: str, turn_id: str) -> None:
+    """One finite authenticated owner plan through normal capability receipts."""
+    from ..commands import owner_media_command
+    command = owner_media_command(command)
+    ctx, run = plugin.ctx, plugin.run
+    await sessions.append(session_id, run, [
+        sessions.part(ctx['objective'], 'user', id=turn_id, run=run),
+        sessions.part(json.dumps({'status': 'started', 'command': command, 'run_id': run,
+                                 'reply_to': turn_id}), 'plugin:obsidience.command', run=run)])
+    settled = False
+    result = None
+    try:
+        operation = command['operation']
+        acquisition_choice = None
+        if operation == 'acquire':
+            from ...interfaces.api.media import claim_source_preview, source_fingerprint
+            proof = claim_source_preview(command['preview_token'], command['request_id'])
+            blocks = await plugin.operate('media.library', {
+                'action': 'search', 'query': proof['query'], 'type': proof['type']})
+            metadata_page = json.loads(next(block['text'] for block in blocks if block.get('type') == 'text'))
+            matches = [row for row in metadata_page.get('matches', [])
+                       if isinstance(row, dict) and all(row.get(key) == proof[key]
+                          for key in ('imdb_id', 'type', 'title', 'year'))]
+            if metadata_page.get('status') != 'completed' or len(matches) != 1:
+                raise ValueError('The chosen title changed or is unavailable; choose it again')
+            args = {'action': 'candidates', 'metadata_id': matches[0]['metadata_id']}
+            if proof['type'] == 'series':
+                args.update(season=proof['season'], episode=proof['episode'])
+            blocks = await plugin.operate('media.library', args)
+            source_page = json.loads(next(block['text'] for block in blocks if block.get('type') == 'text'))
+            exact = []
+            for row in source_page.get('candidates', []):
+                private = (ctx.get('_media_acquisition_candidates') or {}).get(row.get('candidate_id'))
+                if (isinstance(private, dict) and private.get('run_id') == run
+                        and source_fingerprint(private) == proof['fingerprint']):
+                    exact.append((row['candidate_id'], private))
+            if source_page.get('status') != 'completed' or len(exact) != 1:
+                raise ValueError('The exact source changed or is unavailable; choose it again')
+            candidate_id, acquisition_choice = exact[0]
+            call = {'name': 'media.acquire', 'args': {'action': 'register', 'candidate_id': candidate_id}}
+        elif operation == 'play':
+            selected = command['selection']
+            blocks = await plugin.operate('media.library', {
+                'action': 'select', 'item_id': selected['item_id'],
+                'media_source_id': selected['media_source_id']})
+            result = json.loads(next(block['text'] for block in blocks if block.get('type') == 'text'))
+            candidate = result.get('id') if result.get('status') == 'completed' else None
+            binding = (ctx.get('_media_candidates') or {}).get(candidate)
+            if binding is None or binding.get('source_revision') != selected['source_revision']:
+                raise ValueError('The selected catalogue source changed or is unavailable; select it again')
+            call = {'name': 'tv.control', 'args': {'action': 'open', 'id': candidate}}
+            if command['resume']:
+                call['args']['resume'] = True
+        elif operation == 'server':
+            from ...media.config import load_config
+            config = load_config()
+            if not config.get('enabled') or not config.get('catalogue'):
+                raise ValueError('The media server is not configured')
+            call = {'name': 'application.launch', 'args': {
+                'application': 'microsoft_edge', 'url': config['catalogue']['url'] + '/web/'}}
+        else:
+            args = {'action': 'vod', 'operation': operation,
+                    'generation': command['generation'], 'source': command['source']}
+            if operation == 'seek':
+                args['position'] = command['position']
+            call = {'name': 'tv.control', 'args': args}
+        ctx['_reflex_proposal'] = deepcopy(call)
+        result = await plugin.operate(call['name'], call['args'])
+        verified = ctx.get('_reflex_command_verified') is True
+        if operation == 'acquire':
+            receipt = json.loads(next(block['text'] for block in result if block.get('type') == 'text'))
+            verified = (ctx.get('_receipt_covered') is True
+                        and acquisition_choice.get('register_attempted') is True
+                        and receipt.get('status') == 'completed' and receipt.get('delivery') == 'verified'
+                        and receipt.get('title') == acquisition_choice['title']
+                        and receipt.get('type') == ('movie' if acquisition_choice['type'] == 'movie' else 'tv')
+                        and type(receipt.get('registered_files')) is int and receipt['registered_files'] > 0)
+        summary = ('The exact selected source is registered in the library. Catalogue availability is checked separately; playback was not started.' if operation == 'acquire' else
+                   'Media server opened.' if operation == 'server' else
+                   'The selected library source is playing on the registered TV.' if operation == 'play' else
+                   f"Library playback {operation} verified on the registered TV.") if verified else (
+                   'The media command could not be verified. Use its receipt; do not resend it.')
+        await plugin.operate('task.complete', {'status': 'completed' if verified else 'failed',
+                                             'summary': summary})
+        if not plugin.ex.done:
+            raise RuntimeError('Media command completion was not accepted')
+        settled = True
+    finally:
+        await sessions.append(session_id, run, [sessions.part(json.dumps({
+            'status': plugin.ex.status if settled else 'unsettled', 'command': command,
+            'result': result, 'run_id': run, 'reply_to': turn_id, 'must_not_replay': True,
+        }), 'plugin:obsidience.command-outcome', run=run)])
+
+
 async def _run_command(plugin: AgentPlugin, command: dict, session_id: str, turn_id: str) -> None:
     """Controller-owned execution of one exact command; never a fabricated model span."""
+    if "operation" in command:
+        await _run_owner_media(plugin, command, session_id, turn_id)
+        return
     ex, ctx, run = plugin.ex, plugin.ctx, plugin.run
     await sessions.append(session_id, run, [
         sessions.part(ctx['objective'], 'user', id=turn_id, run=run),
@@ -145,7 +242,16 @@ async def run_adk_session(task, model, messages, allowed, ctx, agent_name, effor
     continuation = params.get('event') == 'task.continue'
 
     command = None
-    if (task.ref == EXECUTIVE and task.kind == 'agent' and conversation_id
+    if params.get('owner_command') is not None:
+        from ..commands import owner_media_command
+        if not (task.ref == EXECUTIVE and task.kind == 'agent' and conversation_id
+                and params.get('reply_to_turn_id') and not continuation
+                and not (ex.steering is not None and (ex.steering.pending or ex.steering.applied))):
+            raise ValueError('Typed media command requires one admitted owner activation')
+        command = owner_media_command(params['owner_command'])
+        trace.append({'command_route': 'owner_media', 'request_id': command['request_id'],
+                      'model_requests': 0, 'memory_recalls': 0})
+    elif (task.ref == EXECUTIVE and task.kind == 'agent' and conversation_id
             and params.get('reply_to_turn_id') and not continuation
             and effort == 'none' and initial_lease is None and not trace
             and not (ex.steering is not None and (ex.steering.pending or ex.steering.applied))):

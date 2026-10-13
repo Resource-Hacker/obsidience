@@ -1009,9 +1009,8 @@ def _reach_pc(row, cancel, context, power, action, tv):
     if pc is None:
         raise ValueError('The PC player does not answer')
     if pc.get('provider') == 'local':
-        return {'status': 'failed', 'delivery': 'not_dispatched', 'effect_applied': False,
-                'correction_allowed': True,
-                'failure': 'Local media pause and resume require the next VOD control slice; use stop to end playback.'}
+        return _vod({'operation': action, 'generation': pc.get('generation'),
+                     'source': pc.get('source')}, context, cancel)
     idle = pc['playback'] in ('idle', 'failed')
     if idle and action == 'resume':
         return {'status': 'failed', 'delivery': 'not_dispatched', 'effect_applied': False, 'correction_allowed': True,
@@ -1307,14 +1306,23 @@ def _bind(candidates, context):
                                   candidate.get('duration') == 'live or unknown')
 
 
-def _open_media(candidate_id, context, row, cancel):
+def _open_media(candidate_id, context, row, cancel, resume=False):
     """One exact catalogue selection through the same TV and playback owners."""
     from ...media import service
     binding = (context.get('_media_candidates') or {}).get(candidate_id)
     if binding is None:
         return {'status': 'failed', 'delivery': 'not_dispatched', 'effect_applied': False,
                 'correction_allowed': True, 'failure': 'Select library content in this turn before opening it.'}
-    source = service.catalogue().revalidate(binding)
+    catalogue = service.catalogue()
+    source = catalogue.revalidate(binding)
+    start_seconds = None
+    if resume:
+        saved = catalogue.resume(source['item_id'])
+        position = saved.get('position')
+        if (saved.get('item_id') != source['item_id'] or saved.get('persistence') != 'read_back'
+                or type(position) not in (int, float) or not 0 <= position <= 1_000_000_000):
+            raise ValueError('The exact library item has no verified stored resume position')
+        start_seconds = position
     token = 'media:' + source['source_revision']
     attempted = context.setdefault('_tv_attempted', set())
     if token in attempted:
@@ -1333,6 +1341,7 @@ def _open_media(candidate_id, context, row, cancel):
     android = _android.state()
     if previous_source == 'android' and android is None:
         raise ValueError('Cannot verify the Android source is stopped before switching')
+    source = catalogue.revalidate(source)  # Stored progress never broadens or replaces the source binding.
     attempted.add(token)
     if cancel is not None and cancel.is_set():
         raise InterruptedError('TV command cancelled before media dispatch')
@@ -1344,7 +1353,7 @@ def _open_media(candidate_id, context, row, cancel):
     if previous_source != 'player' and _show('player') != 'player':
         raise ValueError('The TV session did not select its existing player')
     title = binding.get('title') or 'Library item'
-    result = _player.play_local(source, title, cancel)
+    result = _player.play_local(source, title, cancel, start_seconds=start_seconds)
     expected = {key: source[key] for key in ('provider', 'root_id', 'revision',
                                             'catalogue_instance', 'item_id', 'media_source_id', 'source_revision')}
     if (result.get('playback') != 'playing_verified' or not result.get('generation')
@@ -1387,6 +1396,37 @@ def _stop_media(context, cancel):
     context['_tv_effect_uncertain'] = False
     return {'status': 'completed', 'delivery': 'verified', 'action': 'stop', 'effect_applied': True,
             'must_not_replay': True, 'generation': current['generation'], 'pc': result}
+
+
+def _vod(args, context, cancel):
+    """A current destination observation never authorizes a replacement generation."""
+    operation = args['operation']
+    generation, source = args['generation'], args['source']
+    if operation not in ('state', 'pause', 'resume', 'seek', 'stop', 'track'):
+        raise ValueError('Unknown local playback operation')
+    if _show('status') != 'player':
+        raise ValueError('The TV session is not showing its media player')
+    current = _player.local_state(generation, source, cancel)
+    if operation == 'state':
+        return {'status': 'completed', 'delivery': 'verified', 'action': 'vod',
+                'effect_applied': False, 'pc': current}
+    if cancel is not None and cancel.is_set():
+        raise InterruptedError('TV control cancelled before dispatch')
+    context['_tv_effect_uncertain'] = True
+    if operation in ('pause', 'resume'):
+        result = _player.pause_local(generation, source, paused=operation == 'pause', cancel=cancel)
+    elif operation == 'seek':
+        result = _player.seek_local(generation, source, args['position'], cancel=cancel)
+    elif operation == 'stop':
+        result = _player.stop_local(generation, source, cancel=cancel)
+    else:
+        result = _player.select_track_local(generation, source, args['kind'], args['track_id'], cancel=cancel)
+    if _show('status') != 'player':
+        raise ValueError('The playback destination changed after dispatch; do not repeat')
+    context['_tv_effect_uncertain'] = False
+    return {'status': 'completed', 'delivery': 'verified', 'action': 'vod',
+            'operation': operation, 'effect_applied': (result.get('control') or {}).get('effect_applied', True),
+            'must_not_replay': True, 'generation': generation, 'pc': result}
 
 
 _LIVE_WORDS = {'news', 'weather', 'live', 'forecast', 'headlines', *_TOPICS}
@@ -1736,12 +1776,18 @@ def _execute(args, context):
         raise ValueError('TV arguments must be an object')
     action = args.get('action')
     fields = {'on': [set()], 'off': [set()], 'observe': [set()], 'stop': [set()], 'launch': [{'app'}],
+              'vod': [{'operation', 'generation', 'source'},
+                      {'operation', 'generation', 'source', 'position'},
+                      {'operation', 'generation', 'source', 'kind', 'track_id'}],
               'key': [{'key'}], 'keys': [{'keys'}], 'text': [{'text'}],
               'find': [{'query'}, {'query', 'app'}], 'play': [{'query'}, {'query', 'app'}],
-              'open': [{'id'}, {'url'}], 'volume': [{'level'}], 'notice': [{'text'}],
+              'open': [{'id'}, {'url'}, {'id', 'resume'}], 'volume': [{'level'}], 'notice': [{'text'}],
               **{target: [set()] for target in TARGETS if target != 'volume'}}
     if action not in fields or set(args) - {'action'} not in fields[action]:
         raise ValueError('Invalid TV action arguments')
+    if action == 'open' and 'resume' in args and (type(args['resume']) is not bool
+            or not isinstance(args.get('id'), str) or not args['id'].startswith('m')):
+        raise ValueError('resume takes a boolean for an exact current library selection')
     if action == 'key' and args['key'] not in NAV_KEYS and args['key'] not in MEDIA_KEYS:
         raise ValueError('Unknown TV remote key; volume, mute, pause and resume are their own actions')
     if action == 'keys' and (not isinstance(args['keys'], list) or not 1 <= len(args['keys']) <= 8
@@ -1789,8 +1835,10 @@ def _execute(args, context):
             raise ValueError('An earlier TV effect is uncertain; stop effects and report it')
         if action == 'stop':
             return _stop_media(context, cancel)
+        if action == 'vod':
+            return _vod(args, context, cancel)
         if action == 'open' and str(args.get('id', '')).startswith('m'):
-            return _open_media(args['id'], context, row, cancel)
+            return _open_media(args['id'], context, row, cancel, args.get('resume', False))
         attempted = context.setdefault('_tv_attempted', set())
         opening = action in ('open', 'play')
         extra = {'query': args['query'].strip(), 'chosen': chosen, 'alternatives': alternatives} if action == 'play' else {}

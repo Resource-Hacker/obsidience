@@ -177,3 +177,74 @@ def recognize_command(objective, allowed):
         return None
     target, state = choices.pop()
     return {'name': 'lights.set', 'args': {'target': target, 'state': state}}
+
+
+def owner_media_command(value: object) -> dict:
+    """Closed native owner UI protocol. It grants no Tools or identity."""
+    import math
+    from uuid import UUID
+    if not isinstance(value, dict):
+        raise ValueError('Media command must be an object')
+    try:
+        request_id = str(UUID(value['request_id']))
+    except (KeyError, ValueError, TypeError, AttributeError):
+        raise ValueError('Media command requires one request UUID') from None
+    operation = value.get('operation')
+    if operation == 'acquire':
+        if (set(value) != {'request_id', 'operation', 'preview_token'}
+                or not isinstance(value.get('preview_token'), str)
+                or not re.fullmatch(r'[0-9a-f]{32}', value['preview_token'])):
+            raise ValueError('Acquire requires one exact, unexpired source choice')
+        return {'request_id': request_id, 'operation': operation, 'preview_token': value['preview_token']}
+    if operation == 'server':
+        if set(value) != {'request_id', 'operation'}:
+            raise ValueError('Invalid media server command')
+        return {'request_id': request_id, 'operation': operation}
+    if operation not in {'play', 'pause', 'resume', 'seek', 'stop'} or value.get('destination') != 'tv':
+        raise ValueError('Choose the registered TV destination and one media operation')
+    expected = {'request_id', 'operation', 'destination', 'selection'} if operation == 'play' else {
+        'request_id', 'operation', 'destination', 'generation', 'source'} | ({'position'} if operation == 'seek' else set())
+    if set(value) != expected and not (operation == 'play' and set(value) == expected | {'resume'}):
+        raise ValueError('Invalid media command fields')
+    result = {**value, 'request_id': request_id}
+    if operation == 'play':
+        if type(value.get('resume', False)) is not bool:
+            raise ValueError('Saved resume must be a boolean')
+        result['resume'] = value.get('resume', False)
+        selected = value['selection']
+        if not isinstance(selected, dict) or set(selected) != {'item_id', 'media_source_id', 'source_revision'}:
+            raise ValueError('Play requires the exact selected catalogue source')
+        try:
+            item = UUID(selected['item_id']).hex
+        except (ValueError, TypeError, AttributeError):
+            raise ValueError('Invalid catalogue item') from None
+        if (not isinstance(selected['media_source_id'], str)
+                or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', selected['media_source_id'])
+                or not isinstance(selected['source_revision'], str)
+                or not re.fullmatch(r'[0-9a-f]{64}', selected['source_revision'])):
+            raise ValueError('Invalid catalogue source revision')
+        result['selection'] = {**selected, 'item_id': item}
+    else:
+        source = value['source']
+        fields = {'provider', 'root_id', 'revision', 'catalogue_instance', 'item_id', 'media_source_id', 'source_revision'}
+        if (not isinstance(value['generation'], str) or not re.fullmatch(r'[0-9a-f]{32}', value['generation'])
+                or not isinstance(source, dict) or set(source) != fields or source['provider'] != 'local'
+                or any(not isinstance(v, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', v)
+                       for v in source.values())
+                or not re.fullmatch(r'[0-9a-f]{64}', source['revision'])
+                or not re.fullmatch(r'[0-9a-f]{64}', source['source_revision'])):
+            raise ValueError('Control requires the observed local generation and exact source')
+        result['source'] = dict(source)
+        if operation == 'seek' and (type(value['position']) not in (int, float)
+                                   or not math.isfinite(value['position']) or not 0 <= value['position'] <= 86400):
+            raise ValueError('Seek position must be between 0 and 86400 seconds')
+    return result
+
+
+def owner_media_text(command: dict) -> str:
+    return ('Register the exact source selected in the Media pane in the library.' if command['operation'] == 'acquire' else
+            'Open the configured media server.' if command['operation'] == 'server' else
+            'Resume the selected library source from its saved position on the registered TV.'
+                if command['operation'] == 'play' and command.get('resume') else
+            'Play the selected library source on the registered TV.' if command['operation'] == 'play' else
+            f"{command['operation'].capitalize()} the observed library playback on the registered TV.")

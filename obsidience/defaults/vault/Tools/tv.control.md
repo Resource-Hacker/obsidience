@@ -1,7 +1,7 @@
 ---
 type: tool
 title: tv.control
-description: Control one identity-bound television through ADB with intent calls (play content, exact volume, mute, pause, power) confirmed from the TV's own state, and remote navigation as a fallback.
+description: Control one identity-bound television and its current media destination with verified intent calls, generation-bound local VOD controls, and remote navigation as a fallback.
 obsidience:
   binding: capability:tv.control
   source: obsidience/harness/capabilities/tv/control.py
@@ -10,16 +10,27 @@ obsidience:
 
 ## Runtime
 
-For an explicitly selected library item on this TV, use `find` with `app: library`
-and the query, then `open` its exact current-turn `id`. The catalogue is an
-independent media service; this Tool only owns its TV playback destination.
-Library open revalidates the item, edition/episode, source revision and approved
-local file before dispatch. Only verified source/generation and TV-route
-readback establishes playback. `stop` stops the observed local generation; it
-does not delete media. Pending or uncertain playback must never be resent.
-Local pause/resume, seek, track selection and saved resume are not yet supplied
-by this first slice; report them as unavailable. Existing live TV and Android
-transport behavior is unchanged.
+For an explicitly selected Jellyfin item on this TV, use `find` with `app:
+library` and the query, then `open` its exact current-turn `id`. The catalogue
+is independent; this Tool owns only the TV and playback destination. Library
+open revalidates the item, edition/episode, source revision and approved local
+file before dispatch. Only verified source, generation and TV-route readback
+establish playback. Pending or uncertain playback must never be resent.
+
+Local VOD control uses `action: vod`, an exact current `generation`, and the
+`source` identity returned by the current playback state (`provider`, `root_id`,
+`revision`, `catalogue_instance`, `item_id`, `media_source_id`,
+`source_revision`). Operations are `state`, `pause`, `resume`, absolute `seek`
+with `position` in seconds, `stop`, and `track` with `kind: audio|subtitle`
+and an exact `track_id` (`null` disables subtitles). Every read or effect
+revalidates the same generation and source through the existing tuner. A stale
+generation, changed source or uncertain effect fails closed; do not repeat it.
+Track IDs must come from current VOD state. `stop` ends that exact playback
+generation; it does not delete or de-register media. To start at Jellyfin's saved
+position, `open` accepts `resume: true` with the exact current catalogue selection
+id. It reads stored progress afresh, applies it in the single load command and
+verifies first-picture position within five seconds. Omitted or false starts at
+zero; a later `resume` transport action means unpause, not saved-position lookup.
 
 Control the one registered television with `action`. Intents are the normal path; remote keys are for navigation only.
 

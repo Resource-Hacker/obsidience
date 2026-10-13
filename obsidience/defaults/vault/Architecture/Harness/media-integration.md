@@ -3,34 +3,62 @@ type: knowledge
 title: Media integration
 ---
 
-Obsidience Media is centered on an independent media server and catalogue.
-Jellyfin owns movie and episode records, their item/source identities and
-per-user resume. Browsing does not require a television. Desktop presentation
-and other supported clients use that same server; client access is configured
-separately from catalogue ownership. The Harness owns accepted capability
-bindings, conversation and receipts, never a second media database.
+Obsidience Media is one independent catalogue and delivery service. Jellyfin
+owns movie and episode records, item/source identities, playback delivery and
+per-user saved resume. Browsing and saved-position lookup do not require a
+television. Desktop presentation and any configured native clients use the same
+Jellyfin instance; clients consume the catalogue and do not own it. The Harness
+owns accepted capability bindings, conversation and receipts, never a second
+media database.
 
-The existing television route is the first playback destination adapter.
-Its tuner remains the sole controller of that route's mpv; its compositor,
+Cinemeta supplies bounded title/IMDb metadata discovery. The configured source
+provider supplies release candidates; Prowlarr's public TorrentsCSV indexer is
+the supported self-hostable route when configured. Release metadata and hashes
+remain untrusted. Ranking can recommend a unique best match but cannot resolve
+an edition or episode ambiguity. The local Tiramisu provider is reached only
+through its owner-only Unix socket. It accepts one run-bound source registration
+after an explicit owner acquisition request; it does not autonomously sync a
+watchlist, replace releases, schedule upgrades or play media. Provider or
+registration success is separate from Jellyfin catalogue readiness and
+verified playback.
+
+The TV is an optional playback destination, not a media authority. A configured
+native Jellyfin client consumes server delivery; it does not register media or
+control acquisition. The existing workstation TV route remains a separate
+adapter: its tuner is the sole controller of its mpv, while its compositor,
 audio server, Sunshine and Moonlight retain display and transport ownership.
-Other destinations use their own accepted player/client ownership.
-Media bytes never pass through the model or a Harness streaming proxy. Native
-Jellyfin clients can use the server's supported delivery interfaces; the
-workstation TV adapter resolves approved local files to avoid double encoding.
+Media bytes never pass through the model or a Harness streaming proxy. The
+local TV adapter accepts only exact, revalidated catalogue sources and does not
+transcode them.
 
-The first slice resolves explicitly selected local files. Private installation
-configuration maps approved roots; exact file descriptors, source revisions
-and playback generations prevent path or title substitutions. The tuner
-verifies its playlist entry and playback event, and TV control verifies the
-shown route. Physical picture and sound acceptance is separate. File EOF ends
-once; the live-channel reconnect policy never restarts a film.
+Private installation configuration maps approved roots; exact file identities,
+source revisions and playback generations prevent path or title substitutions.
+The tuner verifies its playlist entry and playback event, and TV control
+verifies the shown route. Local VOD state, pause/resume, absolute seek, stop and
+track selection require the current generation plus exact source identity and
+fresh readback; uncertain effects are never repeated. Jellyfin saved resume is
+read from that same catalogue and persisted by the playback progress adapter.
+Physical picture and sound acceptance is separate. File EOF ends once; the
+live-channel reconnect policy never restarts a film.
 
-The integration defaults disabled. Disabling it rejects new selections/opens;
-existing playback and the ordinary TV route remain independent of catalogue
-and Harness availability. No second catalogue, scheduler, Agent, TV player or
-Article type is introduced. Movie records and playback progress are not wiki
-Articles. Tuner resume reporting, the native Media pane, acquisition and virtual
-mounts require later verified slices; they are not implemented by this contract.
+Acquisition streaming must keep persistent media-byte caching disabled and use
+an explicitly bounded in-memory working set. Registration alone does not add a
+Jellyfin item. The shared FUSE mount and library discovery must each be ready
+before an acquired item is considered catalogue-ready. A separate constrained virtual-source admission checks the actual mount identity,
+provider release/file mapping and generation, then probes only the selected file
+in an isolated bounded process. A blocked probe retains its ownership until it
+exits; no replacement probe is spawned. Catalogue startup waits for that mount,
+and mount-owner loss stops the affected catalogue instead of scanning an empty
+directory. Existing tuner playback of ordinary local files remains independent.
+Never report an acquired title as playable based only
+on Tiramisu's registration reply.
+
+The optional integrations default disabled. Disabling them rejects new source
+searches or registrations; existing playback and the ordinary TV route remain
+independent of acquisition availability. Scheduled sync, watchlist ingestion,
+automatic upgrades and autonomous next-episode playback are not enabled. No
+second catalogue, scheduler, Agent, TV player or Article type is introduced.
+Movie records and playback progress are not wiki Articles.
 
 See [Golden ontology](/Architecture/Harness/action-ontology.md) and
 [Media library and playback](/Runbooks/Operations/media-library-and-playback.md).

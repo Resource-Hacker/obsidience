@@ -21,11 +21,16 @@ import socket
 import time
 
 SOCKET = os.path.join(os.environ.get('XDG_RUNTIME_DIR') or f'/run/user/{os.getuid()}', 'obsidience-tv', 'tuner.sock')
-# The tuner is local and answers within milliseconds; every call but play ends within this.
+# Ordinary live commands answer within milliseconds; local VOD reads have a
+# separate bounded deadline below.
 TIMEOUT = 2.5
 # Measured 2026-10-12: a channel shows its first picture 0.5-1.5 s after the request, and about
 # 3 s when the tuner first opens a fresh session with Pluto.
 START_LIMIT = 12.0
+# A target command plus fresh readback may take up to the tuner's five-second
+# bound. This transport margin does not authorize another target command.
+VOD_LIMIT = 8.0
+SEEK_TOLERANCE = 0.5
 _LINE_LIMIT = 1024 * 1024
 
 
@@ -77,7 +82,7 @@ def state():
     Finite EOF returns idle with its terminal ended receipt; it is never reopened.
     """
     try:
-        tuner = _ask({'op': 'state'})
+        tuner = _ask({'op': 'state'}, limit=VOD_LIMIT)
     except (OSError, ValueError):
         return None
     return tuner if tuner.get('player') else None
@@ -102,23 +107,33 @@ def play(source, title, cancel=None, limit=START_LIMIT):
     return tuner.get('playback') in ('playing', 'break') and tuner.get('title') == title
 
 
-def play_local(source: dict, title: str, cancel=None, limit: float = START_LIMIT) -> dict:
+def play_local(source: dict, title: str, cancel=None, limit: float = START_LIMIT,
+               start_seconds: float | None = None) -> dict:
     """Dispatch one admitted catalogue source once and return its complete readback.
 
     Only ``playing_verified`` with matching source identity and a fresh generation
     establishes playback. Loading, failed, or a terminal EOF receipt is returned
     explicitly; the caller must not replace that result with title matching or
     retry an uncertain dispatch. Paths are request-only and never returned.
+
+    Optional start_seconds comes from stored catalogue progress and travels in
+    this same play request. First-picture position readback must be within five
+    seconds of it, with a finite file duration and a target before EOF. Omitting
+    it starts at zero; no correction seek or second load follows a timeout.
     """
     fields = ('provider', 'root_id', 'relative_path', 'revision', 'catalogue_instance',
               'item_id', 'media_source_id', 'source_revision')
     if (not isinstance(source, dict) or set(source) not in (set(fields), set(fields) | {'title'})
             or source.get('provider') != 'local' or source.get('title', title) != title):
         raise ValueError('local playback takes one exact catalogue source')
+    if start_seconds is not None and (type(start_seconds) not in (int, float)
+            or not 0 <= start_seconds <= 1_000_000_000):
+        raise ValueError('local start takes a finite nonnegative saved position')
     expected = {key: source[key] for key in fields if key != 'relative_path'}
     request_generation = secrets.token_hex(16)
+    options = {'start_seconds': start_seconds} if start_seconds is not None else {}
     tuner = _ask({'op': 'play', **source, 'title': title, 'wait': limit,
-                  'generation': request_generation}, limit + TIMEOUT, cancel)
+                  'generation': request_generation, **options}, limit + TIMEOUT + VOD_LIMIT, cancel)
     actual = tuner.get('source')
     # A short finite file can end before the bounded request returns. Its receipt
     # identifies that EOF, without pretending it remains on the screen.
@@ -131,6 +146,12 @@ def play_local(source: dict, title: str, cancel=None, limit: float = START_LIMIT
         raise ValueError('The TV tuner did not confirm the playback generation')
     if tuner.get('playback') == 'playing_verified' and tuner.get('verification') != 'verified':
         raise ValueError('The TV tuner did not verify local playback')
+    if start_seconds is not None and tuner.get('playback') == 'playing_verified':
+        start = tuner.get('start')
+        if (not isinstance(start, dict) or start.get('verified') is not True
+                or start.get('requested') != start_seconds or type(start.get('position')) not in (int, float)
+                or abs(start['position'] - start_seconds) > 5):
+            raise ValueError('The TV tuner did not verify the saved start position')
     return tuner
 
 
@@ -138,13 +159,77 @@ def stop_local(generation: str, source: dict, cancel=None) -> dict:
     """Stop only the exact observed local generation; never a replacement source."""
     # The tuner waits once for the matching unload and its idle readback.
     tuner = _ask({'op': 'stop', 'generation': generation, 'source': source},
-                 limit=4 * TIMEOUT, cancel=cancel)
+                 limit=15.0, cancel=cancel)
     ended = tuner.get('ended')
     if (tuner.get('playback') != 'idle' or not isinstance(ended, dict)
             or ended.get('generation') != generation or ended.get('source') != source
             or ended.get('outcome') != 'stopped'):
         raise ValueError('The TV tuner did not confirm the exact local stop')
     return tuner
+
+
+def _local_control(op: str, generation: str, source: dict, cancel=None, **arguments) -> dict:
+    """One exact-source VOD request; uncertain delivery is never replayed."""
+    tuner = _ask({'op': op, 'generation': generation, 'source': source, **arguments},
+                 limit=VOD_LIMIT, cancel=cancel)
+    if tuner.get('generation') != generation or tuner.get('source') != source:
+        raise ValueError('The TV tuner did not confirm the exact local generation')
+    if tuner.get('verification') != 'verified' or not isinstance(tuner.get('vod'), dict):
+        raise ValueError('The TV tuner did not return fresh verified VOD state')
+    if op != 'vod-state':
+        control = tuner.get('control')
+        if not isinstance(control, dict) or control.get('action') != op or control.get('verified') is not True:
+            raise ValueError('The TV tuner did not verify the local VOD target')
+    return tuner
+
+
+def local_state(generation: str, source: dict, cancel=None) -> dict:
+    """Fresh finite-file position/duration, seekability and embedded track choices."""
+    return _local_control('vod-state', generation, source, cancel)
+
+
+def pause_local(generation: str, source: dict, paused: bool = True, cancel=None) -> dict:
+    """Set one exact local generation's pause target, without a toggle."""
+    if type(paused) is not bool:
+        raise ValueError('local pause takes a boolean target')
+    result = _local_control('pause' if paused else 'resume', generation, source, cancel)
+    if result['vod'].get('paused') is not paused:
+        raise ValueError('The TV tuner did not confirm the local pause target')
+    return result
+
+
+def resume_local(generation: str, source: dict, cancel=None) -> dict:
+    return pause_local(generation, source, False, cancel)
+
+
+def seek_local(generation: str, source: dict, position: float, cancel=None) -> dict:
+    """One absolute exact seek, settled within 0.5 s of the requested position.
+
+    A finite seekable file and a target strictly before EOF are required. A
+    position already within tolerance is a verified no-op. No keyframe fallback,
+    relative seek, loop, or repeat follows an unverified result.
+    """
+    if type(position) not in (int, float) or not 0 <= position <= 1_000_000_000:
+        raise ValueError('local seek takes a finite nonnegative absolute position')
+    result = _local_control('seek', generation, source, cancel, position=position)
+    vod = result['vod']
+    actual = vod.get('position')
+    if (type(actual) not in (int, float) or vod.get('seeking') is not False
+            or abs(actual - position) > SEEK_TOLERANCE):
+        raise ValueError('The TV tuner did not confirm the exact local seek')
+    return result
+
+
+def select_track_local(generation: str, source: dict, kind: str, track_id: int | None,
+                       cancel=None) -> dict:
+    """Select a fresh embedded audio/subtitle id, or None to disable that kind."""
+    if kind not in ('audio', 'subtitle') or (track_id is not None
+            and (type(track_id) is not int or not 0 < track_id <= 2147483647)):
+        raise ValueError('local track takes audio or subtitle and an exact id or null for off')
+    result = _local_control('track', generation, source, cancel, kind=kind, track_id=track_id)
+    if result['vod'].get(kind + '_track') != track_id:
+        raise ValueError('The TV tuner did not confirm the exact local track')
+    return result
 
 
 def pause(paused=True):
