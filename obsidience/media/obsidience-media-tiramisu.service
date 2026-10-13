@@ -3,7 +3,7 @@ Description=Obsidience Media virtual storage (Tiramisu)
 After=network-online.target
 
 [Service]
-Type=simple
+Type=exec
 ExecStart=%h/Projects/obsidience/obsidience/media/provider-launch tiramisu
 ExecStartPost=%h/Projects/obsidience/obsidience/media/provider-launch ready
 TimeoutStartSec=40
