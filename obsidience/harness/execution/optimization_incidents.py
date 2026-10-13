@@ -347,7 +347,10 @@ def notifications() -> list[dict]:
                 # No owner action can repair these; they stay in the attention
                 # record and health status instead of Review.
                 continue
-            rows.append({**row, 'title': 'AutoSaddler', 'task': row.get('task', refinement.AUDITOR)})
+            if reason == 'AutoSaddler exhausted its bounded improvement attempt: not_improved':
+                reason = 'No instruction candidate met the quality gate; the current instructions were kept.'
+            rows.append({**row, 'reason': reason, 'title': 'AutoSaddler',
+                         'task': row.get('task', refinement.AUDITOR)})
     return rows
 
 
@@ -355,8 +358,8 @@ def superseding_evaluation(row: dict) -> str | None:
     """A receipt-attested replacement resolves an old engine or baseline failure.
 
     Candidate quality remains with the replacement report and its own finding.
-    This only removes a superseded incomplete-evaluation warning from the live
-    projection; neither historical report nor attention evidence is modified.
+    A new finding replaces an older finding for the same incident; an entirely
+    passing baseline may resolve it. Historical reports and attention remain.
     """
     from . import optimization
     reason = row.get('reason')
@@ -374,19 +377,31 @@ def superseding_evaluation(row: dict) -> str | None:
             if path.is_symlink() or path.stat().st_size > 16_000 or path.parent.name == row['key']:
                 continue
             result = json.loads(path.read_text())
-            if result.get('verdict') == 'incomplete' or result.get('comparison', {}).get('counts', {}).get('total') != optimization.DECISION_CASE_COUNT * optimization.EVALUATION_REPETITIONS:
+            if result.get('comparison', {}).get('counts', {}).get('total') != optimization.DECISION_CASE_COUNT * optimization.EVALUATION_REPETITIONS:
                 continue
             current = refinement._load('executive/cases', path.parent.name)
             if current.get('origin') != previous['origin'] or current.get('subject') != previous.get('subject'):
                 continue
             report = refinement._load('executive/reports', result['report_id'])
+            attention_path = refinement._root() / 'optimization-attention.json'
+            findings = json.loads(attention_path.read_text()) if attention_path.is_file() else []
+            replacement_finding = any(
+                finding.get('key') == report['case_id']
+                and finding.get('run_id') == report['audit_run_id']
+                and finding.get('reason') == 'AutoSaddler exhausted its bounded improvement attempt: ' + report['verdict']
+                for finding in findings)
+            if result.get('verdict') == 'incomplete' and not replacement_finding:
+                continue
             if baseline_failure:
-                # An unchanged, fully passing baseline proves a code repair of
-                # this exact incident. A merely newer unsuccessful search or an
-                # un-applied instruction candidate cannot clear its warning.
+                # A fully passing baseline resolves the exact incident. If the
+                # replacement still fails, keep its own finding instead of two
+                # warnings for the same incident. An unapplied candidate alone
+                # cannot clear the quality warning.
                 baseline = report.get('observations', {}).get(report.get('seed_id'), [])
-                if (result['comparison']['counts'].get('parent_passed') != optimization.DECISION_CASE_COUNT * optimization.EVALUATION_REPETITIONS
-                        or not baseline or not all(item.get('passed') and not item.get('error') for item in baseline)):
+                baseline_passed = (
+                    result['comparison']['counts'].get('parent_passed') == optimization.DECISION_CASE_COUNT * optimization.EVALUATION_REPETITIONS
+                    and baseline and all(item.get('passed') and not item.get('error') for item in baseline))
+                if not baseline_passed and not replacement_finding:
                     continue
             run = INDEX.run(report['audit_run_id'])
             expected = optimization._report_result(result['report_id'], report)
