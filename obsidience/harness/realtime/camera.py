@@ -107,10 +107,8 @@ async def wake_selected_camera(*, cancel_event: Any = None) -> None:
             selected_obsbot = False
         if not selected_obsbot:
             raise CameraCaptureError("Wake is supported only for the selected OBSBOT Tiny 2 Lite.")
-        from . import tracking
-        current = await asyncio.to_thread(tracking.snapshot)
-        if current.get("state") == "running" and current.get("fresh"):
-            return
+        # An explicit wake must reach the hardware owner even when capture is
+        # fresh. A running tracker does not attest delivery of this power request.
         _check_cancel(cancel_event)
         preparation = asyncio.create_task(asyncio.to_thread(media.set_obsbot_camera_active, True))
         try:
