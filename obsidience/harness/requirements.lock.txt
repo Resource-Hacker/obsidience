@@ -1,7 +1,8 @@
 # Exact versions of the known-good Harness venv (Python 3.14.7), captured 2026-10-08.
 # Use as constraints: pip install -r requirements.txt -c requirements.lock.txt
 # 2026-10-09: + google-adk 2.11.0 / litellm 1.101.0 closure (websockets 17.0.1 -> 15.0.1 for google-adk <16).
-# 2026-10-12: - fastembed closure (onnxruntime, loguru, mmh3, py-rust-stemmers, flatbuffers); pillow now declared directly.
+# 2026-10-12: - fastembed, loguru, mmh3, py-rust-stemmers; pillow now declared directly.
+# Camera tracking retains onnxruntime and flatbuffers independently of embeddings.
 aiohappyeyeballs==2.7.1
 aiohttp==3.14.4
 aiosignal==1.4.0
@@ -32,6 +33,7 @@ fake-useragent==2.2.0
 fastapi==0.141.1
 fastuuid==0.14.0
 filelock==3.32.3
+flatbuffers==25.12.19
 frozenlist==1.8.0
 fsspec==2026.7.0
 google-adk==2.11.0
@@ -70,6 +72,7 @@ mdurl==0.1.2
 multidict==6.9.1
 numpy==2.5.2
 nvidia-ml-py==13.610.43
+onnxruntime==1.29.0
 openai==2.54.0
 opencv-python-headless==4.13.0.92
 opentelemetry-api==1.42.1
