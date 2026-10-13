@@ -94,13 +94,15 @@ Glass group in Graph settings sets inner and outer solidity, crater depth,
 crater glow, seed glow, sheen lines and dust for each graph.
 
 At rest a pale survey plane crosses every ball from bottom to top and lights
-the glass it passes. While a ball's Agent is thinking, each node drops into
-its shell like a stone into water at the moment the thinking path lights it:
-a ripple in the node's color spreads across that layer, and the glass, its
-dust and its seeds ride it. The Articles a route ends on send the strongest
-ripple, and lit nodes keep sending softer ones in turn until the thinking
-ends. The seed of a consulted or hovered node swells and burns amber. Ripples
-start only at nodes the path has actually lit. Labels are captions without a
+the glass it passes. While a ball's Agent is thinking, every node on the
+route drops into its own shell like a stone into water as the thinking front
+reaches it, inner layers included: a ripple in the node's color spreads
+across that layer, and the glass, its dust and its seeds ride it. The
+Articles a route ends on send the strongest ripple, and reached nodes keep
+sending softer ones in turn until the thinking ends. A ripple marks the
+front's passage, as the route beam does; only the seed of a consulted or
+hovered node swells and burns amber. Ripples start only at nodes on the
+actual route. Labels are captions without a
 box: light capitals with a dark outline, a leader to their node, an underline
 and a small square in the branch color, drawn last, over the glass.
 

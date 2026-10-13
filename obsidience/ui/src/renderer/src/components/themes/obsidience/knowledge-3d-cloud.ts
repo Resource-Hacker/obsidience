@@ -1240,7 +1240,10 @@ export function createKnowledge3dCloud(
   // The survey plane starts below the ball and yields while the Agent thinks.
   let scanAt = -1.2;
   let thinking = 0;
-  // Lit nodes keep sending soft ripples, one node at a time.
+  // Which nodes the thinking front has reached on the current route. They
+  // keep sending soft ripples, one node at a time.
+  let passed = new Uint8Array(nodes.length);
+  let reached = new Uint8Array(nodes.length);
   let rippleDue = 0;
   let rippleTurn = 0;
 
@@ -1533,14 +1536,27 @@ export function createKnowledge3dCloud(
         }
         reveal *= opacity;
         if (Math.abs(revealLevels[i] - reveal) > 0.001) {
-          // The moment the path lights a node it drops into its shell; the
-          // Articles the route ends on send the strongest ripple.
-          if (revealLevels[i] < 0.5 && reveal >= 0.5) shells.ripple(i, nodes[i].subject ? 0.7 : 1);
+          // A lit node the route never passed (a relation-reached endpoint)
+          // drops into its shell as it lights.
+          if (revealLevels[i] < 0.5 && reveal >= 0.5 && !spec?.nodeArrival.has(nodeIds[i])) {
+            shells.ripple(i, nodes[i].subject ? 0.7 : 1);
+          }
           revealLevels[i] = reveal;
           dirty = true;
         }
       }
       if (dirty) applyHoverLevels();
+      // Every node the route passes drops into its own shell as the front
+      // reaches it, inner layers included; the Articles a route ends on send
+      // the strongest ripple.
+      reached.fill(0);
+      for (const [id, arrival] of spec?.nodeArrival ?? []) {
+        const index = indexById.get(id);
+        if (index === undefined || solidFront < arrival) continue;
+        reached[index] = 1;
+        if (!passed[index]) shells.ripple(index, nodes[index].subject ? 0.7 : 1);
+      }
+      [passed, reached] = [reached, passed];
     },
     nodeWorldPosition(rawId, out) {
       const index = indexById.get(rawId);
@@ -1576,14 +1592,14 @@ export function createKnowledge3dCloud(
       scanAt += dtSeconds * 2.4 / SURVEY_SWEEP_SECONDS;
       if (scanAt > 1.2) scanAt = -1.2;
       optics.uScan.value.set(scanAt, 1.4 * (1 - thinking));
-      // While the Agent thinks, each node its path has lit sends another,
+      // While the Agent thinks, each node its path has reached sends another,
       // softer ripple in turn, so the glass keeps moving where the thought is.
       rippleDue -= dtSeconds;
       if (active && rippleDue <= 0) {
         rippleDue = 0.45;
         for (let step = 0; step < nodes.length; step += 1) {
           const index = (rippleTurn + step) % nodes.length;
-          if (revealLevels[index] < 0.5) continue;
+          if (!passed[index] && revealLevels[index] < 0.5) continue;
           shells.ripple(index, nodes[index].subject ? 0.35 : 0.5);
           rippleTurn = index + 1;
           break;
