@@ -187,7 +187,6 @@ patch --forward -d <hindsight-venv>/lib/python3.13/site-packages -p1 < obsidienc
 patch --forward -d <hindsight-venv>/lib/python3.13/site-packages -p1 < obsidience/scripts/patches/hindsight/0004-keep-reference-offset-in-parsed-dates.patch
 patch --forward -d <hindsight-venv>/lib/python3.13/site-packages -p1 < obsidience/scripts/patches/hindsight/0005-allow-exact-combined-scope-union-updates.patch
 patch --forward -d <hindsight-venv>/lib/python3.13/site-packages -p1 < obsidience/scripts/patches/hindsight/0006-bank-speaker-perspective.patch
-patch --forward -d <hindsight-venv>/lib/python3.13/site-packages -p1 < obsidience/scripts/patches/hindsight/0007-rank-fact-before-provenance.patch
 ```
 
 Initialize a private PostgreSQL cluster with UTF-8, local peer authentication,
