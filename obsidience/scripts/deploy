@@ -62,7 +62,7 @@ def targets(changed: list[str]) -> list[str]:
         owners.append("ui")
     if "obsidience/tv/host/obsidience-tv-player.service" in changed:
         owners.append("tv-player")
-    if (any(p in {"obsidience/tv/host/tuner.py", "obsidience/tv/host/obsidience-tv-tuner.service",
+    if (any(p in {"obsidience/tv/host/tuner.py", "obsidience/tv/host/break-view", "obsidience/tv/host/obsidience-tv-tuner.service",
                   "obsidience/harness/media/config.py", "obsidience/harness/media/sources.py",
                   "obsidience/harness/media/source_probe.py", "obsidience/harness/media/progress.py",
                   "obsidience/harness/media/jellyfin.py"} for p in changed)

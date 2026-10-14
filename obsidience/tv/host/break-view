@@ -1,7 +1,8 @@
 #!/bin/sh
 # Obsidience TV break view: for as long as this runs, the TV shows the workstation screen that
 # holds the Executive graph instead of a channel's frozen last frame. The tuner starts it when a
-# commercial break begins (argument: the channel's title) and ends it when the programme returns.
+# commercial break begins or playback is idle (arguments: title, idle/break mode), and ends it
+# when content loads or the programme returns. Idle mode has no commercial-break caption.
 #
 # Nothing is rendered twice: the screen recorder captures the desktop output that already shows
 # the graph (encoded on the GPU that drives that output) and a second player shows it in the TV
@@ -16,6 +17,11 @@ systemctl --user is-active --quiet obsidience-shell-knowledge.service || exit 0
 display=$(cat "$XDG_RUNTIME_DIR/obsidience-tv/wayland") || exit 1
 # A title is listing text: no control characters, and no property expansion by the player.
 title=$(printf %s "$1" | tr -d '\000-\037' | sed 's/\$/$$/g')
+case "${2:-break}" in
+    idle) caption= ;;
+    break) caption="$title  ·  Commercial break  ·  Resuming automatically" ;;
+    *) exit 2 ;;
+esac
 
 # The recorder reads the desktop compositor (this unit's own WAYLAND_DISPLAY); only the player
 # is pointed at the TV session. 30 frames a second of the whole screen at the TV mode's capture
@@ -24,6 +30,6 @@ title=$(printf %s "$1" | tr -d '\000-\037' | sed 's/\$/$$/g')
     WAYLAND_DISPLAY=$display /usr/bin/mpv --no-config --no-input-terminal --msg-level=all=error \
         --no-audio --osc=no --input-default-bindings=no --fs --wayland-app-id=obsidience-tv-break \
         --vulkan-device="$TV_VULKAN_DEVICE" --profile=low-latency --untimed --vd-lavc-threads=4 --panscan=1.0 \
-        --osd-level=2 --osd-msg2="$title  ·  Commercial break  ·  Resuming automatically" \
+        --osd-level=2 --osd-msg2="$caption" \
         --osd-align-x=center --osd-align-y=bottom --osd-margin-y=70 --osd-font-size=30 \
         --osd-border-size=2 --no-osd-bar -

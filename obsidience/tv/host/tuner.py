@@ -331,7 +331,7 @@ def _quietly(call, *arguments):
 
 
 def _end(view):
-    """End a break view at once (its whole process group) and reap it.
+    """End the idle/break view at once (its whole process group) and reap it.
 
     Killed, not asked: a view holds only a capture and a window, and the channel's picture
     returns the moment that window is gone (a player asked to quit kept it for a second).
@@ -739,12 +739,13 @@ class Tuner:
                 play.phase, play.reason = 'failed', 'the player could not play this address'
 
     def _present(self):
-        """Draw the break card while a break lasts, its clock once a second, and remove it afterwards.
+        """Show the existing graph mirror while idle or in a commercial break.
 
-        The break view, when one is configured, runs for exactly as long: started once when the
-        break begins and ended with it. Its window covers the card once it has a picture.
+        One presenter owns the view. Loading, playing and paused content keep their
+        own picture; stop and finite EOF return to the idle graph without loading media.
+        The break card remains the fallback during advertisements.
         """
-        shown, breaking, view = None, False, None
+        shown, mode, view = None, None, None
         try:
             while True:
                 with self.lock:
@@ -755,8 +756,10 @@ class Tuner:
                     play = self.play
                     card = (_card(play.title, time.monotonic() - play.breaking)
                             if play is not None and self.playback == 'break' else None)
-                if (card is not None) != breaking:
-                    breaking = card is not None
+                    wanted = 'break' if card is not None else 'idle' if play is None else None
+                    title = play.title if play is not None else ''
+                if wanted != mode:
+                    mode = wanted
                     if view is not None:
                         _end(view)
                         view = None
@@ -768,12 +771,12 @@ class Tuner:
                             self.player.command('set_property', 'fullscreen', True)
                         except (OSError, ValueError):
                             pass
-                    if breaking and self.break_view:
+                    if mode is not None and self.break_view:
                         try:
-                            view = subprocess.Popen([self.break_view, play.title], stdin=subprocess.DEVNULL,
+                            view = subprocess.Popen([self.break_view, title, mode], stdin=subprocess.DEVNULL,
                                                     start_new_session=True)
                         except OSError as error:
-                            log.warning('break view did not start (%s)', type(error).__name__)
+                            log.warning('%s graph view did not start (%s)', mode, type(error).__name__)
                 if card != shown:
                     try:
                         self.player.command('osd-overlay', 0, 'ass-events' if card else 'none', card or '')
@@ -1273,7 +1276,7 @@ class Tuner:
         with self.lock:
             self.closed = True
             self.lock.notify_all()
-        self.presenter.join(10)  # It ends its break view.
+        self.presenter.join(10)  # It ends its idle/break view.
         try:
             self._replace(None, wait=True)
         except (OSError, ValueError):
@@ -1350,9 +1353,8 @@ def main():
     parser.add_argument('--player', default=os.path.join(RUNTIME, 'obsidience-tv-player.sock'),
                         help="the player's JSON IPC socket")
     parser.add_argument('--break-view',
-                        help='a program run for as long as each commercial break lasts, with the title as its '
-                             'argument, and killed when the break ends; it may show something in the TV '
-                             'session in place of the break card')
+                        help='a program shown while idle or during commercial breaks, with title and '
+                             'mode (idle/break) arguments; it ends when content loads or resumes')
     args = parser.parse_args()
     os.umask(0o077)
     handler = logging.StreamHandler()
