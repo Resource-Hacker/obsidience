@@ -250,7 +250,12 @@ def _release_fields(stream: dict) -> tuple[str, int | None, int | None, int | No
                 size = None
         except (ValueError, OverflowError):
             size = None
-    release = raw_title or raw_name
+    # Supported providers put the release on the first line and mutable swarm
+    # statistics below it. Those statistics rank candidates, but must never be
+    # part of the selected source's identity or a later read will invalidate it.
+    title = stream.get('title')
+    lines = title.splitlines() if isinstance(title, str) else []
+    release = (_text(lines[0], 240) if lines else None) or raw_name
     return release, resolution, seeders, size, text
 
 

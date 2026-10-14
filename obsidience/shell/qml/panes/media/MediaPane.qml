@@ -31,6 +31,7 @@ Rectangle {
     property bool serverAvailable: false
     property string message: ""
     property string pendingRequest: ""
+    property string pendingOperation: ""
     property int receiptChecks: 0
     property var requests: []
     property bool disposed: false
@@ -119,7 +120,7 @@ Rectangle {
             root.acquisitionReadiness = data.acquisition && data.acquisition.readiness ? data.acquisition.readiness : ""
         })
     }
-    function browse(index) {
+    function browse(index, completionMessage) {
         if (!visible || loading || pendingRequest) return
         loading = true
         selectionEpoch += 1
@@ -130,7 +131,8 @@ Rectangle {
             root.items = ok && data.available ? data.items : []
             root.offset = index
             root.nextOffset = ok && data.next_offset !== null && data.next_offset !== undefined ? data.next_offset : -1
-            root.message = ok && data.available ? "Choose one exact source." : (data && (data.reason || data.detail)) || "Catalogue unavailable."
+            root.message = ok && data.available ? (completionMessage || "Choose one exact source.")
+                : (data && (data.reason || data.detail)) || "Catalogue unavailable."
         })
     }
     function choose(row) {
@@ -200,6 +202,8 @@ Rectangle {
         if (operation === "acquire") {
             if (!selectedSource || !acquisitionReady) return
             body.preview_token = selectedSource.preview_token
+        } else if (operation === "server" && selected && mode === 0) {
+            body.selection = {item_id: selected.item_id, media_source_id: selected.media_source_id, source_revision: selected.source_revision}
         } else if (operation !== "server") {
             if (destination.currentIndex !== 1) { message = "Choose the registered TV destination."; return }
             body.destination = "tv"
@@ -216,13 +220,14 @@ Rectangle {
             }
         }
         pendingRequest = body.request_id
+        pendingOperation = operation
         receiptChecks = 0
         message = "Submitting owner command…"
         request("POST", "/commands", body, function(ok, data) {
             if (!ok) {
                 root.message = (data && data.detail) || "Command delivery is unknown. Check its receipt; do not resend."
                 // A transport failure may follow admission. Read its UUID, never resend it.
-                if (data && data.detail) root.pendingRequest = ""
+                if (data && data.detail) { root.pendingRequest = ""; root.pendingOperation = "" }
             } else root.message = "Command admitted; waiting for its receipt."
             root.checkReceipt()
         })
@@ -234,9 +239,19 @@ Rectangle {
         request("GET", "/commands/" + pendingRequest, null, function(ok, data) {
             root.receiptReading = false
             if (ok && data.settled) {
-                root.message = data.summary || ("Command " + data.state)
+                const completionMessage = data.summary || ("Command " + data.state)
+                root.message = completionMessage
+                const acquired = root.pendingOperation === "acquire" && data.state === "completed"
                 root.pendingRequest = ""
+                root.pendingOperation = ""
                 root.refreshStatus()
+                if (acquired) {
+                    root.mode = 0
+                    root.selectedSource = null
+                    root.sourceChoices = []
+                    query.text = ""
+                    root.browse(0, completionMessage)
+                }
             } else if (root.receiptChecks >= 30) {
                 root.message = "No settled receipt yet. This command will not be resent."
             }
@@ -259,7 +274,7 @@ Rectangle {
             ComboBox { id: contentType; visible: root.mode === 1; model: ["Movies", "Series"]; onCurrentIndexChanged: { root.cancelReads(); root.metadataMatches = []; root.selectedMetadata = null; root.sourceChoices = []; root.selectedSource = null } }
             TextField { id: query; Layout.fillWidth: true; maximumLength: 160; placeholderText: root.mode === 0 ? "Search the catalogue" : "Search titles"; onAccepted: root.mode === 0 ? root.browse(0) : root.searchTitles() }
             Button { text: "Search"; enabled: !root.loading && !root.pendingRequest; onClicked: root.mode === 0 ? root.browse(0) : root.searchTitles() }
-            Button { text: "Open media server"; enabled: root.serverAvailable && !root.pendingRequest; onClicked: root.command("server") }
+            Button { text: root.mode === 0 && root.selected ? "Open selected in Jellyfin" : "Open Jellyfin"; enabled: root.serverAvailable && !root.pendingRequest; onClicked: root.command("server") }
         }
         ListView {
             Layout.fillWidth: true; Layout.fillHeight: true; clip: true; spacing: 4
@@ -319,9 +334,9 @@ Rectangle {
         RowLayout {
             visible: root.mode === 0
             ComboBox { id: destination; model: ["Choose destination", "Registered TV"] }
-            Button { text: "Play selected"; enabled: root.selected !== null && destination.currentIndex === 1 && !root.pendingRequest; onClicked: root.command("play") }
+            Button { text: "Play selected on TV"; enabled: root.selected !== null && destination.currentIndex === 1 && !root.pendingRequest; onClicked: root.command("play") }
             Button {
-                text: "Resume saved position"
+                text: "Resume on TV"
                 visible: root.savedResume !== null && root.savedResume.position > 0
                 enabled: root.selected !== null && destination.currentIndex === 1 && !root.pendingRequest && !root.resumeLoading
                 onClicked: root.command("play", true)

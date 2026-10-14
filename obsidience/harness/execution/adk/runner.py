@@ -53,7 +53,8 @@ async def _run_owner_media(plugin: AgentPlugin, command: dict, session_id: str, 
         operation = command['operation']
         required = ({'media.library', 'media.acquire'} if operation == 'acquire' else
                     {'media.library', 'tv.control'} if operation == 'play' else
-                    {'application.launch'} if operation == 'server' else {'tv.control'})
+                    ({'application.launch', 'media.library'} if command.get('selection') else
+                     {'application.launch'}) if operation == 'server' else {'tv.control'})
         if missing := required - set(plugin.ex.allowed):
             await plugin.operate('task.complete', {
                 'status': 'failed',
@@ -105,11 +106,24 @@ async def _run_owner_media(plugin: AgentPlugin, command: dict, session_id: str, 
                 call['args']['resume'] = True
         elif operation == 'server':
             from ...media.config import load_config
+            from urllib.parse import urlencode
             config = load_config()
             if not config.get('enabled') or not config.get('catalogue'):
                 raise ValueError('The media server is not configured')
+            url = config['catalogue']['url'] + '/web/'
+            if selected := command.get('selection'):
+                blocks = await plugin.operate('media.library', {
+                    'action': 'select', 'item_id': selected['item_id'],
+                    'media_source_id': selected['media_source_id']}, raw_observation=True)
+                selection = json.loads(next(block['text'] for block in blocks if block.get('type') == 'text'))
+                binding = (ctx.get('_media_candidates') or {}).get(selection.get('id'))
+                if (selection.get('status') != 'completed' or binding is None
+                        or binding.get('source_revision') != selected['source_revision']):
+                    raise ValueError('The selected catalogue source changed or is unavailable; select it again')
+                url += '#/details?' + urlencode({'id': selected['item_id'],
+                                                'serverId': config['catalogue']['instance_id']})
             call = {'name': 'application.launch', 'args': {
-                'application': 'microsoft_edge', 'url': config['catalogue']['url'] + '/web/'}}
+                'application': 'microsoft_edge', 'url': url}}
         else:
             args = {'action': 'vod', 'operation': operation,
                     'generation': command['generation'], 'source': command['source']}
@@ -127,8 +141,14 @@ async def _run_owner_media(plugin: AgentPlugin, command: dict, session_id: str, 
                         and receipt.get('title') == acquisition_choice['title']
                         and receipt.get('type') == ('movie' if acquisition_choice['type'] == 'movie' else 'tv')
                         and type(receipt.get('registered_files')) is int and receipt['registered_files'] > 0)
-        summary = ('The exact selected source is registered in the library. Catalogue availability is checked separately; playback was not started.' if operation == 'acquire' else
-                   'Media server opened.' if operation == 'server' else
+        catalogue_ready = (operation == 'acquire' and verified
+                           and receipt.get('catalogue', {}).get('status') == 'ready'
+                           and receipt['catalogue'].get('source_path_verified') is True)
+        summary = (('The exact selected source is registered and ready in the library. Playback was not started.'
+                    if catalogue_ready else
+                    'The exact selected source is registered. Catalogue availability is pending; refresh the library before selecting it. Playback was not started.') if operation == 'acquire' else
+                   ('The selected Jellyfin item page was sent to the browser. Start playback in that client.'
+                    if command.get('selection') else 'Media server opened.') if operation == 'server' else
                    'The selected library source is playing on the registered TV.' if operation == 'play' else
                    f"Library playback {operation} verified on the registered TV.") if verified else (
                    'The media command could not be verified. Use its receipt; do not resend it.')

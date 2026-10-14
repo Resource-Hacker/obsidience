@@ -22,6 +22,15 @@ Native clients need authenticated reachability; LAN/public access is not implied
 by installation. No GPU is assigned to catalogue/scanning. Jellyfin may remux
 native streams, while video/audio transcoding remains installation policy.
 
+For private LAN clients, retain the loopback default and add an installation-only
+Quadlet drop-in publishing the exact LAN address. Scope the firewall to that
+interface, address and local subnet; keep remote access and UPnP disabled. Configure
+Jellyfin's local subnets explicitly, including the exact rootless-network host
+address if Podman's host mapping requires it. An address assigned by DHCP may
+change; update the private binding then, rather than opening every interface.
+Use Jellyfin's native password login or Quick Connect for each client. Credentials
+stay encrypted or in the client's authenticated session, never in a playback URL.
+
 Tiramisu is an optional virtual-file provider with owner-only control/engine Unix
 sockets. Its integration exposes health, bounded search/list and one source add;
 configuration, delete, scheduler, telemetry and dashboard endpoints are not exposed.
@@ -30,6 +39,9 @@ loopback. The adapter currently supports its public TorrentsCSV indexer. Cinemet
 supplies movie/series identity and exact episode metadata; exact IMDb queries work
 when its name search omits a short film. Ranking applies only to returned eligible
 sources. No provider can promise every title or universal best quality.
+Release identity excludes the provider's mutable seeder and size display lines;
+those statistics affect ranking only, so an updated swarm count cannot invalidate
+the owner's otherwise unchanged selection.
 
 The private Tiramisu service uses bounded RAM caches with persistent media-byte
 caching disabled. There is no complete-offline guarantee. Watchlists, periodic
@@ -81,6 +93,11 @@ owner and need no model classification. A request UUID binds the complete comman
 reusing it observes the original result rather than dispatching again. An active
 conversation refuses a new button command. Hidden/stale reads are cancelled.
 Button receipts remain durable without creating per-title Hindsight memories.
+After registration the pane reports catalogue ready or pending and refreshes its
+Library once. It never repeats registration to check availability. A selected
+source can open its exact native Jellyfin item page independently of the TV;
+the command revalidates item/source/revision and reports navigation, leaving
+playback and saved progress to that client. TV playback remains a separate choice.
 
 The accepted playback preference may obtain a unique recommended source for an
 exact requested title/episode missing locally. Ambiguous franchises, editions,
@@ -122,6 +139,11 @@ this feature and deploy with `obsidience/scripts/deploy`; it preserves active TV
 Android, catalogue clients and virtual readers. It never restarts the compositor,
 locker or remote keyboard. Private credential/config changes use the same deploy
 with the exact affected `--restart` owner.
+When unrelated owners have pending changes, `--only <owner>` narrows that deploy
+while preserving the selected owner's safeguards. Scoped receipts do not advance
+the full-deployment checkpoint or enter its rollback history; a later full deploy
+still handles the other owners. Restore a scoped owner's matching configuration
+or source backup explicitly instead of treating a partial deployment as global.
 
 Stage Tool/Skill, procedure and Executive-grant Articles through the existing
 Article/Review API. Do not copy defaults into the live Vault or manufacture approval

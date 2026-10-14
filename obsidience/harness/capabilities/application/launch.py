@@ -132,9 +132,16 @@ def _launch_application(args: dict, context: dict | None = None) -> dict:
     url = ""
     if "url" in args:
         from obsidience.harness.web.runtime import validate_fetch_url
+        from urllib.parse import quote, urlsplit
         if not spec.get("accepts_web_url"):
             raise ValueError("This registered application does not accept web URLs")
         url = validate_fetch_url(args["url"])
+        # Browser navigation needs client-side routes; HTTP fetches omit fragments.
+        fragment = urlsplit(args["url"].strip()).fragment
+        if fragment:
+            url += "#" + quote(fragment, safe="/?&=;%~!$'()*+,:@")
+            if len(url) > 2000:
+                raise ValueError("Encoded browser URL exceeds its bound")
     witness = _visible_application_window(application)
     if witness and not url:
         return {"application": application, "label": spec["label"], "state": "ready",

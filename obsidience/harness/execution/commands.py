@@ -179,6 +179,22 @@ def recognize_command(objective, allowed):
     return {'name': 'lights.set', 'args': {'target': target, 'state': state}}
 
 
+def _media_selection(selected: object) -> dict:
+    from uuid import UUID
+    if not isinstance(selected, dict) or set(selected) != {'item_id', 'media_source_id', 'source_revision'}:
+        raise ValueError('Choose the exact selected catalogue source')
+    try:
+        item = UUID(selected['item_id']).hex
+    except (ValueError, TypeError, AttributeError):
+        raise ValueError('Invalid catalogue item') from None
+    if (not isinstance(selected['media_source_id'], str)
+            or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', selected['media_source_id'])
+            or not isinstance(selected['source_revision'], str)
+            or not re.fullmatch(r'[0-9a-f]{64}', selected['source_revision'])):
+        raise ValueError('Invalid catalogue source revision')
+    return {**selected, 'item_id': item}
+
+
 def owner_media_command(value: object) -> dict:
     """Closed native owner UI protocol. It grants no Tools or identity."""
     import math
@@ -197,9 +213,10 @@ def owner_media_command(value: object) -> dict:
             raise ValueError('Acquire requires one exact, unexpired source choice')
         return {'request_id': request_id, 'operation': operation, 'preview_token': value['preview_token']}
     if operation == 'server':
-        if set(value) != {'request_id', 'operation'}:
+        if set(value) not in ({'request_id', 'operation'}, {'request_id', 'operation', 'selection'}):
             raise ValueError('Invalid media server command')
-        return {'request_id': request_id, 'operation': operation}
+        return {'request_id': request_id, 'operation': operation, **(
+            {'selection': _media_selection(value['selection'])} if 'selection' in value else {})}
     if operation not in {'play', 'pause', 'resume', 'seek', 'stop'} or value.get('destination') != 'tv':
         raise ValueError('Choose the registered TV destination and one media operation')
     expected = {'request_id', 'operation', 'destination', 'selection'} if operation == 'play' else {
@@ -211,19 +228,7 @@ def owner_media_command(value: object) -> dict:
         if type(value.get('resume', False)) is not bool:
             raise ValueError('Saved resume must be a boolean')
         result['resume'] = value.get('resume', False)
-        selected = value['selection']
-        if not isinstance(selected, dict) or set(selected) != {'item_id', 'media_source_id', 'source_revision'}:
-            raise ValueError('Play requires the exact selected catalogue source')
-        try:
-            item = UUID(selected['item_id']).hex
-        except (ValueError, TypeError, AttributeError):
-            raise ValueError('Invalid catalogue item') from None
-        if (not isinstance(selected['media_source_id'], str)
-                or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', selected['media_source_id'])
-                or not isinstance(selected['source_revision'], str)
-                or not re.fullmatch(r'[0-9a-f]{64}', selected['source_revision'])):
-            raise ValueError('Invalid catalogue source revision')
-        result['selection'] = {**selected, 'item_id': item}
+        result['selection'] = _media_selection(value['selection'])
     else:
         source = value['source']
         fields = {'provider', 'root_id', 'revision', 'catalogue_instance', 'item_id', 'media_source_id', 'source_revision'}
@@ -243,6 +248,7 @@ def owner_media_command(value: object) -> dict:
 
 def owner_media_text(command: dict) -> str:
     return ('Register the exact source selected in the Media pane in the library.' if command['operation'] == 'acquire' else
+            'Open the selected library item in Jellyfin.' if command['operation'] == 'server' and command.get('selection') else
             'Open the configured media server.' if command['operation'] == 'server' else
             'Resume the selected library source from its saved position on the registered TV.'
                 if command['operation'] == 'play' and command.get('resume') else
