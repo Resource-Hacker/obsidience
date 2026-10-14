@@ -12,7 +12,7 @@
 // Pure added light, drawn just after the node sprites; whole turns and whole
 // cycles per hour keep the hourly uTime wrap seamless.
 import * as THREE from "three";
-import { ADDITIVE, LIGHT_GLSL } from "./knowledge-3d-shell";
+import { ADDITIVE, LIGHT_GLSL, MARBLE_COVER_GLSL, type MarbleCover } from "./knowledge-3d-shell";
 
 /** The dust cloud's spread, in marble radii (one standard deviation). */
 const DUST_SPREAD = 0.42;
@@ -40,13 +40,7 @@ varying vec4 vShape; // blur radius, point radius and crisp spread in pixels; li
 varying vec3 vColor;
 // One turn an hour, in radians per second.
 const float HOURLY = 0.0017453293;
-// How much of what lies behind a marble's glass it hides at this fraction of
-// its radius: the sprite's body, thicker toward the limb (knowledge-3d-shaders.ts).
-float marbleGlass(float r) {
-  float limb = 1.0 - sqrt(max(0.0, 1.0 - r * r));
-  float bodyA = 1.0 - exp(-2.5 * uMarbleOpacity);
-  return bodyA + (1.0 - bodyA) * limb * limb * 0.6 * min(uMarbleOpacity, 1.0);
-}
+${MARBLE_COVER_GLSL}
 void main() {
   int slot = int(aMote.x);
   vec4 node = texelFetch(uNodes, ivec2(slot, 0), 0);
@@ -118,22 +112,7 @@ void main() {
   // Seen through every nearer marble's glass: marbles write no depth, so dust
   // behind one shows through it, dimmed as its glass dims whatever is behind.
   vec3 seen = centre.xyz + offset;
-  vec2 onScreen = seen.xy / max(1e-4, -seen.z);
-  float scale = length(modelViewMatrix[0].xyz);
-  if (vAlpha >= 0.003) {
-    for (int other = 0; other < uSlots; other++) {
-      vec4 near = texelFetch(uNodes, ivec2(other, 0), 0);
-      if (other == slot || near.w <= 0.0) continue;
-      vec4 nearCentre = modelViewMatrix * vec4(near.xyz, 1.0);
-      if (nearCentre.z <= centre.z) continue;
-      vec4 nearLook = texelFetch(uNodes, ivec2(other, 1), 0);
-      float nearRadius = near.w * (1.0 + nearLook.w * (0.10 + 0.06 * uPulse)) * scale / max(1e-4, -nearCentre.z);
-      float r = length(onScreen - nearCentre.xy / max(1e-4, -nearCentre.z)) / max(nearRadius, 1e-6);
-      if (r >= 1.0) continue;
-      float nearAlpha = mix(texelFetch(uNodes, ivec2(other, 2), 0).x, 1.0, nearLook.w);
-      vAlpha *= 1.0 - marbleGlass(r) * nearAlpha;
-    }
-  }
+  if (vAlpha >= 0.003) vAlpha *= marbleCover(seen, centre.z, slot);
   vec4 clip = projectionMatrix * vec4(seen, 1.0);
   // Depth of the node's own centre, so opaque nodes, articles and the core in
   // front still hide it through the depth prepass.
@@ -182,6 +161,8 @@ export interface MarbleDustUniforms {
 
 export interface MarbleDust {
   points: THREE.Points;
+  /** Lets another layer be hidden by these marbles where they stand in front of it. */
+  cover: MarbleCover;
   /** A marble's centre and radius in the layer's local units (radius 0 hides
    *  it) and its focus, 0 to 1. Call update() after a batch. */
   setNode(slot: number, x: number, y: number, z: number, radius: number, focus: number): void;
@@ -260,6 +241,10 @@ export function createMarbleDust(options: {
   points.frustumCulled = false;
   return {
     points,
+    cover: {
+      uNodes: material.uniforms.uNodes, uSlots: material.uniforms.uSlots,
+      uMarbleOpacity: material.uniforms.uMarbleOpacity, uPulse: material.uniforms.uPulse,
+    },
     setNode(slot, x, y, z, radius, focus) {
       data.set([x, y, z, radius], slot * 4);
       data[(count + slot) * 4 + 3] = focus;

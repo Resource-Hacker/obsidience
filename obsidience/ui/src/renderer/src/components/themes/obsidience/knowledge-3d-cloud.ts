@@ -528,20 +528,6 @@ export function createKnowledge3dCloud(
     const a = indexById.get(edge.source), b = indexById.get(edge.target);
     if (a !== undefined && b !== undefined) { linkCounts[a] += 1; linkCounts[b] += 1; }
   }
-  const shells = createKnowledge3dShells({
-    positions,
-    layers: Float32Array.from(nodes, (node) => layout?.fractions.get(node.id) ?? 0),
-    sizes: radii,
-    weights: radii.map((radius, index) => radius * Math.sqrt(1 + linkCounts[index])),
-    tints: cores, detail: isMain ? 1 : input.tuning.ballScale, optics,
-    core: nodes.findIndex((_, index) => styles[index * 4] === 2),
-    speech: isMain ? deps.sharedUniforms.uSpeechLevel : undefined,
-  });
-  shells.applyTuning(input.tuning);
-  // Glass only adds light and draws in the beams' slot, behind the node sprites.
-  for (const layer of shells.layers) group.add(layer);
-  disposables.push(shells);
-
   // --- Dust marbles: a branch or sub-branch node drawn as a Dust marble
   // (style 4) is filled with the shells' dust. One slot per subject node;
   // the dust draws just after the node sprites, in the streaks' slot.
@@ -561,6 +547,21 @@ export function createKnowledge3dCloud(
       uMarbleOpacity: marbleOpacityUniform,
     },
   });
+  const shells = createKnowledge3dShells({
+    positions,
+    layers: Float32Array.from(nodes, (node) => layout?.fractions.get(node.id) ?? 0),
+    sizes: radii,
+    weights: radii.map((radius, index) => radius * Math.sqrt(1 + linkCounts[index])),
+    tints: cores, detail: isMain ? 1 : input.tuning.ballScale, optics,
+    core: nodes.findIndex((_, index) => styles[index * 4] === 2),
+    speech: isMain ? deps.sharedUniforms.uSpeechLevel : undefined,
+    marbles: marbleDust.cover,
+  });
+  shells.applyTuning(input.tuning);
+  // Glass only adds light and draws in the beams' slot, behind the node sprites.
+  for (const layer of shells.layers) group.add(layer);
+  disposables.push(shells);
+
   marbleDust.points.renderOrder = 2;
   group.add(marbleDust.points);
   disposables.push(marbleDust);

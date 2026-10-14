@@ -341,6 +341,46 @@ void main() {
 }
 `;
 
+/** How much of a point survives the marbles in front of it: each marble whose
+ *  centre is nearer than \`behind\` (view z) and covers the point on screen
+ *  hides what its glass hides there. The host declares uNodes, uSlots,
+ *  uMarbleOpacity and uPulse (the marble dust's own uniforms, knowledge-3d-marble-dust.ts). */
+export const MARBLE_COVER_GLSL = `
+// How much of what lies behind a marble's glass it hides at this fraction of
+// its radius: the sprite's body, thicker toward the limb (knowledge-3d-shaders.ts).
+float marbleGlass(float r) {
+  float limb = 1.0 - sqrt(max(0.0, 1.0 - r * r));
+  float bodyA = 1.0 - exp(-2.5 * uMarbleOpacity);
+  return bodyA + (1.0 - bodyA) * limb * limb * 0.6 * min(uMarbleOpacity, 1.0);
+}
+float marbleCover(vec3 seen, float behind, int self) {
+  vec2 onScreen = seen.xy / max(1e-4, -seen.z);
+  float scale = length(modelViewMatrix[0].xyz);
+  float kept = 1.0;
+  for (int other = 0; other < uSlots; other++) {
+    vec4 near = texelFetch(uNodes, ivec2(other, 0), 0);
+    if (other == self || near.w <= 0.0) continue;
+    vec4 nearCentre = modelViewMatrix * vec4(near.xyz, 1.0);
+    if (nearCentre.z <= behind) continue;
+    vec4 nearLook = texelFetch(uNodes, ivec2(other, 1), 0);
+    float nearRadius = near.w * (1.0 + nearLook.w * (0.10 + 0.06 * uPulse)) * scale / max(1e-4, -nearCentre.z);
+    float r = length(onScreen - nearCentre.xy / max(1e-4, -nearCentre.z)) / max(nearRadius, 1e-6);
+    if (r >= 1.0) continue;
+    float nearAlpha = mix(texelFetch(uNodes, ivec2(other, 2), 0).x, 1.0, nearLook.w);
+    kept *= 1.0 - marbleGlass(r) * nearAlpha;
+  }
+  return kept;
+}
+`;
+
+/** The uniforms MARBLE_COVER_GLSL reads, for another layer to share. */
+export interface MarbleCover {
+  uNodes: { value: THREE.Texture | null };
+  uSlots: { value: number };
+  uMarbleOpacity: { value: number };
+  uPulse: { value: number };
+}
+
 // The core's band (owner 2026-10-14): white dust packed between the glass
 // hugging the core and the first layout shell, swirling around the core. Each
 // mote circles an axis leaning a little from the cloud's own, the inner ones
@@ -352,12 +392,36 @@ attribute vec3 aLean;   // how the mote's axis leans from the cloud's
 uniform vec3 uCore;     // the core's centre, cloud-local
 uniform vec2 uBand;     // the band's outer radius, cloud-local, in y
 uniform float uGain;
+uniform vec4 uRims;     // each layout shell's radius, cloud-local; 0 where there is none
+uniform vec4 uVeils;    // how much of what lies behind each shell's glass it hides
+uniform float uCoreVeil; // the same for the core's own glass
+// The marbles in front hide it too (knowledge-3d-marble-dust.ts).
+uniform sampler2D uNodes;
+uniform int uSlots;
+uniform float uMarbleOpacity;
+uniform float uPulse;
 varying float vAlpha;
 varying float vRing;
 varying vec3 vColor;
 ${OPTICS_GLSL}
 ${LIGHT_GLSL}
 ${CORE_HUG_GLSL}
+${MARBLE_COVER_GLSL}
+// How many times the sight line from the eye to a point crosses a sphere
+// before reaching it (view space).
+float crossings(vec3 point, vec3 centre, float radius) {
+  if (radius <= 0.0) return 0.0;
+  float far = length(point);
+  vec3 d = point / max(far, 1e-6);
+  float b = dot(d, centre);
+  float disc = b * b - dot(centre, centre) + radius * radius;
+  if (disc <= 0.0) return 0.0;
+  float s = sqrt(disc);
+  return float(b - s > 0.0 && b - s < far) + float(b + s > 0.0 && b + s < far);
+}
+float through(float veil, float times) {
+  return mix(1.0, 1.0 - veil, min(times, 1.0)) * mix(1.0, 1.0 - veil, max(times - 1.0, 0.0));
+}
 void main() {
   vec3 axis = normalize(vec3(0.0, 1.0, 0.0) + aLean);
   float turn = uTime * aRandom.z * 0.0017453293 + aRandom.y * 6.2831853;
@@ -380,6 +444,19 @@ void main() {
   float edges = smoothstep(0.0, 0.08, aMote.w) * (1.0 - smoothstep(0.75, 1.0, aMote.w));
   vAlpha = edges * aRandom.w * base * base / (size * size) * twinkle * knowledgeFog(depth)
     * uGain * min(1.0, apparent * apparent);
+  // Behind glass: every layout shell and the core's glass between it and the
+  // eye hides part of it by its solidity, and so does any marble in front.
+  if (vAlpha >= 0.003) {
+    vec3 hub = (modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+    float scale = length(modelViewMatrix[0].xyz);
+    float kept = through(uVeils.x, crossings(view.xyz, hub, uRims.x * scale))
+      * through(uVeils.y, crossings(view.xyz, hub, uRims.y * scale))
+      * through(uVeils.z, crossings(view.xyz, hub, uRims.z * scale))
+      * through(uVeils.w, crossings(view.xyz, hub, uRims.w * scale));
+    vec3 coreView = (modelViewMatrix * vec4(uCore, 1.0)).xyz;
+    kept *= through(uCoreVeil, crossings(view.xyz, coreView, coreHug(uCore, 0.0) * scale));
+    vAlpha *= kept * marbleCover(view.xyz, view.z, -1);
+  }
   if (vAlpha < 0.003) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
   vRing = smoothstep(5.0, 15.0, confusion / uPixelRatio);
   vColor = vec3(1.0, 0.98, 0.95);
@@ -411,6 +488,9 @@ const RIPPLE_SECONDS = 2.6;
  *  radius. A crater's floor lies below its node, and its mouth reaches toward
  *  the nearest neighbour, by these [lightest, heaviest] amounts. */
 const RIM = 0.05;
+/** How much of what lies behind it a glass layer of solidity 1 hides from the
+ *  core's dust (owner 2026-10-14: the dust sits behind the glass in front of it). */
+const GLASS_VEIL = 0.25;
 /** The core's glass hugs its disc this many CSS pixels out (owner 2026-10-14). */
 const CORE_GAP_PX = 5;
 const FLOOR = [0.03, 0.11];
@@ -472,6 +552,8 @@ export function createKnowledge3dShells(options: {
   core?: number;
   /** The Executive's voice level, which swells the core sprite. */
   speech?: { value: number };
+  /** The marbles, so they hide the core's dust where they stand in front of it. */
+  marbles?: MarbleCover;
 }): Knowledge3dShells {
   const { positions, layers, sizes, weights, tints, optics } = options;
   const core = options.core ?? -1;
@@ -655,6 +737,9 @@ export function createKnowledge3dShells(options: {
     band: { value: new THREE.Vector2(1, 2) },
     hug: { value: new THREE.Vector3(1, CORE_GAP_PX, 1) },
     hugSwell: { value: 1 },
+    rims: { value: new THREE.Vector4() },
+    veils: { value: new THREE.Vector4() },
+    coreVeil: { value: 0 },
   };
   const speech = options.speech ?? { value: 0 };
   let coreFocus = 0;
@@ -722,7 +807,11 @@ export function createKnowledge3dShells(options: {
     coreDustGeometry.setAttribute("aLean", new THREE.BufferAttribute(leans, 3));
     const coreDustMaterial = new THREE.ShaderMaterial({
       uniforms: { ...optics, uCore: coreUniforms.centre, uBand: coreUniforms.band, uGain: { value: 0 },
-        uHug: coreUniforms.hug, uHugSwell: coreUniforms.hugSwell },
+        uHug: coreUniforms.hug, uHugSwell: coreUniforms.hugSwell,
+        uRims: coreUniforms.rims, uVeils: coreUniforms.veils, uCoreVeil: coreUniforms.coreVeil,
+        ...(options.marbles ?? {
+          uNodes: { value: null }, uSlots: { value: 0 }, uMarbleOpacity: { value: 0 }, uPulse: { value: 0 },
+        }) },
       vertexShader: CORE_DUST_VERTEX, fragmentShader: BOKEH_FRAGMENT, ...ADDITIVE, depthTest: true,
     });
     coreDustUniforms = coreDustMaterial.uniforms;
@@ -778,6 +867,9 @@ export function createKnowledge3dShells(options: {
       shell.texture.needsUpdate = true;
       shell.shape.value.set(rim, deepest);
     }
+    shells.forEach((shell, order) => {
+      if (order < 4) coreUniforms.rims.value.setComponent(order, shell.shape.value.x);
+    });
     if (!(outer > 0)) return false;
     optics.uReach.value = outer;
     if (coreGlass && core >= 0) {
@@ -834,6 +926,8 @@ export function createKnowledge3dShells(options: {
         dirty = true;
       }
       const layers = [glass.shellLayer1, glass.shellLayer2, glass.shellLayer3, glass.shellLayer4];
+      layers.forEach((solid, order) => coreUniforms.veils.value.setComponent(order,
+        order < shells.length ? Math.min(0.9, GLASS_VEIL * solid) : 0));
       shells.forEach((shell, order) => {
         const solid = layers[order];
         shell.glass.uSolid.value = solid;
@@ -846,6 +940,7 @@ export function createKnowledge3dShells(options: {
       if (coreGlassUniforms) {
         coreGlassUniforms.uSolid.value = glass.coreGlass;
         coreUniforms.hug.value.z = glass.coreGlassDistance;
+        coreUniforms.coreVeil.value = Math.min(0.9, GLASS_VEIL * glass.coreGlass);
         coreGlassUniforms.uLevels.value = 14 * glass.sheenLines;
       }
       if (coreDustUniforms) coreDustUniforms.uGain.value = 0.7 * coreDustGain * glass.coreDust;
