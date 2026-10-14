@@ -886,8 +886,11 @@ def execute(args: dict, context: dict) -> dict:
                 for item in approved[:MAX_EVIDENCE_ITEMS]
                 if str(item.get("target", "")).strip()
             ]
-    if (requested_status != args.get("status", "completed")
-            and context.get("event") == "observations.memory.ready"):
+    if (context.get("event") == "observations.memory.ready"
+            and (requested_status != args.get("status", "completed")
+                 or (requested_status == "completed" and outcome == "no_change"))):
+        # The complete read of this Source is checked below; a no-change
+        # inspection cites it even when the model listed only Articles.
         citation = str((context.get("params") or {}).get("source_citation", ""))
         if citation and citation not in evidence:
             evidence.append(citation)
