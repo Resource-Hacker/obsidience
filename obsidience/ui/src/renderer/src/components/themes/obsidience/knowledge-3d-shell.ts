@@ -151,17 +151,16 @@ vec3 shellPoint(vec3 direction, float depth, float lift, float wave) {
 }
 `;
 
-// The core's glass hugs the core at a share of its disc plus a few pixels at
-// any zoom, and swells with it while it thinks or speaks.
+// The core's glass hugs the core's disc a few canvas pixels out at any zoom,
+// and swells with it while it thinks or speaks.
 const CORE_HUG_GLSL = `
-uniform vec3 uHug;       // the core's radius, cloud-local; the gap in CSS pixels; the share
+uniform vec2 uHug;       // the core's radius, cloud-local; the gap in CSS pixels
 uniform float uHugSwell; // the core sprite's own swell
 uniform float uPerspective;
 float coreHug(vec3 centre, float extraPx) {
   vec4 hub = modelViewMatrix * vec4(centre, 1.0);
   float perUnit = uPerspective * length(modelViewMatrix[0].xyz) / max(1.0, -hub.z);
-  return uHug.z * (uHug.x * uHugSwell + uHug.y * uPixelRatio / max(perUnit, 1e-4))
-    + extraPx * uPixelRatio / max(perUnit, 1e-4);
+  return uHug.x * uHugSwell + (uHug.y + extraPx) * uPixelRatio / max(perUnit, 1e-4);
 }
 `;
 
@@ -411,11 +410,8 @@ const RIPPLE_SECONDS = 2.6;
  *  radius. A crater's floor lies below its node, and its mouth reaches toward
  *  the nearest neighbour, by these [lightest, heaviest] amounts. */
 const RIM = 0.05;
-/** The core's glass hugs its disc this many CSS pixels out (owner 2026-10-14),
- *  then halved toward the core: the sprite's faint outer disc reaches well past
- *  its bright heart, and the owner asked for half the distance. */
+/** The core's glass hugs its disc this many CSS pixels out (owner 2026-10-14). */
 const CORE_GAP_PX = 5;
-const CORE_HUG_SHARE = 0.5;
 const FLOOR = [0.03, 0.11];
 const MOUTH = [0.55, 0.85];
 
@@ -654,7 +650,7 @@ export function createKnowledge3dShells(options: {
     shape: { value: new THREE.Vector2(1, 0) },
     centre: { value: new THREE.Vector3() },
     band: { value: new THREE.Vector2(1, 2) },
-    hug: { value: new THREE.Vector3(1, CORE_GAP_PX, CORE_HUG_SHARE) },
+    hug: { value: new THREE.Vector2(1, CORE_GAP_PX) },
     hugSwell: { value: 1 },
   };
   const speech = options.speech ?? { value: 0 };
