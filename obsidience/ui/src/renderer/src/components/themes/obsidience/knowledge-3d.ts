@@ -278,7 +278,7 @@ export interface Knowledge3dTuning {
   ringStyle: number;
   coreStyle: number;
   /** Dust marble nodes: how solid their glass is (0 clear, 1 solid) and how
-   *  much dust fills them (0 none, 1 the default, 2 twice as many motes). */
+   *  much dust fills them (0 none, 2 the most; 1.7 by default, owner 2026-10-14). */
   marbleOpacity: number;
   marbleDust: number;
   /** Role-glyph nameplates over every ball (read from the main record). */
@@ -356,8 +356,8 @@ export const DEFAULT_KNOWLEDGE_3D_TUNING: Knowledge3dTuning = {
   articleStyle: 0,
   ringStyle: 0,
   coreStyle: 0,
-  marbleOpacity: 0.25,
-  marbleDust: 1,
+  marbleOpacity: 0.5,
+  marbleDust: 1.7,
   rolePlates: 1,
   orbitRadius: KNOWLEDGE_3D_ORBIT_RADIUS_DEFAULT,
   orbitSpeed: KNOWLEDGE_3D_ORBIT_SPEED_DEFAULT,

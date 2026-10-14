@@ -13,7 +13,7 @@ import * as THREE from "three";
 import { ADDITIVE, LIGHT_GLSL } from "./knowledge-3d-shell";
 
 /** Motes carried per marble; a marble shows a share of them by its area and
- *  the dust setting, so the default keeps its density up to 80 pixels. */
+ *  the dust setting, so the default keeps its density up to about 60 pixels. */
 export const MARBLE_MOTES = 5000;
 
 const MARBLE_DUST_VERTEX = `
