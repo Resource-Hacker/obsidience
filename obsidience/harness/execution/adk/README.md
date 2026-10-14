@@ -41,7 +41,9 @@ records the admitted count with the step's metrics.
   Trials run `run_adk_session` with an evaluation handler: isolated in-memory
   session, no Hindsight recall or writeback, every admitted call answered by
   frozen results or the contract validator (no dispatch or receipt), and a
-  captured prompt replacing the history in contract mode. Specialist captures
+  captured prompt replacing the history in contract mode. A contract trial's
+  read-only steps are answered from the current Vault into its own context,
+  and its prompt then continues with those calls and results. Specialist captures
   from the retired JSON action loop are converted to native Tool calls.
 
 Restart only the Harness after changing this loop.

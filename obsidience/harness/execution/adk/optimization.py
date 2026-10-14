@@ -17,7 +17,7 @@ from dataclasses import replace
 from autosaddler.v2.core.domain import (ArtifactRef, Case, Cost, Evaluation, Observation, PatchVerdict,
                                       canonical_json, sha256_digest)
 from autosaddler.v2.core.engine import AutoSaddlerEngine
-from autosaddler.v2.core.policies import (BudgetPolicy, FixedTaskSelectionPolicy, FullOnAcceptDevelopment,
+from autosaddler.v2.core.policies import (FixedTaskSelectionPolicy, FullOnAcceptDevelopment,
                                         MatchedValidStrictImprovement, MeanDevelopmentRanking, PolicyBundle)
 from autosaddler.v2.core.ports import ScenarioComponents
 from autosaddler.v2.harness.component_map import ComponentMapHarnessSpace
@@ -113,10 +113,80 @@ def _slowdowns(before, after, *, check_latency: bool) -> list[str]:
     return failures
 
 
+# A trial may take read-only steps before its graded call. A job measures the
+# seed's controls, three training rounds and one accepted candidate's controls.
+TRIAL_SECONDS = 240
+JOB_SECONDS = 2400
+
+# Repetitions of one case are independent samples of one model: the unchanged
+# baseline's training passes varied by up to two of five between measurements
+# (2026-10-13 jobs). Cases are therefore compared by their pass counts, never
+# repetition against repetition. The training trials both select a candidate
+# and judge it, so its gain must be far outside that spread; and controls the
+# baseline mostly fails could not show a regression.
+TRAIN_MARGIN = 4
+CONTROL_FLOOR = 0.75
+
+
+def _train_improved(before, after) -> bool:
+    """Every training trial passes, at least TRAIN_MARGIN of which the baseline failed."""
+    passed = sum(row['passed'] for row in after)
+    return bool(after) and passed == len(after) and passed - sum(row['passed'] for row in before) >= TRAIN_MARGIN
+
+
+def _case_passes(before, after) -> dict:
+    """Each case's split and its passes for the baseline, then the candidate."""
+    cases = {}
+    for index, rows in enumerate((before, after)):
+        for row in rows:
+            cases.setdefault(row['case_id'], {'split': row['split'], 'passed': [0, 0]})['passed'][index] += row['passed']
+    return cases
+
+
+def _holdout_regressed(cases: dict) -> bool:
+    """The controls pass less often in total, or one of them by two or more repetitions."""
+    held = [case['passed'] for case in cases.values() if case['split'] == 'holdout']
+    return sum(new for _, new in held) < sum(old for old, _ in held) or any(old - new >= 2 for old, new in held)
+
+
+def _controls_usable(passed: int, trials: int) -> bool:
+    """The baseline passes enough control trials for a regression to be visible."""
+    return trials > 0 and passed >= CONTROL_FLOOR * trials
+
+
+class JobBudget:
+    """Upstream's budget, ended by the first accepted candidate or by unusable controls.
+
+    The accepted candidate's controls are then the job's last measurement, and
+    no candidate can be published when the seed's controls cannot guard it.
+    """
+    def __init__(self, store, *, max_rollouts: int, max_iterations: int):
+        self.store, self.max_rollouts, self.max_iterations = store, max_rollouts, max_iterations
+
+    def allows_iteration(self, *, iteration: int, attempted_rollouts: int) -> bool:
+        if iteration >= self.max_iterations or attempted_rollouts >= self.max_rollouts:
+            return False
+        if any(event.payload.get('accepted') is True for event in self.store.events_of_type('EvolutionRecorded')):
+            return False
+        controls = [row['score'] for event in self.store.events_of_type('EvaluationCompleted')
+                    if (evaluation := event.payload.get('evaluation', {})).get('split') == 'development'
+                    for row in evaluation.get('observations', [])]
+        return _controls_usable(sum(score == 1 for score in controls), len(controls))
+
+
 def _extra_tool_calls(before, after) -> list[str]:
-    return [old['case_id'] for old, new in zip(before, after)
-            if old['passed'] and not old.get('error') and not new.get('error')
-            and new['tool_count'] > old['tool_count']]
+    """Controls whose passing candidate trials average over half a Tool call more.
+
+    The corrected training case may need the read its rejection asked for.
+    """
+    def calls(rows):
+        cases = {}
+        for row in rows:
+            if row['split'] == 'holdout' and row['passed'] and not row.get('error'):
+                cases.setdefault(row['case_id'], []).append(row['tool_count'])
+        return {case: sum(counts) / len(counts) for case, counts in cases.items()}
+    old, new = calls(before), calls(after)
+    return [case for case in old if case in new and new[case] > old[case] + 0.5]
 
 
 class CompleteImprovement(MatchedValidStrictImprovement):
@@ -131,11 +201,10 @@ class CompleteImprovement(MatchedValidStrictImprovement):
         verdict = super().compare(parent, child)
         before = [dict(row.metadata['result']) for row in parent.observations]
         after = [dict(row.metadata['result']) for row in child.observations]
-        if (any(row.disposition != 'success' for row in child.observations)
-                or _extra_tool_calls(before, after)
-                or _slowdowns(before, after, check_latency=self.check_latency)):
+        if not _train_improved(before, after) or _slowdowns(before, after, check_latency=self.check_latency):
             return replace(verdict, accepted=False,
-                           reason='Candidate must pass every case and preserve the applicable execution bounds')
+                           reason=f'Candidate must pass every training trial, at least {TRAIN_MARGIN} of which '
+                                  'the baseline failed, within the applicable execution bounds')
         return verdict
 
 
@@ -179,7 +248,7 @@ class NativeEvaluator:
                 messages = executor.activation_messages(task,
                     {**sections, 'params': {}, 'objective': specification['objective']}, agent_name=agent.title)
                 if self.document.get('evaluation_mode') == 'contract':
-                    from ..optimization_incidents import validate_decision
+                    from ..optimization_incidents import trial_read, validate_decision
                     sample = specification['sample']
                     messages = json.loads(json.dumps(sample['messages']))
                     replacements = 0
@@ -190,7 +259,7 @@ class NativeEvaluator:
                             message['content'] = content.replace(subject.body.strip(), body.strip())
                     if not replacements:
                         raise ValueError('The captured prompt does not contain its exact instruction body')
-                    trial = DecisionTrial(sample, validate_decision)
+                    trial = DecisionTrial(sample, validate_decision, trial_read)
                     # Preserve provider roles and Tool-call/result pairing; the
                     # ordinary bootstrap is not a wire replay.
                     trial.wire_messages = (messages if sample.get('prompt_format') == 'native_wire' else native_wire(
@@ -206,7 +275,7 @@ class NativeEvaluator:
                 try:
                     action_trace.emit('status', 'AutoSaddler native Executive trial started')
                     try:
-                        async with asyncio.timeout(90):
+                        async with asyncio.timeout(TRIAL_SECONDS):
                             trace, status, summary = await run_adk_session(
                                 task, model, messages, sorted(set(spine['tools']) | {'task.complete'}),
                                 trial_context, agent.title, self.document['model_contract']['reasoning_effort'],
@@ -252,18 +321,34 @@ class NativeEvaluator:
 
 
 class DecisionTrial:
-    """One actual model decision graded by a read-only Capability validation."""
-    max_steps = 2
-    def __init__(self, sample, validator):
-        self.sample, self.validator = sample, validator
+    """One captured decision point, graded by a read-only Capability validation.
+
+    The model may first take the read-only steps its procedure or the rejection
+    asks for (a cited Article, vault.validate). They are answered from the
+    current Vault into this trial's own context, and the first other call is
+    graded against the receipts that context then holds.
+    """
+    read_steps = 4
+
+    def __init__(self, sample, validator, reader):
+        self.sample, self.validator, self.reader = sample, validator, reader
         self.case = {'objective': sample['context'].get('objective', 'Continue the bound procedure')}
-        self.schema_context = sample['context']
+        self.context = self.schema_context = json.loads(json.dumps(sample['context']))
+        # The decisions the live run had left at this step, so the budget in
+        # each further Tool result continues the captured one.
+        limit = refinement.CONFIG.max_steps
+        self.max_steps = min(limit, max(1, limit - sample['step'] + 1))
         self.passed, self.error, self.tool_count, self.calls = False, None, 0, []
 
     async def handle(self, name, args):
         self.calls.append({'tool': name, 'args': args})
         self.tool_count += name != 'task.complete'
-        self.passed, reason = await asyncio.to_thread(self.validator, self.sample, name, args)
+        if len(self.calls) <= self.read_steps:
+            observation = await asyncio.to_thread(self.reader, self.sample, self.context, name, args)
+            if observation is not None:
+                return {'done': False, 'observation': observation}
+        self.passed, reason = await asyncio.to_thread(
+            self.validator, {**self.sample, 'context': self.context}, name, args)
         return {'done': True, 'status': 'completed' if self.passed else 'failed',
                 'summary': reason, 'observation': json.dumps({'passed': self.passed, 'reason': reason})}
 
@@ -305,27 +390,61 @@ class NativeTrial(FrozenTrial):
         return result
 
 
+_LIST_ITEM = re.compile(r'\s*(?:[-*+]|\d+[.)])\s')
+UNIT_TEXT_LIMIT = 2500
+
+
+def instruction_units(body: str) -> list[tuple[int, int]]:
+    """Line spans of the body's paragraphs, list items and headings.
+
+    Bodies are hard-wrapped, so a sentence spans physical lines but never
+    units: replacing a unit whole, or adding one after it, leaves no fragment.
+    """
+    lines = body.split('\n')
+    spans, start = [], None
+    for index, line in enumerate(lines):
+        if start is not None and (not line.strip() or _LIST_ITEM.match(line)
+                                  or line.startswith('#') or lines[index - 1].startswith('#')):
+            spans.append((start, index))
+            start = None
+        if start is None and line.strip():
+            start = index
+    if start is not None:
+        spans.append((start, len(lines)))
+    return spans
+
+
 class IdentityHarnessSpace(ComponentMapHarnessSpace):
-    """Apply bounded exact edits through the upstream candidate finalizer."""
+    """Apply bounded whole-unit edits through the upstream candidate finalizer."""
 
     def apply_mutation(self, session, outcome):
         output = outcome.result.structured_output
         edits = output.get('edits') if isinstance(output, Mapping) else None
         if not isinstance(edits, (list, tuple)) or not 1 <= len(edits) <= 3:
-            raise ValueError('An identity candidate requires one to three exact edits')
-        body = json.loads((session.workspace / 'candidate.json').read_text())['identity']
-        edited = set()
+            raise ValueError('An identity candidate requires one to three edits')
+        lines = json.loads((session.workspace / 'candidate.json').read_text())['identity'].split('\n')
+        spans = instruction_units('\n'.join(lines))
+        changes = {}
         for edit in edits:
-            if not isinstance(edit, Mapping) or set(edit) != {'old', 'new'}:
-                raise ValueError('Each identity edit requires old and new text only')
-            old, new = edit['old'], edit['new']
-            if (not isinstance(old, str) or not 1 <= len(old) <= 1000
-                    or not isinstance(new, str) or len(new) > 1500 or old == new
-                    or old in edited or body.count(old) != 1):
-                raise ValueError('Each identity edit must uniquely match a distinct line in the current body')
-            edited.add(old)
-            body = body.replace(old, new, 1)
-        self.apply_updates(session, {'identity': body})
+            if not isinstance(edit, Mapping) or set(edit) != {'unit', 'action', 'text'}:
+                raise ValueError('Each identity edit requires unit, action and text only')
+            unit, action, text = edit['unit'], edit['action'], edit['text']
+            if (type(unit) is not int or not 1 <= unit <= len(spans) or unit in changes
+                    or action not in {'replace', 'insert_after'}
+                    or not isinstance(text, str) or not text.strip() or len(text) > UNIT_TEXT_LIMIT):
+                raise ValueError('Each identity edit must give one distinct unit of the current body its bounded text')
+            changes[unit] = action, text.strip('\n').split('\n')
+        # Last unit first: earlier spans keep their line numbers.
+        for unit in sorted(changes, reverse=True):
+            (start, end), (action, text) = spans[unit - 1], changes[unit]
+            if action == 'replace':
+                if '\n'.join(text).split() == '\n'.join(lines[start:end]).split():
+                    raise ValueError('A replacement must change its unit')
+                lines[start:end] = text
+            else:
+                # After a paragraph the text is its own paragraph; inside a list it is the next item.
+                lines[end:end] = [''] + text if end == len(lines) or not lines[end].strip() else text
+        self.apply_updates(session, {'identity': '\n'.join(lines)})
 
 
 class TrainingEvidence:
@@ -381,23 +500,29 @@ class ExecutivePrompts:
                           'rationale': text}
             instruction = 'Select one existing accepted parent ID.'
         elif kind == 'diagnose_patch':
-            body = data['candidate']['identity']
-            anchors = [line for line in body.splitlines()
-                       if line.strip() and len(line) <= 1000 and body.count(line) == 1]
-            if not anchors:
-                raise ValueError('The instruction body has no unique bounded line to edit')
+            # The body as its numbered units; the envelope around it is not instruction text.
+            lines = data.pop('candidate')['identity'].split('\n')
+            spans = instruction_units('\n'.join(lines))
+            if not spans:
+                raise ValueError('The instruction body has no unit to edit')
+            data['instruction_units'] = [{'unit': number, 'text': '\n'.join(lines[start:end])}
+                                         for number, (start, end) in enumerate(spans, 1)]
             properties = {'schema_version': {'const': 'autosaddler-diagnosis-patch/v1'},
-                          'edits': {'type': 'array', 'minItems': 1, 'maxItems': 3, 'uniqueItems': True, 'items': {
+                          'edits': {'type': 'array', 'minItems': 1, 'maxItems': 3, 'items': {
                               'type': 'object', 'properties': {
-                                  'old': {'type': 'string', 'enum': anchors},
-                                  'new': {'type': 'string', 'maxLength': 1500}},
-                              'required': ['old', 'new'], 'additionalProperties': False}},
+                                  'unit': {'type': 'integer', 'enum': list(range(1, len(spans) + 1))},
+                                  'action': {'type': 'string', 'enum': ['replace', 'insert_after']},
+                                  'text': {'type': 'string', 'maxLength': UNIT_TEXT_LIMIT}},
+                              'required': ['unit', 'action', 'text'], 'additionalProperties': False}},
                           'diagnosis': {'type': 'string', 'maxLength': 1000}}
-            instruction = ('Diagnose the observed failure and return one to three small exact text edits to the supplied Agent identity or Runbook. '
-                           'Select each old string from the supplied enum of exact body lines, including its indentation. '
-                           'Edit each old line at most once; do not repeat an instruction. '
-                           'New replaces that line and may contain newlines. Never reflow or paraphrase the old text. '
-                           'Return only the edits, never repeat the complete body. '
+            instruction = ('Diagnose why the training trials failed and return one to three small edits to the supplied Agent identity or Runbook. '
+                           'training_evidence.observations holds each trial: result.actions are the calls the model made and '
+                           'result.summary is the contract\'s reason for its outcome. Correct what those trials show; '
+                           'original_rejection is the earlier incident and may no longer reproduce. '
+                           'instruction_units is the body in order: each unit is one whole paragraph, list item or heading. '
+                           'An edit names one unit, at most once. "replace" puts your text in place of that whole unit: write the '
+                           'complete unit with its list marker and indentation, repeating word for word every sentence you are not changing. '
+                           '"insert_after" adds your text as a new paragraph or list item after that unit and leaves the unit as it is. '
                            'Keep its identity, owner preferences, Article links and unrelated functionality. Make the smallest '
                            'instruction correction. Do not add case-specific answers, names, new capabilities, authority, '
                            'reasoning modes or extra mandatory Tool calls. Correctness comes first; preserve fast simple answers. '
@@ -471,10 +596,19 @@ def comparison(document, rows, seed_id, selected_id):
                     for n in range(document['suite']['repetitions'])]
         return [found[key] for key in expected if key in found]
     baseline, candidate = ordered(seed_id), ordered(selected_id)
+    # Coverage and bookkeeping; its repetition pairs do not decide the verdict.
     result = compare_observations(baseline, candidate)
     count = len(document['suite']['cases']) * document['suite']['repetitions']
     if len(baseline) != count or len(candidate) != count:
         result['verdict'] = 'incomplete'
+    if result['verdict'] != 'incomplete':
+        result['cases'] = _case_passes(baseline, candidate)
+        held = [row['passed'] for row in baseline if row['split'] == 'holdout']
+        result['controls_usable'] = _controls_usable(sum(held), len(held))
+        result['verdict'] = ('regressed' if _holdout_regressed(result['cases']) else
+                             'passed' if result['controls_usable'] and _train_improved(
+                                 *([row for row in side if row['split'] == 'train'] for side in (baseline, candidate)))
+                             else 'not_improved')
     check_latency = _latency_sensitive(document)
     slowdowns = (_slowdowns(baseline, candidate, check_latency=check_latency)
                  if len(baseline) == len(candidate) else [])
@@ -512,12 +646,12 @@ async def run(case_id, document, audit, context):
         policies=PolicyBundle(task_selection=FixedTaskSelectionPolicy(batch_size=len(scenario.train_cases)),
             acceptance=CompleteImprovement(check_latency=_latency_sensitive(document)),
             development=FullOnAcceptDevelopment(), ranking=MeanDevelopmentRanking(),
-            budget=BudgetPolicy(max_rollouts=len(cases) * document['suite']['repetitions'] * 4, max_iterations=3)),
+            budget=JobBudget(store, max_rollouts=len(cases) * document['suite']['repetitions'] * 4, max_iterations=3)),
         diagnosis_patch_timeout_seconds=180, reflection_timeout_seconds=90)
     failure = None
     result = None
     try:
-        async with asyncio.timeout(900):
+        async with asyncio.timeout(JOB_SECONDS):
             result = await engine.optimize()
     except Exception as exc:
         # A completed audit can report incomplete evidence. Cancellation still

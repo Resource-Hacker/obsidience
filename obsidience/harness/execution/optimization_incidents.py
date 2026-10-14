@@ -20,7 +20,7 @@ CONTEXT_FIELDS = {
     '_source_reads', '_article_reads', '_vault_searches', '_created_tasks',
     'staged_proposals', 'maintenance_candidate', '_memory_proposal_rejection',
     '_link_proposal_rejection', '_proposal_read_prerequisite', 'handoff_source_id',
-    '_merge_retained_updates',
+    '_merge_retained_updates', '_assignment_read_refs',
     '_computer_act_scope', '_computer_request_target', 'trace',
 }
 
@@ -314,6 +314,37 @@ def contract_dead_end(run: dict, entries: list, sample: dict | None) -> str | No
             + f'. Run {run["id"]}; no optimization job was admitted.')
 
 
+TRIAL_READS = ('source.read', 'vault.read', 'vault.search', 'vault.validate')
+
+
+def trial_read(sample: dict, context: dict, tool: str, args: dict) -> str | None:
+    """Answer a trial's read-only step from the current Vault, or None when the call is the graded one.
+
+    A search, an Article or Source read and vault.validate change nothing. Their
+    receipts enter ``context``, the trial's own copy, exactly as a live run's
+    would, so the contract then grades the following call on what was read.
+    """
+    from importlib import import_module
+    from ..capabilities.registry import argument_schema
+    from ..capabilities.source.read import precondition_error
+    import jsonschema
+
+    if tool not in TRIAL_READS or tool == sample['tool'] or tool not in sample['allowed']:
+        return None
+    try:
+        jsonschema.validate(args, argument_schema(tool))
+    except jsonschema.ValidationError:
+        return None
+    context.setdefault('run_id', sample['run_id'])
+    if error := precondition_error(tool, args, context):
+        observation, dispatched = 'Tool prerequisite rejected: ' + error, False
+    else:
+        observation, dispatched = import_module('..capabilities.' + tool, __package__).execute(args, context), True
+    context.setdefault('trace', []).append({'tool': tool, 'args': args, 'obs': observation,
+                                            **({} if dispatched else {'not_dispatched': True})})
+    return observation
+
+
 def validate_decision(sample: dict, tool: str, args: dict) -> tuple[bool, str]:
     """Use executable contracts as the rubric; never execute a proposed effect."""
     from ..capabilities.registry import argument_schema
@@ -332,20 +363,10 @@ def validate_decision(sample: dict, tool: str, args: dict) -> tuple[bool, str]:
         jsonschema.validate(args, argument_schema(tool))
         if error := precondition_error(tool, args, context):
             raise ValueError(error)
-        # A missing prerequisite has a code-owned next operation. A model may
-        # not replace a rejected success claim with a fabricated failure.
-        original_error = str(sample['result'].get('error', '')) if isinstance(sample['result'], dict) else str(sample['result'])
-        if sample['rejected'] and sample['tool'] == 'task.complete':
-            if 'successful Knowledge search' in original_error:
-                return (tool == 'vault.search' and bool(str(args.get('query', '')).strip()),
-                        'The completion contract requires a topic search before success')
-            if 'complete bound' in original_error or 'read the bound' in original_error.lower():
-                expected = (context.get('params') or {}).get('source_citation')
-                return (tool == 'source.read' and bool(expected) and expected in json.dumps(args),
-                        'The completion contract requires the bound Source')
         if tool != sample['tool']:
-            raise ValueError('This decision case requires the original operation or its attested prerequisite')
+            raise ValueError('This decision case requires the original operation after any read-only steps')
         if tool == 'task.complete':
+            # A model may not replace a rejected success claim with a fabricated failure.
             if args.get('status') == 'failed':
                 raise ValueError('Turning a correctable rejection into failure is not an improvement')
             outcome = complete(args, context)

@@ -442,9 +442,12 @@ class AgentPlugin(BasePlugin):
         if (captured := getattr(self.evaluation, 'wire_messages', None)) is not None:
             # A contract trial evaluates the exact captured provider prompt, which
             # already carries its model-family guidance; never append it twice.
-            payload['messages'] = deepcopy(captured)
             # The captured receipt already carries the live decision budget.
             # Keep the trial's internal limit out of the replayed instructions.
+            if self.model_steps == 1:
+                self.replayed = len(payload['messages'])
+            # A later step follows this trial's own calls, results and feedback.
+            payload['messages'] = deepcopy(captured) + payload['messages'][self.replayed:]
         menu = None
         if self.fast_lane:
             from ..fast_lane import candidates

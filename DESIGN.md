@@ -572,9 +572,12 @@ full current reads, unrelated hits do not.
 
 - Heimdall Audit uses pinned Microsoft AutoSaddler V2 as the single improvement path
   (`harness.optimize`), sharing the existing loop, reservations, scheduler, writer and
-  Review. Trials intercept every Tool before dispatch and prove decision behaviour only;
-  Executive trials run the ADK loop in an isolated in-memory session with no Hindsight
-  recall or writeback.
+  Review. Trials dispatch no effect and prove decision behaviour only: each call is
+  answered by frozen results or the contract validator. A captured decision may first take
+  up to four read-only steps (Source and Article reads, search, `vault.validate`); they are
+  answered from the current Vault into the trial's own context, and the contract grades the
+  call that follows them. Executive trials run the ADK loop in an isolated in-memory
+  session with no Hindsight recall or writeback.
 - Bounded decision inputs are captured after the actual receipt commits; rejected calls
   and failed work enter Audit's FIFO after Repair, never preempting foreground work; one
   unchanged failure admits one job. Cases are private evaluation Source, need exact
@@ -585,8 +588,14 @@ full current reads, unrelated hits do not.
   A job is admitted for a run's last rejection only; a run that ended in a Tool-contract
   dead end (a partly read cited Article, no dispatchable call, the output limit) is
   recorded as an implementation finding and admits no job.
-- Candidates change only Agent/Runbook bodies; all cases must pass, training improve and
-  Tool counts hold; the latency bound applies only to Executive at reasoning `none`.
+- Candidates change only Agent/Runbook bodies, by replacing one whole paragraph or list
+  item or adding one after it (a hard-wrapped sentence never crosses those units).
+  Repetitions are independent samples, so cases compare by pass counts: the candidate must
+  pass every training trial, at least four of which the baseline failed; the controls must
+  not pass less often in total, nor any one of them by two or more repetitions, nor average
+  over half a Tool call more. A baseline that passes under three quarters of its control
+  trials cannot guard a candidate, so that job proposes none; the first accepted candidate
+  ends the search. The latency bound applies only to Executive at reasoning `none`.
   Publication revalidates inputs, code, model and the returned receipt; owner-set
   `Tasks/audit` `optimization_auto_apply` (default off) may publish instruction bodies
   automatically; metadata, grants, model configuration and code always keep Review. Never
