@@ -589,6 +589,9 @@ export function knowledge3dLinkDistance(
   );
 }
 
+/** The first layout layer's share of its even distance from the core. */
+export const KNOWLEDGE_3D_INNER_LAYER_SHARE = 0.5;
+
 /** Every Brain branch starts on one shared inner radius. Each branch divides
  * the remaining radius across its own depth; earlier Articles keep their layer.
  * Population and glyph clearance size the WHOLE ball once, not separate crowns.
@@ -667,6 +670,20 @@ export function knowledge3dRadialLayout(
     const step = fractions.get(node.id)! - fractions.get(parent.id)!;
     if (step > 0) radius = Math.max(radius,
       (clearances.get(node.id)! + clearances.get(parent.id)!) / step);
+  }
+  // The first layer sits at half its share of the radius (owner 2026-10-14:
+  // "half the distance of the most inner layer to the core"). The ball keeps
+  // the size the even layers gave it; only that layer moves in, its demand
+  // carried with it, so branch separation still finds its members.
+  const first = layers.find(layer => layer > 0);
+  if (first !== undefined && first < 1) {
+    const inner = first * KNOWLEDGE_3D_INNER_LAYER_SHARE;
+    for (const [id, fraction] of fractions) if (fraction === first) fractions.set(id, inner);
+    for (const profile of footprints.values()) {
+      if (!profile.has(first)) continue;
+      profile.set(inner, profile.get(first)!);
+      profile.delete(first);
+    }
   }
   return {
     radius,
