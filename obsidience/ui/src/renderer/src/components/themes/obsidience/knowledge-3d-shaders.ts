@@ -23,10 +23,12 @@ void main() {
     : (vStyle.x < 1.2
       ? uSubjectStyle
       : (vStyle.x < 1.5 ? uSubnodeStyle : uCoreStyle));
-  bool squareNode = vStyle.x < 1.5 && variant > 3.5;
+  // Squares: Articles 4-5, subjects 5-6 (subject 4 is the round marble).
+  float squareFirst = vStyle.x < 0.5 ? 4.0 : 5.0;
+  bool squareNode = vStyle.x < 1.5 && variant > squareFirst - 0.5;
   float solid = vStyle.x > 1.5 ? 0.9 : 1.0;
   if (squareNode) {
-    float corner = variant < 4.5 ? 0.16 : 0.045;
+    float corner = variant < squareFirst + 0.5 ? 0.16 : 0.045;
     if (roundedBoxDistance(p, solid * 0.82, corner) > 0.0) discard;
   } else if (length(p) > solid) discard;
   gl_FragColor = vec4(0.0);
@@ -124,6 +126,131 @@ void main() {
 }
 `;
 
+// Galaxy marble (owner 2026-10-14): a branch node as a small glass marble
+// in the Knowledge shells' own glass (hairline sheen levels, a limb that
+// glows where they crowd, light gathering in the node's colour) holding a
+// tilted spiral of densely packed dust that slowly turns. 95% opaque. The
+// dust is real points: a view ray is walked through a grid in the galaxy's
+// frame and each cell's one hashed mote lights the pixels near it, so motes
+// stay about a canvas pixel at any zoom. Whole turns per hour keep the
+// hourly uTime wrap seamless.
+const GALAXY_MARBLE_GLSL = `
+vec4 marbleHash(vec3 p) {
+  vec4 q = fract(vec4(p.xyzx) * vec4(0.1031, 0.1030, 0.0973, 0.1099));
+  q += dot(q, q.wzxy + 33.33);
+  return fract((q.xxyz + q.yzzw) * q.zywx);
+}
+mat3 marbleTurn(float x, float y, float z) {
+  float cx = cos(x), sx = sin(x), cy = cos(y), sy = sin(y), cz = cos(z), sz = sin(z);
+  return mat3(cy, 0.0, -sy, 0.0, 1.0, 0.0, sy, 0.0, cy)
+    * mat3(1.0, 0.0, 0.0, 0.0, cx, sx, 0.0, -sx, cx)
+    * mat3(cz, sz, 0.0, -sz, cz, 0.0, 0.0, 0.0, 1.0);
+}
+// Dust per unit volume in the galaxy's frame: a bright bulge, a thin disc
+// wound into log-spiral arms, and a sparse halo; none at the glass.
+float marbleDensity(vec3 s, float arms, float twist) {
+  float rr = dot(s, s);
+  float rho = length(s.xz);
+  float bulge = exp(-rr * 16.0);
+  float disc = exp(-abs(s.y) / (0.04 + 0.1 * rho)) * (1.0 - smoothstep(0.4, 0.9, rho));
+  float arm = 0.5 + 0.5 * cos(arms * (atan(s.z, s.x) - twist * log(rho + 0.05)));
+  return (bulge * 1.8 + disc * (0.03 + arm * arm * arm * arm * 1.2) + 0.05 * exp(-rr * 2.0))
+    * (1.0 - smoothstep(0.84, 0.96, sqrt(rr)));
+}
+vec4 galaxyMarble(vec2 p, float r, float aa, float radiusPx, vec3 tint, vec3 dark, float seed, float boost, float speech) {
+  float h = sqrt(max(0.0, 1.0 - r * r));
+  vec3 normal = vec3(p.x, -p.y, h);
+  float arms = fract(seed * 5.17) < 0.6 ? 2.0 : 3.0;
+  float turns = (30.0 + floor(fract(seed * 13.7) * 40.0)) * (fract(seed * 3.3) < 0.5 ? -1.0 : 1.0);
+  float twist = 2.6 * sign(turns);
+  // Seen 20 to 55 degrees off face-on, at any roll.
+  mat3 tilt = marbleTurn(1.5707963 - 0.35 - 0.6 * fract(seed * 7.31), 0.0, seed * 6.2831853);
+  mat3 frame = marbleTurn(0.0, uTime * turns * 0.0017453293, 0.0) * tilt;
+  // The pixel's ray through the marble, front to back, in the galaxy's frame.
+  vec3 origin = frame * vec3(p.x, -p.y, 0.0);
+  vec3 dir = frame * vec3(0.0, 0.0, -1.0);
+  float near = -h, far = h;
+  // Glow of the same distribution, so the dust reads as one galaxy: the
+  // bulge integrated along the ray, and the thin disc where the ray crosses it.
+  float axis = max(0.0, dot(origin, origin) - dot(origin, dir) * dot(origin, dir));
+  vec3 light = vec3(1.0, 0.95, 0.86) * (exp(-16.0 * axis) * 0.9 + exp(-90.0 * axis) * 1.1)
+    * exp(-(-dot(origin, dir) - near) * 0.8);
+  if (abs(dir.y) > 1e-3) {
+    float crossing = -origin.y / dir.y;
+    vec3 s = origin + dir * crossing;
+    float rho = length(s.xz);
+    float arm = 0.5 + 0.5 * cos(arms * (atan(s.z, s.x) - twist * log(rho + 0.05)));
+    float plane = (0.03 + arm * arm * arm * arm * 1.2) * (1.0 - smoothstep(0.4, 0.9, rho));
+    light += mix(tint, vec3(1.0, 0.95, 0.86), exp(-rho * rho * 10.0)) * plane
+      * 2.0 * (0.04 + 0.1 * rho) / max(abs(dir.y), 0.2)
+      * step(near, crossing) * step(crossing, far) * exp(-(crossing - near) * 0.8) * 1.6;
+  }
+  // The dust: one hashed mote per cell, twenty-four cells across.
+  const float CELLS = 12.0;
+  float sigma = max(0.9 / max(1.0, radiusPx), 0.006);
+  float gain = clamp(radiusPx * radiusPx / 2500.0, 0.25, 1.0);
+  vec3 pos = (origin + dir * near) * CELLS + 64.0;
+  vec3 step3 = sign(dir);
+  vec3 inv = 1.0 / max(abs(dir * CELLS), vec3(1e-5));
+  vec3 cell = floor(pos);
+  vec3 toNext = (step3 * (cell - pos) + step3 * 0.5 + 0.5) * inv;
+  float travelled = 0.0, span = far - near;
+  for (int i = 0; i < 48; i++) {
+    if (travelled > span) break;
+    vec4 hash = marbleHash(cell);
+    vec3 mote = (cell + 0.05 + 0.9 * hash.xyz - 64.0) / CELLS;
+    float density = marbleDensity(mote, arms, twist);
+    if (hash.w < density * 1.6) {
+      vec3 w = mote - origin;
+      float along = dot(w, dir);
+      vec3 off = w - dir * along;
+      float spark = exp(-dot(off, off) / (sigma * sigma));
+      float shade = fract(hash.w * 31.7 + hash.x * 7.3);
+      vec3 color = mix(mix(tint, vec3(1.0), 0.35), vec3(1.0, 0.97, 0.92), shade * shade);
+      light += color * spark * (0.35 + 0.9 * shade) * (0.5 + 0.6 * min(density, 1.5))
+        * exp(-(along - near) * 0.6) * gain;
+    }
+    float advance = min(toNext.x, min(toNext.y, toNext.z));
+    vec3 hit = step(toNext, vec3(advance));
+    travelled = advance;
+    cell += step3 * hit;
+    toNext += inv * hit;
+  }
+  light *= (1.0 + 1.6 * boost) * (1.0 + 0.3 * speech);
+  // The glass: the shells' sheen levels, tilted per marble and fixed to the
+  // view like a reflection, on the front face and faintly on the back.
+  // Its poles sit near the limb, so the levels sweep across as bands.
+  mat3 sheen = marbleTurn(0.2 + 0.3 * fract(seed * 2.91), 0.0, seed * 17.0);
+  vec3 front = sheen * normal;
+  vec3 back = sheen * vec3(p.x, -p.y, -h);
+  float levels = 9.0;
+  float drift = 0.014 * sin(dot(normal, vec3(3.1, 4.7, 2.3)) + seed * 40.0)
+    + 0.006 * sin(dot(normal, vec3(-6.3, 5.1, 7.7)) + seed * 13.0);
+  float level = (0.5 + 0.5 * front.y + drift) * levels;
+  float spacing = fwidth(level);
+  float line = 1.0 - smoothstep(0.25, 1.2, abs(fract(level - 0.5) - 0.5) / max(spacing, 1e-5));
+  line = mix(line, min(spacing, 1.0), smoothstep(0.4, 0.95, spacing));
+  line *= mod(floor(level + 0.5), 5.0) < 0.5 ? 0.3 : 0.11;
+  float backLevel = (0.5 + 0.5 * back.y - drift) * levels;
+  float backSpacing = fwidth(backLevel);
+  float backLine = (1.0 - smoothstep(0.25, 1.2, abs(fract(backLevel - 0.5) - 0.5) / max(backSpacing, 1e-5)))
+    * (1.0 - smoothstep(0.4, 0.95, backSpacing)) * 0.06;
+  vec3 pale = mix(mix(tint, vec3(1.0), 0.35), vec3(0.78, 1.0, 0.94), 0.6);
+  float limb = 1.0 - h;
+  vec3 sun = normalize(vec3(-0.45, 0.55, 0.75));
+  float spec = pow(max(dot(normal, normalize(sun + vec3(0.0, 0.0, 1.0))), 0.0), 90.0);
+  // Light gathers on the far side of the marble from the sun, in its colour.
+  float caustic = smoothstep(0.2, 0.95, dot(normalize(p * vec2(1.0, -1.0) + 1e-4), -sun.xy / length(sun.xy)))
+    * smoothstep(0.45, 0.97, r);
+  vec3 body = dark * 0.3 + tint * 0.015 + light + pale * backLine;
+  vec3 surface = pale * (line * (1.0 + 0.6 * boost) + limb * limb * limb * 0.6)
+    + mix(tint, vec3(1.0), 0.3) * caustic * 0.28
+    + vec3(1.0) * (spec * 0.9 + pow(max(dot(normal, sun), 0.0), 6.0) * 0.05);
+  float edge = 1.0 - smoothstep(1.0 - aa, 1.0 + aa, r);
+  return vec4(body + surface, 0.95 * edge);
+}
+`;
+
 // Procedural replica of the 2D painter's node pass, composited source-over
 // exactly like canvas: depth glow, then ring stroke, then the gradient disc.
 export const POINT_FRAGMENT_SHADER = `
@@ -156,6 +283,7 @@ float roundedBoxDistance(vec2 point, float halfSize, float corner) {
   vec2 q = abs(point) - vec2(halfSize - corner);
   return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - corner;
 }
+${GALAXY_MARBLE_GLSL}
 void main() {
   vec2 p = (gl_PointCoord - 0.5) * 2.0 / max(vDiscFrac, 1e-4);
   float r = length(p);
@@ -165,7 +293,12 @@ void main() {
     : (vStyle.x < 1.2
       ? uSubjectStyle
       : (vStyle.x < 1.5 ? uSubnodeStyle : uCoreStyle));
-  bool squareNode = vStyle.x < 1.5 && nodeVariant > 3.5;
+  // Squares: Articles 4-5, subjects 5-6 (subject 4 is the round marble).
+  float squareFirst = vStyle.x < 0.5 ? 4.0 : 5.0;
+  bool squareNode = vStyle.x < 1.5 && nodeVariant > squareFirst - 0.5;
+  bool roundedSquare = nodeVariant < squareFirst + 0.5;
+  bool marble = vStyle.x > 0.5 && vStyle.x < 1.5
+    && nodeVariant > 3.5 && nodeVariant < 4.5;
   // Leaves shimmer ambiently via the twinkle floor; a real focus (the
   // thinking sweep, hover) always wins. Subjects never twinkle.
   float boost = vStyle.x > 0.5 ? vFocus : max(vFocus, vTwinkle);
@@ -178,7 +311,7 @@ void main() {
   if (vCurate > 0.5 || (vStyle.x > 0.5 && vStyle.x < 1.5)) {
       float halfW = (vStyle.z * 0.5) / vRadiusPx;
       float ringDistance = squareNode
-        ? abs(roundedBoxDistance(p, vStyle.y, nodeVariant < 4.5 ? 0.18 : 0.06))
+        ? abs(roundedBoxDistance(p, vStyle.y, roundedSquare ? 0.18 : 0.06))
         : abs(r - vStyle.y);
       ringA = vRing.a * (1.0 - smoothstep(halfW, halfW + aa, ringDistance));
       // Ring style variants (owner 2026-08-03): 0 solid, 1 dashed,
@@ -192,7 +325,7 @@ void main() {
           ? abs(roundedBoxDistance(
               p,
               vStyle.y * 0.78,
-              nodeVariant < 4.5 ? 0.14 : 0.045))
+              roundedSquare ? 0.14 : 0.045))
           : abs(r - vStyle.y * 0.78);
         float inner = vRing.a *
           (1.0 - smoothstep(halfW, halfW + aa, innerDistance));
@@ -326,8 +459,8 @@ void main() {
     } else {
       // Subject disc variants per tier (owner 2026-08-03): branch nodes
       // ride uSubjectStyle, deeper sub-branch nodes uSubnodeStyle.
-      // 0 Classic disc, 1 Plasma orb, 2 Gem, 3 Hollow. Obsidience adds
-      // 4 Rounded square and 5 Data tile for the Library satellite.
+      // 0 Classic disc, 1 Plasma orb, 2 Gem, 3 Hollow, 4 Galaxy marble.
+      // Obsidience adds 5 Rounded square and 6 Data tile for the Library.
       float variant = nodeVariant;
       float t = clamp((length(p - vec2(-0.28, -0.32)) - 0.08) / 0.92, 0.0, 1.0);
       vec3 classic = t < 0.28
@@ -353,15 +486,19 @@ void main() {
         // Hollow: the ring carries the node; only a whisper of fill.
         disc = classic;
         discA = edge * 0.14 * effAlpha;
+      } else if (marble) {
+        vec4 glass = galaxyMarble(p, r, aa, vRadiusPx, vCore, vDark, vSeed, boost, vSpeech);
+        disc = glass.rgb;
+        discA = glass.a * effAlpha;
       } else {
         // Library square nodes retain the same palette/depth language while
         // changing the actual sprite silhouette. Rounded square is a filled
         // glass tile; Data tile is a sharper hollow frame with scan rows.
-        float corner = variant < 4.5 ? 0.16 : 0.045;
+        float corner = roundedSquare ? 0.16 : 0.045;
         float boxDistance = roundedBoxDistance(p, 0.82, corner);
         float boxInside = 1.0 - smoothstep(-aa, aa, boxDistance);
         float boxEdge = 1.0 - smoothstep(aa * 0.35, aa * 1.8, abs(boxDistance));
-        if (variant < 4.5) {
+        if (roundedSquare) {
           float heart = exp(-dot(p, p) * 4.2);
           disc = mix(classic, vec3(1.0), heart * 0.48);
           discA = boxInside * effAlpha;
@@ -457,7 +594,7 @@ void main() {
   }
   if (accA <= 0.004) discard;
   vec3 color = acc / max(accA, 1e-4);
-  color = mix(color, vec3(1.0), boost * 0.45);
+  color = mix(color, vec3(1.0), boost * (marble ? 0.08 : 0.45));
   gl_FragColor = vec4(color, accA);
 #ifdef KNOWLEDGE_PROVIDER
   gl_FragColor.a *= uProviderOpacity;

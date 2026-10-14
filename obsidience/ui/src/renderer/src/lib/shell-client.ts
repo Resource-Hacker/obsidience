@@ -109,7 +109,9 @@ function publishGraphState(graphId: string): void {
     .filter((field) => id === MAIN_GRAPH_ID || !field.mainOnly)
     .map((field) => {
       if (id !== LIBRARY_GRAPH_ID && LIBRARY_NODE_STYLE_KEYS.has(field.key)) {
-        return { ...field, max: 3, options: field.options?.slice(0, 4) };
+        // Round choices come first; subjects have one more (Galaxy marble).
+        const round = field.key === "articleStyle" ? 4 : 5;
+        return { ...field, max: round - 1, options: field.options?.slice(0, round) };
       }
       return field;
     });

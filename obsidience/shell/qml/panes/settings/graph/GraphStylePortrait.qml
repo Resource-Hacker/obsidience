@@ -129,6 +129,45 @@ Rectangle {
             context.restore()
         }
 
+        // A glass marble holding a small spiral of dust.
+        function marble(context) {
+            const center = width / 2
+            const radius = width * 0.36
+            const body = context.createRadialGradient(
+                center, center, 0, center, center, radius
+            )
+            body.addColorStop(0, "#ecfeff")
+            body.addColorStop(0.18, "#22a5c4")
+            body.addColorStop(0.55, "#06222e")
+            body.addColorStop(0.88, "#0b3442")
+            body.addColorStop(1, "#67e8f9")
+            context.save()
+            context.fillStyle = body
+            context.beginPath()
+            context.arc(center, center, radius, 0, Math.PI * 2)
+            context.fill()
+            context.fillStyle = "#ecfeff"
+            for (let mote = 0; mote < 40; mote++) {
+                const along = mote / 40
+                const angle = along * Math.PI * 2.6 + (mote % 2) * Math.PI
+                const distance = radius * 0.8 * along
+                context.globalAlpha = 1 - 0.55 * along
+                context.fillRect(center + Math.cos(angle) * distance - 0.6,
+                    center + Math.sin(angle) * distance * 0.62 - 0.6, 1.2, 1.2)
+            }
+            context.globalAlpha = 0.8
+            context.strokeStyle = "#a5f3fc"
+            context.lineWidth = 0.8
+            context.beginPath()
+            context.arc(center, center, radius, 0, Math.PI * 2)
+            context.stroke()
+            context.fillStyle = "#ffffff"
+            context.beginPath()
+            context.arc(center - radius * 0.42, center - radius * 0.45, 1.1, 0, Math.PI * 2)
+            context.fill()
+            context.restore()
+        }
+
         function paintSubject(context, index) {
             if (index === 0) {
                 disc(context)
@@ -144,6 +183,9 @@ Rectangle {
                 disc(context, 0.18)
                 ring(context, width * 0.4, false)
             } else if (index === 4) {
+                marble(context)
+                ring(context, width * 0.47, false)
+            } else if (index === 5) {
                 glow(context, width * 0.48, "#67e8f9", 0.45)
                 tile(context, true, false)
             } else {
