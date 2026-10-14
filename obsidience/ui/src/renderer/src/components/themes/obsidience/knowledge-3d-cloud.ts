@@ -464,6 +464,7 @@ export function createKnowledge3dCloud(
   const ringStyleUniform = { value: input.tuning.ringStyle };
   const marbleOpacityUniform = { value: input.tuning.marbleOpacity };
   const marbleDustUniform = { value: input.tuning.marbleDust };
+  const marbleSheenUniform = { value: input.tuning.sheenLines };
   const pointUniforms = {
     uActivityOpacity: { value: 1 },
     uPerspective: deps.sharedUniforms.uPerspective,
@@ -479,6 +480,7 @@ export function createKnowledge3dCloud(
     uRingStyle: ringStyleUniform,
     uMarbleOpacity: marbleOpacityUniform,
     uMarbleDust: marbleDustUniform,
+    uMarbleSheen: marbleSheenUniform,
   };
   const material = new THREE.ShaderMaterial({
     uniforms: pointUniforms,
@@ -1372,6 +1374,7 @@ export function createKnowledge3dCloud(
       ringStyleUniform.value = live.ringStyle;
       marbleOpacityUniform.value = live.marbleOpacity;
       marbleDustUniform.value = live.marbleDust;
+      marbleSheenUniform.value = live.sheenLines;
       if (marbleChanged) syncMarbleDust();
       group.scale.setScalar(ballFactor);
       spokeWidthUniform.value = live.tendrilWidth * ratio * ballFactor;

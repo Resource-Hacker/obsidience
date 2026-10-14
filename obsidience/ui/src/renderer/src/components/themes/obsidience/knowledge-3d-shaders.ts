@@ -69,7 +69,13 @@ varying float vTwinkle;
 varying float vSeed;
 varying float vCurate;
 varying float vSpeech;
+varying vec3 vCloudX;
+varying vec3 vCloudY;
 void main() {
+  // The cloud's own x and y axes as the camera sees them, so a marble's
+  // glass carries its sheen in the cloud's frame and turns with the graph.
+  vCloudX = normalize(modelViewMatrix[0].xyz);
+  vCloudY = normalize(modelViewMatrix[1].xyz);
   vCore = aCore;
   vDark = aDark;
   vRing = aRing;
@@ -127,47 +133,76 @@ void main() {
 `;
 
 // Glass marble (owner 2026-10-14): a branch node as a clear marble in the
-// Knowledge shells' own glass — hairline sheen levels one canvas pixel wide,
-// a limb that glows where they crowd, a small highlight — over a body only
-// faintly tinted, so the scene behind shows through (uMarbleOpacity, thicker
-// toward the limb as glass is). The dust inside is real points drawn after
-// the sprites (knowledge-3d-marble-dust.ts); here only its unresolved haze.
+// Knowledge shells' own glass — their hairline sheen levels one canvas pixel
+// wide, wandering on the same value-noise drift, every fifth one brighter,
+// on the front face and through it on the back, fixed to the cloud so they
+// turn with the graph; a limb, a small highlight — over a body only faintly
+// tinted, so the scene behind shows through (uMarbleOpacity, thicker toward
+// the limb as glass is). The dust inside is real points drawn after the
+// sprites (knowledge-3d-marble-dust.ts); here only its unresolved haze.
 const GLASS_MARBLE_GLSL = `
 uniform float uMarbleOpacity;
 uniform float uMarbleDust;
+uniform float uMarbleSheen; // the Glass group's Sheen lines setting
 uniform float uSpeechLevel;
-mat3 marbleTurn(float x, float z) {
-  float cx = cos(x), sx = sin(x), cz = cos(z), sz = sin(z);
-  return mat3(1.0, 0.0, 0.0, 0.0, cx, sx, 0.0, -sx, cx)
-    * mat3(cz, sz, 0.0, -sz, cz, 0.0, 0.0, 0.0, 1.0);
+varying vec3 vCloudX;
+varying vec3 vCloudY;
+// The shells' survey noise.
+float marbleHash(vec3 p) {
+  p = fract(p * 0.1031);
+  p += dot(p, p.zyx + 31.32);
+  return fract((p.x + p.y) * p.z);
+}
+float marbleNoise(vec3 p) {
+  vec3 i = floor(p);
+  vec3 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(
+    mix(mix(marbleHash(i), marbleHash(i + vec3(1.0, 0.0, 0.0)), f.x),
+      mix(marbleHash(i + vec3(0.0, 1.0, 0.0)), marbleHash(i + vec3(1.0, 1.0, 0.0)), f.x), f.y),
+    mix(mix(marbleHash(i + vec3(0.0, 0.0, 1.0)), marbleHash(i + vec3(1.0, 0.0, 1.0)), f.x),
+      mix(marbleHash(i + vec3(0.0, 1.0, 1.0)), marbleHash(i + vec3(1.0, 1.0, 1.0)), f.x), f.y),
+    f.z);
+}
+// One face's sheen: the level through this bearing (cloud frame) and its
+// hairline, one canvas pixel wide; where levels crowd closer than a pixel they
+// resolve to their mean coverage, so the limb glows instead of shimmering.
+vec2 marbleSheen(vec3 bearing, vec3 pole, vec3 across, float levels, float wander, float minor) {
+  float drift = 0.1 * (marbleNoise(across * 2.3) - 0.5) + 0.05 * (marbleNoise(across * 5.1) - 0.5)
+    + 0.02 * (marbleNoise(across * 11.0) - 0.5);
+  float level = (0.5 + 0.5 * dot(bearing, pole) + drift * wander) * levels;
+  float spacing = fwidth(level);
+  float line = 1.0 - smoothstep(0.25, 1.2, abs(fract(level - 0.5) - 0.5) / max(spacing, 1e-5));
+  line = mix(line, min(spacing, 1.0), smoothstep(0.4, 0.95, spacing));
+  return vec2(line, mod(floor(level + 0.5), 5.0) < 0.5 ? 0.5 : minor);
 }
 vec4 glassMarble(vec2 p, float r, float aa, float radiusPx, vec3 tint, vec3 dark, float seed, float boost) {
   float h = sqrt(max(0.0, 1.0 - r * r));
   vec3 normal = vec3(p.x, -p.y, h);
-  // The shells' sheen levels, tilted per marble and fixed to the view like a
-  // reflection, on the front face and faintly on the back. Their poles sit
-  // near the limb, so the levels sweep across as bands.
-  mat3 sheen = marbleTurn(0.2 + 0.3 * fract(seed * 2.91), seed * 17.0);
-  vec3 front = sheen * normal;
-  vec3 back = sheen * vec3(p.x, -p.y, -h);
-  float levels = 9.0;
-  // On a large marble the levels wander further and the minor ones fade, so
-  // they drift across the glass as on the shells instead of ruling it.
-  float large = smoothstep(45.0, 110.0, radiusPx);
-  float drift = (0.014 * sin(dot(normal, vec3(3.1, 4.7, 2.3)) + seed * 40.0)
-    + 0.006 * sin(dot(normal, vec3(-6.3, 5.1, 7.7)) + seed * 13.0)) * (1.0 + 1.5 * large);
-  float level = (0.5 + 0.5 * front.y + drift) * levels;
-  float spacing = fwidth(level);
-  float line = 1.0 - smoothstep(0.25, 1.2, abs(fract(level - 0.5) - 0.5) / max(spacing, 1e-5));
-  line = mix(line, min(spacing, 1.0), smoothstep(0.4, 0.95, spacing));
-  // Below about 30 pixels the hairlines would beat against the pixel grid.
-  float fine = smoothstep(26.0, 40.0, radiusPx);
-  line *= (mod(floor(level + 0.5), 5.0) < 0.5 ? 0.22 : 0.08 * (1.0 - 0.5 * large)) * fine;
-  float backLevel = (0.5 + 0.5 * back.y - drift) * levels;
-  float backSpacing = fwidth(backLevel);
-  float backLine = (1.0 - smoothstep(0.25, 1.2, abs(fract(backLevel - 0.5) - 0.5) / max(backSpacing, 1e-5)))
-    * (1.0 - smoothstep(0.4, 0.95, backSpacing)) * 0.06 * fine * (1.0 - 0.5 * large);
-  vec3 pale = mix(mix(tint, vec3(1.0), 0.35), vec3(0.78, 1.0, 0.94), 0.6);
+  // Front and back of the glass in the cloud's own frame.
+  vec3 cloudZ = cross(vCloudX, vCloudY);
+  vec3 front = vec3(dot(normal, vCloudX), dot(normal, vCloudY), dot(normal, cloudZ));
+  vec3 rear = vec3(p.x, -p.y, -h);
+  vec3 back = vec3(dot(rear, vCloudX), dot(rear, vCloudY), dot(rear, cloudZ));
+  // Each marble's levels circle a pole leaning from the cloud's axis, as the
+  // shells' circle theirs; more levels on a larger marble, so the lines fall
+  // a few pixels apart at any size, and on a marble they wander further.
+  float lean = 0.3 + 0.6 * fract(seed * 2.91), toward = seed * 17.0;
+  vec3 pole = vec3(sin(lean) * cos(toward), cos(lean), sin(lean) * sin(toward));
+  float levels = (3.0 + 0.1 * radiusPx) * uMarbleSheen;
+  vec3 offset = vec3(seed * 7.3, seed * 3.1, seed * 5.9);
+  // The shells' drift at a scale that bends each level across the marble
+  // as it bends across a shell, a few line spacings to a wiggle.
+  // On a small marble the minor levels fade, so its few lines never rule it.
+  float minor = 0.2 * mix(0.35, 1.0, smoothstep(24.0, 56.0, radiusPx));
+  vec2 frontSheen = marbleSheen(front, pole, front * 0.4 + offset, levels, 4.0, minor);
+  vec2 backSheen = marbleSheen(back, pole, back * 0.4 + offset, levels, 4.0, minor);
+  float line = frontSheen.x * frontSheen.y * 0.5 + backSheen.x * backSheen.y * 0.3;
+  // Mostly pale aqua, a little of the branch, as the shells' sheen.
+  vec3 shellTint = vec3(0.62 + 0.5 * (tint.r - tint.b) - 0.25 * (2.0 * tint.g - tint.r - tint.b),
+    0.62 + 0.25 * (2.0 * tint.g - tint.r - tint.b),
+    0.62 - 0.5 * (tint.r - tint.b) - 0.25 * (2.0 * tint.g - tint.r - tint.b));
+  vec3 pale = mix(shellTint, vec3(0.78, 1.0, 0.94), 0.7);
   float limb = 1.0 - h;
   vec3 sun = normalize(vec3(-0.45, 0.55, 0.75));
   float spec = pow(max(dot(normal, normalize(sun + vec3(0.0, 0.0, 1.0))), 0.0), 220.0);
@@ -179,7 +214,7 @@ vec4 glassMarble(vec2 p, float r, float aa, float radiusPx, vec3 tint, vec3 dark
   // the brightening, and the glass stays clear.
   vec3 haze = mix(tint, vec3(1.0), 0.2) * h * 0.07 * uMarbleDust
     * (1.0 + 0.25 * boost / max(uMarbleDust, 1.0)) * (1.0 + 0.3 * uSpeechLevel);
-  vec3 light = haze + pale * (line * (1.0 + 0.6 * boost) + backLine + limb * limb * limb * 0.6)
+  vec3 light = haze + pale * (line * (1.0 + 0.6 * boost) + limb * limb * limb * 0.6)
     + mix(tint, vec3(1.0), 0.3) * caustic * 0.28
     + vec3(1.0) * (spec * 0.85 + pow(max(dot(normal, sun), 0.0), 6.0) * 0.04);
   float body = uMarbleOpacity + (1.0 - uMarbleOpacity) * limb * limb * 0.6;
