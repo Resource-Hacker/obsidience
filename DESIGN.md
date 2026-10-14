@@ -282,7 +282,9 @@ neighbours); (9) history projected from the native conversation (no conversation
   is validated before dispatch. Source-bound Learn exposes only
   `source.read` and `task.complete` until a complete matching-hash read receipt exists.
   Evidence-bound completions need explicit failed status on non-success branches; Review
-  is not a terminal choice without a proposal or acceptance gate. Wikilinks around
+  is not a terminal choice without a proposal or acceptance gate. A Curate no-change
+  completion is offered as evidence only its bound Source and the Articles it has read
+  in full at their current revision. Wikilinks around
   `source://` citations normalize to the Source URI.
 - Model and reasoning effort are per-Task (Article or per-run owner choice, else the
   installation defaults); the Executive keeps its Agent-owned setting. The LiteLLM route
