@@ -12,6 +12,10 @@ from obsidience.harness.computer.applications import canonical_application_id
 
 MAX_EVIDENCE_ITEMS = 8
 MAX_EVIDENCE_CHARS = 500
+# Chat-template control tokens (Gemma's <|channel>, <tool_call|>) in an entry are
+# leaked generation, not a citation: an accepted Curate completion once carried
+# them after its Source, which the substring citation check still found.
+_CONTROL_MARKUP = re.compile(r"<\|[^<>\s]{1,40}>|<[^<>\s|]{1,40}\|>")
 MAX_VISUAL_VERIFICATION_CHARS = 1000
 
 COMPUTER_OUTCOME_TOOLS = {
@@ -800,7 +804,7 @@ def execute(args: dict, context: dict) -> dict:
         if isinstance(item, str) and item.strip()
     ]
     if len(evidence) != len(raw_evidence) or any(
-        len(item) > MAX_EVIDENCE_CHARS for item in evidence
+        len(item) > MAX_EVIDENCE_CHARS or _CONTROL_MARKUP.search(item) for item in evidence
     ):
         return {
             "accepted": False,
@@ -809,8 +813,8 @@ def execute(args: dict, context: dict) -> dict:
             "outcome": outcome,
             "evidence": [],
             "error": (
-                "evidence entries must be nonempty strings of at most "
-                f"{MAX_EVIDENCE_CHARS} characters"
+                "evidence entries must be nonempty plain strings of at most "
+                f"{MAX_EVIDENCE_CHARS} characters, without model control markup"
             ),
         }
     task = context.get("task_note")
