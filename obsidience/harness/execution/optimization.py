@@ -241,7 +241,9 @@ def _revision() -> str:
              root / 'capabilities/registry.py', root / 'capabilities/task/complete.py',
              root / 'models/llm.py', root / 'models/context.py', root / 'models/runtime.py']
     paths.extend([root / 'execution/optimization_incidents.py', root / 'capabilities/vault/propose.py',
-                  root / 'capabilities/source/read.py', root / 'execution/refinement.py',
+                  root / 'capabilities/source/read.py', root / 'capabilities/vault/read.py',
+                  root / 'capabilities/vault/search.py', root / 'capabilities/vault/validate.py',
+                  root / 'execution/refinement.py',
                   root / 'memory/hindsight.py', root / 'knowledge/links.py', root / 'knowledge/format.py',
                   root / 'knowledge/review.py', root / 'knowledge/scope.py',
                   root / 'knowledge/curation.py', root / 'knowledge/source.py'])
