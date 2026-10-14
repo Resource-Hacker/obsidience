@@ -152,7 +152,7 @@ float marbleDensity(vec3 s, float arms, float twist) {
   float rr = dot(s, s);
   float rho = length(s.xz);
   float bulge = exp(-rr * 16.0);
-  float disc = exp(-abs(s.y) / (0.04 + 0.1 * rho)) * (1.0 - smoothstep(0.4, 0.9, rho));
+  float disc = exp(-abs(s.y) / (0.04 + 0.1 * rho)) * (1.0 - smoothstep(0.45, 0.95, rho));
   float arm = 0.5 + 0.5 * cos(arms * (atan(s.z, s.x) - twist * log(rho + 0.05)));
   return (bulge * 1.8 + disc * (0.03 + arm * arm * arm * arm * 1.2) + 0.05 * exp(-rr * 2.0))
     * (1.0 - smoothstep(0.84, 0.96, sqrt(rr)));
@@ -180,15 +180,15 @@ vec4 galaxyMarble(vec2 p, float r, float aa, float radiusPx, vec3 tint, vec3 dar
     vec3 s = origin + dir * crossing;
     float rho = length(s.xz);
     float arm = 0.5 + 0.5 * cos(arms * (atan(s.z, s.x) - twist * log(rho + 0.05)));
-    float plane = (0.03 + arm * arm * arm * arm * 1.2) * (1.0 - smoothstep(0.4, 0.9, rho));
+    float plane = (0.05 + arm * arm * arm * arm * 1.2) * (1.0 - smoothstep(0.45, 0.95, rho));
     light += mix(tint, vec3(1.0, 0.95, 0.86), exp(-rho * rho * 10.0)) * plane
       * 2.0 * (0.04 + 0.1 * rho) / max(abs(dir.y), 0.2)
-      * step(near, crossing) * step(crossing, far) * exp(-(crossing - near) * 0.8) * 1.6;
+      * step(near, crossing) * step(crossing, far) * exp(-(crossing - near) * 0.8) * 2.6;
   }
   // The dust: one hashed mote per cell, twenty-four cells across.
   const float CELLS = 12.0;
   float sigma = max(0.9 / max(1.0, radiusPx), 0.006);
-  float gain = clamp(radiusPx * radiusPx / 2500.0, 0.25, 1.0);
+  float gain = clamp(radiusPx * radiusPx / 1100.0, 0.3, 1.0) * 1.3;
   vec3 pos = (origin + dir * near) * CELLS + 64.0;
   vec3 step3 = sign(dir);
   vec3 inv = 1.0 / max(abs(dir * CELLS), vec3(1e-5));
@@ -242,7 +242,7 @@ vec4 galaxyMarble(vec2 p, float r, float aa, float radiusPx, vec3 tint, vec3 dar
   // Light gathers on the far side of the marble from the sun, in its colour.
   float caustic = smoothstep(0.2, 0.95, dot(normalize(p * vec2(1.0, -1.0) + 1e-4), -sun.xy / length(sun.xy)))
     * smoothstep(0.45, 0.97, r);
-  vec3 body = dark * 0.3 + tint * 0.015 + light + pale * backLine;
+  vec3 body = dark * 0.4 + tint * 0.05 + light + pale * backLine;
   vec3 surface = pale * (line * (1.0 + 0.6 * boost) + limb * limb * limb * 0.6)
     + mix(tint, vec3(1.0), 0.3) * caustic * 0.28
     + vec3(1.0) * (spec * 0.9 + pow(max(dot(normal, sun), 0.0), 6.0) * 0.05);
