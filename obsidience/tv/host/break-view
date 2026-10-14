@@ -18,8 +18,8 @@ display=$(cat "$XDG_RUNTIME_DIR/obsidience-tv/wayland") || exit 1
 # A title is listing text: no control characters, and no property expansion by the player.
 title=$(printf %s "$1" | tr -d '\000-\037' | sed 's/\$/$$/g')
 case "${2:-break}" in
-    idle) caption= ;;
-    break) caption="$title  ·  Commercial break  ·  Resuming automatically" ;;
+    idle) caption=; osd_level=0 ;;
+    break) caption="$title  ·  Commercial break  ·  Resuming automatically"; osd_level=2 ;;
     *) exit 2 ;;
 esac
 
@@ -30,6 +30,6 @@ esac
     WAYLAND_DISPLAY=$display /usr/bin/mpv --no-config --no-input-terminal --msg-level=all=error \
         --no-audio --osc=no --input-default-bindings=no --fs --wayland-app-id=obsidience-tv-break \
         --vulkan-device="$TV_VULKAN_DEVICE" --profile=low-latency --untimed --vd-lavc-threads=4 --panscan=1.0 \
-        --osd-level=2 --osd-msg2="$caption" \
+        --osd-level="$osd_level" --osd-msg2="$caption" \
         --osd-align-x=center --osd-align-y=bottom --osd-margin-y=70 --osd-font-size=30 \
         --osd-border-size=2 --no-osd-bar -
