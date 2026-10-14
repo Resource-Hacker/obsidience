@@ -534,6 +534,7 @@ export function createKnowledge3dCloud(
     sizes: radii,
     weights: radii.map((radius, index) => radius * Math.sqrt(1 + linkCounts[index])),
     tints: cores, detail: isMain ? 1 : input.tuning.ballScale, optics,
+    core: nodes.findIndex((_, index) => styles[index * 4] === 2),
   });
   shells.applyTuning(input.tuning);
   // Glass only adds light and draws in the beams' slot, behind the node sprites.

@@ -182,6 +182,7 @@ uniform float uLevels;
 uniform float uRings;
 uniform float uSolid;
 uniform float uGlow;
+uniform float uEdge; // how brightly the limb glows where the glass is seen side-on
 varying vec2 vSt;
 varying float vFog;
 varying float vEdge;
@@ -201,7 +202,7 @@ void main() {
   vec3 tint = vec3(0.62 + field.r - field.g, 0.62 + field.g, 0.62 - field.r - field.g);
   vec3 color = mix(mix(tint, vec3(0.78, 1.0, 0.94), 0.86), mix(vec3(1.0), vWaveTint, min(1.0, crest * 3.0)),
     min(1.0, crest * 1.35));
-  float edge = vEdge * vEdge * vEdge * vEdge * 0.07;
+  float edge = vEdge * vEdge * vEdge * vEdge * uEdge;
   // A crater glows from its floor in its node's colour. The glow does not
   // thin with the glass, so a clear shell still shows where its nodes rest.
   vec3 glow = mix(tint, vec3(1.0), 0.2) * field.a * field.a * uGlow;
@@ -319,6 +320,49 @@ void main() {
 }
 `;
 
+// The core's band (owner 2026-10-14): white dust packed between the glass
+// hugging the core and the first layout shell, swirling around the core. Each
+// mote circles an axis leaning a little from the cloud's own, the inner ones
+// faster, at whole turns an hour, so the hourly uTime wrap is seamless.
+const CORE_DUST_VERTEX = `
+attribute vec4 aMote;   // unit bearing; place across the band, 0 inner to 1 outer
+attribute vec4 aRandom; // size, phase, turns per hour, brightness
+attribute vec3 aLean;   // how the mote's axis leans from the cloud's
+uniform vec3 uCore;     // the core's centre, cloud-local
+uniform vec2 uBand;     // the band's inner and outer radius, cloud-local
+uniform float uPerspective;
+uniform float uGain;
+varying float vAlpha;
+varying float vRing;
+varying vec3 vColor;
+${OPTICS_GLSL}
+${LIGHT_GLSL}
+void main() {
+  vec3 axis = normalize(vec3(0.0, 1.0, 0.0) + aLean);
+  float turn = uTime * aRandom.z * 0.0017453293 + aRandom.y * 6.2831853;
+  vec3 d = aMote.xyz;
+  vec3 turned = d * cos(turn) + cross(axis, d) * sin(turn) + axis * dot(axis, d) * (1.0 - cos(turn));
+  vec3 local = uCore + turned * mix(uBand.x, uBand.y, aMote.w);
+  vec4 view = modelViewMatrix * vec4(local, 1.0);
+  gl_Position = projectionMatrix * view;
+  float depth = knowledgeDepth(view);
+  float confusion = knowledgeConfusion(depth);
+  float base = (1.0 + aRandom.x * 1.3) * uPixelRatio;
+  float size = base + confusion;
+  gl_PointSize = size;
+  float twinkle = 0.78 + 0.22 * sin(uTime * floor(2500.0 + aRandom.y * 5000.0) * 0.0017453293 + aRandom.y * 61.0);
+  vec4 centre = modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+  float apparent = uReach * uModelScale * uPerspective / max(1.0, -centre.z) / 450.0;
+  // Densest against the core's glass, thinning out toward the first shell.
+  float edges = smoothstep(0.0, 0.08, aMote.w) * (1.0 - smoothstep(0.75, 1.0, aMote.w));
+  vAlpha = edges * aRandom.w * base * base / (size * size) * twinkle * knowledgeFog(depth)
+    * uGain * min(1.0, apparent * apparent);
+  if (vAlpha < 0.003) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+  vRing = smoothstep(5.0, 15.0, confusion / uPixelRatio);
+  vColor = vec3(1.0, 0.98, 0.95);
+}
+`;
+
 // A large blur is a ring, as through a lens.
 const BOKEH_FRAGMENT = `
 varying float vAlpha;
@@ -344,6 +388,8 @@ const RIPPLE_SECONDS = 2.6;
  *  radius. A crater's floor lies below its node, and its mouth reaches toward
  *  the nearest neighbour, by these [lightest, heaviest] amounts. */
 const RIM = 0.05;
+/** The core's glass sits this many core radii out: close, with a visible gap. */
+const CORE_GAP = 1.45;
 const FLOOR = [0.03, 0.11];
 const MOUTH = [0.55, 0.85];
 
@@ -358,6 +404,10 @@ export interface Knowledge3dGlass {
   seedGlow: number;
   sheenLines: number;
   shellDust: number;
+  /** The glass hugging the core, and the white dust swirling between it and
+   *  the first layout shell (owner 2026-10-14). */
+  coreGlass: number;
+  coreDust: number;
 }
 
 export interface Knowledge3dShells {
@@ -393,8 +443,11 @@ export function createKnowledge3dShells(options: {
   /** 1 for a full-size ball; smaller clouds carry proportionally less. */
   detail: number;
   optics: Knowledge3dOptics;
+  /** The core node's index, or -1: it gets its own glass and a band of dust. */
+  core?: number;
 }): Knowledge3dShells {
   const { positions, layers, sizes, weights, tints, optics } = options;
+  const core = options.core ?? -1;
   const detail = Math.min(1, Math.max(0.25, options.detail));
   const drawn: THREE.Object3D[] = [];
   const show = (visible: boolean) => { for (const layer of drawn) layer.visible = visible; };
@@ -494,7 +547,7 @@ export function createKnowledge3dShells(options: {
     const glassMaterial = new THREE.ShaderMaterial({
       uniforms: {
         ...optics, ...rippling, uSurvey: survey, uShell: shape, uSolid: { value: 1 }, uGlow: { value: 0 },
-        uLevels: { value: levels }, uRings: { value: 7 },
+        uLevels: { value: levels }, uRings: { value: 7 }, uEdge: { value: 0.07 },
       },
       vertexShader: GLASS_VERTEX, fragmentShader: GLASS_FRAGMENT,
       // Added light needs no back-then-front ordering: one draw, both faces.
@@ -565,6 +618,85 @@ export function createKnowledge3dShells(options: {
       target: null as THREE.WebGLRenderTarget | null, floors: new Float32Array(count) };
   });
 
+  // The core's glass hugs it with a visible gap; its band of white dust fills
+  // the space out to the first layout shell. Both draw after the node sprites
+  // (renderOrder 2) and test depth, so the core hides what lies behind it.
+  const coreUniforms = {
+    survey: { value: null as THREE.Texture | null },
+    shape: { value: new THREE.Vector2(1, 0) },
+    centre: { value: new THREE.Vector3() },
+    band: { value: new THREE.Vector2(1, 2) },
+  };
+  let coreTarget: THREE.WebGLRenderTarget | null = null;
+  let coreSurveyMaterial: THREE.ShaderMaterial | null = null;
+  let coreGlass: THREE.Mesh | null = null;
+  let coreGlassUniforms: Record<string, { value: unknown }> | null = null;
+  let coreDustUniforms: Record<string, { value: unknown }> | null = null;
+  let coreDustGain = 0;
+  if (core >= 0) {
+    // No nodes rest on it: its survey carries only the shells' drift.
+    const empty = new THREE.DataTexture(new Float32Array(12), 1, 3, THREE.RGBAFormat, THREE.FloatType);
+    empty.needsUpdate = true;
+    coreSurveyMaterial = new THREE.ShaderMaterial({
+      uniforms: { uNodes: { value: empty }, uCount: { value: 0 }, uSeed: { value: 31.7 } },
+      vertexShader: "varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }",
+      fragmentShader: SURVEY_FRAGMENT,
+      depthTest: false, depthWrite: false, blending: THREE.NoBlending,
+    });
+    const spent = { value: new Float32Array(32) };
+    for (let drop = 0; drop < 8; drop++) spent.value[drop * 4 + 3] = 1;
+    const still = { uDrops: spent, uDropTints: { value: new Float32Array(32) }, uDropSpans: { value: new Float32Array(8).fill(1) } };
+    const glassMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        ...optics, ...still, uSurvey: coreUniforms.survey, uShell: coreUniforms.shape, uSolid: { value: 1 },
+        uGlow: { value: 0 }, uLevels: { value: 12 }, uRings: { value: 0 },
+        // A brighter limb than a layout shell's, so the small sphere reads as one.
+        uEdge: { value: 0.45 },
+      },
+      vertexShader: GLASS_VERTEX, fragmentShader: GLASS_FRAGMENT,
+      side: THREE.DoubleSide, forceSinglePass: true, ...ADDITIVE, depthTest: true,
+    });
+    coreGlassUniforms = glassMaterial.uniforms;
+    coreGlass = new THREE.Mesh(glassGeometry, glassMaterial);
+    coreGlass.name = "knowledge-core-glass";
+    coreGlass.frustumCulled = false;
+    coreGlass.renderOrder = 2;
+    drawn.push(coreGlass);
+
+    const moteCount = Math.round(60_000 * Math.max(0.25, detail * detail));
+    const motes = new Float32Array(moteCount * 4);
+    const moteRandoms = new Float32Array(moteCount * 4);
+    const leans = new Float32Array(moteCount * 3);
+    for (let i = 0; i < moteCount; i++) {
+      const y = random() * 2 - 1, angle = random() * Math.PI * 2, ring = Math.sqrt(1 - y * y);
+      // Gathered toward the core's glass, so the band is densest around it.
+      const across = Math.pow(random(), 1.6);
+      motes.set([Math.cos(angle) * ring, y, Math.sin(angle) * ring, across], i * 4);
+      // One way round, the inner dust faster; a few strays the other way.
+      const turns = Math.round(40 + 220 * (1 - across) * (1 - across)) * (random() < 0.9 ? 1 : -1);
+      moteRandoms.set([random(), random(), turns, 0.35 + 0.65 * random()], i * 4);
+      const lean = 0.35 * random(), leanAngle = random() * Math.PI * 2;
+      leans.set([Math.cos(leanAngle) * lean, 0, Math.sin(leanAngle) * lean], i * 3);
+    }
+    const coreDustGeometry = new THREE.BufferGeometry();
+    coreDustGeometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(moteCount * 3), 3));
+    coreDustGeometry.setAttribute("aMote", new THREE.BufferAttribute(motes, 4));
+    coreDustGeometry.setAttribute("aRandom", new THREE.BufferAttribute(moteRandoms, 4));
+    coreDustGeometry.setAttribute("aLean", new THREE.BufferAttribute(leans, 3));
+    const coreDustMaterial = new THREE.ShaderMaterial({
+      uniforms: { ...optics, uCore: coreUniforms.centre, uBand: coreUniforms.band, uGain: { value: 0 } },
+      vertexShader: CORE_DUST_VERTEX, fragmentShader: BOKEH_FRAGMENT, ...ADDITIVE, depthTest: true,
+    });
+    coreDustUniforms = coreDustMaterial.uniforms;
+    coreDustGain = 60_000 / moteCount;
+    const coreDust = new THREE.Points(coreDustGeometry, coreDustMaterial);
+    coreDust.name = "knowledge-core-dust";
+    coreDust.frustumCulled = false;
+    coreDust.renderOrder = 2;
+    drawn.push(coreDust);
+    disposables.push(empty, coreSurveyMaterial, glassMaterial, coreDustGeometry, coreDustMaterial);
+  }
+
   show(false);
   let dirty = true;
   let craterDepth = 1;
@@ -610,6 +742,17 @@ export function createKnowledge3dShells(options: {
     }
     if (!(outer > 0)) return false;
     optics.uReach.value = outer;
+    if (coreGlass && core >= 0) {
+      const cx = positions[core * 3], cy = positions[core * 3 + 1], cz = positions[core * 3 + 2];
+      const hug = sizes[core] * CORE_GAP;
+      coreGlass.position.set(cx, cy, cz);
+      coreUniforms.shape.value.set(hug, 0);
+      coreUniforms.centre.value.set(cx, cy, cz);
+      // Out to just inside the first layout shell's deepest crater floor.
+      let first = outer;
+      for (const shell of shells.slice(0, 1)) for (const floor of shell.floors) first = Math.min(first, floor);
+      coreUniforms.band.value.set(hug * 1.08, Math.max(hug * 1.6, first * 0.9));
+    }
     return true;
   };
 
@@ -660,6 +803,11 @@ export function createKnowledge3dShells(options: {
         shell.seeds.uGain.value = 1.1 * glass.seedGlow;
         shell.glass.uGlow.value = 0.16 * glass.craterGlow;
       });
+      if (coreGlassUniforms) {
+        coreGlassUniforms.uSolid.value = glass.coreGlass;
+        coreGlassUniforms.uLevels.value = 14 * glass.sheenLines;
+      }
+      if (coreDustUniforms) coreDustUniforms.uGain.value = 1.3 * coreDustGain * glass.coreDust;
     },
     prepare(renderer) {
       if (!dirty || ++skipped < cadence) return;
@@ -682,11 +830,24 @@ export function createKnowledge3dShells(options: {
         renderer.setRenderTarget(shell.target);
         renderer.render(surveyScene, surveyCamera);
       }
+      if (coreSurveyMaterial && !coreTarget) {
+        coreTarget = new THREE.WebGLRenderTarget(256, 128, {
+          type: THREE.HalfFloatType, format: THREE.RGBAFormat,
+          minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
+          wrapS: THREE.RepeatWrapping, wrapT: THREE.ClampToEdgeWrapping,
+          depthBuffer: false, generateMipmaps: false,
+        });
+        coreUniforms.survey.value = coreTarget.texture;
+        surveyQuad.material = coreSurveyMaterial;
+        renderer.setRenderTarget(coreTarget);
+        renderer.render(surveyScene, surveyCamera);
+      }
       renderer.setRenderTarget(previous);
       show(true);
     },
     dispose() {
       for (const shell of shells) shell.target?.dispose();
+      coreTarget?.dispose();
       for (const disposable of disposables) disposable.dispose();
     },
   };
