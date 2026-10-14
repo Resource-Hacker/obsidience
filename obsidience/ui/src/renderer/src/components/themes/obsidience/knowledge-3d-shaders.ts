@@ -139,8 +139,7 @@ void main() {
 // Knowledge shells' own glass — their hairline sheen levels one canvas pixel
 // wide, wandering on the same value-noise drift, every fifth one brighter,
 // on the front face and through it on the back, fixed to the cloud so they
-// turn with the graph; a smaller glass layer inside, as the graph nests its
-// layers around the core; a limb, a small highlight — over a tinted body. Its
+// turn with the graph; a limb, a small highlight — over a tinted body. Its
 // solidity (uMarbleOpacity, 0 to 1.5) works as a shell layer's: at 0 only the
 // dust is left, the glass light grows with it as a shell's does, and the body
 // darkens toward opaque, almost fully at the top. The dust inside is real
@@ -204,23 +203,6 @@ vec4 glassMarble(vec2 p, float r, float aa, float radiusPx, vec3 tint, vec3 dark
   vec2 frontSheen = marbleSheen(front, pole, front * 0.4 + offset, levels, 4.0, minor);
   vec2 backSheen = marbleSheen(back, pole, back * 0.4 + offset, levels, 4.0, minor);
   float line = frontSheen.x * frontSheen.y * 0.5 + backSheen.x * backSheen.y * 0.3;
-  // A smaller glass layer inside, as the graph nests its layers around the
-  // core, with the dust cloud in its middle. Evaluated everywhere so its
-  // derivatives stay in uniform flow, then kept only inside its own radius.
-  const float INNER = 0.58;
-  float ri = r / INNER;
-  float hi = sqrt(max(0.0, 1.0 - ri * ri));
-  vec3 innerFront = vec3(p.x, -p.y, hi * INNER) / INNER;
-  vec3 innerBack = vec3(p.x, -p.y, -hi * INNER) / INNER;
-  innerFront = vec3(dot(innerFront, vCloudX), dot(innerFront, vCloudY), dot(innerFront, cloudZ));
-  innerBack = vec3(dot(innerBack, vCloudX), dot(innerBack, vCloudY), dot(innerBack, cloudZ));
-  vec3 innerPole = vec3(pole.z, pole.x, pole.y);
-  float innerLevels = max(2.0, levels * INNER);
-  vec2 innerFrontSheen = marbleSheen(innerFront, innerPole, innerFront * 0.4 + offset.zxy, innerLevels, 4.0, minor);
-  vec2 innerBackSheen = marbleSheen(innerBack, innerPole, innerBack * 0.4 + offset.zxy, innerLevels, 4.0, minor);
-  float inside = 1.0 - smoothstep(1.0 - aa / INNER, 1.0 + aa / INNER, ri);
-  float innerLimb = (1.0 - hi) * inside;
-  line += (innerFrontSheen.x * innerFrontSheen.y * 0.45 + innerBackSheen.x * innerBackSheen.y * 0.25) * inside;
   // Mostly pale aqua, a little of the branch, as the shells' sheen.
   vec3 shellTint = vec3(0.62 + 0.5 * (tint.r - tint.b) - 0.25 * (2.0 * tint.g - tint.r - tint.b),
     0.62 + 0.25 * (2.0 * tint.g - tint.r - tint.b),
@@ -236,10 +218,10 @@ vec4 glassMarble(vec2 p, float r, float aa, float radiusPx, vec3 tint, vec3 dark
   // and the Executive's voice lift it only a little: the dust itself carries
   // the brightening, and the glass stays clear.
   // The dust cloud's own glow, centred as the cloud is.
-  vec3 haze = mix(tint, vec3(1.0), 0.2) * exp(-r * r / 0.18) * 0.07 * uMarbleDust
+  vec3 haze = mix(tint, vec3(1.0), 0.2) * exp(-r * r / 0.4) * 0.06 * uMarbleDust
     * (1.0 + 0.25 * boost / max(uMarbleDust, 1.0)) * (1.0 + 0.3 * uSpeechLevel);
   float solid = uMarbleOpacity;
-  vec3 light = (pale * (line * (1.0 + 0.6 * boost) + limb * limb * limb * 0.6 + innerLimb * innerLimb * innerLimb * 0.35)
+  vec3 light = (pale * (line * (1.0 + 0.6 * boost) + limb * limb * limb * 0.6)
     + mix(tint, vec3(1.0), 0.3) * caustic * 0.28
     + vec3(1.0) * (spec * 0.85 + pow(max(dot(normal, sun), 0.0), 6.0) * 0.04)) * solid;
   // 0.5 lets about a third of the scene through, 1 a tenth, 1.5 almost none;
