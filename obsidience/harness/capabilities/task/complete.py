@@ -547,6 +547,32 @@ def completion_prerequisite_error(context: dict) -> str | None:
     return None
 
 
+def completion_citations(context: dict) -> list[str] | None:
+    """What a successful Curate inspection may cite: its Source and each Article read in full.
+
+    The step's evidence schema offers only these, so a search lead read in part
+    or not at all cannot be cited (Curate's recurring rejection, 2026-10-13).
+    """
+    if context.get("event") != "observations.memory.ready":
+        return None
+    from obsidience.harness.capabilities.source.read import required_source
+    from obsidience.harness.knowledge.source import SourceError
+    from obsidience.harness.knowledge.vault import load_note
+
+    try:
+        source = required_source(context)
+    except SourceError:
+        return None
+    if not source:
+        return None
+    citations = [source["citation"]]
+    for ref, read in sorted(context.get("_article_reads", {}).items()):
+        note = load_note(ref + ".md") if isinstance(read, dict) and read.get("complete") is True else None
+        if note is not None and read.get("article_sha256") == hashlib.sha256(note.text().encode()).hexdigest():
+            citations.append(f"[[{ref}]]")
+    return citations
+
+
 def available_tools(allowed: list[str], context: dict) -> list[str]:
     """Expose the required memory topic search before a terminal decision.
 

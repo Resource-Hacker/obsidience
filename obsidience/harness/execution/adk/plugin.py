@@ -368,7 +368,8 @@ class AgentPlugin(BasePlugin):
         """This Task step's Tools and the active proposal, completion and Repair schema modes."""
         from ...capabilities.source.read import available_tools
         from ...capabilities.task.complete import (
-            available_tools as completion_tools, completion_prerequisite_error, completion_requires_no_change,
+            available_tools as completion_tools, completion_citations, completion_prerequisite_error,
+            completion_requires_no_change,
         )
         from ..repair import available_tools as repair_tools, eligible_rows
         context = getattr(self.evaluation, 'schema_context', self.ctx)
@@ -383,6 +384,7 @@ class AgentPlugin(BasePlugin):
             'completion_no_change': completion_requires_no_change(context) and not self.task.meta.get('acceptance'),
             'completion_blocked': bool(completion_prerequisite_error(context)),
             'repair_rows': eligible_rows(context),
+            'evidence_citations': completion_citations(context) or (),
         }
         return names, modes
 

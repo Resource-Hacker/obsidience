@@ -292,7 +292,7 @@ OUTPUT_LIMIT_FEEDBACK = ('The reply reached the output limit before its native T
 
 
 def task_tool_schemas(names, *, completion_no_change=False, completion_blocked=False, proposal_mode='',
-                      repair_rows=()):
+                      repair_rows=(), evidence_citations=()):
     """A specialist step's native schemas: its narrowed Tools under the active contract.
 
     The proposal, completion and Repair modes shape vault.propose, task.complete and
@@ -323,6 +323,9 @@ def task_tool_schemas(names, *, completion_no_change=False, completion_blocked=F
             registered = _argument_schemas()['task.complete']['properties']['evidence']
             evidence['maxItems'] = registered['maxItems']
             evidence['items']['maxLength'] = registered['items']['maxLength']
+            if evidence_citations:
+                # Only what this step may cite: an Article read in part is not offered.
+                evidence['items']['enum'] = list(evidence_citations)
         schemas.append({'name': name, 'description': DESCRIPTIONS[name],
                         'parameters': parameters})
     return schemas
