@@ -27,6 +27,8 @@ uniform float uPixelRatio;
 uniform float uPulse;
 uniform float uSpeechLevel;
 uniform float uMarbleDust;
+uniform float uMarbleOpacity; // the marbles' glass solidity, as the sprites draw it
+uniform int uSlots;
 varying float vAlpha;
 varying float vSoft;
 varying float vRing;
@@ -34,6 +36,13 @@ varying vec4 vShape; // blur radius, point radius and crisp spread in pixels; li
 varying vec3 vColor;
 // One turn an hour, in radians per second.
 const float HOURLY = 0.0017453293;
+// How much of what lies behind a marble's glass it hides at this fraction of
+// its radius: the sprite's body, thicker toward the limb (knowledge-3d-shaders.ts).
+float marbleGlass(float r) {
+  float limb = 1.0 - sqrt(max(0.0, 1.0 - r * r));
+  float bodyA = 1.0 - exp(-2.5 * uMarbleOpacity);
+  return bodyA + (1.0 - bodyA) * limb * limb * 0.6 * min(uMarbleOpacity, 1.0);
+}
 void main() {
   int slot = int(aMote.x);
   vec4 node = texelFetch(uNodes, ivec2(slot, 0), 0);
@@ -100,9 +109,28 @@ void main() {
   vec3 tint = look.rgb;
   float red = 0.5 * (tint.r - tint.b), green = 0.25 * (2.0 * tint.g - tint.r - tint.b);
   vColor = mix(vec3(0.62 + red - green, 0.62 + green, 0.62 - red - green), vec3(1.0), 0.3 + 0.3 * bright);
-  vec4 clip = projectionMatrix * vec4(centre.xyz + offset, 1.0);
-  // Depth of the node's own disc, so a nearer node's depth-prepass disc hides
-  // this dust while its own disc does not.
+  // Seen through every nearer marble's glass: marbles write no depth, so dust
+  // behind one shows through it, dimmed as its glass dims whatever is behind.
+  vec3 seen = centre.xyz + offset;
+  vec2 onScreen = seen.xy / max(1e-4, -seen.z);
+  float scale = length(modelViewMatrix[0].xyz);
+  if (vAlpha >= 0.003) {
+    for (int other = 0; other < uSlots; other++) {
+      vec4 near = texelFetch(uNodes, ivec2(other, 0), 0);
+      if (other == slot || near.w <= 0.0) continue;
+      vec4 nearCentre = modelViewMatrix * vec4(near.xyz, 1.0);
+      if (nearCentre.z <= centre.z) continue;
+      vec4 nearLook = texelFetch(uNodes, ivec2(other, 1), 0);
+      float nearRadius = near.w * (1.0 + nearLook.w * (0.10 + 0.06 * uPulse)) * scale / max(1e-4, -nearCentre.z);
+      float r = length(onScreen - nearCentre.xy / max(1e-4, -nearCentre.z)) / max(nearRadius, 1e-6);
+      if (r >= 1.0) continue;
+      float nearAlpha = mix(texelFetch(uNodes, ivec2(other, 2), 0).x, 1.0, nearLook.w);
+      vAlpha *= 1.0 - marbleGlass(r) * nearAlpha;
+    }
+  }
+  vec4 clip = projectionMatrix * vec4(seen, 1.0);
+  // Depth of the node's own centre, so opaque nodes, articles and the core in
+  // front still hide it through the depth prepass.
   vec4 at = projectionMatrix * centre;
   clip.z = (at.z / at.w - 1e-4) * clip.w;
   gl_Position = clip;
@@ -142,6 +170,8 @@ export interface MarbleDustUniforms {
   uSpeechLevel: { value: number };
   /** Amount of dust: more and brighter motes as it rises; 1 by default. */
   uMarbleDust: { value: number };
+  /** The marbles' glass solidity, 0 to 1.5, so dust behind a marble dims as its glass does. */
+  uMarbleOpacity: { value: number };
 }
 
 export interface MarbleDust {
@@ -212,9 +242,10 @@ export function createMarbleDust(options: {
   geometry.setAttribute("aLean", new THREE.BufferAttribute(leans, 3));
   geometry.setAttribute("aRandom", new THREE.BufferAttribute(randoms, 3));
   const material = new THREE.ShaderMaterial({
-    uniforms: { ...options.uniforms, uNodes: { value: texture } },
+    uniforms: { ...options.uniforms, uNodes: { value: texture }, uSlots: { value: count } },
     vertexShader: MARBLE_DUST_VERTEX, fragmentShader: MARBLE_DUST_FRAGMENT,
-    // The depth prepass hides dust behind a nearer node, as for the streaks.
+    // The depth prepass hides dust behind a nearer opaque node or the core;
+    // marbles write no depth and dim it themselves (above).
     ...ADDITIVE, depthTest: true,
   });
   const points = new THREE.Points(geometry, material);

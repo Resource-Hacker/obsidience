@@ -277,7 +277,8 @@ export interface Knowledge3dTuning {
   articleStyle: number;
   ringStyle: number;
   coreStyle: number;
-  /** Dust marble nodes: how solid their glass is (0 clear, 1 solid) and how
+  /** Dust marble nodes: how solid their glass is (as a glass layer: 0 none,
+   *  1.5 almost opaque) and how
    *  much dust fills them (0 none, 2 the most; 1.7 by default, owner 2026-10-14). */
   marbleOpacity: number;
   marbleDust: number;
@@ -356,7 +357,7 @@ export const DEFAULT_KNOWLEDGE_3D_TUNING: Knowledge3dTuning = {
   articleStyle: 0,
   ringStyle: 0,
   coreStyle: 0,
-  marbleOpacity: 0.5,
+  marbleOpacity: 1,
   marbleDust: 1.7,
   rolePlates: 1,
   orbitRadius: KNOWLEDGE_3D_ORBIT_RADIUS_DEFAULT,
@@ -399,6 +400,9 @@ export const KNOWLEDGE_3D_TUNING_FIELDS: readonly Knowledge3dTuningField[] = [
   { key: "shellLayer2", label: "Glass layer 2", group: "Glass", min: 0, max: 1.5, step: 0.05, description: "How solid the second glass layer out from the core is." },
   { key: "shellLayer3", label: "Glass layer 3", group: "Glass", min: 0, max: 1.5, step: 0.05, description: "How solid the third glass layer out from the core is. Lower values let the inner layers show through." },
   { key: "shellLayer4", label: "Glass layer 4", group: "Glass", min: 0, max: 1.5, step: 0.05, description: "How solid the fourth glass layer is. Only a graph with four layers has one." },
+  // Dust marble glass works as a layer's (owner 2026-10-14): nothing at 0, almost opaque at the top.
+  { key: "marbleOpacity", label: "Marble glass", group: "Glass", min: 0, max: 1.5, step: 0.05, description: "How solid the glass of Dust marble nodes is, as with the glass layers: 0 leaves only the dust, 1.5 is almost opaque." },
+  { key: "marbleDust", label: "Marble dust", group: "Glass", min: 0, max: 2, step: 0.05, description: "How much floating dust fills Dust marble nodes. Higher values add more and brighter specks; zero leaves the glass empty." },
   { key: "craterDepth", label: "Crater depth", group: "Glass", min: 0, max: 2, step: 0.05, description: "How deeply nodes press into their shell. Larger and better linked nodes always press deeper than small ones." },
   { key: "craterGlow", label: "Crater glow", group: "Glass", min: 0, max: 2, step: 0.05, description: "Coloured glow rising from the floor of each crater, in its node's colour." },
   { key: "seedGlow", label: "Seed glow", group: "Glass", min: 0, max: 2, step: 0.05, description: "Brightness of the orb of dust inside each crater." },
@@ -427,8 +431,6 @@ export const KNOWLEDGE_3D_TUNING_FIELDS: readonly Knowledge3dTuningField[] = [
   // with their depth-of-field dust. The Library's squares follow it.
   { key: "subjectStyle", label: "Branch nodes", group: "Nodes", min: 0, max: 6, step: 1, options: ["Classic disc", "Plasma orb", "Gem", "Hollow", "Dust marble", "Rounded square", "Data tile"], description: "Shape and surface style for top-level branch subjects; square choices are offered for the Library graph." },
   { key: "subnodeStyle", label: "Sub-branch nodes", group: "Nodes", min: 0, max: 6, step: 1, options: ["Classic disc", "Plasma orb", "Gem", "Hollow", "Dust marble", "Rounded square", "Data tile"], description: "Shape and surface style for deeper subject nodes; square choices are offered for the Library graph." },
-  { key: "marbleOpacity", label: "Marble glass", group: "Nodes", min: 0, max: 1, step: 0.05, description: "How solid the glass of Dust marble nodes is. Lower values let the graph behind show through; the rim and highlight always stay." },
-  { key: "marbleDust", label: "Marble dust", group: "Nodes", min: 0, max: 2, step: 0.05, description: "How much glittering dust fills Dust marble nodes. Higher values add more and brighter specks; zero leaves clear glass." },
   { key: "articleStyle", label: "Article nodes", group: "Nodes", min: 0, max: 5, step: 1, options: ["Jewel star", "Plasma orb", "Classic disc", "Ember", "Jewel square", "Data pixel"], description: "Shape and surface style for article nodes; square choices are offered for the Library graph." },
   { key: "ringStyle", label: "Node rings", group: "Nodes", min: 0, max: 3, step: 1, options: ["Solid", "Dashed", "Double", "None"], description: "Ring stroke style around subject nodes. Auto-curated rings always stay visible." },
   { key: "coreStyle", label: "AI core", group: "Nodes", min: 0, max: 4, step: 1, options: ["Plasma filaments", "Calm core", "Vortex", "Pulsar", "Data block"], description: "Style of the central core: plasma variants for agents, the geometric Data block for the shared library." },

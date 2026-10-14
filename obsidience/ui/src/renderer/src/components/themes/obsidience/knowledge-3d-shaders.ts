@@ -26,6 +26,9 @@ void main() {
   // Squares: Articles 4-5, subjects 5-6 (subject 4 is the round marble).
   float squareFirst = vStyle.x < 0.5 ? 4.0 : 5.0;
   bool squareNode = vStyle.x < 1.5 && variant > squareFirst - 0.5;
+  // A Dust marble is glass: what lies behind it shows through, so it writes
+  // no depth (its dust layer dims what its glass covers).
+  if (vStyle.x > 0.5 && vStyle.x < 1.5 && variant > 3.5 && variant < 4.5) discard;
   float solid = vStyle.x > 1.5 ? 0.9 : 1.0;
   if (squareNode) {
     float corner = variant < squareFirst + 0.5 ? 0.16 : 0.045;
@@ -136,10 +139,12 @@ void main() {
 // Knowledge shells' own glass — their hairline sheen levels one canvas pixel
 // wide, wandering on the same value-noise drift, every fifth one brighter,
 // on the front face and through it on the back, fixed to the cloud so they
-// turn with the graph; a limb, a small highlight — over a body only faintly
-// tinted, so the scene behind shows through (uMarbleOpacity, thicker toward
-// the limb as glass is). The dust inside is real points drawn after the
-// sprites (knowledge-3d-marble-dust.ts); here only its unresolved haze.
+// turn with the graph; a limb, a small highlight — over a tinted body. Its
+// solidity (uMarbleOpacity, 0 to 1.5) works as a shell layer's: at 0 only the
+// dust is left, the glass light grows with it as a shell's does, and the body
+// darkens toward opaque, almost fully at the top. The dust inside is real
+// points drawn after the sprites (knowledge-3d-marble-dust.ts); here only its
+// unresolved haze.
 const GLASS_MARBLE_GLSL = `
 uniform float uMarbleOpacity;
 uniform float uMarbleDust;
@@ -214,10 +219,14 @@ vec4 glassMarble(vec2 p, float r, float aa, float radiusPx, vec3 tint, vec3 dark
   // the brightening, and the glass stays clear.
   vec3 haze = mix(tint, vec3(1.0), 0.2) * h * 0.07 * uMarbleDust
     * (1.0 + 0.25 * boost / max(uMarbleDust, 1.0)) * (1.0 + 0.3 * uSpeechLevel);
-  vec3 light = haze + pale * (line * (1.0 + 0.6 * boost) + limb * limb * limb * 0.6)
+  float solid = uMarbleOpacity;
+  vec3 light = haze + (pale * (line * (1.0 + 0.6 * boost) + limb * limb * limb * 0.6)
     + mix(tint, vec3(1.0), 0.3) * caustic * 0.28
-    + vec3(1.0) * (spec * 0.85 + pow(max(dot(normal, sun), 0.0), 6.0) * 0.04);
-  float body = uMarbleOpacity + (1.0 - uMarbleOpacity) * limb * limb * 0.6;
+    + vec3(1.0) * (spec * 0.85 + pow(max(dot(normal, sun), 0.0), 6.0) * 0.04)) * solid;
+  // 0.5 lets about a third of the scene through, 1 a tenth, 1.5 almost none;
+  // thicker toward the limb, as glass is.
+  float bodyA = 1.0 - exp(-2.5 * solid);
+  float body = bodyA + (1.0 - bodyA) * limb * limb * 0.6 * min(solid, 1.0);
   // Light over the tinted body: alpha follows the brightest channel.
   float shine = clamp(max(light.r, max(light.g, light.b)), 0.0, 1.0);
   float alpha = body + (1.0 - body) * shine;

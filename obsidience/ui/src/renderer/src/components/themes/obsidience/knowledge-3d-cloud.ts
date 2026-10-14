@@ -556,6 +556,7 @@ export function createKnowledge3dCloud(
       uPulse: deps.sharedUniforms.uPulse,
       uSpeechLevel: pointUniforms.uSpeechLevel,
       uMarbleDust: marbleDustUniform,
+      uMarbleOpacity: marbleOpacityUniform,
     },
   });
   marbleDust.points.renderOrder = 2;
