@@ -341,6 +341,10 @@ async def run_adk_session(task, model, messages, allowed, ctx, agent_name, effor
                 delta = None
                 if ex.done:
                     break
+                if ctx.get('interruption_reason') == 'foreground_admission':
+                    # A Tool that yielded to foreground input (harness.optimize) raised
+                    # inside ADK, which ends the invocation instead of propagating.
+                    raise asyncio.CancelledError('foreground_admission')
                 if (clarifications := plugin.take_steering()) is not None:
                     plugin.steered = True
                     plugin.last_search_refs = None
