@@ -33,7 +33,8 @@ own memory corrections.
 
 ## Accepted Knowledge
 
-Established preferences belong directly under Executive. Workstation procedures
+Established owner preferences belong directly under Executive Preferences, an
+Agent branch outside Alexandria's checkout. Workstation procedures
 belong under Runbooks/Operations with explicit Skill dependencies. Implementation
 explanations and dated incident evidence belong in Architecture/Shell. Shared architecture
 belongs in the root Architecture branch. Agent identities, capability

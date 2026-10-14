@@ -53,13 +53,19 @@ Hindsight mental-model page. Use this procedure instead of the maintenance scan 
    Skip recommendations solely about Agent architecture, executable definitions
    or runtime maintenance; those belong to Heimdall. Do not invent an Executive
    directory or move such content into an unrelated wiki Article to bypass scope.
+   Accepted owner preferences live in Executive Preferences
+   (`Agents/Executive/Preferences`), an Agent branch outside this checkout: no
+   search or read here reaches it, so do not look for it. Page items that belong
+   there are not Curate recommendations.
    Search result refs are readable; links inside their snippets may be outside
    checkout. An unavailable linked path is not evidence that a new Article is
    needed. File knowledge under its actual subject and purpose; do not create a
    generic Observations folder or an Article per page item. Use an
    existing incident Article only for useful dated history, and an existing
-   preference or configuration Article for an established standing requirement.
-   A page with no useful ordinary-wiki recommendation may finish no change.
+   ordinary preference or configuration Article in the checkout for an
+   established standing requirement. A page with no useful ordinary-wiki
+   recommendation, including one whose durable items all belong in Executive
+   Preferences, finishes no change; say so in the summary.
 3. If the evidence warrants durable wiki content, stage at most three
    highest-value minimal `vault.propose` create/update recommendations in existing owned
    Knowledge branches. Preserve useful prose, links, qualifiers and dates; omit

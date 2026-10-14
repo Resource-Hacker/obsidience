@@ -311,6 +311,9 @@ def task_tool_schemas(names, *, completion_no_change=False, completion_blocked=F
             # fields. Keep them explicit in both branches; failure can use an
             # empty classification and evidence list without inventing evidence.
             parameters['required'] = ['summary', 'status', 'outcome', 'evidence']
+            # Nothing is staged, so "changed" is never accepted; the merged union
+            # would still offer it with completed status.
+            parameters['properties']['outcome']['enum'] = ['no_change', '']
             parameters['properties']['outcome']['description'] = (
                 'Use no_change for a completed inspection; use an empty string for failed.')
             evidence = parameters['properties']['evidence']
