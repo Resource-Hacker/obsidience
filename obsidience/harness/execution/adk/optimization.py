@@ -122,8 +122,9 @@ JOB_SECONDS = 2400
 # baseline's training passes varied by up to two of five between measurements
 # (2026-10-13 jobs). Cases are therefore compared by their pass counts, never
 # repetition against repetition. The training trials both select a candidate
-# and judge it, so its gain must be far outside that spread; and controls the
-# baseline mostly fails could not show a regression.
+# and judge it, so its gain must be far outside that spread. Controls the
+# baseline mostly fails cannot show a regression (2026-10-13: 11 of 20 passed,
+# failing as the incident did), so the candidate must also pass most of them.
 TRAIN_MARGIN = 4
 CONTROL_FLOOR = 0.75
 
@@ -149,29 +150,24 @@ def _holdout_regressed(cases: dict) -> bool:
     return sum(new for _, new in held) < sum(old for old, _ in held) or any(old - new >= 2 for old, new in held)
 
 
-def _controls_usable(passed: int, trials: int) -> bool:
-    """The baseline passes enough control trials for a regression to be visible."""
-    return trials > 0 and passed >= CONTROL_FLOOR * trials
+def _controls_pass(candidate) -> bool:
+    """The candidate passes at least CONTROL_FLOOR of its control trials."""
+    held = [row['passed'] for row in candidate if row['split'] == 'holdout']
+    return bool(held) and sum(held) >= CONTROL_FLOOR * len(held)
 
 
 class JobBudget:
-    """Upstream's budget, ended by the first accepted candidate or by unusable controls.
+    """Upstream's budget, ended by the first accepted candidate.
 
-    The accepted candidate's controls are then the job's last measurement, and
-    no candidate can be published when the seed's controls cannot guard it.
+    That candidate's controls are then the job's last measurement.
     """
     def __init__(self, store, *, max_rollouts: int, max_iterations: int):
         self.store, self.max_rollouts, self.max_iterations = store, max_rollouts, max_iterations
 
     def allows_iteration(self, *, iteration: int, attempted_rollouts: int) -> bool:
-        if iteration >= self.max_iterations or attempted_rollouts >= self.max_rollouts:
-            return False
-        if any(event.payload.get('accepted') is True for event in self.store.events_of_type('EvolutionRecorded')):
-            return False
-        controls = [row['score'] for event in self.store.events_of_type('EvaluationCompleted')
-                    if (evaluation := event.payload.get('evaluation', {})).get('split') == 'development'
-                    for row in evaluation.get('observations', [])]
-        return _controls_usable(sum(score == 1 for score in controls), len(controls))
+        return (iteration < self.max_iterations and attempted_rollouts < self.max_rollouts
+                and not any(event.payload.get('accepted') is True
+                            for event in self.store.events_of_type('EvolutionRecorded')))
 
 
 def _extra_tool_calls(before, after) -> list[str]:
@@ -603,10 +599,8 @@ def comparison(document, rows, seed_id, selected_id):
         result['verdict'] = 'incomplete'
     if result['verdict'] != 'incomplete':
         result['cases'] = _case_passes(baseline, candidate)
-        held = [row['passed'] for row in baseline if row['split'] == 'holdout']
-        result['controls_usable'] = _controls_usable(sum(held), len(held))
         result['verdict'] = ('regressed' if _holdout_regressed(result['cases']) else
-                             'passed' if result['controls_usable'] and _train_improved(
+                             'passed' if _controls_pass(candidate) and _train_improved(
                                  *([row for row in side if row['split'] == 'train'] for side in (baseline, candidate)))
                              else 'not_improved')
     check_latency = _latency_sensitive(document)

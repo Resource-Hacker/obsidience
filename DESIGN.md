@@ -593,9 +593,10 @@ full current reads, unrelated hits do not.
   Repetitions are independent samples, so cases compare by pass counts: the candidate must
   pass every training trial, at least four of which the baseline failed; the controls must
   not pass less often in total, nor any one of them by two or more repetitions, nor average
-  over half a Tool call more. A baseline that passes under three quarters of its control
-  trials cannot guard a candidate, so that job proposes none; the first accepted candidate
-  ends the search. The latency bound applies only to Executive at reasoning `none`.
+  over half a Tool call more. Controls the baseline mostly fails cannot show a regression,
+  so the candidate must itself pass at least three quarters of the control trials. The
+  first accepted candidate ends the search. The latency bound applies only to Executive at
+  reasoning `none`.
   Publication revalidates inputs, code, model and the returned receipt; owner-set
   `Tasks/audit` `optimization_auto_apply` (default off) may publish instruction bodies
   automatically; metadata, grants, model configuration and code always keep Review. Never
