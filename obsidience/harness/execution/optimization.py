@@ -455,7 +455,10 @@ async def optimize(case_id: str, context: dict) -> dict:
                 context.pop('_executive_optimization', None)
         context['_harness_optimization'] = result
         from .optimization_incidents import attention
-        baseline = report.get('observations', {}).get(report.get('seed_id'), [])
+        # The incident is the training case: once its replays all pass, a control
+        # that failed a repetition is not this incident's quality warning.
+        baseline = [row for row in report.get('observations', {}).get(report.get('seed_id'), [])
+                    if row.get('split') == 'train']
         if report['verdict'] != 'passed' and (not baseline or not all(row.get('passed') for row in baseline)):
             attention(case_id, context['run_id'], document.get('task', EXECUTIVE),
                       'AutoSaddler exhausted its bounded improvement attempt: ' + report['verdict'],

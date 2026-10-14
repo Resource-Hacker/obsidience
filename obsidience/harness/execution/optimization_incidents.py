@@ -458,14 +458,14 @@ def _replacement_reports(row: dict, baseline_failure: bool) -> list[dict]:
             if result.get('verdict') == 'incomplete' and not replacement_finding:
                 continue
             if baseline_failure:
-                # A fully passing baseline resolves the exact incident. If the
-                # replacement still fails, keep its own finding instead of two
-                # warnings for the same incident. An unapplied candidate alone
+                # Replays of the incident (the training case) that all pass resolve
+                # it. If the replacement still fails, keep its own finding instead of
+                # two warnings for the same incident. An unapplied candidate alone
                 # cannot clear the quality warning.
-                baseline = report.get('observations', {}).get(report.get('seed_id'), [])
-                baseline_passed = (
-                    result['comparison']['counts'].get('parent_passed') == optimization.DECISION_CASE_COUNT * optimization.EVALUATION_REPETITIONS
-                    and baseline and all(item.get('passed') and not item.get('error') for item in baseline))
+                baseline = [item for item in report.get('observations', {}).get(report.get('seed_id'), [])
+                            if item.get('split') == 'train']
+                baseline_passed = bool(baseline) and all(item.get('passed') and not item.get('error')
+                                                         for item in baseline)
                 if not baseline_passed and not replacement_finding:
                     continue
             audit_run_id = report['audit_run_id']
