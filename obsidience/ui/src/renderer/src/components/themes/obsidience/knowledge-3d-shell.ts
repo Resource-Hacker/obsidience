@@ -69,14 +69,14 @@ float rippleWave(vec3 direction, out vec3 tint) {
 `;
 
 /** Light added to a premultiplied canvas: alpha follows the brightest channel. */
-const LIGHT_GLSL = `
+export const LIGHT_GLSL = `
 const vec3 AMBER = vec3(1.0, 0.604, 0.235);
 vec4 knowledgeLight(vec3 light) {
   return vec4(light, clamp(max(light.r, max(light.g, light.b)), 0.0, 1.0));
 }
 `;
 
-const ADDITIVE = {
+export const ADDITIVE = {
   transparent: true, depthTest: false, depthWrite: false,
   blending: THREE.CustomBlending, blendEquation: THREE.AddEquation,
   blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,

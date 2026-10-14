@@ -49,6 +49,7 @@ import type { ForceSimulation } from "d3-force-3d";
 import { KNOWLEDGE_CROSS_SEGMENTS as CROSS_SEGMENTS, writeKnowledgeCrossRoute } from "./knowledge-3d-links";
 import { KNOWLEDGE_LINK_APPROVAL_DURATION_MS } from "./knowledge-3d-shaders";
 import { createKnowledge3dShells, type Knowledge3dOptics } from "./knowledge-3d-shell";
+import { createMarbleDust } from "./knowledge-3d-marble-dust";
 export { KNOWLEDGE_LINK_APPROVAL_DURATION_MS };
 
 /** Leaf sprites carry the plasma-orb halo and star flare, so the quad
@@ -461,6 +462,8 @@ export function createKnowledge3dCloud(
   const subjectStyleUniform = { value: input.tuning.subjectStyle };
   const subnodeStyleUniform = { value: input.tuning.subnodeStyle };
   const ringStyleUniform = { value: input.tuning.ringStyle };
+  const marbleOpacityUniform = { value: input.tuning.marbleOpacity };
+  const marbleDustUniform = { value: input.tuning.marbleDust };
   const pointUniforms = {
     uActivityOpacity: { value: 1 },
     uPerspective: deps.sharedUniforms.uPerspective,
@@ -474,6 +477,8 @@ export function createKnowledge3dCloud(
     uSubjectStyle: subjectStyleUniform,
     uSubnodeStyle: subnodeStyleUniform,
     uRingStyle: ringStyleUniform,
+    uMarbleOpacity: marbleOpacityUniform,
+    uMarbleDust: marbleDustUniform,
   };
   const material = new THREE.ShaderMaterial({
     uniforms: pointUniforms,
@@ -532,6 +537,42 @@ export function createKnowledge3dCloud(
   // Glass only adds light and draws in the beams' slot, behind the node sprites.
   for (const layer of shells.layers) group.add(layer);
   disposables.push(shells);
+
+  // --- Dust marbles: a branch or sub-branch node drawn as a Dust marble
+  // (style 4) is filled with the shells' dust. One slot per subject node;
+  // the dust draws just after the node sprites, in the streaks' slot.
+  const marbleNodes = nodes.flatMap((_, index) =>
+    styles[index * 4] === 1 || styles[index * 4] === 1.25 ? [index] : []);
+  const marbleDust = createMarbleDust({
+    tints: Float32Array.from(marbleNodes.flatMap((index) => [cores[index * 3], cores[index * 3 + 1], cores[index * 3 + 2]])),
+    seeds: Float32Array.from(marbleNodes, (index) => seeds[index]),
+    alphas: Float32Array.from(marbleNodes, (index) => styles[index * 4 + 3]),
+    uniforms: {
+      uTime: deps.sharedUniforms.uTime,
+      uPerspective: deps.sharedUniforms.uPerspective,
+      uPixelRatio: deps.sharedUniforms.uPixelRatio,
+      uPulse: deps.sharedUniforms.uPulse,
+      uSpeechLevel: pointUniforms.uSpeechLevel,
+      uMarbleDust: marbleDustUniform,
+    },
+  });
+  marbleDust.points.renderOrder = 2;
+  group.add(marbleDust.points);
+  disposables.push(marbleDust);
+  // Centres, sizes and focus follow the node sprites (the shader adds the
+  // sprites' focus swell); a tier not drawn as a marble hides its slots.
+  const syncMarbleDust = (): void => {
+    let shown = false;
+    marbleNodes.forEach((index, slot) => {
+      const style = styles[index * 4] === 1 ? subjectStyleUniform.value : subnodeStyleUniform.value;
+      const marble = Math.round(style) === 4;
+      shown = shown || marble;
+      marbleDust.setNode(slot, positions[index * 3], positions[index * 3 + 1], positions[index * 3 + 2],
+        marble ? radii[index] : 0, focusLevels[index]);
+    });
+    marbleDust.update();
+    marbleDust.points.visible = shown && marbleDustUniform.value > 0;
+  };
 
   // --- Taxonomy beams: the main ball's TWO-mesh split — root SPOKES
   // (tendril width, dormant per Brain lines) and deeper BRANCHES (depth
@@ -1066,6 +1107,7 @@ export function createKnowledge3dCloud(
   };
   const syncAllPositions = (): void => {
     shells.invalidate();
+    syncMarbleDust();
     syncStraightBeams(spokes);
     syncStraightBeams(branches);
     syncCrossPositions();
@@ -1257,6 +1299,7 @@ export function createKnowledge3dCloud(
       }
     }
     if (dirty) focusAttribute.needsUpdate = true;
+    if (dirty) syncMarbleDust();
     if (glassDirty) shells.setFocus(glassFocus);
   };
 
@@ -1316,6 +1359,8 @@ export function createKnowledge3dCloud(
     applyRelationEffects,
     applyTuning(live: Knowledge3dTuning, ratio: number) {
       shells.applyTuning(live);
+      const marbleChanged = live.subjectStyle !== subjectStyleUniform.value
+        || live.subnodeStyle !== subnodeStyleUniform.value || live.marbleDust !== marbleDustUniform.value;
       landing = live;
       glowScaleUniform.value = live.nodeGlow;
       const ballFactor = renderBallScale(live);
@@ -1325,6 +1370,9 @@ export function createKnowledge3dCloud(
       subjectStyleUniform.value = live.subjectStyle;
       subnodeStyleUniform.value = live.subnodeStyle;
       ringStyleUniform.value = live.ringStyle;
+      marbleOpacityUniform.value = live.marbleOpacity;
+      marbleDustUniform.value = live.marbleDust;
+      if (marbleChanged) syncMarbleDust();
       group.scale.setScalar(ballFactor);
       spokeWidthUniform.value = live.tendrilWidth * ratio * ballFactor;
       (spokes.mesh.material as THREE.ShaderMaterial).uniforms.uOpacity.value =

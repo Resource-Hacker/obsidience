@@ -277,6 +277,10 @@ export interface Knowledge3dTuning {
   articleStyle: number;
   ringStyle: number;
   coreStyle: number;
+  /** Dust marble nodes: how solid their glass is (0 clear, 1 solid) and how
+   *  much dust fills them (0 none, 1 the default, 2 twice as many motes). */
+  marbleOpacity: number;
+  marbleDust: number;
   /** Role-glyph nameplates over every ball (read from the main record). */
   rolePlates: number;
   orbitRadius: number;
@@ -352,6 +356,8 @@ export const DEFAULT_KNOWLEDGE_3D_TUNING: Knowledge3dTuning = {
   articleStyle: 0,
   ringStyle: 0,
   coreStyle: 0,
+  marbleOpacity: 0.25,
+  marbleDust: 1,
   rolePlates: 1,
   orbitRadius: KNOWLEDGE_3D_ORBIT_RADIUS_DEFAULT,
   orbitSpeed: KNOWLEDGE_3D_ORBIT_SPEED_DEFAULT,
@@ -417,10 +423,12 @@ export const KNOWLEDGE_3D_TUNING_FIELDS: readonly Knowledge3dTuningField[] = [
   // Style pickers (owner 2026-08-03, folded under Nodes): shader variants
   // per node TIER — top-level branch subjects, deeper sub-branch subjects,
   // article orbs, the subject rings, and the central AI plasma core.
-  // Galaxy marble (owner 2026-10-14): glass in the shells' style holding a
-  // turning spiral of dense dust. The Library's squares follow it.
-  { key: "subjectStyle", label: "Branch nodes", group: "Nodes", min: 0, max: 6, step: 1, options: ["Classic disc", "Plasma orb", "Gem", "Hollow", "Galaxy marble", "Rounded square", "Data tile"], description: "Shape and surface style for top-level branch subjects; square choices are offered for the Library graph." },
-  { key: "subnodeStyle", label: "Sub-branch nodes", group: "Nodes", min: 0, max: 6, step: 1, options: ["Classic disc", "Plasma orb", "Gem", "Hollow", "Galaxy marble", "Rounded square", "Data tile"], description: "Shape and surface style for deeper subject nodes; square choices are offered for the Library graph." },
+  // Dust marble (owner 2026-10-14): clear glass in the shells' style packed
+  // with their depth-of-field dust. The Library's squares follow it.
+  { key: "subjectStyle", label: "Branch nodes", group: "Nodes", min: 0, max: 6, step: 1, options: ["Classic disc", "Plasma orb", "Gem", "Hollow", "Dust marble", "Rounded square", "Data tile"], description: "Shape and surface style for top-level branch subjects; square choices are offered for the Library graph." },
+  { key: "subnodeStyle", label: "Sub-branch nodes", group: "Nodes", min: 0, max: 6, step: 1, options: ["Classic disc", "Plasma orb", "Gem", "Hollow", "Dust marble", "Rounded square", "Data tile"], description: "Shape and surface style for deeper subject nodes; square choices are offered for the Library graph." },
+  { key: "marbleOpacity", label: "Marble glass", group: "Nodes", min: 0, max: 1, step: 0.05, description: "How solid the glass of Dust marble nodes is. Lower values let the graph behind show through; the rim and highlight always stay." },
+  { key: "marbleDust", label: "Marble dust", group: "Nodes", min: 0, max: 2, step: 0.05, description: "How much glittering dust fills Dust marble nodes. Higher values add more and brighter specks; zero leaves clear glass." },
   { key: "articleStyle", label: "Article nodes", group: "Nodes", min: 0, max: 5, step: 1, options: ["Jewel star", "Plasma orb", "Classic disc", "Ember", "Jewel square", "Data pixel"], description: "Shape and surface style for article nodes; square choices are offered for the Library graph." },
   { key: "ringStyle", label: "Node rings", group: "Nodes", min: 0, max: 3, step: 1, options: ["Solid", "Dashed", "Double", "None"], description: "Ring stroke style around subject nodes. Auto-curated rings always stay visible." },
   { key: "coreStyle", label: "AI core", group: "Nodes", min: 0, max: 4, step: 1, options: ["Plasma filaments", "Calm core", "Vortex", "Pulsar", "Data block"], description: "Style of the central core: plasma variants for agents, the geometric Data block for the shared library." },

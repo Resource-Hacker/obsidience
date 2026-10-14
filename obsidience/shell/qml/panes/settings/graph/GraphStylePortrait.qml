@@ -129,33 +129,37 @@ Rectangle {
             context.restore()
         }
 
-        // A glass marble holding a small spiral of dust.
+        // Clear glass packed with fine dust.
         function marble(context) {
             const center = width / 2
             const radius = width * 0.36
             const body = context.createRadialGradient(
-                center, center, 0, center, center, radius
+                center, center, radius * 0.2, center, center, radius
             )
-            body.addColorStop(0, "#ecfeff")
-            body.addColorStop(0.18, "#22a5c4")
-            body.addColorStop(0.55, "#06222e")
-            body.addColorStop(0.88, "#0b3442")
-            body.addColorStop(1, "#67e8f9")
+            body.addColorStop(0, "rgba(21,94,117,0.35)")
+            body.addColorStop(0.85, "rgba(8,51,68,0.45)")
+            body.addColorStop(1, "rgba(103,232,249,0.9)")
             context.save()
             context.fillStyle = body
             context.beginPath()
             context.arc(center, center, radius, 0, Math.PI * 2)
             context.fill()
-            context.fillStyle = "#ecfeff"
-            for (let mote = 0; mote < 40; mote++) {
-                const along = mote / 40
-                const angle = along * Math.PI * 2.6 + (mote % 2) * Math.PI
-                const distance = radius * 0.8 * along
-                context.globalAlpha = 1 - 0.55 * along
-                context.fillRect(center + Math.cos(angle) * distance - 0.6,
-                    center + Math.sin(angle) * distance * 0.62 - 0.6, 1.2, 1.2)
+            let seed = 7
+            const random = () => {
+                seed = (seed * 16807) % 2147483647
+                return seed / 2147483647
             }
-            context.globalAlpha = 0.8
+            for (let mote = 0; mote < 90; mote++) {
+                const angle = random() * Math.PI * 2
+                const distance = radius * 0.88 * Math.sqrt(random())
+                const bright = random()
+                context.globalAlpha = 0.35 + 0.65 * bright
+                context.fillStyle = bright > 0.92 ? "#ffffff" : "#a5f3fc"
+                const size = bright > 0.92 ? 1.3 : 0.9
+                context.fillRect(center + Math.cos(angle) * distance - size / 2,
+                    center + Math.sin(angle) * distance - size / 2, size, size)
+            }
+            context.globalAlpha = 0.85
             context.strokeStyle = "#a5f3fc"
             context.lineWidth = 0.8
             context.beginPath()

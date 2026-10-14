@@ -1441,7 +1441,7 @@ QtObject {
         const result = {}
         let count = 0
         for (const key of Object.keys(value)) {
-            if (count >= 64 || !/^[A-Za-z][A-Za-z0-9_]{0,47}$/.test(key)) {
+            if (count >= 96 || !/^[A-Za-z][A-Za-z0-9_]{0,47}$/.test(key)) {
                 continue
             }
             const number = value[key]
@@ -1591,7 +1591,7 @@ QtObject {
         const profile = cleanProfile(command.profile)
         const profiles = cleanProfiles(command.profiles)
         if (!tuning || !defaultTuning || !Array.isArray(command.fields)
-                || command.fields.length > 64 || !profile
+                || command.fields.length > 96 || !profile
                 || profiles.indexOf(profile) < 0) {
             return true
         }
