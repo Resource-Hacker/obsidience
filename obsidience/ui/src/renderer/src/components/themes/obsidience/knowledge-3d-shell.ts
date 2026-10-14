@@ -151,6 +151,19 @@ vec3 shellPoint(vec3 direction, float depth, float lift, float wave) {
 }
 `;
 
+// The core's glass hugs the core's disc a few canvas pixels out at any zoom,
+// and swells with it while it thinks or speaks.
+const CORE_HUG_GLSL = `
+uniform vec2 uHug;       // the core's radius, cloud-local; the gap in CSS pixels
+uniform float uHugSwell; // the core sprite's own swell
+uniform float uPerspective;
+float coreHug(vec3 centre, float extraPx) {
+  vec4 hub = modelViewMatrix * vec4(centre, 1.0);
+  float perUnit = uPerspective * length(modelViewMatrix[0].xyz) / max(1.0, -hub.z);
+  return uHug.x * uHugSwell + (uHug.y + extraPx) * uPixelRatio / max(perUnit, 1e-4);
+}
+`;
+
 const GLASS_VERTEX = `
 varying vec2 vSt;
 varying float vFog;
@@ -160,11 +173,18 @@ varying vec3 vWaveTint;
 ${OPTICS_GLSL}
 ${SPHERE_GLSL}
 ${SHELL_GLSL}
+#ifdef CORE_HUG
+${CORE_HUG_GLSL}
+#endif
 void main() {
   vSt = position.xy;
   vec3 direction = sphereDirection(vSt);
   vWave = rippleWave(direction, vWaveTint);
+#ifdef CORE_HUG
+  vec4 view = modelViewMatrix * vec4(direction * coreHug(vec3(0.0), 0.0), 1.0);
+#else
   vec4 view = modelViewMatrix * vec4(shellPoint(direction, texture2D(uSurvey, vSt).a, 0.0, vWave), 1.0);
+#endif
   vFog = knowledgeFog(knowledgeDepth(view));
   // Glass shows at its edge: how nearly this bearing is seen side-on.
   vEdge = 1.0 - abs(dot(normalize(normalMatrix * direction), normalize(view.xyz)));
@@ -329,20 +349,22 @@ attribute vec4 aMote;   // unit bearing; place across the band, 0 inner to 1 out
 attribute vec4 aRandom; // size, phase, turns per hour, brightness
 attribute vec3 aLean;   // how the mote's axis leans from the cloud's
 uniform vec3 uCore;     // the core's centre, cloud-local
-uniform vec2 uBand;     // the band's inner and outer radius, cloud-local
-uniform float uPerspective;
+uniform vec2 uBand;     // the band's outer radius, cloud-local, in y
 uniform float uGain;
 varying float vAlpha;
 varying float vRing;
 varying vec3 vColor;
 ${OPTICS_GLSL}
 ${LIGHT_GLSL}
+${CORE_HUG_GLSL}
 void main() {
   vec3 axis = normalize(vec3(0.0, 1.0, 0.0) + aLean);
   float turn = uTime * aRandom.z * 0.0017453293 + aRandom.y * 6.2831853;
   vec3 d = aMote.xyz;
   vec3 turned = d * cos(turn) + cross(axis, d) * sin(turn) + axis * dot(axis, d) * (1.0 - cos(turn));
-  vec3 local = uCore + turned * mix(uBand.x, uBand.y, aMote.w);
+  // From just outside the core's glass out to the first layout shell.
+  float inner = coreHug(uCore, 2.0);
+  vec3 local = uCore + turned * mix(inner, max(uBand.y, inner * 1.5), aMote.w);
   vec4 view = modelViewMatrix * vec4(local, 1.0);
   gl_Position = projectionMatrix * view;
   float depth = knowledgeDepth(view);
@@ -388,8 +410,8 @@ const RIPPLE_SECONDS = 2.6;
  *  radius. A crater's floor lies below its node, and its mouth reaches toward
  *  the nearest neighbour, by these [lightest, heaviest] amounts. */
 const RIM = 0.05;
-/** The core's glass sits this many core radii out: close, with a visible gap. */
-const CORE_GAP = 1.45;
+/** The core's glass hugs its disc this many CSS pixels out (owner 2026-10-14). */
+const CORE_GAP_PX = 5;
 const FLOOR = [0.03, 0.11];
 const MOUTH = [0.55, 0.85];
 
@@ -445,6 +467,8 @@ export function createKnowledge3dShells(options: {
   optics: Knowledge3dOptics;
   /** The core node's index, or -1: it gets its own glass and a band of dust. */
   core?: number;
+  /** The Executive's voice level, which swells the core sprite. */
+  speech?: { value: number };
 }): Knowledge3dShells {
   const { positions, layers, sizes, weights, tints, optics } = options;
   const core = options.core ?? -1;
@@ -626,6 +650,14 @@ export function createKnowledge3dShells(options: {
     shape: { value: new THREE.Vector2(1, 0) },
     centre: { value: new THREE.Vector3() },
     band: { value: new THREE.Vector2(1, 2) },
+    hug: { value: new THREE.Vector2(1, CORE_GAP_PX) },
+    hugSwell: { value: 1 },
+  };
+  const speech = options.speech ?? { value: 0 };
+  let coreFocus = 0;
+  // The core sprite's swell (knowledge-3d-shaders.ts), so the glass keeps its gap.
+  const syncHugSwell = () => {
+    coreUniforms.hugSwell.value = (1 + coreFocus * 0.13) * (1 + 0.32 * speech.value);
   };
   let coreTarget: THREE.WebGLRenderTarget | null = null;
   let coreSurveyMaterial: THREE.ShaderMaterial | null = null;
@@ -650,9 +682,11 @@ export function createKnowledge3dShells(options: {
       uniforms: {
         ...optics, ...still, uSurvey: coreUniforms.survey, uShell: coreUniforms.shape, uSolid: { value: 1 },
         uGlow: { value: 0 }, uLevels: { value: 12 }, uRings: { value: 0 },
+        uHug: coreUniforms.hug, uHugSwell: coreUniforms.hugSwell,
         // A brighter limb than a layout shell's, so the small sphere reads as one.
         uEdge: { value: 0.45 },
       },
+      defines: { CORE_HUG: 1 },
       vertexShader: GLASS_VERTEX, fragmentShader: GLASS_FRAGMENT,
       side: THREE.DoubleSide, forceSinglePass: true, ...ADDITIVE, depthTest: true,
     });
@@ -684,7 +718,8 @@ export function createKnowledge3dShells(options: {
     coreDustGeometry.setAttribute("aRandom", new THREE.BufferAttribute(moteRandoms, 4));
     coreDustGeometry.setAttribute("aLean", new THREE.BufferAttribute(leans, 3));
     const coreDustMaterial = new THREE.ShaderMaterial({
-      uniforms: { ...optics, uCore: coreUniforms.centre, uBand: coreUniforms.band, uGain: { value: 0 } },
+      uniforms: { ...optics, uCore: coreUniforms.centre, uBand: coreUniforms.band, uGain: { value: 0 },
+        uHug: coreUniforms.hug, uHugSwell: coreUniforms.hugSwell },
       vertexShader: CORE_DUST_VERTEX, fragmentShader: BOKEH_FRAGMENT, ...ADDITIVE, depthTest: true,
     });
     coreDustUniforms = coreDustMaterial.uniforms;
@@ -744,14 +779,14 @@ export function createKnowledge3dShells(options: {
     optics.uReach.value = outer;
     if (coreGlass && core >= 0) {
       const cx = positions[core * 3], cy = positions[core * 3 + 1], cz = positions[core * 3 + 2];
-      const hug = sizes[core] * CORE_GAP;
       coreGlass.position.set(cx, cy, cz);
-      coreUniforms.shape.value.set(hug, 0);
+      coreUniforms.hug.value.x = sizes[core];
+      const hug = sizes[core] * 1.3;
       coreUniforms.centre.value.set(cx, cy, cz);
       // Out to just inside the first layout shell's deepest crater floor.
       let first = outer;
       for (const shell of shells.slice(0, 1)) for (const floor of shell.floors) first = Math.min(first, floor);
-      coreUniforms.band.value.set(hug * 1.08, Math.max(hug * 1.6, first * 0.9));
+      coreUniforms.band.value.set(hug, Math.max(hug * 1.6, first * 0.9));
     }
     return true;
   };
@@ -774,6 +809,7 @@ export function createKnowledge3dShells(options: {
       }
     },
     advance(dtSeconds) {
+      syncHugSwell();
       for (const shell of shells) {
         for (let drop = 0; drop < 8; drop++) {
           const age = shell.drops[drop * 4 + 3];
@@ -782,6 +818,7 @@ export function createKnowledge3dShells(options: {
       }
     },
     setFocus(levels) {
+      if (core >= 0) coreFocus = levels[core];
       for (const shell of shells) {
         const count = shell.members.length;
         shell.members.forEach((node, slot) => { shell.data[(2 * count + slot) * 4 + 1] = levels[node]; });
