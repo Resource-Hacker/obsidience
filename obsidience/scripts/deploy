@@ -13,7 +13,15 @@ deploy restarts. Elsewhere it is named and left alone.
 
     obsidience/scripts/deploy            # deploy HEAD
     obsidience/scripts/deploy --dry-run  # show what would restart
-    obsidience/scripts/deploy --rollback # revert to the previous deploy
+    obsidience/scripts/deploy --rollback # revert to the previous full deploy
+    obsidience/scripts/deploy --only media-catalogue --restart media-catalogue
+
+--only narrows the affected owners; --restart also selects a private-config
+owner when its tracked files did not change. Required dependent restarts stay
+included. Scoped deploys record a separate receipt and leave the full-deploy
+checkpoint and rollback history unchanged; the next full deploy still handles
+all pending owners. Scoped rollback is not supported: restore the selected
+owner's matching configuration/source backup and deploy that owner explicitly.
 
 Gemma (obsidience/scripts/llm.sh) is never restarted automatically.
 """
@@ -32,6 +40,7 @@ import urllib.request
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 STATE = ROOT / "obsidience" / "state"
 RECORD, LOG = STATE / "deploy.json", STATE / "deploys.jsonl"
+PARTIAL_LOG = STATE / "deploy-partials.jsonl"
 API = "http://127.0.0.1:8765"
 RESTART_SHELL = ROOT / "obsidience" / "shell" / "session" / "restart-shell"
 
@@ -338,7 +347,15 @@ def main() -> None:
     parser.add_argument("--restart", action="append", default=[],
                         choices=("harness", "tv-player", "tv-tuner", "media-catalogue", "media-tiramisu", "media-prowlarr"),
                         help="Include an affected owner after a private configuration change")
+    parser.add_argument("--only", action="append", default=[],
+                        choices=("harness", "shell", "ui", "tv-player", "tv-tuner",
+                                 "media-catalogue", "media-tiramisu", "media-prowlarr"),
+                        help="Deploy only selected affected owners; keep the full checkpoint unchanged")
     args = parser.parse_args()
+    if args.only and args.rollback:
+        parser.error("--only cannot be combined with --rollback; scoped receipts are not full deploys")
+    if args.only and set(args.restart) - set(args.only):
+        parser.error("each --restart owner must also be selected with --only")
     dirty = sorted(set(git("diff", "--name-only", "HEAD").splitlines()
                        + git("ls-files", "--others", "--exclude-standard").splitlines()))
     last = json.loads(RECORD.read_text()).get("commit") if RECORD.is_file() else None
@@ -356,6 +373,8 @@ def main() -> None:
     changed = git("diff", "--name-only", f"{base}..{head}").splitlines() if base else ["obsidience/harness/", "obsidience/shell/", "obsidience/ui/"]
     owners = targets(changed)
     owners = list(dict.fromkeys([*owners, *args.restart]))
+    if args.only:
+        owners = [owner for owner in owners if owner in args.only]
     if "tv-player" in owners and "tv-tuner" not in owners:
         owners.append("tv-tuner")
     for owner in tuple(owners):
@@ -375,7 +394,8 @@ def main() -> None:
         print("Note: uncommitted and not part of this deploy:", ", ".join(dirty))
     if "obsidience/scripts/llm.sh" in changed:
         print("Note: llm.sh changed; restart obsidience-gemma.service deliberately (not automatic).")
-    print(f"deploy {last and last[:7]} -> {head[:7]}; restart: {', '.join(owners) or 'nothing'}")
+    kind = "scoped deploy" if args.only else "deploy"
+    print(f"{kind} {last and last[:7]} -> {head[:7]}; restart: {', '.join(owners) or 'nothing'}")
     if args.dry_run:
         return
     started = time.time()
@@ -413,6 +433,15 @@ def main() -> None:
         failures.append(voice)
     for line in failures:
         print("trace failure:", line)
+    if args.only:
+        entry = {"scope": "partial", "commit": head, "full_checkpoint": last,
+                 "at": started, "selected": list(dict.fromkeys(args.only)),
+                 "owners": owners, "failures": len(failures)}
+        with PARTIAL_LOG.open("a") as log:
+            log.write(json.dumps(entry) + "\n")
+        print("scoped deployment recorded; full checkpoint unchanged" if not failures else
+              "scoped deployment recorded with trace failures; inspect selected owners; full checkpoint unchanged")
+        return
     entry = {"commit": head, "previous": last, "at": started, "owners": owners, "failures": len(failures)}
     RECORD.write_text(json.dumps(entry) + "\n")
     with LOG.open("a") as log:
