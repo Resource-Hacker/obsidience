@@ -119,7 +119,9 @@ the Executive waits for its name, so the opening chirp is immediate. Once the li
 and that chirp has ended, while the owner speaks, the Snapcast path takes over: the
 "accepted" chirp, the reply and the closing chirp play on both speakers in step, and then
 the direct path returns. A command spoken over the opening chirp switches after the
-"accepted" chirp instead. `voice.py` reads those moments from the Harness (`/ws/trace` chirp
+"accepted" chirp instead. A reply ending in a question has no closing chirp: the line opens
+again with its ready chirp in step, and the exchange ends with that line's closing or cancel
+chirp. `voice.py` reads those moments from the Harness (`/ws/trace` chirp
 lines, `/ws/realtime` state) and the television's presence from the Snapcast server. A
 television that stops listening during an exchange changes nothing until the exchange ends;
 none begins on the Snapcast path without it. The echo reference is unchanged: it is the

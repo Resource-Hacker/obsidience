@@ -133,6 +133,8 @@ SENTENCE_PAUSE_SECS = 0.2
 CAPTURE_STALL_SECS = 5.0
 _SENTENCE_PAUSE_PCM = b"\0" * (round(SENTENCE_PAUSE_SECS * TTS_SAMPLE_RATE * 2 / CHUNK_BYTES) * CHUNK_BYTES)
 _SENTENCE_END = re.compile(r"[.!?…][\"'”’)\]*_]*$")
+# A spoken reply that asks the owner something: "?" before any closing marks.
+_QUESTION_END = re.compile(r"\?[\"'”’»)\]}]*$")
 
 
 def _speech_pcm(samples: np.ndarray) -> bytes:
@@ -497,7 +499,7 @@ class SpeechTimingAudioOutput(LocalAudioOutputTransport):
         elif direction is FrameDirection.DOWNSTREAM and isinstance(frame, ReplyFinished):
             name = self._playback.reply_finished(frame.binding, frame.successful)
             if name and not self._reply_failed:
-                await self._playback.queue_cue(name, frame.binding["generation"])
+                await self._playback.close_reply(name, frame.binding["generation"])
         # Upstream queues this marker with PCM and forwards it only when its
         # output task reaches it. Binding at process_frame would race old audio.
         if direction is FrameDirection.DOWNSTREAM and isinstance(frame, TTSStartedFrame):
@@ -816,6 +818,32 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
         finally:
             if self._wake_timeout is asyncio.current_task():
                 self._wake_timeout = None
+
+    def follow_up(self, reply: tuple[int, int]) -> bool:
+        """A spoken question has finished playing: open the command window as
+        the name said alone would (owner, 2026-10-14). False in Realtime mode
+        or with a window already open; the closing cue then plays as before."""
+        if self.mode != "wake" or self._wake_open or self._mode_waiting_for_stop:
+            return False
+        self.create_task(self._open_follow_up(reply), name="wake-follow-up")
+        return True
+
+    async def _open_follow_up(self, reply: tuple[int, int]) -> None:
+        # Its own task, like _confirm_wake: the output's audio task reported
+        # the end and must never be the one an interruption cancels mid-open.
+        # A newer reply, cancellation, mode change or stop has moved the epoch.
+        playback = self._playback
+        if (self.mode != "wake" or self._wake_open or self._mode_waiting_for_stop
+                or playback is None or (playback.generation, playback.epoch) != reply):
+            return
+        await self._open_wake("")
+        if self._have_sent_user_started_speaking and not self._vad_user_speaking:
+            # Nobody spoke: end the opening edge as the name's own VAD stop
+            # does, so the answer is the next utterance with its own timing.
+            await self._handle_user_interruption(UserStoppedSpeakingFrame())
+            self._have_sent_user_started_speaking = False
+            if self._timing is not None:
+                self._timing.discard()
 
     async def _handle_transcription(self, frame, direction) -> None:
         # STT stays resident. Unaddressed words never enter NeMo's command
@@ -1136,7 +1164,7 @@ class PlaybackCommands:
     A reply opened with ``open`` accepts ``speak_append`` chunks under the same
     generation and epoch: they queue behind it for the one serialized Pocket
     producer, so playback continues without a gap or an interruption. Its
-    outcome cue follows only the final chunk.
+    outcome cue follows only the final chunk (see ``close_reply``).
     """
 
     def __init__(self) -> None:
@@ -1150,6 +1178,7 @@ class PlaybackCommands:
         self._chunks = 0
         self._closing: str | None = None
         self._chunk_failed = False
+        self._last_text = ""  # The open or latest reply's last spoken chunk.
         self._preparing: asyncio.Task | None = None
         self._controller_ready = asyncio.Event()
         self._startup_pending = True
@@ -1267,6 +1296,7 @@ class PlaybackCommands:
         self._playing = playback_id if isinstance(playback_id, str) else None
         self._audible = 0
         self._chunks, self._closing, self._chunk_failed = 1, None, False
+        self._last_text = text
         self._queued = [(generation, self.epoch, text, timing, playback_id,
                          None if opened else command.get("outcome"), opened)]
         self._start_preparing(task)
@@ -1290,6 +1320,7 @@ class PlaybackCommands:
         if text:
             self._reply_active = True
             self._chunks += 1
+            self._last_text = text
             self._queued.append((generation, self.epoch, text, None, playback_id, outcome, opened))
             self._start_preparing(task)
         elif not opened:
@@ -1297,9 +1328,7 @@ class PlaybackCommands:
             if self._chunks:
                 self._closing = outcome
             else:
-                name = self._closing_cue(outcome)
-                if name:
-                    await self.queue_cue(name, generation)
+                await self.close_reply(self._closing_cue(outcome), generation)
 
     def _start_preparing(self, task: PipelineTask) -> None:
         if self._preparing is None or self._preparing.done():
@@ -1310,6 +1339,20 @@ class PlaybackCommands:
     def _closing_cue(self, outcome) -> str | None:
         return ("error" if self._chunk_failed or outcome == "failed"
                 else "complete" if outcome == "completed" else None)
+
+    async def close_reply(self, name: str | None, generation: int) -> None:
+        """Close the current reply, all of whose audio has been written.
+
+        A completed reply that ends in a question opens the wake-mode command
+        window instead of its closing cue; the window's own ready chirp follows.
+        """
+        turn = self._turn_taking
+        if (name == "complete" and turn is not None and generation == self.generation
+                and _QUESTION_END.search(self._last_text)
+                and turn.follow_up((self.generation, self.epoch))):
+            return
+        if name:
+            await self.queue_cue(name, generation)
 
     def chunk_audible(self, binding) -> None:
         """Count one chunk of the current reply whose first PCM was written."""

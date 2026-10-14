@@ -659,7 +659,10 @@ full current reads, unrelated hits do not.
 - Cues (installation clips; missing clips are silent): no processing clips or timers; a
   started ready chirp finishes; STOP, mute, mode change and shutdown cancel. Code, not model
   wording, replaces spoken confirmation with a completion chirp for receipt-verified
-  reflex effects; failures and uncertain effects never chirp success.
+  reflex effects; failures and uncertain effects never chirp success. In wake mode a
+  completed spoken reply that ends in a question, once its last audio is written, opens the
+  command window as the name said alone would: the ready chirp replaces the completion
+  chirp, and silence closes it the same way.
 - Executive voice turns may speak each complete sentence of a model step that has emitted
   no Tool call before completion acceptance, once it passes the completion's own
   unsupported-claim check (owner decision 2026-10-08). A later Tool call or rejected

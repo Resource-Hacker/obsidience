@@ -23,7 +23,9 @@ chirp is as immediate as ever (owner, 2026-10-12: it must be as snappy as possib
 line is open and that chirp has ended, while the owner speaks, the Snapcast path takes over:
 the "accepted" chirp, the reply and the closing chirp play on both speakers in step, and then
 the direct path returns. A command spoken over the opening chirp leaves no such moment; then
-the switch follows the "accepted" chirp, just ahead of the reply.
+the switch follows the "accepted" chirp, just ahead of the reply. A reply that asks the owner
+something ends with no closing chirp: the line opens again and its ready chirp plays in step,
+so the exchange goes on through the answer and ends with that line's own closing chirp.
 
 A reply must never be lost to this. While the Snapcast path is the audible one the router
 listens, electrically, to what goes into the chain and what the desk speakers receive; sound
