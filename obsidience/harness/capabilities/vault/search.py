@@ -7,6 +7,11 @@ import sqlite3
 from copy import deepcopy
 
 MAX_RECEIPTS = 256
+# Memory Curate cannot tell an out-of-scope branch from a missing one; it
+# searched for Executive Preferences until its steps ran out (2026-10-14).
+MEMORY_SCOPE = ("Searched only ordinary Knowledge in this Curate checkout. Agent branches (Agents/...), "
+                "including Executive Preferences, are outside it: no search here reaches them, and page "
+                "items that belong there are not Curate recommendations.")
 
 
 def execute(args: dict, context: dict) -> str:
@@ -43,7 +48,8 @@ def execute(args: dict, context: dict) -> str:
         _agent, allowed = execution_scope(context, Resolver(snapshot))
     except PermissionError as exc:
         return str(exc)
-    if context.get("event") == "observations.memory.ready":
+    memory = context.get("event") == "observations.memory.ready"
+    if memory:
         # This occurrence curates memory into the wiki. Filter before lexical
         # and vector limits so executable definitions cannot displace Knowledge.
         allowed.intersection_update(note.ref for note in snapshot
@@ -81,6 +87,6 @@ def execute(args: dict, context: dict) -> str:
         if not ok:
             context.get("_vault_searches", {}).pop(query, None)
         if not batch:
-            return output
+            return MEMORY_SCOPE + "\n" + output if memory else output
         results.append({"query": query, "ok": ok, "result": output})
-    return json.dumps({"results": results}, ensure_ascii=False)
+    return json.dumps({**({"scope": MEMORY_SCOPE} if memory else {}), "results": results}, ensure_ascii=False)
