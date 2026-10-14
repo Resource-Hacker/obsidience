@@ -170,8 +170,9 @@ def wait_idle(limit: float = 900) -> None:
             busy = (realtime.get("playback", {}).get("status") not in (None, "idle")
                     or realtime.get("phase") in {"thinking", "speaking"})
             tasks = get("/api/tasks")
+            # A Task in review has finished and waits only for the owner.
             busy = busy or any(task.get("execution", {}).get("state") not in
-                               {"idle", "blocked", "failed", "needs_attention"} for task in tasks)
+                               {"idle", "blocked", "failed", "needs_attention", "review"} for task in tasks)
             # The conversation's live owner, not historical run rows, decides
             # whether a turn is active. This subscription sends no command.
             from websockets.sync.client import connect
