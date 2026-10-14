@@ -260,7 +260,8 @@ def prepare(specification: dict) -> dict:
     """Freeze a small owner-authored reconstruction and the actual native inputs."""
     if set(specification) == {'origin_run_id'}:
         from .optimization_incidents import prepare as prepare_incident
-        return prepare_incident(str(specification['origin_run_id']))
+        # The owner re-checks an incident against the instructions in force now.
+        return prepare_incident(str(specification['origin_run_id']), current_instructions=True)
     from .evaluation import validate_suite
     from .executor import resolve_spine
     _validate_suite_size(specification.get('suite', {}))

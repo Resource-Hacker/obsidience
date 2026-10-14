@@ -127,14 +127,60 @@ def _check_evidence(sample: dict) -> None:
         raise ValueError('The captured prompt does not contain its exact instruction body')
 
 
-def revalidate(sample: dict) -> dict:
+def _current_instructions(sample: dict) -> dict:
+    """Put the subject's current body where the captured one was, as a candidate trial does.
+
+    The captured body is found by its exact hash in the Vault's audit history.
+    Without it the sample is returned unchanged and fails the dependency check.
+    """
+    import subprocess
+    from ..knowledge import format as article_format
+    subject = load_note(sample['subject'] + '.md')
+    messages = sample.get('messages')
+    if subject is None or not isinstance(messages, list):
+        return sample
+    current = refinement._hash((CONFIG.vault_dir / subject.path).read_bytes())
+    if current == sample['subject_sha256']:
+        return sample
+    git = ['git', '-C', str(CONFIG.vault_dir)]
+    try:
+        commits = subprocess.run([*git, 'log', '--format=%H', '-n', '64', '--', subject.path],
+                                 capture_output=True, text=True, check=True, timeout=10).stdout.split()
+        for commit in commits:
+            raw = subprocess.run([*git, 'show', f'{commit}:{subject.path}'],
+                                 capture_output=True, check=True, timeout=10).stdout
+            if refinement._hash(raw) == sample['subject_sha256']:
+                captured = article_format.loads(raw.decode('utf-8'))[1].strip()
+                break
+        else:
+            return sample
+    except (OSError, subprocess.SubprocessError, UnicodeDecodeError, ValueError):
+        return sample
+    if not captured:
+        return sample
+    messages = deepcopy(messages)
+    replaced = 0
+    for message in messages:
+        if isinstance(message, dict) and isinstance(message.get('content'), str):
+            replaced += message['content'].count(captured)
+            message['content'] = message['content'].replace(captured, subject.body.strip())
+    if not replaced:
+        return sample
+    return {**sample, 'messages': messages, 'subject_sha256': current, 'captured_subject_sha256': sample['subject_sha256']}
+
+
+def revalidate(sample: dict, current_instructions: bool = False) -> dict:
     """Derive a current contract case without rewriting the historical capture.
 
     Only unchanged, receipt-attested text inputs can be used. This is a new
     counterfactual decision evaluation, not a replay of historical implementation
-    behavior. Publication still pins the complete current implementation.
+    behavior. Publication still pins the complete current implementation. An
+    owner re-check may judge the current instructions instead of the captured
+    ones; Articles the validator consulted must still be unchanged.
     """
     from . import executor, optimization
+    if current_instructions:
+        sample = _current_instructions(sample)
     _check_evidence(sample)
     task = load_note(sample['context']['task'] + '.md')
     if task is None:
@@ -143,10 +189,13 @@ def revalidate(sample: dict) -> dict:
     if spine.get('error') or set(sample['allowed']) - (set(spine['tools']) | {'task.complete'}):
         raise ValueError('Captured decision Tool authority changed')
     return {**deepcopy(sample), 'validation_revision': optimization._revision(),
-            'validation_scope': 'Current contract on unchanged captured inputs; no historical effect replay'}
+            'validation_scope': ('Current contract and current instructions on otherwise unchanged captured inputs; '
+                                 'no historical effect replay' if sample.get('captured_subject_sha256') else
+                                 'Current contract on unchanged captured inputs; no historical effect replay')}
 
 
-def prepare(run_id: str) -> dict:
+def prepare(run_id: str, current_instructions: bool = False) -> dict:
+    """Automatic admission judges the captured instructions; an owner re-check may judge the current ones."""
     from . import optimization
     path = refinement._root() / 'incidents' / (run_id + '.json')
     if not path.is_file():
@@ -158,7 +207,7 @@ def prepare(run_id: str) -> dict:
     # The unrecovered rejection is the run's last; it corrected the earlier ones itself.
     for sample in samples[-1:]:
         try:
-            current = revalidate(sample)
+            current = revalidate(sample, current_instructions)
             valid, _reason = validate_decision(current, current['tool'], current['args'])
             if valid:
                 errors.append('Captured arguments satisfy the current contract; the original operational outcome is not an instruction grade')
@@ -178,7 +227,7 @@ def prepare(run_id: str) -> dict:
         if control['run_id'] in seen_runs:
             continue
         try:
-            control = revalidate(control)
+            control = revalidate(control, current_instructions)
             valid, _reason = validate_decision(control, control['tool'], control['args'])
             if valid:
                 eligible.append(control)

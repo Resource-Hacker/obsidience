@@ -584,6 +584,9 @@ full current reads, unrelated hits do not.
   and failed work enter Audit's FIFO after Repair, never preempting foreground work; one
   unchanged failure admits one job. Cases are private evaluation Source, need exact
   receipt-attested inputs (empty or visual prompts never qualify) and are never full replay.
+  An owner re-check may judge the instructions in force now: the captured body, found by
+  hash in the Vault's audit history, is replaced as a candidate trial replaces it; other
+  consulted Articles must be unchanged. Automatic admission keeps the captured instructions.
 - Five distinct cases × five repetitions; automatic suites pair the rejection with four
   accepted controls from other runs (never duplicates; waits visibly when short); rubrics
   are the actual validators; unsupported contracts and code defects are explicit findings.
