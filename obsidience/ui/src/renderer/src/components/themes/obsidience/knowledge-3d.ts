@@ -219,6 +219,7 @@ export interface Knowledge3dTuning {
   shellLayer4: number;
   /** The glass hugging the core and the white dust swirling around it. */
   coreGlass: number;
+  coreGlassDistance: number;
   coreDust: number;
   craterDepth: number;
   craterGlow: number;
@@ -322,6 +323,7 @@ export const DEFAULT_KNOWLEDGE_3D_TUNING: Knowledge3dTuning = {
   shellLayer3: 0.35,
   shellLayer4: 0.35,
   coreGlass: 1,
+  coreGlassDistance: 1,
   coreDust: 1,
   craterDepth: 1,
   craterGlow: 1,
@@ -403,6 +405,7 @@ export const KNOWLEDGE_3D_TUNING_FIELDS: readonly Knowledge3dTuningField[] = [
   { key: "branchClearance", label: "Branch clearance", group: "Layout", min: 0.5, max: 2, step: 0.05, description: "Space around nodes and branches. Lower values pack the sphere closer; higher values make it grow. Article and node sizes stay the same." },
   // The core's own glass and its band of white dust (owner 2026-10-14).
   { key: "coreGlass", label: "Core glass", group: "Glass", min: 0, max: 1.5, step: 0.05, description: "How solid the glass hugging the central core is." },
+  { key: "coreGlassDistance", label: "Core glass distance", group: "Glass", min: 0.3, max: 4, step: 0.05, description: "How far the core glass sits from the core. 1 hugs it five pixels out; lower draws it into the core's glow, higher moves it out toward the first glass layer." },
   { key: "coreDust", label: "Core dust", group: "Glass", min: 0, max: 2, step: 0.05, description: "How bright the white dust swirling around the core is, between its glass and the first glass layer." },
   { key: "shellLayer1", label: "Glass layer 1", group: "Glass", min: 0, max: 1.5, step: 0.05, description: "How solid the glass layer nearest the core is." },
   { key: "shellLayer2", label: "Glass layer 2", group: "Glass", min: 0, max: 1.5, step: 0.05, description: "How solid the second glass layer out from the core is." },

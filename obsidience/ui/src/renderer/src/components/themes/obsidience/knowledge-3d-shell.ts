@@ -154,13 +154,14 @@ vec3 shellPoint(vec3 direction, float depth, float lift, float wave) {
 // The core's glass hugs the core's disc a few canvas pixels out at any zoom,
 // and swells with it while it thinks or speaks.
 const CORE_HUG_GLSL = `
-uniform vec2 uHug;       // the core's radius, cloud-local; the gap in CSS pixels
+uniform vec3 uHug;       // the core's radius, cloud-local; the gap in CSS pixels; the distance setting
 uniform float uHugSwell; // the core sprite's own swell
 uniform float uPerspective;
 float coreHug(vec3 centre, float extraPx) {
   vec4 hub = modelViewMatrix * vec4(centre, 1.0);
   float perUnit = uPerspective * length(modelViewMatrix[0].xyz) / max(1.0, -hub.z);
-  return uHug.x * uHugSwell + (uHug.y + extraPx) * uPixelRatio / max(perUnit, 1e-4);
+  return uHug.z * (uHug.x * uHugSwell + uHug.y * uPixelRatio / max(perUnit, 1e-4))
+    + extraPx * uPixelRatio / max(perUnit, 1e-4);
 }
 `;
 
@@ -429,6 +430,8 @@ export interface Knowledge3dGlass {
   /** The glass hugging the core, and the white dust swirling between it and
    *  the first layout shell (owner 2026-10-14). */
   coreGlass: number;
+  /** The core glass's distance: 1 hugs the core five pixels out. */
+  coreGlassDistance: number;
   coreDust: number;
 }
 
@@ -650,7 +653,7 @@ export function createKnowledge3dShells(options: {
     shape: { value: new THREE.Vector2(1, 0) },
     centre: { value: new THREE.Vector3() },
     band: { value: new THREE.Vector2(1, 2) },
-    hug: { value: new THREE.Vector2(1, CORE_GAP_PX) },
+    hug: { value: new THREE.Vector3(1, CORE_GAP_PX, 1) },
     hugSwell: { value: 1 },
   };
   const speech = options.speech ?? { value: 0 };
@@ -842,6 +845,7 @@ export function createKnowledge3dShells(options: {
       });
       if (coreGlassUniforms) {
         coreGlassUniforms.uSolid.value = glass.coreGlass;
+        coreUniforms.hug.value.z = glass.coreGlassDistance;
         coreGlassUniforms.uLevels.value = 14 * glass.sheenLines;
       }
       if (coreDustUniforms) coreDustUniforms.uGain.value = 0.7 * coreDustGain * glass.coreDust;
