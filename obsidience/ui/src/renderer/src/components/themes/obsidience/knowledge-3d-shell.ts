@@ -663,7 +663,7 @@ export function createKnowledge3dShells(options: {
     coreGlass.renderOrder = 2;
     drawn.push(coreGlass);
 
-    const moteCount = Math.round(60_000 * Math.max(0.25, detail * detail));
+    const moteCount = Math.round(30_000 * Math.max(0.25, detail * detail));
     const motes = new Float32Array(moteCount * 4);
     const moteRandoms = new Float32Array(moteCount * 4);
     const leans = new Float32Array(moteCount * 3);
@@ -688,7 +688,7 @@ export function createKnowledge3dShells(options: {
       vertexShader: CORE_DUST_VERTEX, fragmentShader: BOKEH_FRAGMENT, ...ADDITIVE, depthTest: true,
     });
     coreDustUniforms = coreDustMaterial.uniforms;
-    coreDustGain = 60_000 / moteCount;
+    coreDustGain = 30_000 / moteCount;
     const coreDust = new THREE.Points(coreDustGeometry, coreDustMaterial);
     coreDust.name = "knowledge-core-dust";
     coreDust.frustumCulled = false;
@@ -807,7 +807,7 @@ export function createKnowledge3dShells(options: {
         coreGlassUniforms.uSolid.value = glass.coreGlass;
         coreGlassUniforms.uLevels.value = 14 * glass.sheenLines;
       }
-      if (coreDustUniforms) coreDustUniforms.uGain.value = 1.3 * coreDustGain * glass.coreDust;
+      if (coreDustUniforms) coreDustUniforms.uGain.value = 0.7 * coreDustGain * glass.coreDust;
     },
     prepare(renderer) {
       if (!dirty || ++skipped < cadence) return;
