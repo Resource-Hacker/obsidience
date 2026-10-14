@@ -1,5 +1,6 @@
-// Marble dust (owner 2026-10-14): each dust-marble node is filled with the
-// Knowledge shells' own depth-of-field dust, floating. As a crater seed's
+// Marble dust (owner 2026-10-14): each dust-marble node holds a cloud of the
+// Knowledge shells' own depth-of-field dust in its middle, as the graph holds
+// its core: densest at the centre, almost none at the glass. As a crater seed's
 // motes circle their node's bearing, every mote here circles its own axis,
 // leaning from that bearing, at its own rate and in its own direction (60 to
 // 300 whole turns an hour), and bobs gently besides, so the dust drifts past
@@ -12,6 +13,8 @@
 import * as THREE from "three";
 import { ADDITIVE, LIGHT_GLSL } from "./knowledge-3d-shell";
 
+/** The dust cloud's spread, in marble radii (one standard deviation). */
+const DUST_SPREAD = 0.34;
 /** Motes carried per marble; a marble shows a share of them by its area and
  *  the dust setting, so the default keeps its density up to about 60 pixels. */
 export const MARBLE_MOTES = 5000;
@@ -61,9 +64,11 @@ void main() {
     + axis * dot(axis, position) * (1.0 - cos(turn));
   // And bobs a little, so it floats rather than wheels.
   vec3 cycles = floor(vec3(90.0, 120.0, 150.0) + fract(phase * vec3(13.1, 7.7, 5.3)) * 120.0);
-  place += 0.06 * sin(uTime * cycles * HOURLY + phase * vec3(61.0, 17.0, 43.0));
-  // Inside the glass.
-  place *= min(1.0, 0.93 / max(length(place), 1e-4));
+  place += 0.05 * sin(uTime * cycles * HOURLY + phase * vec3(61.0, 17.0, 43.0));
+  // The rare mote that drifts out fades before the glass instead of piling on it.
+  float away = length(place);
+  float rim = 1.0 - smoothstep(0.7, 0.9, away);
+  place *= min(1.0, 0.9 / max(away, 1e-4));
   vec4 centre = modelViewMatrix * vec4(node.xyz, 1.0);
   vec3 offset = mat3(modelViewMatrix) * place * radius;
   float reach = radius * length(modelViewMatrix[0].xyz);
@@ -101,9 +106,9 @@ void main() {
   // Focus brightens the crisp motes, hardly the blur, and less as the dust
   // setting already brightens them, so a thinking marble never fills white.
   float lift = 1.0 + focus * (0.05 + 0.6 * (1.0 - vSoft)) / max(uMarbleDust * uMarbleDust * uMarbleDust, 1.0);
-  vAlpha = (0.45 + 0.55 * bright) * twinkle * lit * mix(0.6, 1.0, 0.5 + 0.5 * depth)
+  vAlpha = rim * (0.45 + 0.55 * bright) * twinkle * lit * mix(0.6, 1.0, 0.5 + 0.5 * depth)
     * shown * sqrt(max(uMarbleDust, 0.0)) * lift * (1.0 + 0.3 * uSpeechLevel) * baseAlpha
-    * smoothstep(3.0, 9.0, marble) * 0.6;
+    * smoothstep(3.0, 9.0, marble) * 0.45;
   // The shells' pale dust: the branch colour, desaturated as the glass
   // carries it, lifted between the seeds' white and the shell dust's.
   vec3 tint = look.rgb;
@@ -211,18 +216,19 @@ export function createMarbleDust(options: {
       state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
       return state / 4294967296;
     };
+    const gaussian = () => Math.sqrt(-2 * Math.log(1 - random())) * Math.cos(2 * Math.PI * random());
     data.set([tints[slot * 3], tints[slot * 3 + 1], tints[slot * 3 + 2], 0], (count + slot) * 4);
     data[(2 * count + slot) * 4] = alphas[slot];
     for (let i = 0; i < MARBLE_MOTES; i++) {
-      // An even fill of the ball: no clouds, arms or core. One mote in five
-      // lies on the inside of the glass, as the shells' dust lies on theirs.
+      // A cloud in the middle of the glass, as the core sits in the middle of
+      // the graph: densest at the centre, thinning to almost none at the rim
+      // (a gaussian ball, cut off well inside the glass).
       let x = 0, y = 0, z = 0;
       do {
-        x = random() * 2 - 1; y = random() * 2 - 1; z = random() * 2 - 1;
-      } while (x * x + y * y + z * z > 1);
-      const onGlass = random() < 0.2 ? 1 / Math.max(Math.hypot(x, y, z), 1e-3) : 1;
+        x = gaussian() * DUST_SPREAD; y = gaussian() * DUST_SPREAD; z = gaussian() * DUST_SPREAD;
+      } while (x * x + y * y + z * z > 0.85 * 0.85);
       const at = slot * MARBLE_MOTES + i;
-      places[at * 3] = x * onGlass; places[at * 3 + 1] = y * onGlass; places[at * 3 + 2] = z * onGlass;
+      places[at * 3] = x; places[at * 3 + 1] = y; places[at * 3 + 2] = z;
       // Its axis leans up to fifty degrees from the bearing; its rate is
       // mostly slow, 60 to 300 whole turns an hour, either way round.
       const height = random() * 2 - 1, angle = random() * Math.PI * 2, ring = 0.8 * Math.sqrt(1 - height * height);
