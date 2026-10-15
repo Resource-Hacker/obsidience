@@ -181,7 +181,7 @@ async def run_capability(ex, name: str, args: dict, *, execute, execute_async, s
         operation_status = call_status
         if call_status == "returned":
             # An inspection's subject status is not failure of the Tool.
-            if isinstance(result, dict) and name not in {"task.inspect", "harness.status"}:
+            if isinstance(result, dict) and name != "harness.status":
                 outcome = result.get("observation", result) if name == "computer.observe" else result
                 if isinstance(outcome, dict):
                     reported = outcome.get("status", outcome.get("state"))

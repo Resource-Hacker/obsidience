@@ -890,17 +890,6 @@ def _resolved_input_evidence(note: Note, params: dict) -> dict | None:
             if str(exc) in STALE_CASE_ERRORS:
                 return {"disposition": "obsolete_optimization_case", "case_id": params["optimization_case"],
                         "reason": str(exc) + ". Retain isolated evaluation artifacts; no instruction was published and the stale case is not replayed"}
-        return None
-    if note.ref == "Tasks/audit" and params.get("event") == "runbook.proposed":
-        name = params.get("proposal")
-        if not isinstance(name, str) or load_note("_staging/" + name) is not None:
-            return None
-        row = INDEX.db.execute(
-            "SELECT decision,decided_at FROM review_decisions WHERE proposal_id=?", (name,),
-        ).fetchone()
-        if row and row[0] == "rejected":
-            return {"disposition": "proposal_rejected", "proposal": name, "decided_at": row[1],
-                    "reason": "The owner already rejected this exact Runbook proposal"}
     return None
 
 
@@ -1368,7 +1357,7 @@ def _receipt_retry_blocked_reason(note: Note, run_id: str, *, allow_source_captu
         # Older inspection receipts predate the complete read-only registry.
         # Their exact reviewed Tool definition must still match.
         legacy_list = False
-        if (call["tool"] in {"vault.list", "task.inspect", "review.inspect", "vault.maintenance"}
+        if (call["tool"] in {"vault.list", "vault.maintenance"}
                 and call["tool_ref"] == "Tools/" + call["tool"]):
             try:
                 legacy_list = call["tool_sha256"] == hashlib.sha256(
@@ -2333,8 +2322,6 @@ async def loop() -> None:
                 await _refresh_source_health()
                 from ..memory.hindsight import MEMORY
                 await MEMORY.check_health()
-                from .refinement import reconcile_candidates
-                reconcile_candidates()
                 continuation = _claim_ready_continuation()
                 if continuation is not None:
                     task = asyncio.create_task(_resume_claimed(continuation))

@@ -98,8 +98,7 @@ def _stage(meta: dict, body: str) -> str:
     return filename
 
 
-def validate_generated_runbook(target: str, body: str, params: dict, skill_refs: object = None,
-                               *, allow_implicit_completion: bool = False) -> None:
+def validate_generated_runbook(target: str, body: str, params: dict, skill_refs: object = None) -> None:
     expected = str(params.get("output_runbook", "")).strip()
     if not expected or target != expected:
         raise ValueError(
@@ -187,10 +186,6 @@ def validate_generated_runbook(target: str, body: str, params: dict, skill_refs:
         )
     )
     selected_tools = {ref.removeprefix("Skills/") for ref in selected_skills}
-    if allow_implicit_completion:
-        # Existing procedures may use the executor's built-in completion Tool
-        # without changing their accepted Skill metadata during a refinement.
-        selected_tools.add("task.complete")
     unauthorized_tools = sorted(named_tools - selected_tools)
     if unauthorized_tools:
         raise ValueError(
@@ -469,13 +464,6 @@ def stage_proposal(args: dict, context: dict, *, validate_only: bool = False) ->
     merge_retention = _merge_retention(target, action, body, context)
     from obsidience.harness.execution.optimization import proposal_binding
     optimization = proposal_binding(context, target, action, proposal_title, body, authored_meta)
-    from obsidience.harness.execution.refinement import (
-        candidate_staged, proposal_context, validate_candidate,
-    )
-
-    refinement = proposal_context(context)
-    if refinement is not None:
-        validate_candidate(target, action, proposal_title, body, authored_meta, refinement)
 
     for pending_path in sorted(CONFIG.staging_dir.glob("*.md")):
         pending = load_note(pending_path.relative_to(CONFIG.vault_dir))
@@ -491,7 +479,6 @@ def stage_proposal(args: dict, context: dict, *, validate_only: bool = False) ->
             and isinstance(pending_fields, list)
             and all(isinstance(key, str) for key in pending_fields)
             and {key: pending.meta.get(key) for key in pending_fields} == authored_meta
-            and pending.meta.get("refinement") == refinement
             and pending.meta.get("optimization") == optimization
             and pending.meta.get("merge_retained") == (merge_retention if action == "archive" else None)
         )
@@ -511,8 +498,6 @@ def stage_proposal(args: dict, context: dict, *, validate_only: bool = False) ->
             context.setdefault("staged_proposals", []).append(result)
             if merge_retention and action == "update":
                 context.setdefault("_merge_retained_updates", {})[target] = merge_retention["body_sha256"]
-            if refinement is not None:
-                candidate_staged(str(pending_path), context)
             return result
         raise ValueError(
             f"{target} already has a pending review proposal; decide it before staging another"
@@ -625,8 +610,6 @@ def stage_proposal(args: dict, context: dict, *, validate_only: bool = False) ->
     if generation_params is not None:
         proposal_meta["kind"] = "runbook"
         proposal_meta["event_context"] = generation_params
-    if refinement is not None:
-        proposal_meta["refinement"] = refinement
     if optimization is not None:
         proposal_meta["optimization"] = optimization
     if merge_retention and action == "archive":
@@ -646,9 +629,6 @@ def stage_proposal(args: dict, context: dict, *, validate_only: bool = False) ->
         "action": action,
         "review_class": review_class,
     }
-    if refinement is not None:
-        # Bind evaluation to the complete staged file, including its metadata.
-        candidate_staged(staged, context)
     from obsidience.harness.knowledge.curation import try_auto_approve
     result = try_auto_approve(result, args, context)
     if not result.get("auto_approved"):

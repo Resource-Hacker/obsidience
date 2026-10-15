@@ -18,11 +18,11 @@ from typing import Any
 CAPABILITY_PREFIX = "capability:"
 CAPABILITY_SOURCE_ROOT = PurePosixPath("obsidience/harness/capabilities")
 ALWAYS_ALLOWED = ("task.complete",)
-MODEL_RESOURCE_TOOLS = frozenset({"model.configure", "model.benchmark", "harness.evaluate", "harness.optimize"})
+MODEL_RESOURCE_TOOLS = frozenset({"model.configure", "model.benchmark", "harness.optimize"})
 # Reviewed implementation policy; Article prose cannot declare an effect safe.
 READ_ONLY_CAPABILITIES = frozenset({
     "source.read", "vault.read", "vault.search", "vault.list", "vault.validate", "harness.status",
-    "task.inspect", "review.inspect", "vault.maintenance", "observations.recall", "media.library",
+    "vault.maintenance", "observations.recall", "media.library",
 })
 
 _CAPABILITY_NAMES = (
@@ -36,7 +36,6 @@ _CAPABILITY_NAMES = (
     "computer.act",
     "computer.observe",
     "computer.replay",
-    "harness.evaluate",
     "harness.optimize",
     "harness.repair",
     "harness.status",
@@ -46,14 +45,12 @@ _CAPABILITY_NAMES = (
     "model.source",
     "observations.recall",
     "observations.retain",
-    "review.inspect",
     "session.unlock",
     "source.handoff",
     "source.ingest",
     "source.read",
     "task.complete",
     "task.create",
-    "task.inspect",
     "vault.list",
     "vault.maintenance",
     "vault.propose",
@@ -258,10 +255,7 @@ def _argument_schemas() -> dict[str, dict]:
         "vault.maintenance":obj({}), "vault.validate":obj({}), "harness.status":obj({}),
         "harness.repair":{"anyOf":[obj({"task":text(512),"run_id":text(128)},("task","run_id")),
                                     obj({"component":{"const":"hindsight"}},("component",))]},
-        "harness.evaluate":obj({"proposal":text(512)},("proposal",)),
         "harness.optimize":obj({"case_id":text(64)},("case_id",)),
-        "task.inspect":obj({"task":text(512),"run_id":text(128)},("task",)),
-        "review.inspect":obj({"task":text(512),"proposal":text(512)}),
         "session.unlock":obj({}),
         "tv.control":{"anyOf":[obj({"action":{"enum":["on","off","observe","volume_up","volume_down","mute","unmute","pause","resume","stop"]}},("action",)),
             obj({**vod_binding,"operation":{"enum":["state","pause","resume","stop"]}},

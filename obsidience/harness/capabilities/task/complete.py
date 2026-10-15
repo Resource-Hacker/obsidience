@@ -443,29 +443,6 @@ def _pending_staged_proposals(context: dict) -> list[dict]:
 
 
 def _generated_runbook_completion_error(status: str, context: dict) -> str | None:
-    from obsidience.harness.execution.refinement import proposal_context
-
-    try:
-        refinement = proposal_context(context) if context.get("task") == "Tasks/generate/runbook" else None
-    except (OSError, ValueError) as exc:
-        return None if status == "failed" else f"Runbook refinement context is invalid: {exc}"
-    if refinement is not None:
-        from obsidience.harness.knowledge.vault import load_note
-
-        expected = refinement["runbook_ref"] + ".md"
-        matched = False
-        for item in _pending_staged_proposals(context):
-            if item.get("target") != expected or item.get("action") != "update":
-                continue
-            staged = load_note(str(item.get("staged", "")))
-            if staged is not None and staged.meta.get("refinement") == refinement:
-                matched = True
-                break
-        if matched and status != "review":
-            return 'a staged Runbook refinement must finish with status "review"'
-        if not matched and status != "failed":
-            return f'no validated refinement proposal for {expected} was staged; finish with "failed" or stage that update'
-        return None
     if context.get("event") != "task.assigned":
         return None
     params = context.get("params")
@@ -486,24 +463,6 @@ def _generated_runbook_completion_error(status: str, context: dict) -> str | Non
             f"no validated proposal for {expected or '(missing output path)'} was staged "
             'during this execution; call vault.propose, then finish with status "review"'
         )
-    return None
-
-
-def _runbook_evaluation_completion_error(status: str, context: dict) -> str | None:
-    params = context.get("params")
-    if (context.get("task") != "Tasks/audit" or not isinstance(params, dict)
-            or not params.get("refinement_case") or not params.get("proposal")):
-        return None
-    if status == "failed":
-        return None
-    if status != "completed":
-        return "Runbook evaluation Audit reports its finding as completed; it does not stage its own Review"
-    evaluation = context.get("_harness_evaluation")
-    if (not isinstance(evaluation, dict) or evaluation.get("proposal") != params["proposal"]
-            or not isinstance(evaluation.get("evaluation_report"), str) or not evaluation["evaluation_report"].strip()
-            or not isinstance(evaluation.get("verdict"), str)
-            or evaluation.get("verdict") not in {"passed", "not_improved", "regressed", "incomplete"}):
-        return "Runbook evaluation Audit requires the actual harness.evaluate result for its exact proposal"
     return None
 
 
@@ -695,9 +654,6 @@ def _completion_error(
                 and any(row.get("operation") in {"retry", "settle"} for row in snapshot.get("repair_plan", []) if isinstance(row, dict))):
             return "Repair still has an eligible recovery operation; perform it or report the pass failed"
     error = _generated_runbook_completion_error(status, context)
-    if error:
-        return error
-    error = _runbook_evaluation_completion_error(status, context)
     if error:
         return error
     if task.ref == 'Tasks/audit' and status != 'failed':
