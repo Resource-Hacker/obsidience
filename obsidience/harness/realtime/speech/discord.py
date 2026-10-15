@@ -188,9 +188,10 @@ class _MemberTurn(speech.ObsidienceNeMoTurnTakingService):
     def __init__(self, stream, **kwargs):
         self.stream = stream
         super().__init__(event_sink=stream.event, **kwargs)
-        # Supplied PCM is recognized as "Squonge Bot" or "Squange Bot".
-        # Keep this observed rendering local to Discord's address policy.
-        self._wake_pattern = re.compile(r"(?<!\w)(?:squanch|squ[ao]nge)\s*bot(?!\w)", re.IGNORECASE)
+        # NeMo also renders this name as "Squonge Bot", "Squange Bot",
+        # "squash bot" and "SpongeBot" in admitted Discord speech. Keep these
+        # observed aliases local; ordinary address/possessive guards still apply.
+        self._wake_pattern = re.compile(r"(?<!\w)(?:squanch|squ[ao]nge|squash|sponge)\s*bot(?!\w)", re.IGNORECASE)
 
     async def _open_wake(self, text, *, cue_name="ready"):
         if not self.stream.server.claim(self.stream):

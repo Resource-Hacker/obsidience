@@ -19,6 +19,12 @@ to listen. This prevents idle streams from competing with current speakers for
 the shared decoder. Private diagnostics retain bounded per-member failure codes
 and queue counts after a failed stream is removed, without audio or transcript text.
 
+Wake recognition accepts the observed ASR spellings Squanchbot, Squonge Bot,
+Squange Bot, squash bot and SpongeBot. These aliases apply only to Discord's
+address matcher, with the same sentence-start/pause and possessive guards as the
+desktop. A question followup retains its original member without requiring a new
+wake name; ordinary listening always requires an address.
+
 Discord's supported bot voice API carries audio. Local video files can supply their
 audio track, but this implementation does not transmit video or Go Live streams.
 It uses no user account, user token, selfbot, screen capture or hidden client API.
