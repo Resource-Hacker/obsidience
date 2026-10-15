@@ -1,0 +1,22 @@
+{
+  "name": "obsidience-discord-bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Official Discord bot transport for the independent Obsidience OmniBot Agent",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "start": "node bot.mjs",
+    "check": "node --check bot.mjs && node --check protocol.mjs"
+  },
+  "dependencies": {
+    "@discordjs/opus": "0.10.0",
+    "@discordjs/voice": "0.19.2",
+    "discord.js": "14.27.0"
+  },
+  "allowScripts": {
+    "@discordjs/opus@0.10.0": true
+  }
+}

@@ -6,7 +6,9 @@ async function render(): Promise<void> {
   const surface = new URLSearchParams(window.location.search).get("surface");
   if (surface) document.documentElement.dataset.obsidienceSurface = surface;
   // Every Shell page names its surface; ?surface=<name> loads surfaces/<name>.tsx.
-  const Component = surface === "knowledge"
+  const Component = surface === "discord"
+    ? (await import("./surfaces/discord")).DiscordGraphSurface
+    : surface === "knowledge"
     ? (await import("./surfaces/knowledge")).KnowledgeDesktopSurface
     : surface === "stage"
     ? (await import("./surfaces/stage")).GraphStage

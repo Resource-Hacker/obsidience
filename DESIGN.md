@@ -134,8 +134,10 @@ Executive conversation: Agent identity -> direct Skills -> Tools -> Capabilities
   **Alexandria** (Curator): Ingest, Curate, Merge, Link, Improve, Archive, wiki freshness.
   **Darwin** (Researcher): Question, Learn, Generate. **Heimdall** (Guardian): Audit,
   automatic Repair, operational Model characterization.
-- Exactly these four have one `type: agent` Article each; Merge absorbs a parallel role
-  charter into it. The Library is a passive catalog, never an Agent or assignee.
+- These four core roles each have one `type: agent` Article; optional integration Agents
+  use the same identity, direct Skills, Knowledge checkout and separate Memory contracts.
+  The Obsidience Discord Bot is an OmniBot Agent with its own admitted member conversations.
+  Merge absorbs parallel role charters. The Library is a passive catalog, never an Agent or assignee.
 - Shared design: `Architecture/Architecture`; owner preferences:
   `Agents/Executive/Preferences`; procedures: `Runbooks/Operations` with exact Skills;
   configuration explanations and incident lessons: `Architecture/Shell`; project knowledge:
@@ -839,3 +841,42 @@ and [composability paper](https://arxiv.org/abs/2608.25512);
 [Graphify](https://github.com/Graphify-Labs/graphify/tree/33362d969292b57eda82f3fbd9eb5f3f5bc9bbc2)
 (relationship evidence, connectivity, reconciliation); Omarchy Aero Snap. Code is imported
 only when recorded in `artifacts.lock.json`; a coding agent's code index grants nothing.
+
+
+## Optional Discord integration
+
+`obsidience/discord` owns the official bot Gateway, voice receiver and audio players.
+It uses a private configuration and systemd credentials, restricts itself to one configured
+guild, and connects to voice only when explicitly asked. Squanchbot is an installation's
+public display name; the internal identity is `Agents/Discord/Discord`, the Obsidience
+Discord Bot with role OmniBot. Additional bot features require implemented paired
+Tools/Skills and an explicit Agent grant.
+
+The Harness admits authenticated observed guild/channel/member identities into a dedicated
+Discord conversation ledger. The native ADK loop, model leases and capability receipts are
+shared infrastructure. Its context carries no Executive conversation, Shell Scene, private
+Knowledge or Memory. The Agent checks out its own shared Media knowledge leaf. Discord
+members are external speakers, never inferred workstation owners. Only accepted bot replies
+and their attributed requests enter that Agent's separate historical Hindsight bank.
+
+The existing speech owner accepts per-member PCM through an owner-only socket. Decoder,
+VAD, wake and follow-up state are member-scoped; loaded NeMo and Pocket models and inference
+locks stay shared. The first addressed Squanchbot wake claims the channel until its reply
+has drained. Other members' audio is not admitted to that request. Unaddressed audio/text
+stays ephemeral. Muting the desktop input can retain the same sole worker in a mode with
+no desktop microphone, AEC, output transport or Executive speech attachment. Dependency
+loss cancels pending work; a later voice event can reconnect without replaying it.
+
+Media catalogue selection and source admission remain owned by Obsidience Media. The bot
+receives a held descriptor with exact file identity and a finite dispatch deadline, then
+opens its own descriptor for FFmpeg audio playback. Cancellation addresses the original
+play request, never a newer item. Current bot delivery is audio only; a soundtrack is not
+an acceptable implicit substitute for requested television/video. The implementation does
+not supply a supported bot camera/Go Live sender.
+
+The bot camera presentation projects the canonical accepted Discord Agent graph with
+opaque public IDs and run-correlated activity. It reuses the Executive graph renderer
+and its thinking routes. Public events contain no queries, conversation, reasoning,
+Tool arguments/results, source paths, other Agent scopes or general trace stream.
+A separate local virtual camera can expose this dedicated surface to an ordinary
+Discord client; it is not a bot-token video sender.

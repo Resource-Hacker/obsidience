@@ -65,10 +65,10 @@ async def execute(args: dict, context: dict) -> dict:
             page = await asyncio.to_thread(service.catalogue().browse, query=args.get('query', ''),
                                               offset=args.get('offset', 0), limit=args.get('limit', 20))
             return {'status': 'completed', **page,
-                    'note': 'Read-only catalogue. Select one exact item and media source before tv.control open.'}
+                    'note': 'Read-only catalogue. Select one exact item and media source before destination playback.'}
         if action == 'select' and set(args) == {'action', 'item_id', 'media_source_id'}:
             return {'status': 'completed', **await asyncio.to_thread(bind, args['item_id'], args['media_source_id'], context),
-                    'note': 'Selection is valid only in this turn; tv.control open revalidates it before playback.'}
+                    'note': 'Selection is valid only in this turn; the granted playback destination revalidates it before playback.'}
         raise ValueError('Invalid media.library arguments')
     except MediaUnavailable as error:
         return {'status': 'failed', 'delivery': 'not_dispatched', 'effect_applied': False,

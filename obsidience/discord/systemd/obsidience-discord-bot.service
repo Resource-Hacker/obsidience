@@ -1,0 +1,31 @@
+[Unit]
+Description=Obsidience Discord Bot (Squanchbot)
+After=network-online.target obsidience-harness-dev.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Projects/obsidience/obsidience/discord
+Environment=NODE_ENV=production
+Environment=OBSIDIENCE_DISCORD_CONFIG=%h/Projects/obsidience/obsidience/state/discord.json
+LoadCredentialEncrypted=discord-bot-token:%h/.config/credentials/obsidience-discord-bot-token.cred
+LoadCredentialEncrypted=discord-ingress-token:%h/.config/credentials/obsidience-discord-ingress-token.cred
+ExecStart=/usr/bin/node %h/Projects/obsidience/obsidience/discord/bot.mjs
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=%t
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+KillMode=control-group
+TimeoutStopSec=10s
+Restart=no
+CPUWeight=25
+MemoryMax=768M
+TasksMax=64
+LimitNOFILE=256
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

@@ -673,13 +673,14 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
                  playback: PlaybackCommands | None = None,
                  mode: str = "realtime", mode_revision: int = 0,
                  wake_word: str = "Computer", smart_turn: bool = False,
-                 semantic_turns: bool = False,
+                 semantic_turns: bool = False, event_sink=None,
                  **kwargs: Any) -> None:
         # STT audio and VAD share its system-frame FIFO, but transcription
         # frames use a separate downstream queue. Consume text inline so a
         # VAD stop cannot overtake recognized words before finalization.
         super().__init__(enable_direct_mode=True, **kwargs)
         self._timing = timing
+        self._emit = event_sink or emit
         self._playback = playback
         self._smart_turn = smart_turn
         self._semantic_turns = semantic_turns
@@ -714,7 +715,7 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
         self._candidate_revision += 1
         if self._candidate_ready:
             self._candidate_ready = False
-            emit("speech_candidate_invalidated", speech_sequence=self._candidate_sequence,
+            self._emit("speech_candidate_invalidated", speech_sequence=self._candidate_sequence,
                  candidate_revision=self._candidate_revision, mode_revision=self.mode_revision)
 
     def _clear_semantic(self) -> None:
@@ -738,7 +739,7 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
             if self._timing is not None:
                 self._timing.discard()
             await self._close_wake()
-        emit("speech_admission", action=frame.action, accepted=accepted,
+        self._emit("speech_admission", action=frame.action, accepted=accepted,
              speech_sequence=frame.speech_sequence,
              candidate_revision=frame.candidate_revision,
              mode_revision=frame.mode_revision)
@@ -764,7 +765,7 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
         )
         for reason in rejected:
             # Counts only: rejected speech never leaves the worker.
-            emit("wake_rejected", reason=reason, mode_revision=self.mode_revision)
+            self._emit("wake_rejected", reason=reason, mode_revision=self.mode_revision)
         self._wake_pending = decision == "pending"
         return self._wake_prefix[end:] if decision == "accept" else None
 
@@ -788,7 +789,7 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
         await self._reset_wake_scan(segment_start=False)
         if self._timing is not None:
             self._timing.onset()
-        emit("wake_detected", mode_revision=self.mode_revision,
+        self._emit("wake_detected", mode_revision=self.mode_revision,
              speech_sequence=self._timing.sequence if self._timing else 0)
         self._wake_timeout = self.create_task(self._expire_wake(), name="wake-command-window")
         # NeMo's bot flag includes the output queue's idle delay plus its
@@ -880,7 +881,7 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
                 if self._have_sent_user_started_speaking and not self._vad_user_speaking:
                     await self._handle_user_interruption(UserStoppedSpeakingFrame())
                     self._have_sent_user_started_speaking = False
-                emit("wake_idle", mode_revision=self.mode_revision)
+                self._emit("wake_idle", mode_revision=self.mode_revision)
         finally:
             if self._wake_timeout is asyncio.current_task():
                 self._wake_timeout = None
@@ -959,7 +960,7 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
             if len(text) > SEMANTIC_TEXT_MAX_CHARS:
                 self._clear_semantic()
                 await self._close_wake()
-                emit("speech_candidate_failed", code="text_limit", mode_revision=self.mode_revision)
+                self._emit("speech_candidate_failed", code="text_limit", mode_revision=self.mode_revision)
                 return
             self._semantic_text = text
             timing = frame.metadata.get("obsidience_speech_timing")
@@ -1049,7 +1050,7 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
             self.mode, self.mode_revision = frame.mode, frame.revision
             if self._timing is not None:
                 self._timing.discard()
-            emit("mode_applied", mode=self.mode, mode_revision=self.mode_revision)
+            self._emit("mode_applied", mode=self.mode, mode_revision=self.mode_revision)
             return
         if isinstance(frame, (EndFrame, CancelFrame)):
             self._clear_semantic()
@@ -1112,7 +1113,7 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
             self._candidate_revision += 1
             self._candidate_sequence = self._timing.sequence if self._timing else 0
             self._candidate_ready = True
-            emit("speech_candidate", text=self._semantic_text,
+            self._emit("speech_candidate", text=self._semantic_text,
                  speech_sequence=self._candidate_sequence,
                  candidate_revision=self._candidate_revision, mode_revision=self.mode_revision,
                  refreshed=True,
@@ -1148,7 +1149,7 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
             self._have_sent_user_started_speaking = True
         partial = (" ".join((self._semantic_text + " " + transcript).split())
                    if self._semantic_turns else transcript)
-        emit("transcript_partial", text=partial,
+        self._emit("transcript_partial", text=partial,
              mode_revision=self.mode_revision,
              **({"speech_sequence": self._timing.sequence} if self._timing else {}))
         await self._cancel_transcript_timeout()
@@ -1187,6 +1188,82 @@ class PocketTTSService(TTSService):
         self._model.to("cpu")
         self._voice_state = self._model.get_state_for_audio_prompt(str(voice_path))
         self._synthesis_lock = threading.Lock()
+
+    async def external_pcm(self, text: str) -> AsyncGenerator[bytes, None]:
+        """Serialize an external reply on the existing Pocket model.
+
+        This consumer owns only its PCM iterator, never desktop playback state.
+        The bounded queue and cooperative cancellation retain Pocket's required
+        producer cleanup before releasing its existing synthesis lock.
+        """
+        clean = " ".join(text.split())[:4_000]
+        if not clean:
+            return
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue = asyncio.Queue(maxsize=8)
+        cancelled = threading.Event()
+
+        def put(item) -> bool:
+            future = asyncio.run_coroutine_threadsafe(queue.put(item), loop)
+            while not cancelled.is_set():
+                try:
+                    future.result(timeout=0.1)
+                    return True
+                except TimeoutError:
+                    continue
+            future.cancel()
+            return False
+
+        def synthesize() -> None:
+            try:
+                while not self._synthesis_lock.acquire(timeout=0.1):
+                    if cancelled.is_set():
+                        return
+                try:
+                    if cancelled.is_set():
+                        return
+                    owner_thread = threading.get_ident()
+
+                    def cancel_generation(_module, _inputs) -> None:
+                        if cancelled.is_set() and threading.get_ident() != owner_thread:
+                            raise InterruptedError("Speech synthesis cancelled")
+
+                    hook = self._model.flow_lm.conditioner.register_forward_pre_hook(cancel_generation)
+                    try:
+                        for chunk in self._model.generate_audio_stream(self._voice_state, clean):
+                            if not cancelled.is_set():
+                                samples = chunk.detach().float().cpu().numpy().reshape(-1)
+                                put(_speech_pcm(samples))
+                    finally:
+                        hook.remove()
+                finally:
+                    self._synthesis_lock.release()
+            except BaseException:
+                if not cancelled.is_set():
+                    put(RuntimeError("Pocket TTS speech delivery failed"))
+            finally:
+                if not cancelled.is_set():
+                    put(None)
+
+        worker = threading.Thread(target=synthesize, name="pocket-discord", daemon=False)
+        worker.start()
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    return
+                if isinstance(item, BaseException):
+                    raise item
+                yield item
+        finally:
+            cancelled.set()
+            # Never detach a generator that still owns Pocket's native work.
+            join = asyncio.create_task(asyncio.to_thread(worker.join))
+            while not join.done():
+                try:
+                    await asyncio.shield(join)
+                except asyncio.CancelledError:
+                    continue
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         if isinstance(frame, TTSSpeakFrame):
@@ -1663,7 +1740,79 @@ async def command_loop(
         await playback.close()
 
 
+def create_stt(args: argparse.Namespace):
+    return UtteranceNeMoSTTService(
+        model=args.asr_model,
+        device="cuda:0",
+        sample_rate=SAMPLE_RATE,
+        params=NeMoSTTInputParams(
+            att_context_size=[70, 1],
+            frame_len_in_secs=0.08,
+            raw_audio_frame_len_in_secs=0.02,
+            buffer_size=4,
+        ),
+        has_turn_taking=False,
+        backend="legacy",
+        decoder_type="rnnt",
+        audio_passthrough=True,
+    )
+
+
+async def run_discord_only(args: argparse.Namespace) -> None:
+    """Own shared models and Discord while desktop capture/playback is muted."""
+    if not args.discord_socket:
+        raise ValueError("Desktop-disabled speech requires the configured Discord socket")
+    # No PyAudio probe, local transport, desktop pipeline, cue or microphone.
+    stt = create_stt(args)
+    tts = PocketTTSService(root=Path(args.pocket_root), voice=args.voice)
+    sys.modules.setdefault(f"{__package__}.worker", sys.modules[__name__])
+    from .discord import DiscordSpeechServer
+    server = DiscordSpeechServer(Path(args.discord_socket), stt, tts)
+    stopping = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    import signal
+    for signum in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(signum, stopping.set)
+    reader = asyncio.StreamReader(limit=65_536)
+    protocol = asyncio.StreamReaderProtocol(reader)
+    pipe = None
+
+    async def commands():
+        while True:
+            line = await reader.readline()
+            if not line:
+                stopping.set()
+                return
+            message = json.loads(line)
+            if isinstance(message, dict) and message.get("type") == "stop":
+                stopping.set()
+                return
+            # Desktop speak/cue/mode/control messages cannot enable an input
+            # or output route on this worker. Mode transitions replace it.
+
+    command_task = None
+    try:
+        await server.start()
+        pipe, _ = await loop.connect_read_pipe(lambda: protocol, sys.stdin.buffer)
+        command_task = asyncio.create_task(commands(), name="discord-shared-control")
+        command_task.add_done_callback(lambda _task: stopping.set())
+        emit("discord_ready", desktop_disabled=True)
+        await stopping.wait()
+    finally:
+        if command_task is not None:
+            command_task.cancel()
+            await asyncio.gather(command_task, return_exceptions=True)
+        if pipe is not None:
+            pipe.close()
+        await server.close()
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            loop.remove_signal_handler(signum)
+
+
 async def run(args: argparse.Namespace) -> None:
+    if args.desktop_disabled:
+        await run_discord_only(args)
+        return
     probe = pyaudio.PyAudio()
     try:
         pulse_devices = [
@@ -1710,21 +1859,7 @@ async def run(args: argparse.Namespace) -> None:
             audio_out_10ms_chunks=4,
         ), playback=playback, input_channel=args.input_channel,
     )
-    stt = UtteranceNeMoSTTService(
-        model=args.asr_model,
-        device="cuda:0",
-        sample_rate=SAMPLE_RATE,
-        params=NeMoSTTInputParams(
-            att_context_size=[70, 1],
-            frame_len_in_secs=0.08,
-            raw_audio_frame_len_in_secs=0.02,
-            buffer_size=4,
-        ),
-        has_turn_taking=False,
-        backend="legacy",
-        decoder_type="rnnt",
-        audio_passthrough=True,
-    )
+    stt = create_stt(args)
     turn_taking = ObsidienceNeMoTurnTakingService(
         timing=input_timing,
         playback=playback,
@@ -1800,12 +1935,24 @@ async def run(args: argparse.Namespace) -> None:
         )
         await playback.startup(task, args.startup_confirmation)
 
+    discord = None
+    if args.discord_socket:
+        # The worker is normally launched with -m. Let the optional adapter
+        # reuse these exact service classes rather than import a second copy.
+        sys.modules.setdefault(f"{__package__}.worker", sys.modules[__name__])
+        from .discord import DiscordSpeechServer
+        discord = DiscordSpeechServer(Path(args.discord_socket), stt, tts)
+        await discord.start()
+        emit("discord_ready", desktop_disabled=False)
+
     commands = asyncio.create_task(
         command_loop(task, playback), name="speech-commands",
     )
     try:
         await PipelineRunner(handle_sigint=True, handle_sigterm=True).run(task)
     finally:
+        if discord is not None:
+            await discord.close()
         commands.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await commands
@@ -1821,6 +1968,8 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--wake-word", default="Computer")
     result.add_argument("--mode", choices=("wake", "realtime"), default="realtime")
     result.add_argument("--mode-revision", type=int, default=0)
+    result.add_argument("--discord-socket", default="", help="Optional owner-only Discord PCM socket")
+    result.add_argument("--desktop-disabled", action="store_true", help="Share speech models without desktop audio")
     return result
 
 

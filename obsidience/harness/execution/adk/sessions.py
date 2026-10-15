@@ -43,6 +43,23 @@ _models: dict[tuple, object] = {}
 # The current model step's metrics, set by the plugin before each request; the
 # admission client records the provider's acknowledged input count there.
 ADMISSION: ContextVar[dict | None] = ContextVar('obsidience_admission', default=None)
+# Set only by the trusted named-Agent ingress wrapper, never by model params.
+CONVERSATION_BINDING: ContextVar[object | None] = ContextVar('obsidience_conversation_binding', default=None)
+
+
+def binding(conversation_id):
+    value = CONVERSATION_BINDING.get()
+    return value if value is not None and value.conversation_id == conversation_id else None
+
+
+def user_id(conversation_id):
+    value = binding(conversation_id)
+    return value.user_id if value is not None else USER
+
+
+def agent_id(conversation_id):
+    value = binding(conversation_id)
+    return value.agent_name if value is not None else AGENT
 
 
 def admitted_input_tokens(response, limit: int) -> int:
@@ -129,7 +146,7 @@ async def window_floor(conversation_id: str) -> float | None:
             with sqlite3.connect(f'file:{CONFIG.runtime_dir / STORE}?mode=ro', uri=True) as db:
                 return db.execute(
                     'SELECT MIN(timestamp) FROM events WHERE app_name=? AND user_id=? AND session_id=? '
-                    'AND instr(event_data, ?) > 0', (APP, USER, conversation_id, anchor)).fetchone()[0]
+                    'AND instr(event_data, ?) > 0', (APP, user_id(conversation_id), conversation_id, anchor)).fetchone()[0]
         floor = await asyncio.to_thread(find)
         if floor is None:
             return None  # The anchor is not in this log yet: load it whole.
@@ -304,7 +321,7 @@ def publish(session) -> dict:
 
 
 async def refresh(conversation_id: str) -> dict | None:
-    session = await service().get_session(app_name=APP, user_id=USER, session_id=conversation_id)
+    session = await service().get_session(app_name=APP, user_id=user_id(conversation_id), session_id=conversation_id)
     if session is None:
         _views.pop(conversation_id, None)
         return None
@@ -349,23 +366,34 @@ async def open_session(conversation_id: str, turn_id: str | None):
     dialogue is kept.
     """
     store = service()
-    session = await store.get_session(app_name=APP, user_id=USER, session_id=conversation_id)
+    session = await store.get_session(app_name=APP, user_id=user_id(conversation_id), session_id=conversation_id)
     if session is None:
-        session = await store.create_session(app_name=APP, user_id=USER, session_id=conversation_id)
+        session = await store.create_session(app_name=APP, user_id=user_id(conversation_id), session_id=conversation_id)
     if turn_id is None:
         return session
     from ...knowledge.index import INDEX
-    current = INDEX.conversation_turn(turn_id)
+    external = binding(conversation_id)
+    if external is not None:
+        current = external.validate()
+        if turn_id != external.turn_id:
+            raise ValueError('Native named-Agent turn binding changed')
+        turns = external.history()
+    else:
+        current = INDEX.conversation_turn(turn_id)
     if not current or current['conversation_id'] != conversation_id:
         raise ValueError('Native conversation requires an exact admitted owner turn')
-    turns = INDEX.conversation_turns(conversation_id, before_sequence=current['sequence'])
-    if await window_floor(conversation_id) is not None:
+    if external is None:
+        turns = INDEX.conversation_turns(conversation_id, before_sequence=current['sequence'])
+    if external is None and await window_floor(conversation_id) is not None:
         # The log was loaded from the window's anchor; earlier turns are already in it.
         # Without the anchor's ledger row nothing can be placed safely: seed nothing.
         first = INDEX.conversation_turn(window_anchor(conversation_id))
         floor_sequence = (first['sequence'] if first and first['conversation_id'] == conversation_id
                           else current['sequence'])
         turns = [turn for turn in turns if turn['sequence'] >= floor_sequence]
+    if external is not None:
+        await close_interrupted_calls(conversation_id, 'named-agent-recovery')
+        session = await store.get_session(app_name=APP, user_id=user_id(conversation_id), session_id=conversation_id)
     known = known_turns(session)
     replies = {turn['reply_to']: turn for turn in turns if turn['role'] == 'assistant'}
     for turn in turns:
@@ -374,7 +402,7 @@ async def open_session(conversation_id: str, turn_id: str | None):
         await store.append_event(session, Event(invocation_id='seed', author='user', content=types.Content(
             role='user', parts=[part(turn['text'], 'user', id=turn['id'])])))
         if (reply := replies.get(turn['id'])) is not None:
-            await store.append_event(session, Event(invocation_id='seed', author=AGENT, content=types.Content(
+            await store.append_event(session, Event(invocation_id='seed', author=agent_id(conversation_id), content=types.Content(
                 role='model', parts=[types.Part(text=reply['text'])])))
     return session
 
@@ -383,7 +411,7 @@ async def close_interrupted_calls(conversation_id: str, invocation_id: str) -> N
     """Record every unanswered native call as outcome unknown; it is never replayed."""
     from ..capability_core import INTERRUPTED, observation_text
     store = service()
-    session = await store.get_session(app_name=APP, user_id=USER, session_id=conversation_id)
+    session = await store.get_session(app_name=APP, user_id=user_id(conversation_id), session_id=conversation_id)
     if session is None:
         return
     calls, answered = {}, set()
@@ -397,7 +425,7 @@ async def close_interrupted_calls(conversation_id: str, invocation_id: str) -> N
         'content': [{'type': 'text', 'text': observation_text(INTERRUPTED)}]}))
         for identifier, name in calls.items() if identifier not in answered]
     if parts:
-        await store.append_event(session, Event(invocation_id=invocation_id, author=AGENT,
+        await store.append_event(session, Event(invocation_id=invocation_id, author=agent_id(conversation_id),
                                                 content=types.Content(role='user', parts=parts)))
 
 
@@ -405,7 +433,7 @@ async def append(conversation_id: str, invocation_id: str, parts: list[types.Par
     """Append one controller-owned user event (settlement or command records)."""
     from google.adk.sessions.base_session_service import GetSessionConfig
     store = service()
-    session = await store.get_session(app_name=APP, user_id=USER, session_id=conversation_id,
+    session = await store.get_session(app_name=APP, user_id=user_id(conversation_id), session_id=conversation_id,
                                       config=GetSessionConfig(num_recent_events=1))
     if session is None:
         raise RuntimeError('The ADK conversation disappeared during its activation')

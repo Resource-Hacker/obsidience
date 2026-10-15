@@ -39,6 +39,7 @@ import sqlite3
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -50,7 +51,7 @@ RESTART_SHELL = ROOT / "obsidience" / "shell" / "session" / "restart-shell"
 HARNESS_UNITS = "obsidience/harness/systemd/"
 SHELL_UNITS = ROOT / "obsidience" / "shell" / "systemd"
 # Unit templates whose installed copies are what runs; an identical move changes none of them.
-UNIT_SOURCES = ("obsidience/tv/systemd/", "obsidience/shell/systemd/", HARNESS_UNITS)
+UNIT_SOURCES = ("obsidience/tv/systemd/", "obsidience/shell/systemd/", "obsidience/discord/systemd/", HARNESS_UNITS)
 
 
 def git(*args: str) -> str:
@@ -88,6 +89,8 @@ def targets(changed: list[str]) -> list[str]:
         owners.append("shell")
     if any(p.startswith("obsidience/ui/") for p in changed):
         owners.append("ui")
+    if any(p.startswith("obsidience/discord/") for p in changed):
+        owners.append("discord")
     if "obsidience/tv/systemd/obsidience-tv-player.service" in changed:
         owners.append("tv-player")
     if (any(p in {"obsidience/tv/host/tuner.py", "obsidience/tv/host/break-view", "obsidience/tv/systemd/obsidience-tv-tuner.service",
@@ -231,6 +234,17 @@ def wait_idle(limit: float = 900) -> None:
             # A Task in review has finished and waits only for the owner.
             busy = busy or any(task.get("execution", {}).get("state") not in
                                {"idle", "blocked", "failed", "needs_attention", "review"} for task in tasks)
+            try:
+                discord = get("/api/discord/status")
+            except urllib.error.HTTPError as error:
+                if error.code != 404:
+                    raise
+                discord = {}  # First deployment from a pre-Discord Harness.
+            transport = discord.get("transport") or {}
+            busy = busy or bool(discord.get("active_turns") or transport.get("active_turns")
+                                or transport.get("pending_speech"))
+            busy = busy or any(transport.get(key) not in (None, "idle")
+                               for key in ("playback", "speech_playback"))
             # The conversation's live owner, not historical run rows, decides
             # whether a turn is active. This subscription sends no command.
             from websockets.sync.client import connect
@@ -293,7 +307,28 @@ def check_voice(limit: float = 90) -> str | None:
 
 
 def restart(owner: str) -> None:
-    if owner in {"media-tiramisu", "media-prowlarr", "media-torbox"}:
+    if owner == "discord":
+        name = "obsidience-discord-bot.service"
+        destination = pathlib.Path.home() / ".config/systemd/user" / name
+        if not destination.exists():
+            print("Discord is not installed; installation remains explicit.")
+            return
+        subprocess.run(["npm", "ci", "--omit=dev", "--no-audit", "--no-fund"],
+                       cwd=ROOT / "obsidience/discord", check=True)
+        shutil.copy2(ROOT / "obsidience/discord/systemd" / name, destination)
+        subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
+        subprocess.run(["systemctl", "--user", "restart", name], check=True)
+        deadline = time.monotonic() + 45
+        while time.monotonic() < deadline:
+            try:
+                state = get("/api/discord/status")
+                if (state.get("transport") or {}).get("ready") is True:
+                    return
+            except OSError:
+                pass
+            time.sleep(1)
+        sys.exit("Discord did not become ready; inspect obsidience-discord-bot.service.")
+    elif owner in {"media-tiramisu", "media-prowlarr", "media-torbox"}:
         provider = owner.removeprefix("media-")
         name = f"obsidience-media-{provider}.service"
         source = ROOT / "obsidience/media" / name
@@ -398,10 +433,10 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--rollback", action="store_true")
     parser.add_argument("--restart", action="append", default=[],
-                        choices=("harness", "tv-player", "tv-tuner", "media-catalogue", "media-tiramisu", "media-prowlarr", "media-torbox"),
+                        choices=("harness", "discord", "tv-player", "tv-tuner", "media-catalogue", "media-tiramisu", "media-prowlarr", "media-torbox"),
                         help="Include an affected owner after a private configuration change")
     parser.add_argument("--only", action="append", default=[],
-                        choices=("harness", "shell", "ui", "tv-player", "tv-tuner",
+                        choices=("harness", "shell", "ui", "discord", "tv-player", "tv-tuner",
                                  "media-catalogue", "media-tiramisu", "media-prowlarr", "media-torbox"),
                         help="Deploy only selected affected owners; keep the full checkpoint unchanged")
     parser.add_argument("--recover-realtime", action="store_true",

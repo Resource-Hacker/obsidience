@@ -42,6 +42,7 @@ CHECKOUT_AGENTS = {
     "guardian": "Agents/Heimdall/Heimdall",
     "curator": "Agents/Alexandria/Alexandria",
     "researcher": "Agents/Darwin/Darwin",
+    "discord": "Agents/Discord/Discord",
 }
 CHECKOUT_FIELDS = {
     "tool": "tools",

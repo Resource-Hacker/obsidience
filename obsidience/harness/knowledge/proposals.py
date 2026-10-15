@@ -16,12 +16,15 @@ from obsidience.harness.config import CONFIG
 DOCUMENTARY_METADATA_FIELDS = {
     "description", "resource", "sources", "generated", "status", "stale_after",
 }
+AGENT_DEFINITION_METADATA_FIELDS = {
+    "tasks", "knowledge", "exclude_knowledge", "required_context", "role", "name",
+}
 PROPOSAL_METADATA_FIELDS = {
     "acceptance", "assignee", "binding", "kind", "model", "owner_maintained",
     "reasoning_effort", "runbook", "skills", "source", "subrunbooks",
     "subskills", "subtasks", "subtools", "taxonomy_path", "tool", "triggers",
     "type", "obsidience",
-} | DOCUMENTARY_METADATA_FIELDS | {"article_status"}
+} | DOCUMENTARY_METADATA_FIELDS | AGENT_DEFINITION_METADATA_FIELDS | {"article_status"}
 TASK_DEFINITION_METADATA_FIELDS = {
     "acceptance", "assignee", "kind", "model", "reasoning_effort", "runbook",
     "subtasks", "taxonomy_path", "triggers",
@@ -76,9 +79,12 @@ def _authored_metadata(value: object) -> dict:
     ):
         raise ValueError("metadata type must be one of: " + ", ".join(sorted(ARTICLE_TYPES)))
     documentary = {key: value[key] for key in DOCUMENTARY_METADATA_FIELDS if key in value}
-    errors = validate_profile({"type": projected.get("kind", "knowledge"), **documentary})
+    profile = {"type": projected.get("kind", "knowledge"), **documentary,
+               "obsidience": {key: projected[key] for key in
+                              AGENT_DEFINITION_METADATA_FIELDS | {"skills"} if key in projected}}
+    errors = validate_profile(profile)
     if errors:
-        raise ValueError("invalid documentary metadata: " + "; ".join(errors))
+        raise ValueError("invalid Article metadata: " + "; ".join(errors))
     if "status" in projected:
         projected["article_status"] = projected.pop("status")
     return projected
@@ -211,6 +217,70 @@ def _nonempty_string_list(value: object, field: str, *, limit: int, item_limit: 
     if len(set(values)) != len(values):
         raise ValueError(f"Task {field} entries must be unique")
     return values
+
+
+
+def agent_staging_resolver():
+    """Exact pending creates may satisfy proposal planning, never publication.
+
+    Existing accepted identities always win. Ambiguous pending targets and
+    pending updates supply no alternative definition. Review still validates
+    the Agent against only accepted Articles immediately before publication.
+    """
+    from obsidience.harness.knowledge.vault import Note, Resolver, iter_notes, load_note
+    from obsidience.harness.knowledge.links import metadata_ref
+
+    accepted = list(iter_notes())
+    existing = {note.ref.casefold() for note in accepted}
+    candidates = {}
+    for path in CONFIG.staging_dir.glob("*.md"):
+        pending = load_note(path.relative_to(CONFIG.vault_dir))
+        if pending is None or pending.meta.get("proposal") is not True or pending.meta.get("action") != "create":
+            continue
+        target = metadata_ref(str(pending.meta.get("target", "")))
+        fields = pending.meta.get("authored_fields")
+        if (not target or target.casefold() in existing or any(part.startswith(("_", ".")) for part in target.split("/"))
+                or not isinstance(fields, list) or any(not isinstance(field, str) or field not in PROPOSAL_METADATA_FIELDS for field in fields)):
+            continue
+        meta = {field: pending.meta[field] for field in fields if field in pending.meta}
+        if meta.get("kind") not in {"knowledge", "task", "runbook", "skill", "tool"}:
+            continue
+        candidates.setdefault(target.casefold(), []).append(
+            Note(target + ".md", pending.title, meta, pending.body))
+    return Resolver(accepted + [rows[0] for rows in candidates.values() if len(rows) == 1])
+
+
+def validate_agent_definition(target: str, metadata: dict, accepted_resolver) -> None:
+    """Validate explicit Agent authority both before staging and at publication."""
+    from obsidience.harness.knowledge.dependencies import resolve_dependencies
+    from obsidience.harness.knowledge.links import metadata_ref
+    from obsidience.harness.knowledge.scope import knowledge_refs
+    from obsidience.harness.knowledge.vault import Note
+
+    if not target.startswith("Agents/"):
+        raise ValueError("Agent definitions must target Agents/")
+    for field in ("role", "name"):
+        if field in metadata and (not isinstance(metadata[field], str) or not metadata[field].strip()
+                or len(metadata[field]) > 128 or any(ord(char) < 32 for char in metadata[field])):
+            raise ValueError("Agent " + field + " must be a bounded nonempty string")
+    tasks = metadata.get("tasks", [])
+    if (not isinstance(tasks, list) or len(tasks) > 128
+            or any(not isinstance(ref, str) or len(ref) > 512 for ref in tasks)):
+        raise ValueError("Agent tasks must contain at most 128 exact accepted Task references")
+    if len({metadata_ref(ref) for ref in tasks}) != len(tasks):
+        raise ValueError("Agent Task references must be unique")
+    for ref in tasks:
+        task = accepted_resolver.resolve(ref)
+        if task is None or task.kind != "task":
+            raise ValueError("Agent tasks must resolve to accepted Task Articles")
+    agent = Note(target, str(metadata.get("title") or "Agent"), metadata, "")
+    if metadata.get("skills"):
+        dependencies = resolve_dependencies(agent, accepted_resolver, agent_ref=agent.ref)
+        if dependencies.get("error"):
+            raise ValueError("Agent direct Skills require accepted executable Tool pairs: " + str(dependencies["error"]))
+    checked_out = knowledge_refs(agent, accepted_resolver)
+    if any(metadata_ref(ref) not in checked_out for ref in metadata.get("required_context", [])):
+        raise ValueError("Agent required context must be inside its accepted Knowledge checkout")
 
 
 def _validate_task_definition(
@@ -586,6 +656,10 @@ def stage_proposal(args: dict, context: dict, *, validate_only: bool = False) ->
     effective_meta = dict(accepted_note.meta) if accepted_note else {}
     effective_meta.update(authored_meta)
     effective_meta.setdefault("title", proposal_title)
+    if str(effective_meta.get("kind", "")).lower() == "agent":
+        validate_agent_definition(target, effective_meta, agent_staging_resolver())
+    elif set(authored_meta) & AGENT_DEFINITION_METADATA_FIELDS:
+        raise ValueError("Agent definition metadata requires an Agent Article")
     if target.startswith("Tasks/") or str(effective_meta.get("kind", "")).lower() == "task":
         _validate_task_definition(
             target,

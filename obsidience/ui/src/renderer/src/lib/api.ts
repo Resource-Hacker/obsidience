@@ -63,7 +63,7 @@ export interface LinkReviewChange {
   links?: Array<{ source: string; target: string }>;
   truncated: boolean;
 }
-export type GraphNavigationRole = "executive" | "guardian" | "curator" | "researcher" | "library";
+export type GraphNavigationRole = "executive" | "guardian" | "curator" | "researcher" | "library" | "discord" | "omnibot";
 export interface GraphNavigationSubject {
   id: string;
   title: string;

@@ -945,6 +945,24 @@
       "license": "BSD-2-Clause",
       "reference_path": "src/pipecat/turns/user_turn_completion_mixin.py",
       "integration": "Architectural adaptation of the contextual incomplete-turn filter, not copied runtime code or a Pipecat upgrade. The existing Executive buffers its actual first ADK response with a private C/I/W completion marker. Incomplete speech has no Tool dispatch, final transcript, or history write; complete responses are consumed once through ordinary ADK authority. Unlike the reference, missing markers fail closed and expiry discards rather than prompting or executing."
+    },
+    "discord_transport": {
+      "repository": "https://github.com/discordjs/discord.js",
+      "packages": {
+        "discord.js": "14.27.0",
+        "@discordjs/voice": "0.19.2",
+        "@discordjs/opus": "0.10.0",
+        "@snazzah/davey": "0.1.12"
+      },
+      "licenses": {
+        "discord.js": "Apache-2.0",
+        "@discordjs/voice": "Apache-2.0",
+        "@discordjs/opus": "MIT",
+        "@snazzah/davey": "MIT"
+      },
+      "lockfile": "obsidience/discord/package-lock.json",
+      "lockfile_sha256": "13c333c1e5bd6f465e32d2575acbcc224bc04054650ff85cf31491cc97389c98",
+      "integration": "Optional official bot Gateway and DAVE per-member audio transport. Discord.js owns Discord connections; native Obsidience Agent ADK owns reasoning, dedicated ledger and Hindsight bank. Existing speech owner shares loaded models with isolated member decoder state. FFmpeg converts PCM and admitted file audio; no video sender, selfbot or account token."
     }
   }
 }

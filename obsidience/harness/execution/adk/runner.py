@@ -386,7 +386,7 @@ async def run_adk_session(task, model, messages, allowed, ctx, agent_name, effor
                                              context_text=messages[1]['content'] if len(messages) > 1 else '')
                 if memory := memory_message(recalled):
                     parts.append(sessions.part(memory, 'plugin:obsidience.memory', run=run))
-            agent = LlmAgent(name=sessions.AGENT, model=sessions.model(model, effort), instruction='',
+            agent = LlmAgent(name=sessions.agent_id(session_id), model=sessions.model(model, effort), instruction='',
                              tools=capability_tools(allowed, plugin),
                              disallow_transfer_to_parent=True, disallow_transfer_to_peers=True)
             runner = Runner(app=App(name=sessions.APP, root_agent=agent, plugins=[plugin]),
@@ -399,7 +399,7 @@ async def run_adk_session(task, model, messages, allowed, ctx, agent_name, effor
             while True:
                 config = RunConfig(streaming_mode=StreamingMode.SSE,
                                    max_llm_calls=max(1, plugin.max_steps - plugin.model_steps + 1))
-                await _invoke(runner, plugin, interruption_event, ctx, user_id=sessions.USER,
+                await _invoke(runner, plugin, interruption_event, ctx, user_id=sessions.user_id(session_id),
                               session_id=session_id, new_message=message, state_delta=delta, run_config=config)
                 delta = None
                 if ex.done:

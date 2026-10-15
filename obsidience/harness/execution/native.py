@@ -473,6 +473,9 @@ def _window_state() -> dict:
 def window_anchor(conversation_id: str | None) -> str | None:
     """The owner message id where this conversation's provider window begins."""
     from ..config import CONFIG
+    from .adk.sessions import binding
+    if (external := binding(conversation_id)) is not None:
+        return external.anchor()
     if not conversation_id or CONFIG.extras.get('conversation_window', True) is False:
         return None
     state = _window_state()

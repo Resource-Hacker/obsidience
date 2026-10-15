@@ -573,6 +573,9 @@ def reconcile_origin_review_task(origin_ref: str) -> str:
 def _validate_capability_metadata(target: str, meta: dict) -> None:
     """Fail closed before accepting a Tool or its one-to-one Skill."""
     kind = str(meta.get("kind", "")).strip().lower()
+    if kind == "agent":
+        from .proposals import validate_agent_definition
+        validate_agent_definition(target, meta, Resolver(iter_notes()))
     if kind == "tool":
         # OKF sources are documentary provenance, never executable bindings.
         # The singular application source still supplies the exact contract.
