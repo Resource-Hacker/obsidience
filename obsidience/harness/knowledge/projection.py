@@ -14,15 +14,8 @@ from pathlib import Path
 from ..config import CONFIG
 from . import review, system as system_knowledge
 from .dependencies import agent_dependencies
-from .index import INDEX
+from .index import INDEX, callable_namespace, namespace_title
 from .links import metadata_ref
-from .skills import (
-    build_skill_mirror,
-    callable_namespace,
-    descendant_count as skill_mirror_descendant_count,
-    namespace_title,
-    node_id as skill_mirror_node_id,
-)
 from .tasks import (
     TASK_TAXONOMY_BY_PATH,
     TASK_TAXONOMY_NODES,
@@ -340,72 +333,6 @@ def _task_taxonomy_article(ref: str, path: str | None = None) -> dict:
         "meta": meta,
         "body": body,
         "children": child_refs,
-    }
-
-
-def _skill_mirror_catalog():
-    notes = iter_notes()
-    nodes = build_skill_mirror(notes)
-    return notes, nodes, {node.path: node for node in nodes}
-
-
-def _skill_mirror_article(ref: str, path: str | None = None) -> dict:
-    notes, nodes, by_path = _skill_mirror_catalog()
-    by_ref = {note.ref: note for note in notes}
-    if path is None:
-        children = [node for node in nodes if "/" not in node.path]
-        title = "Skills"
-        summary = "Skills mirror the Tool shelf: each callable Tool has one article explaining how to use it."
-        article_count = len(nodes)
-    else:
-        node = by_path[path]
-        children = [by_path[child] for child in node.children]
-        title = node.title
-        article_count = skill_mirror_descendant_count(path, nodes)
-        if node.tool_ref:
-            tool = by_ref[node.tool_ref]
-            guidance = [by_ref[skill_ref] for skill_ref in node.source_skills if skill_ref in by_ref]
-            sections = [
-                f"How to use [[{tool.ref}|{tool.title}]].",
-                f"## Tool contract\n\n{tool.body.strip()}",
-            ]
-            if guidance:
-                sections.append("## Authored guidance\n\n" + "\n\n".join(
-                    f"### [[{skill.ref}|{skill.title}]]\n\n{skill.body.strip()}" for skill in guidance
-                ))
-            else:
-                sections.append(
-                    "## Usage guidance\n\nFollow the Tool contract exactly and verify its returned observation "
-                    "before treating the action as complete."
-                )
-            return {
-                "ref": ref,
-                "title": title,
-                "kind": "skill",
-                "meta": {
-                    "node": "true",
-                    "generated": "true",
-                    "tool": tool.ref,
-                    "source_skills": ", ".join(node.source_skills),
-                },
-                "body": "\n\n".join(sections),
-                "children": [],
-            }
-        summary = f"Usage Skills for the `{path.replace('/', '.')}` Tool namespace."
-    lines = [
-        f"- [[{skill_mirror_node_id(child.path)}|{child.title}]] · skill node"
-        for child in children
-    ]
-    body = summary + "\n\n## Indexed subskills\n\n" + (
-        "\n".join(lines) if lines else "*No callable Tool is indexed here.*"
-    )
-    return {
-        "ref": ref,
-        "title": title,
-        "kind": "skill",
-        "meta": {"node": "true", "articles": str(article_count), "generated": "true"},
-        "body": body,
-        "children": [skill_mirror_node_id(child.path) for child in children],
     }
 
 
@@ -799,14 +726,6 @@ def base_article(ref: str):
             if namespace not in _tool_namespace_catalog()[1]:
                 raise NotFound(f"tool namespace not found: {namespace}")
             return _tool_namespace_article(ref, namespace)
-        if relative == "Skills":
-            return _skill_mirror_article(ref)
-        if relative.startswith("Skills/"):
-            path = relative.removeprefix("Skills/")
-            _notes, _nodes, by_path = _skill_mirror_catalog()
-            if path not in by_path:
-                raise NotFound(f"skill mirror node not found: {path}")
-            return _skill_mirror_article(ref, path)
         if relative == "Tasks":
             return _task_taxonomy_article(ref)
         if relative.startswith("Tasks/"):

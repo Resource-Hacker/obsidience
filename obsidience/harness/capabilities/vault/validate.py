@@ -12,10 +12,6 @@ def execute(args: dict, context: dict) -> str:
     from obsidience.harness.capabilities.registry import DESCRIPTIONS, REGISTRY, contract_error
     from obsidience.harness.config import CONFIG
     from obsidience.harness.knowledge.format import parse, validate_profile
-    from obsidience.harness.knowledge.skills import (
-        build_skill_mirror,
-        node_id as skill_mirror_node_id,
-    )
     from obsidience.harness.knowledge.tasks import (
         CANONICAL_TASK_BY_PATH,
         TASK_TAXONOMY_BY_PATH,
@@ -74,9 +70,6 @@ def execute(args: dict, context: dict) -> str:
         target = res.resolve(raw_ref)
         return task_path(target) if target and target.kind == "task" else ""
 
-    skill_mirror_refs = {
-        skill_mirror_node_id(node.path) for node in build_skill_mirror(notes)
-    }
     broken, checked = [], 0
     for note in notes:
         if str(note.meta.get("kind", "")).strip().lower() == "index":
@@ -92,8 +85,6 @@ def execute(args: dict, context: dict) -> str:
                 raw_ref = (
                     str(ref).strip().strip("[]").split("|", 1)[0].split("#", 1)[0]
                 )
-                if field == "skills" and raw_ref in skill_mirror_refs:
-                    continue
                 if field == "exclude_subtasks" and raw_ref.startswith("@library/Tasks/"):
                     root_path = task_path(note) if note.kind == "task" else ""
                     path = exclusion_path(raw_ref)

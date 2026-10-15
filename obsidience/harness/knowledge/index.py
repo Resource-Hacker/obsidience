@@ -25,14 +25,6 @@ import numpy as np
 from ..config import CONFIG
 from .format import TASK_RUNTIME_FIELDS
 from .links import metadata_ref
-from .skills import (
-    build_skill_mirror,
-    callable_namespace,
-    namespace_title,
-)
-from .skills import (
-    node_id as skill_mirror_node_id,
-)
 from .tasks import (
     CANONICAL_TASK_BY_PATH,
     TASK_TAXONOMY_BY_PATH,
@@ -188,6 +180,16 @@ CREATE TABLE IF NOT EXISTS deferred_observation_finalizations(
 
 _embed_client = None
 _embed_lock = threading.Lock()
+
+
+def namespace_title(segment: str) -> str:
+    """Human title for a generated Tool namespace index; callable leaves stay exact."""
+    return segment[:1].upper() + segment[1:]
+
+
+def callable_namespace(name: str) -> str:
+    """Library grouping, independent of the callable's exact stable identity."""
+    return name.rsplit(".", 1)[0]
 
 
 def _meta_links(value) -> list[str]:
@@ -804,25 +806,7 @@ class Index:
                 "synthetic": True,
             })
 
-        # Skills mirror dotted callable Tools one-for-one. Each generated leaf
-        # is an article about how to use its Tool; authored technique notes are
-        # retained as its guidance sources and remain canonical at runtime.
-        note_stubs = stubs
-        links.extend(_binding_shortcuts(note_stubs, links))
-        for skill_order, skill_node in enumerate(build_skill_mirror(note_stubs)):
-            nodes.append({
-                "id": skill_mirror_node_id(skill_node.path),
-                **({"article_ref": skill_node.source_skills[0]}
-                   if len(skill_node.source_skills) == 1 else {}),
-                "title": skill_node.title,
-                "kind": "skill",
-                "status": None,
-                "assignee": None,
-                "children": [skill_mirror_node_id(child) for child in skill_node.children],
-                "tags": ["skill-tool-mirror"],
-                "synthetic": True,
-                "order": skill_order,
-            })
+        links.extend(_binding_shortcuts(stubs, links))
 
         # One Task article tree: semantic kind says what a node is, while its
         # direct children alone determine whether it presents as an index.
