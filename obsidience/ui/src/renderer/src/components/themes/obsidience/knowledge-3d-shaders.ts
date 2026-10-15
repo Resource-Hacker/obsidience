@@ -48,6 +48,7 @@ attribute vec4 aRing;
 attribute vec4 aGlow;
 attribute vec4 aStyle; // (subject, ringScale, ringWidthPx, baseAlpha)
 attribute float aFocus;
+attribute float aLaser;
 attribute float aSwell; // extra size as a fraction: 1 doubles the node
 attribute vec4 aActivity;
 attribute float aSeed;
@@ -67,6 +68,7 @@ varying float vGlowScale;
 varying float vDiscFrac;
 varying float vRadiusPx;
 varying float vFocus;
+varying float vLaser;
 varying vec4 vActivity;
 varying float vTwinkle;
 varying float vSeed;
@@ -87,6 +89,7 @@ void main() {
   vStyle = aStyle;
   vGlowScale = aGlowScale;
   vFocus = aFocus;
+  vLaser = aLaser;
   vActivity = aActivity;
   vSeed = aSeed;
   vCurate = aCurate;
@@ -128,7 +131,11 @@ void main() {
   vStyle.w *= mix(0.65, 1.0, detail);
   vGlow.a *= mix(0.45, 1.0, detail);
 #endif
-  float size = clamp(radiusPx * aExtent * 2.0, 1.5, 1200.0);
+  // A branch node the thinking beam lights spills its bloom and glint past
+  // its glow, so its sprite grows to hold them.
+  float extent = aStyle.x > 0.5 && aStyle.x < 1.5 && aLaser > 0.001
+    ? max(aExtent, 3.2) : aExtent;
+  float size = clamp(radiusPx * extent * 2.0, 1.5, 1200.0);
   vRadiusPx = max(radiusPx, 0.75);
   vDiscFrac = (radiusPx * 2.0) / size;
   gl_PointSize = size;
@@ -289,11 +296,13 @@ varying float vGlowScale;
 varying float vDiscFrac;
 varying float vRadiusPx;
 varying float vFocus;
+varying float vLaser;
 varying vec4 vActivity;
 varying float vTwinkle;
 varying float vSeed;
 varying float vCurate;
 varying float vSpeech;
+uniform float uLaserHit;
 uniform float uArticleStyle;
 uniform float uCoreStyle;
 uniform float uSubjectStyle;
@@ -319,9 +328,15 @@ void main() {
   bool roundedSquare = nodeVariant < squareFirst + 0.5;
   bool marble = vStyle.x > 0.5 && vStyle.x < 1.5
     && nodeVariant > 3.5 && nodeVariant < 4.5;
+  // The thinking beam striking a marble (owner 2026-10-15: "a laser hitting
+  // a marble"): how lit it is, and the flash of the beam's arrival.
+  float laser = marble ? min(vLaser, 1.0) * uLaserHit : 0.0;
+  float flash = marble ? max(vLaser - 1.0, 0.0) * uLaserHit : 0.0;
+  float laserBloom = 0.0;
+  float laserGlint = 0.0;
   // Leaves shimmer ambiently via the twinkle floor; a real focus (the
   // thinking sweep, hover) always wins. Subjects never twinkle.
-  float boost = vStyle.x > 0.5 ? vFocus : max(vFocus, vTwinkle);
+  float boost = vStyle.x > 0.5 ? max(vFocus, min(laser, 1.0)) : max(vFocus, vTwinkle);
   float effAlpha = mix(vStyle.w, 1.0, boost);
   vec3 acc = vec3(0.0);
   float accA = 0.0;
@@ -374,6 +389,8 @@ void main() {
           (1.0 - smoothstep(0.62, 0.68, cell));
         ringA *= dash;
       }
+      // A lit marble's ring burns.
+      ringA = min(1.0, ringA * (1.0 + laser + flash));
   }
   if (vStyle.x > 0.5) {
     // Depth glow: gradient from 0.25r (palette glow) to glowScale*r (clear).
@@ -512,6 +529,24 @@ void main() {
         vec4 glass = glassMarble(p, r, aa, vRadiusPx, vCore, vDark, vSeed, boost);
         disc = glass.rgb;
         discA = glass.a * effAlpha;
+        if (laser > 0.001) {
+          // Light floods the glass in the node's colour, white-hot at the
+          // heart where the beam scatters; the rim burns with the light the
+          // glass traps; a bloom and a four-point glint spill past it.
+          float heart = exp(-r * r * 3.2);
+          float fill = exp(-r * r * 1.2);
+          float rim = smoothstep(0.62, 1.0, r) * edge;
+          vec3 lit = mix(vCore, vec3(1.0), clamp(0.2 + 0.75 * heart + 0.5 * flash, 0.0, 1.0));
+          float litA = edge * clamp((0.45 * fill + 0.55 * heart + 0.55 * rim) * laser
+            + 0.35 * flash * fill, 0.0, 0.95);
+          float outA = litA + discA * (1.0 - litA);
+          disc = (lit * litA + disc * discA * (1.0 - litA)) / max(outA, 1e-4);
+          discA = outA;
+          laserBloom = exp(-max(r - 1.0, 0.0) * 2.2) * (1.0 - edge)
+            * min(1.0, laser * 0.6 + flash * 0.6);
+          laserGlint = (1.0 - smoothstep(0.0, aa * 2.0 + 0.04, min(abs(p.x), abs(p.y))))
+            * exp(-r * 1.1) * min(1.0, laser * 0.5 + flash * 1.2);
+        }
         // The node's own glow stands behind the marble; seen through the
         // glass it should not fill it.
         float behind = 1.0 - 0.6 * edge;
@@ -539,6 +574,12 @@ void main() {
     }
     acc = disc * discA + acc * (1.0 - discA);
     accA = discA + accA * (1.0 - discA);
+    if (laserBloom + laserGlint > 0.0) {
+      acc = mix(vCore, vec3(1.0), 0.3) * laserBloom + acc * (1.0 - laserBloom);
+      accA = laserBloom + accA * (1.0 - laserBloom);
+      acc = mix(vCore, vec3(1.0), 0.75) * laserGlint + acc * (1.0 - laserGlint);
+      accA = laserGlint + accA * (1.0 - laserGlint);
+    }
   } else {
     // Article leaves: uArticleStyle picks the orb variant (owner
     // 2026-08-03, WeakAuras-style style list). 0 Jewel star is the classic

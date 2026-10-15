@@ -288,6 +288,8 @@ export interface Knowledge3dTuning {
   marbleOpacity: number;
   marbleDust: number;
   marbleRefraction: number;
+  /** How hard the thinking beam lights a Dust marble it reaches (0 off). */
+  laserHit: number;
   /** Role-glyph nameplates over every ball (read from the main record). */
   rolePlates: number;
   orbitRadius: number;
@@ -370,6 +372,7 @@ export const DEFAULT_KNOWLEDGE_3D_TUNING: Knowledge3dTuning = {
   marbleOpacity: 1,
   marbleDust: 1.7,
   marbleRefraction: 1,
+  laserHit: 1,
   rolePlates: 1,
   orbitRadius: KNOWLEDGE_3D_ORBIT_RADIUS_DEFAULT,
   orbitSpeed: KNOWLEDGE_3D_ORBIT_SPEED_DEFAULT,
@@ -430,6 +433,7 @@ export const KNOWLEDGE_3D_TUNING_FIELDS: readonly Knowledge3dTuningField[] = [
   { key: "yawSpeed", label: "Rotation speed", group: "Motion", mainOnly: true, min: 0, max: 0.2, step: 0.005, description: "Camera rotation around all graphs. Pauses while dragging or focused on a satellite." },
   { key: "automaticSweepSpeed", label: "Automatic speed", group: "Thinking", min: 0, max: 1, step: 1, toggle: true, description: "Reveal the packet at a readable pace, keep paths flowing through speech, and fade when playback ends. Turn this off to set the reveal speed." },
   { key: "sweepSpeed", label: "Animation speed", group: "Thinking", min: 0.1, max: 3, step: 0.05, description: "Speed of the continuous path reveal when Automatic speed is off. Speech never skips unfinished links." },
+  { key: "laserHit", label: "Laser hit", group: "Thinking", min: 0, max: 2, step: 0.05, description: "How brightly a Dust marble node lights when the thinking beam reaches it: a flash, light filling the glass, a burning rim and a glint." },
   { key: "tendrilWidth", label: "Tendril width", group: "Thinking", min: 1, max: 24, step: 0.5, description: "Width of the lit beam from the core out to a top-level branch while thinking." },
   { key: "branchWidth", label: "Branch width", group: "Beams", min: 1, max: 20, step: 0.5, description: "Width of the widest structural beams; deeper arms thin down to the article line width." },
   { key: "articleWidth", label: "Article line width", group: "Beams", min: 1, max: 4, step: 0.25, description: "Width the depth taper lands on at the article-level arms." },
