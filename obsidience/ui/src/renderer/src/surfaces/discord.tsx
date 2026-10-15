@@ -1,7 +1,8 @@
 /** Discord-only camera presentation: the existing Knowledge cloud and real
  * run-correlated activity, without Shell controls, trace or conversation UI. */
-import { useEffect, useMemo, useState } from "react";
-import type { GraphNavigationGroup, GraphNode, GraphLink } from "@/lib/api";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { GraphNavigationGroup, GraphNode, GraphLink, ProviderGraph, GraphOperation as MemoryOperation } from "@/lib/api";
+import { ProviderGraphScene } from "@/graph/memory/provider-graph-scene";
 import { Knowledge3dScene, type Knowledge3dLabelMeta } from "@/graph/knowledge/knowledge-3d-scene";
 import { DEFAULT_KNOWLEDGE_3D_TUNING } from "@/graph/knowledge/knowledge-3d";
 import { agentSatellite } from "@/graph/knowledge-stage/satellites";
@@ -9,7 +10,7 @@ import { buildThinkingRoute } from "@/graph/knowledge-stage/thinking-route";
 import { currentOperations, operationAccent, type GraphOperation } from "@/graph/knowledge-stage/graph-activity";
 import "@/styles/provider-graph.css";
 
-type PublicGraph = { revision?: string; available: boolean; nodes: GraphNode[]; links: GraphLink[]; group: GraphNavigationGroup | null };
+type PublicGraph = { revision?: string; available: boolean; nodes: GraphNode[]; links: GraphLink[]; group: GraphNavigationGroup | null; memory?: ProviderGraph & {available: boolean} };
 type Run = { refs: string[] };
 const EMPTY: PublicGraph = { available: false, nodes: [], links: [], group: null };
 const TUNING = { ...DEFAULT_KNOWLEDGE_3D_TUNING, sweepSpeed: 1 / 1.6 };
@@ -18,6 +19,7 @@ export function DiscordGraphSurface() {
   const [graph, setGraph] = useState<PublicGraph>(EMPTY);
   const [runs, setRuns] = useState<Map<string, Run>>(new Map());
   const [operations, setOperations] = useState<GraphOperation[]>([]);
+  const [memoryOperations, setMemoryOperations] = useState<MemoryOperation[]>([]);
   const [connected, setConnected] = useState(false);
   const [sceneKey, setSceneKey] = useState(0);
 
@@ -30,14 +32,15 @@ export function DiscordGraphSurface() {
 
   useEffect(() => {
     document.documentElement.dataset.discordGraphData = graph.available ? "available" : "unavailable";
-    return () => { delete document.documentElement.dataset.discordGraphData; };
-  }, [graph.available]);
+    document.documentElement.dataset.discordMemoryData = graph.memory?.available ? "available" : "unavailable";
+    return () => { delete document.documentElement.dataset.discordGraphData; delete document.documentElement.dataset.discordMemoryData; };
+  }, [graph.available, graph.memory?.available]);
 
   useEffect(() => {
     let disposed = false;
     let socket: WebSocket | null = null;
     let reconnect: ReturnType<typeof setTimeout> | undefined;
-    const clear = () => { setConnected(false); setRuns(new Map()); setOperations([]); setGraph(EMPTY); };
+    const clear = () => { setConnected(false); setRuns(new Map()); setOperations([]); setMemoryOperations([]); setGraph(EMPTY); };
     const connect = () => {
       if (disposed) return;
       const url = new URL("/api/discord/presentation/activity", window.location.href);
@@ -51,6 +54,9 @@ export function DiscordGraphSurface() {
             const next = value.graph as PublicGraph;
             if (!next || !Array.isArray(next.nodes) || next.nodes.length > 512
               || !Array.isArray(next.links) || next.links.length > 1024) return;
+            if (next.memory && (next.memory.graph_id !== "memory:discord"
+              || !Array.isArray(next.memory.nodes) || next.memory.nodes.length > 1000
+              || !Array.isArray(next.memory.edges) || next.memory.edges.length > 4000)) return;
             setGraph(current => current.revision && current.revision === next.revision ? current : next);
             setRuns(new Map()); setOperations([]); setConnected(true);
           } else if (value.type === "activity" && value.graph_id === "discord"
@@ -64,6 +70,8 @@ export function DiscordGraphSurface() {
               }
               return next;
             });
+          } else if (value.type === "operation" && value.operation?.graph_id === "memory:discord") {
+            setMemoryOperations(current => [...current.filter(op => op.id !== value.operation.id), value.operation].slice(-64));
           } else if (value.type === "operation" && value.operation?.graph_id === "discord") {
             setOperations(current => currentOperations([...current, value.operation]).slice(-64));
           }
@@ -75,6 +83,13 @@ export function DiscordGraphSurface() {
     connect();
     return () => { disposed = true; clearTimeout(reconnect); socket?.close(); };
   }, []);
+
+  useEffect(() => {
+    if (!memoryOperations.length) return;
+    const timer = setTimeout(() => setMemoryOperations(current =>
+      current.filter(op => !op.expires_at || op.expires_at > Date.now())), 1000);
+    return () => clearTimeout(timer);
+  }, [memoryOperations]);
 
   const model = useMemo(() => {
     const titles = new Map<string, string>();
@@ -105,10 +120,11 @@ export function DiscordGraphSurface() {
     return result;
   }, [liveOperations]);
   const active = runs.size > 0;
-  return <div className="fixed inset-0 overflow-hidden bg-black"><main aria-label="Discord Agent knowledge presentation"
+  return <div className="fixed inset-0 overflow-hidden bg-black"><main aria-label="Discord Agent Knowledge and Memory presentation"
     data-obsidience-theme="obsidience" className="absolute overflow-hidden bg-[#030304] text-cyan-50"
     style={{ left: "50%", top: "50%", transform: "translate(-50%, -50%)",
       width: "min(100vw, 177.777778vh)", height: "min(100vh, 56.25vw)" }}>
+    <section className="absolute inset-x-0 top-0 h-1/2" aria-label="Accepted Knowledge graph">
     <Knowledge3dScene key={sceneKey} primaryGraphId="Discord" nodes={model.nodes} edges={model.edges} hub={{ x: 0.5, y: 0.5 }}
       focusNodeIds={route?.nodeIds ?? new Set()} passedNodeIds={route?.passedIds}
       pathSpec={route?.pathSpec ?? null} focusActive={active} focusPhase={active ? "thinking" : null}
@@ -116,18 +132,61 @@ export function DiscordGraphSurface() {
       visible={true} reducedMotion={false} adapterPreference="system" animationProfile="maximum"
       hoveredNodeId={null} labelIds={[]} showActivityLabels={true} labelMetadata={labels}
       tuning={TUNING} sharePresentation={false} onContextLost={() => setSceneKey(key => key + 1)} />
+    </section>
+    <section className="absolute inset-x-0 bottom-0 h-1/2 border-t border-cyan-100/15" aria-label="Own Hindsight Memory graph">
+      <DiscordMemoryGraph graph={graph.memory} operations={memoryOperations}/>
+    </section>
     <div className="pointer-events-none absolute left-8 top-6 font-mono uppercase tracking-[0.3em] text-cyan-100/80">
       <div className="text-sm">{graph.group?.title ?? "Obsidience Discord Bot"}</div>
+      <div className="mt-1 text-[10px] text-cyan-100/40">Knowledge · accepted Articles</div>
       <div role="status" className="mt-2 text-[10px] tracking-[0.2em] text-cyan-100/45">
         {!connected ? "Presentation unavailable" : !graph.available ? "Agent unavailable" : active ? "Thinking" : "Idle"}
       </div>
     </div>
     {liveOperations.length > 0 && <div aria-label="Actual Tool and read activity"
-      className="pointer-events-none absolute bottom-6 right-8 font-mono text-xs text-cyan-100/70">
+      className="pointer-events-none absolute right-8 top-6 font-mono text-xs text-cyan-100/70">
       {liveOperations.filter(operation => operation.kind !== "context").slice(-4).map(operation =>
         <div key={operation.id} className="mt-1" style={{ color: operationAccent(operation)?.color }}>
           {operation.label} · {operation.status === "running" ? "Active" : operation.status}
         </div>)}
     </div>}
   </main></div>;
+}
+
+
+/** Native Memory renderer, isolated from Shell graph publishing and controls. */
+function DiscordMemoryGraph({graph, operations}: {
+  graph?: ProviderGraph & {available: boolean}; operations: MemoryOperation[];
+}) {
+  const host = useRef<HTMLDivElement>(null), scene = useRef<ProviderGraphScene | null>(null);
+  const [error, setError] = useState(false);
+  useEffect(() => {
+    if (!host.current) return;
+    try {
+      scene.current = new ProviderGraphScene(host.current, () => {}, () => {}, () => {}, () => {}, {
+        timeGuides: false,
+        presentation: () => ({publishCatalog() {}, publishState() {}, frame() {}, dispose() {}}),
+      });
+    } catch { setError(true); }
+    return () => { scene.current?.dispose(); scene.current = null; };
+  }, []);
+  useEffect(() => {
+    if (graph?.available) scene.current?.setData(graph, new Set(graph.nodes.map(node => node.id)));
+    scene.current?.setVisible(!!graph?.available && !error);
+  }, [graph, error]);
+  useEffect(() => { scene.current?.activity(operations); }, [operations, graph]);
+  return <>
+    <div ref={host} className="absolute inset-0 pointer-events-none"
+      style={{ visibility: graph?.available && !error ? "visible" : "hidden" }}/>
+    <div className="pointer-events-none absolute left-8 top-4 font-mono text-[10px] uppercase tracking-[0.2em] text-cyan-100/45">
+      Hindsight · unverified Memory
+      <div role="status" className="mt-2 normal-case tracking-normal text-cyan-100/35">
+        {error || !graph?.available ? "Memory unavailable" : !graph.total ? "No retained memories yet" :
+          `${graph.nodes.length} memories${graph.limited ? " · bounded view" : ""}`}
+      </div>
+    </div>
+    {!!operations.length && <div className="pointer-events-none absolute bottom-5 right-8 font-mono text-xs text-cyan-100/65">
+      {operations.slice(-3).map(op => <div key={op.id}>{op.label}</div>)}
+    </div>}
+  </>;
 }

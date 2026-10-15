@@ -48,6 +48,14 @@ CHECKOUT_AGENTS = {
 # Independent integrations remain readable/manageable without joining the
 # Executive's scene or its specialist constellation.
 EXECUTIVE_SCENE_GROUPS = frozenset({"executive", "guardian", "curator", "researcher"})
+
+
+def agent_scene(agent_ref: str) -> str:
+    """Scene membership is presentation metadata, never a Memory grant."""
+    return "executive" if any(CHECKOUT_AGENTS[group] == agent_ref
+                              for group in EXECUTIVE_SCENE_GROUPS) else "independent"
+
+
 CHECKOUT_FIELDS = {
     "tool": "tools",
     "skill": "skills",
@@ -553,7 +561,7 @@ def _navigation_manifest(overrides: dict[str, Note]) -> dict:
             "title": identity.title,
             "subtitle": role.replace("-", " ").title(),
             "role": role,
-            "scene": "executive" if group_id in EXECUTIVE_SCENE_GROUPS else "independent",
+            "scene": agent_scene(identity.ref),
             "root_ref": identity.ref,
             "access_refs": access_refs,
             "subjects": subjects,

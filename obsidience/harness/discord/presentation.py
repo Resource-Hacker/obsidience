@@ -5,8 +5,9 @@ model reasoning, Tool arguments/results, credentials or desktop state.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
+import json
 import re
 
 from ..knowledge import projection
@@ -15,9 +16,14 @@ AGENT_REF = 'Agents/Discord/Discord'
 GRAPH_ID = 'Discord'
 MAX_NODES = 512
 MAX_LINKS = 1024
+MAX_MEMORY_NODES = 1000
+MAX_MEMORY_EDGES = 4000
 _PHASES = {'query_started', 'path', 'query_completed', 'cleared'}
 _KINDS = {'context': 'Context in use', 'read': 'Reading', 'search': 'Searching',
           'list': 'Listing', 'tool': 'Tool activity'}
+_MEMORY_KINDS = {'search': 'Recalling memory', 'read': 'Reading memory',
+                 'retain': 'Memory retained', 'consolidate': 'Memory consolidated',
+                 'retire': 'Memory retired'}
 _STATUSES = {'running', 'returned', 'completed', 'failed', 'interrupted'}
 
 
@@ -37,6 +43,8 @@ def public_title(title, kind='knowledge'):
 class Presentation:
     graph: dict
     refs: dict[str, str]
+    memory_refs: dict[str, str] = field(default_factory=dict)
+    memory_graph_id: str = ""
 
 
 def snapshot():
@@ -104,8 +112,50 @@ def snapshot():
                     'subtitle': 'Discord Agent', 'root_ref': mapping[AGENT_REF],
                     'subjects': public_subjects, 'article_refs': sorted(set(mapping.values()))}
     graph = {'available': True, 'nodes': public_nodes, 'links': links, 'group': public_group}
+    memory, memory_refs, memory_graph_id = memory_snapshot()
+    graph['memory'] = memory
     graph['revision'] = opaque(repr(graph))
-    return Presentation(graph, mapping)
+    return Presentation(graph, mapping, memory_refs, memory_graph_id)
+
+
+def memory_snapshot():
+    """Use the existing exact-bank provider projection, strip all Memory prose.
+
+    Record type, discussion day and actual links retain the native timeline.
+    No query, body, entity, provenance, bank identity or other Agent is public.
+    """
+    empty = {'available': False, 'provider': 'hindsight', 'graph_id': 'memory:discord',
+             'nodes': [], 'edges': [], 'total': 0, 'limited': False}
+    bank = ''
+    try:
+        from ..memory.hindsight import MEMORY, bank_for
+        from ..interfaces.api.routes.graphs import memory_graph
+        bank = bank_for(AGENT_REF)
+        if MEMORY.banks.get(bank) != AGENT_REF:
+            return empty, {}, ''
+        native = json.loads(memory_graph(bank, limit=MAX_MEMORY_NODES).body)
+        if len(native['nodes']) > MAX_MEMORY_NODES:
+            return empty, {}, 'memory:' + bank
+        mapping = {node['id']: opaque(node['id']) for node in native['nodes']}
+        kinds = {'experience': ('Experience', '#38bdf8'), 'world': ('World memory', '#5eead4'),
+                 'observation': ('Observation', '#c4b5fd')}
+        nodes = []
+        for node in native['nodes']:
+            kind = node['kind'] if node['kind'] in kinds else 'memory'
+            name, color = kinds.get(kind, ('Memory', '#94a3b8'))
+            date = str(node.get('date', ''))[:10]
+            nodes.append({'id': mapping[node['id']], 'name': name, 'kind': kind, 'color': color,
+                          'date': date if re.fullmatch(r'\d{4}-\d{2}-\d{2}', date) else ''})
+        edges = [{'source': mapping[edge['source']], 'target': mapping[edge['target']],
+                  'kind': 'supports' if edge['kind'] == 'supports' else 'related',
+                  'weight': 1, 'color': '#6d8baa'}
+                 for edge in native['edges'][:MAX_MEMORY_EDGES]
+                 if edge['source'] in mapping and edge['target'] in mapping]
+        return {**empty, 'available': True, 'nodes': nodes, 'edges': edges,
+                'total': native['total'],
+                'limited': native['limited'] or len(native['edges']) > MAX_MEMORY_EDGES}, mapping, 'memory:' + bank
+    except Exception:
+        return empty, {}, 'memory:' + bank if bank else ''
 
 
 class ActivityProjection:
@@ -119,7 +169,23 @@ class ActivityProjection:
             return None
         if entry.get('type') == 'operation':
             operation = entry.get('operation')
-            if not isinstance(operation, dict) or operation.get('run_id') not in self.runs:
+            if not isinstance(operation, dict):
+                return None
+            if self.view.memory_graph_id and operation.get('graph_id') == self.view.memory_graph_id:
+                # Native retain/consolidation and recall are bank-owned events;
+                # they can finish after the conversational run has ended.
+                kind = operation.get('kind')
+                if kind not in _MEMORY_KINDS or operation.get('status') not in _STATUSES:
+                    return None
+                return {'type': 'operation', 'operation': {
+                    'id': opaque(operation.get('id')), 'kind': kind, 'status': operation['status'],
+                    'label': _MEMORY_KINDS[kind], 'graph_id': 'memory:discord',
+                    'refs': [self.view.memory_refs[ref] for ref in operation.get('refs', [])
+                             if ref in self.view.memory_refs][:128],
+                    'at': operation.get('at', 0), 'expires_at': operation.get('expires_at', 0),
+                    'refresh': False,
+                }}
+            if operation.get('run_id') not in self.runs:
                 return None
             if operation.get('kind') not in _KINDS or operation.get('status') not in _STATUSES:
                 return None

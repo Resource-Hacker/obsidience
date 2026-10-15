@@ -121,7 +121,7 @@ Item {
         const generation = requestGeneration
         memoryBusy = true
         errorMessage = ""
-        Harness.request("GET", "/api/graphs/memory/banks", null, function(reply) {
+        Harness.request("GET", "/api/graphs/memory/banks?agent_ref=" + encodeURIComponent(agentRef), null, function(reply) {
             if (generation !== root.requestGeneration) return
             root.memoryBusy = false
             if (!reply.ok) {

@@ -37,6 +37,7 @@ function applyMemoryDelta(current: ProviderGraph, delta: MemoryDelta): ProviderG
 /** The Samsung stage's Memory third: one row per Agent memory bank. */
 export function MemoryStageWall() {
   const [banks, setBanks] = useState<MemoryBank[]>([]), [error, setError] = useState("");
+  const [selectedBank, setSelectedBank] = useState("");
   const [presentation, setPresentation] = useState<MemoryStagePresentation | null>(null);
   const [oled, setOled] = useState<ShellOledPolicy>({ enabled: false, shiftPx: 32, travelSeconds: 3600 });
   const [shellVisible, setShellVisible] = useState(false);
@@ -50,15 +51,20 @@ export function MemoryStageWall() {
   }, []);
   useEffect(() => {
     const controller = new AbortController();
-    api.memoryBanks(controller.signal)
-      .then(result => { setBanks(result.banks); if (!result.banks.length) setError("No Agent memory banks are available yet."); })
-      .catch(error => { if (!controller.signal.aborted) setError(error.message); });
+    api.memoryBanks(controller.signal, selectedBank || undefined)
+      .then(async result => {
+        if (selectedBank && result.banks[0]?.scene === "executive") result = await api.memoryBanks(controller.signal);
+        if (!controller.signal.aborted) {
+          setBanks(result.banks); setError(result.banks.length ? "" : "No Agent memory banks are available yet.");
+        }
+      })
+      .catch(() => { if (!controller.signal.aborted) setError("Agent memory banks are unavailable."); });
     return () => controller.abort();
-  }, []);
+  }, [selectedBank]);
   useEffect(() => onShellProviderGraph("memory", settings => {
-    if (settings.bank) presentation?.select(settings.bank);
+    if (settings.bank) { presentation?.select(settings.bank); setSelectedBank(settings.bank); }
   }), [presentation]);
-  return <main className="memory-stage-wall" aria-label="All Agent memory graphs"
+  return <main className="memory-stage-wall" aria-label="Agent memory scene"
     data-motion={shellVisible && pageVisible} data-oled={oled.enabled}
     style={{ "--oled-shift": `${oled.shiftPx}px`, "--oled-travel": `${oled.travelSeconds}s` } as CSSProperties}>
     {presentation && banks.map((bank, index) => <section className="memory-stage-row" key={bank.id} aria-label={`${bank.name} memory`}>

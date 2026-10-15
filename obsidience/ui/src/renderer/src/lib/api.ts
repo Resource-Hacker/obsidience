@@ -126,7 +126,7 @@ export interface GraphOperation {
   graph_id: string; at: number; expires_at: number; refresh: boolean;
 }
 
-export interface MemoryBank { id: string; name: string; agent_ref: string; count: number }
+export interface MemoryBank { id: string; name: string; agent_ref: string; count: number; scene: "executive" | "independent" }
 /** Changed records and edges since the shown revision of one memory bank. */
 export type MemoryDelta = Pick<ProviderGraph, "provider" | "graph_id" | "nodes" | "edges" | "total" | "limited" | "updated_at"> & {
   delta: true; since: string; revision: string; removed: string[]; removed_edges: ProviderGraph["edges"];
@@ -134,7 +134,8 @@ export type MemoryDelta = Pick<ProviderGraph, "provider" | "graph_id" | "nodes" 
 
 export const api = {
   graph: () => json<GraphSnapshot>("/api/graph", { cache: "no-store" }),
-  memoryBanks: (signal?: AbortSignal) => json<{ banks: MemoryBank[] }>("/api/graphs/memory/banks", { signal }),
+  memoryBanks: (signal?: AbortSignal, bank?: string) => json<{ banks: MemoryBank[] }>(
+    "/api/graphs/memory/banks" + (bank ? "?bank=" + encodeURIComponent(bank) : ""), { signal }),
   memoryGraph: (bank: string, since?: string, signal?: AbortSignal) => json<ProviderGraph | MemoryDelta>(
     "/api/graphs/memory?bank=" + encodeURIComponent(bank) + (since ? "&since=" + encodeURIComponent(since) : ""), { signal }),
   memoryRecord: (bank: string, id: string, signal?: AbortSignal) => json<Record<string, unknown>>(

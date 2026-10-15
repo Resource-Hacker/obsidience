@@ -55,7 +55,8 @@ async def graph_activity(ws: WebSocket):
             if id(entry) in replayed or id(entry.get('operation')) in replayed:
                 continue
             if entry.get('phase') == 'graph_changed' or (entry.get('type') == 'operation'
-                    and entry.get('operation', {}).get('refresh') is True):
+                    and entry.get('operation', {}).get('refresh') is True
+                    and entry['operation'].get('graph_id') == filtered.view.memory_graph_id):
                 # Permission changes replace the graph and replay only currently
                 # active runs under its newly accepted scope.
                 await send_snapshot()

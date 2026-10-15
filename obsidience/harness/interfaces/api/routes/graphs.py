@@ -8,6 +8,7 @@ import hashlib
 import json
 import logging
 import threading
+from typing import Literal
 from urllib.parse import quote
 import uuid
 
@@ -18,6 +19,7 @@ from fastapi.responses import JSONResponse
 from ....config import CONFIG
 from ....memory.hindsight import MEMORY, hindsight_auth_headers, memory_ref
 from ....knowledge.vault import load_note
+from ....knowledge.projection import agent_scene
 
 router = APIRouter(prefix="/api/graphs")
 CODE_PROJECT = str(CONFIG.project_root).strip("/").replace("/", "-")
@@ -107,12 +109,14 @@ async def lifespan():
 
 
 @router.get("/memory/banks")
-def banks():
+def banks(agent_ref: str = "", bank: str = "", scene: Literal["executive", "all"] = "executive"):
     result = []
+    selected_bank = bank
     for bank, ref in MEMORY.banks.items():
         note = load_note(ref + ".md")
-        if note:
-            result.append({"id": bank, "name": note.title, "agent_ref": ref,
+        if note and (not agent_ref or ref == agent_ref) and (not selected_bank or bank == selected_bank) \
+                and (agent_ref or selected_bank or scene == "all" or agent_scene(ref) == scene):
+            result.append({"id": bank, "name": note.title, "agent_ref": ref, "scene": agent_scene(ref),
                            "count": len(MEMORY.records.get(bank, {}))})
     return {"banks": sorted(result, key=lambda b: ("Executive" not in b["agent_ref"], b["name"])),
             "status": MEMORY.status()["status"]}
