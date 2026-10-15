@@ -10,7 +10,7 @@ import { buildThinkingRoute } from "@/graph/knowledge-stage/thinking-route";
 import { currentOperations, operationAccent, type GraphOperation } from "@/graph/knowledge-stage/graph-activity";
 import "@/styles/provider-graph.css";
 
-type PublicGraph = { revision?: string; available: boolean; nodes: GraphNode[]; links: GraphLink[]; group: GraphNavigationGroup | null; memory?: ProviderGraph & {available: boolean} };
+type PublicGraph = { public_name?: string; revision?: string; available: boolean; nodes: GraphNode[]; links: GraphLink[]; group: GraphNavigationGroup | null; memory?: ProviderGraph & {available: boolean} };
 type Run = { refs: string[] };
 const EMPTY: PublicGraph = { available: false, nodes: [], links: [], group: null };
 const TUNING = { ...DEFAULT_KNOWLEDGE_3D_TUNING, sweepSpeed: 1 / 1.6 };
@@ -137,7 +137,8 @@ export function DiscordGraphSurface() {
       <DiscordMemoryGraph graph={graph.memory} operations={memoryOperations}/>
     </section>
     <div className="pointer-events-none absolute left-8 top-6 font-mono uppercase tracking-[0.3em] text-cyan-100/80">
-      <div className="text-sm">{graph.group?.title ?? "Obsidience Discord Bot"}</div>
+      <div className="text-lg">{graph.public_name ?? "Obsidience Discord Bot"}</div>
+      <div className="mt-1 text-[10px] text-cyan-100/50">OmniBot</div>
       <div className="mt-1 text-[10px] text-cyan-100/40">Knowledge · accepted Articles</div>
       <div role="status" className="mt-2 text-[10px] tracking-[0.2em] text-cyan-100/45">
         {!connected ? "Presentation unavailable" : !graph.available ? "Agent unavailable" : active ? "Thinking" : "Idle"}

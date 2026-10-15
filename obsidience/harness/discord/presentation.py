@@ -111,7 +111,10 @@ def snapshot():
     public_group = {'id': 'discord', 'role': 'discord', 'title': public_title(group['title'], 'agent'),
                     'subtitle': 'Discord Agent', 'root_ref': mapping[AGENT_REF],
                     'subjects': public_subjects, 'article_refs': sorted(set(mapping.values()))}
-    graph = {'available': True, 'nodes': public_nodes, 'links': links, 'group': public_group}
+    from .config import load_config
+    public_name = public_title(load_config().get('bot_name') or group['title'], 'agent')
+    graph = {'available': True, 'nodes': public_nodes, 'links': links, 'group': public_group,
+             'public_name': public_name}
     memory, memory_refs, memory_graph_id = memory_snapshot()
     graph['memory'] = memory
     graph['revision'] = opaque(repr(graph))
