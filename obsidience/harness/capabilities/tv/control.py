@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import atexit
 from collections import deque
+from contextlib import contextmanager
 import io
 import ipaddress
 import json
@@ -345,6 +346,18 @@ def _end_screensaver(row, cancel, limit=6.0):
             return state
         _wait(cancel, .3)
     raise ValueError('The TV screensaver did not end')
+
+
+@contextmanager
+def _phase(context, name):
+    """Add this block's wall time to the current play/open call's timings_ms[name]."""
+    started = time.monotonic()
+    try:
+        yield
+    finally:
+        timings = context.get('_tv_timings') if isinstance(context, dict) else None
+        if isinstance(timings, dict):
+            timings[name] = round(timings.get(name, 0) + (time.monotonic() - started) * 1000, 1)
 
 
 def _wait(cancel, seconds):
@@ -1088,20 +1101,43 @@ def _app_uid(row, cancel, package):
     return int(match[1]) if match else None
 
 
-def _wait_for_playback(row, cancel, package, before, limit=20.0, resend=None):
+def _session(row, cancel, package):
+    """The package's media session as (state, title), or None when it publishes none (read-only)."""
+    raw = _ask('state')
+    if raw is not None:
+        rows = [s for s in raw['sessions'] if s['package'] == package]
+    else:
+        rows = _sessions(adb.shell(row, cancel, adb.guard(row) + 'dumpsys media_session'), {package})
+    rows.sort(key=lambda s: s.get('active') is not True)
+    return (rows[0].get('state'), rows[0].get('title')) if rows else None
+
+
+_NO_SESSION = object()
+
+
+def _wait_for_playback(row, cancel, package, before, limit=20.0, resend=None, session_before=_NO_SESSION):
     """Wait until the opened app starts a new media player; return its id or None (read-only).
 
     Measured on this TV: Pluto shows a splash and a loading spinner for about
     ten seconds before live video, and a full video frame is too large to
     screenshot quickly over network ADB. A new started media player of the
     target app is the cheap, protected-video-safe sign that playback began.
+    An app that reuses its started player (the YouTube app kept one id across
+    videos, so the old wait ran out its limit) counts once its own media
+    session, read before the send as session_before, changes to playing.
     """
     uid = _app_uid(row, cancel, package)
     start, settled, restarted = time.monotonic(), None, False
     while uid is not None and time.monotonic() - start < limit:
-        for player, owner in _media_players(row, cancel).items():
+        players = _media_players(row, cancel)
+        for player, owner in players.items():
             if owner == uid and player not in before:
                 return player
+        mine = sorted(player for player, owner in players.items() if owner == uid)
+        if mine and session_before is not _NO_SESSION:
+            current = _session(row, cancel, package)
+            if current is not None and current[0] == 'playing' and current != session_before:
+                return mine[0]
         try:
             focus = _focus(row, cancel)
         except ValueError:  # No focused window during app transitions.
@@ -1156,6 +1192,11 @@ def _show_stream(row, cancel, context):
             return _stream_shown(_window(row, cancel)) and _stream_unobstructed() is not False
         except ValueError:  # No focused window during a transition.
             return False
+    with _phase(context, 'show_stream'):
+        return _bring_stream(row, cancel, context, shown)
+
+
+def _bring_stream(row, cancel, context, shown):
     if shown():
         return False
     host = _sunshine_host()
@@ -1163,7 +1204,8 @@ def _show_stream(row, cancel, context):
     # The stream size Moonlight asks for must fit the GPU the TV session runs on (the TV mode,
     # obsidience/tv/host/mode): nothing is touched when the size last set already fits.
     try:
-        subprocess.run([str(_TV_MODE), 'client'], stdin=subprocess.DEVNULL, capture_output=True, timeout=60)
+        with _phase(context, 'tv_mode'):
+            subprocess.run([str(_TV_MODE), 'client'], stdin=subprocess.DEVNULL, capture_output=True, timeout=60)
     except (OSError, subprocess.TimeoutExpired) as error:
         _agent.log.info('TV mode client check skipped: %s', type(error).__name__)
     started = adb.shell(row, cancel, adb.guard(row) + 'am start -n ' + MOONLIGHT + '/.ShortcutTrampoline --es UUID '
@@ -1322,7 +1364,8 @@ def _open_media(candidate_id, context, row, cancel, resume=False, season=False):
         raise ValueError('This season was already attempted in this turn; do not replay it')
     if season:
         from ...media.season import resolve
-        prepared = resolve(candidate_id, context)
+        with _phase(context, 'revalidate'):
+            prepared = resolve(candidate_id, context)
         binding = prepared['bindings'][0]
         record = context['_media_seasons'][candidate_id]
         if record.get('used'):
@@ -1336,7 +1379,8 @@ def _open_media(candidate_id, context, row, cancel, resume=False, season=False):
             return {'status': 'failed', 'delivery': 'not_dispatched', 'effect_applied': False,
                     'correction_allowed': True, 'failure': 'Select library content in this turn before opening it.'}
     catalogue = service.catalogue()
-    source = catalogue.revalidate(binding)
+    with _phase(context, 'revalidate'):
+        source = catalogue.revalidate(binding)
     start_seconds = None
     if season:
         start_seconds = 0 if prepared['mode'] == 'first' else prepared['resume_position']
@@ -1385,7 +1429,8 @@ def _open_media(candidate_id, context, row, cancel, resume=False, season=False):
         raise ValueError('The TV session did not select its existing player')
     title = binding.get('title') or 'Library item'
     options = {'queue': prepared['bindings'][1:]} if season else {}
-    result = _player.play_local(source, title, cancel, start_seconds=start_seconds, **options)
+    with _phase(context, 'player'):
+        result = _player.play_local(source, title, cancel, start_seconds=start_seconds, **options)
     expected = {key: source[key] for key in ('provider', 'root_id', 'revision',
                                             'catalogue_instance', 'item_id', 'media_source_id', 'source_revision')}
     if (result.get('playback') != 'playing_verified' or not result.get('generation')
@@ -1416,6 +1461,31 @@ def _open_media(candidate_id, context, row, cancel, resume=False, season=False):
                     'Physical picture and sound acceptance remain separate.'
                     + (' Only this first source is verified; the tuner owns the finite same-season sequence.'
                        if season else '')}
+
+
+def _play_library(prepared, context, row, cancel):
+    """play's Media server route: wake the TV once like the PC route, then the exact library open."""
+    try:
+        raw, _boot, _ad = _preamble(row, cancel, _POWER_READ, timeout=4)
+    except OSError as error:
+        if isinstance(error, InterruptedError):
+            raise
+        with _phase(context, 'wake'):
+            if row.get('mac'):
+                raw, _boot, _ad = _after_wake(row, cancel, _POWER_READ)
+            else:
+                _drop_offline(row)
+                adb.run(row, cancel, connect=True, timeout=4)
+                raw, _boot, _ad = _preamble(row, cancel, _POWER_READ)
+    if _parse_power(raw) != {'wakefulness': 'Awake', 'display': 'ON'}:
+        # The power key of `on`, sent once; the TV's own readback decides.
+        context['_tv_effect_uncertain'] = True
+        with _phase(context, 'wake'):
+            _end_screensaver(row, cancel, limit=8.0)
+        context['_tv_effect_uncertain'] = False
+    result = _open_media(prepared['id'], context, row, cancel, season=prepared['kind'] == 'season')
+    return {**result, 'action': 'play', 'route_kind': 'library',
+            'library': {key: value for key, value in prepared.items() if key not in ('status', 'id')}}
 
 
 def _stop_media(context, cancel):
@@ -1485,15 +1555,22 @@ def _vod(args, context, cancel):
 
 
 _LIVE_WORDS = {'news', 'weather', 'live', 'forecast', 'headlines', *_TOPICS}
+# Owner, 2026-10-15: play uses Pluto/YouTube only when the request says so; otherwise the Media server.
+_PROVIDER_WORDS = _LIVE_WORDS | {'channel', 'channels', 'youtube', 'pluto', 'livestream'}
+
+
+class _NoAutoPick(LookupError):
+    """Only live streams or unknown-length videos matched a request that did not ask for live content."""
 
 
 def _choose(args, context):
     """Deterministic content pick for play (read-only): (alias, link, title), chosen, alternatives.
 
-    A strong Pluto channel match first (the owner prefers Pluto live TV), else
-    YouTube's top result (its first live stream for news/weather). Weak channel
-    matches are discoverable with find, never an automatic substitute for content.
-    YouTube is not searched when Pluto already has a strong match.
+    A strong Pluto channel match first, else YouTube's top result (its first live
+    stream for news/weather). Weak channel matches are discoverable with find, never
+    an automatic substitute for content. YouTube is not searched when Pluto already
+    has a strong match. A YouTube result of live or unknown length is chosen only for
+    a live/news/weather request; otherwise the candidates return unopened.
     """
     query, app = args['query'], args.get('app')
     apps = _inventory()['apps']
@@ -1515,7 +1592,13 @@ def _choose(args, context):
     candidates = [candidate for _strong, candidate in order][:4]
     if not candidates:
         raise LookupError('No TV content matches this query' + (' (' + '; '.join(errors) + ')' if errors else ''))
-    chosen = candidates[0]
+    live = bool(_words(query) & _LIVE_WORDS)
+    chosen = next((candidate for candidate in candidates
+                   if live or candidate.get('duration') != 'live or unknown'), None)
+    if chosen is None:
+        _bind(candidates, context)
+        raise _NoAutoPick(candidates)
+    candidates = [chosen, *(candidate for candidate in candidates if candidate is not chosen)]
     link = chosen['url']
     _bind(candidates, context)
     return (chosen['app'], link, chosen['title']), chosen, candidates[1:]
@@ -1796,7 +1879,16 @@ def _record(args, result):
 
 
 def execute(args: dict, context: dict) -> dict:
-    result = _execute(args, context)
+    timed = isinstance(args, dict) and args.get('action') in ('play', 'open', 'open_season')
+    if timed:
+        context['_tv_timings'] = {}
+        started = time.monotonic()
+    try:
+        result = _execute(args, context)
+    finally:
+        timings = context.pop('_tv_timings', None) if timed else None
+    if timed and isinstance(result, dict):
+        result['timings_ms'] = {**timings, 'total': round((time.monotonic() - started) * 1000, 1)}
     if args.get('action') != 'find':
         _record(args, result)
     return result
@@ -1857,13 +1949,34 @@ def _execute(args, context):
         except (OSError, ValueError, KeyError, MediaUnavailable) as error:
             return {'status': 'failed', 'delivery': 'not_dispatched', 'effect_applied': False,
                     'correction_allowed': True, 'failure': str(error)}
+    library = None
     if action == 'play':
-        # Content resolution is read-only network work; it never holds the TV.
-        try:
-            (alias, link, title), chosen, alternatives = _choose({**args, 'query': args['query'].strip()}, context)
-        except (OSError, ValueError, LookupError) as error:
-            return {'status': 'failed', 'delivery': 'not_dispatched', 'effect_applied': False,
-                    'correction_allowed': True, 'failure': str(error)}
+        # Content resolution is network and Media server work; it never holds the TV.
+        query = args['query'].strip()
+        if 'app' not in args and not _words(query) & _PROVIDER_WORDS:
+            # A named movie or series plays from the owner's Media server; it never becomes
+            # a Pluto channel or YouTube clip (owner, 2026-10-15).
+            from ..media.title import prepare
+            with _phase(context, 'library'):
+                try:
+                    library = prepare(query, context)
+                except (OSError, ValueError) as error:
+                    library = {'status': 'failed', 'delivery': 'not_dispatched', 'effect_applied': False,
+                               'correction_allowed': True, 'route': 'library', 'failure': str(error)}
+            if library.get('status') != 'ready':
+                return {**library, 'action': 'play', 'query': query}
+        else:
+            try:
+                with _phase(context, 'choose'):
+                    (alias, link, title), chosen, alternatives = _choose({**args, 'query': query}, context)
+            except _NoAutoPick as error:
+                return {'status': 'failed', 'delivery': 'not_dispatched', 'effect_applied': False,
+                        'correction_allowed': True, 'candidates': error.args[0],
+                        'failure': 'Only live streams or videos of unknown length matched; none was opened '
+                                   'for a request that did not ask for live content. open one id if the owner wants it.'}
+            except (OSError, ValueError, LookupError) as error:
+                return {'status': 'failed', 'delivery': 'not_dispatched', 'effect_applied': False,
+                        'correction_allowed': True, 'failure': str(error)}
     cancel = context.get('_capability_cancel_event')
     while not _LOCK.acquire(timeout=.1):
         if cancel is not None and cancel.is_set():
@@ -1884,6 +1997,8 @@ def _execute(args, context):
             return _open_media(args['id'], context, row, cancel, season=True)
         if action == 'open' and str(args.get('id', '')).startswith('m'):
             return _open_media(args['id'], context, row, cancel, args.get('resume', False))
+        if library is not None:
+            return _play_library(library, context, row, cancel)
         attempted = context.setdefault('_tv_attempted', set())
         opening = action in ('open', 'play')
         extra = {'query': args['query'].strip(), 'chosen': chosen, 'alternatives': alternatives} if action == 'play' else {}
@@ -1917,7 +2032,8 @@ def _execute(args, context):
             # The same route for a YouTube video: the workstation's Android TV instance plays it (one
             # to two seconds) and the TV only shows it. Without the instance, or when it does not play
             # the video, the Fire OS app remains. Live streams stay with the TV's YouTube app.
-            carried = _android_video(context, cancel, token, attempted, link, start or 0)
+            with _phase(context, 'android'):
+                carried = _android_video(context, cancel, token, attempted, link, start or 0)
             if carried is not None:
                 (run, loaded), source = carried, 'android'
                 pc, started = (title, None), run is not None
@@ -1931,7 +2047,8 @@ def _execute(args, context):
             if loaded:
                 attempted.add(token)
                 context['_tv_effect_uncertain'] = True
-                started = _player.play({'provider': 'pluto', 'channel': ident}, title, cancel)
+                with _phase(context, 'tuner'):
+                    started = _player.play({'provider': 'pluto', 'channel': ident}, title, cancel)
                 context['_tv_effect_uncertain'] = False
                 if not started and (_player.state() or {}).get('playback') == 'failed':
                     # The tuner gave the channel up and plays nothing (its journal says why).
@@ -1992,7 +2109,8 @@ def _execute(args, context):
                     raise
                 if action in WAKES_SCREEN and row.get('mac'):
                     # Network standby: the TV's Wi-Fi answers ARP but not ADB. Wake it, then reach it again.
-                    tail, boot, ad = _after_wake(row, cancel, read)
+                    with _phase(context, 'wake'):
+                        tail, boot, ad = _after_wake(row, cancel, read)
                     woke = True
                 else:
                     # Reconnect only the transport and read again; never replay an input or restart the ADB server.
@@ -2032,7 +2150,8 @@ def _execute(args, context):
             if asleep:
                 # The power key of `on`, sent once; the TV's own readback decides.
                 context['_tv_effect_uncertain'] = True
-                state = _end_screensaver(row, cancel, limit=8.0)
+                with _phase(context, 'wake'):
+                    state = _end_screensaver(row, cancel, limit=8.0)
             sent = _show_stream(row, cancel, context)
             return _pc_opened(row, cancel, context, action, link, title, loaded or asleep or sent, state, extra, run)
         command, names = None, None
@@ -2076,6 +2195,7 @@ def _execute(args, context):
             command = ('am start -W ' + flags + '-a android.intent.action.VIEW -d '
                        + shlex.quote(target) + ' ' + package)
             before = set(_media_players(row, cancel))
+            session_before = _session(row, cancel, package)
             uid = _app_uid(row, cancel, package)
             if ((_OPENED.get(alias) or {}).get('link') == link and uid in _media_players(row, cancel).values()
                     and ' ' + package + '/' in _focus(row, cancel)):
@@ -2108,7 +2228,8 @@ def _execute(args, context):
         context.pop('_tv_observation', None)
         context['_tv_effect_uncertain'] = True
         delivery = 'uncertain'
-        how = _press(row, cancel, boot, names) if names else adb.shell(row, cancel, adb.guard(row) + command)
+        with _phase(context, 'dispatch'):
+            how = _press(row, cancel, boot, names) if names else adb.shell(row, cancel, adb.guard(row) + command)
         delivery = 'acknowledged'
         if action == 'key' and args['key'] in MEDIA_KEYS:
             context['_tv_effect_uncertain'] = False
@@ -2122,15 +2243,19 @@ def _execute(args, context):
             settle = alias in LINK_NEEDS_SETTLED_APP
             # Seen on screen: a cold-started Pluto lands on its On Demand home and
             # ignores the link; the same link sent to the running app plays.
-            playback = _wait_for_playback(row, cancel, row['apps'][alias], before,
-                                          limit=60.0 if settle else 35.0 if alias == AD_FREE_YOUTUBE else 20.0,
-                                          resend=command if settle else None)
+            with _phase(context, 'readback'):
+                playback = _wait_for_playback(row, cancel, row['apps'][alias], before,
+                                              limit=60.0 if settle else 35.0 if alias == AD_FREE_YOUTUBE else 20.0,
+                                              resend=command if settle else None, session_before=session_before)
             if playback is None and alias == AD_FREE_YOUTUBE:
                 alias = 'youtube'
                 before = set(_media_players(row, cancel))
+                session_before = _session(row, cancel, row['apps'][alias])
                 adb.shell(row, cancel, adb.guard(row) + 'am start -W -a android.intent.action.VIEW -d '
                           + shlex.quote(link) + ' ' + row['apps'][alias])
-                playback = _wait_for_playback(row, cancel, row['apps'][alias], before)
+                with _phase(context, 'fallback'):
+                    playback = _wait_for_playback(row, cancel, row['apps'][alias], before,
+                                                  session_before=session_before)
                 extra['fallback'] = 'SmartTube did not start this video; it opened in the official YouTube app.'
         if action in ('on', 'off'):
             deadline = time.monotonic() + 8

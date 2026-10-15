@@ -515,6 +515,75 @@ class JellyfinCatalogue:
         self._pin()
         return sorted(rows, key=lambda row: row['episode'])
 
+    def titles(self) -> list[dict]:
+        """Bounded Movie/Series inventory for named-title requests; GET only.
+
+        Episodes are excluded: their names are scraped metadata (Voyager's all read
+        "Star Trek Voyager"), so a series is found by its own Series item.
+        """
+        self._pin()
+        page = self._query(includeItemTypes='Movie,Series', fields='MediaSources,ProviderIds', limit=513)
+        items, total = page.get('Items'), page.get('TotalRecordCount')
+        if (not isinstance(items, list) or len(items) > 512
+                or type(total) is not int or total != len(items)):
+            raise MediaUnavailable('catalogue_title_inventory_limit')
+        rows = []
+        for item in items:
+            if not isinstance(item, dict) or item.get('Type') not in ('Movie', 'Series'):
+                raise MediaUnavailable('invalid_catalogue_response')
+            title = _text(item.get('Name'))
+            if not title:
+                continue
+            providers = item.get('ProviderIds') or {}
+            imdb = str(providers.get('Imdb') or '').lower() if isinstance(providers, dict) else ''
+            row = {'item_id': _id(item.get('Id')), 'type': item['Type'], 'title': title,
+                   'year': _number(item.get('ProductionYear')),
+                   'imdb': imdb if re.fullmatch(r'tt[0-9]{7,10}', imdb) else None}
+            if item['Type'] == 'Movie':
+                sources = item.get('MediaSources')
+                row['sources'] = []
+                for source in sources if isinstance(sources, list) and len(sources) <= 4 else []:
+                    source_id = source.get('Id') if isinstance(source, dict) else None
+                    try:
+                        self._source(item, source_id)
+                    except MediaUnavailable:
+                        continue
+                    row['sources'].append(source_id)
+            rows.append(row)
+        return rows
+
+    def series_progress(self, series_id: str) -> list[dict]:
+        """Numbered episodes of one Series with native per-user watch state; GET only."""
+        self._pin()
+        series_id = _id(series_id)
+        page = self._query(parentId=series_id, includeItemTypes='Episode', fields='ProviderIds',
+                           enableUserData='true', limit=2049)
+        items, total = page.get('Items'), page.get('TotalRecordCount')
+        if (not isinstance(items, list) or len(items) > 2048
+                or type(total) is not int or total != len(items)):
+            raise MediaUnavailable('catalogue_series_inventory_limit')
+        rows = []
+        for item in items:
+            if (not isinstance(item, dict) or item.get('Type') != 'Episode'
+                    or _id(item.get('SeriesId')) != series_id):
+                raise MediaUnavailable('catalogue_episode_identity_unverified')
+            season, episode = item.get('ParentIndexNumber'), item.get('IndexNumber')
+            if season in (None, 0):
+                continue  # Specials have no place in series order.
+            end = item.get('IndexNumberEnd')
+            end = episode if end is None else end
+            if (type(season) is not int or not 1 <= season <= 99 or type(episode) is not int
+                    or type(end) is not int or not 1 <= episode <= end <= 999):
+                raise MediaUnavailable('catalogue_episode_identity_unverified')
+            data = item.get('UserData')
+            if (not isinstance(data, dict) or type(data.get('Played')) is not bool
+                    or type(data.get('PlaybackPositionTicks')) is not int):
+                raise MediaUnavailable('catalogue_resume_unavailable')
+            rows.append({'season': season, 'episode': episode, 'episode_end': end,
+                         'played': data['Played'],
+                         'resume_position': data['PlaybackPositionTicks'] / 10000000})
+        return sorted(rows, key=lambda row: (row['season'], row['episode']))
+
     def resume(self, item_id: str) -> dict:
         """Stored per-user progress; never infer persistence from a player clock."""
         self._pin()
