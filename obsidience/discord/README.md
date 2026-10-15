@@ -205,3 +205,20 @@ and FFmpeg PCM resample probe can verify installed bindings without logging in,
 joining Discord, sending messages, using the microphone or playing desktop audio.
 No automated test suite is included. Actual Discord receive, DAVE, spoken reply,
 followup and media acceptance remain a bounded owner-authorized channel check.
+
+## Independent presentation
+
+`/shell/knowledge/?surface=discord` shows only this Agent: accepted Knowledge above
+its own Hindsight graph. Its bank is excluded from the Executive's normal Memory
+wall and picker, while explicit Agent management can still open it. Public graph
+output uses opaque identifiers, accepted Article labels and generic memory types;
+actual scoped operations drive highlighting. An empty bank is displayed as empty.
+The [local camera producer](camera/README.md) publishes this view as
+`Squanchbot Graph` for a normal Discord client to select.
+
+Discord's wake address accepts the canonical name and the narrowly observed ASR
+spellings `Squonge Bot` and `Squange Bot`. This applies only to the Discord stream;
+the desktop wake address stays unchanged. The first addressed member owns the
+current command and any invited follow-up; other members' audio is discarded
+until that ownership ends. Supplied-PCM validation establishes routing, not a
+human speaker's acoustic recognition or what listeners hear in Discord.

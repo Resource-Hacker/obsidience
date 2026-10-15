@@ -56,6 +56,24 @@ Adopted 2026-09-12 for Harness, Shell, UI and integrations (Article
   and licenses in `artifacts.lock.json`. Adopt a maintained framework when it makes the system better (one per
   concern, staged behind a switch with a rollback); the principles live in the Golden ontology.
 
+## Independent conversation surfaces
+
+An integration may bind a separately accepted Agent identity to its own native
+ADK conversations. Discord uses the Obsidience Discord Bot identity and exact
+guild/channel/member bindings; it shares execution and model owners while keeping
+its conversation history, direct Skills, scoped Knowledge and Hindsight bank
+separate from the Executive. External members do not inherit workstation-owner
+authority. Controller admission, completion verification and effect receipts stay
+in the same execution core.
+
+Scene membership is presentation metadata. The independent Discord Agent and its
+Memory are absent from the Executive scene and normal Memory wall, while remaining
+available for explicit management. Its dedicated camera surface stacks accepted
+Knowledge above its own unverified Hindsight projection. Real Agent/run and native
+bank events drive activity; camera output contains no private reasoning or raw
+transcripts. The local virtual camera is selected by a normal Discord client;
+the official bot transport carries audio.
+
 ## Article ontology
 
 Six types, through Open Knowledge Format v0.2 with the Obsidience profile:
