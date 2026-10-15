@@ -146,6 +146,17 @@ def _invalid_constant(_value: str):
     raise ValueError('invalid_json_constant')
 
 
+def _registration_name(candidate: dict) -> str:
+    name = re.sub(r'[^\w .()\[\]-]', '', unicodedata.normalize('NFKC', candidate['title']))
+    name = ' '.join(name.split()).strip(' .')[:160]
+    if not name:
+        raise MediaUnavailable('torbox_candidate_invalid')
+    year = candidate.get('year')
+    name += f' ({year})' if type(year) is int and 1880 <= year <= 2200 else ''
+    name += f' [imdbid-{candidate["imdb"]}]'
+    return name
+
+
 class TorBoxAPI:
     """Fixed-origin requests; credentials load only for an actual provider call."""
 
@@ -325,23 +336,30 @@ class TorBoxAPI:
                 'title': candidate['title'], 'registered_files': 1, 'already_present': existing,
                 'reconciled': reconciled, 'must_not_replay': True}
 
-    async def organize(self, registered: dict, content_type: str, cancel=None) -> dict:
+    async def organize(self, registered: dict, candidate: dict, cancel=None) -> dict:
         """Tag only this exact registered torrent for the matching native library."""
-        tag = 'obsidience movies' if content_type == 'movie' else 'obsidience tv'
+        tag = 'obsidience movies' if candidate['type'] == 'movie' else 'obsidience tv'
+        name = _registration_name(candidate)
         rows = await self.mylist(torrent_id=registered['torrent_id'], cancel=cancel)
         if len(rows) != 1 or rows[0]['hash'] != registered['hash']:
             raise MediaUnavailable('torbox_registration_changed')
         tags = rows[0]['tags']
-        if tag not in tags:
+        if tag not in tags or rows[0]['name'] != name:
             try:
                 await self._request('PUT', '/torrents/edittorrent',
-                    payload={'torrent_id': registered['torrent_id'], 'tags': tags + [tag]}, cancel=cancel)
+                    payload={'torrent_id': registered['torrent_id'], 'name': name,
+                             'tags': tags if tag in tags else tags + [tag]}, cancel=cancel)
             except MediaUnavailable:
                 pass  # An uncertain metadata write is reconciled, never resent.
-            rows = await self.mylist(torrent_id=registered['torrent_id'], cancel=cancel)
-            if len(rows) != 1 or rows[0]['hash'] != registered['hash'] or tag not in rows[0]['tags']:
-                raise MediaUnavailable('torbox_library_tag_unverified')
-        return {**registered, 'tag': tag}
+            for attempt in range(4):
+                rows = await self.mylist(torrent_id=registered['torrent_id'], cancel=cancel)
+                if (len(rows) == 1 and rows[0]['hash'] == registered['hash']
+                        and tag in rows[0]['tags'] and rows[0]['name'] == name):
+                    break
+                if attempt == 3:
+                    raise MediaUnavailable('torbox_library_tag_unverified')
+                await asyncio.sleep(.5)
+        return {**registered, 'name': name, 'tag': tag}
 
     async def register(self, candidate: dict, cancel=None) -> dict:
         """One cached-only POST; one read-only reconciliation; no write retries."""
@@ -370,13 +388,7 @@ class TorBoxAPI:
         imdb = candidate.get('imdb')
         if not isinstance(imdb, str) or not re.fullmatch(r'tt[0-9]{7,10}', imdb):
             raise MediaUnavailable('torbox_candidate_invalid')
-        name = re.sub(r'[^\w .()\[\]-]', '', unicodedata.normalize('NFKC', candidate['title']))
-        name = ' '.join(name.split()).strip(' .')[:160]
-        if not name:
-            raise MediaUnavailable('torbox_candidate_invalid')
-        year = candidate.get('year')
-        name += f' ({year})' if type(year) is int and 1880 <= year <= 2200 else ''
-        name += f' [imdbid-{imdb}]'
+        name = _registration_name(candidate)
         form = {'magnet': 'magnet:?xt=urn:btih:' + _normal_hash(candidate['hash']),
                 'seed': '3', 'allow_zip': 'false', 'as_queued': 'false',
                 'add_only_if_cached': 'true', 'name': name}

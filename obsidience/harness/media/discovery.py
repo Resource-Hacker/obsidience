@@ -401,11 +401,10 @@ async def candidates(metadata_id: str, *, season: int | None = None,
     credible_identity = provider == 'torrentio' or _release_matches_identity(top[3], metadata, require_year=True)
     recommend = not tied and adequate_quality and credible_identity
     output = []
+    pending = {}
     for rank, stream, info_hash, release, resolution, seeders, size, language, hdr, remux in scored[:32 if cached_provider else 8]:
-        if len(chosen) >= 32:
-            raise MediaUnavailable('media_acquisition_candidate_limit')
         candidate_id = 'a' + secrets.token_urlsafe(14).rstrip('=')
-        while candidate_id in chosen:
+        while candidate_id in chosen or candidate_id in pending:
             candidate_id = 'a' + secrets.token_urlsafe(14).rstrip('=')
         private = {'run_id': run_id, 'metadata_id': metadata_id, 'hash': info_hash.lower(),
                    'release_title': release, 'title': metadata['title'], 'type': metadata['type'],
@@ -416,7 +415,7 @@ async def candidates(metadata_id: str, *, season: int | None = None,
                    'quality_score': max(0, rank[1] * 100 + rank[2] * 20 + rank[3] * 10)}
         private.update(transport.binding())
         private['provider'] = provider
-        chosen[candidate_id] = private
+        pending[candidate_id] = private
         output.append({'candidate_id': candidate_id, 'title': metadata['title'],
                        'resolution': resolution,
                        'seeders': seeders, 'size_bytes': size,
@@ -424,11 +423,11 @@ async def candidates(metadata_id: str, *, season: int | None = None,
                        'recommended': False})
     if cached_provider and output:
         matches = await cached_provider.cache_matches(
-            [chosen[row['candidate_id']] for row in output], context.get('_capability_cancel_event'))
+            [pending[row['candidate_id']] for row in output], context.get('_capability_cancel_event'))
         from .tiramisu import _normal_hash
         cached_output = []
         for row in output:
-            private = chosen[row['candidate_id']]
+            private = pending[row['candidate_id']]
             match = matches.get(_normal_hash(private['hash']))
             if match:
                 private.update(match)
@@ -436,13 +435,16 @@ async def candidates(metadata_id: str, *, season: int | None = None,
                 row['cache_provider'] = 'torbox'
                 cached_output.append(row)
             else:
-                del chosen[row['candidate_id']]
+                del pending[row['candidate_id']]
         output = cached_output[:8]
         # Ranking remains quality-first among exact, currently cached files.
         recommend = bool(output) and output[0]['resolution'] is not None
         tied = (len(output) > 1 and all(output[0][key] == output[1][key]
                 for key in ('resolution', 'preferred_language_match', 'hdr', 'remux', 'size_bytes')))
         recommend = recommend and not tied
+    if len(chosen) + len(output) > 32:
+        raise MediaUnavailable('media_acquisition_candidate_limit')
+    chosen.update({row['candidate_id']: pending[row['candidate_id']] for row in output})
     if output:
         output[0]['recommended'] = recommend
     return {'status': 'completed', 'provider': provider, 'title': metadata['title'],

@@ -76,7 +76,7 @@ async def _refresh_catalogue(client: Tiramisu, candidate: dict, cancel) -> dict:
             from ...media.torbox_files import refresh
             config = load_config()
             registered = candidate['_context']['_media_registered_file']
-            registered = await client.organize(registered, candidate['type'], cancel)
+            registered = await client.organize(registered, candidate, cancel)
             work = asyncio.create_task(asyncio.to_thread(refresh, config, registered))
             try:
                 path = await asyncio.shield(work)
