@@ -3,8 +3,8 @@
 
 Moonlight sends the Fire TV remote as a gamepad and Sunshine's input stays disabled (its virtual
 devices are kernel devices, which the desktop would see), so the keys take another road. The TV
-agent (org.obsidience.tv, obsidience/tv/android) takes them from Moonlight while its stream is in
-front and a client asks for them, and pushes each press and release over its socket. This unit is
+agent (org.obsidience.tv, obsidience/tv/firetv-agent) takes them from Moonlight while its stream is
+in front and a client asks for them, and pushes each press and release over its socket. This unit is
 that client: it replays them through one Wayland virtual keyboard (zwp_virtual_keyboard_v1) in the
 TV compositor, as real evdev scancodes under the stock keymap, to whatever window that compositor
 focuses. The Android TV instance reads the scancode and ignores the keymap. No kernel input device

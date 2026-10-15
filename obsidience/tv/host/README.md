@@ -4,7 +4,22 @@ The television shows a session hosted on the workstation: content plays here and
 the Fire TV only displays it through Moonlight. Fire OS is the display client, not
 the place where channels load.
 
-## Services (user units, installed as copies in `~/.config/systemd/user`)
+This file is the current contract. The measurements behind it are in the installation's
+archive note `~/Notes/instruction-archive/obsidience-tv-host-history-20261015.md` and in the
+commit messages.
+
+| Path | Holds |
+| --- | --- |
+| `tv/host/` (this directory) | What the units run: `tuner.py`, `break-view`, `remote.py`, `voice.py`, `mode`, `show`, `tvpace.c`, the sway, Sunshine, Snapcast and PipeWire configuration, `modes/`, `android/` (the Android TV container) and the checks `input-check` and `flashcheck` |
+| `tv/systemd/` | The unit sources and the udev seat rule |
+| `tv/firetv-agent/` | The Fire TV agent `org.obsidience.tv` and its `build.sh` |
+
+## Services
+
+User units, installed as copies of `tv/systemd/` in `~/.config/systemd/user` and enabled
+(`obsidience-tv-mode@` is a template that GameMode starts). The units name files in this
+directory by absolute path, and a change to a unit source takes effect only once its copy is
+reinstalled (`scripts/deploy` does that for the player and the tuner).
 
 | Unit | Owns |
 | --- | --- |
@@ -15,9 +30,12 @@ the place where channels load.
 | `obsidience-tv-player.service` | `mpv --idle` in that compositor; JSON IPC at `$XDG_RUNTIME_DIR/obsidience-tv-player.sock`, used by the tuner only |
 | `obsidience-tv-tuner.service` | `tuner.py` (system Python with streamlink): the one owner of the player's IPC socket and of what plays; control socket `$XDG_RUNTIME_DIR/obsidience-tv/tuner.sock` |
 | `obsidience-tv-sunshine.service` | Sunshine (HEVC on the mode's GPU: VAAPI on the integrated GPU, or NVENC on the RTX 4080), connected only to that compositor and that audio server |
-| `obsidience-tv-remote.service` | `remote.py` (system Python with pywayland): the television's remote keys, typed into that compositor through a virtual keyboard (section below). Not installed or enabled yet |
-| `obsidience-tv-android.service` | Android TV in its own container (section below); its window is one more client of that compositor. Staged 2026-10-12, not installed or enabled yet |
+| `obsidience-tv-remote.service` | `remote.py` (system Python with pywayland): the television's remote keys, typed into that compositor through a virtual keyboard (section below) |
+| `obsidience-tv-android.service` | Android TV in its own container (section below); its window is one more client of that compositor |
+| `obsidience-tv-voice*.service` | The Executive's voice on the television (four units, section below) |
 | `obsidience-tv-mode@.service` | One run of `mode <1080p\|default>`, started by GameMode |
+
+`72-obsidience-tv-seat.rules` is installed as a copy in `/etc/udev/rules.d` (Boundaries).
 
 The session publishes its Wayland socket name in `$XDG_RUNTIME_DIR/obsidience-tv/wayland`
 (the player and Sunshine wait for it) and its control socket in `.../obsidience-tv/sway`
@@ -35,13 +53,10 @@ which GPU carries the TV session.
 | `1080p` (default) | Integrated GPU, VAAPI | 1920x1080, about 15 Mbit/s | Nothing else competes for that GPU the way the desktop and games compete for the RTX 4080 |
 | `4k` | RTX 4080, NVENC | 3840x2160, about 63 Mbit/s | Sharper; only as smooth as that card is free |
 
-Why 1080p is the default (measured on the television, 2026-10-12): on the RTX 4080 the
-stream is fine while the desktop is quiet (0.5% of refreshes skipped) and fell to 54 frames a
-second, 10-11% skipped, while the desktop played a video in the browser; a test compositor
-and encoder on that card had the same effect and once dropped the session. In the same
-minutes the integrated GPU, itself fully busy with another test, held 59.7 frames a second
-and 0.45% skipped. The integrated GPU cannot encode 3840x2160 at 60 frames a second (44
-against 135 at 1920x1080, with the side-panel screen recorders running).
+1080p is the default because on the RTX 4080 the stream stutters while the desktop or a game
+uses that card. The integrated GPU cannot encode 3840x2160 at 60 frames a second, so 4K needs
+the RTX 4080. A 30 fps stream at 3840x2160 is not a mode: it missed the panel's cadence on both
+GPUs.
 
 `modes/4k.env` and `modes/1080p.env` hold everything that differs (render node, sway
 configuration, compositor renderer, the player's Vulkan device and frame timing, Sunshine's
@@ -68,18 +83,6 @@ already fits. Moonlight then chooses its default bit rate for that size. A telev
 is off, unreachable or showing another app is left alone; `tv.control` runs `mode client`
 before it next starts the stream. A stream started by hand in between asks for the old size.
 
-A 30 fps stream at 3840x2160 was tried (owner's question, 2026-10-12: live channels are
-30 fps anyway) and is not a mode. On the integrated GPU that size saturates the GPU itself,
-not only its encoder: 27.9 frames a second reached the panel and 28% of them stayed for one
-or three refreshes instead of two. On the RTX 4080, with the desktop busy, every frame
-arrived (29.96) but 9.8% were off that two-refresh cadence, in bursts every 30-40 s: at 30
-frames a second each frame has to land in one particular pair of the panel's 60.07 refreshes.
-The 60 fps stream at 1920x1080 skipped 0.5-1% in the same conditions.
-
-A switch between modes takes 26-34 s on the television (about 10 s until the channel plays
-again on the other GPU, the rest is Moonlight's setting and reconnect); `mode reload`, with
-no change of size, about 15 s.
-
 ## The Executive's voice on the television
 
 Owner request, 2026-10-12: the television as a second speaker for the Executive's voice, in
@@ -97,9 +100,7 @@ On the television the Snapcast app (`de.badaix.snapcast` 0.29.0.2, sideloaded un
 finds the server by mDNS; its client runs as a foreground service and keeps playing while
 Moonlight is in front. Each client plays every chunk at the server's time plus the server's
 `buffer` (300 ms) and keeps correcting its clock, so the voice on this route starts 0.3 s
-later. Measured at the desk microphone: the television 46 ms behind the desk speakers,
-steady to a few ms, which the owner judged in step by ear; sound that starts after a long
-silence is not clipped.
+later.
 
 The client goes with the television's screen. It neither starts itself after the television
 restarts nor stops when it sleeps, so `tv.control` starts and stops it through the app's own
@@ -130,16 +131,10 @@ monitor of the physical speaker, which carries the voice whichever way it arrive
 A reply must not be lost to this. In step, `voice.py` compares, electrically, what goes
 into the chain with what the desk speakers receive: sound in and none out for 0.9 s puts the
 direct path back at once and restarts the server; a shorter sound (a chirp) that never came
-out restarts the server when the exchange ends. Seen 2026-10-12, twice: snapserver
-0.35.0 reading the sink through its own PipeWire input stopped producing chunks after
-running for a while (clients connected, stream "playing", every client "No chunks
-available") until it was restarted, which silenced the reply to "turn off the TV". Its pipe
-input replaced that. To check the path without a sound anyone hears, play one second of 90 Hz
-at -40 dBFS into `obsidience_tv_voice` and look for it on the desk speaker's monitor.
-
-Tried first and dropped: sending the voice through Sunshine's own audio stream and delaying
-the desk speakers by a fixed amount. That path's delay wandered between about 190 and 270 ms
-within minutes.
+out restarts the server when the exchange ends. The server reads a pipe, not its own PipeWire
+input, which stopped producing chunks after running a while. To check the path without a
+sound anyone hears, play one second of 90 Hz at -40 dBFS into `obsidience_tv_voice` and look
+for it on the desk speaker's monitor.
 
 ## Boundaries
 
@@ -153,18 +148,16 @@ within minutes.
   discards ("Too much pending audio data"). `audio/` sets one Opus frame (5 ms) per
   cycle. PipeWire falls back to `~/.config` when the directory named by
   `XDG_CONFIG_HOME` has no `pipewire/<name>.conf.d`, so both directories exist here.
-- 4K (2026-10-12): the session renders and encodes on the RTX 4080; the model GPU is
+- 4K: the session renders and encodes on the RTX 4080; the model GPU is
   never used. Four pins keep it there: the compositor's render node
   (`WLR_RENDER_DRM_DEVICE`, sway needs `--unsupported-gpu`), the player's Vulkan device
   UUID, Sunshine's `CUDA_VISIBLE_DEVICES` UUID and Sunshine's `adapter_name`. Without
   `adapter_name` Sunshine allocates its capture buffers on another card and every
   capture fails ("Frame capture failed"; the compositor logs "DMA-BUF format is
   external-only", or with the Vulkan renderer "can't be used with modifier LINEAR").
-  The iGPU cannot carry 4K: its encoder was at about 35% from the side-panel screen
-  recorders plus 17% for a 1080p60 stream. Rollback to the iGPU at 1080p: commit 6cb3438.
-- Player frame timing is chosen by measurement on the TV panel. On the RTX 4080
-  audio-clock timing (`--video-sync=audio`) skipped no refreshes where display-synced
-  timing skipped 0.1-0.4%; on the iGPU compositor it was the other way round.
+  The iGPU cannot carry 4K: its encoder is shared with the side-panel screen recorders.
+- Player frame timing is per mode, chosen by measurement on the TV panel
+  (`TV_VIDEO_SYNC` in `modes/`): audio-clock timing on the RTX 4080, display-synced on the iGPU.
 - Sunshine creates kernel input devices (libvirtualhid keyboard, mice, touchscreen, pen)
   even with input disabled. `72-obsidience-tv-seat.rules` (installed in
   `/etc/udev/rules.d`) parks them on seat `seat-obsidience-tv`, `/etc/keyd/default.conf`
@@ -178,7 +171,7 @@ within minutes.
 Moonlight sends the Fire TV remote as a gamepad (no Back, no Play/Pause), and Sunshine's input
 stays disabled. The keys take another road, which creates no kernel input device:
 
-1. The TV agent (`org.obsidience.tv`, version 2, `obsidience/tv/android`) asks Fire OS for key
+1. The TV agent (`org.obsidience.tv`, version 2, `obsidience/tv/firetv-agent`) asks Fire OS for key
    events only while a host client has asked for keys **and** Moonlight's stream activity
    (`com.limelight/.Game`) is in front. It then consumes a first press of Up, Down, Left, Right,
    Select, Back, Menu, Play/Pause, Rewind or Fast forward when the stream's own window has input
@@ -202,9 +195,7 @@ stays disabled. The keys take another road, which creates no kernel input device
 The keyboard stays while the television is off, on purpose. It is the seat's only keyboard, so
 when it comes or goes Android sees a hardware keyboard appear or vanish and restarts the activity
 in front; SmartTube's player then plays its last video again although it had been stopped, unseen
-and audible behind the channel. Until 2026-10-13 the keyboard existed only while the agent
-granted keys, so every time the television went off or on a stopped video resumed (once it played
-through the night). Restarting this unit alone still does that once: afterwards read
+and audible behind the channel. Restarting this unit alone still does that once: afterwards read
 `tv.control`'s state, or stop Android's player (`cmd media_session dispatch stop`).
 
 It fails closed: `remote.py` reads the compositor's socket name from
@@ -215,12 +206,7 @@ offers the virtual-keyboard global. The unit's environment names no compositor.
 The player ignores every key (`--input-default-bindings=no` in its unit): mpv's defaults would
 seek in a live stream, pause it or leave full screen. The break view already did the same.
 
-Measured 2026-10-12 against a private compositor and a stand-in for the agent: from the agent's
-push to the key at a client of the compositor 0.1 ms (median of 400 events, largest 0.5 ms);
-ten keys arrive as scancodes 103, 108, 105, 106, 28, 1, 127, 164, 168 and 208;
-`/proc/bus/input/devices` does not change. Not measured: the television's side (whether Fire OS
-hands these keys to the agent, and the time across ADB over Wi-Fi). `remote.py --debug` logs each
-key with the time it spent in the agent, on the way, and here.
+`remote.py --debug` logs each key with the time it spent in the agent, on the way, and here.
 
 Rollback: `systemctl --user disable --now obsidience-tv-remote` (the agent then takes no key);
 remove the unit copy. Agent version 1 again: uninstall `org.obsidience.tv` (a lower version does
@@ -246,26 +232,25 @@ line back (`{"ok": true, "state": {...}}`). The Harness does this through
   `reason`); also `title`, `video` size, `since`, and `provider`/`channel` for a channel.
   `playing` means the stream shows a picture, not that the picture is the intended one.
 
-A channel is resolved by streamlink's Pluto plugin inside the tuner (one warm session:
-measured 0.5-1.0 s from request to first picture, now and then 1.5-3.5 s when Pluto
-answers slowly or the session is fresh), muxed by its ffmpeg and written into a FIFO
-(`stream-N.fifo` beside the socket) that the player reads. A new play stops the previous
-picture at once and releases the previous stream beside its own start.
+A channel is resolved by streamlink's Pluto plugin inside the tuner (one warm session),
+muxed by its ffmpeg and written into a FIFO (`stream-N.fifo` beside the socket) that the
+player reads; mpv's own HLS reader cannot play Pluto across an ad break, and over streamlink's
+HTTP server mpv times out during the break. A new play stops the previous picture at once and
+releases the previous stream beside its own start.
 
 The plugin drops the advertisement segments, and the player plays the programme it still
 holds (up to about eight seconds). Once it has run dry and the plugin reports
 advertisements, the tuner draws a break card over the last frame (channel, "Commercial
 break", elapsed time) and reports `break`; the plugin can see the first advertisement a
 second or two after the player ran dry, which reads as `loading` until then. When the
-programme returns the player first buffers eight seconds (`cache-pause-wait`; resuming on
-the first segment stalled twice in the next minute), then plays, and the tuner removes the
-card and reports `playing`. A first picture waits for the same margin (about 0.1 s on an
-ordinary channel change). A channel tuned in during its break shows the card within a few
-seconds, over the empty screen, and its picture when the break ends. A stream that ends
-or fails is opened once more with a fresh session; if that fails too the state is
-`failed` and nothing loops. The journal (`journalctl --user -u obsidience-tv-tuner`) names
-titles and channel ids, state changes and when advertisements begin and end, never a
-stream address.
+programme returns the player first buffers eight seconds (`cache-pause-wait`), then plays,
+and the tuner removes the card and reports `playing`. A first picture waits for the same
+margin (about 0.1 s on an ordinary channel change). A channel tuned in during its break
+shows the card within a few seconds, over the empty screen, and its picture when the break
+ends. A stream that ends or fails is opened once more with a fresh session; if that fails
+too the state is `failed` and nothing loops. The journal (`journalctl --user -u
+obsidience-tv-tuner`) names titles and channel ids, state changes and when advertisements
+begin and end, never a stream address.
 
 With `--break-view PROGRAM` (the unit passes `break-view` from this directory) the tuner runs
 that program while playback is idle and for as long as each break lasts, with title and
@@ -284,12 +269,6 @@ this idle screen through the existing TV stream. The card still shows first
 content reaches the TV: whatever `DP-8` shows is what a break shows. The view is killed rather
 than asked to quit because a quitting player kept its window for a second.
 
-Measured on the television, 2026-10-12 (FOX Weather, about three minutes of advertisements
-every 12-17 minutes): the card showed 4.6 s after the advertisements began, the programme
-returned 4.8 s after they ended, and in the following two minutes video and audio each
-advanced 120.0 s with no stall. Through `tv.control` an idle player showed the channel
-1.0 s after the tuner got the request (3.7 s for the whole typed request).
-
 After a streamlink update, check what the tuner relies on beyond its public session,
 plugin and stream calls: the Pluto plugin taking a channel id in the page address,
 keeping its `app_version` per instance and accepting a new `url` on the same instance;
@@ -298,7 +277,7 @@ readers there) and reporting advertisements through `is_paused()`; and the muxer
 `pipes` (released on close, or a writer waits forever for an ffmpeg that is gone) and
 `process` (reaped on close).
 
-## Android TV instance (staged 2026-10-12)
+## Android TV instance
 
 TV apps run on the workstation, not on Fire OS: an unmodified Waydroid 1.6.3 with the
 WayDroid-ATV image (Android TV 16, LineageOS 23.0, build 20260403, no Google services) runs
@@ -331,56 +310,28 @@ same line in `state/waydroid_base.prop`):
 
 - `debug.ffmpeg-codec2.threads=4`. Every video decoder of this image is in its ffmpeg codec
   service, which announces an output delay of twice its thread count, by default one thread per
-  CPU: 64 frames on this 32-thread CPU. Android 16 then gives the decoder more than 64 buffer
-  slots, and the service's slot tables hold 64: it died on slot 64 (`SIGILL` from a failed CFI
-  check in `C2BufferQueueBlockPool::fetchFromIgbp_l`, 115 crashes out of 115 at that slot) within
-  a second of every 720p and 1080p start, hardware or software, and the player looped on
-  restarts. With 4 the delay is 8. Hardware decoding uses one thread anyway.
+  CPU: 64 frames on this 32-thread CPU. Android 16 then gives the decoder more buffer slots than
+  the service's slot tables hold (64), and it crashed within a second of every 720p and 1080p
+  start. With 4 the delay is 8. Hardware decoding uses one thread anyway.
 - `persist.waydroid.no_presentation=true`. A headless output is no clock: it reports a frame
-  as presented when the client commits it. Android's composer set its next vsync 16.7 ms after
-  that report, so each frame's own latency was added to the next one and Android composed about
-  51 frames a second (measured: of 12,036 frames a 1080p60 video queued in 200 s, SurfaceFlinger
-  replaced 1,925 before showing them, 16%; the player counted none as dropped). Without the
-  feedback its vsync runs free at 60 Hz.
+  as presented when the client commits it, and Android's composer then fell to about 51 frames
+  a second. Without the feedback its vsync runs free at 60 Hz.
 
-SmartTube's video preset is set to "1080p 60fps vp9" (player, HQ button, Video presets). Left on
-automatic it chose 2160p60 for a 1920x1080 display, which this GPU did not carry (85% of frames
-dropped; measured before the two properties, not again after).
+SmartTube's video preset is set to "1080p 60fps vp9" (player, HQ button, Video presets); on
+automatic it chose 2160p60 for a 1920x1080 display, which this GPU did not carry. Decoding is
+VA-API on the integrated GPU without a copy; `media.sf.hwaccel=0` selects software decoding in
+the same service.
 
-Video playback, measured 2026-10-12 on a private compositor like mode `1080p` (integrated GPU,
-GLES2, 1920x1080) while the live session ran on the same GPU and Sunshine encoded its stream there
-(integrated GPU 48-67% busy with the instance idle, 69-80% during a run; the instance's own
-picture was not encoded):
-
-| | 1080p60 VP9, 200 s | 1080p60 VP9, 200 s | 1080p30 H.264, 190 s |
-| --- | --- | --- | --- |
-| Frames the player dropped (its log) | 0 of 12,050 | 0 of 11,987 | 0 of 5,715 |
-| Frames SurfaceFlinger showed / replaced unseen | 12,043 / 0 | 11,994 / 0 | 5,712 / 0 |
-| New frames the compositor received | 12,039 (59.95 a second) | 11,986 (60.01) | 5,711 (29.98) |
-| Frames one refresh late | 12 (0.10%) | 0 | 12 (0.21%) |
-| CPU, whole instance | 15% of a core | 14% | 34% |
-| Memory | 2.1 GiB | 2.1 GiB | 2.1 GiB |
-
-Decoding is VA-API on the integrated GPU without a copy (`c2.ffmpeg.vp9.decoder`,
-`c2.ffmpeg.h264.decoder`; the decoder's process spent 30% of the time on the GPU's decode engine
-and 15% on its conversion to RGB). `media.sf.hwaccel=0` selects software decoding in the same
-service: no frame lost over 45 s of 1080p60, at 28% of a core for the decoder. From the link to a
-playing session: 0.8 s while SmartTube plays something else, 0.9-1.8 s with it in the background,
-1.8-2.1 s with it stopped. Sound reached the audio server without a gap. Pause and resume through
-`cmd media_session dispatch` took 25 ms and read back from the session.
-
-Android's low-memory killer reads the workstation's memory pressure, not its own: during one
-episode on the host (memory pressure `full avg10` 24%, 17 GiB written to swap by other programs)
-it killed 42 processes in 20 s, SmartTube in front among them. Not solved (`ro.lmk.*` is the
-place to look); playback simply ends and the launcher shows.
+Android's low-memory killer reads the workstation's memory pressure, not its own: under host
+memory pressure it can kill SmartTube in front. Not solved (`ro.lmk.*` is the place to look);
+playback simply ends and the launcher shows.
 
 Everything it owns is under `~/.local/share/obsidience-tv-android`: `dl/` and `images/` (the
 verified release archives and the two images, read-only in the container), `state/` (Waydroid
 configuration and Android's data), `apps/` (verified APKs) and `containers/` (Podman's store
 for this image). Podman is always called with `--root` that store, `--runroot
-/run/obsidience-tv-android/storage --tmpdir /run/obsidience-tv-android/libpod`: the root
-filesystem had no unallocated Btrfs space on 2026-10-12 and an image commit into the default
-store failed there.
+/run/obsidience-tv-android/storage --tmpdir /run/obsidience-tv-android/libpod` (an image commit
+into the default store on the root filesystem once failed for lack of Btrfs space).
 
 Rules:
 
@@ -401,34 +352,12 @@ Rules:
   window is then shown unscaled (a quarter of a 3840x2160 output).
 - Loop devices are host-wide: a running Android holds about 42 of them for its APEX images
   (TFT's does the same), which is why the entrypoint makes 256 loop nodes.
+- Keys through the compositor must be real evdev scancodes from a virtual keyboard that stays
+  connected (Waydroid forwards the scancode and ignores the keymap; Android adds its
+  `wayland_keyboard` only while the seat has a keyboard). `wtype` invents a keymap and sends
+  codes 1, 2, 3..., so its first key arrives as Escape, which Android reads as Back.
 
-Measured 2026-10-12 with private compositors configured like this session (launcher navigated
-at 8 keys a second; frame statistics from `dumpsys gfxinfo`):
-
-| Compositor | Android display | Frames over one refresh | Compositor CPU |
-| --- | --- | --- | --- |
-| RTX 4080, GLES2 (mode `4k`) | 3840x2160 | 30% (median frame 36 ms) | 27% of a core |
-| RTX 4080, GLES2 | 1920x1080 pinned, shown unscaled | 0% (5 ms) | 14% |
-| RTX 4080, Vulkan (`WLR_RENDERER=vulkan`) | 3840x2160 | 0% (5 ms) | 1% |
-| Integrated GPU, GLES2 | 3840x2160 | 0% (5 ms) | 0.4% |
-| Integrated GPU, GLES2, 1920x1080 output (mode `1080p`) | 1920x1080 | 0.1% (12 ms, with the live session also on that GPU) | 0.7% |
-
-Android renders on the integrated GPU and hands the compositor LINEAR dmabufs; the RTX 4080
-samples them without a copy (a test client sending 59 MB frames at 63 a second cost the
-compositor 3% of a core from either GPU). With Android's own 3840x2160 frames the GLES2
-compositor on the RTX 4080 spends its time inside the NVIDIA driver and Android misses
-refreshes; the cause is not isolated. Not measured: Sunshine capturing Android's frames.
-
-Other numbers: first start to `sys.boot_completed` 14 s, later starts 11-13 s, stop 1 s;
-SmartTube cold start 0.15 s; key to next frame 15 ms through the compositor and 63 ms by ADB;
-idle 1% of a core and 1.9 GiB (2.8 GiB at 3840x2160).
-
-Keys through the compositor must be real evdev scancodes from a virtual keyboard that stays
-connected (Waydroid forwards the scancode and ignores the keymap; Android adds its
-`wayland_keyboard` only while the seat has a keyboard). `wtype` invents a keymap and sends
-codes 1, 2, 3..., so its first key arrives as Escape, which Android reads as Back.
-
-Setting it up again from nothing (the staged copy already has all of this):
+Setting it up again from nothing (the installed copy already has all of this):
 
     D=~/.local/share/obsidience-tv-android; P="sudo podman --root $D/containers --runroot /run/obsidience-tv-android/storage --tmpdir /run/obsidience-tv-android/libpod"
     # images: release 20260403 of WayDroid-ATV/waydroid-androidtv-builds, digests in artifacts.lock.json
@@ -447,43 +376,37 @@ Starting a container on the bridge sets `net.ipv4.ip_forward=1` until reboot.
 
 Not yet checked: TFT running beside it (start TFT with this instance up; its payload must be
 `/sys/fs/cgroup/lxc.payload.waydroid` and its compatibility hook must attach), pacing on the
-television's panel (every number above is from the workstation's side of the stream), a video
-at the `4k` mode's 3840x2160 display, and the remote's keys in SmartTube.
+television's panel (every measurement so far is from the workstation's side of the stream), a
+video at the `4k` mode's 3840x2160 display, and the remote's keys in SmartTube.
 
 Rollback: `systemctl --user disable --now obsidience-tv-android`; `adb disconnect
 10.89.240.2:5555`; `sudo podman network rm obsidience-tv`; the ufw route rule if it was added;
 `sudo rm -rf ~/.local/share/obsidience-tv-android /run/obsidience-tv-android`. No host package
 was installed for it.
 
-
 ## Television side
 
 Moonlight 12.2 (`com.limelight`), paired with this host. Settings chosen for
 television: 4K, 60 FPS, 80 Mbps (about 63 Mbps of video), frame pacing "Prefer
-smoothest video", connection warnings off. "Balanced" pacing was measured worse
-(1.6% skipped refreshes against 0.5%). `am start -n com.limelight/.ShortcutTrampoline --es UUID
+smoothest video", connection warnings off. `am start -n com.limelight/.ShortcutTrampoline --es UUID
 <host uniqueid> --es Name Obsidience` opens the host's app list; one select starts
 "Obsidience TV"; with `--es AppName "Obsidience TV"` it starts the app directly. When
 the host restarts, Moonlight shows "Connection Terminated" and must be started again.
 Firewall: the TV's address only, tcp 47984, 47989, 48010 and
 udp 47998-48000, 48002, 48010.
 
-## Known limits (measured 2026-10-12)
+## Known limits
 
 - The television cannot show a 60 fps stream without repeats: its panel refreshes at
   60.071 Hz (SurfaceFlinger's measured period, 16.647 ms; the mode is advertised as
   60.000004), so about once in 14 s a refresh has no new frame, whatever the host does.
   That floor is 0.12% of refreshes; 30 fps programmes meet the same one on any player.
-- Sunshine sends each frame the moment its encode finishes, 3-30 ms after the capture
-  and different for every frame (a shared GPU; `sudo python3 framesniff.py IFACE SECONDS`
-  reads its outgoing packets). Left alone, Moonlight's "smoothest" pacing showed that as
-  minutes without a skipped refresh and then about 20 s with 10-18 skipped a second,
-  every 5-6 minutes (0.6-0.8% overall). `tvpace.c` is preloaded into Sunshine by its
-  unit and holds the first packet of each frame until the frame's slot on an even 60 fps
-  grid, placed just behind the slowest recent frame: video leaves about 20-35 ms later,
-  sound does not. With it the television skipped 1-5 refreshes at each 14 s crossing and
-  had no long burst (0.4-0.5% overall, 13 minutes). It holds only frames of a steady
-  60 fps stream and passes everything else through; once a minute the journal says how
+- Sunshine sends each frame the moment its encode finishes, a different 3-30 ms after the
+  capture for every frame, which Moonlight's "smoothest" pacing shows as bursts of skipped
+  refreshes. `tvpace.c` is preloaded into Sunshine by its unit and holds the first packet of
+  each frame until the frame's slot on an even 60 fps grid, placed just behind the slowest
+  recent frame: video leaves about 20-35 ms later, sound does not. It holds only frames of a
+  steady 60 fps stream and passes everything else through; once a minute the journal says how
   many frames missed their slot (`tvpace: ... late`). The dynamic loader starts Sunshine
   because glibc ignores `LD_PRELOAD` for a program with file capabilities; Sunshine then
   runs without them, which Wayland capture does not need. The unit builds the library
@@ -492,21 +415,12 @@ udp 47998-48000, 48002, 48010.
   counts frames.
 - A break view's start and end each cost the stream about 20 frames (0.4 s) while the
   second player's window appears or goes.
+- In mode `4k` the GLES2 compositor on the RTX 4080 misses refreshes with the Android
+  instance's own 3840x2160 frames; the cause is not isolated.
 - Do not raise the output's refresh rate to even the captures: at 120-1000 Hz the player's
-  pictures are sampled badly (with 30 fps video 13-40% of the pictures stayed on screen for
-  one or three stream frames instead of two, against 4-8% at 60 Hz, measured on a private
-  copy of this stack), and Sunshine's portal capture halves 60 fps content. Details of
-  those measurements: commit message history and `AGENTS.local.md`.
+  pictures are sampled badly, and Sunshine's portal capture halves 60 fps content.
 - wlroots' headless output re-arms a whole-millisecond frame timer after each commit, so
   a "60 Hz" output is not a 60.00 Hz clock (clients estimate 62-70 Hz).
-- History, solved by the tuner: FFmpeg's HLS reader (mpv's) cannot play Pluto across an
-  ad break. Pluto serves video and audio as separate playlists and marks the break with
-  `#EXT-X-DISCONTINUITY`, which FFmpeg skips; it then reads one playlist only and the
-  player starves (no recovery in a 15-minute reproduction). streamlink's Pluto plugin
-  muxes the two, drops the ad segments and resumes at the next content frame. The player
-  is fed through a FIFO because over streamlink's HTTP server mpv times out during the
-  break. Pluto's v1 stitcher path and the guide's `stitched.urls` play a "no longer
-  available on this device" slate.
 
 ## Checking smoothness
 
@@ -516,9 +430,8 @@ interval should be one refresh), and Moonlight's logcat shows discarded audio.
 
 Black or half-drawn frames do not show in refresh timing. `flashcheck ADB_SERIAL [SECONDS]`
 records the television's own screen and counts frames that are suddenly dark between two
-bright ones. With the compositor's Vulkan renderer on the RTX 4080 it found 5 in 90 s (frames
-black above a tear line: Sunshine read its capture buffer before the compositor had finished
-drawing it); with the GLES2 renderer none in 170 s. The GLES2 renderer is the setting.
+bright ones. The compositor's renderer is GLES2 (`TV_RENDERER`): with Vulkan on the RTX 4080
+Sunshine captured half-drawn frames, black above a tear line.
 
 ## Optional Obsidience Media destination
 

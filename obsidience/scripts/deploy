@@ -75,9 +75,9 @@ def targets(changed: list[str]) -> list[str]:
         owners.append("shell")
     if any(p.startswith("obsidience/ui/") for p in changed):
         owners.append("ui")
-    if "obsidience/tv/host/obsidience-tv-player.service" in changed:
+    if "obsidience/tv/systemd/obsidience-tv-player.service" in changed:
         owners.append("tv-player")
-    if (any(p in {"obsidience/tv/host/tuner.py", "obsidience/tv/host/break-view", "obsidience/tv/host/obsidience-tv-tuner.service",
+    if (any(p in {"obsidience/tv/host/tuner.py", "obsidience/tv/host/break-view", "obsidience/tv/systemd/obsidience-tv-tuner.service",
                   "obsidience/harness/media/config.py", "obsidience/harness/media/sources.py",
                   "obsidience/harness/media/source_probe.py", "obsidience/harness/media/torbox_files.py",
                   "obsidience/harness/media/torbox.py", "obsidience/harness/media/progress.py",
@@ -186,7 +186,7 @@ def require_tv_idle() -> None:
 def install_tv_unit(name: str) -> None:
     destination = pathlib.Path.home() / ".config/systemd/user" / name
     destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(ROOT / "obsidience/tv/host" / name, destination)
+    shutil.copy2(ROOT / "obsidience/tv/systemd" / name, destination)
     subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
 
 
