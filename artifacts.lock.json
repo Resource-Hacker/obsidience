@@ -987,7 +987,7 @@
           "license": "LicenseRef-Microsoft-Edge"
         }
       },
-      "integration": "System dependencies invoked without redistribution. A dedicated ephemeral headless Edge page uses CPU SwiftShader to render only the standalone Discord graph, CDP viewport frames feed FFmpeg and v4l2loopback. No desktop capture, audio, existing profile, general trace or bot-account video."
+      "integration": "System dependencies invoked without redistribution. A dedicated ephemeral headless Edge page uses AMD-only ANGLE/Vulkan to render the standalone Discord Knowledge and Hindsight graphs, CDP viewport frames feed FFmpeg and v4l2loopback. No desktop capture, audio, existing profile, general trace or bot-account video."
     }
   }
 }

@@ -15,13 +15,26 @@ and `discordGraphData=available` markers plus a canvas, and rechecks them before
 each screenshot. The markers are presentation/data readiness, not proof of an
 Agent turn or of what Discord viewers actually receive.
 
-SwiftShader renders WebGL on the CPU. The unit additionally makes DRI and NVIDIA
-device nodes inaccessible, so it cannot allocate graph VRAM on the RTX 4000 or
-compete for either NVIDIA GPU. FFmpeg decodes/converts images on the CPU. This
-keeps the user's graph content and rendering settings; actual 15-fps throughput
-and CPU cost still require deployment measurement. No GPU/renderer was started
-while preparing this component. It does not replace or restart the native graph
-stage.
+Edge renders WebGL through ANGLE/Vulkan on the AMD iGPU selected by the installation.
+The unit masks the host `/dev/dri` tree with a private temporary filesystem and
+binds only its selected AMD card and render node; NVIDIA device nodes remain
+inaccessible. The launcher verifies both DRI nodes against their actual sysfs PCI
+identity and AMD vendor before starting Edge. The private unit drop-in sets
+`OBSIDIENCE_DISCORD_CAMERA_GPU_PCI`, `OBSIDIENCE_DISCORD_CAMERA_GPU_NODES`
+(card then render-node basename), and matching `BindPaths`. A changed device mapping fails
+closed and requires updating the unit and launcher together. Direct launches
+outside this device namespace are refused.
+
+The browser loads only the installed Radeon Vulkan ICD, selects that PCI device,
+and disables software rasterizer fallback. After the graph mounts, the launcher
+checks its existing WebGL2 renderer and requires AMD/Radeon/RADV, rejecting NVIDIA,
+SwiftShader and llvmpipe. It emits only a fixed `renderer_verified` receipt, never
+raw renderer/page data. Hardware failure stops the producer; it does not silently
+switch back to an unbounded software renderer. Chromium's sandbox remains enabled.
+FFmpeg decodes/converts images on the CPU with one decoder thread, one filter
+thread and one rawvideo encoder thread. `TasksMax=192`, picture settings and 15-fps
+cadence stay unchanged. Actual throughput and resource cost require deployment
+measurement; no renderer was started while preparing this change.
 
 The default camera format is 1280x720, 15 fps, YUV420P; `--size 1920x1080` selects
 1080p at the same cadence. Only the latest captured JPEG is retained. A slow camera
@@ -33,8 +46,9 @@ absent producer becomes a blank camera instead of retaining an old graph frame.
 
 ## Dependencies
 
-Use the installed Microsoft Edge browser with bundled SwiftShader, Python with
-`websockets`, FFmpeg and a matching-kernel `v4l2loopback` module. `v4l2-ctl` from
+Use the installed Microsoft Edge browser, Mesa `vulkan-radeon` providing
+`/usr/share/vulkan/icd.d/radeon_icd.json`, Python with `websockets`, FFmpeg and a
+matching-kernel `v4l2loopback` module. `v4l2-ctl` from
 v4l-utils configures and verifies the camera. The producer redistributes none
 of those system binaries and changes no global browser settings.
 
@@ -78,15 +92,22 @@ preparation. To stop, use `systemctl --user stop obsidience-discord-camera.servi
 Unloading/removing the dedicated loopback device requires closing its producer
 and every consuming application first; never unload another camera's module.
 
-After deployment, verify real V4L2 format/frame flow, per-process software-renderer
-ownership and measured capture cadence, then let the owner select/preview the
+After deployment, verify real V4L2 format/frame flow, AMD-only device visibility
+and open GPU descriptors in the service namespace, task usage and measured capture
+cadence, then let the owner select/preview the
 camera in Discord. Installation status and a loaded HTML page cannot establish
 those outcomes.
 
 ## Upstream contracts
 
-- [Chromium SwiftShader](https://chromium.googlesource.com/chromium/src/+/main/docs/gpu/swiftshader.md)
-  documents CPU rendering and the explicit trusted-page WebGL opt-in flags.
+- [Chromium headless GPU hardware](https://chromium.googlesource.com/chromium/src/+/main/docs/gpu/using-gpu-hardware-in-headless-chrome.md)
+  documents `--enable-gpu` and ANGLE Vulkan for headless Linux without X11.
+- [Chrome headless Vulkan](https://developer.chrome.com/blog/supercharge-web-ai-testing)
+  documents Vulkan enablement and the surface-free rendering flag.
+- [Mesa device selection](https://docs.mesa3d.org/envvars.html#dri-prime)
+  documents PCI selection and the Vulkan `!` restriction to the selected device.
+- [systemd filesystem namespaces](https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html#BindPaths=)
+  documents private bind mounts beneath a `TemporaryFileSystem=...:ro` mount.
 - [Microsoft Edge DevTools Protocol](https://learn.microsoft.com/en-us/microsoft-edge/devtools/protocol/)
   documents custom tooling clients; Edge matches Chromium's protocol.
 - [Page.captureScreenshot](https://chromedevtools.github.io/devtools-protocol/tot/Page/#method-captureScreenshot)
@@ -103,3 +124,14 @@ numeric browser exit code where available. Browser profiles, configuration and
 cache belong to the same ephemeral runtime directory: Edge Crashpad uses
 `XDG_CONFIG_HOME` even when `--user-data-dir` is supplied, so a read-only home
 requires this explicit private XDG location. No browser sandbox is disabled.
+
+The parent should perform one bounded native-service start after integration,
+inspect `/proc/<camera-main-pid>/root/dev/dri` for exactly the two configured AMD nodes,
+and inspect the service descendants' open GPU descriptors for those AMD devices
+only. Require `renderer_verified` with `amd_vulkan`, then `camera_ready` and real
+V4L2 frame flow at the selected size/15 fps. Sample the service's `TasksCurrent`,
+`TasksMax`, CPU delta and cgroup `pids.events` during that same bounded run;
+`pids.events:max` establishes whether the old EAGAIN was a task-limit denial.
+Do not infer frame delivery or physical viewer acceptance from those startup
+receipts. If hardware initialization fails, retain the fixed failure code and
+stop; do not raise task limits or enable an implicit software fallback.

@@ -28,6 +28,20 @@ DEVICE = Path('/dev/video42')
 LABEL = 'Squanchbot Graph'
 MAX_JPEG = 2 * 1024 * 1024
 FPS = 15
+AMD_PCI = os.environ.get('OBSIDIENCE_DISCORD_CAMERA_GPU_PCI', '')
+AMD_NODES = tuple(os.environ.get('OBSIDIENCE_DISCORD_CAMERA_GPU_NODES', '').split())
+RADEON_ICD = '/usr/share/vulkan/icd.d/radeon_icd.json'
+# Inspect the existing graph contexts; do not create a second renderer/context.
+AMD_RENDERING = r'''(() => {
+  const contexts = [...document.querySelectorAll('canvas')]
+    .map(canvas => canvas.getContext('webgl2')).filter(Boolean);
+  return contexts.length > 0 && contexts.every(gl => {
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    const renderer = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : '';
+    return /AMD|Radeon|RADV/i.test(renderer)
+      && !/NVIDIA|SwiftShader|llvmpipe|softpipe/i.test(renderer);
+  });
+})()'''
 
 
 class CameraFailure(RuntimeError):
@@ -74,7 +88,7 @@ class BrowserDiagnostics:
             (b'No usable sandbox', 'browser_sandbox_unavailable'),
             (b'SUID sandbox helper binary', 'browser_sandbox_unavailable'),
             (b'Failed to move to new namespace', 'browser_namespace_unavailable'),
-            (b'GPU process isn\'t usable', 'browser_software_renderer_unavailable'),
+            (b'GPU process isn\'t usable', 'browser_gpu_renderer_unavailable'),
             (b'Permission denied', 'browser_permission_denied'),
         )
         tail = b''
@@ -171,6 +185,30 @@ class CDP:
             await self.reader
 
 
+def amd_device():
+    # The unit hides the host DRI tree and binds only these two AMD nodes.
+    # Fail closed on numbering drift or a direct launch outside that namespace.
+    if (not re.fullmatch(r'[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]', AMD_PCI)
+            or len(AMD_NODES) != 2 or not re.fullmatch(r'card[0-9]+', AMD_NODES[0])
+            or not re.fullmatch(r'renderD[0-9]+', AMD_NODES[1])):
+        raise CameraFailure('amd_installation_identity_required')
+    visible = {node.name for node in Path('/dev/dri').iterdir()}
+    if visible != set(AMD_NODES):
+        raise CameraFailure('amd_only_device_namespace_required')
+    for name in AMD_NODES:
+        node = Path('/dev/dri') / name
+        info = node.stat()
+        drm = Path('/sys/class/drm') / name
+        device = (drm / 'device').resolve()
+        expected_dev = tuple(map(int, (drm / 'dev').read_text().strip().split(':')))
+        if (not stat.S_ISCHR(info.st_mode) or os.major(info.st_rdev) != 226
+                or (os.major(info.st_rdev), os.minor(info.st_rdev)) != expected_dev
+                or device.name != AMD_PCI or (device / 'vendor').read_text().strip() != '0x1002'):
+            raise CameraFailure('amd_device_identity_mismatch')
+    if not Path(RADEON_ICD).is_file():
+        raise CameraFailure('amd_vulkan_driver_missing')
+
+
 def camera_device():
     info = DEVICE.stat()
     name = (Path('/sys/class/video4linux') / DEVICE.name / 'name').read_text().strip()
@@ -229,6 +267,7 @@ async def terminate_browser(process):
 
 async def produce(size):
     camera_device()
+    amd_device()
     width, height = map(int, size.split('x'))
     runtime = Path(f'/run/user/{os.getuid()}')
     info = runtime.stat()
@@ -241,11 +280,16 @@ async def produce(size):
     environment = dict(os.environ)
     for key in ('DISPLAY', 'WAYLAND_DISPLAY', 'CREDENTIALS_DIRECTORY', 'NODE_OPTIONS',
                 'CUDA_VISIBLE_DEVICES', '__NV_PRIME_RENDER_OFFLOAD', '__GLX_VENDOR_LIBRARY_NAME',
-                'NOTIFY_SOCKET', 'WATCHDOG_PID', 'WATCHDOG_USEC'):
+                'NOTIFY_SOCKET', 'WATCHDOG_PID', 'WATCHDOG_USEC',
+                'LIBGL_ALWAYS_SOFTWARE', 'GALLIUM_DRIVER', 'VK_INSTANCE_LAYERS',
+                'VK_ADD_DRIVER_FILES', 'VK_LOADER_DRIVERS_SELECT', 'VK_LOADER_DRIVERS_DISABLE'):
         environment.pop(key, None)
     environment['CUDA_VISIBLE_DEVICES'] = ''
-    environment['LIBGL_ALWAYS_SOFTWARE'] = '1'
-    environment['GALLIUM_DRIVER'] = 'llvmpipe'
+    # Driver selection plus the unit's device namespace exclude both NVIDIA GPUs.
+    environment['VK_DRIVER_FILES'] = RADEON_ICD
+    environment['VK_ICD_FILENAMES'] = RADEON_ICD
+    environment['DRI_PRIME'] = 'pci-' + AMD_PCI.replace(':', '_').replace('.', '_') + '!'
+    environment['__EGL_VENDOR_LIBRARY_FILENAMES'] = '/usr/share/glvnd/egl_vendor.d/50_mesa.json'
     # Best-effort deletion must never replace the actual capture/encoder
     # failure with an ENOTEMPTY error from asynchronous browser teardown.
     with tempfile.TemporaryDirectory(prefix='discord-graph-camera-', dir=runtime, ignore_cleanup_errors=True) as directory:
@@ -256,8 +300,9 @@ async def produce(size):
                 '/opt/microsoft/msedge/msedge', '--headless=new', '--no-first-run',
                 '--no-default-browser-check', '--disable-extensions', '--disable-sync',
                 '--disable-background-networking', '--disable-component-update',
-                '--disable-gpu', '--use-gl=angle', '--use-angle=swiftshader-webgl',
-                '--enable-unsafe-swiftshader', '--disable-vulkan', '--mute-audio',
+                '--enable-gpu', '--use-gl=angle', '--use-angle=vulkan',
+                '--enable-features=Vulkan', '--use-vulkan=native', '--disable-vulkan-surface',
+                '--disable-software-rasterizer', '--mute-audio',
                 '--disable-background-timer-throttling', '--disable-renderer-backgrounding',
                 '--force-device-scale-factor=1', f'--window-size={width},{height}',
                 '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=0',
@@ -297,6 +342,13 @@ async def produce(size):
                 if time.monotonic() >= deadline:
                     raise CameraFailure('discord_graph_not_ready')
                 await asyncio.sleep(0.1)
+            rendering = await cdp.call('Runtime.evaluate', {
+                'expression': AMD_RENDERING, 'returnByValue': True,
+            })
+            if rendering.get('result', {}).get('value') is not True:
+                raise CameraFailure('amd_graph_renderer_required')
+            print(json.dumps({'component': 'discord_graph_camera', 'state': 'renderer_verified',
+                              'rendering': 'amd_vulkan', 'audio': False}), flush=True)
             encoder = await asyncio.create_subprocess_exec(
                 '/usr/bin/ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error',
                 # Codec, image format and cadence are known. Do not wait for
@@ -304,7 +356,7 @@ async def produce(size):
                 '-probesize', '32', '-analyzeduration', '1', '-fpsprobesize', '0',
                 '-threads', '1', '-filter_threads', '1', '-f', 'image2pipe', '-vcodec', 'mjpeg',
                 '-framerate', str(FPS), '-i', 'pipe:0', '-an', '-vf', f'scale={width}:{height}',
-                '-pix_fmt', 'yuv420p', '-vcodec', 'rawvideo', '-r', str(FPS), '-f', 'v4l2', str(DEVICE),
+                '-pix_fmt', 'yuv420p', '-vcodec', 'rawvideo', '-threads', '1', '-r', str(FPS), '-f', 'v4l2', str(DEVICE),
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL, env=environment,
             )
@@ -356,7 +408,7 @@ async def produce(size):
                         if await camera_ready(width, height):
                             notify_ready()
                             print(json.dumps({'component': 'discord_graph_camera', 'state': 'camera_ready',
-                                              'size': size, 'fps': FPS, 'rendering': 'software', 'audio': False,
+                                              'size': size, 'fps': FPS, 'rendering': 'amd_vulkan', 'audio': False,
                                               'verification': 'v4l2_format_and_capture_capability'}), flush=True)
                             announced = True
                         elif time.monotonic() >= ready_deadline:

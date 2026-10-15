@@ -12,11 +12,12 @@ WorkingDirectory=%h/Projects/obsidience
 ExecStartPre=/usr/bin/v4l2-ctl --device=/dev/video42 --set-ctrl=timeout=1000
 ExecStart=/usr/bin/python %h/Projects/obsidience/obsidience/discord/camera/graph-camera.py --size 1280x720
 UMask=0077
-Environment=LIBGL_ALWAYS_SOFTWARE=1
-Environment=GALLIUM_DRIVER=llvmpipe
 Environment=CUDA_VISIBLE_DEVICES=
 UnsetEnvironment=DISPLAY WAYLAND_DISPLAY CREDENTIALS_DIRECTORY
-InaccessiblePaths=-/dev/dri -/dev/nvidia0 -/dev/nvidia1 -/dev/nvidia2 -/dev/nvidiactl -/dev/nvidia-modeset -/dev/nvidia-uvm -/dev/nvidia-uvm-tools
+# Expose only the verified AMD iGPU; never either NVIDIA GPU.
+TemporaryFileSystem=/dev/dri:ro
+# Installation drop-in supplies exact AMD BindPaths and GPU identity variables.
+InaccessiblePaths=-/dev/nvidia0 -/dev/nvidia1 -/dev/nvidia2 -/dev/nvidiactl -/dev/nvidia-modeset -/dev/nvidia-uvm -/dev/nvidia-uvm-tools
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
