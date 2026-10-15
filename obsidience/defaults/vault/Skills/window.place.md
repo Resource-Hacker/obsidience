@@ -17,8 +17,8 @@ Use `window.place` to move one existing native application or module pane to one
 declared Surface and optional workspace tile.
 
 - Pass exactly `{"target": {"kind": "application|pane", "name": str,
-  "surface": "samsung|usb-c|dp-4" optional}, "destination": {"surface":
-  "samsung|usb-c|dp-4", "tile": {"left": int, "top": int, "right": int,
+  "surface": "<configured Surface id>" optional}, "destination": {"surface":
+  "<configured Surface id>", "tile": {"left": int, "top": int, "right": int,
   "bottom": int} optional}}`. Take `kind` and `name` from the current Shell
   Scene or reuse an observation's exact target object. For `application`, use
   the canonical application ID, such as `teamfight_tactics`, or exact current

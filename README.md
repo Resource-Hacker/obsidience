@@ -178,8 +178,9 @@ changes require only the Harness reload; graph changes require rebuilding and
 reloading the graph presenter. Preserve the secure locker and compositor.
 Instruction-only changes need no restart.
 
-Validate the affected behavior directly. Preserve existing tests, use a narrow
-existing check when needed, and do not add tests or run broad suites unless asked.
+Validate the affected behavior directly with the needed build, logs and API/UI
+observations. The development build carries no automated test suite; add tests
+only when the owner asks.
 
 ## How it works
 
@@ -209,6 +210,8 @@ the shared React/Three.js knowledge graph.
 ## Documentation
 
 - [DESIGN.md](DESIGN.md): the ontology, design laws and execution rules.
+- [Architecture](obsidience/defaults/vault/Architecture/Architecture.md): the
+  Modules and what each one owns.
 - [Shell](obsidience/shell/README.md): native desktop setup, panes and Surfaces.
 - [Knowledge graph rendering](obsidience/defaults/vault/Architecture/Shell/knowledge-graph-rendering.md):
   the graph renderer and the Memory and Code views, their providers and limits.
@@ -222,13 +225,20 @@ the shared React/Three.js knowledge graph.
 | `obsidience/harness/` | API, CLI, conversation, execution, capabilities, models, knowledge and speech |
 | `obsidience/shell/` | Native desktop/session adapters, panes and graph presenter |
 | `obsidience/ui/` | Shared React/Three.js graph and interface bundle |
+| `obsidience/browser/edge/` | Edge Cast extension, its native messaging host and theme policy |
+| `obsidience/media/` | Media server units, provider launchers and the TorBox mount |
+| `obsidience/tv/` | PC-hosted TV session (`host/`), its units (`systemd/`) and the Fire TV agent (`firetv-agent/`) |
 | `obsidience/defaults/vault/` | Reviewed, distributable starter Articles |
 | `obsidience/vault/` | Ignored live Articles and local audit repository |
 | `obsidience/evidence/` | Ignored immutable Sources, Inbox and evidence |
 | `obsidience/state/` | Ignored SQLite, settings and runtime artifacts |
 | `obsidience/scripts/` | Development and runtime entry points |
-| `obsidience/tests/` | Existing behavior and architecture checks |
+| `LICENSES/` | License texts of adopted code, recorded in `artifacts.lock.json` |
 | `docs/media/` | README screenshots and animations |
+
+Unit sources live beside the code that owns them: `obsidience/harness/systemd/`,
+`obsidience/shell/systemd/`, `obsidience/tv/systemd/` and the Media units in
+`obsidience/media/`. An installation copies them into `~/.config/systemd/user`.
 
 Previously published Git history is distinct from the current installation
 snapshot. Removing live files from a new commit does not remove them from older

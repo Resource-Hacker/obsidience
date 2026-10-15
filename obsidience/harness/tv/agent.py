@@ -1,6 +1,6 @@
 """The Obsidience TV agent (org.obsidience.tv): a fast, push-based backend channel to the registered TV.
 
-The sideloaded app (source: obsidience/tv/android) hosts an accessibility service
+The sideloaded app (source: obsidience/tv/firetv-agent) hosts an accessibility service
 that the system keeps bound across reboots. It listens on the abstract Unix
 socket `obsidience-tv` and admits only the shell (adbd) or root peer, and it has
 no INTERNET permission. The Harness reaches it through ADB's own forward
@@ -34,12 +34,12 @@ from ..config import CONFIG
 from . import adb
 
 PACKAGE = 'org.obsidience.tv'
-# Pinned app version: android:versionCode in obsidience/tv/android/AndroidManifest.xml.
+# Pinned app version: android:versionCode in obsidience/tv/firetv-agent/AndroidManifest.xml.
 VERSION = 2
 SERVICE = PACKAGE + '/.AgentService'
 LISTENER = PACKAGE + '/' + PACKAGE + '.MediaListener'
 SOCKET = 'obsidience-tv'
-# Built by obsidience/tv/android/build.sh into ignored installation state.
+# Built by obsidience/tv/firetv-agent/build.sh into ignored installation state.
 APK = CONFIG.runtime_dir / 'tv-agent' / f'obsidience-tv-{VERSION}.apk'
 # A failed connection rests this long; tv.control reads over ADB meanwhile.
 RETRY = 120.0
@@ -197,7 +197,7 @@ def _connect(row, cancel, boot, on_state):
     provisioned = False
     if not installed or int(installed[1]) != VERSION:
         if not APK.is_file():
-            raise FileNotFoundError(f'TV agent {VERSION} is not built; run obsidience/tv/android/build.sh')
+            raise FileNotFoundError(f'TV agent {VERSION} is not built; run obsidience/tv/firetv-agent/build.sh')
         adb.run(row, cancel, 'push', str(APK), '/data/local/tmp/obsidience-tv.apk', timeout=30)
         result = adb.shell(row, cancel, guard + '{ pm install -r /data/local/tmp/obsidience-tv.apk; '
                            'rm -f /data/local/tmp/obsidience-tv.apk; }', timeout=90)

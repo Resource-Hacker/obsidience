@@ -1,8 +1,9 @@
 ---
 type: tool
 title: harness.optimize
-description: Optimize one bound Agent or Runbook instruction case through AutoSaddler
-  V2.
+description: Run the bound AutoSaddler Executive optimization case with case_id. Returns
+  measured comparisons and any candidate staged for Review; never changes the live
+  Executive.
 obsidience:
   binding: capability:harness.optimize
   source: obsidience/harness/capabilities/harness/optimize.py

@@ -19,6 +19,11 @@ Use `vault.validate` to run the deterministic load-bearing graph validator.
 - A clean result states the exact number of resolved load-bearing edges and
   `No broken references.` A failing result reports checked and broken counts
   followed by at most 30 exact diagnostics.
+- Either result may end with one advisory line, `Tool description drift
+  (advisory, not a broken reference)`, naming Tool Articles whose description
+  differs from the registry description. It is not a broken reference and does
+  not fail validation; report it, and reconcile a description only through an
+  ordinary Review proposal.
 - Preserve the returned counts and diagnostics verbatim. A diagnostic identifies
   a structural failure; it does not establish an intended replacement edge.
 - Stop on any broken count or unavailable validator result. Repeating the same

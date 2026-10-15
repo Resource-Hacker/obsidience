@@ -56,7 +56,7 @@ def prepare_case(specification: dict) -> dict:
     spine = resolve_spine(task, res)
     books = spine.get("runbooks", [])
     if "error" in spine or len(books) != 1 or books[0].ref != specification["runbook"] or books[0].children:
-        raise ValueError("First refinement slice requires one applicable leaf Runbook")
+        raise ValueError("Case requires one applicable leaf Runbook")
     agent = res.resolve(str(task.meta.get("assignee", "")))
     if agent is None or agent.kind != "agent":
         raise ValueError("Case Task requires one accepted Agent")

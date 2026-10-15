@@ -1,4 +1,4 @@
-"""Central config. Everything overridable via obsidience.toml at project root."""
+"""Central config. Everything overridable via obsidience/obsidience.toml (ignored)."""
 
 from __future__ import annotations
 

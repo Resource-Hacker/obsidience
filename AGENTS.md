@@ -11,9 +11,10 @@ Use their essential workflow even in a checkout without them:
   work, dirty files, authority boundaries and a rollback path.
 - Validate actual behavior with relevant logs, API/UI observations and the
   compile/build steps needed for the affected code.
-- Do not create or modify tests, fixtures or test infrastructure unless the
-  owner explicitly requests tests. Preserve existing tests. Use a narrow existing
-  check only when it resolves a concrete uncertainty; avoid routine broad suites.
+- The development build carries no automated test suite. Do not create tests,
+  fixtures or test infrastructure, or restore deleted ones from history, unless
+  the owner explicitly requests tests. Use a narrow existing check only when it
+  resolves a concrete uncertainty; avoid routine broad runs.
 - Restart only affected processes. Documentation needs no restart. Preserve the
   secure locker, compositor and live applications during backend maintenance.
 - Keep the user informed and carry authorized changes through verification.

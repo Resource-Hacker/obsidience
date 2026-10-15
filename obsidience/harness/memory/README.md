@@ -80,6 +80,13 @@ preserving bounded per-turn recall, explicit inspection and Curate handoffs.
 
 Hindsight's native configuration selects the extraction/consolidation provider;
 inspect the installation's selected environment rather than assuming a model.
+The accepted provider is Hindsight's native `openai-codex` provider with the
+installation's selected Codex model at the standard service tier, strict
+structured output and no fallback; the retain, consolidation, Reflect and
+mental-model-refresh role overrides use high reasoning. It authenticates through
+the existing Codex login home, used in place and never copied into Hindsight's
+environment. Missing provider configuration or credentials fails startup rather
+than selecting the local model.
 The optional local-model configuration uses the private port in
 `interfaces/api/routes/memory.py`, borrowing only preemptible idle capacity from
 the existing resident model owner. Foreground work cancels that pure inference;
@@ -182,13 +189,14 @@ Python 3.13 environment:
 ```sh
 uv venv --python 3.13 <hindsight-venv>
 uv pip install --python <hindsight-venv>/bin/python -r obsidience/harness/memory/requirements.txt
-patch --forward -d <hindsight-venv>/lib/python3.13/site-packages -p1 < obsidience/scripts/patches/hindsight/0001-render-graphs-outside-event-loop.patch
-patch --forward -d <hindsight-venv>/lib/python3.13/site-packages -p1 < obsidience/scripts/patches/hindsight/0002-bound-cpu-reranking-and-cancellation.patch
-patch --forward -d <hindsight-venv>/lib/python3.13/site-packages -p1 < obsidience/scripts/patches/hindsight/0003-openrouter-daily-quota-reset.patch
-patch --forward -d <hindsight-venv>/lib/python3.13/site-packages -p1 < obsidience/scripts/patches/hindsight/0004-keep-reference-offset-in-parsed-dates.patch
-patch --forward -d <hindsight-venv>/lib/python3.13/site-packages -p1 < obsidience/scripts/patches/hindsight/0005-allow-exact-combined-scope-union-updates.patch
-patch --forward -d <hindsight-venv>/lib/python3.13/site-packages -p1 < obsidience/scripts/patches/hindsight/0006-bank-speaker-perspective.patch
+for patch in obsidience/scripts/patches/hindsight/00*.patch; do
+  patch --forward -d <hindsight-venv>/lib/python3.13/site-packages -p1 < "$patch"
+done
 ```
+
+This applies the reviewed native patches 0001 through 0010 in numeric order;
+[their README](../../scripts/patches/hindsight/README.md) explains each one, and
+`artifacts.lock.json` records their preimage and result hashes.
 
 Initialize a private PostgreSQL cluster with UTF-8, local peer authentication,
 host SCRAM authentication, and mode 0700. Run it as the owner, with no TCP
@@ -201,11 +209,16 @@ postgresql://<owner>@/obsidience_hindsight?host=<socket-directory>&port=55437
 ```
 
 Create an owner-only random token at
-`obsidience/state/hindsight-token`. The same token is the Hindsight LLM API key;
-the adapter also sends it in the Authorization header for registered callbacks.
-Never put it in public defaults, command arguments, Git or logs. Keep the
-following environment in mode-0600 `obsidience/state/hindsight.env`, substituting
-the selected paths and token:
+`obsidience/state/hindsight-token`. The adapter sends it in the Authorization
+header for registered callbacks, and the optional local-model configuration also
+uses it as the Hindsight LLM API key. Never put it in public defaults, command
+arguments, Git or logs. Keep the environment in mode-0600
+`obsidience/state/hindsight.env`. The block below is the optional local-model
+configuration; substitute the selected paths and token. With the accepted
+provider, `HINDSIGHT_API_LLM_PROVIDER=openai-codex`, the selected model, the
+role overrides above and that provider's own retain, consolidation and worker
+budgets replace the `HINDSIGHT_API_LLM_*`, completion-token, batch and
+worker-slot lines; the embedding, reranker, recall and webhook lines are shared:
 
 ```text
 HINDSIGHT_API_DATABASE_URL=<private PostgreSQL DSN>
@@ -249,7 +262,8 @@ TOKENIZERS_PARALLELISM=false
 ```
 
 Embeddings come from the one resident EmbeddingGemma 2 service
-(`obsidience-embeddings.service`, `obsidience/scripts/embed.sh`) that the
+(`obsidience-embeddings.service`, whose source is in `obsidience/harness/systemd/`,
+running `obsidience/scripts/embed.sh`) that the
 Knowledge index also uses; Hindsight loads no embedding model of its own. The
 wrapper exports `HINDSIGHT_API_EMBEDDINGS_OPENAI_API_KEY` from the
 `obsidience-model-api-key` credential (otherwise the provider would send the LLM

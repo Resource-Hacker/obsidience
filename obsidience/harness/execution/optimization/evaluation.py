@@ -1,4 +1,4 @@
-"""Pure frozen trials and paired, per-case refinement acceptance.
+"""Pure frozen trials and paired, per-case acceptance of instruction candidates.
 
 The frozen-response experiment follows AutoSaddler's evaluation idea; it is
 implemented locally with exact fixtures and protected holdout nonregression.

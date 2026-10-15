@@ -1,8 +1,11 @@
 ---
 type: tool
 title: computer.observe
-description: Read the current image of one exact target without changing focus or
-  placement.
+description: Read a fresh image of one exact target without changing focus or placement.
+  Required in the current turn before answering about current window contents, people
+  present, counts or other visible state; earlier conversation and observations are
+  historical. For what the owner is looking at now, use target kind focused. For what
+  just happened (the recent past), use computer.replay.
 obsidience:
   binding: capability:computer.observe
   source: obsidience/harness/capabilities/computer/observe.py
@@ -17,7 +20,7 @@ Read the current image of one exact target without changing focus or placement. 
 Answer one visual question about an exact native application or module pane,
 including a unique unfocused target. The current Shell Scene already supplies
 window enumeration and focus; observation is not an enumeration Tool. Arguments:
-`{"target": {"kind": "focused|application|pane", "name": str optional, "surface": "samsung|usb-c|dp-4" optional}, "query": str}`.
+`{"target": {"kind": "focused|application|pane", "name": str optional, "surface": "<configured Surface id>" optional}, "query": str}`.
 
 For `application`, `name` is the registered canonical application ID, such as
 `teamfight_tactics`, or exact current `app_id` (1-256 printable characters).

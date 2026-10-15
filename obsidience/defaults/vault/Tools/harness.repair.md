@@ -2,7 +2,9 @@
 type: tool
 title: harness.repair
 description: Request one receipt-safe recovery with exact task and run_id from current
-  status evidence.
+  status evidence. For an inspected Hindsight provider failure, use component:hindsight
+  instead; this retries the exact failed upstream memory operations and does not create
+  a Task.
 obsidience:
   binding: capability:harness.repair
   source: obsidience/harness/capabilities/harness/repair.py

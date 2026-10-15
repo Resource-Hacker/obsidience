@@ -16,7 +16,7 @@ Focus one exact current application or pane using target:{kind:application|pane,
 
 Bring one existing native application or module pane to the front and give it
 focus. Argument:
-`{"target": {"kind": "application|pane", "name": str, "surface": "samsung|usb-c|dp-4" optional}}`.
+`{"target": {"kind": "application|pane", "name": str, "surface": "<configured Surface id>" optional}}`.
 
 Use the current Shell Scene's concrete `kind: application|pane` and `name`,
 or the exact target object returned by observation. For an application, `name`

@@ -33,7 +33,24 @@
       "revision": "ebe59e5a817142986528bbbee5dba8db7b38ed50",
       "path": "/var/lib/ai/models/obsidience-nemotron-speech-streaming-en-0.6b/nemotron-speech-streaming-en-0.6b.nemo",
       "sha256": "283638054c44f6794e74fe9af9048d78a6d9d6c058c12131856c7859a62ac9cd",
-      "size": 2473041920
+      "size": 2473041920,
+      "integration": "Fixed streaming recognition model of the NeMo Voice Agent in the speech worker: 160 ms chunks on the reserved speech GPU, no CPU offload, network disabled at runtime."
+    },
+    "pipecat": {
+      "repository": "https://github.com/pipecat-ai/pipecat",
+      "version": "0.0.98",
+      "revision": "f9fef7807090ffb93821241d504d7751ee682f33",
+      "license": "BSD-2-Clause",
+      "source_path": "/var/lib/ai/src/obsidience-pipecat",
+      "integration": "Typed streaming audio frame transport of the speech worker (requirements-speech.txt): microphone frames, VAD, transcription and interruption frames and lifecycle only. Network disabled at runtime."
+    },
+    "pocket_tts": {
+      "repository": "https://github.com/kyutai-labs/pocket-tts",
+      "version": "3.0.2",
+      "revision": "f5fa841aa8702d7f15ea9e344bec5290bf42a446",
+      "license": "MIT",
+      "source_path": "/var/lib/ai/src/obsidience-pocket-tts",
+      "integration": "Fixed local speech synthesis of the speech worker (requirements-speech.txt) on CPU: 24 kHz streaming, temperature 0.3, with the pocket_tts_* model, tokenizer, config and voice artifacts. No raw training audio imported; network disabled at runtime."
     },
     "smart_turn_v3_2_cpu": {
       "repository": "https://huggingface.co/pipecat-ai/smart-turn-v3",
@@ -105,7 +122,7 @@
       "repository": "https://github.com/AreevAI/areev",
       "revision": "124cdf9aa306c8cfa99b14800f44a6190e8c3455",
       "license": "MIT OR Apache-2.0",
-      "integration": "Pattern reference only; no upstream source code, runtime or dependency imported. Native implementation of bounded context inclusion/omission accounting and revision-scoped historical failure diagnostics; deterministic tests of the existing intent/result crash boundaries. Existing Article ontology, tokenizer, execution ledger, Check, review and no-replay owners remain authoritative.",
+      "integration": "Pattern reference only; no upstream source code, runtime or dependency imported. Native implementation of bounded context inclusion/omission accounting and revision-scoped historical failure diagnostics. Existing Article ontology, tokenizer, execution ledger, Check, review and no-replay owners remain authoritative.",
       "reference_files": [
         "crates/areev-cal/tests/assemble_budget_visibility.rs",
         "crates/areev-cal/src/assemble.rs",
@@ -349,7 +366,7 @@
       "integration": "Optional Terminal-pane AGENT CANVAS provider. The unmodified Server Edition runs as obsidience-shell-agent-canvas.service on loopback 127.0.0.1:8770 from an immutable generation under ~/.local/opt/obsidience-agent-canvas; nodeterm owns its canvas state, password login and dedicated tmux server (tmux -L node-terminal), whose sessions survive service restarts by upstream KillMode=process contract. The Shell only presents the page in a WebEngineView with a named persistent profile. Local build deviation: the server bundle marks ssh2's optional cpu-features native module external (ssh2 loads it inside try/catch). Personal, non-hosted use under the Additional Use Grant; no nodeterm code is copied into Obsidience."
     },
     "nemo_voice_agent": {
-      "repository": "https://github.com/NVIDIA/NeMo",
+      "repository": "https://github.com/NVIDIA-NeMo/Speech",
       "revision": "b17490a705707c09700166d764b3842ab7c1fd4d",
       "license": "Apache-2.0",
       "source_path": "/var/lib/ai/src/obsidience-nemo-speech",

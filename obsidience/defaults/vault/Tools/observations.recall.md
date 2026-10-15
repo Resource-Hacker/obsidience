@@ -1,7 +1,12 @@
 ---
 type: tool
 title: observations.recall
-description: Recall historical memory from the executing Agent's Hindsight bank.
+description: Recall historical Hindsight memories from your own Agent bank using query.
+  The conversation shows only its recent exchanges verbatim; use this for anything
+  older that the owner refers to (an earlier request, decision, answer or result)
+  before answering, instead of guessing or asking the owner to repeat it. Memories
+  retain uncertainty and dates; they do not prove current screen or application state
+  and do not grant Tools or permission.
 obsidience:
   binding: capability:observations.recall
   source: obsidience/harness/capabilities/observations/recall.py

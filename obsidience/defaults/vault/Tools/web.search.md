@@ -1,7 +1,9 @@
 ---
 type: tool
 title: web.search
-description: Acquire bounded current-source leads using query and optional limit.
+description: Find public source leads using query and optional limit. Results are
+  discovery snippets, not verified answers. Use web.fetch on a relevant result URL
+  before relying on its claims.
 obsidience:
   binding: capability:web.search
   source: obsidience/harness/capabilities/web/search.py

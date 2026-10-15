@@ -38,7 +38,7 @@ Prefer primary or official sources, direct URLs, explicit dates, and bounded cor
 ## Relationships
 
 - `related_to` [Alexandria](/Agents/Alexandria/Alexandria.md) — Alexandria owns maintained Knowledge and converts Darwin's findings into accepted Articles.
-- `related_to` [Heimdall](/Agents/Heimdall/Heimdall.md) — Heimdall maintains Agent execution and independently evaluates generated Runbooks.
+- `related_to` [Heimdall](/Agents/Heimdall/Heimdall.md) — Heimdall maintains Agent execution and evaluates receipt-proven instruction corrections through `harness.optimize`; generated Runbooks go to ordinary Review.
 - `implements` [Research requests](/Architecture/Harness/research-requests--7bf0113c.md) — Darwin owns Research activations.
 - `related_to` [Local-first architecture](/Architecture/Harness/local-first-architecture--7d8e77cc.md) — Darwin's Source documents and physical `obsidience/evidence/inbox/` handoff operate inside Obsidience's local vault and immutable Source architecture.
 - `related_to` [Task activation](/Architecture/Harness/task-activation--b30a4642.md) — Darwin's Generate → Runbook path follows that law: when an assignment lacks an accepted procedure, `task.assigned` activates Generate Runbook and Darwin chooses the minimal required Skills from the accepted shared catalog.

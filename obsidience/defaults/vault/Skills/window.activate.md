@@ -16,7 +16,7 @@ Use `window.activate` when one existing native application or module pane must
 become the focused front window.
 
 - Pass exactly `{"target": {"kind": "application|pane", "name": str,
-  "surface": "samsung|usb-c|dp-4" optional}}`. Take `kind` and `name` from the
+  "surface": "<configured Surface id>" optional}}`. Take `kind` and `name` from the
   current Shell Scene or reuse an observation's exact target object. For
   `application`, use the canonical application ID, such as `teamfight_tactics`,
   or exact current `app_id` (1-256 printable characters); existing registry

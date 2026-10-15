@@ -1,7 +1,13 @@
 ---
 type: tool
 title: application.launch
-description: Open one registered application with application:<registered identifier>.
+description: Open a registered application with application:<registered identifier>.
+  To open a web page, video or YouTube search, use application:microsoft_edge and
+  url:<absolute HTTP/HTTPS URL>. This opens the URL even when the browser is already
+  running. Observe the page after dispatch. Opening is complete when the requested
+  page is visible; playing is complete when playback is visibly active. Finish with
+  task.complete verification when that requested outcome is established. Do not click
+  an already playing video or add playback to an open-only request.
 obsidience:
   binding: capability:application.launch
   source: obsidience/harness/capabilities/application/launch.py

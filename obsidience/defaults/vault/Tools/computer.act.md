@@ -1,7 +1,10 @@
 ---
 type: tool
 title: computer.act
-description: Deliver one click to the immediately observed application.
+description: Deliver one requested click to the immediately observed application.
+  target is a short control label, at most 128 characters. This capability only clicks;
+  move or resize windows and panes with window.place. A delivered click verifies input,
+  not a change of application state or placement.
 obsidience:
   binding: capability:computer.act
   source: obsidience/harness/capabilities/computer/act.py

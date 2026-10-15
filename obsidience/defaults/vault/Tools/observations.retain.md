@@ -1,7 +1,9 @@
 ---
 type: tool
 title: observations.retain
-description: Retain a bounded historical note in the executing Agent's Hindsight bank.
+description: Retain an unverified historical note in your own Hindsight bank using
+  text and up to three accessible related_refs. This does not publish accepted wiki
+  Knowledge.
 obsidience:
   binding: capability:observations.retain
   source: obsidience/harness/capabilities/observations/retain.py

@@ -16,3 +16,11 @@ git_commit = true  # Local Vault audit only; never the application repository.
 # acceptance, appended to one worker reply with a short pause between sentences;
 # false speaks only the accepted reply.
 # realtime_early_speech = true
+# Optional providers (TOML tables; keep them after the top-level keys above).
+# Hindsight historical memory: leave unset until its service is configured
+# (obsidience/harness/memory/README.md).
+# [memory]
+# hindsight_url = "http://127.0.0.1:8790"
+# Local SearXNG for web.search; without it web.search uses its DDGS fallback.
+# [web]
+# searxng_url = "http://127.0.0.1:8888"

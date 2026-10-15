@@ -1,8 +1,9 @@
 ---
 type: tool
 title: session.unlock
-description: Unlock the current Obsidience desktop session through its native lock
-  controller. No arguments. Executive only; verified result, no password required.
+description: Unlock the current desktop session through its native lock owner using
+  {}. Available even when the Shell scene is locked; no screenshot or password prerequisite.
+  Call once. After verified success, answer directly in text from the returned receipt.
 obsidience:
   binding: capability:session.unlock
   source: obsidience/harness/capabilities/session/unlock.py

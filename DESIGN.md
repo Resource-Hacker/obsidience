@@ -80,10 +80,12 @@ Six types, through Open Knowledge Format v0.2 with the Obsidience profile:
   links parsed by one CommonMark parser are edges; code, images and URLs are not.
 - Outside the six types: **Source** (read-only evidence view), **Capability** (machinery
   behind one Tool at `obsidience/harness/capabilities/<dotted segments>/<leaf>.py`) and
-  **Module** (Harness, Shell, UI, Vault, Tests). Neither becomes an Article or authority.
-- Harness packages stay shallow (`interfaces/{api,cli}`, one level of subsystems,
-  `capabilities/` mirroring Tool IDs); explicit imports, side-effect-free `__init__`, no
-  `modules`/`utils`/`common`/`core` drawers.
+  **Module** (a top-level product component; the Modules are listed once in the
+  `Architecture/Architecture` Article). Neither becomes an Article or authority.
+- Harness packages stay shallow (`interfaces/{api,cli}` with one API router per resource
+  in `interfaces/api/routes/`, one level of subsystems, `capabilities/` mirroring Tool
+  IDs); explicit imports, side-effect-free `__init__`, no `modules`/`utils`/`common`/`core`
+  drawers.
 - Accepted Articles are concise and current: no duplicate summaries, migration history,
   receipts, filler, fictional bindings or generic edges.
 
@@ -131,7 +133,7 @@ Executive conversation: Agent identity -> direct Skills -> Tools -> Capabilities
   delegates directly and returns verified results; a personal name is identity data only.
   **Alexandria** (Curator): Ingest, Curate, Merge, Link, Improve, Archive, wiki freshness.
   **Darwin** (Researcher): Question, Learn, Generate. **Heimdall** (Guardian): Audit,
-  automatic Repair, operational Model characterization, Runbook evaluation.
+  automatic Repair, operational Model characterization.
 - Exactly these four have one `type: agent` Article each; Merge absorbs a parallel role
   charter into it. The Library is a passive catalog, never an Agent or assignee.
 - Shared design: `Architecture/Architecture`; owner preferences:
@@ -390,7 +392,7 @@ neighbours); (9) history projected from the native conversation (no conversation
   fallback. The Executive's per-turn metadata renders the last read state with its age,
   never contacting the TV while building the prompt; a private ledger keeps that state and
   recent intent outcomes across restarts. The sideloaded Obsidience TV agent
-  (`obsidience/tv/android`: an accessibility service and a notification listener, no network
+  (`obsidience/tv/firetv-agent`: an accessibility service and a notification listener, no network
   permission) answers state, the UI tree, volume, media-session transport and on-screen notices,
   and pushes state changes, over an abstract Unix socket that admits only the ADB shell user.
   The Harness reaches it through an ADB forward on the identity-verified transport, owns that one
@@ -808,7 +810,10 @@ Connections/Feeds (panes, API, collector, publication/retention, `web.feed`), Di
 News/Top Stories, Check, Lookup, Executive Task/Runbook, request classification and the
 packet router, Compact/Promote, Immediate/Temporary/Workstation Observations, custom
 Hindsight categories, the WebKit presenter, PaneCanvas, processing cues, the layered graph
-engine, KWin paths, Xorg bridges and Electron. The DeepSeek Harness Executive loop (Node
+engine, KWin paths, Xorg bridges and Electron. The Generate-refinement evaluation path with
+`harness.evaluate`, the `review.inspect` and `task.inspect` Tools, the synthetic
+`@library/Skills` graph mirror and the automated test suite (new tests only on owner
+request) are retired (2026-10-15). The DeepSeek Harness Executive loop (Node
 child, npm Cordis composition, JSONL sessions; replaced by ADK 2026-10-09) and
 conversation compaction (idle, manual Compact and its threshold) and the specialist
 Python decision loop (provider-constrained JSON `{tool, args}` actions; replaced by the ADK

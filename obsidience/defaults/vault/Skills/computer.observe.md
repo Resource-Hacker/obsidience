@@ -20,7 +20,7 @@ Use the Shell Scene already in Bindings to list windows or read focus; that
 does not require a screenshot.
 
 - Pass exactly `{"target": {"kind": "focused|application|pane", "name": str
-  optional, "surface": "samsung|usb-c|dp-4" optional}, "query": str}`.
+  optional, "surface": "<configured Surface id>" optional}, "query": str}`.
   Omit `name` for `focused`. For `application`, use the canonical application
   ID, such as `teamfight_tactics`, or exact current `app_id` (1-256 printable
   characters); existing registry aliases also resolve. For `pane`, use exact

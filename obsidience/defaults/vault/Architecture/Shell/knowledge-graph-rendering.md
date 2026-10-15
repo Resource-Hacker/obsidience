@@ -18,6 +18,8 @@ sources:
 - resource: obsidience/harness/graphs/code_refresh.py
 - resource: obsidience/harness/execution/activity.py
 - resource: obsidience/ui/src/renderer/src/graph/knowledge-stage/graph-activity.ts
+- resource: obsidience/ui/src/renderer/src/graph/knowledge-stage/thinking-route.ts
+- resource: obsidience/ui/src/renderer/src/lib/activity-client.ts
 ---
 
 
@@ -246,9 +248,12 @@ at most twelve provider labels, updated on camera, data or emphasis changes.
   with Follow enabled or on a click or search, adding up to sixteen direct
   external neighbors marked by an outward arrow. Right-click, Back and Fit
   return to the saved project camera.
-- `obsidience-code-graph.service` owns the provider daemon and graph viewer.
-  Agent MCP sessions join it with `--tool-profile analysis`; never restart the
-  unit under them or start a second MCP owner. Saved-file events coalesce for
+- `obsidience-code-graph.service` (source in `obsidience/harness/systemd/`) owns
+  the provider daemon and graph viewer. It starts before restored agent sessions,
+  because a daemon spawned by an agent's MCP session stops with its last session
+  and cannot be promoted. Agent MCP sessions join it with
+  `--tool-profile analysis`; never restart the unit under them or start a second
+  MCP owner. Saved-file events coalesce for
   750 ms into one native `index_repository` pass (`graphs/code_refresh.py`); a
   failed refresh shows stale, not ready, and no index artifact enters the repo.
 - `graphs/agent_activity.py` turns new tool calls in the local Codex and Claude

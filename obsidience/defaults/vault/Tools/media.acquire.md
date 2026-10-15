@@ -1,7 +1,21 @@
 ---
 type: tool
 title: media.acquire
-description: Register one owner-selected movie or exact episode source with the configured provider, once, without starting playback.
+description: Register one exact source for an explicit acquisition or playback request
+  under the accepted source-selection policy. A unique recommended source may serve
+  the requested title/episode; a validated same-season pack may serve a season request.
+  The accepted owner policy permits cached season/complete-series packs containing
+  the exact episode when no narrower eligible source exists; show all-file scope but
+  play only the requested episode or season. action register takes one candidate_id
+  returned by media.library candidates in this activation. The candidate binds exact
+  IMDb/title/type, season/episode, source hash, configured provider and socket identity.
+  Never guess a hash, pass an external URL or reuse an earlier activation id. A verified
+  registration receipt proves library registration only; catalogue scan/readiness
+  and playback are separate. An uncertain or failed registration must never be repeated.
+  For a known TorBox registration with pending visibility, action refresh takes a
+  fresh exact candidate_id, reconciles its existing complete file plan and refreshes
+  catalogue visibility without any torrent-creation path. An absent registration fails;
+  pending catalogue readback is not success or playback.
 obsidience:
   binding: capability:media.acquire
   source: obsidience/harness/capabilities/media/acquire.py

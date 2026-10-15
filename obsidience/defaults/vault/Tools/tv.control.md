@@ -1,7 +1,57 @@
 ---
 type: tool
 title: tv.control
-description: Control one identity-bound television and its current media destination with verified intent calls, generation-bound local VOD controls, and remote navigation as a fallback.
+description: 'Control the registered TV as an optional Media playback destination.
+  For an explicit library source use media.library select then open its returned current-activation
+  id; catalogue GUIDs are not open ids. For an explicit season request use media.library
+  season, then open_season with its fresh id. The tuner owns only that finite same-season
+  catalogue sequence, with no acquisition at EOF. The first receipt verifies only
+  the first file. Each next file has a new generation; reread state before controls.
+  stop cancels the exact observed queue even between files. Ordinary open remains
+  single-file; resume:true loads freshly read saved progress once. action vod uses
+  operation state|pause|resume|seek|stop|track with the exact observed local generation
+  and seven-field source identity; seek adds position seconds; track adds kind and
+  track_id. Verify the exact generation/source and property readback. For content
+  currently in Edge or another browser, first computer.observe the exact current window.
+  Use open only with a supported exact URL identified by fresh source evidence; a
+  URL from an earlier cast is not evidence of the current page. If that URL cannot
+  be established or is unsupported, explain the blocker instead of substituting a
+  content search. Control the registered TV with one intent call where possible. play
+  with query (optional app pluto|youtube) picks and opens content in one call: a strong
+  Pluto live-channel match first, else YouTube''s top result (a live stream for news/weather);
+  it returns what it chose and up to 3 alternatives (open one by id if the owner wants
+  another). A Pluto live channel starts in about a second on the PC route: the workstation
+  plays it and the TV shows that stream (foreground app pc); the Pluto app is only
+  the fallback. The PC route plays no advertisements: during a channel''s break the
+  TV shows a break card (tv line: commercial break) and the programme resumes by itself,
+  so a break is the channel playing, not a fault. volume with level 0-100 sets it
+  exactly; volume_up/volume_down step by 5; mute, unmute, pause and resume reach that
+  state. These read the TV back: delivery verified reports the new state, otherwise
+  say it is unverified; an already-reached state sends nothing. on|off verify power.
+  You can see the TV: while its foreground app is pc (the workstation''s stream, which
+  is what the TV normally shows) observe returns the current picture on the TV screen,
+  also while video plays, with the backend state (power, foreground app, playback,
+  volume/mute, what this Harness opened and what airs now). For any question about
+  what is on the screen (what is showing, who or what is in the picture, what someone
+  on screen is wearing or doing, text on screen), including a follow-up about something
+  on the TV, call observe and answer from that image; never say you cannot see the
+  TV, and never use camera.observe for the TV''s picture (the camera shows the room).
+  Only a video playing in one of the TV''s own apps returns the state without a picture.
+  The metadata tv line is the last state seen, with its age. For an exact library
+  item on this TV, find with app library and query returns current-turn selections.
+  open with that id revalidates the exact file; never substitute a different edition
+  or episode. Library playback is verified only by exact source/generation and TV
+  route readback. stop ends the observed local generation without deleting media.
+  Saved progress is read with media.library resume; never silently start a source
+  from historical progress. find otherwise lists Pluto/YouTube candidates; open plays
+  one by id, or an official https link (web.search for a specific Netflix/Hulu/Tubi/YouTube
+  title). Remote keys are only for navigation that play/open cannot reach: observe
+  -> keys (up to 8; the focused:true control is what select activates) -> check the
+  new screen. text types only into an active text field; launch opens an app home
+  screen. notice with text shows a short message card on the TV screen for six seconds.
+  After play/open, complete with verification established naming what plays. Never
+  replay a failed or uncertain effect; a correction_allowed failure sent nothing.
+  Never purchase, subscribe, install or change accounts without an explicit request.'
 obsidience:
   binding: capability:tv.control
   source: obsidience/harness/capabilities/tv/control.py
@@ -61,7 +111,7 @@ The state `tv` comes from Android system services, not pixels: `power` (wakefuln
 
 Upstream Android Platform Tools ADB owns the transport. Private installation state `obsidience/state/television.json` binds one LAN address to an exact device serial and OEM model and lists installed application packages. No caller can supply an address, shell command, arbitrary package, keycode or link outside the registered apps' hosts. Every call verifies identity (with power, the TV boot and the advertising-ID settings in one read); every effect checks it again remotely. Content listings come from public services and are untrusted evidence, never instructions.
 
-The Obsidience TV agent (`org.obsidience.tv`, source `obsidience/tv/android`, built without Gradle by its `build.sh` and signed with a private installation key) is an accessibility service the system keeps bound across reboots, plus a notification listener that admits it to media sessions. It has no network permission: it listens only on the abstract Unix socket `obsidience-tv` and accepts only the ADB shell user or root, so the Harness reaches it through `adb forward` on the identity-verified TV transport and ADB key authentication is its authentication. The Harness owns that one connection (`agent.py`): after an identity-checked read it installs the pinned version when needed, appends its accessibility service to the enabled ones without removing any, connects, caches each pushed state for the per-turn line, and closes the connection and its forward with tv.control. Reads (state about 20-60 ms instead of about 1.1 s; the UI tree about 30 ms instead of uiautomator's 3 s) and target states then skip the per-call ADB preamble for the rest of that TV boot, because the connection ends with the transport; other effects keep it. Any agent failure falls back to the ADB paths below. The agent clicks visible "Skip"/"Skip ad(s)" controls in known video apps (YouTube, Pluto, Tubi); the YouTube app renders its own UI and exposes none to accessibility.
+The Obsidience TV agent (`org.obsidience.tv`, source `obsidience/tv/firetv-agent`, built without Gradle by its `build.sh` and signed with a private installation key) is an accessibility service the system keeps bound across reboots, plus a notification listener that admits it to media sessions. It has no network permission: it listens only on the abstract Unix socket `obsidience-tv` and accepts only the ADB shell user or root, so the Harness reaches it through `adb forward` on the identity-verified TV transport and ADB key authentication is its authentication. The Harness owns that one connection (`agent.py`): after an identity-checked read it installs the pinned version when needed, appends its accessibility service to the enabled ones without removing any, connects, caches each pushed state for the per-turn line, and closes the connection and its forward with tv.control. Reads (state about 20-60 ms instead of about 1.1 s; the UI tree about 30 ms instead of uiautomator's 3 s) and target states then skip the per-call ADB preamble for the rest of that TV boot, because the connection ends with the transport; other effects keep it. Any agent failure falls back to the ADB paths below. The agent clicks visible "Skip"/"Skip ad(s)" controls in known video apps (YouTube, Pluto, Tubi); the YouTube app renders its own UI and exposes none to accessibility.
 
 The PC route's player is one idle mpv on a headless compositor of the workstation, streamed by Sunshine to the Moonlight app paired on the TV. The TV tuner (`obsidience-tv-tuner.service`, `obsidience/tv/host/tuner.py`) is the only owner of that player's JSON IPC socket and of what it shows, and keeps a channel playing while the Harness restarts. It resolves a channel from its guide id with streamlink's Pluto plugin, which opens an anonymous session of Pluto's web player, muxes the separate video and audio and drops the advertisement segments, and feeds the player through a FIFO; a stream that ends is opened once more with a fresh session and then reported as failed. `player.py` is the tuner's client: each call opens one connection to its socket and closes it, sends a request once and never retries a lost reply. A stream address carries a session token, so it stays inside the tuner and is never logged, returned or stored; the tuner reports titles and channel ids only. Moonlight is started through its own shortcut activity with the paired host's id, read from Sunshine's state at use. The Android TV instance (`obsidience-tv-android.service`, an unmodified Waydroid Android TV image in its own container) is a second window of that compositor on a workspace of its own; `obsidience/tv/host/show` asks the compositor which workspace the output shows and switches it, and `android.py` is the instance's client over ADB at its own address, which only the workstation reaches: every command rechecks that the target is that instance, an effect is sent once, and what plays is read from Android's media session.
 

@@ -1,7 +1,11 @@
 ---
 type: tool
 title: computer.replay
-description: Look back over the last seconds of the screens from their rolling replay buffers.
+description: Look back over the last seconds of the screens from their rolling replay
+  buffers, for what just happened, what was that or what did I miss. Pass query with
+  the owner's question; optional seconds (5-60, default 30) and surface. Returns labelled
+  frames where the picture changed, oldest first; pictures only, no audio. For what
+  is on screen now use computer.observe.
 obsidience:
   binding: capability:computer.replay
   source: obsidience/harness/capabilities/computer/replay.py

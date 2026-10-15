@@ -1,8 +1,12 @@
 ---
 type: tool
 title: window.place
-description: Place one exact current target on a logical Surface and optional integer
-  tile edges.
+description: Move or resize a current application window or Obsidience pane. Call
+  directly with target:{kind:application|pane,name:<exact Scene name>} and destination:{surface:<destination
+  Surface>,tile?:{left,top,right,bottom}}. External apps use kind:application, even
+  when called panes. Omit tile to move to another Surface. No screenshot, click, close,
+  detach or prior activation is needed. Completion requires the returned destination
+  and observed placement to agree.
 obsidience:
   binding: capability:window.place
   source: obsidience/harness/capabilities/window/place.py
@@ -16,7 +20,7 @@ Place one exact current target on a logical Surface and optional integer tile ed
 
 Place one existing native application or module pane on a declared Surface and
 optional workspace tile. Arguments:
-`{"target": {"kind": "application|pane", "name": str, "surface": "samsung|usb-c|dp-4" optional}, "destination": {"surface": "samsung|usb-c|dp-4", "tile": {"left": int, "top": int, "right": int, "bottom": int} optional}}`.
+`{"target": {"kind": "application|pane", "name": str, "surface": "<configured Surface id>" optional}, "destination": {"surface": "<configured Surface id>", "tile": {"left": int, "top": int, "right": int, "bottom": int} optional}}`.
 
 Use the current Shell Scene's concrete `kind: application|pane` and `name`,
 or the exact target object returned by observation. For an application, `name`

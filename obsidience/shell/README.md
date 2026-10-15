@@ -252,7 +252,7 @@ releases its port. An explicit guarded restart replaces the host once; no
 listener retry loop or compositor restart is needed for ordinary QML changes.
 
 `Obsidience` is the UWSM desktop session. `obsidience-shell-session.target`
-wants its services, whose sources are in `systemd/`:
+wants the Shell's services, whose sources are in `systemd/`:
 
 - `obsidience-shell-host.service`, the Quickshell host and command socket;
 - `obsidience-shell-knowledge.service`, the resident graph stage;
@@ -260,9 +260,12 @@ wants its services, whose sources are in `systemd/`:
 - `obsidience-shell-notifications.service`, mako;
 - `obsidience-shell-agent-canvas.service`, the Terminal pane's nodeterm canvas;
 - `obsidience-shell-screen-replay@HDMI-A-1`, `@HDMI-A-2` and `@DP-8`, the
-  60-second RAM replay per output behind `computer.replay`;
-- `obsidience-harness-dev.service`, the Harness, ordered by the drop-ins in
-  `systemd/obsidience-harness-dev.service.d/`.
+  60-second RAM replay per output behind `computer.replay`.
+
+The target also wants the Harness, `obsidience-harness-dev.service`. Its
+drop-ins (session ordering and its embedding and Code graph dependencies)
+belong to the Harness and live in
+`obsidience/harness/systemd/obsidience-harness-dev.service.d/`.
 
 The graph presenter belongs to the Shell session. It only wants the Shell host
 and the Harness for startup, with ordering and the existing HTML readiness
