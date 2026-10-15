@@ -36,6 +36,7 @@ MAX_PCM = 16_384
 PCM_FRAME = 640  # 20 ms, mono s16/16 kHz.
 MAX_QUEUED_FRAMES = 50  # One second per member, including terminal silence.
 MAX_COMMAND_CHARS = 2_000
+TERMINAL_SILENCE_SECS = 4.0  # Covers Smart Turn's three-second pending bound.
 _PRINCIPAL_FIELDS = ("guild_id", "channel_id", "member_id")
 _ID = re.compile(r"[0-9]{1,20}\Z")
 _TOKEN = re.compile(r"[A-Za-z0-9_-]{1,96}\Z")
@@ -104,18 +105,24 @@ class _MemberSTT(speech.UtteranceNeMoSTTService):
 
     async def process_audio_frame(self, frame, direction):
         self.audio_frames = min(self.audio_frames + 1, 1_000_000_000)
-        self.utterance_pcm_bytes += len(frame.audio)
+        if not frame.metadata.get("discord_terminal_silence", False):
+            self.utterance_pcm_bytes += len(frame.audio)
         await super().process_audio_frame(frame, direction)
 
     async def _handle_transcription(self, transcript, is_final, language=None):
         if transcript.strip():
             self.transcription_frames = min(self.transcription_frames + 1, 1_000_000_000)
         await super()._handle_transcription(transcript, is_final, language)
+        if is_final:
+            self.utterance_pcm_bytes = 0
 
     async def process_frame(self, frame, direction):
         if direction is speech.FrameDirection.DOWNSTREAM:
             if isinstance(frame, speech.VADUserStartedSpeakingFrame):
                 self.vad_starts = min(self.vad_starts + 1, 1_000_000_000)
+                if not self._is_vad_active and not self._recognized_since_stop:
+                    # The shared onset policy resets this decoder on this edge.
+                    self.utterance_pcm_bytes = 0
             elif isinstance(frame, speech.VADUserStoppedSpeakingFrame):
                 self.vad_stops = min(self.vad_stops + 1, 1_000_000_000)
         await super().process_frame(frame, direction)
@@ -346,7 +353,9 @@ class _Member:
             piece = bytes(self.remainder[:PCM_FRAME])
             del self.remainder[:PCM_FRAME]
             try:
-                await self.input.push_audio_frame(speech.InputAudioRawFrame(piece, speech.SAMPLE_RATE, 1))
+                frame = speech.InputAudioRawFrame(piece, speech.SAMPLE_RATE, 1)
+                frame.metadata["discord_terminal_silence"] = terminal
+                await self.input.push_audio_frame(frame)
                 if terminal:
                     self.terminal_pcm_frames = min(self.terminal_pcm_frames + 1, 1_000_000_000)
                 else:
@@ -718,13 +727,23 @@ class DiscordSpeechServer:
                 if owner is not None and owner.principal == principal and now >= owner.deadline:
                     member.fail("utterance_timeout" if owner.phase == "listening" else "reply_timeout")
                     continue
-                if owner is None and now - member.last_input > 60:
-                    self.schedule_drop(principal)
-                    continue
                 # Discord sends no packets between utterances. Supply only the
                 # bounded terminal silence needed by the existing turn policy.
                 gap = now - member.last_input
-                if (self.listening(member) and 0.04 <= gap <= 4.0
+                if (self.current(member) and owner is None and member.probe_kind is None
+                        and member.ready.is_set() and not member.turn._wake_pending
+                        and (member.turn._wake_confirm is None or member.turn._wake_confirm.done())
+                        and gap > TERMINAL_SILENCE_SECS
+                        and not member.input._audio_in_queue._unfinished_tasks):
+                    # A packet gap is the stream boundary even if quiet speech
+                    # never produced a VAD stop. Drain through the final ASR/
+                    # wake handlers before retiring decoder state; loaded model
+                    # weights remain shared. Never discard an addressed turn.
+                    # _drop removes the unowned member before its first await;
+                    # a returning packet can create the next stream immediately.
+                    await self._drop(principal)
+                    continue
+                if (self.listening(member) and 0.04 <= gap <= TERMINAL_SILENCE_SECS
                         and now - member.last_silence >= 0.04 and member.ready.is_set()):
                     member.last_silence = now
                     await member.audio(b"\0" * (PCM_FRAME * 2), terminal=True)

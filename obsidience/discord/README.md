@@ -6,6 +6,13 @@ conversation, grants and reasoning. This process owns Discord Gateway, voice,
 receivers and audio players. The existing speech worker owns ASR, wake admission,
 followups and TTS; this package loads no speech or language model.
 
+Each member uses a separate decoder stream. After a packet gap, the speech owner
+finishes the existing bounded endpoint silence, drains recognition and pending
+wake confirmation, then retires unaddressed stream state. The next utterance
+starts fresh without reloading model weights. Claimed commands and question
+followups retain their speaker ownership. Generated endpoint silence does not
+count toward the continuous received-audio limit.
+
 Discord's supported bot voice API carries audio. Local video files can supply their
 audio track, but this implementation does not transmit video or Go Live streams.
 It uses no user account, user token, selfbot, screen capture or hidden client API.
