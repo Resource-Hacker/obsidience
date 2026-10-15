@@ -13,7 +13,7 @@ import "@/styles/provider-graph.css";
 type PublicGraph = { public_name?: string; revision?: string; available: boolean; nodes: GraphNode[]; links: GraphLink[]; group: GraphNavigationGroup | null; memory?: ProviderGraph & {available: boolean} };
 type Run = { refs: string[] };
 const EMPTY: PublicGraph = { available: false, nodes: [], links: [], group: null };
-const TUNING = { ...DEFAULT_KNOWLEDGE_3D_TUNING, sweepSpeed: 1 / 1.6 };
+const TUNING = { ...DEFAULT_KNOWLEDGE_3D_TUNING, sweepSpeed: 1 / 1.6, rolePlates: 0 };
 
 export function DiscordGraphSurface() {
   const [graph, setGraph] = useState<PublicGraph>(EMPTY);
