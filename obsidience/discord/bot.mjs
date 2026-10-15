@@ -54,7 +54,8 @@ export class DiscordTransport {
     this.diagnosticRead = null;
     this.wakeCalibration = null;
     this.receiveCounters = { starts: 0, failures: 0, rx_packets: 0, decoded_pcm_bytes: 0,
-      forwarded_pcm_bytes: 0, decoded_pcm_peak: 0, nonzero_pcm_frames: 0, wake_events: 0, transcript_events: 0 };
+      forwarded_pcm_bytes: 0, decoded_pcm_peak: 0, nonzero_pcm_frames: 0, invalid_opus_packets: 0,
+      wake_events: 0, transcript_events: 0 };
     this.clients = new Set();
     const intents = [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.GuildMessages];
     if (config.message_content_intent) intents.push(GatewayIntentBits.MessageContent);
@@ -401,7 +402,17 @@ export class DiscordTransport {
           this.sendSpeech({ type: 'audio', ...principal, pcm: pcm.toString('base64'),
             sample_rate: 16000, channels: 1, format: 's16le', ...(calibrating ? { calibration_probe: true } : {}) });
           this.countReceive('forwarded_pcm_bytes', pcm.length);
-        } catch (error) { rejected(at, error); }
+        } catch (error) {
+          if (at === 'opus_decode' && error instanceof TypeError
+            && error.message === 'The compressed data passed is corrupted') {
+            // The pinned binding's OPUS_INVALID_PACKET leaves decoder state
+            // intact. Drop that packet, not the subscription: speaking.start
+            // will not fire again while subsequent packets keep arriving.
+            this.countReceive('invalid_opus_packets');
+            return;
+          }
+          rejected(at, error);
+        }
       });
       opus.on('end', () => {
         if (!current()) return;

@@ -210,6 +210,11 @@ received with `selfDeaf:false` and decoded per Discord user identity directly to
 16k mono through libopus. Each packet reaches speech at its RTC arrival cadence;
 there is no receiver-side FFmpeg process or pipe buffering. At most eight live receive pipelines exist. Stream/socket
 backpressure terminates that receiver instead of accumulating unbounded audio.
+A corrupt Opus packet increments `invalid_opus_packets` and is discarded while
+keeping the subscription and decoder alive. The pinned libopus rejects invalid
+packets before changing decoder state. Other codec and transport failures remain
+failure-visible and close their receiver.
+
 Status includes saturating process-lifetime `receive_counters`: receiver starts,
 failures, Opus RX packets, decoded 16k mono PCM bytes, successfully forwarded
 16k mono PCM bytes, accepted wake events and accepted transcript events. Values
