@@ -65,7 +65,7 @@ QtObject {
     }
 
     readonly property WebSocket socket: WebSocket {
-        url: "ws://127.0.0.1:8765/ws/realtime"
+        url: Harness.socketOrigin + "/ws/realtime"
         active: true
         onTextMessageReceived: message => root.applyMessage(message)
         onStatusChanged: status => {

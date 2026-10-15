@@ -5,7 +5,9 @@ import QtQuick.Controls
 import QtWebEngine
 import QtWebSockets
 import QMLTermWidget 2.0
+import Quickshell
 import Quickshell.Io
+import "../../api"
 
 Rectangle {
     id: root
@@ -256,7 +258,7 @@ Rectangle {
                 id: terminalSession
 
                 initialWorkingDirectory: "/home/wissenschafter"
-                shellProgram: "/home/wissenschafter/Projects/obsidience/obsidience/shell/qml/panes/terminal/attach-shared-tmux"
+                shellProgram: Quickshell.shellPath("../session/attach-shared-tmux")
                 onFinished: root.terminalConnected = false
             }
 
@@ -465,7 +467,7 @@ Rectangle {
     WebSocket {
         id: traceSocket
 
-        url: "ws://127.0.0.1:8765/ws/trace"
+        url: Harness.socketOrigin + "/ws/trace"
         active: true
         onTextMessageReceived: message => root.applyTrace(message)
         onStatusChanged: status => {

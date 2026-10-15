@@ -5,8 +5,9 @@ pragma ComponentBehavior: Bound
 import Quickshell
 import QtQml
 import "api"
+import "api/command"
 import "lock"
-import "surfaces/stage"
+import "surfaces/wordmark"
 import "workspace"
 
 ShellRoot {
@@ -65,7 +66,7 @@ ShellRoot {
             surfaceId: "samsung"
             shellApi: root.shellApi
             locked: root.lockController.active
-            windowState: commandServer.windowStates.samsung || null
+            windowState: commandServer.scene.windowStates.samsung || null
             motionAllowed: root.knowledgeVisible
         }
     }

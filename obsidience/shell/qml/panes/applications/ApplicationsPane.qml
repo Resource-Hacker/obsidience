@@ -5,11 +5,11 @@ import QtQuick.Controls
 import Quickshell
 import Quickshell.Widgets
 import "../../components/visual"
+import "../../api"
 
 Item {
     id: root
 
-    readonly property string apiBase: "http://127.0.0.1:8765"
     property string mode: "installed"
     property var applications: []
     property var results: []
@@ -35,40 +35,18 @@ Item {
         ].join(" ").toLowerCase().indexOf(needle) >= 0)
     }
 
-    function responseError(request, fallback) {
-        const raw = request.responseText || ""
-        try {
-            const parsed = JSON.parse(raw)
-            if (parsed && typeof parsed.detail === "string" && parsed.detail) {
-                return parsed.detail
-            }
-        } catch (error) {
-            // Plain text is already useful.
-        }
-        return raw || fallback + " (" + request.status + ")"
-    }
-
     function request(method, path, body, onSuccess, onFailure) {
-        const xhr = new XMLHttpRequest()
-        xhr.open(method, apiBase + path)
-        if (body !== null) {
-            xhr.setRequestHeader("content-type", "application/json")
-        }
-        xhr.onreadystatechange = function() {
-            if (xhr.readyState !== XMLHttpRequest.DONE) {
-                return
-            }
-            if (xhr.status < 200 || xhr.status >= 300) {
-                onFailure(responseError(xhr, "Software request failed"))
+        Harness.request(method, path, body, function(reply) {
+            if (!reply.ok) {
+                onFailure(Harness.errorText(reply, "Software request failed"))
                 return
             }
             try {
-                onSuccess(JSON.parse(xhr.responseText))
+                onSuccess(JSON.parse(reply.text))
             } catch (error) {
                 onFailure("Obsidience returned invalid software data.")
             }
-        }
-        xhr.send(body === null ? null : JSON.stringify(body))
+        })
     }
 
     function refresh() {

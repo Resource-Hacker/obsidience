@@ -4,6 +4,7 @@ import QtQuick
 import QtQuick.Controls
 import QtWebSockets
 import "../../components/visual"
+import "../../api"
 
 Rectangle {
     id: root
@@ -38,18 +39,14 @@ Rectangle {
         if (voiceRequestPending || !realtime.connected) return
         voiceRequestPending = true
         voiceError = ""
-        const xhr = new XMLHttpRequest()
-        xhr.open("PATCH", "http://127.0.0.1:8765/api/realtime/mode")
-        xhr.setRequestHeader("Content-Type", "application/json")
-        xhr.onreadystatechange = function() {
-            if (!root || xhr.readyState !== XMLHttpRequest.DONE) return
+        Harness.request("PATCH", "/api/realtime/mode", payload, function(reply) {
+            if (!root) return
             root.voiceRequestPending = false
-            if (xhr.status < 200 || xhr.status >= 300) {
+            if (!reply.ok) {
                 root.voiceError = "Voice could not change mode."
-                try { root.voiceError = JSON.parse(xhr.responseText).detail || root.voiceError } catch (error) {}
+                try { root.voiceError = JSON.parse(reply.text).detail || root.voiceError } catch (error) {}
             }
-        }
-        xhr.send(JSON.stringify(payload))
+        })
     }
 
     function voiceStatus() {
@@ -545,7 +542,7 @@ Rectangle {
     WebSocket {
         id: chatSocket
 
-        url: "ws://127.0.0.1:8765/ws/chat"
+        url: Harness.socketOrigin + "/ws/chat"
         active: true
         onTextMessageReceived: message => root.applyMessage(message)
         onStatusChanged: status => {

@@ -52,22 +52,19 @@ Rectangle {
 
     function request(method, path, body, callback) {
         if (disposed || !visible) return
-        const xhr = new XMLHttpRequest()
-        xhr.mediaMutation = method === "POST"
+        const mutation = method === "POST"
         const epoch = viewEpoch
-        requests.push(xhr)
-        xhr.open(method, "http://127.0.0.1:8765/api/media" + path)
-        if (body !== null) xhr.setRequestHeader("Content-Type", "application/json")
-        if (path.startsWith("/commands")) xhr.setRequestHeader("X-Obsidience-Owner", ShellCommandToken.value)
-        xhr.onreadystatechange = function() {
-            if (root.disposed || xhr.readyState !== XMLHttpRequest.DONE) return
+        const headers = path.startsWith("/commands") ? {"X-Obsidience-Owner": ShellCommandToken.value} : {}
+        const xhr = Harness.request(method, "/api/media" + path, body, function(reply) {
+            if (root.disposed) return
             root.requests = root.requests.filter(item => item !== xhr)
-            if (!root.visible || (!xhr.mediaMutation && root.viewEpoch !== epoch)) return
+            if (!root.visible || (!mutation && root.viewEpoch !== epoch)) return
             let data = null
-            try { data = JSON.parse(xhr.responseText) } catch (error) {}
-            callback(xhr.status >= 200 && xhr.status < 300, data)
-        }
-        xhr.send(body === null ? null : JSON.stringify(body))
+            try { data = JSON.parse(reply.text) } catch (error) {}
+            callback(reply.ok, data)
+        }, headers)
+        xhr.mediaMutation = mutation
+        requests.push(xhr)
         return xhr
     }
     function clearSavedResume() {

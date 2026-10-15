@@ -11,7 +11,6 @@ import "../../api"
 Rectangle {
     id: root
     required property var shellTheme
-    property string apiBase: "http://127.0.0.1:8765"
     property string activeSection: "overview"
     property string activeDevice: ""
     property var snapshot: null
@@ -145,23 +144,19 @@ Rectangle {
     function refresh() {
         if (!monitorActive || loading) return
         const generation = ++requestGeneration
-        const xhr = new XMLHttpRequest()
-        activeRequest = xhr
         loading = true
-        xhr.open("GET", apiBase + "/api/hardware/monitor")
-        xhr.onreadystatechange = function() {
-            if (xhr.readyState !== XMLHttpRequest.DONE || root.disposing || generation !== root.requestGeneration) return
+        activeRequest = Harness.request("GET", "/api/hardware/monitor", null, function(reply) {
+            if (root.disposing || generation !== root.requestGeneration) return
             root.activeRequest = null
             root.loading = false
-            if (xhr.status < 200 || xhr.status >= 300) {
-                root.errorMessage = "Monitor unavailable (HTTP " + xhr.status + "). Last reading retained."
+            if (!reply.ok) {
+                root.errorMessage = "Monitor unavailable (HTTP " + reply.status + "). Last reading retained."
                 root.historyGap = true
                 return
             }
-            try { root.applySnapshot(JSON.parse(xhr.responseText)); root.errorMessage = "" }
+            try { root.applySnapshot(JSON.parse(reply.text)); root.errorMessage = "" }
             catch (error) { root.errorMessage = "Monitor returned an invalid reading. Last reading retained."; root.historyGap = true }
-        }
-        xhr.send()
+        })
     }
     function showSettings() {
         if (shellSocket.status !== WebSocket.Open) { settingsError = "Settings bridge is unavailable."; return }

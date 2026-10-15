@@ -8,7 +8,6 @@ import "../../../api"
 Item {
     id: root
 
-    readonly property string apiBase: "http://127.0.0.1:8765"
     readonly property string commandSchema: "obsidience.shell.command.v1"
     property var graphOptions: []
     property int selectedIndex: 0
@@ -35,18 +34,6 @@ Item {
     readonly property bool dirty: stateReady
         && JSON.stringify(tuning) !== JSON.stringify(savedTuning)
 
-    function responseError(request, fallback) {
-        const raw = request.responseText || ""
-        try {
-            const parsed = JSON.parse(raw)
-            if (parsed && typeof parsed.detail === "string" && parsed.detail) {
-                return parsed.detail
-            }
-        } catch (error) {
-        }
-        return raw || fallback + " (" + request.status + ")"
-    }
-
     function graphId(group) {
         const role = String(group.role || group.id || "").toLowerCase()
         if (role === "executive") return "main"
@@ -65,17 +52,15 @@ Item {
 
     function refreshGraphs() {
         const current = selectedGraphId
-        const xhr = new XMLHttpRequest()
-        xhr.open("GET", apiBase + "/api/graph")
-        xhr.onreadystatechange = function() {
+        Harness.request("GET", "/api/graph", null, function(reply) {
             // The Settings Loader may destroy this page before its request finishes.
-            if (!root || xhr.readyState !== XMLHttpRequest.DONE) return
-            if (xhr.status < 200 || xhr.status >= 300) {
-                root.errorMessage = root.responseError(xhr, "Graph inventory failed")
+            if (!root) return
+            if (!reply.ok) {
+                root.errorMessage = Harness.errorText(reply, "Graph inventory failed")
                 return
             }
             try {
-                const payload = JSON.parse(xhr.responseText)
+                const payload = JSON.parse(reply.text)
                 const navigation = payload && payload.navigation
                 const source = navigation && Array.isArray(navigation.groups)
                     ? navigation.groups : []
@@ -103,8 +88,7 @@ Item {
             } catch (error) {
                 root.errorMessage = "Obsidience returned invalid graph navigation."
             }
-        }
-        xhr.send()
+        })
     }
 
     function send(type, extra) {

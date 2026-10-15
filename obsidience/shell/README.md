@@ -33,8 +33,14 @@ The Hyprland session has one native implementation:
   `FloatingWindow` per undocked module, the launcher, and the 10-pixel grid
   definition;
 - `qml/panes/` supplies Chat, Library, Tasks, Reviews, Reader, Knowledge,
-  Source, Models, Hardware, Camera, Settings, Applications, Terminal, and
-  Displays;
+  Graph, Source, Models, Hardware, Camera, Settings, Media, Applications,
+  Terminal, and TFT; each folder is named by what its pane does, while the
+  pane IDs (`status` for Models, `knowledge-graph` for Graph) stay stable;
+- `qml/api/command/` serves the `obsidience.shell.v1` command socket, with one
+  owner per domain: pane selection and docking, the window adapter's Scene,
+  graph state and stream signalling, and workspace settings;
+- `qml/api/Harness.qml` is the panes' one Harness client: its origin,
+  `request()` and the reading of its error replies;
 - `qml/graph-stage.qml` presents the canonical React/Three.js stages;
 - `theme/palette.json` remains the visual authority;
 - the native Terminal remains one QMLTermWidget view of the persistent
@@ -178,7 +184,8 @@ distro-owned executable remains untouched and serves only as the IPC client.
 
 Hyprland keeps a secure `ext-session-lock` after its client dies. Obsidience
 therefore enables Hyprland's supported `allow_session_lock_restore` option and
-uses the small lifecycle helpers under `session/`: `restart-shell` refuses to
+uses the small lifecycle helpers under `session/` (which also holds the
+Terminal's `attach-shared-tmux`): `restart-shell` refuses to
 kill the live locker, while the host's startup hook detects and reclaims only a
 stranded compositor lock. This is the bounded Omarchy Quattro pattern adapted
 to the existing Obsidience service and plain lock IPC; it adds no daemon,

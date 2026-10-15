@@ -26,38 +26,18 @@ Rectangle {
             letter => letter.toUpperCase())
     }
 
-    function requestError(request, fallback) {
-        const raw = String(request.responseText || "").trim()
-        if (!raw) {
-            return fallback
-        }
-        try {
-            const parsed = JSON.parse(raw)
-            return typeof parsed.detail === "string" ? parsed.detail : raw
-        } catch (error) {
-            return raw
-        }
-    }
-
     function requestJson(method, path, callback) {
-        const request = new XMLHttpRequest()
-        request.open(method, "http://127.0.0.1:8765" + path)
-        request.onreadystatechange = function() {
-            if (request.readyState !== XMLHttpRequest.DONE) {
-                return
-            }
-            if (request.status < 200 || request.status >= 300) {
-                callback(false, null, root.requestError(request,
-                    "Request failed (" + request.status + ")"))
+        Harness.request(method, path, null, function(reply) {
+            if (!reply.ok) {
+                callback(false, null, Harness.errorText(reply, "Request failed"))
                 return
             }
             try {
-                callback(true, request.responseText ? JSON.parse(request.responseText) : {}, "")
+                callback(true, reply.text ? JSON.parse(reply.text) : {}, "")
             } catch (error) {
                 callback(false, null, "The harness returned invalid JSON.")
             }
-        }
-        request.send()
+        })
     }
 
     function refresh() {

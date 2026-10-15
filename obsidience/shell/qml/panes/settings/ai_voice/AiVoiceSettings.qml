@@ -4,11 +4,11 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import "../../../components/visual"
+import "../../../api"
 
 Item {
     id: root
 
-    readonly property string apiBase: "http://127.0.0.1:8765"
     property var hardware: null
     property bool loading: false
     property string changing: ""
@@ -26,28 +26,24 @@ Item {
         hardware = payload
     }
 
-    function responseError(xhr) {
+    function responseError(reply) {
         try {
-            const payload = JSON.parse(xhr.responseText || "{}")
+            const payload = JSON.parse(reply.text || "{}")
             if (typeof payload.detail === "string") return payload.detail.slice(0, 500)
         } catch (error) {}
-        return "Settings could not be updated (HTTP " + xhr.status + ")."
+        return "Settings could not be updated (HTTP " + reply.status + ")."
     }
 
     function request(method, path, body, onSuccess, onFailure) {
-        const xhr = new XMLHttpRequest()
-        xhr.open(method, apiBase + path)
-        if (body !== null) xhr.setRequestHeader("content-type", "application/json")
-        xhr.onreadystatechange = function() {
-            if (xhr.readyState !== XMLHttpRequest.DONE || !root) return
-            if (xhr.status < 200 || xhr.status >= 300) {
-                onFailure(root.responseError(xhr))
+        Harness.request(method, path, body, function(reply) {
+            if (!root) return
+            if (!reply.ok) {
+                onFailure(root.responseError(reply))
                 return
             }
-            try { onSuccess(JSON.parse(xhr.responseText)) }
+            try { onSuccess(JSON.parse(reply.text)) }
             catch (error) { onFailure("Settings could not be read. Reload to check the saved values.") }
-        }
-        xhr.send(body === null ? null : JSON.stringify(body))
+        })
     }
 
     function refresh() {

@@ -121,17 +121,15 @@ Item {
         const generation = requestGeneration
         memoryBusy = true
         errorMessage = ""
-        const request = new XMLHttpRequest()
-        request.open("GET", "http://127.0.0.1:8765/api/graphs/memory/banks")
-        request.onreadystatechange = function() {
-            if (request.readyState !== XMLHttpRequest.DONE || generation !== root.requestGeneration) return
+        Harness.request("GET", "/api/graphs/memory/banks", null, function(reply) {
+            if (generation !== root.requestGeneration) return
             root.memoryBusy = false
-            if (request.status < 200 || request.status >= 300) {
+            if (!reply.ok) {
                 root.errorMessage = "Agent memory banks are unavailable."
                 return
             }
             try {
-                const data = JSON.parse(request.responseText)
+                const data = JSON.parse(reply.text)
                 const bank = (Array.isArray(data.banks) ? data.banks : [])
                     .find(item => item.agent_ref === agentRef)
                 if (!bank || typeof bank.id !== "string" || !/^obsidience-[a-f0-9]{32}$/.test(bank.id)) {
@@ -153,8 +151,7 @@ Item {
             } catch (error) {
                 root.errorMessage = "The Agent memory bank response was invalid."
             }
-        }
-        request.send()
+        })
     }
 
     function readableBytes(bytes) {
@@ -227,14 +224,10 @@ Item {
 
     function loadArticleTitles(generation) {
         checkouts.refresh()
-        const request = new XMLHttpRequest()
-        request.open("GET", "http://127.0.0.1:8765/api/graph")
-        request.onreadystatechange = function() {
-            if (request.readyState !== XMLHttpRequest.DONE
-                    || generation !== root.requestGeneration
-                    || request.status < 200 || request.status >= 300) return
+        Harness.request("GET", "/api/graph", null, function(reply) {
+            if (generation !== root.requestGeneration || !reply.ok) return
             try {
-                const graph = JSON.parse(request.responseText)
+                const graph = JSON.parse(reply.text)
                 const titles = {}
                 for (const node of graph.nodes || []) titles[node.id] = node.title
                 for (const group of graph.navigation.groups || []) {
@@ -248,8 +241,7 @@ Item {
                 root.articleGraph = {nodes: graph.nodes || [], links: graph.links || [],
                     navigation: graph.navigation || {groups: []}}
             } catch (error) {}
-        }
-        request.send()
+        })
     }
 
     function loadDocument() {
@@ -262,22 +254,20 @@ Item {
         if (!ref) { loading = false; return }
         loading = true
         loadArticleTitles(generation)
-        const request = new XMLHttpRequest()
-        request.open("GET", "http://127.0.0.1:8765/"
+        const documentUrl = "/"
             + (sourceMode ? "api/source-files/" : "api/articles/")
             + encodeURI(ref)
             + (!root.sourceMode ? "?graph_id=" + encodeURIComponent(root.graphId)
-                + (animateRead ? "&activity=true" : "") : animateRead ? "?activity=true" : ""))
-        request.onreadystatechange = function() {
-            if (request.readyState !== XMLHttpRequest.DONE
-                    || generation !== root.requestGeneration) return
+                + (animateRead ? "&activity=true" : "") : animateRead ? "?activity=true" : "")
+        Harness.request("GET", documentUrl, null, function(reply) {
+            if (generation !== root.requestGeneration) return
             root.loading = false
-            if (request.status < 200 || request.status >= 300) {
-                root.errorMessage = request.responseText || "Document could not be loaded."
+            if (!reply.ok) {
+                root.errorMessage = reply.text || "Document could not be loaded."
                 return
             }
             try {
-                const document = JSON.parse(request.responseText)
+                const document = JSON.parse(reply.text)
                 if (root.sourceMode) {
                     root.articleTitle = typeof document.name === "string" ? document.name : ref
                     root.articleKind = typeof document.storage === "string"
@@ -314,8 +304,7 @@ Item {
             } catch (error) {
                 root.errorMessage = "Document response was invalid."
             }
-        }
-        request.send()
+        })
     }
 
     function startEdit() {
@@ -333,21 +322,16 @@ Item {
         curationBusy = true
         errorMessage = ""
         noticeMessage = ""
-        const request = new XMLHttpRequest()
-        request.open("PUT", "http://127.0.0.1:8765/api/articles/" + encodeURI(ref) + "/auto-curate")
-        request.setRequestHeader("content-type", "application/json")
-        request.onreadystatechange = function() {
-            if (request.readyState !== XMLHttpRequest.DONE
-                    || generation !== root.requestGeneration || root.articleRef !== ref || root.sourceMode) return
+        Harness.request("PUT", "/api/articles/" + encodeURI(ref) + "/auto-curate", {"enabled": enabled}, function(reply) {
+            if (generation !== root.requestGeneration || root.articleRef !== ref || root.sourceMode) return
             root.curationBusy = false
-            if (request.status < 200 || request.status >= 300) {
-                root.errorMessage = request.responseText || "Auto-curation permission could not be saved."
+            if (!reply.ok) {
+                root.errorMessage = reply.text || "Auto-curation permission could not be saved."
                 return
             }
             root.loadDocument()
             root.noticeMessage = "Auto-curation permission saved. Task triggers are unchanged."
-        }
-        request.send(JSON.stringify({"enabled": enabled}))
+        })
     }
 
     function cancelEdit() {
@@ -366,24 +350,19 @@ Item {
         saving = true
         noticeMessage = ""
         errorMessage = ""
-        const request = new XMLHttpRequest()
-        request.open("PATCH", "http://127.0.0.1:8765/api/articles/" + encodeURI(ref))
-        request.setRequestHeader("content-type", "application/json")
-        request.onreadystatechange = function() {
-            if (request.readyState !== XMLHttpRequest.DONE
-                    || generation !== root.requestGeneration
+        Harness.request("PATCH", "/api/articles/" + encodeURI(ref), {"title": title, "body": body}, function(reply) {
+            if (generation !== root.requestGeneration
                     || root.selectionKind !== "article" || root.articleRef !== ref) return
             root.saving = false
-            if (request.status < 200 || request.status >= 300) {
-                root.errorMessage = request.responseText || "Article could not be saved."
+            if (!reply.ok) {
+                root.errorMessage = reply.text || "Article could not be saved."
                 return
             }
             root.articleTitle = title
             root.articleBody = body
             root.editing = false
             root.noticeMessage = "Article saved."
-        }
-        request.send(JSON.stringify({"title": title, "body": body}))
+        })
     }
 
     function wikiMarkdown(content) {
@@ -428,19 +407,16 @@ Item {
         const citationGeneration = ++citationRequestGeneration
         const ref = articleRef
         const graph = graphId
-        const request = new XMLHttpRequest()
-        request.open("GET", "http://127.0.0.1:8765/api/sources/" + id)
-        request.onreadystatechange = function() {
-            if (request.readyState !== XMLHttpRequest.DONE || !root
-                    || generation !== root.requestGeneration
+        Harness.request("GET", "/api/sources/" + id, null, function(reply) {
+            if (!root || generation !== root.requestGeneration
                     || citationGeneration !== root.citationRequestGeneration
                     || root.selectionKind !== "article" || root.articleRef !== ref || root.graphId !== graph) return
-            if (request.status < 200 || request.status >= 300) {
+            if (!reply.ok) {
                 root.errorMessage = "The cited Source could not be opened."
                 return
             }
             try {
-                const source = JSON.parse(request.responseText)
+                const source = JSON.parse(reply.text)
                 const path = source.source_path
                 if (source.id !== id || source.citation !== "source://" + id || source.immutable !== true
                         || typeof path !== "string" || path.length > 4096
@@ -459,8 +435,7 @@ Item {
             } catch (error) {
                 root.errorMessage = "The cited Source identity could not be verified."
             }
-        }
-        request.send()
+        })
     }
 
     function escapeHtml(value) {

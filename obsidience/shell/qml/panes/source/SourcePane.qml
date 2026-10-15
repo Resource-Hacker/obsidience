@@ -250,22 +250,19 @@ Rectangle {
             root.rebuildRows()
         }
         function load(path, accept, optional) {
-            const request = new XMLHttpRequest()
-            request.open("GET", "http://127.0.0.1:8765" + path)
-            request.onreadystatechange = function() {
-                if (request.readyState !== XMLHttpRequest.DONE || !root || failed
-                        || generation !== root.requestGeneration) return
-                if (request.status < 200 || request.status >= 300) {
+            Harness.request("GET", path, null, function(reply) {
+                if (!root || failed || generation !== root.requestGeneration) return
+                if (!reply.ok) {
                     if (optional) { accept({}); finish(); return }
                     if (generation === root.requestGeneration) {
                         failed = true
                         root.loading = false
-                        root.errorMessage = request.responseText
+                        root.errorMessage = reply.text
                             || "Source hierarchy is unavailable."
                     }
                     return
                 }
-                try { accept(JSON.parse(request.responseText)); finish() }
+                try { accept(JSON.parse(reply.text)); finish() }
                 catch (error) {
                     if (optional) { accept({}); finish(); return }
                     if (root && generation === root.requestGeneration) {
@@ -274,8 +271,7 @@ Rectangle {
                         root.errorMessage = "Source hierarchy response was invalid."
                     }
                 }
-            }
-            request.send()
+            })
         }
         function loadSource(after) {
             load("/api/source-files" + (after === null ? ""
@@ -355,25 +351,20 @@ Rectangle {
         nextBusy[key] = true
         busyCheckouts = nextBusy
         const checkedOut = !isCheckedOut(tree, agent)
-        const request = new XMLHttpRequest()
-        request.open("PUT", "http://127.0.0.1:8765/api/source-checkouts/"
-            + encodeURI(tree))
-        request.setRequestHeader("content-type", "application/json")
-        request.onreadystatechange = function() {
-            if (request.readyState !== XMLHttpRequest.DONE) return
+        Harness.request("PUT", "/api/source-checkouts/" + encodeURI(tree),
+            {"agent": agent, "checked_out": checkedOut}, function(reply) {
             const busy = Object.assign({}, root.busyCheckouts)
             delete busy[key]
             root.busyCheckouts = busy
-            if (request.status < 200 || request.status >= 300) {
-                root.errorMessage = request.responseText || "Source checkout failed."
+            if (!reply.ok) {
+                root.errorMessage = reply.text || "Source checkout failed."
                 return
             }
             const assignments = Object.assign({}, root.checkouts)
             if (checkedOut) assignments[key] = true
             else delete assignments[key]
             root.checkouts = assignments
-        }
-        request.send(JSON.stringify({"agent": agent, "checked_out": checkedOut}))
+        })
     }
 
     function applyShellEvent(message) {
@@ -418,20 +409,17 @@ Rectangle {
         const generation = ++systemRequestGeneration
         if (capture) systemRefreshBusy = true
         systemError = ""
-        const request = new XMLHttpRequest()
-        request.open(capture ? "POST" : "GET", "http://127.0.0.1:8765/api/system/"
-            + (capture ? "refresh" : "knowledge"))
-        request.onreadystatechange = function() {
-            if (request.readyState !== XMLHttpRequest.DONE || !root
-                    || generation !== root.systemRequestGeneration) return
+        Harness.request(capture ? "POST" : "GET", "/api/system/" + (capture ? "refresh" : "knowledge"),
+            null, function(reply) {
+            if (!root || generation !== root.systemRequestGeneration) return
             root.systemRefreshBusy = false
-            if (request.status < 200 || request.status >= 300) {
+            if (!reply.ok) {
                 root.systemError = capture ? "System refresh failed · previous evidence retained"
                     : "System evidence status unavailable"
                 return
             }
             try {
-                const report = JSON.parse(request.responseText)
+                const report = JSON.parse(reply.text)
                 if (!report || ["ready", "degraded", "uninitialized"].indexOf(report.status) < 0
                         || !Array.isArray(report.categories)) throw new Error("Invalid system status")
                 root.systemKnowledge = report
@@ -439,8 +427,7 @@ Rectangle {
             } catch (error) {
                 root.systemError = "System evidence status unavailable"
             }
-        }
-        request.send()
+        })
     }
 
     Component.onCompleted: { refresh(); loadSystemKnowledge(false) }
