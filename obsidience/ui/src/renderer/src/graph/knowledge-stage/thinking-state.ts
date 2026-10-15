@@ -105,6 +105,8 @@ export function useThinkingActivity(handlers: {
   onReview: (review: LinkReviewChange) => void;
   /** Accepted knowledge changed: reload the graph snapshot. */
   onGraphChanged: () => void;
+  /** A scene's explicit navigation membership; other Agents stay independent. */
+  acceptGraph?: (graphId: string) => boolean;
 }) {
   const listeners = useRef(handlers);
   listeners.current = handlers;
@@ -222,31 +224,49 @@ export function useThinkingActivity(handlers: {
       activityTransaction.current = null;
       setActivity(null);
     };
+    const runGraphs = new Map<string, string>();
+    const accepts = (graphId: string) => listeners.current.acceptGraph?.(graphId) !== false;
+    const rememberRun = (entry: ActivityWireEntry) => {
+      if (entry.run_id) {
+        runGraphs.set(entry.run_id, entry.graph_id ?? MAIN_GRAPH_ID);
+        while (runGraphs.size > 200) runGraphs.delete(runGraphs.keys().next().value!);
+      }
+    };
+    const acceptsOperation = (entry: GraphOperation) => entry.graph_id !== "*"
+      ? accepts(entry.graph_id)
+      : !entry.run_id || (runGraphs.has(entry.run_id) && accepts(runGraphs.get(entry.run_id)!));
     const stop = subscribeActivity({
       message: (frame) => {
         try {
           const message = frame as ActivityWireMessage;
           if (message.type === "activity") {
-            recent = [...recent, message].slice(-100);
+            rememberRun(message);
             reviewChanged(message);
+            if (!accepts(message.graph_id ?? MAIN_GRAPH_ID)) return;
+            recent = [...recent, message].slice(-100);
             const activity = activityFromWire(message);
             if (activity) receiveActivity(activity);
           } else if (message.type === "snapshot" && Array.isArray(message.entries)) {
             resetActivity(); // Replace stale display state with the current stream snapshot.
-            recent = message.entries.slice(-100);
+            message.entries.forEach(rememberRun);
+            recent = message.entries.filter(entry => accepts(entry.graph_id ?? MAIN_GRAPH_ID)).slice(-100);
             applyPlayback(message.playback, false);
-            setOperations(currentOperations((message.operations ?? []).map(entry => {
+            setOperations(currentOperations((message.operations ?? []).filter(acceptsOperation).map(entry => {
               const expiresAt = finishedRuns.current.get(entry.run_id);
               return expiresAt === undefined ? entry : { ...entry, expires_at: expiresAt };
             })));
             message.entries.forEach(reviewChanged);
-            latestActivityTransaction(message.entries,
+            latestActivityTransaction(recent,
               playback.current.status !== "idle" ? playback.current.run_id : "",
             ).forEach(receiveActivity);
           } else if (message.type === "playback") {
             applyPlayback(message.playback);
           } else if (message.type === "operation" && message.operation) {
             const operation = message.operation;
+            if (!acceptsOperation(operation)) {
+              if (operation.refresh) listeners.current.onGraphChanged();
+              return;
+            }
             const expiresAt = finishedRuns.current.get(operation.run_id);
             const presented = expiresAt === undefined ? operation
               : { ...operation, expires_at: expiresAt };
@@ -256,6 +276,7 @@ export function useThinkingActivity(handlers: {
         } catch { /* malformed activity frames are ignored */ }
       },
       close: () => {
+        runGraphs.clear();
         resetActivity(); // A lost stream is not evidence that a graph is still thinking.
         setOperations([]);
         applyPlayback({ status: "idle", level: 0, run_id: "", playback_id: "" });

@@ -880,3 +880,7 @@ and its thinking routes. Public events contain no queries, conversation, reasoni
 Tool arguments/results, source paths, other Agent scopes or general trace stream.
 A separate local virtual camera can expose this dedicated surface to an ordinary
 Discord client; it is not a bot-token video sender.
+
+Navigation declares scene membership separately from Agent registration. The Discord
+Agent belongs to its independent scene; Executive satellites and activity exclude it.
+The Library retains its identity for ordinary management and Review.

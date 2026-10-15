@@ -99,6 +99,9 @@ export function GraphBackdrop({
       }
     },
     onGraphChanged: () => window.dispatchEvent(new Event("obsidience:graph-refresh")),
+    acceptGraph: (graphId) => graphScope === "library" ? graphId === "library"
+      : graphId === MAIN_GRAPH_ID || graph.navigation.groups.some((group) => group.scene === "executive"
+        && (graphId === group.id || graphId === group.root_ref.split("/")[1])),
   });
 
   function selectReader(ref: string, graphId: string): void {

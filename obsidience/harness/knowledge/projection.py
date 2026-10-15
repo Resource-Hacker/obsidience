@@ -44,6 +44,10 @@ CHECKOUT_AGENTS = {
     "researcher": "Agents/Darwin/Darwin",
     "discord": "Agents/Discord/Discord",
 }
+# Agent registration and scene membership are separate presentation decisions.
+# Independent integrations remain readable/manageable without joining the
+# Executive's scene or its specialist constellation.
+EXECUTIVE_SCENE_GROUPS = frozenset({"executive", "guardian", "curator", "researcher"})
 CHECKOUT_FIELDS = {
     "tool": "tools",
     "skill": "skills",
@@ -549,6 +553,7 @@ def _navigation_manifest(overrides: dict[str, Note]) -> dict:
             "title": identity.title,
             "subtitle": role.replace("-", " ").title(),
             "role": role,
+            "scene": "executive" if group_id in EXECUTIVE_SCENE_GROUPS else "independent",
             "root_ref": identity.ref,
             "access_refs": access_refs,
             "subjects": subjects,
@@ -564,6 +569,7 @@ def _navigation_manifest(overrides: dict[str, Note]) -> dict:
         "title": str(library["title"]),
         "subtitle": "Shared assets",
         "role": "library",
+        "scene": "library",
         "root_ref": "@library",
         "subjects": _scoped_knowledge_subjects(None, notes, library_subjects, overrides)
                     + [item for item in library_subjects if item["id"] == "@library/Agents"],

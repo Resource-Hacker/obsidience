@@ -76,6 +76,7 @@ export interface GraphNavigationGroup {
   title: string;
   subtitle: string;
   role: GraphNavigationRole;
+  scene?: "executive" | "library" | "independent";
   root_ref: string;
   subjects: GraphNavigationSubject[];
   article_refs?: string[];

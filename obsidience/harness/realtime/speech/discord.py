@@ -97,8 +97,26 @@ class _MemberSTT(speech.UtteranceNeMoSTTService):
                          enable_direct_mode=True)
         self._model_lock = source._model_lock
         self.last_reset = time.monotonic()
+        self.audio_frames = 0
+        self.transcription_frames = 0
+        self.vad_starts = 0
+        self.vad_stops = 0
+
+    async def process_audio_frame(self, frame, direction):
+        self.audio_frames = min(self.audio_frames + 1, 1_000_000_000)
+        await super().process_audio_frame(frame, direction)
+
+    async def _handle_transcription(self, transcript, is_final, language=None):
+        if transcript.strip():
+            self.transcription_frames = min(self.transcription_frames + 1, 1_000_000_000)
+        await super()._handle_transcription(transcript, is_final, language)
 
     async def process_frame(self, frame, direction):
+        if direction is speech.FrameDirection.DOWNSTREAM:
+            if isinstance(frame, speech.VADUserStartedSpeakingFrame):
+                self.vad_starts = min(self.vad_starts + 1, 1_000_000_000)
+            elif isinstance(frame, speech.VADUserStoppedSpeakingFrame):
+                self.vad_stops = min(self.vad_stops + 1, 1_000_000_000)
         await super().process_frame(frame, direction)
         if isinstance(frame, speech.VADUserStoppedSpeakingFrame):
             self.last_reset = time.monotonic()
@@ -190,6 +208,9 @@ class _Member:
         self.remainder = bytearray()
         self.closed = False
         self.ready = asyncio.Event()
+        self.received_pcm_frames = 0
+        self.terminal_pcm_frames = 0
+        self.wake_rejected = {"possessive": 0, "mid_sentence": 0}
         self.stt = _MemberSTT(server.stt, decoder)
         turn_analyzer = speech.smart_turn_analyzer(
             lambda: self.turn.turn_pending(), lambda: self.turn.turn_short_reply(),
@@ -237,11 +258,35 @@ class _Member:
         if not self.server.current(self):
             return
         owner = self.server.owner(self.principal)
+        if kind == "wake_rejected":
+            reason = payload.get("reason")
+            if reason in self.wake_rejected:
+                self.wake_rejected[reason] = min(self.wake_rejected[reason] + 1, 1_000_000_000)
         if kind == "wake_detected" and owner is not None and owner.principal == self.principal:
             self.server.emit("wake", self.principal, request_id=owner.request_id)
         elif kind == "wake_idle" and owner is not None and owner.phase == "listening":
             self.server.release(self.principal)
         # Ambient words and partial transcripts never leave the speech owner.
+
+    def diagnostics(self):
+        # Explicit owner-socket request only. Never include transcript, PCM,
+        # analyzer output or exception text, including before wake admission.
+        audio_task = self.input._audio_task
+        return {
+            "available": True,
+            "received_pcm_frames": self.received_pcm_frames,
+            "terminal_pcm_frames": self.terminal_pcm_frames,
+            "stt_audio_frames": self.stt.audio_frames,
+            "stt_transcription_frames": self.stt.transcription_frames,
+            "vad_starts": self.stt.vad_starts,
+            "vad_stops": self.stt.vad_stops,
+            "wake_rejected": dict(self.wake_rejected),
+            "input_task_done": audio_task is not None and audio_task.done(),
+            "input_task_failed": (audio_task is not None and audio_task.done()
+                                  and not audio_task.cancelled() and audio_task.exception() is not None),
+            "runner_done": self.runner.done(),
+            "queue_depth": self.input._audio_in_queue.qsize() if audio_task is not None else 0,
+        }
 
     def final(self, text):
         owner = self.server.owner(self.principal)
@@ -280,6 +325,10 @@ class _Member:
             del self.remainder[:PCM_FRAME]
             try:
                 await self.input.push_audio_frame(speech.InputAudioRawFrame(piece, speech.SAMPLE_RATE, 1))
+                if terminal:
+                    self.terminal_pcm_frames = min(self.terminal_pcm_frames + 1, 1_000_000_000)
+                else:
+                    self.received_pcm_frames = min(self.received_pcm_frames + 1, 1_000_000_000)
             except asyncio.QueueFull:
                 self.fail("audio_backpressure")
                 self.remainder.clear()
@@ -455,7 +504,11 @@ class DiscordSpeechServer:
         if generation != self.generation:
             raise ValueError("Discord speech generation is stale")
         principal = _principal(message)
-        if kind == "audio":
+        if kind == "diagnostics":
+            member = self.members.get(principal)
+            self.emit("diagnostics", principal,
+                      **(member.diagnostics() if member is not None else {"available": False}))
+        elif kind == "audio":
             if (message.get("sample_rate", 16000) != 16000
                     or message.get("channels", 1) != 1 or message.get("format", "s16le") != "s16le"):
                 raise ValueError("Discord input requires mono s16le/16000")
@@ -598,6 +651,13 @@ class DiscordSpeechServer:
             await asyncio.sleep(0.04)
             now = time.monotonic()
             for principal, member in tuple(self.members.items()):
+                # Pipecat's audio task may terminate outside its frame error
+                # path. A live socket must not silently retain a dead stream.
+                audio_task = member.input._audio_task
+                if (self.current(member) and member.ready.is_set()
+                        and ((audio_task is not None and audio_task.done()) or member.runner.done())):
+                    member.fail("audio_pipeline_stopped")
+                    continue
                 owner = self.owner(principal)
                 if owner is not None and owner.principal == principal and now >= owner.deadline:
                     member.fail("utterance_timeout" if owner.phase == "listening" else "reply_timeout")

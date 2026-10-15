@@ -84,8 +84,9 @@ export function buildKnowledgeModel(graph: VaultGraphSnapshot, displayAliases: R
     ?? "Executive";
   // Literal specialists are discovered from the same navigation manifest
   // that names their Reader cards and graph subjects.
-  const agentGroups = graph.navigation.groups.filter((group) =>
-    !["executive", "library"].includes(group.id));
+  const sceneGroups = graph.navigation.groups.filter((group) => group.scene === "executive");
+  const sceneIdentities = new Set(sceneGroups.map((group) => group.root_ref));
+  const agentGroups = sceneGroups.filter((group) => group.id !== "executive");
   const agentGroupByName = new Map(agentGroups.map((group) => [
     group.root_ref.split("/")[1], group,
   ]));
@@ -99,12 +100,12 @@ export function buildKnowledgeModel(graph: VaultGraphSnapshot, displayAliases: R
   const executiveParents = hierarchyParents(executivePrimitives, displayAliases);
   const executiveContainers = new Set(executiveParents.values());
   const agentIdentities = all.filter((node) => node.kind === "agent"
-    && node.id.startsWith("Agents/") && node.id !== "Agents/Executive/Executive");
+    && sceneIdentities.has(node.id) && node.id !== executiveGroup?.root_ref);
   // Other Brains remain navigation shortcuts, never membership expansion or
   // cross-link evidence (isArticleEndpoint excludes Agent nodes).
   const notes = [
     ...all.filter((node) => executiveMembers.has(node.id) && !primitiveKindOf(node)
-      && !node.navigation_ref && node.id !== "Agents/Executive/Executive"),
+      && !node.navigation_ref && node.kind !== "agent"),
     ...agentIdentities,
     ...executivePrimitives,
   ];
@@ -271,8 +272,9 @@ export function buildKnowledgeModel(graph: VaultGraphSnapshot, displayAliases: R
     edgeColorEnd: (id) => paletteOf(id).core }]]);
   // ---- satellites: one ball per agent, seeded by its own mini hierarchy ----
   const inputs: CloudInputs = { all, displayAliases, linkPairs, autoCurated, reviewScopes, titles };
+  const sceneInputs = { ...inputs, all: all.filter((node) => node.kind !== "agent" || sceneIdentities.has(node.id)) };
   const satellites = [
-    ...agentNames.map((name) => agentSatellite(inputs, name, agentGroupByName.get(name) as GraphNavigationGroup)),
+    ...agentNames.map((name) => agentSatellite(sceneInputs, name, agentGroupByName.get(name) as GraphNavigationGroup)),
     librarySatellite(inputs, graph.navigation.groups.find((group) => group.id === "library")),
   ];
   const labelMetadata = new Map<string, Knowledge3dLabelMeta>();

@@ -133,6 +133,8 @@ async def produce(size):
     environment['LIBGL_ALWAYS_SOFTWARE'] = '1'
     environment['GALLIUM_DRIVER'] = 'llvmpipe'
     with tempfile.TemporaryDirectory(prefix='discord-graph-camera-', dir=runtime) as directory:
+        environment['XDG_CONFIG_HOME'] = str(Path(directory) / 'config')
+        environment['XDG_CACHE_HOME'] = str(Path(directory) / 'cache')
         try:
             browser = await asyncio.create_subprocess_exec(
                 '/opt/microsoft/msedge/msedge', '--headless=new', '--no-first-run',
