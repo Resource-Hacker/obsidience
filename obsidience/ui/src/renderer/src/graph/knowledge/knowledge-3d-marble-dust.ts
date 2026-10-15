@@ -100,7 +100,7 @@ void main() {
   float lit = 0.8 + 0.2 * dot(offset / max(reach, 1e-4), vec3(-0.45, 0.55, 0.7));
   // Focus brightens the crisp motes, hardly the blur, and less as the dust
   // setting already brightens them, so a thinking marble never fills white.
-  float lift = 1.0 + focus * (0.05 + 0.6 * (1.0 - vSoft)) / max(uMarbleDust * uMarbleDust * uMarbleDust, 1.0);
+  float lift = 1.0 + focus * (0.05 + 0.6 * (1.0 - vSoft)) / max(uMarbleDust, 1.0);
   vAlpha = rim * (0.45 + 0.55 * bright) * twinkle * lit * mix(0.6, 1.0, 0.5 + 0.5 * depth)
     * shown * sqrt(max(uMarbleDust, 0.0)) * lift * (1.0 + 0.3 * uSpeechLevel) * baseAlpha
     * smoothstep(3.0, 9.0, marble) * 0.45;

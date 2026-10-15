@@ -218,8 +218,8 @@ def _words(text):
 
 
 def _pluto_matches(query, limit):
-    """Ranked live channels as (strong, candidate). Strong: the channel name covers the
-    request (every request word, or the whole name), or a topic (hurricane -> weather)."""
+    """Ranked live channels as (strong, candidate). Strong: the channel name covers
+    every request word, or a topic (hurricane -> weather); name overlap alone is weak."""
     content = _words(query) - _FILLER
     topics = {_TOPICS[word] for word in content if word in _TOPICS}  # hurricane -> weather
     words = content | topics
@@ -231,8 +231,8 @@ def _pluto_matches(query, limit):
                  - (2 if 'local' in row['category'].lower() else 0))
         if score > 0 and row['name'].lower() not in names:
             names.add(row['name'].lower())
-            core = name - _FILLER - {'pluto'}
-            strong = bool(topics & name) or bool(content and core) and (content <= name or core <= content)
+            requested = content - {'pluto', 'stream', 'streaming'}
+            strong = bool(topics & name) or bool(requested and requested <= name)
             scored.append((score, strong, row))
     scored.sort(key=lambda item: -item[0])
     return [(strong, {'app': 'pluto', 'kind': 'live channel', 'title': row['name'], 'by': row['category'],
@@ -1491,8 +1491,9 @@ def _choose(args, context):
     """Deterministic content pick for play (read-only): (alias, link, title), chosen, alternatives.
 
     A strong Pluto channel match first (the owner prefers Pluto live TV), else
-    YouTube's top result (its first live stream for news/weather), else the best
-    Pluto match. YouTube is not searched when Pluto already has a strong match.
+    YouTube's top result (its first live stream for news/weather). Weak channel
+    matches are discoverable with find, never an automatic substitute for content.
+    YouTube is not searched when Pluto already has a strong match.
     """
     query, app = args['query'], args.get('app')
     apps = _inventory()['apps']
@@ -1502,15 +1503,15 @@ def _choose(args, context):
             pluto = _pluto_matches(query, 8)
         except Exception as error:  # One listing failing leaves the other usable.
             errors.append(f'pluto listing unavailable ({type(error).__name__})')
-    order = sorted(pluto, key=lambda item: not item[0]) if app != 'pluto' else pluto
-    if not (order and order[0][0]) and app != 'pluto' and 'youtube' in apps:
+    order = [(strong, candidate) for strong, candidate in pluto if strong]
+    if not order and app != 'pluto' and 'youtube' in apps:
         try:
             youtube = _youtube_matches(query, 5)
         except Exception as error:
             errors.append(f'youtube listing unavailable ({type(error).__name__})')
         if _words(query) & _LIVE_WORDS:
             youtube.sort(key=lambda candidate: candidate['duration'] != 'live or unknown')
-        order = [(False, candidate) for candidate in youtube] + order
+        order = [(False, candidate) for candidate in youtube]
     candidates = [candidate for _strong, candidate in order][:4]
     if not candidates:
         raise LookupError('No TV content matches this query' + (' (' + '; '.join(errors) + ')' if errors else ''))

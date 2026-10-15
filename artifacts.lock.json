@@ -919,6 +919,15 @@
       "packaging_reference": "https://gitlab.archlinux.org/archlinux/packaging/packages/xdg-desktop-portal-hyprland/-/commit/58bf407",
       "adaptation": "Backport three merged upstream capture fixes onto the installed 1.4.1 base: preserve capture callbacks across buffer starvation and format renegotiation, and advertise the actual DMA-BUF plane layout with DMA-specific buffer parameters. The ordinary portal remains the sole Discord screen-share backend; no replacement capture service or restart loop.",
       "notice": "/usr/share/licenses/xdg-desktop-portal-hyprland-obsidience/LICENSE"
+    },
+    "pipecat_contextual_turn_admission": {
+      "repository": "https://github.com/pipecat-ai/pipecat",
+      "revision": "8dc2093360750371e7027ec41dd8bdfda78e2a60",
+      "reference_sha256": "0e7da371f5551c40fb4777bc112839ef6933467fd2babb3ba5d2205f2cfa0283",
+      "license_sha256": "e31a733ecb79cbffafd5474e964e5eca15e0a0876a42b1d7253b51b198eb61aa",
+      "license": "BSD-2-Clause",
+      "reference_path": "src/pipecat/turns/user_turn_completion_mixin.py",
+      "integration": "Architectural adaptation of the contextual incomplete-turn filter, not copied runtime code or a Pipecat upgrade. The existing Executive buffers its actual first ADK response with a private C/I/W completion marker. Incomplete speech has no Tool dispatch, final transcript, or history write; complete responses are consumed once through ordinary ADK authority. Unlike the reference, missing markers fail closed and expiry discards rather than prompting or executing."
     }
   }
 }

@@ -65,14 +65,18 @@ const streakSpeed = (streak: number): number => 0.09 + ((streak * 0.61) % 1) * 0
 /** How brightly a node the thinking route only passes glows, against 1 for
  *  a node the Agent was actually given. */
 const PASSED_GLOW = 0.45;
+/** How long a node's arrival flash lasts when the thinking beam reaches it. */
+const LASER_FLASH_SECONDS = 1.2;
 
 /** The small ripple a landing comet sends (strength, spread in radians). Its
- *  duration is tuned; a ball starts at most seven in that time, so each runs
- *  its course on a shell that carries eight. */
+ *  duration is tuned; a ball starts at most seven in that time, so idle
+ *  comets keep the glass calm. */
 const LANDING_RIPPLE = [0.3, 0.5] as const;
 const LANDING_RIPPLES_AT_ONCE = 7;
+/** While the route is lit, each node on it ripples its glass this often. */
+const LIT_RIPPLE_SECONDS = 1.4;
 
-export const KNOWLEDGE_ACTIVITY_FADE_MS = 420;
+export const KNOWLEDGE_ACTIVITY_FADE_MS = 2_000; // Owner 2026-10-15: a two-second fade.
 const SELECTION_TRANSITION_MS = 340;
 
 /** Transient Review paint over the separate scene presentation model. */
@@ -243,9 +247,8 @@ export interface Knowledge3dCloud {
   nodeWorldPosition(rawId: string, out: THREE.Vector3): boolean;
   sortSprites(cameraPosition: THREE.Vector3): void;
   /** Advance this cloud's glass: the twinkle and small ripple where a link
-   *  comet lands, and the ripples the thinking route sends while its Agent
-   *  is thinking. */
-  driveGlass(dtSeconds: number, thinking: boolean): void;
+   *  comet lands, and the ripples the thinking route sends while it is lit. */
+  driveGlass(dtSeconds: number, lit: boolean): void;
   /** Resurvey the glass if the solver moved its nodes. Before any render. */
   prepare(renderer: THREE.WebGLRenderer): void;
   dispose(scene: THREE.Scene): void;
@@ -386,6 +389,9 @@ export function createKnowledge3dCloud(
   const glows = new Float32Array(nodes.length * 4);
   const styles = new Float32Array(nodes.length * 4);
   const focusLevels = new Float32Array(nodes.length);
+  // The thinking route's own light on each node, apart from hover and comet
+  // focus: 0..1 lit, plus up to 1 more while its arrival flashes.
+  const laserLevels = new Float32Array(nodes.length);
   const seeds = new Float32Array(nodes.length);
   const curates = new Float32Array(nodes.length);
   nodes.forEach((node, index) => {
@@ -439,8 +445,13 @@ export function createKnowledge3dCloud(
   const focusAttribute = new THREE.BufferAttribute(focusLevels, 1);
   focusAttribute.setUsage(THREE.DynamicDrawUsage);
   geometry.setAttribute("aFocus", focusAttribute);
-  const swells = new Float32Array(nodes.length);
-  const swellAttribute = new THREE.BufferAttribute(swells, 1);
+  // When each node's beam arrived, for the arrival flash.
+  const laserArrivedAt = new Float64Array(nodes.length).fill(-Infinity);
+  const laserOn = new Uint8Array(nodes.length);
+  // Per node: an Article's extra size, and the laser level (WebGL allows
+  // sixteen attributes, so they share one).
+  const swells = new Float32Array(nodes.length * 2);
+  const swellAttribute = new THREE.BufferAttribute(swells, 2);
   swellAttribute.setUsage(THREE.DynamicDrawUsage);
   geometry.setAttribute("aSwell", swellAttribute);
   const activityLevels = new Float32Array(nodes.length * 4);
@@ -470,6 +481,7 @@ export function createKnowledge3dCloud(
   const marbleDustUniform = { value: input.tuning.marbleDust };
   const marbleSheenUniform = { value: input.tuning.sheenLines };
   const marbleRefractionUniform = { value: input.tuning.marbleRefraction };
+  const laserHitUniform = { value: input.tuning.laserHit };
   const pointUniforms = {
     uActivityOpacity: { value: 1 },
     uPerspective: deps.sharedUniforms.uPerspective,
@@ -487,6 +499,7 @@ export function createKnowledge3dCloud(
     uMarbleDust: marbleDustUniform,
     uMarbleSheen: marbleSheenUniform,
     uMarbleRefraction: marbleRefractionUniform,
+    uLaserHit: laserHitUniform,
     uBackdrop: deps.sharedUniforms.uBackdrop,
     uViewportPx: deps.viewportUniform,
   };
@@ -589,7 +602,7 @@ export function createKnowledge3dCloud(
       const marble = Math.round(style) === 4;
       shown = shown || marble;
       marbleDust.setNode(slot, positions[index * 3], positions[index * 3 + 1], positions[index * 3 + 2],
-        marble ? radii[index] : 0, focusLevels[index]);
+        marble ? radii[index] : 0, Math.max(focusLevels[index], Math.min(1, laserLevels[index]) * laserHitUniform.value));
     });
     marbleDust.update();
     marbleDust.points.visible = shown && marbleDustUniform.value > 0;
@@ -763,8 +776,11 @@ export function createKnowledge3dCloud(
     } else {
       crossPairs.push([a, b]);
       crossKeys.push(key);
-      const near = deps.parseColor(edge.colorEnd ?? edge.color);
-      const far = rgba;
+      // Each end wears the OTHER endpoint's colour (owner 2026-10-15). The
+      // dim 2D stroke is one cyan for every link, so the target end takes
+      // the source node's own colour instead.
+      const near = deps.parseColor(edge.colorEnd ?? nodes[b].core);
+      const far = deps.parseColor(nodes[a].core);
       crossNear.push(near.r, near.g, near.b);
       crossFar.push(far.r, far.g, far.b);
     }
@@ -1327,15 +1343,14 @@ export function createKnowledge3dCloud(
 
   const localCamera = new THREE.Vector3();
   const projectionVector = new THREE.Vector3();
-  // Which nodes the thinking front has reached on the current route. They
-  // keep sending soft ripples, one node at a time.
+  // Which nodes the thinking front has reached on the current route. Each
+  // keeps sending soft ripples on its own clock, however many are lit.
   let passed = new Uint8Array(nodes.length);
   let reached = new Uint8Array(nodes.length);
   // A cloud rebuilt under a lit route adopts it quietly instead of rippling
   // every reached node at once.
   let routeSeen = false;
-  let rippleDue = 0;
-  let rippleTurn = 0;
+  const rippleDue = new Float32Array(nodes.length).fill(LIT_RIPPLE_SECONDS);
   // Comets ride the article links on the shader clock; the same arithmetic
   // here tells when each one lands on the node at its link's far end.
   const landingCycles = new Int32Array(streakCount);
@@ -1396,6 +1411,7 @@ export function createKnowledge3dCloud(
       marbleDustUniform.value = live.marbleDust;
       marbleSheenUniform.value = live.sheenLines;
       marbleRefractionUniform.value = live.marbleRefraction;
+      laserHitUniform.value = live.laserHit;
       if (marbleChanged) syncMarbleDust();
       group.scale.setScalar(ballFactor);
       spokeWidthUniform.value = live.tendrilWidth * ratio * ballFactor;
@@ -1612,6 +1628,8 @@ export function createKnowledge3dCloud(
         spec?.firstArticleProgress ?? 1,
       );
       let dirty = false;
+      let laserDirty = false;
+      const now = performance.now();
       for (let i = 0; i < nodeIds.length; i += 1) {
         const gated =
           focus !== undefined && focus !== null
@@ -1620,10 +1638,14 @@ export function createKnowledge3dCloud(
         // A node the route only passes glows softly as the front reaches it.
         const passing = !gated && focus?.active === true && focus.passedIds?.has(nodeIds[i]) === true;
         let reveal = 0;
+        // How far the beam has lit this node, for the laser hit; a passed node
+        // takes it in full while its orb glows only softly.
+        let lit = 0;
         if (passing && spec) {
           const arrival = spec.routeArrival?.get(nodeIds[i]);
           if (arrival !== undefined) {
-            reveal = PASSED_GLOW * Math.min(1, Math.max(0, (solidFront - arrival) / revealWindow));
+            lit = Math.min(1, Math.max(0, (solidFront - arrival) / revealWindow));
+            reveal = PASSED_GLOW * lit;
           }
         } else if (gated && spec) {
           // Nodes ignite as the SOLID line reaches their plan arrival; a
@@ -1648,6 +1670,17 @@ export function createKnowledge3dCloud(
           // plan-less selection): lit fully, exactly the pre-plan law.
           reveal = 1;
         }
+        if (gated) lit = reveal;
+        // The arrival flashes white-hot and settles into the lit glow.
+        if (lit >= 0.5 && !laserOn[i]) laserArrivedAt[i] = now;
+        laserOn[i] = lit >= 0.5 ? 1 : 0;
+        const flashAge = (now - laserArrivedAt[i]) / 1000;
+        const laser = lit > 0 ? (lit + (flashAge < LASER_FLASH_SECONDS ? Math.exp(-flashAge / 0.3) : 0)) * opacity : 0;
+        if (Math.abs(laserLevels[i] - laser) > 0.003) {
+          laserLevels[i] = laser;
+          swells[i * 2 + 1] = laser;
+          laserDirty = true;
+        }
         reveal *= opacity;
         if (Math.abs(revealLevels[i] - reveal) > 0.001) {
           // A lit node the route never passed (a relation-reached endpoint)
@@ -1661,6 +1694,10 @@ export function createKnowledge3dCloud(
         }
       }
       if (dirty) applyHoverLevels();
+      if (laserDirty) {
+        swellAttribute.needsUpdate = true;
+        syncMarbleDust();
+      }
       // Every node the route passes drops into its own shell as the front
       // reaches it, inner layers included; the Articles a route ends on send
       // the strongest ripple.
@@ -1732,7 +1769,7 @@ export function createKnowledge3dCloud(
         if (landingAges[i] >= span) continue;
         const age = landingAges[i] += dtSeconds;
         const branch = nodes[i].subject;
-        swells[i] = !branch && age < landing.cometSwellSeconds
+        swells[i * 2] = !branch && age < landing.cometSwellSeconds
           ? (landing.cometSwell - 1) * Math.sin(Math.PI * age / landing.cometSwellSeconds) : 0;
         landingGlows[i] = age < landing.cometGlowSeconds
           ? (branch ? landing.cometNodeGlow : landing.cometGlow) * Math.sin(Math.PI * age / landing.cometGlowSeconds) : 0;
@@ -1742,18 +1779,18 @@ export function createKnowledge3dCloud(
         swellAttribute.needsUpdate = true;
         applyHoverLevels();
       }
-      // While the Agent thinks, each node its path has reached sends another,
-      // softer ripple in turn, so the glass keeps moving where the thought is.
-      rippleDue -= dtSeconds;
-      if (active && rippleDue <= 0) {
-        rippleDue = 0.45;
-        for (let step = 0; step < nodes.length; step += 1) {
-          const index = (rippleTurn + step) % nodes.length;
-          if (!passed[index] && revealLevels[index] < 0.5) continue;
-          shells.ripple(index, nodes[index].subject ? 0.35 : 0.5);
-          rippleTurn = index + 1;
-          break;
+      // While the route is lit, every node and Article on it keeps sending a
+      // softer ripple after the one it sent on arrival, so the glass keeps
+      // moving wherever the thought is (owner 2026-10-15: no limit).
+      for (let index = 0; index < nodes.length; index += 1) {
+        if (!active || (!passed[index] && revealLevels[index] < 0.5)) {
+          rippleDue[index] = LIT_RIPPLE_SECONDS;
+          continue;
         }
+        rippleDue[index] -= dtSeconds;
+        if (rippleDue[index] > 0) continue;
+        rippleDue[index] += LIT_RIPPLE_SECONDS;
+        shells.ripple(index, nodes[index].subject ? 0.35 : 0.5);
       }
       shells.advance(dtSeconds);
     },

@@ -111,6 +111,100 @@ def _trace(value: object) -> list[dict] | None:
     return entries
 
 
+def public_failure_notice(result: dict, run: dict | None = None, *, fallback: str = "") -> str:
+    """Explain a failed run using fixed language, never raw execution text.
+
+    The exact run's existing trace supplies reasons, not action authority. A
+    rejected or incomplete call says nothing about earlier delivered effects.
+    """
+    entries = _trace((run or {}).get("trace")) or []
+    reasons = {
+        "click_precondition_failed": "The desktop action failed its target or fresh-observation checks.",
+        "geometry_changed": "The target window moved or changed before the action could be sent.",
+        "media_target_unavailable": "No matching media player was available for the command.",
+        "lock_unavailable_or_busy": "The desktop lock service was unavailable or busy.",
+        "Turn the registered TV on before opening library media.": "The TV must be on before library media can be opened.",
+        "TV foreground window unavailable": "The TV's current screen could not be read.",
+        "TV ADB connection timed out; the TV may be in network standby or disconnected": "The connection to the TV timed out.",
+        "TV ADB command timed out before a response was received": "The TV did not confirm the command before it timed out.",
+        "ADB rejected or lost the TV connection: adb: device offline\n": "The TV connection went offline.",
+    }
+    notice = ""
+    effect_possible = False
+    replay_blocked = False
+    effect_tools = {"computer.act", "application.launch", "tv.control", "lights.set", "media.pause",
+                    "window.activate", "window.place", "session.unlock", "media.acquire"}
+    for entry in entries:
+        if entry.get("tool") == "task.complete":
+            if (not notice and entry.get("completion_rejected") is True
+                    and str(entry.get("obs", "")).startswith(
+                        "Completion rejected: TV input delivery is not outcome verification.")):
+                notice = "The TV received input, but the requested playback or screen was not verified."
+            continue
+        if not entry.get("tool") or entry.get("not_dispatched") is True:
+            continue
+        try:
+            observation = json.loads(entry.get("obs", ""))
+        except (ValueError, TypeError, RecursionError):
+            observation = None
+        if not isinstance(observation, dict):
+            # Long observations are clipped in the durable trace. Missing
+            # delivery evidence must never become a claim of no earlier effects.
+            effect_possible |= entry.get("tool") in effect_tools
+            continue
+        failure = observation.get("failure")
+        code = failure.get("code") if isinstance(failure, dict) else failure
+        if code == "This TV operation was already attempted in this run; do not replay it":
+            replay_blocked = True
+        if isinstance(code, str) and code in reasons:
+            notice = reasons[code]
+            if (code == "click_precondition_failed" and isinstance(failure, dict)
+                    and failure.get("message") == "computer.act requires the observed window's application or handle."):
+                notice = "I supplied an invalid window target for the desktop action."
+            if observation.get("delivery") == "not_dispatched":
+                notice += " That action was not sent."
+        elif isinstance(code, str) and code.startswith("No TV content matches this query"):
+            notice = "No matching TV content was found from the available sources."
+        if (entry.get("tool") in effect_tools
+                and observation.get("delivery") in {"acknowledged", "uncertain", "verified"}
+                and observation.get("effect_applied") is not False):
+            effect_possible = True
+    if not notice and replay_blocked:
+        notice = "The TV operation was already attempted, so a repeat was blocked; the requested result is not verified."
+    if (fallback and notice ==
+            "The TV received input, but the requested playback or screen was not verified."):
+        # An accepted failure can name a visible sign-in or loading screen;
+        # the generic completion rejection must not erase that explanation.
+        notice = fallback
+    if not notice:
+        notice = {
+            "ImportError": "A required internal component could not be loaded.",
+            "ModuleNotFoundError": "A required internal component is unavailable.",
+            "TimeoutError": "The request timed out before completion could be confirmed.",
+            "NameError": "An internal software error prevented the request from completing.",
+        }.get(result.get("failure_type"), "")
+    if not notice:
+        summary = str(result.get("summary") or (run or {}).get("summary") or "")
+        if result.get("failure_type") and summary == "No accepted completion":
+            summary = ""  # An exception left this default; it is not a model verdict.
+        notice = {
+            "Three invalid or unavailable native Tool calls": "The model repeatedly requested an unavailable operation, so the request stopped.",
+            "Three invalid native Tool calls; no effect dispatched": "The model repeatedly supplied invalid operation arguments, so those calls were not sent.",
+            "Three native Tool errors; inspect the Action Trace": "The model repeatedly produced malformed operation calls, so those calls were not sent.",
+            "Three rejected completion attempts": "The requested result could not be verified after three completion attempts.",
+            "Model returned two empty responses; no completion was accepted": "The model returned two empty responses and supplied no answer.",
+            "Executive operation budget exhausted": "The request reached its operation limit before a verified result was available.",
+            "Executive decision budget exhausted": "The request reached its decision limit before a verified result was available.",
+            "No accepted completion": "The model stopped without an accepted answer or verified result.",
+            "Execution failed: Executive model ended with max-tokens; no incomplete Tool is dispatched": "The model reached its response limit; its incomplete operation was not sent.",
+        }.get(summary, "")
+    if not notice:
+        notice = fallback or "The request stopped before its result could be verified; the available record does not identify a more specific cause."
+    if effect_possible:
+        notice += " Earlier actions may already have taken effect; they will not be repeated."
+    return notice
+
+
 def historical_evidence(
     conversation, *, conversation_id: str, before_sequence: int, limit: int = 4,
 ) -> list[dict]:

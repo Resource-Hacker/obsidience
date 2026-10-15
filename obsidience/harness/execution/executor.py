@@ -679,6 +679,9 @@ async def compile_activation(
         for note in [*([requested_agent] if _is_agent_identity(requested_agent) else []),
                      *resolved_spine["runbooks"], *resolved_spine["skills"], *resolved_spine.get("tool_articles", [])]
         for start, end in _instruction_ranges(note, str(activation.bindings.get("computer_outcome", "")))]
+    activity_packet = action_trace.packet_payload(
+        public_sections, selected_refs, retrieval_ms,
+        knowledge_accounting=knowledge_accounting, instruction_accounting=instruction_accounting)
     if emit_activity:
         knowledge_activity.emit(
             "path", selected_refs, query=activity_query, graph_id=graph_id,
@@ -689,12 +692,11 @@ async def compile_activation(
             f"{requested_agent.title if _is_agent_identity(requested_agent) else 'Obsidience'} "
             f"packet for {task.title}",
             selected_refs,
-            {"payload": action_trace.packet_payload(public_sections, selected_refs, retrieval_ms,
-                                                    knowledge_accounting=knowledge_accounting,
-                                                    instruction_accounting=instruction_accounting)},
+            {"payload": activity_packet},
         )
     return {
         "packet": packet,
+        "activity_packet": activity_packet,
         **provider_sections,
         "refs": selected_refs,
         "retrieval_ms": retrieval_ms,
@@ -976,7 +978,7 @@ async def _run_execution(task: Note, depth: int = 0, reasoning_effort: str | Non
                    activity_completion: dict | None = None,
                    verified_command=None,
                    steering=None,
-                   memory_recall=None) -> dict:
+                   memory_recall=None, prepared_speech=None) -> dict:
     if task.ref.startswith(("_", ".")) or task.meta.get("article_status") == "deprecated":
         return {"task_ref": task.ref, "status": "blocked",
                 "summary": "Only an accepted active Task definition may execute."}
@@ -1139,7 +1141,7 @@ async def _run_execution(task: Note, depth: int = 0, reasoning_effort: str | Non
             conversation_evidence=conversation_evidence,
             accepted_resolver=res,
             interactive=interactive,
-            activation_id=activation_id, run_id=run_id,
+            activation_id=activation_id, run_id=run_id, emit_activity=prepared_speech is None,
         )
         action_trace.latency("activation", duration_ms=(time.monotonic() - activation_started) * 1000)
         allowed = list(activation["spine"]["tools"])
@@ -1147,8 +1149,15 @@ async def _run_execution(task: Note, depth: int = 0, reasoning_effort: str | Non
             # A resumed objective may use its ordinary Tools, but it cannot
             # create the same research wait again.
             allowed = [tool for tool in allowed if tool != "task.create"]
-        packet_refs = list(activation["refs"])
-        retrieval_ms = float(activation["retrieval_ms"])
+        packet_refs = list(activation["refs"] if prepared_speech is None else prepared_speech.refs)
+        retrieval_ms = float(activation["retrieval_ms"] if prepared_speech is None else prepared_speech.retrieval_ms)
+        if prepared_speech is not None:
+            # Fresh compilation checks current authority; the carried decision
+            # saw its original packet, which owns display and run provenance.
+            knowledge_activity.emit("path", packet_refs, query=objective,
+                                    graph_id=_agent_graph_id(agent), retrieval_ms=retrieval_ms, run_id=run_id)
+            action_trace.emit("activation", f"{agent_name} packet for {task.title}", packet_refs,
+                              {"payload": prepared_speech.packet})
         objective = str(activation["objective"])
         messages = activation_messages(
             task, activation, agent_name=agent_name,
@@ -1233,7 +1242,7 @@ async def _run_execution(task: Note, depth: int = 0, reasoning_effort: str | Non
         trace, status, summary = await run_adk_session(
             task, model_spec, messages, allowed, ctx, agent_name, effort,
             interruption_event=interruption_event,
-            initial_lease=session_lease,
+            initial_lease=session_lease, prepared_speech=prepared_speech,
         )
         _publish_working_progress(ctx, status)
         runtime_only_reply = _runtime_only_answer(task, params, interactive, status, trace)

@@ -272,8 +272,7 @@ export function GraphBackdrop({
       return;
     }
     // Obsidience starts the thinking state immediately, admits the real path at
-    // 750 ms, flips to speaking at 3.2 s, and then gives the resolved path its
-    // six-second readable linger after the 5.8 s synthetic turn ends.
+    // 750 ms, flips to speaking at 3.2 s, and ends the synthetic turn at 5.8 s.
     setActivity({ refs: [], phase: "thinking", key, graphId, query: "Thinking test", startedAt: Date.now() });
     testTimers.current.push(window.setTimeout(() => {
       setActivity((current) => current?.key === key
@@ -286,7 +285,7 @@ export function GraphBackdrop({
     testTimers.current.push(window.setTimeout(() => {
       setActivity((current) => current?.key === key ? null : current);
       testTimers.current = [];
-    }, 11_800));
+    }, 5_800));
   }), [model]);
 
   const renderedActivityRefs = useMemo(() => {

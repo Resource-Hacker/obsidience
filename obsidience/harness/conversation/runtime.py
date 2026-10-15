@@ -11,7 +11,7 @@ from typing import Any, Literal
 
 from .store import CONVERSATION
 from .selection import EXECUTIVE_REF, admit_executive
-from .evidence import historical_evidence
+from .evidence import historical_evidence, public_failure_notice
 from ..execution import trace
 from ..execution import activity as knowledge_activity
 from ..knowledge.index import INDEX
@@ -194,6 +194,12 @@ class ConversationRuntime:
             if self.speech is not None:
                 await self.speech.publish_readiness()
 
+    async def prepare_speech_turn(self, text: str):
+        """Buffer the Executive's own first response before a public voice turn."""
+        from ..execution.speech_admission import prepare
+        await self._cancel_speech_prefill()
+        return await prepare(self, text, SPEECH_RESPONSE_CONTRACT)
+
     async def _cancel_speech_prefill(self) -> None:
         self._prefill_latest = None
         task = self._prefill_task
@@ -360,13 +366,17 @@ class ConversationRuntime:
     async def submit(
         self, text: str, *, source: Literal["text", "realtime"] = "text", wait: bool = True,
         speech_timing: dict | None = None, memory_writeback: bool = True,
-        owner_command: dict | None = None,
+        owner_command: dict | None = None, prepared_speech=None,
     ) -> dict[str, Any]:
         """Bind one exact user turn, independent of microphone state.
 
         memory_writeback=False keeps an owner-controlled diagnostic turn out of
         Hindsight; the turn is otherwise ordinary.
         """
+        if prepared_speech is not None:
+            from ..execution.speech_admission import PreparedSpeechTurn
+            if not isinstance(prepared_speech, PreparedSpeechTurn) or source != "realtime" or owner_command is not None:
+                raise ValueError("Prepared speech requires the internal voice ingress")
         owner_request = None
         if owner_command is not None:
             from ..execution.commands import owner_media_command, owner_media_text
@@ -392,9 +402,14 @@ class ConversationRuntime:
                     return {**existing, "duplicate": True}
                 if self._turn_task is not None and not self._turn_task.done():
                     raise RuntimeError("The owner conversation is active; wait before submitting a media command")
+            if prepared_speech is not None:
+                # Validate the original generation before cancel advances it.
+                await prepared_speech.validate_submission(self, clean)
             await self.cancel(stop_playback=source == "text", reason=f"{source}.final")
             user_turn = await self._conversation.append(role="user", source=source, text=clean,
                                                        owner_request=owner_request)
+            if prepared_speech is not None:
+                prepared_speech.bind(user_turn, self._generation)
             if not memory_writeback:
                 # Reserve before execution can commit a reply or continuation.
                 # A failed reservation aborts admission; restart cannot leak it.
@@ -405,7 +420,8 @@ class ConversationRuntime:
             turn_task = asyncio.create_task(
                 self._run_turn(clean, self._generation, user_turn, source=source,
                                received_ns=received_ns, speech_timing=speech_timing,
-                               memory_writeback=memory_writeback, owner_command=owner_command),
+                               memory_writeback=memory_writeback, owner_command=owner_command,
+                               prepared_speech=prepared_speech),
                 name=f"obsidience-conversation-turn-{user_turn['id']}",
             )
             self._turn_task = turn_task
@@ -431,15 +447,33 @@ class ConversationRuntime:
         else:
             result = task.result()
         status = str(result.get("status") or "failed")
-        summary = str(result.get("public_summary") or (result.get("summary") if status == "completed" else "")
-                      or "The media command did not settle successfully. Use its receipt; do not resend.")
+        summary = (str(result.get("public_summary") or result.get("summary") or "")
+                   if status == "completed" else self._outcome_notice(result))
         INDEX.finish_owner_command(request_id, status, result.get("run_id"), summary)
+
+    def _outcome_notice(self, result: dict) -> str:
+        """One safe failure explanation for spoken, Chat and owner-command views."""
+        if result.get("resource_blocked") is True:
+            return ("The selected model's hardware is currently reserved. "
+                    "Please retry this request when it is available.")
+        notice = str(result.get("public_summary") or "").strip()[:2000]
+        # This fixed controller fallback carries no diagnosis; project its
+        # actual run just like a controller failure without an accepted summary.
+        if notice == "The media command could not be verified. Use its receipt; do not resend it.":
+            notice = ""
+        if result.get("status") == "review":
+            return notice or "That request needs review before it can complete."
+        run = None
+        if result.get("run_id"):
+            with contextlib.suppress(Exception):
+                run = INDEX.run(str(result["run_id"]))
+        return public_failure_notice(result, run, fallback=notice)
 
     async def _run_turn(
         self, text: str, generation: int, user_turn: dict, *,
         source: Literal["text", "realtime"],
         received_ns: int | None = None, speech_timing: dict | None = None,
-        memory_writeback: bool = True, owner_command: dict | None = None,
+        memory_writeback: bool = True, owner_command: dict | None = None, prepared_speech=None,
     ) -> dict[str, Any]:
         from ..execution.scheduler import foreground_admission
 
@@ -458,7 +492,8 @@ class ConversationRuntime:
             async with foreground_admission("conversation"):
                 return await self._run_admitted_turn(text, generation, user_turn, source=source,
                                                      speech_sequence=sequence,
-                                                     memory_writeback=memory_writeback, owner_command=owner_command)
+                                                     memory_writeback=memory_writeback, owner_command=owner_command,
+                                                     prepared_speech=prepared_speech)
         finally:
             knowledge_activity.emit("admission_completed", [], turn_id=str(user_turn["id"]))
             trace.reset(scope)
@@ -467,7 +502,7 @@ class ConversationRuntime:
         self, text: str, generation: int, user_turn: dict, *,
         source: Literal["text", "realtime"],
         speech_sequence: int | None = None, memory_writeback: bool = True,
-        owner_command: dict | None = None,
+        owner_command: dict | None = None, prepared_speech=None,
     ) -> dict[str, Any]:
         from ..execution.executor import run_conversation
 
@@ -483,7 +518,7 @@ class ConversationRuntime:
             trace.latency("admission", duration_ms=(time.monotonic() - admission_started) * 1000)
             from ..execution.commands import recognize_command
             from ..execution.native_turn import discard_recall, prefetch_recall
-            if owner_command is None and recognize_command(text, ["lights.set", "tv.control", "media.pause", "task.complete"]) is None:
+            if prepared_speech is None and owner_command is None and recognize_command(text, ["lights.set", "tv.control", "media.pause", "task.complete"]) is None:
                 # The native memory hook recalls for this exact request after the
                 # agent starts; begin it now so it overlaps preparation and compile.
                 recall = prefetch_recall(task.ref, text, user_turn)
@@ -521,7 +556,7 @@ class ConversationRuntime:
                 steering=inbox,
                 activity_completion=activity_completion,
                 verified_command=verified_command,
-                memory_recall=recall,
+                memory_recall=recall, prepared_speech=prepared_speech,
             )
             self.record_prompt_usage(result, request_text=text)
             if generation != self._generation:
@@ -562,10 +597,11 @@ class ConversationRuntime:
         except Exception as exc:
             message = f"Executive turn failed: {type(exc).__name__}: {exc}"[:MAX_EVENT_TEXT]
             trace.emit("error", message)
-            await self._report_task_outcome(
-                {"status": "failed", "run_id": activity_completion.get("run_id")}, source=source, generation=generation,
-            )
-            return {"status": "failed", "summary": message, "run_id": activity_completion.get("run_id")}
+            failure = {"status": "failed", "run_id": activity_completion.get("run_id"),
+                       "failure_type": type(exc).__name__}
+            failure["summary"] = self._outcome_notice(failure)
+            await self._report_task_outcome(failure, source=source, generation=generation)
+            return failure
         finally:
             if recall is not None:
                 await discard_recall(recall)
@@ -586,27 +622,13 @@ class ConversationRuntime:
     async def _report_task_outcome(self, result: dict, *, source: str, generation: int) -> None:
         """Deliver a terminal notice without inventing a successful dialogue pair.
 
-        Only an accepted task.complete can supply public_summary. Internal
-        executor errors stay in the trace and get a fixed, credential-free notice.
+        Only an accepted task.complete can supply public_summary. Other failures
+        use fixed descriptions of the exact run's known error or delivery state.
         """
         if generation != self._generation:
             return
         status = str(result.get("status") or "failed")
-        notice = str(result.get("public_summary") or "").strip()[:2000]
-        if result.get("resource_blocked") is True:
-            # A live turn cannot be replayed later with a different Objective or
-            # saved model. Explain admission without leaking internal details or
-            # promising the continuation reserved for durable Task occurrences.
-            notice = (
-                "The selected model's hardware is currently reserved. "
-                "Please retry this request when it is available."
-            )
-        if not notice:
-            notice = (
-                "That request needs review before it can complete."
-                if status == "review" else
-                "I couldn't complete that request. The Action Trace has the error details."
-            )
+        notice = self._outcome_notice(result)
         self._conversation.publish({"type": "error", "text": notice,
                                     "status": status, "run_id": result.get("run_id")})
         await self._publish_speech("task_result", status=status, text=notice,

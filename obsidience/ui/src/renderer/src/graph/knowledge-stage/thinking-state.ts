@@ -8,7 +8,7 @@ import { subscribeActivity } from "@/lib/activity-client";
 import { MAIN_GRAPH_ID } from "@/graph/tuning";
 import { currentOperations, operationDeadline, type GraphOperation } from "./graph-activity";
 
-const FOCUS_LINGER_MS = 6_000; // The lit route stays on screen this long after its run ends.
+const FOCUS_LINGER_MS = 0; // Owner 2026-10-15: the route fades as soon as its run (and speech) ends.
 
 interface ActivityWireEntry {
   run_id?: string;
@@ -178,7 +178,7 @@ export function useThinkingActivity(handlers: {
       }
       if (next.status === "idle" && next.playback_id && next.playback_id === previous.playback_id
         && next.run_id === previous.run_id) {
-        // Audio has ended; the route lingers like a text-only one before the Scene fades.
+        // Audio has ended; the Scene fades the route like a finished text-only one.
         finishRun(next.run_id);
       }
       const transaction = activityTransaction.current;

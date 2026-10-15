@@ -280,6 +280,8 @@ export interface Knowledge3dTuning {
   marbleOpacity: number;
   marbleDust: number;
   marbleRefraction: number;
+  /** How hard the thinking beam lights a Dust marble it reaches (0 off). */
+  laserHit: number;
   /** Role-glyph nameplates over every ball (read from the main record). */
   rolePlates: number;
   orbitRadius: number;
@@ -362,6 +364,7 @@ export const DEFAULT_KNOWLEDGE_3D_TUNING: Knowledge3dTuning = {
   marbleOpacity: 1,
   marbleDust: 1.7,
   marbleRefraction: 1,
+  laserHit: 1,
   rolePlates: 1,
   orbitRadius: KNOWLEDGE_3D_ORBIT_RADIUS_DEFAULT,
   orbitSpeed: KNOWLEDGE_3D_ORBIT_SPEED_DEFAULT,
@@ -422,6 +425,7 @@ export const KNOWLEDGE_3D_TUNING_FIELDS: readonly Knowledge3dTuningField[] = [
   { key: "yawSpeed", label: "Rotation speed", group: "Motion", mainOnly: true, min: 0, max: 0.2, step: 0.005, description: "Camera rotation around all graphs. Pauses while dragging or focused on a satellite." },
   { key: "automaticSweepSpeed", label: "Automatic speed", group: "Thinking", min: 0, max: 1, step: 1, toggle: true, description: "Reveal the packet at a readable pace, keep paths flowing through speech, and fade when playback ends. Turn this off to set the reveal speed." },
   { key: "sweepSpeed", label: "Animation speed", group: "Thinking", min: 0.1, max: 3, step: 0.05, description: "Speed of the continuous path reveal when Automatic speed is off. Speech never skips unfinished links." },
+  { key: "laserHit", label: "Laser hit", group: "Thinking", min: 0, max: 2, step: 0.05, description: "How brightly a Dust marble node lights when the thinking beam reaches it: a flash, light filling the glass, a burning rim and a glint." },
   { key: "tendrilWidth", label: "Tendril width", group: "Thinking", min: 1, max: 24, step: 0.5, description: "Width of the lit beam from the core out to a top-level branch while thinking." },
   { key: "branchWidth", label: "Branch width", group: "Beams", min: 1, max: 20, step: 0.5, description: "Width of the widest structural beams; deeper arms thin down to the article line width." },
   { key: "articleWidth", label: "Article line width", group: "Beams", min: 1, max: 4, step: 0.25, description: "Width the depth taper lands on at the article-level arms." },
@@ -1232,9 +1236,9 @@ export interface KnowledgeSweepEdge {
 export interface KnowledgeSweepCrossSpan {
   from: number;
   to: number;
-  /** meet — terminal link: comets depart BOTH endpoints and meet at the
-   *  middle; through — the head traverses the full curve from `nearId`
-   *  and continues the route beyond it. */
+  /** meet — both endpoints were reached another way: comets depart both
+   *  and meet at the middle; through — the head traverses the full curve
+   *  from `nearId` to the far endpoint. */
   mode: "meet" | "through";
   nearId: string;
 }
@@ -1314,71 +1318,29 @@ export function computeKnowledgeSweepPlan(
       }
     }
   }
-  const treeChildren = new Map<string, string[]>();
-  for (const [child, parent] of treeParent) {
-    if (!treeChildren.has(parent.id)) treeChildren.set(parent.id, []);
-    treeChildren.get(parent.id)!.push(child);
-  }
-  // Terminal cross tree edges become MEET links: the head only travels to
-  // the middle, so the far node's effective distance is near + half.
-  const meetFar = new Set<string>();
-  for (const [child, parent] of treeParent) {
-    if (parent.edge.taxonomy) continue;
-    if ((treeChildren.get(child) ?? []).length > 0) continue;
-    meetFar.add(child);
-    distance.set(
-      child,
-      distance.get(parent.id)! + length(parent.edge) / 2,
-    );
-  }
   const order = [...settled].sort(
     (left, right) => (distance.get(left) ?? 0) - (distance.get(right) ?? 0),
   );
   // PRE-CROSS subtree: reachable from the root without traversing a
   // relation. The sweep TIMER (progress 0→1 over the minimum animation
-  // time) normalizes over this taxonomy phase only; relation hops and
-  // their continuations inherit the branch's px-per-progress rate and run
-  // past 1 for as long as their lengths need.
+  // time) spans its longest taxonomy route, and every beam, relation hops
+  // included, runs at that one px-per-progress rate: the front never waits
+  // at a junction, and a relation lights its far Article only when the
+  // beam gets there (owner 2026-10-15).
   const preCross = new Set<string>([rootId]);
   for (const id of order) {
     const parent = treeParent.get(id);
     if (!parent) continue;
     if (parent.edge.taxonomy && preCross.has(parent.id)) preCross.add(id);
   }
-  const longestPre = new Map<string, number>();
-  for (let index = order.length - 1; index >= 0; index -= 1) {
-    const id = order[index];
-    if (!preCross.has(id)) continue;
-    let value = distance.get(id)!;
-    for (const child of treeChildren.get(id) ?? []) {
-      if (!preCross.has(child)) continue;
-      value = Math.max(value, longestPre.get(child) ?? 0);
-    }
-    longestPre.set(id, value);
-  }
-  // px-per-progress denominator per node: pre-cross nodes pace their own
-  // longest taxonomy route; beyond-cross nodes inherit their tree
-  // parent's rate so the tail runs at the branch's speed.
-  const denominator = new Map<string, number>();
-  for (const id of order) {
-    if (preCross.has(id)) {
-      denominator.set(id, Math.max(1e-6, longestPre.get(id) ?? 0));
-    } else {
-      const parent = treeParent.get(id);
-      denominator.set(
-        id,
-        parent
-          ? (denominator.get(parent.id) ?? 1e-6)
-          : Math.max(1e-6, distance.get(id) ?? 1e-6),
-      );
-    }
-  }
+  let longest = 0;
+  for (const id of preCross) longest = Math.max(longest, distance.get(id) ?? 0);
+  const denom = Math.max(1e-6, longest || Math.max(0, ...distance.values()));
   const nodeArrival = new Map<string, number>();
   const edgeSpan = new Map<string, { from: number; to: number; hubId: string }>();
   const crossSpan = new Map<string, KnowledgeSweepCrossSpan>();
   let maxProgress = 1;
   for (const id of order) {
-    const denom = denominator.get(id)!;
     const arrival = (distance.get(id) ?? 0) / denom;
     nodeArrival.set(id, arrival);
     maxProgress = Math.max(maxProgress, arrival);
@@ -1389,17 +1351,12 @@ export function computeKnowledgeSweepPlan(
     if (parent.edge.taxonomy) {
       edgeSpan.set(parent.edge.id, { from, to, hubId: parent.id });
     } else {
-      crossSpan.set(parent.edge.id, {
-        from,
-        to,
-        mode: meetFar.has(id) ? "meet" : "through",
-        nearId: parent.id,
-      });
+      crossSpan.set(parent.edge.id, { from, to, mode: "through", nearId: parent.id });
     }
   }
   // Non-tree active cross-links (both endpoints reached another way):
   // comets depart both ends once both are lit and meet at the middle,
-  // running at the launch endpoint's branch speed.
+  // at the route's one speed.
   for (const edge of active) {
     if (edge.taxonomy || crossSpan.has(edge.id)) continue;
     const candidates = [edge.source, edge.target].filter((id) =>
@@ -1410,8 +1367,7 @@ export function computeKnowledgeSweepPlan(
       nodeArrival.get(id)! > nodeArrival.get(best)! ? id : best,
     );
     const from = nodeArrival.get(nearId)!;
-    const to =
-      from + length(edge) / 2 / (denominator.get(nearId) ?? 1e-6);
+    const to = from + length(edge) / 2 / denom;
     crossSpan.set(edge.id, { from, to, mode: "meet", nearId: edge.source });
     maxProgress = Math.max(maxProgress, to);
   }

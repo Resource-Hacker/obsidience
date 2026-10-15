@@ -16,6 +16,7 @@ from collections import deque
 from pathlib import Path
 from typing import Any, Literal
 
+from ..config import CONFIG
 from ..conversation import runtime as conversation_runtime
 from ..conversation.selection import EXECUTIVE_REF
 from ..knowledge.vault import resolver
@@ -231,6 +232,13 @@ class RealtimeSessionManager:
         self._user_speaking = False
         self._speech_sequence = 0
         self._speech_handoff_task: asyncio.Task | None = None
+        self._semantic_enabled = CONFIG.extras.get("realtime_semantic_turns", False) is True
+        self._semantic_binding: tuple[int, int, int, int] | None = None
+        self._semantic_task: asyncio.Task | None = None
+        self._semantic_expiry: asyncio.Task | None = None
+        self._semantic_ack: tuple[str, asyncio.Future] | None = None
+        self._semantic_state = "idle"
+        self._semantic_seen: tuple[int, int, int] = (0, 0, 0)
         self._live_transcript: dict[str, Any] | None = None
         self._aec_active = False
         self._tts_voice = media_runtime.DEFAULT_TTS_VOICE
@@ -256,7 +264,8 @@ class RealtimeSessionManager:
         # VAD and idle listening do not pause background work. Keep the final
         # dispatch bridge until its existing conversation task owns admission.
         return (self._phase in {"starting", "stopping"} or self._wake_open
-                or self._user_speaking or (self._speech_handoff_task is not None
+                or self._user_speaking or self._semantic_binding is not None
+                or (self._speech_handoff_task is not None
                                           and not self._speech_handoff_task.done()))
 
     async def _prioritize_speech_capture(self) -> None:
@@ -316,6 +325,8 @@ class RealtimeSessionManager:
                 "voice": self._tts_voice,
                 "cues": list(self._cue_names),
                 "wake_rejected": dict(self._wake_rejected),
+                "semantic_turns": self._semantic_enabled,
+                "turn_admission": self._semantic_state,
             },
             "scheduler_paused": self.scheduler_paused(),
             "recent_log": list(self._recent_log),
@@ -720,6 +731,8 @@ class RealtimeSessionManager:
     async def _send_worker(self, payload: dict[str, Any], *, provisional: bool = False) -> None:
         # provisional: early reply speech; its cancel retracts only that audio.
         if payload.get("type") in {"cancel", "stop"}:
+            if not provisional and asyncio.current_task() is not self._semantic_task:
+                await self._cancel_speech_candidate()
             if not provisional:
                 if payload.get("type") == "stop" or payload.get("stop_playback", True):
                     self._wake_open = self._capture_active = self._user_speaking = False
@@ -758,6 +771,173 @@ class RealtimeSessionManager:
         elif (payload.get("type") == "speak_append" and text and self._spoken is not None
               and self._spoken[0] == payload.get("playback_id")):
             self._spoken[1].append(text)
+
+    async def _cancel_speech_candidate(self) -> None:
+        """Join owned inference/waits before replacing a candidate or worker."""
+        self._semantic_binding, self._semantic_state = None, "idle"
+        ack, self._semantic_ack = self._semantic_ack, None
+        if ack is not None and not ack[1].done():
+            ack[1].cancel()
+        tasks = (self._semantic_task, self._semantic_expiry)
+        self._semantic_task = self._semantic_expiry = None
+        owned = [task for task in tasks if task is not None
+                 and task is not asyncio.current_task() and not task.done()]
+        for task in owned:
+            task.cancel()
+        if owned:
+            await asyncio.gather(*owned, return_exceptions=True)
+
+    def _candidate_current(self, binding: tuple) -> bool:
+        return (binding == self._semantic_binding and binding[:2] == (
+            self._operation, self._mode_revision) and self._phase in READY_PHASES)
+
+    async def _candidate_verdict(self, binding: tuple, action: str) -> bool:
+        if not self._candidate_current(binding):
+            return False
+        future = asyncio.get_running_loop().create_future()
+        self._semantic_ack = (action, future)
+        try:
+            await self._send_worker({"type": "speech_admission", "action": action,
+                                     "mode_revision": binding[1], "speech_sequence": binding[2],
+                                     "candidate_revision": binding[3]})
+            accepted = await asyncio.wait_for(future, timeout=2)
+            return accepted and self._candidate_current(binding)
+        finally:
+            if self._semantic_ack is not None and self._semantic_ack[1] is future:
+                self._semantic_ack = None
+
+    async def _speech_candidate_notice(self, message: str, cue: str) -> None:
+        self._semantic_binding, self._semantic_state = None, "idle"
+        self._wake_open = self._capture_active = self._user_speaking = False
+        self._live_transcript, self._input_level = None, 0.0
+        self.conversation._conversation.publish({"type": "error", "text": message})
+        await self.cue(cue)
+        await self._publish("runtime", reason="speech_admission_closed", line=message)
+
+    async def _expire_speech_candidate(self, binding: tuple) -> None:
+        try:
+            # Expiry discards; silence never authorizes an unfinished request.
+            await asyncio.sleep(30)
+            discarded = await self._candidate_verdict(binding, "discard")
+            if self._candidate_current(binding):
+                if not discarded:
+                    await self._send_worker({"type": "cancel", "stop_playback": True,
+                                             "generation": self.conversation._generation})
+                await self._speech_candidate_notice(
+                    "The unfinished request expired without an action. Please start again.", "cancel")
+        except TimeoutError:
+            if self._candidate_current(binding):
+                await self._send_worker({"type": "cancel", "stop_playback": True,
+                                         "generation": self.conversation._generation})
+                await self._speech_candidate_notice(
+                    "Speech capture did not confirm the unfinished request was cleared. No action ran.", "error")
+        finally:
+            if self._semantic_expiry is asyncio.current_task():
+                self._semantic_expiry = None
+
+    async def _prepare_speech_candidate(self, binding: tuple, text: str, timing: dict | None) -> None:
+        try:
+            prepared = await self.conversation.prepare_speech_turn(text)
+            if not self._candidate_current(binding):
+                return
+            trace.emit("speech", "Executive speech admission", [json.dumps({
+                "event": "speech.admission", "decision": prepared.decision,
+                "speech_sequence": binding[2], "candidate_revision": binding[3],
+            }, sort_keys=True)])
+            if prepared.decision != "complete":
+                self._semantic_state = "waiting"
+                self._semantic_expiry = asyncio.create_task(
+                    self._expire_speech_candidate(binding), name="obsidience-speech-expiry")
+                await self._publish("runtime", reason="speech_incomplete")
+                return
+            if not await self._candidate_verdict(binding, "accept"):
+                if self._candidate_current(binding):
+                    # The worker has newer capture that has not reached stdout
+                    # yet. Keep a bounded expiry until its replacement arrives.
+                    self._semantic_state = "waiting"
+                    self._semantic_expiry = asyncio.create_task(
+                        self._expire_speech_candidate(binding), name="obsidience-speech-expiry")
+                return
+            async with self._lock:
+                if not self._candidate_current(binding):
+                    return
+                await self.conversation.submit(
+                    text, source="realtime", wait=False, prepared_speech=prepared,
+                    **({"speech_timing": timing} if timing is not None else {}))
+                self._speech_handoff_task = self.conversation._turn_task
+                if self._speech_handoff_task is not None:
+                    self._speech_handoff_task.add_done_callback(self._speech_handoff_done)
+                self._semantic_binding, self._semantic_state = None, "idle"
+                self._live_transcript = {"text": text, "final": True}
+                if self._mode == "wake":
+                    self._wake_open = self._capture_active = False
+                    self._input_level = 0.0
+                await self.cue("accepted")
+                await self._publish("runtime", reason="speech_admitted")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            if self._candidate_current(binding):
+                with contextlib.suppress(Exception):
+                    await self._candidate_verdict(binding, "discard")
+                if self._candidate_current(binding):
+                    await self._send_worker({"type": "cancel", "stop_playback": True,
+                                             "generation": self.conversation._generation})
+                    trace.emit("error", "Speech admission failed: " + type(exc).__name__)
+                    await self._speech_candidate_notice(
+                        "I could not determine whether that request was finished. No action ran; please repeat it.",
+                        "error")
+        finally:
+            if self._semantic_task is asyncio.current_task():
+                self._semantic_task = None
+
+    async def _speech_candidate_event(self, event: dict, operation: int) -> None:
+        if (not self._semantic_enabled or self._phase not in READY_PHASES
+                or event.get("mode_revision") != self._mode_revision):
+            return
+        kind = event["type"]
+        revision = event.get("candidate_revision")
+        if kind == "speech_candidate_invalidated":
+            if type(revision) is not int or revision <= 0:
+                return
+            seen = (operation, self._mode_revision, revision)
+            if seen <= self._semantic_seen:
+                return
+            self._semantic_seen = seen
+            await self._cancel_speech_candidate()
+            return
+        if kind == "speech_candidate_failed":
+            await self._cancel_speech_candidate()
+            await self._speech_candidate_notice(
+                "That unfinished request exceeded the speech limit. No action ran; please start again.", "error")
+            return
+        binding = (operation, self._mode_revision, event.get("speech_sequence"),
+                   event.get("candidate_revision"))
+        if kind == "speech_admission":
+            ack = self._semantic_ack
+            if (self._candidate_current(binding) and ack is not None
+                    and ack[0] == event.get("action") and not ack[1].done()):
+                ack[1].set_result(event.get("accepted") is True)
+            return
+        if self._mode == "wake" and not self._wake_open:
+            return
+        raw = event.get("text")
+        if (not isinstance(raw, str) or any(type(value) is not int or value <= 0
+                                           for value in binding[2:])):
+            return
+        text = " ".join(raw.split())
+        seen = (operation, self._mode_revision, binding[3])
+        if not 0 < len(text) <= 2000 or seen <= self._semantic_seen:
+            return
+        self._semantic_seen = seen
+        await self._cancel_speech_candidate()
+        self._semantic_binding, self._semantic_state = binding, "considering"
+        self._speech_sequence = binding[2]
+        self._live_transcript = {"text": text, "final": False}
+        timing = _input_speech_timing(event.get("speech_timing"))
+        self._semantic_task = asyncio.create_task(
+            self._prepare_speech_candidate(binding, text, timing), name="obsidience-speech-admission")
+        await self._publish("runtime", reason="speech_candidate")
 
     def _heard_reply(self, event: dict[str, Any]) -> list[str] | None:
         """Chunks of the playing reply whose audio had started at owner barge-in.
@@ -1228,6 +1408,12 @@ class RealtimeSessionManager:
                     # Upstream diagnostic text may include raw ASR tokens.
                     # Ambient recognition is never a retained public log.
                     continue
+                if event_type in {"speech_candidate", "speech_candidate_invalidated",
+                                  "speech_candidate_failed", "speech_admission"}:
+                    await self._speech_candidate_event(worker_event, operation)
+                    continue
+                if event_type == "transcript_final" and self._semantic_enabled:
+                    continue  # A legacy worker cannot bypass contextual admission.
                 if event_type == "wake_detected":
                     if (self._mode != "wake" or self._phase not in READY_PHASES
                             or worker_event.get("mode_revision", 0) != self._mode_revision):
@@ -1251,6 +1437,7 @@ class RealtimeSessionManager:
                     continue
                 if event_type == "wake_idle":
                     if worker_event.get("mode_revision", 0) == self._mode_revision:
+                        await self._cancel_speech_candidate()
                         if self._wake_open:
                             await self.cue("cancel")
                         self._wake_open = False
@@ -1265,7 +1452,7 @@ class RealtimeSessionManager:
                     generation = worker_event.get("generation")
                     if (name in self._cue_names and type(generation) is int
                             and (generation == self.conversation._generation
-                                 or (name == "ready" and 0 <= generation < self.conversation._generation))):
+                                 or (name in {"ready", "follow_up"} and 0 <= generation < self.conversation._generation))):
                         # A started opening chirp can finish after natural speech
                         # advances the turn. These events attest actual writes only.
                         trace.emit("speech", f"Computer cue: {name} ({event_type[4:]})", [
@@ -1367,7 +1554,7 @@ class RealtimeSessionManager:
                 elif event_type in {"transcript_partial", "transcript_final"}:
                     transcript_text = " ".join(
                         str(worker_event.get("text", "")).split()
-                    )[:MAX_EVENT_TEXT]
+                    )[:2000 if self._semantic_enabled else MAX_EVENT_TEXT]
                     if transcript_text:
                         self._live_transcript = {
                             "text": transcript_text,
@@ -1404,10 +1591,12 @@ class RealtimeSessionManager:
                     await self._publish("state", reason="transport_ready")
                 elif event_type in {"runtime_ready", "mode_applied"}:
                     if event_type == "runtime_ready":
+                        if worker_event.get("semantic_turns", False) is not self._semantic_enabled:
+                            raise RuntimeError("Speech worker semantic-admission configuration does not match")
                         # Cue assets belong to this worker, not its startup
                         # mode revision; a mode change before ready keeps them.
                         self._cue_names = [name for name in worker_event.get("cues", [])
-                                           if name in {"ready", "accepted", "complete", "cancel", "error"}]
+                                           if name in {"ready", "follow_up", "accepted", "complete", "cancel", "error"}]
                     if self._phase != "starting":
                         continue
                     if worker_event.get("mode_revision", 0) != self._mode_revision:
@@ -1567,6 +1756,9 @@ class RealtimeSessionManager:
                     await self._publish("state", reason="monitor_failed")
                     # A failed monitor cannot release a live worker's GPU or
                     # another operation's lease. Stop retains exact ownership.
+        finally:
+            if operation == self._operation:
+                await self._cancel_speech_candidate()
 
     @staticmethod
     async def _drain_stderr(stream: asyncio.StreamReader, tail: deque[str]) -> None:

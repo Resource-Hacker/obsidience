@@ -76,7 +76,7 @@ from pipecat.transports.local.audio import (
     LocalAudioTransportParams,
 )
 from pocket_tts import TTSModel
-from .cues import CueAudioFrame, CueMarker, ReplyFinished, load_assets, CHUNK_BYTES
+from .cues import CueAudioFrame, CueMarker, ReplyFinished, load_assets, CHUNK_BYTES, OPENING_CUES
 
 SAMPLE_RATE = 16_000
 TTS_SAMPLE_RATE = 24_000
@@ -110,9 +110,10 @@ SHORT_REPLIES = frozenset({
     "thank you", "never mind", "nevermind", "cancel", "correct", "right",
 })
 WAKE_COMMAND_WAIT_SECS = 8
+SEMANTIC_TEXT_MAX_CHARS = 2_000
 # The wake word is an address, not any mention: it must start the speech
-# segment or follow a pause in recognized words, optionally after hey/ok/okay.
-WAKE_PAUSE_SECS = 0.4
+# segment, optionally after hey/ok/okay. The existing VAD stop, delivered
+# after the ASR tail, starts the next segment; decoder gaps are not silence.
 # A name ending the recognized text may still become "computer's": the next
 # ASR delta arrives one 160 ms step later. This wait is what the opening
 # chirp costs when the name is said alone, so it covers that one step and no
@@ -243,7 +244,7 @@ def classify_wake(text: str, address: int | None, scanned: int, pattern: re.Patt
                   *, final: bool = False) -> tuple[str, int, int, list[str]]:
     """Classify unaddressed wake-word mentions in one speech segment's text.
 
-    ``address`` is where an address may begin (segment start or after a pause);
+    ``address`` is where an address may begin (the VAD-delimited segment start);
     only hey/ok/okay may precede the name there. Possessives and contractions
     ("computer's") are never addresses. A name ending the text stays pending
     until more text arrives, unless ``final``. Returns (decision, end, scanned,
@@ -270,6 +271,19 @@ def classify_wake(text: str, address: int | None, scanned: int, pattern: re.Patt
 class ListeningModeFrame(SystemFrame):
     mode: str
     revision: int
+
+
+@dataclass
+class SpeechAdmissionFrame(SystemFrame):
+    action: str
+    speech_sequence: int
+    candidate_revision: int
+    mode_revision: int
+
+
+@dataclass
+class SpeechResetFrame(SystemFrame):
+    pass
 
 
 class SpeechInputTiming:
@@ -481,7 +495,7 @@ class SpeechTimingAudioOutput(LocalAudioOutputTransport):
                     turn._timing.sequence > 0
                     and frame.metadata.get("obsidience_speech_sequence") == turn._timing.sequence))
                 and turn._wake_cue_eligible):
-            await self._playback.queue_cue("ready", self._playback.generation)
+            await self._playback.queue_cue(turn._wake_cue_name, self._playback.generation)
 
     async def push_frame(self, frame: Frame, direction=FrameDirection.DOWNSTREAM) -> None:
         if direction is FrameDirection.DOWNSTREAM and isinstance(frame, CueMarker):
@@ -489,15 +503,15 @@ class SpeechTimingAudioOutput(LocalAudioOutputTransport):
                 self._cue_binding = frame
                 self._cue_failed = False
                 self._cue_wrote = False
-                if frame.cue_name == "ready" and self._playback.cue_current(frame):
+                if frame.cue_name in OPENING_CUES and self._playback.cue_current(frame):
                     self._playback._ready_cue_binding = (frame.generation, frame.epoch)
-                if (frame.cue_name == "ready"
+                if (frame.cue_name in OPENING_CUES
                         and self._playback._pending_ready_cue_binding == (frame.generation, frame.epoch)):
                     self._playback._pending_ready_cue_binding = None
             elif self._cue_binding is not None and self._playback.cue_current(frame) and not self._cue_failed and self._cue_wrote:
                 emit("cue_finished", name=frame.cue_name, generation=frame.generation, epoch=frame.epoch)
             if frame.end:
-                if (frame.cue_name == "ready"
+                if (frame.cue_name in OPENING_CUES
                         and self._playback._ready_cue_binding == (frame.generation, frame.epoch)):
                     self._playback._ready_cue_binding = None
                 self._cue_binding = None
@@ -662,6 +676,7 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
                  playback: PlaybackCommands | None = None,
                  mode: str = "realtime", mode_revision: int = 0,
                  wake_word: str = "Computer", smart_turn: bool = False,
+                 semantic_turns: bool = False,
                  **kwargs: Any) -> None:
         # STT audio and VAD share its system-frame FIFO, but transcription
         # frames use a separate downstream queue. Consume text inline so a
@@ -670,6 +685,11 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
         self._timing = timing
         self._playback = playback
         self._smart_turn = smart_turn
+        self._semantic_turns = semantic_turns
+        self._semantic_text = ""
+        self._candidate_revision = 0
+        self._candidate_sequence = 0
+        self._candidate_ready = False
         self._transcript_timeout: asyncio.Task[None] | None = None
         self.mode = mode
         self.mode_revision = mode_revision
@@ -680,13 +700,48 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
         self._wake_address: int | None = 0
         self._wake_scanned = 0
         self._wake_pending = False
-        self._wake_heard_at: float | None = None
         self._wake_confirm: asyncio.Task[None] | None = None
         self._wake_open = False
         self._wake_timeout: asyncio.Task[None] | None = None
         self._mode_waiting_for_stop = False
         self._wake_cue_eligible = False
+        self._wake_cue_name = "ready"
         self._completed_pushed = False
+
+    def _invalidate_candidate(self) -> None:
+        """New capture invalidates a verdict without losing addressed text."""
+        if not self._semantic_turns:
+            return
+        self._candidate_revision += 1
+        if self._candidate_ready:
+            self._candidate_ready = False
+            emit("speech_candidate_invalidated", speech_sequence=self._candidate_sequence,
+                 candidate_revision=self._candidate_revision, mode_revision=self.mode_revision)
+
+    def _clear_semantic(self) -> None:
+        self._candidate_revision += 1
+        self._candidate_ready = False
+        self._semantic_text = ""
+        self._candidate_sequence = 0
+
+    async def _admit_speech(self, frame: SpeechAdmissionFrame) -> None:
+        # Check and clear before any await: an old model result cannot clear a
+        # newer capture or the next addressed utterance.
+        accepted = (self._semantic_turns and self._candidate_ready
+                    and frame.mode_revision == self.mode_revision
+                    and frame.speech_sequence == self._candidate_sequence
+                    and frame.candidate_revision == self._candidate_revision
+                    and not self._vad_user_speaking
+                    and not self._user_speaking_buffer.strip())
+        if accepted:
+            self._clear_semantic()
+            if self._timing is not None:
+                self._timing.discard()
+            await self._close_wake()
+        emit("speech_admission", action=frame.action, accepted=accepted,
+             speech_sequence=frame.speech_sequence,
+             candidate_revision=frame.candidate_revision,
+             mode_revision=frame.mode_revision)
 
     async def _reset_wake_scan(self, *, segment_start: bool) -> None:
         confirm, self._wake_confirm = self._wake_confirm, None
@@ -695,11 +750,9 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
         self._wake_prefix = ""
         self._wake_scanned = 0
         self._wake_pending = False
-        if segment_start or self._wake_heard_at is None:
-            self._wake_address, self._wake_heard_at = 0, None
-        else:
-            # Ongoing speech: only a later pause can start an address.
-            self._wake_address = None
+        # Keep the address anchored until the existing VAD stop. Its ASR
+        # tail has already been decoded, so old words cannot start a new address.
+        self._wake_address = 0 if segment_start else None
 
     def _classify_wake(self, *, final: bool = False) -> str | None:
         """Return command text after an accepted address, else None."""
@@ -726,8 +779,9 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
             if self._wake_confirm is asyncio.current_task():
                 self._wake_confirm = None
 
-    async def _open_wake(self, text: str) -> str:
+    async def _open_wake(self, text: str, *, cue_name: str = "ready") -> str:
         text = text.lstrip(WAKE_STRIP)
+        self._wake_cue_name = cue_name
         self._wake_open = True
         await self._reset_wake_scan(segment_start=False)
         if self._timing is not None:
@@ -741,7 +795,10 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
         # it, so immediate follow-ups chirp and true speech barge-in stays quiet.
         reply_active = (self._playback._reply_active if self._playback is not None
                         else self._bot_speaking)
-        self._wake_cue_eligible = not any(c.isalnum() for c in text) and not reply_active
+        # A complete address opens the input window even when its command
+        # arrives in the same ASR delta. Acknowledge that edge promptly;
+        # only a true interruption of a playing reply stays quiet.
+        self._wake_cue_eligible = not reply_active
         if not self._have_sent_user_started_speaking:
             await self._handle_user_interruption(UserStartedSpeakingFrame())
             self._have_sent_user_started_speaking = True
@@ -749,25 +806,10 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
 
     async def _wake_delta(self, text: str) -> str | None:
         """Track one unaddressed ASR delta; return command text once addressed."""
-        now = time.monotonic()
-        words = any(c.isalnum() for c in text)
         if self._wake_pending:
             confirm, self._wake_confirm = self._wake_confirm, None
             if confirm is not None:
                 await self.cancel_task(confirm)
-        if (words and self._wake_heard_at is not None
-                and now - self._wake_heard_at >= WAKE_PAUSE_SECS):
-            # A pause confirms a trailing name and opens a possible address.
-            if self._wake_pending:
-                command = self._classify_wake(final=True)
-                if command is not None:
-                    return command + text
-            # NeMo deltas can split a word. An ASR delivery gap inside
-            # that word must not move its existing address past the prefix.
-            if not (re.search(r"\w$", self._wake_prefix) and re.match(r"\w", text)):
-                self._wake_address = len(self._wake_prefix)
-        if words:
-            self._wake_heard_at = now
         self._wake_prefix += text
         if len(self._wake_prefix) > 512:
             dropped = len(self._wake_prefix) - 512
@@ -844,7 +886,7 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
         if (self.mode != "wake" or self._wake_open or self._mode_waiting_for_stop
                 or playback is None or (playback.generation, playback.epoch) != reply):
             return
-        await self._open_wake("")
+        await self._open_wake("", cue_name="follow_up")
         if self._have_sent_user_started_speaking and not self._vad_user_speaking:
             # Nobody spoke: end the opening edge as the name's own VAD stop
             # does, so the answer is the next utterance with its own timing.
@@ -867,11 +909,11 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
             # NeMo may return punctuation after the name in a later delta.
             frame.text = frame.text.lstrip(WAKE_STRIP)
         if self._wake_open and any(character.isalnum() for character in frame.text):
-            self._wake_cue_eligible = False
             timeout, self._wake_timeout = self._wake_timeout, None
             if timeout is not None:
                 await self.cancel_task(timeout)
         if frame.text.strip():
+            self._invalidate_candidate()
             await super()._handle_transcription(frame, direction)
 
     async def _handle_completed_text(self, completed_text, direction, is_final=True):
@@ -879,7 +921,7 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
             return
         self._completed_pushed = True
         await super()._handle_completed_text(completed_text, direction, is_final)
-        if is_final and self.mode == "wake":
+        if is_final and self.mode == "wake" and not self._semantic_turns:
             await self._close_wake()
 
     async def push_frame(self, frame: Frame, direction=FrameDirection.DOWNSTREAM) -> None:
@@ -893,6 +935,25 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
                 and isinstance(frame, TranscriptionFrame) and frame.text.strip()
                 and not (frame.text.startswith("(") and frame.text.endswith(")"))):
             frame.metadata["obsidience_speech_timing"] = self._timing.finish()
+        if (self._semantic_turns and direction is FrameDirection.DOWNSTREAM
+                and isinstance(frame, TranscriptionFrame) and frame.text.strip()
+                and not (frame.text.startswith("(") and frame.text.endswith(")"))):
+            text = " ".join((self._semantic_text + " " + frame.text).split())
+            if len(text) > SEMANTIC_TEXT_MAX_CHARS:
+                self._clear_semantic()
+                await self._close_wake()
+                emit("speech_candidate_failed", code="text_limit", mode_revision=self.mode_revision)
+                return
+            self._semantic_text = text
+            self._candidate_revision += 1
+            self._candidate_sequence = self._timing.sequence if self._timing else 0
+            self._candidate_ready = True
+            # The address chirped once; later segments remain in its window
+            # without presenting another opening cue.
+            self._wake_cue_eligible = False
+            frame.text = self._semantic_text
+            frame.metadata["obsidience_candidate_revision"] = self._candidate_revision
+            frame.metadata["obsidience_speech_sequence"] = self._candidate_sequence
         if isinstance(frame, StartInterruptionFrame):
             frame.metadata["obsidience_wake_ready"] = self._wake_cue_eligible
         await super().push_frame(frame, direction)
@@ -905,6 +966,7 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
         """Keep VAD provisional until recognized speech confirms interruption."""
 
         self._vad_user_speaking = True
+        self._invalidate_candidate()
         if self._timing is not None:
             self._timing.onset(frame.metadata.get("obsidience_onset_ns"))
         await self.push_frame(frame, direction)
@@ -940,7 +1002,23 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
                 self._transcript_timeout = None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        if isinstance(frame, SpeechAdmissionFrame):
+            await self._admit_speech(frame)
+            return
+        if isinstance(frame, SpeechResetFrame):
+            if not self._semantic_turns:
+                return
+            self._clear_semantic()
+            await self._cancel_transcript_timeout()
+            waiting = self._vad_user_speaking
+            self.reset()
+            self._mode_waiting_for_stop = waiting
+            if self._timing is not None:
+                self._timing.discard()
+            await self._close_wake()
+            return
         if isinstance(frame, ListeningModeFrame):
+            self._clear_semantic()
             waiting = self._vad_user_speaking
             await self._cancel_transcript_timeout()
             await self._close_wake()
@@ -952,7 +1030,17 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
             emit("mode_applied", mode=self.mode, mode_revision=self.mode_revision)
             return
         if isinstance(frame, (EndFrame, CancelFrame)):
+            self._clear_semantic()
             await self._close_wake()
+        held_timing = None
+        refresh_candidate = (self._semantic_turns and self._semantic_text
+                             and isinstance(frame, VADUserStoppedSpeakingFrame)
+                             and not self._user_speaking_buffer.strip()
+                             and not self._mode_waiting_for_stop)
+        if refresh_candidate and self._timing is not None:
+            # A noise-only VAD edge invalidated the old verdict. Re-offer the
+            # held words with its new identity only after capture stops.
+            held_timing = self._timing.finish()
         if (isinstance(frame, VADUserStoppedSpeakingFrame) and self._smart_turn
                 and frame.metadata.get("obsidience_asr_tail_frames", 0) > 0
                 and any(c.isalnum() for c in self._user_speaking_buffer) and self.turn_pending()):
@@ -998,6 +1086,15 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
 
         await super().process_frame(frame, direction)
 
+        if refresh_candidate and self._semantic_text and not self._vad_user_speaking:
+            self._candidate_revision += 1
+            self._candidate_sequence = self._timing.sequence if self._timing else 0
+            self._candidate_ready = True
+            emit("speech_candidate", text=self._semantic_text,
+                 speech_sequence=self._candidate_sequence,
+                 candidate_revision=self._candidate_revision, mode_revision=self.mode_revision,
+                 **({"speech_timing": held_timing} if held_timing else {}))
+
         if empty_vad_stop and self._have_sent_user_started_speaking:
             await self._handle_user_interruption(UserStoppedSpeakingFrame())
             self._have_sent_user_started_speaking = False
@@ -1024,7 +1121,9 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
         if not self._have_sent_user_started_speaking:
             await self._handle_user_interruption(UserStartedSpeakingFrame())
             self._have_sent_user_started_speaking = True
-        emit("transcript_partial", text=transcript,
+        partial = (" ".join((self._semantic_text + " " + transcript).split())
+                   if self._semantic_turns else transcript)
+        emit("transcript_partial", text=partial,
              mode_revision=self.mode_revision,
              **({"speech_sequence": self._timing.sequence} if self._timing else {}))
         await self._cancel_transcript_timeout()
@@ -1207,17 +1306,17 @@ class PlaybackCommands:
 
     def cue_current(self, marker) -> bool:
         turn = self._turn_taking
-        if marker.cue_name == "ready" and self._ready_cue_binding == (marker.generation, marker.epoch):
+        if marker.cue_name in OPENING_CUES and self._ready_cue_binding == (marker.generation, marker.epoch):
             return True
         # Harness's natural-speech cancellation may arrive before the queued
-        # marker. It must not delay this local acknowledgement. Command text
-        # still suppresses an unstarted cue; explicit cancellation clears both
-        # pending and started bindings.
-        pending_ready = (marker.cue_name == "ready"
+        # marker. Neither command text nor the Harness round trip should
+        # suppress the acknowledgement of an accepted address. Explicit
+        # cancellation clears both pending and started bindings.
+        pending_ready = (marker.cue_name in OPENING_CUES
                          and self._pending_ready_cue_binding == (marker.generation, marker.epoch))
         return (((marker.generation, marker.epoch) == (self.generation, self.epoch) or pending_ready)
-                and not (turn and turn._user_speaking_buffer.strip())
-                and (marker.cue_name != "ready" or (not self._reply_active and turn and turn._wake_open and turn._wake_cue_eligible)))
+                and (marker.cue_name in OPENING_CUES or not (turn and turn._user_speaking_buffer.strip()))
+                and (marker.cue_name not in OPENING_CUES or (not self._reply_active and turn and turn._wake_open and turn._wake_cue_eligible)))
 
     async def queue_cue(self, name: str, generation: int) -> None:
         pcm = self._cue_assets.get(name) if isinstance(name, str) else None
@@ -1226,7 +1325,7 @@ class PlaybackCommands:
         marker = CueMarker(name, generation, self.epoch)
         if not self.cue_current(marker):
             return
-        if name == "ready":
+        if name in OPENING_CUES:
             self._pending_ready_cue_binding = (marker.generation, marker.epoch)
         # Admit ordinary frames to the existing output processor: TTS
         # synthesis gaps and zero-PCM failures must not hold cue delivery.
@@ -1352,7 +1451,7 @@ class PlaybackCommands:
         """Close the current reply, all of whose audio has been written.
 
         A completed reply that ends in a question opens the wake-mode command
-        window instead of its closing cue; the window's own ready chirp follows.
+        window instead of its closing cue; a distinct follow-up chirp follows.
         """
         turn = self._turn_taking
         if (name == "complete" and turn is not None and generation == self.generation
@@ -1464,7 +1563,10 @@ class ObsidienceTaskBridge(FrameProcessor):
             text = " ".join(frame.text.split())
             if text and not (text.startswith("(") and text.endswith(")")):
                 timing = frame.metadata.get("obsidience_speech_timing")
-                emit("transcript_final", text=text, **correlation,
+                candidate = frame.metadata.get("obsidience_candidate_revision")
+                emit("speech_candidate" if type(candidate) is int else "transcript_final",
+                     text=text, **correlation,
+                     **({"candidate_revision": candidate} if type(candidate) is int else {}),
                      **({"speech_timing": timing} if timing else {}))
         elif isinstance(frame, StartInterruptionFrame):
             if not frame.metadata.get("obsidience_playback_cancel"):
@@ -1509,9 +1611,18 @@ async def command_loop(
                 ):
                     continue
                 if command.get("stop_playback", True) is True:
+                    await task.queue_frame(SpeechResetFrame())
                     frame = StartInterruptionFrame()
                     frame.metadata["obsidience_playback_cancel"] = True
                     await task.queue_frame(frame)
+            elif kind == "speech_admission":
+                if (command.get("action") in {"accept", "discard"}
+                        and all(type(command.get(key)) is int and command[key] >= 0
+                                for key in ("speech_sequence", "candidate_revision", "mode_revision"))):
+                    await task.queue_frame(SpeechAdmissionFrame(
+                        action=command["action"], speech_sequence=command["speech_sequence"],
+                        candidate_revision=command["candidate_revision"], mode_revision=command["mode_revision"],
+                    ))
             elif kind == "stop":
                 await playback.close()
                 await task.queue_frame(EndFrame())
@@ -1596,6 +1707,7 @@ async def run(args: argparse.Namespace) -> None:
         mode_revision=args.mode_revision,
         wake_word=args.wake_word,
         smart_turn=turn_analyzer is not None,
+        semantic_turns=CONFIG.extras.get("realtime_semantic_turns", False) is True,
         use_vad=True,
         use_diar=False,
         max_buffer_size=2,
@@ -1654,6 +1766,7 @@ async def run(args: argparse.Namespace) -> None:
             "runtime_ready",
             mode=args.mode,
             mode_revision=args.mode_revision,
+            semantic_turns=turn_taking._semantic_turns,
             asr="nvidia/nemotron-speech-streaming-en-0.6b",
             asr_chunk_ms=160,
             tts="pocket-tts-3.0.2-cpu",

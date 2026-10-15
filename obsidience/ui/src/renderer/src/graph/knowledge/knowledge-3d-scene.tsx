@@ -1507,13 +1507,12 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
         });
       }
       // The glass: a twinkle and a small ripple wherever a link comet lands,
-      // and ripples along the route while an agent thinks (its own Task sweep
-      // for a satellite).
-      mainCloud?.driveGlass(dt, Boolean(retainedFocus) && tendrilPhase === "thinking");
+      // and ripples along the route for as long as it is lit (its own Task
+      // sweep for a satellite).
+      mainCloud?.driveGlass(dt, Boolean(retainedFocus) && mainFadeStartedAt < 0);
       for (const [agentId, cloud] of satelliteClouds) {
         const state = sweepStates.get(agentId);
-        cloud.driveGlass(dt, Boolean(state) && state!.fadeStartedAt < 0
-          && (state!.sweep.phase ?? "thinking") === "thinking");
+        cloud.driveGlass(dt, Boolean(state) && state!.fadeStartedAt < 0);
       }
       // Labels follow the same admitted path and frame clock as their beams.
       // A node the route only passes wears the ring without a label.
