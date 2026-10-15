@@ -132,7 +132,8 @@ void main() {
 // colour, fading as it goes. A wide drop crosses the whole layer; a small one
 // is the same ripple in miniature. One pass draws every live drop.
 // Columns of uDrops: row 0 bearing and age (0 as it lands, 1 when spent),
-// row 1 colour and strength, row 2 how far it spreads in its life (radians).
+// row 1 colour and strength, row 2 how far it spreads in its life (radians)
+// and the cosines that bound its train of crests, outer then inner.
 const WAVE_FRAGMENT = `
 precision highp float;
 uniform sampler2D uDrops;
@@ -146,12 +147,15 @@ void main() {
   vec3 tint = vec3(0.0);
   for (int drop = 0; drop < uCount; drop++) {
     vec4 bearing = texelFetch(uDrops, ivec2(drop, 0), 0);
+    vec4 band = texelFetch(uDrops, ivec2(drop, 2), 0);
+    // Only bearings inside its train of crests can rise.
+    float facing = dot(direction, bearing.xyz);
+    if (facing < band.y || facing > band.z) continue;
     vec4 colour = texelFetch(uDrops, ivec2(drop, 1), 0);
-    float span = texelFetch(uDrops, ivec2(drop, 2), 0).x;
+    float span = band.x;
     // Radians from the node, less how far its ring has spread, in units of
     // a full-size ripple.
-    float offset = (acos(clamp(dot(direction, bearing.xyz), -1.0, 1.0)) - bearing.w * span) * 2.4 / span;
-    if (abs(offset) > 1.2) continue;
+    float offset = (acos(clamp(facing, -1.0, 1.0)) - bearing.w * span) * 2.4 / span;
     float height = sin(offset * 20.0) * exp(-offset * offset * 14.0)
       * (1.0 - bearing.w) * (1.0 - bearing.w) * colour.w;
     wave += height;
@@ -642,7 +646,8 @@ export function createKnowledge3dShells(options: {
   backdrop?: {
     texture: { value: THREE.Texture };
     viewport: { value: THREE.Vector2 };
-    capture(renderer: THREE.WebGLRenderer): void;
+    /** Refill the texture where `sphere` (world space) can show through. */
+    capture(renderer: THREE.WebGLRenderer, camera?: THREE.Camera, sphere?: THREE.Sphere): void;
   };
 }): Knowledge3dShells {
   const { positions, layers, sizes, weights, tints, optics } = options;
@@ -783,13 +788,21 @@ export function createKnowledge3dShells(options: {
         },
         defines: { SHELL_LENS: 1 },
         vertexShader: GLASS_VERTEX, fragmentShader: LENS_FRAGMENT,
-        // The grid's winding faces inward; the shader keeps the near half.
-        side: THREE.DoubleSide, transparent: true, depthTest: false, depthWrite: false, blending: THREE.NoBlending,
+        // The grid's winding faces inward, so its near half is the back face:
+        // only that half is drawn (the shader still trims the limb).
+        side: THREE.BackSide, transparent: true, depthTest: false, depthWrite: false, blending: THREE.NoBlending,
       });
       const lens = new THREE.Mesh(glassGeometry, lensMaterial);
       lens.name = "knowledge-shell-lens";
       lens.frustumCulled = false;
-      lens.onBeforeRender = (renderer) => backdrop.capture(renderer);
+      // What the layer bends lies within its rim, lifted by its ripples and
+      // shifted by its refraction (at most an eighth of its radius).
+      const lensSphere = new THREE.Sphere();
+      lens.onBeforeRender = (renderer, _scene, camera) => {
+        lensSphere.center.setFromMatrixPosition(lens.matrixWorld);
+        lensSphere.radius = shape.value.x * 1.3 * lens.matrixWorld.getMaxScaleOnAxis();
+        backdrop.capture(renderer, camera, lensSphere);
+      };
       lenses.push({ mesh: lens, strength: refraction });
       drawn.push(lens);
       disposables.push(lensMaterial);
@@ -1028,7 +1041,9 @@ export function createKnowledge3dShells(options: {
       const count = shell.drops.length;
       if (!count && !shell.wavesDrawn) continue;
       if (!shell.waveTarget) {
-        shell.waveTarget = new THREE.WebGLRenderTarget(512, 256, {
+        // A small ball's ripples need no finer map than its glass grid.
+        const waveWidth = detail > 0.6 ? 512 : 256;
+        shell.waveTarget = new THREE.WebGLRenderTarget(waveWidth, waveWidth / 2, {
           type: THREE.HalfFloatType, format: THREE.RGBAFormat,
           minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
           wrapS: THREE.RepeatWrapping, wrapT: THREE.ClampToEdgeWrapping,
@@ -1051,7 +1066,10 @@ export function createKnowledge3dShells(options: {
         shell.drops.forEach((drop, column) => {
           data.set([...drop.bearing, Math.min(1, drop.age)], column * 4);
           data.set([...drop.tint, drop.strength], (width + column) * 4);
-          data[(2 * width + column) * 4] = drop.spread;
+          // The crests lie within half a spread of the ring (|offset| < 1.2).
+          const age = Math.min(1, drop.age);
+          data.set([drop.spread, Math.cos(Math.min(Math.PI, (age + 0.5) * drop.spread)),
+            Math.cos(Math.max(0, (age - 0.5) * drop.spread)) + 1e-6], (2 * width + column) * 4);
         });
         shell.dropTexture.needsUpdate = true;
       }

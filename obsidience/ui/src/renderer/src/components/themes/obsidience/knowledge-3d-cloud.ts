@@ -171,7 +171,9 @@ export interface Knowledge3dCloudDeps {
     uBackdrop: { value: THREE.Texture };
   };
   viewportUniform: { value: THREE.Vector2 };
-  captureBackdrop: (renderer: THREE.WebGLRenderer) => void;
+  /** Refill uBackdrop where `sphere` (world space) can show through, or
+   *  the whole canvas without one. */
+  captureBackdrop: (renderer: THREE.WebGLRenderer, camera?: THREE.Camera, sphere?: THREE.Sphere) => void;
 }
 
 /** Physics/geometry signature: a change rebuilds ONLY this cloud. */
@@ -518,8 +520,17 @@ export function createKnowledge3dCloud(
   points.renderOrder = 1;
   // Dust marbles bend what lies behind them: the canvas as it stands just
   // before these sprites draw.
-  points.onBeforeRender = (renderer) => {
-    if (marblesShown && marbleRefractionUniform.value > 0) deps.captureBackdrop(renderer);
+  // A marble's lens reads up to about two of its radii from its centre.
+  const marbleSphere = new THREE.Sphere();
+  points.onBeforeRender = (renderer, _scene, camera) => {
+    if (!marblesShown || marbleRefractionUniform.value <= 0) return;
+    let widest = 0;
+    for (const index of marbleNodes) widest = Math.max(widest, radii[index]);
+    const scale = points.matrixWorld.getMaxScaleOnAxis();
+    marbleSphere.center.setFromMatrixPosition(points.matrixWorld);
+    marbleSphere.radius = optics.uReach.value * scale * 1.05
+      + 3 * widest * Math.max(scale, modelScaleUniform.value);
+    deps.captureBackdrop(renderer, camera, marbleSphere);
   };
   group.add(points);
   const depthMaterial = new THREE.ShaderMaterial({
