@@ -29,7 +29,7 @@ from .tasks import task_triggers
 from .vault import (
     Note,
     Resolver,
-    _NOTE_WRITE_LOCK,
+    NOTE_WRITE_LOCK,
     iter_notes,
     load_note,
     mutate_note_metadata,
@@ -132,7 +132,7 @@ def notify_link_review(proposal_id: str, meta: dict, state: str, *, links: list[
 
     run_id = str(meta.get("run_id", ""))
     if state == "pending":
-        with _NOTE_WRITE_LOCK:
+        with NOTE_WRITE_LOCK:
             # A concurrent owner decision may finish between staging and this
             # invalidation; never announce a removed proposal as pending.
             if (CONFIG.staging_dir / proposal_id).is_file() and INDEX.review_decision(proposal_id) is None:
@@ -237,7 +237,7 @@ def link_evidence(existing, body: str, accepted_resolver: Resolver) -> list[dict
 
 
 def _validate_link_evidence(meta: dict, existing, body: str, accepted_resolver: Resolver) -> str:
-    from ..capabilities.vault.propose import PROPOSAL_METADATA_FIELDS
+    from .proposals import PROPOSAL_METADATA_FIELDS
 
     if meta.get("action") != "update":
         raise ValueError("Link proposals update existing Articles")
@@ -288,7 +288,7 @@ def git_commit(message: str, rel_paths: list[str]) -> None:
 
 
 def list_proposals() -> list[dict]:
-    with _NOTE_WRITE_LOCK:
+    with NOTE_WRITE_LOCK:
         return _list_proposals()
 
 
@@ -329,7 +329,7 @@ def acknowledge_notification(identity: str) -> dict:
 
 
 def _list_proposals(accepted: list[Note] | None = None) -> list[dict]:
-    from ..execution.refinement import review_blocker
+    from ..execution.optimization.admission import review_blocker
     from .system import assert_system_article_writable
 
     accepted = iter_notes() if accepted is None else accepted
@@ -454,7 +454,7 @@ def link_proposals(accepted: list[Note] | None = None) -> dict:
     """Pending additions are presentation evidence, never accepted graph links."""
     from ..execution.activity import MAX_REVIEW_REF_CHARS
 
-    with _NOTE_WRITE_LOCK:
+    with NOTE_WRITE_LOCK:
         accepted = iter_notes() if accepted is None else accepted
         res = Resolver(accepted)
         by_path = {note.path: note for note in accepted}
@@ -624,12 +624,12 @@ def _validate_capability_metadata(target: str, meta: dict) -> None:
 
 
 def approve(name: str) -> dict:
-    with _NOTE_WRITE_LOCK:
+    with NOTE_WRITE_LOCK:
         return _approve(name)
 
 
 def _approve(name: str) -> dict:
-    from ..execution.refinement import review_blocker
+    from ..execution.optimization.admission import review_blocker
     from .system import assert_system_article_writable
 
     path, meta, body = _load_proposal(name)
@@ -737,7 +737,7 @@ def _approve(name: str) -> dict:
         and target.startswith("Runbooks/")
     )
     if generated:
-        from ..capabilities.vault.propose import validate_generated_runbook
+        from .proposals import validate_generated_runbook
         from ..execution.assignments import library_candidates
         from .dependencies import dependency_resolver
 
@@ -759,7 +759,7 @@ def _approve(name: str) -> dict:
     # the common proposal envelope.
     note_meta = dict(existing.meta) if action == "update" and existing else {}
     if "authored_fields" in meta:
-        from ..capabilities.vault.propose import PROPOSAL_METADATA_FIELDS
+        from .proposals import PROPOSAL_METADATA_FIELDS
 
         authored_fields = meta["authored_fields"]
         if not isinstance(authored_fields, list) or any(
@@ -773,7 +773,7 @@ def _approve(name: str) -> dict:
         note_meta.update({k: v for k, v in meta.items()
                           if k not in ("proposal", "action", "target", "reason", "proposed_at",
                                        "agent", "task", "run_id", "base_sha256", "event_context",
-                                       "review_class", "link_evidence", "proposal_body_sha256", "refinement", "optimization")})
+                                       "review_class", "link_evidence", "proposal_body_sha256", "optimization")})
     if generated:
         note_meta["kind"] = "runbook"
         note_meta["task"] = f"[[{generation_params['target_task']}]]"
@@ -836,7 +836,7 @@ def _approve(name: str) -> dict:
 
 
 def reject(name: str, reason: str = "") -> dict:
-    with _NOTE_WRITE_LOCK:
+    with NOTE_WRITE_LOCK:
         return _reject(name, reason)
 
 

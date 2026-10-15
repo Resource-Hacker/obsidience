@@ -9,13 +9,9 @@ import yaml
 
 def execute(args: dict, context: dict) -> str:
     del args, context
-    from obsidience.harness.capabilities.registry import REGISTRY, contract_error
+    from obsidience.harness.capabilities.registry import DESCRIPTIONS, REGISTRY, contract_error
     from obsidience.harness.config import CONFIG
     from obsidience.harness.knowledge.format import parse, validate_profile
-    from obsidience.harness.knowledge.skills import (
-        build_skill_mirror,
-        node_id as skill_mirror_node_id,
-    )
     from obsidience.harness.knowledge.tasks import (
         CANONICAL_TASK_BY_PATH,
         TASK_TAXONOMY_BY_PATH,
@@ -74,9 +70,6 @@ def execute(args: dict, context: dict) -> str:
         target = res.resolve(raw_ref)
         return task_path(target) if target and target.kind == "task" else ""
 
-    skill_mirror_refs = {
-        skill_mirror_node_id(node.path) for node in build_skill_mirror(notes)
-    }
     broken, checked = [], 0
     for note in notes:
         if str(note.meta.get("kind", "")).strip().lower() == "index":
@@ -92,8 +85,6 @@ def execute(args: dict, context: dict) -> str:
                 raw_ref = (
                     str(ref).strip().strip("[]").split("|", 1)[0].split("#", 1)[0]
                 )
-                if field == "skills" and raw_ref in skill_mirror_refs:
-                    continue
                 if field == "exclude_subtasks" and raw_ref.startswith("@library/Tasks/"):
                     root_path = task_path(note) if note.kind == "task" else ""
                     path = exclusion_path(raw_ref)
@@ -159,6 +150,7 @@ def execute(args: dict, context: dict) -> str:
         skills_by_tool.setdefault(target.ref, []).append(skill.ref)
 
     leaf_titles: list[str] = []
+    drifted: list[str] = []
     for tool in leaf_tools:
         checked += 1
         leaf_titles.append(tool.title)
@@ -171,6 +163,11 @@ def execute(args: dict, context: dict) -> str:
         )
         if error:
             broken.append(f"- [[{tool.ref}]] Capability contract: {error}")
+        # The registry description is what the model sees; the Article explains
+        # that interface. Drift is only reported; a Review proposal reconciles it.
+        registered = DESCRIPTIONS.get(tool.title)
+        if registered is not None and str(tool.meta.get("description") or "").strip() != registered:
+            drifted.append(tool.title)
         paired = skills_by_tool.get(tool.ref, [])
         if len(paired) != 1:
             broken.append(
@@ -271,6 +268,11 @@ def execute(args: dict, context: dict) -> str:
                 broken.append(
                     f"- [[{subscriber.ref}]] assignee: expected [[{expected_agent}]]"
                 )
+    drift = (
+        f"\nTool description drift (advisory, not a broken reference): {len(drifted)} Tool "
+        "Article descriptions differ from the registry description: " + ", ".join(sorted(drifted))
+        if drifted else ""
+    )
     if not broken:
-        return f"All {checked} load-bearing edges resolve. No broken references."
-    return f"{checked} edges checked, {len(broken)} broken:\n" + "\n".join(broken[:30])
+        return f"All {checked} load-bearing edges resolve. No broken references." + drift
+    return f"{checked} edges checked, {len(broken)} broken:\n" + "\n".join(broken[:30]) + drift

@@ -14,10 +14,9 @@ import platform
 import re
 import subprocess
 
-from . import inventory
+from . import inventory, packagekit
 from ..config import CONFIG
-from ..realtime import media
-from ...shell.applications import packagekit
+from ..realtime import devices as realtime_devices
 
 PROC = Path("/proc")
 SYS = Path("/sys")
@@ -200,7 +199,7 @@ def _storage() -> dict:
 
 
 def _audio(kind: str) -> list[dict]:
-    values = media._run_json(("/usr/bin/pactl", "-f", "json", "list", "sources" if kind == "microphones" else "sinks"))
+    values = realtime_devices._run_json(("/usr/bin/pactl", "-f", "json", "list", "sources" if kind == "microphones" else "sinks"))
     if not isinstance(values, list) or len(values) > MAX_DEVICES:
         raise ValueError("PipeWire endpoint enumeration is unavailable or exceeded its bound")
     result = {}
@@ -286,7 +285,7 @@ def _applications() -> dict:
         title = _label(entry.get("Name"), 160)
         # Preserve the normal parser's chosen field semantics without its
         # display-only truncation becoming a changed inventory fact.
-        existing = packagekit._desktop_entry(path)
+        existing = packagekit.desktop_entry(path)
         if existing is None or existing["label"] != title:
             raise ValueError("Desktop entry changed during enumeration")
         rows.append({"desktop_id": _label(existing["desktop_id"]), "label": title})
@@ -298,7 +297,7 @@ def _runtime() -> dict:
     # Saved configuration is observed directly. Do not call model catalog,
     # discovery, initialization or reconciliation from an inventory read.
     models = json.loads(_text(CONFIG.runtime_dir / "model-settings.json", 500_000))
-    selections = json.loads(_text(media.MEDIA_SETTINGS_PATH, 16_384))
+    selections = json.loads(_text(realtime_devices.MEDIA_SETTINGS_PATH, 16_384))
     if (not isinstance(models, dict) or models.get("schema_version") != 2
             or not isinstance(models.get("hardware"), dict) or not isinstance(selections, dict)
             or selections.get("schema_version") != 3):
@@ -307,11 +306,11 @@ def _runtime() -> dict:
     devices = (inventory.CPU_DEVICE, inventory.IGPU_DEVICE, *inventory.GPU_DEVICES)
     if set(hardware) != set(devices):
         raise ValueError("Saved hardware assignment coverage is incomplete")
-    fields = (*media.INTERFACE_KINDS, "tts_voice")
+    fields = (*realtime_devices.INTERFACE_KINDS, "tts_voice")
     configured = {key: _label(selections.get(key)) for key in fields}
-    if configured["tts_voice"] not in media.TTS_VOICES or configured["camera"] == "adb:tft":
+    if configured["tts_voice"] not in realtime_devices.TTS_VOICES or configured["camera"] == "adb:tft":
         raise ValueError("Saved media configuration requires migration or correction")
-    speech = media.speech_runtime()
+    speech = realtime_devices.speech_runtime()
     return {"hardware_assignments": {key: _label(hardware[key]) for key in devices},
             "media_selections": configured,
             "speech": {key: (configured["tts_voice"] if key == "voice" else speech[key]) for key in (

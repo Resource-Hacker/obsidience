@@ -24,10 +24,13 @@ from autosaddler.v2.harness.component_map import ComponentMapHarnessSpace
 from autosaddler.v2.prompting.models import SessionResult, SessionSpec, Usage
 from autosaddler.v2.storage.local import LocalRunStore
 
+from ...config import CONFIG
 from ...knowledge.vault import Resolver
 from ...models import llm, runtime
-from .. import executor, optimization, refinement, trace as action_trace
-from ..evaluation import FrozenTrial, compare_observations
+from .. import executor, trace as action_trace
+from ..optimization import EXECUTIVE, HEIMDALL, admission, store as evaluation_store
+from ..optimization.cases import frozen_notes
+from ..optimization.evaluation import FrozenTrial, compare_observations, fixture_json
 from .runner import run_adk_session
 
 
@@ -92,7 +95,7 @@ def native_wire(messages: list[dict], model, effort: str) -> list[dict]:
 
 
 def _latency_sensitive(document: dict) -> bool:
-    return (document['agent'] == optimization.EXECUTIVE
+    return (document['agent'] == EXECUTIVE
             and document['model_contract']['reasoning_effort'] == 'none')
 
 
@@ -215,12 +218,12 @@ class NativeEvaluator:
             body = json.loads((materialized.root / 'candidate.json').read_text())['identity']
         finally:
             materialized.release()
-        frozen = Resolver(refinement._notes(self.document))
-        subject = frozen.resolve(optimization.subject_ref(self.document))
+        frozen = Resolver(frozen_notes(self.document))
+        subject = frozen.resolve(admission.subject_ref(self.document))
         frozen = Resolver([replace(note, body=body) if note.ref == subject.ref else note
-                           for note in refinement._notes(self.document)])
+                           for note in frozen_notes(self.document)])
         agent = frozen.resolve(self.document['agent'])
-        task = frozen.resolve(self.document.get('task', optimization.EXECUTIVE))
+        task = frozen.resolve(self.document.get('task', EXECUTIVE))
         spine = executor.resolve_spine(task, frozen)
         model = runtime.configured_spec(self.document['model_contract']['spec']['id'])
         observations = []
@@ -244,7 +247,7 @@ class NativeEvaluator:
                 messages = executor.activation_messages(task,
                     {**sections, 'params': {}, 'objective': specification['objective']}, agent_name=agent.title)
                 if self.document.get('evaluation_mode') == 'contract':
-                    from ..optimization_incidents import trial_read, validate_decision
+                    from ..optimization.incidents import trial_read, validate_decision
                     sample = specification['sample']
                     messages = json.loads(json.dumps(sample['messages']))
                     replacements = 0
@@ -332,7 +335,7 @@ class DecisionTrial:
         self.context = self.schema_context = json.loads(json.dumps(sample['context']))
         # The decisions the live run had left at this step, so the budget in
         # each further Tool result continues the captured one.
-        limit = refinement.CONFIG.max_steps
+        limit = CONFIG.max_steps
         self.max_steps = min(limit, max(1, limit - sample['step'] + 1))
         self.passed, self.error, self.tool_count, self.calls = False, None, 0, []
 
@@ -358,12 +361,11 @@ class NativeTrial(FrozenTrial):
                        and {k: v for k, v in row['args'].items() if k != 'query'}
                        == {k: v for k, v in args.items() if k != 'query'}]
             if len(matches) == 1:
-                from ..evaluation import _json
                 value = matches[0]['result']
-                self._responses[(name, _json(args))] = value if isinstance(value, str) else _json(value)
+                self._responses[(name, fixture_json(args))] = value if isinstance(value, str) else fixture_json(value)
         result = await super().handle(name, args)
         if not result.get('done'):
-            from ...capabilities.task.complete import computer_completion_evidence
+            from ..completion import computer_completion_evidence
             try:
                 observed = json.loads(result['observation'])
             except ValueError:
@@ -483,7 +485,7 @@ class ExecutivePrompts:
                     relevant.add(sample['tool'])
                     relevant.update({'source.read', 'vault.search'} & set(sample['allowed']))
             data['tool_contracts'] = {name: argument_schema(name) for name in sorted(relevant)}
-            data['capability_instructions'] = {note.ref: note.body for note in refinement._notes(self.document)
+            data['capability_instructions'] = {note.ref: note.body for note in frozen_notes(self.document)
                 if note.kind in {'tool', 'skill'} and note.ref.rsplit('/', 1)[-1] in relevant}
         if kind in {'diagnose_patch', 'reflect'}:
             candidate_id = context['candidate_ids'][0]
@@ -544,7 +546,7 @@ class ExecutivePrompts:
 class ReservedModelProvider:
     """An upstream AgentProvider using the Audit-selected model and shared lease."""
     def __init__(self, audit):
-        self.spec = runtime.resolve_model(audit.meta.get('model'), refinement.HEIMDALL)
+        self.spec = runtime.resolve_model(audit.meta.get('model'), HEIMDALL)
         self.effort = llm.normalize_reasoning_effort(audit.meta.get('reasoning_effort'))
 
     async def run(self, request):
@@ -618,16 +620,16 @@ def comparison(document, rows, seed_id, selected_id):
 
 
 async def run(case_id, document, audit, context):
-    run_dir = refinement._root() / 'executive/jobs' / case_id
+    run_dir = evaluation_store.root() / 'executive/jobs' / case_id
     if any(path.is_symlink() for path in (run_dir, *run_dir.parents)):
         raise ValueError('Optimization artifacts cannot follow symlinks')
     store = LocalRunStore(run_dir=run_dir, run_id=case_id)
     store.initialize(resolved_config={'scenario': 'obsidience', 'case_id': case_id,
-                                     'max_iterations': 3, 'upstream_revision': optimization.UPSTREAM_REVISION},
+                                     'max_iterations': 3, 'upstream_revision': admission.UPSTREAM_REVISION},
                      resolved_entities={'resolved/optimizer.json': document['optimizer_contract']})
-    baseline = Resolver(refinement._notes(document)).resolve(optimization.subject_ref(document)).body
+    baseline = Resolver(frozen_notes(document)).resolve(admission.subject_ref(document)).body
     space = IdentityHarnessSpace(baseline={'identity': baseline}, store_root=run_dir / 'candidates',
-        validator=lambda components: optimization.validate_body(components['identity'], baseline, optimization.subject_ref(document)))
+        validator=lambda components: admission.validate_body(components['identity'], baseline, admission.subject_ref(document)))
     cases = tuple(Case(case_id=case['id'], split='train' if case['split'] == 'train' else 'development', payload=case)
                   for case in document['suite']['cases'])
     evaluator = NativeEvaluator(document, space, store, context)
@@ -677,8 +679,8 @@ async def run(case_id, document, audit, context):
     if any(not item.get('resolved') for item in failures):
         compared['verdict'] = 'incomplete'
     return {'schema_version': 1, 'case_id': case_id, 'audit_run_id': context['run_id'],
-            'upstream_revision': optimization.UPSTREAM_REVISION, 'evaluator_revision': document['evaluator_revision'],
+            'upstream_revision': admission.UPSTREAM_REVISION, 'evaluator_revision': document['evaluator_revision'],
             'model_contract': document['model_contract'], 'candidate_body': selected['identity'],
             'seed_id': seed_id, 'selected_id': selected_id, 'observations': rows, 'optimizer_failures': failures,
             'verdict': compared['verdict'], 'comparison': compared, 'scope': document['scope'],
-            'job_path': str(run_dir.relative_to(refinement.CONFIG.project_root))}
+            'job_path': str(run_dir.relative_to(CONFIG.project_root))}

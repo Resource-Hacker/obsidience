@@ -5,11 +5,11 @@ sources:
 - resource: obsidience/harness/knowledge/scope.py
 - resource: obsidience/harness/knowledge/index.py
 - resource: obsidience/harness/realtime/runtime.py
-- resource: obsidience/harness/realtime/media.py
+- resource: obsidience/harness/realtime/devices.py
 - resource: obsidience/harness/realtime/speech/worker.py
 - resource: obsidience/harness/conversation/runtime.py
 - resource: obsidience/harness/conversation/selection.py
-- resource: obsidience/harness/capabilities/task/complete.py
+- resource: obsidience/harness/execution/completion.py
 - resource: obsidience/harness/execution/executor.py
 - resource: obsidience/harness/execution/scheduler.py
 ---

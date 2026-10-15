@@ -1,4 +1,10 @@
-"""Owner-selected, source-backed Ingest publication through ordinary review.
+"""Owner-selected Auto-curate publication through ordinary review.
+
+Auto-curate is the owner-authored ``auto_curate`` boolean, inherited through
+Article containment. It is permission to publish, not a Task trigger or
+evidence of truth. The nearest explicit boolean wins, including false. An Agent
+Brain scopes its own knowledge folder, never the shared Library articles
+checked out from elsewhere.
 
 The branch's accepted metadata is the policy; Source text cannot grant it.
 Other proposals remain in the same review queue. No second wiki writer.
@@ -8,11 +14,49 @@ from __future__ import annotations
 
 from pathlib import Path, PurePosixPath
 
-
-from .auto_curate import enabled, policy_for, selection
 from .source import get_source, validate_source_citations
-from .vault import Resolver, folder_article_path, iter_notes, load_note
+from .vault import Note, Resolver, folder_article_path, iter_notes, load_note
 from .links import body_links
+
+
+def selection(note: Note | None) -> bool | None:
+    if note is None:
+        return None
+    value = note.meta.get("auto_curate")
+    if isinstance(value, bool):
+        return value
+    # Read old accepted selections without inventing a second policy store.
+    if "auto-curate" in (note.meta.get("tags") or []):
+        return True
+    return None
+
+
+def policy_for(target: str, notes: dict[str, Note] | None = None) -> Note | None:
+    path = PurePosixPath(target.removesuffix(".md"))
+    if path.is_absolute() or any(part.startswith((".", "_", "@")) for part in path.parts):
+        return None
+
+    def read(ref: str) -> Note | None:
+        return notes.get(ref) if notes is not None else load_note(ref + ".md")
+
+    candidates = [str(path)]
+    # A target may be an existing Article or a not-yet-populated folder.
+    for folder in (path, *path.parents):
+        if str(folder) == ".":
+            break
+        candidates.append(folder_article_path(str(folder)).removesuffix(".md"))
+        if len(folder.parts) == 2 and folder.parts[0] == "Agents":
+            candidates.append(str(folder / folder.name))
+    for ref in dict.fromkeys(candidates):
+        note = read(ref)
+        if selection(note) is not None:
+            return note
+    return None
+
+
+def enabled(target: str, notes: dict[str, Note] | None = None) -> bool:
+    return selection(policy_for(target, notes)) is True
+
 
 def publication_policy(target: str):
     path = PurePosixPath(target.removesuffix(".md"))
@@ -26,17 +70,16 @@ def publication_policy(target: str):
 
 
 def try_auto_approve(result: dict, args: dict, context: dict) -> dict:
-    from ..capabilities.vault.propose import _authored_metadata
+    """Publish a just-staged proposal when owner policy permits it.
+
+    ``args["metadata"]`` is the proposal's already validated authored metadata.
+    """
     from ..memory.hindsight import observation_links
 
     if (context.get("event") == "observations.memory.ready"
             or observation_links(str(args.get("body", "")), str(result["target"]))):
         return result  # Hindsight evidence produces recommendations for owner Review.
 
-    try:
-        args = {**args, "metadata": _authored_metadata(args.get("metadata") or {})}
-    except ValueError:
-        return result
     if not enabled(str(result["target"])):
         return result
     policy = publication_policy(str(result["target"]))

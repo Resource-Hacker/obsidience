@@ -37,7 +37,6 @@ PROJECT_SOURCE_ROOTS = (
     Path("obsidience/shell"),
     Path("obsidience/ui/src"),
     Path("obsidience/scripts"),
-    Path("obsidience/tests"),
 )
 PROJECT_SOURCE_FILES = (
     Path(".gitignore"),
@@ -45,7 +44,6 @@ PROJECT_SOURCE_FILES = (
     Path("DESIGN.md"),
     Path("README.md"),
     Path("artifacts.lock.json"),
-    Path("obsidience.toml"),
     Path("obsidience/obsidience.toml"),
     Path("obsidience/shell/session/greetd.toml"),
     Path("obsidience/shell/session/install-session"),
@@ -58,7 +56,6 @@ PROJECT_SOURCE_FILES = (
     Path("obsidience/ui/tsconfig.node.json"),
     Path("obsidience/ui/tsconfig.web.json"),
 )
-SYSTEM_SOURCE_ROOT = Path("obsidience/state/system")
 PROJECT_SOURCE_SUFFIXES = frozenset({
     ".conf", ".css", ".desktop", ".html", ".js", ".jsx", ".json", ".md", ".mjs",
     ".py", ".pyi", ".qml", ".service", ".sh", ".svg", ".target", ".toml", ".ts",

@@ -9,7 +9,11 @@ sources:
 - resource: obsidience/ui/src/renderer/src/components/themes/obsidience/knowledge-3d-shell.ts
 - resource: obsidience/ui/src/renderer/src/components/themes/obsidience/knowledge-3d-scene.tsx
 - resource: obsidience/ui/src/renderer/src/panes/graph-backdrop.tsx
-- resource: obsidience/harness/interfaces/api/app.py
+- resource: obsidience/harness/knowledge/projection.py
+- resource: obsidience/harness/interfaces/api/routes/knowledge.py
+- resource: obsidience/harness/interfaces/api/routes/graphs.py
+- resource: obsidience/harness/graphs/agent_activity.py
+- resource: obsidience/harness/graphs/code_refresh.py
 - resource: obsidience/harness/execution/activity.py
 - resource: obsidience/ui/src/renderer/src/panes/graph-activity.ts
 ---
@@ -198,6 +202,61 @@ thinking sweep without restarting already illuminated Tools.
 New relationships remain proposed until ordinary Review accepts them. Valid
 pending relation proposals retain their existing physical preview and approval
 continuity without changing accepted Task authority or packet Knowledge.
+
+## Memory and Code provider views
+
+Memory and Code are presentation adapters over their providers
+(`interfaces/api/routes/graphs.py`), composed with the Harness lifespan and the
+activity stream. They add no graph store, Agent, Tool grant or scheduler.
+Memory and source content stay read-only; a saved-code refresh only updates the
+provider's own derived index. Knowledge, Memory and Code share one native Graph
+pane (placement identity `knowledge-graph`); its header switches the view
+through the Shell selection channel without presenting or focusing a pane, and
+Memory's Agent dropdown selects one configured Hindsight bank. The views share
+controls, background, details and the `knowledge-3d-labels.ts` label style, with
+at most twelve provider labels, updated on camera, data or emphasis changes.
+
+- Memory reads the configured Hindsight API: per-bank `/stats`, `/graph` and
+  exact `/memories/{id}`. The default view requests the complete bank, sized
+  from the native statistics, so older days never fall off a newest-first page.
+  Only that complete view carries a revision cursor; a client holding one
+  receives just the changed records and their edges. Explicit bounded queries
+  report incomplete coverage. Native observation-support IDs become `supports`
+  edges. Large responses are decoded and serialized in FastAPI's worker pool,
+  never on the conversational event loop.
+- Memory time belongs to Hindsight. The timeline uses `mentioned_at`;
+  `occurred_start` and `occurred_end` stay in record details; import or
+  consolidation time never substitutes, and unknown dates stay undated. The
+  stage spaces records by activity along a tube (equal memory volume, equal
+  length), settles the other two coordinates with `d3-force-3d`, and shows each
+  record's two strongest native ties at rest; hover or selection reveals every
+  incident link.
+- Code reads codebase-memory-mcp's native `/api/layout` (default
+  `http://127.0.0.1:9749`; optional `[graphs]` keys `codebase_url` and
+  `codebase_project`, the default project being the repository path with `/`
+  replaced by `-`). The stage lays it out with Knowledge's spherical solver:
+  native containment groups branches, calls and imports stay cross-links, and
+  layout ancestry is placement, never a relationship. Stable qualified names map
+  to compact display IDs, and saved source spans carry bounded in-root SHA-256
+  fingerprints, never source text. The view reports unavailable while the
+  provider is absent and never polls.
+- Code's file lens unfolds one file into a local sphere, on a saved-file event
+  with Follow enabled or on a click or search, adding up to sixteen direct
+  external neighbors marked by an outward arrow. Right-click, Back and Fit
+  return to the saved project camera.
+- `obsidience-code-graph.service` owns the provider daemon and graph viewer.
+  Agent MCP sessions join it with `--tool-profile analysis`; never restart the
+  unit under them or start a second MCP owner. Saved-file events coalesce for
+  750 ms into one native `index_repository` pass (`graphs/code_refresh.py`); a
+  failed refresh shows stale, not ready, and no index artifact enters the repo.
+- `graphs/agent_activity.py` turns new tool calls in the local Codex and Claude
+  Code journals into fixed operation labels and the qualified identities they
+  returned, without replaying history at startup, and repository file events
+  into "File changed". It never copies reasoning, conversation, arguments,
+  source contents or command output, and it cannot invoke a tool.
+- Both views consume `/ws/activity` operations with exact `memory:<bank>` or
+  `code:<project>` scope: searches glow green, reads cyan, changes amber and
+  consolidation violet. Neighbor edges are not asserted to be agent traversal.
 
 See [Native shell and surfaces](/Architecture/Shell/native-shell-and-surfaces.md) for the actual
 QtWebEngine host and [Activation packet protocol](/Architecture/Harness/activation-briefing-protocol--21d7f1ad.md)

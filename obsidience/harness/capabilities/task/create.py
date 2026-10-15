@@ -59,7 +59,7 @@ def _maintenance_params(
         for note in notes
     ):
         raise ValueError("maintenance candidate Articles are no longer accepted")
-    from obsidience.harness.capabilities.vault.maintenance import candidate_revision
+    from obsidience.harness.knowledge.maintenance import candidate_revision
 
     current_revision = candidate_revision(notes)
     if current_revision != str(row.get("candidate_revision", "")):

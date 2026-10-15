@@ -7,10 +7,10 @@ import json
 import re
 import time
 from functools import cache
-from pathlib import Path
 
 from ..knowledge.index import INDEX
 from ..knowledge.vault import Note
+from . import revision
 from .ledger import current_task_issue
 
 REPAIR_TASK = "Tasks/repair"
@@ -45,10 +45,7 @@ def health_causes(notes: list[Note], source_issues: list | None = None) -> list[
 @cache
 def _code_revision() -> str:
     """A new repair implementation may reconsider an earlier blocked cycle."""
-    return hashlib.sha256(b"".join((Path(__file__).parent / name).read_bytes()
-                                   for name in ("repair.py", "scheduler.py", "executor.py",
-                                                "../capabilities/registry.py", "../capabilities/harness/repair.py",
-                                                "../capabilities/harness/status.py", "../memory/hindsight.py"))).hexdigest()
+    return hashlib.sha256(b"".join((revision.ROOT / name).read_bytes() for name in revision.REPAIR)).hexdigest()
 
 
 def definition_revision(notes: list[Note]) -> str:
@@ -417,7 +414,7 @@ def verified_source_captures(note: Note, run_id: str) -> dict:
     The shortened trace locates evidence, but the durable full-result digest
     and Source bytes, not trace prose, authorize this disposition.
     """
-    from ..capabilities.web.fetch import _render_batch, _render_result
+    from ..capabilities.web.fetch import render_batch, render_result
     from ..knowledge.source import _row_doc
     from .scheduler import _retry_trace
 
@@ -463,7 +460,7 @@ def verified_source_captures(note: Note, run_id: str) -> dict:
             continue
         for created in (True, False):
             result = {**source, "url": source["source_ref"], "created": created}
-            rendered = _render_batch(urls, [result]) if "urls" in args else _render_result(result)
+            rendered = render_batch(urls, [result]) if "urls" in args else render_result(result)
             encoded = json.dumps(rendered, sort_keys=True).encode()
             if (len(encoded) == call["result_chars"]
                     and hashlib.sha256(encoded).hexdigest() == call["result_sha256"]):
@@ -491,16 +488,6 @@ def eligible_rows(context: dict) -> list[dict]:
     if not isinstance(plan, list):
         return []
     return [row for row in plan if isinstance(row, dict) and row.get("operation") in {"retry", "settle"}]
-
-
-def available_tools(allowed: list[str], context: dict) -> list[str]:
-    """Expose the same fresh-inspection prerequisite as Repair completion."""
-    if context.get("task") == REPAIR_TASK and "harness.status" in allowed:
-        if not isinstance(context.get("_harness_snapshot"), dict):
-            return ["harness.status"]
-        if repair_attempt_count(context) >= PASS_ATTEMPT_LIMIT or not eligible_rows(context):
-            return [name for name in allowed if name != "harness.repair"]
-    return allowed
 
 
 def occurrence_key(note: Note) -> str:

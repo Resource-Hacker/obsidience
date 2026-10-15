@@ -4,8 +4,6 @@ title: Using task.create
 description: Select an existing accepted outcome, not a new task name.
 obsidience:
   tool: '[[Tools/task.create]]'
-  requires:
-  - '[[Skills/task.inspect]]'
 ---
 
 ## Runtime

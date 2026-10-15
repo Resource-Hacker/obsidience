@@ -47,6 +47,7 @@ RECORD, LOG = STATE / "deploy.json", STATE / "deploys.jsonl"
 PARTIAL_LOG = STATE / "deploy-partials.jsonl"
 API = "http://127.0.0.1:8765"
 RESTART_SHELL = ROOT / "obsidience" / "shell" / "session" / "restart-shell"
+HARNESS_UNITS = "obsidience/harness/systemd/"
 
 
 def git(*args: str) -> str:
@@ -67,7 +68,8 @@ def ledger(sql: str) -> list:
 
 def targets(changed: list[str]) -> list[str]:
     owners = []
-    if any(p.startswith("obsidience/harness/") for p in changed):
+    # Unit templates are installed copies; a Harness restart does not load them.
+    if any(p.startswith("obsidience/harness/") and not p.startswith(HARNESS_UNITS) for p in changed):
         owners.append("harness")
     if any(p.startswith("obsidience/shell/") for p in changed):
         owners.append("shell")
@@ -173,7 +175,7 @@ def require_tv_idle() -> None:
             raise ValueError("TV player is active or unavailable")
         if subprocess.run(["systemctl", "--user", "is-active", "--quiet", "obsidience-tv-android.service"]).returncode == 0:
             sys.path.insert(0, str(ROOT))
-            from obsidience.harness.capabilities.tv.android import state as android_state
+            from obsidience.harness.tv.android import state as android_state
             android = android_state()
             if android is None or android.get("playback") != "idle":
                 raise ValueError("TV Android playback is active or unavailable")
@@ -418,6 +420,9 @@ def main() -> None:
         print("Note: uncommitted and not part of this deploy:", ", ".join(dirty))
     if "obsidience/scripts/llm.sh" in changed:
         print("Note: llm.sh changed; restart obsidience-gemma.service deliberately (not automatic).")
+    if units := [p for p in changed if p.startswith(HARNESS_UNITS)]:
+        print("Note: Harness unit templates changed; install them into ~/.config/systemd/user "
+              "and daemon-reload deliberately (not automatic):", ", ".join(units))
     kind = "scoped deploy" if args.only else "deploy"
     print(f"{kind} {last and last[:7]} -> {head[:7]}; restart: {', '.join(owners) or 'nothing'}")
     if args.dry_run:

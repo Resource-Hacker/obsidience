@@ -8,7 +8,9 @@ import json
 import threading
 from pathlib import Path
 
-SETTINGS = Path(__file__).resolve().parents[2] / "state/camera-owner/settings.json"
+from ..config import CONFIG
+
+SETTINGS = CONFIG.runtime_dir / "camera-owner/settings.json"
 _LOCK = threading.RLock()
 _tracker = None
 _error = None
@@ -151,8 +153,8 @@ async def _recover_events():
 
 def _recover_once(reason, source, revision):
     global _attempted, _endpoint, _recovery_state, _error
-    from . import media
-    with media._CAMERA_LOCK:
+    from . import devices
+    with devices._CAMERA_LOCK:
         with _LOCK:
             if revision != _intent_revision or not _wanted:
                 return
@@ -177,7 +179,7 @@ def _recover_once(reason, source, revision):
                     # V4L2 numbers can change. Resolve the same USB device and
                     # capture interface before updating its saved node through
                     # the media owner; never select whichever reused videoN.
-                    if media.settings()["camera"] != _endpoint[0]:
+                    if devices.settings()["camera"] != _endpoint[0]:
                         return
                     old_interface = Path(_endpoint[4]).parent
                     candidates = []
@@ -196,7 +198,7 @@ def _recover_once(reason, source, revision):
                     if returned != _usb:
                         raise RuntimeError("The selected physical camera identity changed")
                     if selection != _endpoint[0]:
-                        media.set_interface("camera", selection)
+                        devices.set_interface("camera", selection)
                     _, _, identity, usb = _physical_identity()
                     if usb != _usb or identity == _endpoint:
                         return
@@ -219,7 +221,7 @@ def _recover_once(reason, source, revision):
                 if usb != _usb:
                     raise RuntimeError("The selected physical camera identity changed")
                 if reason in {"camera_motor_unresponsive", "endpoint_add"}:
-                    media._obsbot_control("camera", "on")
+                    devices._obsbot_control("camera", "on")
                 state = start()
                 if state.get("state") not in {"starting", "running"}:
                     raise RuntimeError(state.get("error") or "Camera owner did not reacquire")
@@ -245,7 +247,7 @@ def restore() -> dict:
     with _LOCK:
         if _config().get("enabled") is True:
             try:
-                from .media import obsbot_camera_state
+                from .devices import obsbot_camera_state
                 if obsbot_camera_state()["active"]:
                     _wanted = True
                     return start()
@@ -270,7 +272,7 @@ def start() -> dict:
             return {"enabled": False, "state": "disabled"}
         try:
             from .camera import _selected
-            from .media import _obsbot_control
+            from .devices import _obsbot_control
             from .owner_tracking import Tracker
 
             device, name, identity, usb = _physical_identity()

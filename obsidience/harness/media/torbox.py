@@ -37,10 +37,6 @@ class TorBoxFile(TypedDict):
     size: int
 
 
-class BoundFile(TorBoxFile):
-    hash: str
-
-
 class TorBoxTorrent(TypedDict):
     torrent_id: int
     hash: str

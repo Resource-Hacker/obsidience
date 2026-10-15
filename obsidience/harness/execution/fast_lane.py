@@ -11,7 +11,7 @@ from pathlib import Path
 import httpx
 from jsonschema import Draft202012Validator
 
-from ..capabilities.registry import READ_ONLY_CAPABILITIES, _argument_schemas
+from ..capabilities.registry import READ_ONLY_CAPABILITIES, argument_schemas
 from ..capabilities.lights.set import TARGETS as LIGHT_TARGETS
 from ..computer.applications import APPLICATIONS, canonical_application_id
 from ..knowledge.vault import load_note
@@ -113,7 +113,7 @@ def candidates(objective, allowed, *, first_step=False, search_refs=None, trace=
                                for name in sorted(APPLICATIONS))
     if not choices or len(choices) > MAX_CANDIDATES:
         return None
-    schemas = _argument_schemas()
+    schemas = argument_schemas()
     for choice in choices:
         if choice['name'] not in allowed:
             return None
@@ -168,7 +168,7 @@ async def select(client, payload, spec, choices, metrics, *, objective='', heade
         if not 1 <= len(choices) <= MAX_CANDIDATES:
             raise ValueError('Finite-choice menu exceeds its bound')
         allowed = {tool['function']['name'] for tool in payload['tools']}
-        schemas = _argument_schemas()
+        schemas = argument_schemas()
         for choice in choices:
             if (set(choice) != {'name', 'args'} or choice['name'] not in allowed
                     or choice['name'] not in {'harness.status', 'session.unlock',

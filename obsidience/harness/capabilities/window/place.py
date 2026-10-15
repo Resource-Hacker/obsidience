@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from .command import place
+from obsidience.harness.shell_port.command import place
 
 
 def execute(args: dict, context: dict) -> str:

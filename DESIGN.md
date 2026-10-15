@@ -453,7 +453,7 @@ neighbours); (9) history projected from the native conversation (no conversation
 - Shutdown disarms admission at the stop signal; queued claims recheck it.
 - **Trace**: one sanitized ledger trace (bounded events and bytes) with resumable cursors
   and explicit gap recovery; pixels, credentials, leases and private reasoning never enter
-  trace or receipts; `task.inspect` keeps original/omitted counts. `harness.status` history
+  trace or receipts. `harness.status` history
   findings are bounded diagnostics that never change health or prove root cause. Event
   WebSockets cancel and join sender and reader before unsubscribing.
 

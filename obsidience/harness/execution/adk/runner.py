@@ -67,7 +67,7 @@ async def _run_owner_media(plugin: AgentPlugin, command: dict, session_id: str, 
             return
         acquisition_choice = None
         if acquisition:
-            from ...interfaces.api.media import claim_source_preview, source_fingerprint
+            from ...media.previews import claim_source_preview, source_fingerprint
             proof = claim_source_preview(command['preview_token'], command['request_id'])
             blocks = await plugin.operate('media.library', {
                 'action': 'search', 'query': proof['query'], 'type': proof['type']}, raw_observation=True)
@@ -335,7 +335,7 @@ async def run_adk_session(task, model, messages, allowed, ctx, agent_name, effor
     if (command is None and task.kind == 'agent' and task.ref == EXECUTIVE
             and params.get('event') == 'voice.activation'
             and CONFIG.extras.get('realtime_early_speech', True) is not False):
-        from ...capabilities.task.complete import public_claim_error
+        from ..completion import public_claim_error
         from ...conversation.runtime import RUNTIME as conversation
         if conversation.speech is not None:
             plugin.voice = conversation.speech.provisional_reply(run, lambda text: public_claim_error(text, ctx))

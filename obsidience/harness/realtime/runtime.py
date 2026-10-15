@@ -21,7 +21,7 @@ from ..conversation.selection import EXECUTIVE_REF
 from ..knowledge.vault import resolver
 from ..execution import activity, trace
 from ..models import runtime as model_runtime
-from . import media as media_runtime
+from . import devices as media_runtime
 
 RealtimePhase = Literal["off", "starting", "wake", "command", "proactive", "suspended", "stopping", "error"]
 READY_PHASES = {"wake", "command", "proactive"}
@@ -865,9 +865,7 @@ class RealtimeSessionManager:
             requested = {"mode": "wake"}
         if not isinstance(requested, dict):
             requested = {}
-        # Legacy intent is exactly {"enabled": true}; 1 == True must not match.
-        legacy = set(requested) == {"enabled"} and requested["enabled"] is True
-        mode = "realtime" if legacy else requested.get("mode", "wake")
+        mode = requested.get("mode", "wake")
         if mode == "off":
             return self.snapshot()
         if mode not in {"wake", "realtime"}:

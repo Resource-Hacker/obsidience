@@ -6,10 +6,10 @@ import time
 from dataclasses import asdict, fields, replace
 from typing import Any
 
-from obsidience.harness.capabilities.window.command import (
-    COMMAND_SCHEMA, EffectNotObserved, ShellCommandUnavailable, _send_command, activate,
+from obsidience.harness.shell_port.command import (
+    COMMAND_SCHEMA, EffectNotObserved, ShellCommandUnavailable, activate, send,
 )
-from obsidience.harness.host.scene import HANDLE, SCENE, SceneTarget
+from obsidience.harness.shell_port.scene import HANDLE, SCENE, SceneTarget
 from .applications import canonical_application_id, matches_application_window
 from .capture import ScreenCapture, _png_size, capture_screen
 from .grounding import process_start_time
@@ -174,7 +174,7 @@ def act_computer(args: dict[str, Any], context: dict[str, Any]) -> dict[str, Any
         "requested_postcondition": postcondition, "semantic_postcondition_verified": False,
     }
     try:
-        receipt = _send_command({
+        receipt = send({
             "schema": COMMAND_SCHEMA, "type": "window.click", "token": "click." + secrets.token_hex(16),
             "surface_id": target.surface_id, "window_id": target.window.window_id,
             "expected_revision": target.surface_revision, "witness": witness,

@@ -7,7 +7,7 @@ import subprocess
 import time
 
 from obsidience.harness.computer.applications import APPLICATIONS
-from obsidience.harness.host.scene import (
+from obsidience.harness.shell_port.scene import (
     SCENE, SceneTargetAmbiguous, SceneTargetNotFound, SceneUnavailable,
     SceneLocked, _semantic_title,
 )

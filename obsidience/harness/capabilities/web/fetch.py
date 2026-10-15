@@ -14,7 +14,7 @@ MAX_FETCH_BATCH_WORKERS = 4
 MAX_FETCH_BATCH_OUTPUT_CHARS = 60_000
 
 
-def _render_result(result: dict, *, preview_chars: int = MAX_FETCH_PREVIEW_CHARS) -> str:
+def render_result(result: dict, *, preview_chars: int = MAX_FETCH_PREVIEW_CHARS) -> str:
     content = str(result["content"])
     citation = str(result["citation"])
     end = min(preview_chars, len(content))
@@ -38,11 +38,11 @@ def _render_result(result: dict, *, preview_chars: int = MAX_FETCH_PREVIEW_CHARS
     )
 
 
-def _render_batch(urls: list[str], results: list[dict | str]) -> str:
+def render_batch(urls: list[str], results: list[dict | str]) -> str:
     def render(preview_chars: int) -> str:
         return json.dumps({"results": [
             {"url": url, "ok": isinstance(result, dict), "result": (
-                _render_result(result, preview_chars=preview_chars)
+                render_result(result, preview_chars=preview_chars)
                 if isinstance(result, dict) else result
             )}
             for url, result in zip(urls, results, strict=True)
@@ -118,7 +118,7 @@ def execute(args: dict, context: dict) -> str:
     if not batch:
         result = acquire(urls[0])
         remember(result)
-        return result if isinstance(result, str) else _render_result(result)
+        return result if isinstance(result, str) else render_result(result)
 
     # The context manager joins every worker before the Tool returns. STOP is
     # passed through the existing capability event to queued and active fetches;
@@ -127,4 +127,4 @@ def execute(args: dict, context: dict) -> str:
         results = list(pool.map(acquire, urls))
     for result in results:
         remember(result)
-    return _render_batch(urls, results)
+    return render_batch(urls, results)

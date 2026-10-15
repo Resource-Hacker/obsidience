@@ -23,15 +23,8 @@ from . import format as article_format
 from .links import body_links, canonical_body
 
 WIKILINK_RE = re.compile(r"\[\[([^\]\|#]+)(?:#[^\]\|]*)?(?:\|[^\]]*)?\]\]")
-WIKILINK_TOKEN_RE = re.compile(r"\[\[([^\]\|#]+)(#[^\]\|]*)?(\|[^\]]*)?\]\]")
 SYSTEM_DIRS = ("_staging", "_archived")  # excluded from search/graph unless asked
 SOURCE_DIRS = ("raw",)       # evidence, never graph knowledge even for system reads
-IMMUTABLE_DIRS = SOURCE_DIRS
-HIDDEN_DIRS = (".reader",)
-PROTECTED_ROOTS = {
-    "Agents", "Tools", "Skills", "Tasks", "Runbooks", "raw",
-    "_staging", "_archived",
-}
 CHILD_FIELD_BY_KIND = {
     "task": "subtasks",
     "runbook": "subrunbooks",
@@ -39,7 +32,8 @@ CHILD_FIELD_BY_KIND = {
     "tool": "subtools",
 }
 HIERARCHY_FIELDS = tuple(CHILD_FIELD_BY_KIND.values())
-_NOTE_WRITE_LOCK = threading.RLock()
+# The in-process lock for vault Article writes, shared with the Harness's other vault writers.
+NOTE_WRITE_LOCK = threading.RLock()
 
 
 @dataclass
@@ -141,7 +135,7 @@ def _escapes_vault(rel_path: str | Path) -> bool:
 def load_note(rel_path: str | Path) -> Note | None:
     if _escapes_vault(rel_path):
         return None
-    with _NOTE_WRITE_LOCK:
+    with NOTE_WRITE_LOCK:
         p = CONFIG.vault_dir / rel_path
         if not p.exists() or p.suffix != ".md":
             return None
@@ -198,7 +192,7 @@ def _article_files(include_system: bool) -> list[tuple[tuple[str, ...], os.stat_
 
 
 def iter_notes(include_system: bool = False) -> list[Note]:
-    with _NOTE_WRITE_LOCK:
+    with NOTE_WRITE_LOCK:
         root = CONFIG.vault_dir
         cached_root, previous = _SNAPSHOTS.get(include_system, (None, {}))
         if cached_root != root:
@@ -323,7 +317,7 @@ def write_note(rel_path: str, meta: dict, body: str) -> str:
     """Write one native OKF Article; operational Task fields stay in SQLite."""
     if _escapes_vault(rel_path):
         raise ValueError("Article paths must stay inside the Vault")
-    with _NOTE_WRITE_LOCK:
+    with NOTE_WRITE_LOCK:
         p = CONFIG.vault_dir / rel_path
         meta = dict(meta)
         if "kind" not in meta and "type" not in meta:
@@ -400,7 +394,7 @@ def mutate_note_metadata(
     nearly the same time. Re-reading under the shared write lock preserves
     fields added after the scheduler took its original Note snapshot.
     """
-    with _NOTE_WRITE_LOCK:
+    with NOTE_WRITE_LOCK:
         current = load_note(note.path) or note
         if current.kind == "task" and not current.path.startswith(("_", ".")):
             from .index import INDEX
@@ -432,64 +426,6 @@ def mutate_note_metadata(
         return meta
 
 
-def _vault_relative(value: str, *, allow_root: bool = False) -> Path:
-    """Validate an owner-supplied vault-relative path without resolving symlinks."""
-    raw = value.strip().replace("\\", "/").strip("/")
-    if not raw:
-        if allow_root:
-            return Path()
-        raise ValueError("path required")
-    path = Path(raw)
-    if path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
-        raise ValueError("invalid vault path")
-    if any(part.startswith(".") for part in path.parts):
-        raise ValueError("hidden vault paths cannot be moved")
-    return path
-
-
-def _replace_refs(value: str, mapping: dict[str, str]) -> str:
-    """Rewrite exact note refs while retaining link aliases and headings."""
-    folded = {old.casefold(): new for old, new in mapping.items()}
-
-    def link(match: re.Match[str]) -> str:
-        target = match.group(1).strip()
-        markdown_suffix = target.lower().endswith(".md")
-        lookup = target[:-3] if markdown_suffix else target
-        replacement = folded.get(lookup.casefold())
-        if not replacement:
-            return match.group(0)
-        if markdown_suffix:
-            replacement += ".md"
-        return f"[[{replacement}{match.group(2) or ''}{match.group(3) or ''}]]"
-
-    rewritten = WIKILINK_TOKEN_RE.sub(link, value)
-    stripped = rewritten.strip()
-    base, marker, heading = stripped.partition("#")
-    markdown_suffix = base.lower().endswith(".md")
-    lookup = base[:-3] if markdown_suffix else base
-    replacement = folded.get(lookup.casefold())
-    if replacement:
-        if markdown_suffix:
-            replacement += ".md"
-        replacement += f"#{heading}" if marker else ""
-        leading = len(rewritten) - len(rewritten.lstrip())
-        trailing = len(rewritten) - len(rewritten.rstrip())
-        return f"{rewritten[:leading]}{replacement}{rewritten[len(rewritten) - trailing:] if trailing else ''}"
-    return rewritten
-
-
-def _rewrite_refs(value, mapping: dict[str, str]):
-    if isinstance(value, str):
-        return _replace_refs(value, mapping)
-    if isinstance(value, list):
-        return [_rewrite_refs(item, mapping) for item in value]
-    if isinstance(value, tuple):
-        return tuple(_rewrite_refs(item, mapping) for item in value)
-    if isinstance(value, dict):
-        return {key: _rewrite_refs(item, mapping) for key, item in value.items()}
-    return value
-
-
 def _atomic_write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     handle, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
@@ -505,155 +441,6 @@ def _atomic_write(path: Path, text: str) -> None:
         except FileNotFoundError:
             pass
         raise
-
-
-def move_vault_item(source: str, destination_parent: str, new_name: str | None = None) -> dict:
-    """Move or rename one owner-managed article/folder and repair exact refs.
-
-    Raw source bytes remain outside this owner-managed tree. All article
-    transformations are prepared before the filesystem move and rolled back
-    together if a write fails.
-    """
-    from .system import assert_system_move_allowed, assert_system_article_writable
-
-    source_rel = _vault_relative(source)
-    assert_system_move_allowed(str(source_rel))
-    parent_rel = _vault_relative(destination_parent, allow_root=True)
-    source_path = CONFIG.vault_dir / source_rel
-    parent_path = CONFIG.vault_dir / parent_rel
-    if not source_path.exists():
-        raise ValueError(f"source not found: {source_rel}")
-    if source_rel.parts[0] in (*IMMUTABLE_DIRS, *SYSTEM_DIRS, *HIDDEN_DIRS):
-        raise ValueError("system and raw source items cannot be moved")
-    if len(source_rel.parts) == 1 and source_rel.name in PROTECTED_ROOTS:
-        raise ValueError("core vault roots cannot be moved or renamed")
-    if not parent_path.is_dir():
-        raise ValueError(f"destination folder not found: {parent_rel}")
-    if parent_rel.parts and parent_rel.parts[0] in (*IMMUTABLE_DIRS, *SYSTEM_DIRS, *HIDDEN_DIRS):
-        raise ValueError("items cannot be moved into a system or raw source folder")
-
-    is_article = source_path.is_file()
-    if is_article and source_path.suffix.lower() != ".md":
-        raise ValueError("only Markdown articles can be moved")
-    if is_article and source_path.name.casefold() in {"index.md", "log.md"}:
-        raise ValueError("index.md and log.md are reserved OKF listings, not Articles")
-    requested_name = str(new_name or "").strip()
-    title = None
-    if requested_name:
-        if len(requested_name) > 160 or requested_name in {".", ".."} or "/" in requested_name or "\\" in requested_name:
-            raise ValueError("invalid name")
-        if is_article:
-            destination_name = f"{slugify(requested_name)}.md"
-            title = requested_name
-        else:
-            destination_name = requested_name
-    else:
-        destination_name = source_rel.name
-    if destination_name.startswith(".") or (
-        is_article and destination_name.casefold() in {"index.md", "log.md"}
-    ):
-        raise ValueError("reserved or hidden destination name")
-    destination_rel = parent_rel / destination_name
-    destination_path = CONFIG.vault_dir / destination_rel
-    if destination_rel == source_rel:
-        raise ValueError("item is already in that location")
-    if not is_article and destination_rel.parts[:len(source_rel.parts)] == source_rel.parts:
-        raise ValueError("a folder cannot be moved into itself")
-    sibling_collision = next(
-        (item for item in parent_path.iterdir()
-         if item.name.casefold() == destination_name.casefold() and item != source_path),
-        None,
-    )
-    if destination_path.exists() or sibling_collision:
-        raise ValueError(f"destination already exists: {destination_rel}")
-
-    source_files = [source_path] if is_article else sorted(source_path.rglob("*.md"))
-    mapping: dict[str, str] = {
-        str(source_rel.with_suffix("")) if is_article else str(source_rel):
-        str(destination_rel.with_suffix("")) if is_article else str(destination_rel),
-    }
-    hub_source = source_path / (source_rel.name + ".md")
-    hub_renamed = not is_article and source_rel.name != destination_name and hub_source.is_file()
-    if hub_renamed and destination_name.casefold() in {"index", "log"}:
-        raise ValueError("index.md and log.md are reserved OKF listings, not Articles")
-    if hub_renamed and any(
-        item.name.casefold() == (destination_name + ".md").casefold()
-        and item != hub_source for item in source_path.iterdir()
-    ):
-        raise ValueError("destination folder hub already exists")
-    moved_file_paths: dict[Path, Path] = {}
-    for old_path in source_files:
-        old_rel = old_path.relative_to(CONFIG.vault_dir)
-        relative = Path(old_path.name) if is_article else old_path.relative_to(source_path)
-        if hub_renamed and old_path == hub_source:
-            relative = Path(destination_name + ".md")
-        new_rel = destination_rel if is_article else destination_rel / relative
-        assert_system_article_writable(str(new_rel))
-        mapping[str(old_rel.with_suffix(""))] = str(new_rel.with_suffix(""))
-        moved_file_paths[old_path] = CONFIG.vault_dir / new_rel
-
-    for old_path in source_files:
-        note = load_note(old_path.relative_to(CONFIG.vault_dir))
-        if note and note.runtime_observation:
-            raise ValueError("runtime Observations are lifecycle-owned and cannot be moved")
-        if note and note.kind == "task" and str(note.meta.get("status", "draft")) == "running":
-            raise ValueError("a running task cannot be moved")
-
-    originals: dict[Path, bytes] = {}
-    writes: dict[Path, str] = {}
-    for path in sorted(CONFIG.vault_dir.rglob("*.md")):
-        rel = path.relative_to(CONFIG.vault_dir)
-        # Review envelopes and archived editions are historical evidence, not
-        # accepted references to rebase during an owner move. Rewriting them
-        # would invalidate their pins and can misinterpret legacy envelopes
-        # without an Article type as current Knowledge.
-        if rel.parts and rel.parts[0] in (*IMMUTABLE_DIRS, *SYSTEM_DIRS, *HIDDEN_DIRS):
-            continue
-        reserved = path.name.casefold() in {"index.md", "log.md"}
-        parse = article_format.parse if reserved else article_format.loads
-        original_meta, original_body = parse(path.read_text(encoding="utf-8"))
-        meta = _rewrite_refs(original_meta, mapping)
-        body = canonical_body(original_body, str(rel), mapping)
-        target = moved_file_paths.get(path, path)
-        if title is not None and path == source_path:
-            meta["title"] = title
-        elif hub_renamed and path == hub_source:
-            meta["title"] = destination_name
-        if meta != original_meta or body != original_body:
-            originals[path] = path.read_bytes()
-            serialize = article_format.serialize if reserved else article_format.dumps
-            writes[target] = serialize(meta, body)
-
-    moved = False
-    renamed_hub = False
-    runtime_moves: dict[str, str] = {}
-    try:
-        from .index import INDEX
-        runtime_moves = INDEX.remap_task_runtime(mapping)
-        source_path.rename(destination_path)
-        moved = True
-        if hub_renamed:
-            (destination_path / hub_source.name).rename(destination_path / (destination_name + ".md"))
-            renamed_hub = True
-        for path, content in writes.items():
-            _atomic_write(path, content)
-    except Exception:
-        if runtime_moves:
-            INDEX.remap_task_runtime({new: old for old, new in runtime_moves.items()})
-        if renamed_hub:
-            (destination_path / (destination_name + ".md")).rename(destination_path / hub_source.name)
-        if moved and destination_path.exists() and not source_path.exists():
-            destination_path.rename(source_path)
-        for path, content in originals.items():
-            _atomic_write(path, content.decode("utf-8"))
-        raise
-
-    return {
-        "source": str(source_rel),
-        "destination": str(destination_rel),
-        "refs": mapping,
-        "article": is_article,
-    }
 
 
 def update_status(note: Note, status: str, extra: dict | None = None) -> None:

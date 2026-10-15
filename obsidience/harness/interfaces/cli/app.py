@@ -1,4 +1,4 @@
-"""obsidience CLI: serve / status / index / search / tasks / run / review / chat."""
+"""obsidience CLI: init / serve / status / index / search / tasks / run / review."""
 
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ def main() -> None:
     if args.cmd == "status":
         from ...knowledge.review import list_proposals
         from ...knowledge.vault import iter_notes
-        from ...realtime.media import speech_runtime
+        from ...realtime.devices import speech_runtime
         notes = iter_notes()
         tasks = [n for n in notes if n.kind == "task"]
         print(f"notes: {len(notes)}  tasks: {len(tasks)}  proposals: {len(list_proposals())}")

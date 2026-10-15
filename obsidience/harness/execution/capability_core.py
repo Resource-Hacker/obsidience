@@ -111,13 +111,13 @@ async def run_capability(ex, name: str, args: dict, *, execute, execute_async, s
     optional ``blocked`` observation (with extra trace fields) for a call its own
     policy refuses before dispatch. ``started`` runs once the call is announced.
     """
-    from ..capabilities.task.complete import computer_completion_evidence, computer_request_target_error
+    from .completion import computer_completion_evidence, computer_request_target_error
     scope_checkpoint(ex.ctx, name)
     reflex_proposal = ex.ctx.pop("_reflex_proposal", None)
     if name != "task.complete":
         ex.ctx.pop("_reflex_command_verified", None)
         ex.ctx.pop("_reflex_command_result", None)
-    from .optimization_incidents import snapshot, record as record_decision
+    from .optimization.incidents import snapshot, record as record_decision
     decision_sample = snapshot(ex, name, args)
     public_args = {key: value for key, value in args.items() if key != "point"}
     call_fields = {"step": ex.step + 1}
@@ -181,7 +181,7 @@ async def run_capability(ex, name: str, args: dict, *, execute, execute_async, s
         operation_status = call_status
         if call_status == "returned":
             # An inspection's subject status is not failure of the Tool.
-            if isinstance(result, dict) and name not in {"task.inspect", "harness.status"}:
+            if isinstance(result, dict) and name != "harness.status":
                 outcome = result.get("observation", result) if name == "computer.observe" else result
                 if isinstance(outcome, dict):
                     reported = outcome.get("status", outcome.get("state"))

@@ -366,17 +366,11 @@ class AgentPlugin(BasePlugin):
 
     def _decision_tools(self) -> tuple[list[str], dict]:
         """This Task step's Tools and the active proposal, completion and Repair schema modes."""
-        from ...capabilities.source.read import available_tools
-        from ...capabilities.task.complete import (
-            available_tools as completion_tools, completion_citations, completion_prerequisite_error,
-            completion_requires_no_change,
-        )
-        from ..repair import available_tools as repair_tools, eligible_rows
+        from ..availability import available_tools
+        from ..completion import completion_citations, completion_prerequisite_error, completion_requires_no_change
+        from ..repair import eligible_rows
         context = getattr(self.evaluation, 'schema_context', self.ctx)
-        names = completion_tools(repair_tools(available_tools(self.ex.allowed, context), context), context)
-        if context.get('task') == 'Tasks/audit' and (context.get('params') or {}).get('optimization_case'):
-            required = 'task.complete' if context.get('_harness_optimization_attempted') else 'harness.optimize'
-            names = [name for name in names if name == required]
+        names = available_tools(self.ex.allowed, context)
         modes = {
             'proposal_mode': ('ingest' if context.get('event') == 'observations.memory.ready'
                               or context.get('task') == 'Tasks/ingest'

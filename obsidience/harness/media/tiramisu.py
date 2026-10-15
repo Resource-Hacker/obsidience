@@ -397,13 +397,3 @@ def _normal_hash(value: object) -> str:
         except (ValueError, binascii.Error):
             pass
     return ''
-
-
-def socket_status() -> dict:
-    """Read-only readiness check; does not connect or send an HTTP request."""
-    try:
-        client = Tiramisu()
-        return {'enabled': True, 'providers': ['tiramisu'], 'transport': 'owner_unix_socket',
-                'instance_id': client.instance_id, 'ready': True}
-    except MediaUnavailable as error:
-        return {'enabled': False, 'providers': [], 'ready': False, 'readiness': str(error)}

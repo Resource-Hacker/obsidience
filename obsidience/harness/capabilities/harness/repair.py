@@ -7,7 +7,7 @@ import json
 
 async def execute(args: dict, context: dict) -> str:
     from obsidience.harness.execution import repair, scheduler
-    from obsidience.harness.knowledge.vault import _NOTE_WRITE_LOCK, load_note
+    from obsidience.harness.knowledge.vault import NOTE_WRITE_LOCK, load_note
 
     def result(status: str, reason: str, **evidence) -> str:
         return json.dumps({"status": status, "reason": reason, **evidence}, sort_keys=True)
@@ -48,7 +48,7 @@ async def execute(args: dict, context: dict) -> str:
     # Keep snapshot validation and the existing mutation under the same owner
     # lock. The scheduler rechecks exact params/FIFO and strict coverage inside
     # its SQLite transaction before committing the once-per-occurrence receipt.
-    with _NOTE_WRITE_LOCK:
+    with NOTE_WRITE_LOCK:
         note = load_note(task_ref + ".md")
         if (note is None or note.kind != "task" or note.ref != task_ref
                 or note.ref == repair.REPAIR_TASK or note.path.startswith(("_", "."))

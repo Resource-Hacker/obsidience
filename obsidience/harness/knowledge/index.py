@@ -25,14 +25,6 @@ import numpy as np
 from ..config import CONFIG
 from .format import TASK_RUNTIME_FIELDS
 from .links import metadata_ref
-from .skills import (
-    build_skill_mirror,
-    callable_namespace,
-    namespace_title,
-)
-from .skills import (
-    node_id as skill_mirror_node_id,
-)
 from .tasks import (
     CANONICAL_TASK_BY_PATH,
     TASK_TAXONOMY_BY_PATH,
@@ -188,6 +180,16 @@ CREATE TABLE IF NOT EXISTS deferred_observation_finalizations(
 
 _embed_client = None
 _embed_lock = threading.Lock()
+
+
+def namespace_title(segment: str) -> str:
+    """Human title for a generated Tool namespace index; callable leaves stay exact."""
+    return segment[:1].upper() + segment[1:]
+
+
+def callable_namespace(name: str) -> str:
+    """Library grouping, independent of the callable's exact stable identity."""
+    return name.rsplit(".", 1)[0]
 
 
 def _meta_links(value) -> list[str]:
@@ -483,9 +485,9 @@ class Index:
         # All publishers acquire the Article lock before the process sync lock.
         # Group Review and graph readers share this order; the ledger lock is
         # still released while encoding. flock is released even on failure.
-        from .vault import _NOTE_WRITE_LOCK
+        from .vault import NOTE_WRITE_LOCK
 
-        with _NOTE_WRITE_LOCK, Path(self.db_path + ".sync.lock").open("a") as lockfile:
+        with NOTE_WRITE_LOCK, Path(self.db_path + ".sync.lock").open("a") as lockfile:
             fcntl.flock(lockfile, fcntl.LOCK_EX)
             return self._sync(embed)
 
@@ -804,25 +806,7 @@ class Index:
                 "synthetic": True,
             })
 
-        # Skills mirror dotted callable Tools one-for-one. Each generated leaf
-        # is an article about how to use its Tool; authored technique notes are
-        # retained as its guidance sources and remain canonical at runtime.
-        note_stubs = stubs
-        links.extend(_binding_shortcuts(note_stubs, links))
-        for skill_order, skill_node in enumerate(build_skill_mirror(note_stubs)):
-            nodes.append({
-                "id": skill_mirror_node_id(skill_node.path),
-                **({"article_ref": skill_node.source_skills[0]}
-                   if len(skill_node.source_skills) == 1 else {}),
-                "title": skill_node.title,
-                "kind": "skill",
-                "status": None,
-                "assignee": None,
-                "children": [skill_mirror_node_id(child) for child in skill_node.children],
-                "tags": ["skill-tool-mirror"],
-                "synthetic": True,
-                "order": skill_order,
-            })
+        links.extend(_binding_shortcuts(stubs, links))
 
         # One Task article tree: semantic kind says what a node is, while its
         # direct children alone determine whether it presents as an index.
@@ -1143,41 +1127,6 @@ class Index:
                 self.db.rollback()
                 raise
         return json.loads(payload)
-
-    def remap_task_runtime(self, mapping: dict[str, str]) -> dict[str, str]:
-        """Move current state with an Article; preserve every historical receipt."""
-        moves = {old: new for old, new in mapping.items() if old != new}
-        if not moves:
-            return {}
-        with self.lock:
-            try:
-                self.db.execute("BEGIN IMMEDIATE")
-                rows = {
-                    ref: (state, updated_at)
-                    for ref, state, updated_at in self.db.execute(
-                        "SELECT task_ref,state,updated_at FROM task_runtime"
-                    )
-                }
-                destinations = list(moves.values())
-                if len(set(destinations)) != len(destinations) or any(
-                    new in rows and new not in moves for new in destinations
-                ):
-                    raise ValueError("destination already owns Task runtime state")
-                moves = {old: new for old, new in moves.items() if old in rows}
-                for old in moves:
-                    self.db.execute("DELETE FROM task_runtime WHERE task_ref=?", (old,))
-                for old, new in moves.items():
-                    self.db.execute("UPDATE task_activations SET task_ref=? WHERE task_ref=?", (new, old))
-                    state, updated_at = rows[old]
-                    self.db.execute(
-                        "INSERT INTO task_runtime(task_ref,state,updated_at) VALUES(?,?,?)",
-                        (new, state, updated_at),
-                    )
-                self.db.commit()
-            except BaseException:
-                self.db.rollback()
-                raise
-        return moves
 
     # ---------- execution receipts and public trace ----------
 
