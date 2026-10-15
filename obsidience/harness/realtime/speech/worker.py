@@ -112,14 +112,11 @@ SHORT_REPLIES = frozenset({
 WAKE_COMMAND_WAIT_SECS = 8
 SEMANTIC_TEXT_MAX_CHARS = 2_000
 # The wake word is an address, not any mention: it must start the speech
-# segment, optionally after hey/ok/okay. The existing VAD stop, delivered
-# after the ASR tail, starts the next segment; decoder gaps are not silence.
-# A name ending the recognized text may still become "computer's": the next
-# ASR delta arrives one 160 ms step later. This wait is what the opening
-# chirp costs when the name is said alone, so it covers that one step and no
-# more (owner, 2026-10-12: the chirp must be as snappy as possible; it was
-# 0.35 s, two steps).
-WAKE_CONFIRM_SECS = 0.2
+# segment or follow a pause in recognized words, optionally after hey/ok/okay.
+WAKE_PAUSE_SECS = 0.4
+# A name ending the recognized text may still become "computer's"; the next
+# ASR delta normally arrives within one or two 80-160 ms steps.
+WAKE_CONFIRM_SECS = 0.35
 WAKE_STRIP = " ,.!?:;—-'’\t\n"
 _WAKE_LEAD = re.compile(r"[\W_]*(?:(?:hey|ok|okay)\b[\W_]*)?", re.IGNORECASE)
 # Short acknowledgements that must not interrupt a playing Realtime reply.
@@ -244,7 +241,7 @@ def classify_wake(text: str, address: int | None, scanned: int, pattern: re.Patt
                   *, final: bool = False) -> tuple[str, int, int, list[str]]:
     """Classify unaddressed wake-word mentions in one speech segment's text.
 
-    ``address`` is where an address may begin (the VAD-delimited segment start);
+    ``address`` is where an address may begin (segment start or after a pause);
     only hey/ok/okay may precede the name there. Possessives and contractions
     ("computer's") are never addresses. A name ending the text stays pending
     until more text arrives, unless ``final``. Returns (decision, end, scanned,
@@ -284,11 +281,6 @@ class SpeechAdmissionFrame(SystemFrame):
 @dataclass
 class SpeechResetFrame(SystemFrame):
     pass
-
-
-@dataclass
-class UnvoicedSilenceFrame(SystemFrame):
-    """An unvoiced ASR segment ended after sustained acoustic silence."""
 
 
 class SpeechInputTiming:
@@ -381,7 +373,6 @@ class NeMoLocalAudioInputTransport(LocalAudioInputTransport):
 
     async def _vad_analyze(self, audio_frame: InputAudioRawFrame) -> VADState:
         state = await super()._vad_analyze(audio_frame)
-        audio_frame.metadata["obsidience_vad_quiet"] = state == VADState.QUIET
         if state == VADState.SPEAKING:
             self._last_voiced_ns = time.monotonic_ns()
         return state
@@ -619,30 +610,13 @@ class UtteranceNeMoSTTService(NemoSTTService):
         super().__init__(**kwargs)
         self._preroll = bytearray()
         self._recognized_since_stop = False
-        self._unvoiced_quiet_bytes = 0
 
     async def _handle_transcription(self, transcript, is_final, language=None):
         if transcript.strip():
             self._recognized_since_stop = True
-            self._unvoiced_quiet_bytes = 0
         await super()._handle_transcription(transcript, is_final, language)
 
     async def process_audio_frame(self, frame, direction) -> None:
-        if (not self._is_vad_active and self._recognized_since_stop
-                and frame.metadata.get("obsidience_vad_quiet") is True):
-            self._unvoiced_quiet_bytes += len(frame.audio)
-            if self._unvoiced_quiet_bytes >= SMART_TURN_PENDING_SECS * SAMPLE_RATE * 2:
-                # Quiet recognized speech has no VAD stop to clear its decoder
-                # or wake prefix. Use actual quiet PCM, never decoder delivery
-                # gaps, to give the next utterance the same fresh boundary.
-                async with self._model_lock:
-                    self._model.reset_state()
-                self.audio_buffer.clear()
-                self._recognized_since_stop = False
-                self._unvoiced_quiet_bytes = 0
-                await self.push_frame(UnvoicedSilenceFrame(), direction)
-        else:
-            self._unvoiced_quiet_bytes = 0
         if not self._is_vad_active:
             # 320 ms of mono s16/16 kHz, including the first 100 ms before
             # Silero confirms onset. Never retain an unbounded idle recording.
@@ -690,7 +664,6 @@ class UtteranceNeMoSTTService(NemoSTTService):
         if isinstance(frame, (VADUserStoppedSpeakingFrame, ListeningModeFrame,
                               EndFrame, CancelFrame)):
             self._preroll.clear()
-            self._unvoiced_quiet_bytes = 0
 
 
 class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
@@ -725,6 +698,7 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
         self._wake_address: int | None = 0
         self._wake_scanned = 0
         self._wake_pending = False
+        self._wake_heard_at: float | None = None
         self._wake_confirm: asyncio.Task[None] | None = None
         self._wake_open = False
         self._wake_timeout: asyncio.Task[None] | None = None
@@ -776,9 +750,11 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
         self._wake_prefix = ""
         self._wake_scanned = 0
         self._wake_pending = False
-        # Keep the address anchored until the existing VAD stop. Its ASR
-        # tail has already been decoded, so old words cannot start a new address.
-        self._wake_address = 0 if segment_start else None
+        if segment_start or self._wake_heard_at is None:
+            self._wake_address, self._wake_heard_at = 0, None
+        else:
+            # Ongoing speech: only a later pause can start an address.
+            self._wake_address = None
 
     def _classify_wake(self, *, final: bool = False) -> str | None:
         """Return command text after an accepted address, else None."""
@@ -821,10 +797,7 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
         # it, so immediate follow-ups chirp and true speech barge-in stays quiet.
         reply_active = (self._playback._reply_active if self._playback is not None
                         else self._bot_speaking)
-        # A complete address opens the input window even when its command
-        # arrives in the same ASR delta. Acknowledge that edge promptly;
-        # only a true interruption of a playing reply stays quiet.
-        self._wake_cue_eligible = not reply_active
+        self._wake_cue_eligible = not any(c.isalnum() for c in text) and not reply_active
         if not self._have_sent_user_started_speaking:
             await self._handle_user_interruption(UserStartedSpeakingFrame())
             self._have_sent_user_started_speaking = True
@@ -832,10 +805,22 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
 
     async def _wake_delta(self, text: str) -> str | None:
         """Track one unaddressed ASR delta; return command text once addressed."""
+        now = time.monotonic()
+        words = any(c.isalnum() for c in text)
         if self._wake_pending:
             confirm, self._wake_confirm = self._wake_confirm, None
             if confirm is not None:
                 await self.cancel_task(confirm)
+        if (words and self._wake_heard_at is not None
+                and now - self._wake_heard_at >= WAKE_PAUSE_SECS):
+            # A pause confirms a trailing name and opens a possible address.
+            if self._wake_pending:
+                command = self._classify_wake(final=True)
+                if command is not None:
+                    return command + text
+            self._wake_address = len(self._wake_prefix)
+        if words:
+            self._wake_heard_at = now
         self._wake_prefix += text
         if len(self._wake_prefix) > 512:
             dropped = len(self._wake_prefix) - 512
@@ -852,15 +837,9 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
     def turn_pending(self) -> bool:
         """True while the current speech cannot end a turn: no words, a dangling
         end, or only the wake-word address (Realtime keeps it in the text)."""
-        if self.mode == "wake" and not self._wake_open:
-            # Unaddressed speech lives only in the wake scanner. Its empty
-            # command buffer must not veto every acoustic endpoint and carry
-            # the preceding sentence into the next wake-word address.
-            text = self._wake_prefix
-        else:
-            text = self._user_speaking_buffer
-            if self._semantic_turns:
-                text = self._semantic_text + " " + text
+        text = self._user_speaking_buffer
+        if self._semantic_turns:
+            text = self._semantic_text + " " + text
         address = self._wake_pattern.sub("", text)
         # A bare "okay" or "hey" is not an address without the wake word.
         return turn_text_pending(text) or (address != text and _WAKE_LEAD.fullmatch(address) is not None)
@@ -946,6 +925,7 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
             # NeMo may return punctuation after the name in a later delta.
             frame.text = frame.text.lstrip(WAKE_STRIP)
         if self._wake_open and any(character.isalnum() for character in frame.text):
+            self._wake_cue_eligible = False
             timeout, self._wake_timeout = self._wake_timeout, None
             if timeout is not None:
                 await self.cancel_task(timeout)
@@ -1044,10 +1024,6 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
                 self._transcript_timeout = None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
-        if isinstance(frame, UnvoicedSilenceFrame):
-            if self.mode == "wake" and not self._wake_open and not self._vad_user_speaking:
-                await self._reset_wake_scan(segment_start=True)
-            return
         if isinstance(frame, SpeechAdmissionFrame):
             await self._admit_speech(frame)
             return
@@ -1358,13 +1334,13 @@ class PlaybackCommands:
         if marker.cue_name in OPENING_CUES and self._ready_cue_binding == (marker.generation, marker.epoch):
             return True
         # Harness's natural-speech cancellation may arrive before the queued
-        # marker. Neither command text nor the Harness round trip should
-        # suppress the acknowledgement of an accepted address. Explicit
-        # cancellation clears both pending and started bindings.
+        # marker. It must not delay this local acknowledgement. Command text
+        # still suppresses an unstarted cue; explicit cancellation clears both
+        # pending and started bindings.
         pending_ready = (marker.cue_name in OPENING_CUES
                          and self._pending_ready_cue_binding == (marker.generation, marker.epoch))
         return (((marker.generation, marker.epoch) == (self.generation, self.epoch) or pending_ready)
-                and (marker.cue_name in OPENING_CUES or not (turn and turn._user_speaking_buffer.strip()))
+                and not (turn and turn._user_speaking_buffer.strip())
                 and (marker.cue_name not in OPENING_CUES or (not self._reply_active and turn and turn._wake_open and turn._wake_cue_eligible)))
 
     async def queue_cue(self, name: str, generation: int) -> None:

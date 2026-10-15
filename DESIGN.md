@@ -659,12 +659,10 @@ full current reads, unrelated hits do not.
   The wake word is the Executive title; no text before it is admitted or stored. Mode
   changes drain and reject old revisions; the mode persists per login (a failed restore
   reports, no retry loop) and never becomes conversation, Task or Knowledge state.
-  Quiet ASR words that never triggered VAD expire after sustained acoustic silence;
-  their decoder state and unopened wake prefix cannot survive indefinitely into the
-  next address. ASR delivery gaps alone never establish a new speech boundary.
-  Before wake opens, the pending-text guard reads the bounded wake prefix, since
-  unaddressed speech never enters the command buffer. A complete preceding segment
-  may accept its acoustic endpoint without waiting for the missing-command limit.
+  An address starts a speech segment or follows a 0.4-second gap in recognized
+  words, optionally after hey/ok/okay. This recognition-gap heuristic governs wake
+  admission, not acoustic endpointing or semantic completion. A trailing bare name
+  waits up to 0.35 seconds for continuation; possessives remain rejected.
 - NeMo owns acoustic turns and interruptions; confirmed speech interrupts before
   endpointing. With contextual admission enabled, its endpoint supplies a candidate,
   and the Executive's completion verdict plus an exact worker acknowledgement admits
@@ -685,8 +683,9 @@ full current reads, unrelated hits do not.
 - Pocket is serialized; cancellation stops the producer and drains cleanup; synthesis
   failure is a delivery error that never erases the reply. Completion needs the ordered
   terminal marker after the last PCM write.
-- Cues (installation clips; missing clips are silent): no processing clips or timers; a
-  started ready chirp finishes; STOP, mute, mode change and shutdown cancel. Code, not model
+- Cues (installation clips; missing clips are silent): no processing clips or timers;
+  command text suppresses an unstarted opening chirp, while a started chirp finishes.
+  STOP, mute, mode change and shutdown cancel. Code, not model
   wording, replaces spoken confirmation with a completion chirp for receipt-verified
   reflex effects; failures and uncertain effects never chirp success. In wake mode a
   completed spoken reply that ends in a question, once its last audio is written, opens the
