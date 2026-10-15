@@ -1,0 +1,12 @@
+{
+  "schema": "obsidience.theme-catalog.v1",
+  "display_name": "Obsidience Themes",
+  "active_palette": "palette.json",
+  "packages": [
+    {
+      "id": "obsidian-gold",
+      "manifest": "obsidian-gold/theme.json",
+      "status": "design-preview"
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "name": "Obsidian Gold",
+  "background": "#0d1113",
+  "foreground": "#eee9dc",
+  "cursor": "#efcf91",
+  "selection_background": "#2b2418",
+  "selection_foreground": "#eee9dc",
+  "ansi": [
+    "#252b2c",
+    "#d98883",
+    "#91b9a3",
+    "#c6a56b",
+    "#8fb8cc",
+    "#baa6cf",
+    "#8ebfc0",
+    "#d8d4c9",
+    "#747d7a",
+    "#efaaa2",
+    "#b1d2bd",
+    "#efcf91",
+    "#b5d0df",
+    "#d8c5e7",
+    "#b6dadd",
+    "#f5efe1"
+  ]
+}

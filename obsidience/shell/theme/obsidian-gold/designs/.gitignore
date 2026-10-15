@@ -1,0 +1,6 @@
+*.png
+*.jpg
+*.webp
+compact/
+strip/
+states/

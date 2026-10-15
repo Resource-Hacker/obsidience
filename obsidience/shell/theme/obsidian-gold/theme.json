@@ -1,0 +1,31 @@
+{
+  "schema": "obsidience.theme-package.v1",
+  "id": "obsidian-gold",
+  "name": "Obsidian Gold",
+  "version": "0.1.0",
+  "status": "design-preview",
+  "runtime_activation": "not-applied",
+  "summary": "Matte cassette-futurist architecture, restrained brass, legible instrument panels.",
+  "palette": "palette.json",
+  "tokens": "tokens.json",
+  "preview": "preview/index.html",
+  "designs": "designs",
+  "implementation_map": "docs/02-PANE-MAP.md",
+  "compatible_palette_schema": "obsidience.shell-theme.v1",
+  "palette_identity_note": "The current runtime validates name=Obsidience; friendly package identity lives here.",
+  "runtime_owners": {
+    "native": "qml/api/ShellTheme.qml",
+    "palette": "../palette.json",
+    "placement": "qml/workspace/PaneWorkspace.qml",
+    "compositor": "adapter/hyprland",
+    "graph": "one existing QtWebEngine/Three.js presenter",
+    "documents": "one existing Reader"
+  },
+  "preview_security": {
+    "network_requests": false,
+    "system_actions": false,
+    "credential_collection": false,
+    "data": "Explicit illustrative sample data, not live records."
+  },
+  "provenance": "docs/07-SOURCES-AND-PROVENANCE.md"
+}

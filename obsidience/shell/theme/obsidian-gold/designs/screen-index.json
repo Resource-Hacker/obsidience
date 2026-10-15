@@ -1,0 +1,1042 @@
+[
+  {
+    "id": "desktop",
+    "title": "Desktop overview",
+    "group": "Shell",
+    "kind": "desktop",
+    "status": "Composition",
+    "pane": null,
+    "source": "obsidience/shell/qml/surfaces/wordmark/StageContent.qml",
+    "owner": "Stage + PaneWorkspace + existing API projections",
+    "workflow": "Inspect system, queued work, recent receipts and the current workspace without leaving the desktop. This is a composition, not another scheduler or agent.",
+    "acceptance": "Offline and model-unavailable states leave launcher, windows, clock and system controls usable. No invented health score or agent roster.",
+    "data": {}
+  },
+  {
+    "id": "chat",
+    "title": "Computer / Conversation",
+    "group": "Knowledge & work",
+    "kind": "chat",
+    "status": "Existing",
+    "pane": "chat",
+    "source": "obsidience/shell/qml/panes/chat/ChatPane.qml",
+    "owner": "Executive conversation + RealtimeState",
+    "workflow": "Converse with Computer, review action receipts and select the existing voice mode. Keep the composer, context budget and stop control visible.",
+    "acceptance": "Stopping dispatch cancels through the existing owner. Audio indicators reflect actual capture state; the theme never acquires a microphone.",
+    "data": {}
+  },
+  {
+    "id": "library",
+    "title": "Library / Capability catalog",
+    "group": "Knowledge & work",
+    "kind": "library",
+    "status": "Existing",
+    "pane": "library",
+    "source": "obsidience/shell/qml/panes/library/LibraryPane.qml",
+    "owner": "Existing Library projection and Reader",
+    "workflow": "Browse Tasks, paired Tool–Skill entries and Agents. Filters select existing identities, then open the one Reader.",
+    "acceptance": "No fictional ontology categories, no duplicate Article writer, and no click that executes a Tool simply because it appears in the catalog.",
+    "data": {}
+  },
+  {
+    "id": "tasks",
+    "title": "Tasks / Execution queue",
+    "group": "Knowledge & work",
+    "kind": "tasks",
+    "status": "Existing",
+    "pane": "tasks",
+    "source": "obsidience/shell/qml/panes/tasks/TasksPane.qml",
+    "owner": "Task runtime, scheduler, existing ADK execution",
+    "workflow": "See trigger, Agent, model, runtime status and receipts together. Open the Task definition separately from a particular activation.",
+    "acceptance": "Runtime transitions never rewrite the Article. Cancel, retry and activation actions keep their existing permission and uncertain-outcome semantics.",
+    "data": {}
+  },
+  {
+    "id": "reviews",
+    "title": "Reviews / Change approval",
+    "group": "Knowledge & work",
+    "kind": "reviews",
+    "status": "Existing",
+    "pane": "reviews",
+    "source": "obsidience/shell/qml/panes/reviews/ReviewsPane.qml",
+    "owner": "Existing Review owner and revision-checked writer",
+    "workflow": "Inspect proposed text and relationship changes alongside evidence; accept or reject one exact revision.",
+    "acceptance": "A stale revision disables approval and requests a new comparison. Green text indicates additions, not proof of factual correctness.",
+    "data": {}
+  },
+  {
+    "id": "reader",
+    "title": "Reader / Article and evidence",
+    "group": "Knowledge & work",
+    "kind": "reader",
+    "status": "Existing",
+    "pane": "reader",
+    "source": "obsidience/shell/qml/panes/reader/ReaderPane.qml",
+    "owner": "Single native Reader + existing writers",
+    "workflow": "Read an Article, inspect links, evidence and agent checkouts, edit through revision checks; dock Knowledge and Source at the edges.",
+    "acceptance": "One viewer, one loaded identity; binary, truncated, read-only and externally managed Sources remain clearly distinguished.",
+    "data": {}
+  },
+  {
+    "id": "knowledge",
+    "title": "Knowledge / Explorer",
+    "group": "Knowledge & work",
+    "kind": "knowledge",
+    "status": "Existing",
+    "pane": "knowledge",
+    "source": "obsidience/shell/qml/panes/knowledge/KnowledgePane.qml",
+    "owner": "Knowledge projection + PaneDockLayout",
+    "workflow": "Search the real Article tree grouped by agent assignment; open selected refs in Reader or locate them in the shared graph.",
+    "acceptance": "Node names and assignments come from graph.navigation. Docking changes the existing layout record, not a second file tree or renderer.",
+    "data": {}
+  },
+  {
+    "id": "graph-knowledge",
+    "title": "Graph / Knowledge",
+    "group": "Graphs",
+    "kind": "graph",
+    "status": "Existing",
+    "pane": "knowledge-graph",
+    "source": "obsidience/shell/qml/panes/graph/GraphViewerPane.qml",
+    "owner": "Single canonical graph presenter; frame-viewer pane",
+    "workflow": "Navigate the six Article types and current agent identities with an inspector and readable evidence list.",
+    "acceptance": "Theme changes must not reheat simulation, rewrite positions, invent links or alter selection/picking. Miniature atlas graph is an illustrative diagram only.",
+    "data": {
+      "view": "Knowledge"
+    }
+  },
+  {
+    "id": "graph-memory",
+    "title": "Graph / Historical memory",
+    "group": "Graphs",
+    "kind": "graph",
+    "status": "Existing",
+    "pane": "knowledge-graph",
+    "source": "obsidience/shell/qml/panes/graph/GraphViewerPane.qml",
+    "owner": "Existing Hindsight provider + same viewer",
+    "workflow": "Switch the existing viewer to Memory, select a bank and time range, open an exact returned memory record.",
+    "acceptance": "Memory records remain provider records, never invented Article types; chronology and actual returned IDs remain intact.",
+    "data": {
+      "view": "Memory"
+    }
+  },
+  {
+    "id": "graph-code",
+    "title": "Graph / Code",
+    "group": "Graphs",
+    "kind": "graph",
+    "status": "Existing",
+    "pane": "knowledge-graph",
+    "source": "obsidience/shell/qml/panes/graph/GraphViewerPane.qml",
+    "owner": "Existing code graph provider + same viewer",
+    "workflow": "Switch to Code, select a project, inspect symbol dependencies and observed tool activity.",
+    "acceptance": "No second code graph solver. Proximity does not imply dependency; activity labels never expose hidden reasoning or imply success.",
+    "data": {
+      "view": "Code"
+    }
+  },
+  {
+    "id": "source",
+    "title": "Source / Provenance explorer",
+    "group": "Knowledge & work",
+    "kind": "source",
+    "status": "Existing",
+    "pane": "source",
+    "source": "obsidience/shell/qml/panes/source/SourcePane.qml",
+    "owner": "Immutable Source + system projection + Reader",
+    "workflow": "Inspect System, Knowledge and Evidence trees, coverage and checkouts. Keep path, provenance and read-only status obvious.",
+    "acceptance": "Source is not a general-purpose file manager. Opening evidence never grants execution or changes its immutable provenance.",
+    "data": {}
+  },
+  {
+    "id": "models",
+    "title": "Models / Residency and capacity",
+    "group": "Systems",
+    "kind": "models",
+    "status": "Existing",
+    "pane": "status",
+    "source": "obsidience/shell/qml/panes/models/StatusPane.qml",
+    "owner": "Model admission and residency owner",
+    "workflow": "Inspect available task models, allowed GPUs, context limits and measured performance. Make configuration and benchmark costs explicit.",
+    "acceptance": "A presentation theme never loads, evicts or benchmarks a model. Unknown performance is unavailable, not a fabricated estimate.",
+    "data": {}
+  },
+  {
+    "id": "hardware",
+    "title": "Hardware / Performance",
+    "group": "Systems",
+    "kind": "hardware",
+    "status": "Existing",
+    "pane": "hardware",
+    "source": "obsidience/shell/qml/panes/hardware/HardwarePane.qml",
+    "owner": "Existing read-only hardware monitor",
+    "workflow": "Inspect Summary, CPU, memory, GPUs, storage and network with one selected resource and bounded charts.",
+    "acceptance": "Keep on-demand sampling, missing-data gaps and read-only process identity. No new sampler thread or polling daemon.",
+    "data": {}
+  },
+  {
+    "id": "hardware-processes",
+    "title": "Hardware / Processes",
+    "group": "Systems",
+    "kind": "processes",
+    "status": "Existing",
+    "pane": "hardware",
+    "source": "obsidience/shell/qml/panes/hardware/HardwarePane.qml",
+    "owner": "Same hardware monitor",
+    "workflow": "Sort read-only processes by resource use; show sample time, process identity and unavailable measurements.",
+    "acceptance": "Do not quietly add kill-process controls to this read-only interface. Sorting remains presentation only.",
+    "data": {}
+  },
+  {
+    "id": "camera",
+    "title": "Camera / Preview",
+    "group": "Tools & media",
+    "kind": "camera",
+    "status": "Existing",
+    "pane": "camera",
+    "source": "obsidience/shell/qml/panes/camera/CameraPane.qml",
+    "owner": "Existing camera owner; video-only preview",
+    "workflow": "See the selected camera and explicit preview state, retry a failed preview, and open AI & Voice device settings.",
+    "acceptance": "No microphone, no second capture owner, no camera-power change on close. A closed preview must never be shown as recording.",
+    "data": {}
+  },
+  {
+    "id": "media",
+    "title": "Media / Library and playback",
+    "group": "Tools & media",
+    "kind": "media",
+    "status": "Existing",
+    "pane": "media",
+    "source": "obsidience/shell/qml/panes/media/MediaPane.qml",
+    "owner": "Existing media/TV owner and command receipts",
+    "workflow": "Select a library item, target playback, resume or seek, and verify the matching command receipt.",
+    "acceptance": "Keep target identity and command status explicit; no invented universal playback authority or second media server.",
+    "data": {}
+  },
+  {
+    "id": "media-discover",
+    "title": "Media / Discovery and readiness",
+    "group": "Tools & media",
+    "kind": "media-discover",
+    "status": "Existing",
+    "pane": "media",
+    "source": "obsidience/shell/qml/panes/media/MediaPane.qml",
+    "owner": "Existing media search and acquisition owner",
+    "workflow": "Search metadata, choose season/episode, inspect eligible sources and readiness before sending an authorized acquisition request.",
+    "acceptance": "Distinguish metadata match, source availability, acquisition eligibility, command accepted and actual playback.",
+    "data": {}
+  },
+  {
+    "id": "applications",
+    "title": "Applications / Installed software",
+    "group": "Tools & media",
+    "kind": "applications",
+    "status": "Existing",
+    "pane": "applications",
+    "source": "obsidience/shell/qml/panes/applications/ApplicationsPane.qml",
+    "owner": "Existing Applications + PackageKit adapter",
+    "workflow": "Find installed software, launch through the existing app owner, search packages and inspect install/remove confirmation.",
+    "acceptance": "Package metadata is untrusted display content; launching and package mutations retain their own validation and authorization.",
+    "data": {}
+  },
+  {
+    "id": "application-updates",
+    "title": "Applications / Updates",
+    "group": "Tools & media",
+    "kind": "updates",
+    "status": "Proposed extension",
+    "pane": "applications",
+    "source": "obsidience/shell/qml/panes/applications/ApplicationsPane.qml",
+    "owner": "Existing PackageKit adapter; extend transaction projection",
+    "workflow": "Inspect the update set, dependencies, restart requirements and transaction history before applying a system update.",
+    "acceptance": "Never perform Arch partial upgrades; expose transaction failure honestly. Existing install/search does not prove update UI completeness.",
+    "data": {}
+  },
+  {
+    "id": "terminal",
+    "title": "Terminal / Console and agent canvas",
+    "group": "Tools & media",
+    "kind": "terminal",
+    "status": "Existing",
+    "pane": "terminal",
+    "source": "obsidience/shell/qml/panes/terminal/TerminalPane.qml",
+    "owner": "Existing persistent obsidience-ui tmux view",
+    "workflow": "Keep Local Console, Active Trace and Agent Canvas as views of the existing terminal owner, with explicit session labels and copy/paste.",
+    "acceptance": "Theme reload cannot detach, recreate or replace tmux sessions. ANSI colors retain distinct semantics on an opaque background.",
+    "data": {}
+  },
+  {
+    "id": "development",
+    "title": "Development / Workspace composition",
+    "group": "Shell",
+    "kind": "development",
+    "status": "Composition",
+    "pane": null,
+    "source": "obsidience/shell/qml/workspace/PaneWorkspace.qml",
+    "owner": "Existing Source + Reader + Terminal + Graph Code",
+    "workflow": "Arrange the existing code explorer, terminal, Reader and code graph as a workspace; external editors remain native windows.",
+    "acceptance": "Do not build a duplicate IDE, source writer or window manager to imitate an old concept image.",
+    "data": {}
+  },
+  {
+    "id": "tft",
+    "title": "TFT / Ledger companion",
+    "group": "Tools & media",
+    "kind": "tft",
+    "status": "Existing",
+    "pane": "tft-companion",
+    "source": "obsidience/shell/qml/panes/tft/TftCompanionPane.qml",
+    "owner": "Existing read-only TFT ledger WebEngine view",
+    "workflow": "Read round, board, shop, items, observations and historical decisions from the ledger.",
+    "acceptance": "Visual refresh adds no gameplay control, no second state recorder and no training workload. Stale observations must be labeled.",
+    "data": {}
+  },
+  {
+    "id": "settings-graph",
+    "title": "Settings / Graph presentation",
+    "group": "Settings",
+    "kind": "settings",
+    "status": "Existing",
+    "pane": "settings",
+    "source": "obsidience/shell/qml/panes/settings/graph/GraphSettings.qml",
+    "owner": "Existing graph-settings owner",
+    "workflow": "Choose presentation profile, graph Surface and existing layout controls without altering graph semantics.",
+    "acceptance": "Do not add a second graph or fixed branch sectors; style-only edits leave simulation state intact.",
+    "data": {
+      "section": "Graph",
+      "intro": "Presentation is separate from knowledge and simulation.",
+      "controls": [
+        [
+          "Profile",
+          "Current presentation profile.",
+          "select:Current saved graph profile|Existing default profile"
+        ],
+        [
+          "Graph Surface",
+          "Choose one existing Surface for the canonical graph.",
+          "select:Primary graph Surface|Main display"
+        ],
+        [
+          "Branch clearance",
+          "Existing layout control; changes physics only when explicitly edited.",
+          "range:42"
+        ],
+        [
+          "Labels",
+          "Show labels according to the current visibility policy.",
+          "toggle:on"
+        ],
+        [
+          "Reduce motion",
+          "Pause idle motion while keeping interaction available.",
+          "toggle:on"
+        ]
+      ]
+    }
+  },
+  {
+    "id": "settings-input",
+    "title": "Settings / Input",
+    "group": "Settings",
+    "kind": "settings",
+    "status": "Existing",
+    "pane": "settings",
+    "source": "obsidience/shell/qml/panes/settings/input/InputSettings.qml",
+    "owner": "Existing compositor input projection",
+    "workflow": "Inspect the applied keyboard and mouse profile with hardware and effective sensitivity separated.",
+    "acceptance": "Do not create per-Surface sensitivity, a second mouse profile store or direct pane-issued compositor commands.",
+    "data": {
+      "section": "Input",
+      "intro": "One input configuration across every Surface.",
+      "controls": [
+        [
+          "Active mouse",
+          "Device-reported identity, not the marketing name.",
+          "text:Primary pointer"
+        ],
+        [
+          "Hardware DPI",
+          "Read from the current verified profile.",
+          "text:6,400 DPI"
+        ],
+        [
+          "Effective sensitivity",
+          "After the existing compositor multiplier.",
+          "text:800 DPI equivalent"
+        ],
+        [
+          "Keyboard layout",
+          "Current compositor keymap.",
+          "text:English (US)"
+        ],
+        [
+          "Repeat rate",
+          "Current setting, read-only until adapter support exists.",
+          "text:40 Hz / 400 ms"
+        ]
+      ]
+    }
+  },
+  {
+    "id": "settings-workspace",
+    "title": "Settings / Workspace",
+    "group": "Settings",
+    "kind": "workspace-settings",
+    "status": "Existing",
+    "pane": "settings",
+    "source": "obsidience/shell/qml/panes/settings/workspace/WorkspaceSettings.qml",
+    "owner": "SurfaceLayout + PanePlacement + compositor adapter",
+    "workflow": "Configure each Surface grid and the existing native tile/OLED behavior.",
+    "acceptance": "Keep one 10-px grid, 5-px compositor-owned gaps and one persisted placement record per pane; no browser drag engine.",
+    "data": {}
+  },
+  {
+    "id": "settings-ai-voice",
+    "title": "Settings / AI & Voice",
+    "group": "Settings",
+    "kind": "settings",
+    "status": "Existing",
+    "pane": "settings",
+    "source": "obsidience/shell/qml/panes/settings/ai_voice/AiVoiceSettings.qml",
+    "owner": "Existing hardware slots + Realtime owner",
+    "workflow": "Choose residency defaults and speech/camera devices; show when changes take effect.",
+    "acceptance": "Opening Settings never starts audio or changes residency. Apply audio device changes through the existing session boundary.",
+    "data": {
+      "section": "AI & Voice",
+      "intro": "Device preferences are not an invitation to start capturing.",
+      "controls": [
+        [
+          "Model residency",
+          "Idle model defaults return when active Tasks release hardware.",
+          "select:Keep current assignment|No idle model"
+        ],
+        [
+          "Microphone source",
+          "Applies through the existing speech owner, not this pane.",
+          "select:System input|Microphone array"
+        ],
+        [
+          "Speaker output",
+          "Use the existing output-routing owner.",
+          "select:System output|Desktop speakers"
+        ],
+        [
+          "Camera",
+          "Preview selection; audio remains separate.",
+          "select:Selected physical camera|System camera"
+        ],
+        [
+          "Spoken voice",
+          "Existing Pocket voice catalog.",
+          "select:HAL|Star Trek Computer|Ultron"
+        ]
+      ]
+    }
+  },
+  {
+    "id": "appearance",
+    "title": "Settings / Obsidience Themes",
+    "group": "Settings",
+    "kind": "appearance",
+    "status": "Proposed extension",
+    "pane": "settings",
+    "source": "obsidience/shell/qml/panes/settings/appearance/AppearanceSettings.qml (proposed)",
+    "owner": "Existing palette owner + staged theme catalog",
+    "workflow": "Browse Obsidience Themes, preview a package and review the exact affected surfaces before applying it.",
+    "acceptance": "This package is not currently activated. Keep palette.json authoritative, validate first, commit atomically, retain previous theme and provide rollback.",
+    "data": {}
+  },
+  {
+    "id": "launcher",
+    "title": "Launcher / Global search",
+    "group": "Shell",
+    "kind": "launcher",
+    "status": "Proposed extension",
+    "pane": null,
+    "source": "obsidience/shell/qml/workspace/ApplicationLauncher.qml",
+    "owner": "Existing launcher + explicit search providers",
+    "workflow": "Search applications, panes, files and existing knowledge as clearly separated result groups.",
+    "acceptance": "Basic launching requires no model. Search results never auto-execute shell text; AI interpretation is an explicit opt-in action.",
+    "data": {}
+  },
+  {
+    "id": "workspaces",
+    "title": "Workspace overview / Window switcher",
+    "group": "Shell",
+    "kind": "workspaces",
+    "status": "Proposed extension",
+    "pane": null,
+    "source": "obsidience/shell/qml/workspace/PaneWorkspace.qml + adapter/windows",
+    "owner": "Compositor Scene + existing placement owner",
+    "workflow": "Inspect current windows and Surfaces; activate a specific native target or restore a named layout.",
+    "acceptance": "The overview is a projection, not a second geometry owner. Native window identity and stale-revision handling remain mandatory.",
+    "data": {}
+  },
+  {
+    "id": "quick-settings",
+    "title": "Quick settings / System tray",
+    "group": "Desktop gaps",
+    "kind": "quick",
+    "status": "Missing presentation",
+    "pane": null,
+    "source": "obsidience/shell/qml/workspace/QuickSettings.qml (proposed)",
+    "owner": "Existing Linux services via thin Shell adapters",
+    "workflow": "Open audio, network, Bluetooth, power and device controls from a compact status drawer.",
+    "acceptance": "Reuse StatusNotifierItem and service adapters. Do not embed the KDE or GNOME shell or register competing service owners.",
+    "data": {}
+  },
+  {
+    "id": "notifications",
+    "title": "Notifications / History and focus",
+    "group": "Desktop gaps",
+    "kind": "notifications",
+    "status": "Missing presentation",
+    "pane": null,
+    "source": "obsidience/shell/qml/workspace/NotificationCenter.qml (proposed)",
+    "owner": "Existing mako notification owner; bounded history projection",
+    "workflow": "Read grouped notifications, activate explicit actions and toggle Do Not Disturb with app-level controls.",
+    "acceptance": "Keep one org.freedesktop.Notifications owner. Do not start a Quickshell notification server beside mako; lock screen redacts private bodies.",
+    "data": {}
+  },
+  {
+    "id": "network",
+    "title": "Settings / Network & VPN",
+    "group": "Desktop gaps",
+    "kind": "settings",
+    "status": "Missing presentation",
+    "pane": "settings",
+    "source": "obsidience/shell/qml/panes/settings/network/NetworkSettings.qml (proposed)",
+    "owner": "NetworkManager; thin typed Shell service adapter",
+    "workflow": "Choose Wi-Fi/Ethernet/VPN, inspect link state and handle connection requests through the proper secret agent.",
+    "acceptance": "Never store or log passwords in theme state; bounded transactions report real connection state, not only requested state.",
+    "data": {
+      "section": "Network & VPN",
+      "intro": "Connectivity owned by NetworkManager.",
+      "controls": [
+        [
+          "Wired connection",
+          "Active interface and negotiated link speed.",
+          "text:Connected · 1 Gb/s"
+        ],
+        [
+          "Wi-Fi",
+          "Radio state belongs to NetworkManager.",
+          "toggle:on"
+        ],
+        [
+          "Available networks",
+          "Select a discovered network; credentials use a trusted native prompt.",
+          "select:Choose network…|Studio network|Guest network"
+        ],
+        [
+          "VPN",
+          "Profile state, not a background model task.",
+          "select:Disconnected|Work profile"
+        ],
+        [
+          "Metered connection",
+          "Warn before large updates or model downloads.",
+          "toggle:off"
+        ]
+      ]
+    }
+  },
+  {
+    "id": "bluetooth",
+    "title": "Settings / Bluetooth",
+    "group": "Desktop gaps",
+    "kind": "settings",
+    "status": "Missing presentation",
+    "pane": "settings",
+    "source": "obsidience/shell/qml/panes/settings/bluetooth/BluetoothSettings.qml (proposed)",
+    "owner": "BlueZ through one adapter",
+    "workflow": "Discover, pair and disconnect devices with explicit pairing codes and per-device state.",
+    "acceptance": "Never approve unknown pairing automatically; do not replace the system pairing agent without lifecycle handoff.",
+    "data": {
+      "section": "Bluetooth",
+      "intro": "Pairing is a deliberate action, not a notification click-through.",
+      "controls": [
+        [
+          "Bluetooth radio",
+          "Show adapter availability independently from discoverability.",
+          "toggle:on"
+        ],
+        [
+          "Discoverable",
+          "Use a bounded discovery interval.",
+          "toggle:off"
+        ],
+        [
+          "Wireless headphones",
+          "Connected audio device.",
+          "select:Connected|Disconnect"
+        ],
+        [
+          "Keyboard",
+          "Bonded input device; preserve alternate input during removal.",
+          "text:Paired"
+        ],
+        [
+          "Pairing request",
+          "Show device identity and matching code before accepting.",
+          "button:Review pairing"
+        ]
+      ]
+    }
+  },
+  {
+    "id": "audio",
+    "title": "Settings / Sound & media",
+    "group": "Desktop gaps",
+    "kind": "audio",
+    "status": "Missing presentation",
+    "pane": "settings",
+    "source": "obsidience/shell/qml/panes/settings/audio/AudioSettings.qml (proposed)",
+    "owner": "PipeWire/WirePlumber + MPRIS; Realtime remains separate",
+    "workflow": "Choose system input/output, adjust app streams and control existing MPRIS players.",
+    "acceptance": "No competing audio capture pipeline. Mute/input and playback indicators reflect actual stream state.",
+    "data": {}
+  },
+  {
+    "id": "displays",
+    "title": "Settings / Displays",
+    "group": "Desktop gaps",
+    "kind": "displays",
+    "status": "Missing control surface",
+    "pane": "settings",
+    "source": "obsidience/shell/qml/panes/settings/displays/DisplaySettings.qml (proposed)",
+    "owner": "Existing compositor adapter + SurfaceLayout",
+    "workflow": "Inspect output geometry, scaling, refresh, HDR and VRR; preview changes with a keep/revert deadline.",
+    "acceptance": "Never change GPU routing or accepted HDR defaults on theme apply. Any output transaction must have timed rollback and a recovery path.",
+    "data": {}
+  },
+  {
+    "id": "accessibility",
+    "title": "Settings / Accessibility",
+    "group": "Desktop gaps",
+    "kind": "settings",
+    "status": "Missing presentation",
+    "pane": "settings",
+    "source": "obsidience/shell/qml/panes/settings/accessibility/AccessibilitySettings.qml (proposed)",
+    "owner": "Qt accessibility + AT-SPI/upstream assistive tools",
+    "workflow": "Adjust text scale, contrast, focus visibility, motion and keyboard navigation; inspect actual screen-reader support.",
+    "acceptance": "Palette contrast alone is not accessibility conformance. Validate semantic labels, focus order, speech and magnification on the real native UI.",
+    "data": {
+      "section": "Accessibility",
+      "intro": "Readable controls first. Decorative brass second.",
+      "controls": [
+        [
+          "Text scale",
+          "Reflow instead of cropping labels.",
+          "select:100%|125%|150%|200%"
+        ],
+        [
+          "High contrast",
+          "Increase control edges and remove texture.",
+          "toggle:off"
+        ],
+        [
+          "Reduced motion",
+          "No idle animation or flashing status.",
+          "toggle:on"
+        ],
+        [
+          "Screen reader",
+          "Availability and startup must come from the installed assistive service.",
+          "text:Integration required"
+        ],
+        [
+          "Keyboard focus",
+          "Always show a two-pixel non-color-only focus outline.",
+          "toggle:on"
+        ]
+      ]
+    }
+  },
+  {
+    "id": "shortcuts",
+    "title": "Settings / Keyboard shortcuts",
+    "group": "Desktop gaps",
+    "kind": "shortcuts",
+    "status": "Missing editor",
+    "pane": "settings",
+    "source": "obsidience/shell/qml/panes/settings/input/InputSettings.qml",
+    "owner": "Existing input/compositor adapter; no parallel shortcut store",
+    "workflow": "Review current shortcuts and edit only supported commands with collision detection and rollback.",
+    "acceptance": "Do not silently overwrite working tiling, recovery or accessibility shortcuts. Planned bindings require conflict review.",
+    "data": {}
+  },
+  {
+    "id": "power",
+    "title": "Settings / Power & idle",
+    "group": "Desktop gaps",
+    "kind": "settings",
+    "status": "Missing presentation",
+    "pane": "settings",
+    "source": "obsidience/shell/qml/panes/settings/power/PowerSettings.qml (proposed)",
+    "owner": "Existing hypridle + logind + power-profiles-daemon",
+    "workflow": "Inspect current power profile, lock/blank deadlines and inhibitors; expose platform-supported actions.",
+    "acceptance": "Preserve this installation’s no-suspend policy. A theme does not rewrite idle/security listeners or allow applications to inhibit security locking.",
+    "data": {
+      "section": "Power & idle",
+      "intro": "Presentation of existing policy; never a second idle daemon.",
+      "controls": [
+        [
+          "Power profile",
+          "Read actual available platform profiles.",
+          "select:Balanced|Power saver|Performance"
+        ],
+        [
+          "Automatic lock",
+          "Owner keep-awake policy: hypridle remains masked. The saved 5-minute setting is inactive.",
+          "text:Disabled by owner"
+        ],
+        [
+          "Display power-off",
+          "The saved 10-minute DPMS setting is inactive while hypridle is masked.",
+          "text:Disabled by owner"
+        ],
+        [
+          "Suspend",
+          "Disabled by current installation policy.",
+          "text:Unavailable by policy"
+        ],
+        [
+          "Inhibitors",
+          "Inspect app requests without overriding security listeners.",
+          "button:View inhibitors"
+        ]
+      ]
+    }
+  },
+  {
+    "id": "session",
+    "title": "Session / Lock and power actions",
+    "group": "Desktop gaps",
+    "kind": "session",
+    "status": "Missing unified surface",
+    "pane": null,
+    "source": "obsidience/shell/qml/workspace/SessionMenu.qml (proposed)",
+    "owner": "Existing LockController, logind and session helpers",
+    "workflow": "Choose lock, sign out, restart or power off; inspect unsaved work and active tasks before destructive session actions.",
+    "acceptance": "Never bind theme activation to a restart; do not imply lock complete before the existing owner confirms secure state.",
+    "data": {}
+  },
+  {
+    "id": "lock",
+    "title": "Lock screen / Native secure surface",
+    "group": "Desktop gaps",
+    "kind": "lock",
+    "status": "Existing owner; redesign",
+    "pane": null,
+    "source": "obsidience/shell/qml/lock/",
+    "owner": "Existing WlSessionLock + native PamContext",
+    "workflow": "Restyle native identity and unlock controls on the existing opaque secure surface.",
+    "acceptance": "The HTML sample is not a locker and accepts no credentials. Preserve black opaque output coverage, PAM isolation and fail-secure restart behavior.",
+    "data": {}
+  },
+  {
+    "id": "login",
+    "title": "Login / Session entry",
+    "group": "Desktop gaps",
+    "kind": "login",
+    "status": "Design only",
+    "pane": null,
+    "source": "obsidience/shell/session/greetd.toml + supported greeter integration (proposed)",
+    "owner": "greetd and its chosen greeter",
+    "workflow": "Present user/session selection and native authentication for a fresh login.",
+    "acceptance": "Login and lock are different owners. No HTML password collection; no unreviewed greeter replacement or changes to active boot/session configuration.",
+    "data": {}
+  },
+  {
+    "id": "permissions",
+    "title": "Permissions / Privileged action",
+    "group": "Desktop gaps",
+    "kind": "permissions",
+    "status": "Acceptance gap",
+    "pane": null,
+    "source": "Existing system polkit + supported native authentication agent",
+    "owner": "polkit; graphical agent integration must be verified",
+    "workflow": "Show requesting app, exact action and consequences with a trusted native authentication prompt.",
+    "acceptance": "Expected hyprpolkitagent package was absent during inspection; another registered agent must be checked before declaring the whole service absent. Never authenticate through webviews or AI.",
+    "data": {}
+  },
+  {
+    "id": "files",
+    "title": "Files / General filesystem",
+    "group": "Desktop gaps",
+    "kind": "files",
+    "status": "External integration",
+    "pane": null,
+    "source": "Existing native file manager + XDG portals; appearance adapter (proposed)",
+    "owner": "Maintained upstream file manager, not Article/Source writer",
+    "workflow": "Browse home/devices/trash, move files, inspect properties and conflicts in a normal native application.",
+    "acceptance": "Source remains provenance explorer. Prefer theming and launching Dolphin or another maintained file manager over building a duplicate file engine.",
+    "data": {}
+  },
+  {
+    "id": "file-dialog",
+    "title": "Files / Open and save dialog",
+    "group": "Desktop gaps",
+    "kind": "file-dialog",
+    "status": "External integration",
+    "pane": null,
+    "source": "xdg-desktop-portal FileChooser + active backend",
+    "owner": "Existing portal backend",
+    "workflow": "Select a file or destination with clear filter, path, overwrite and sandbox permission boundaries.",
+    "acceptance": "Do not bypass a sandbox with a custom raw filesystem chooser. Theme toolkit surfaces within supported limits.",
+    "data": {}
+  },
+  {
+    "id": "clipboard",
+    "title": "Clipboard / Private history",
+    "group": "Desktop gaps",
+    "kind": "clipboard",
+    "status": "Missing optional feature",
+    "pane": null,
+    "source": "obsidience/shell/qml/workspace/ClipboardHistory.qml (proposed)",
+    "owner": "One optional Wayland clipboard history provider",
+    "workflow": "Search a bounded local history, pin deliberate snippets, clear items and pause collection.",
+    "acceptance": "Basic clipboard already exists. History is opt-in, secret/private selections excluded where supported, and lock clears or hides content; never harvest clipboard into AI memory.",
+    "data": {}
+  },
+  {
+    "id": "capture",
+    "title": "Capture / Screenshot and sharing",
+    "group": "Desktop gaps",
+    "kind": "capture",
+    "status": "Missing presentation",
+    "pane": null,
+    "source": "obsidience/shell/qml/workspace/CaptureSheet.qml (proposed)",
+    "owner": "Existing capture/portal owner + ScreenCast session lifecycle",
+    "workflow": "Choose one window, region or output; inspect save destination and explicit recording/sharing state.",
+    "acceptance": "Keep visible recording indicators and stop/revoke controls. Do not create an additional continuous capture service or expose hidden windows.",
+    "data": {}
+  },
+  {
+    "id": "calendar",
+    "title": "Clock / Calendar",
+    "group": "Desktop gaps",
+    "kind": "calendar",
+    "status": "Missing presentation",
+    "pane": null,
+    "source": "obsidience/shell/qml/workspace/ClockCalendar.qml (proposed)",
+    "owner": "System clock + explicit optional calendar provider",
+    "workflow": "View date and timezone with an optional separately connected event source.",
+    "acceptance": "No invented meetings. Offline calendar works without AI or account integration; source timezone is visible.",
+    "data": {}
+  },
+  {
+    "id": "storage",
+    "title": "Settings / Removable devices",
+    "group": "Desktop gaps",
+    "kind": "storage",
+    "status": "Missing presentation",
+    "pane": "settings",
+    "source": "obsidience/shell/qml/panes/settings/storage/StorageSettings.qml (proposed)",
+    "owner": "UDisks2 + existing hardware read-only telemetry",
+    "workflow": "Inspect devices, filesystem capacity and mount state, then safely eject an exact target.",
+    "acceptance": "Destructive disk formatting is not a casual quick action. Keep busy/mounted/error states and permissions explicit.",
+    "data": {}
+  },
+  {
+    "id": "printers",
+    "title": "Settings / Printers",
+    "group": "Desktop gaps",
+    "kind": "settings",
+    "status": "Missing presentation",
+    "pane": "settings",
+    "source": "obsidience/shell/qml/panes/settings/printers/PrinterSettings.qml (proposed)",
+    "owner": "Supported CUPS/upstream settings integration",
+    "workflow": "Choose a printer, inspect queue and job status, and open maintained configuration tools.",
+    "acceptance": "Installed printer service and permissions must be checked before enabling controls. Never install drivers silently.",
+    "data": {
+      "section": "Printers",
+      "intro": "Use the printing service, not a parallel queue.",
+      "controls": [
+        [
+          "Printer service",
+          "Available only when the host provides it.",
+          "text:Not yet integrated"
+        ],
+        [
+          "Default printer",
+          "No device is assumed from this design.",
+          "select:None selected"
+        ],
+        [
+          "Print queue",
+          "Show jobs belonging to the current user.",
+          "button:Open queue"
+        ],
+        [
+          "Add printer",
+          "Delegate discovery and credentials to maintained tooling.",
+          "button:Add printer"
+        ]
+      ]
+    }
+  },
+  {
+    "id": "privacy",
+    "title": "Settings / Privacy & permissions",
+    "group": "Desktop gaps",
+    "kind": "settings",
+    "status": "Missing overview",
+    "pane": "settings",
+    "source": "obsidience/shell/qml/panes/settings/privacy/PrivacySettings.qml (proposed)",
+    "owner": "Existing portal permissions, Realtime state, Secret Service",
+    "workflow": "Review app capture permissions, actual mic/camera activity and local data boundaries.",
+    "acceptance": "KWallet was installed; do not claim no secret store. Show provider availability, never secret values; system permissions and AI Tool grants remain different.",
+    "data": {
+      "section": "Privacy",
+      "intro": "Desktop permissions are not model permissions.",
+      "controls": [
+        [
+          "Camera and microphone",
+          "Display only active owners and current indicators.",
+          "button:Review active sessions"
+        ],
+        [
+          "Screen sharing",
+          "Show portal sessions with a stop/revoke action.",
+          "button:Review sharing"
+        ],
+        [
+          "Clipboard retention",
+          "Off unless deliberately enabled.",
+          "toggle:off"
+        ],
+        [
+          "Private notifications",
+          "Hide notification bodies while locked.",
+          "toggle:on"
+        ],
+        [
+          "Credential service",
+          "Read provider availability without opening stored secrets.",
+          "text:Provider check required"
+        ]
+      ]
+    }
+  },
+  {
+    "id": "defaults",
+    "title": "Settings / Defaults & locale",
+    "group": "Desktop gaps",
+    "kind": "settings",
+    "status": "Missing presentation",
+    "pane": "settings",
+    "source": "obsidience/shell/qml/panes/settings/defaults/DefaultsSettings.qml (proposed)",
+    "owner": "XDG MIME defaults + supported locale/time services",
+    "workflow": "Choose default apps, language, formats and timezone through existing host services.",
+    "acceptance": "Honor registered desktop IDs and MIME associations. Locale changes can require a new session; do not restart without confirmation.",
+    "data": {
+      "section": "Defaults & locale",
+      "intro": "Ordinary desktop preferences, available without a model.",
+      "controls": [
+        [
+          "Web browser",
+          "Current registered HTTP/HTTPS handler.",
+          "select:System default|Microsoft Edge"
+        ],
+        [
+          "Terminal",
+          "Independent recovery terminal remains available.",
+          "select:System default|Konsole|Kitty"
+        ],
+        [
+          "Language",
+          "Display language for the shell.",
+          "select:English (US)|System locale"
+        ],
+        [
+          "Timezone",
+          "Use system timezone data; show changes explicitly.",
+          "select:System timezone|UTC"
+        ],
+        [
+          "File associations",
+          "Group by MIME type and show registered applications.",
+          "button:Manage associations"
+        ]
+      ]
+    }
+  },
+  {
+    "id": "autostart",
+    "title": "Settings / Startup applications",
+    "group": "Desktop gaps",
+    "kind": "settings",
+    "status": "Missing presentation",
+    "pane": "settings",
+    "source": "obsidience/shell/qml/panes/settings/startup/StartupSettings.qml (proposed)",
+    "owner": "Existing systemd user units + XDG autostart ownership",
+    "workflow": "Inspect login applications and services with exact source and dependency information.",
+    "acceptance": "No second startup scheduler; protect shell/lock/portal/audio owners and distinguish user apps from required session services.",
+    "data": {
+      "section": "Startup applications",
+      "intro": "One lifecycle owner for every background process.",
+      "controls": [
+        [
+          "Shell and lock",
+          "Required session service; managed by existing units.",
+          "text:Protected"
+        ],
+        [
+          "Notifications",
+          "Existing mako service.",
+          "text:Session managed"
+        ],
+        [
+          "Personal applications",
+          "Optional XDG autostart entries.",
+          "button:Review entries"
+        ],
+        [
+          "User services",
+          "Inspect status without automatically restarting anything.",
+          "button:Open service details"
+        ]
+      ]
+    }
+  },
+  {
+    "id": "accounts",
+    "title": "Settings / Accounts & identity",
+    "group": "Desktop gaps",
+    "kind": "settings",
+    "status": "Missing presentation",
+    "pane": "settings",
+    "source": "obsidience/shell/qml/panes/settings/accounts/AccountSettings.qml (proposed)",
+    "owner": "System account services + explicitly connected providers",
+    "workflow": "Inspect local identity and session avatar, then manage online connections through their real providers.",
+    "acceptance": "Local account identity is not an Agent identity. Password/keyring changes remain native authenticated operations; no credentials in theme files.",
+    "data": {
+      "section": "Accounts & identity",
+      "intro": "Separate the person, the local login, and the AI agent.",
+      "controls": [
+        [
+          "Local account",
+          "Display identity from the host account service.",
+          "text:Current user"
+        ],
+        [
+          "Profile image",
+          "An optional local asset, not a camera capture.",
+          "button:Choose image"
+        ],
+        [
+          "Online accounts",
+          "No connections are assumed by this prototype.",
+          "button:Manage connections"
+        ],
+        [
+          "Password",
+          "Open the trusted native account workflow.",
+          "button:Change password"
+        ]
+      ]
+    }
+  }
+]
