@@ -1,57 +1,63 @@
 ---
 type: tool
 title: tv.control
-description: 'Control the registered TV as an optional Media playback destination.
-  For an explicit library source use media.library select then open its returned current-activation
-  id; catalogue GUIDs are not open ids. For an explicit season request use media.library
-  season, then open_season with its fresh id. The tuner owns only that finite same-season
-  catalogue sequence, with no acquisition at EOF. The first receipt verifies only
-  the first file. Each next file has a new generation; reread state before controls.
-  stop cancels the exact observed queue even between files. Ordinary open remains
-  single-file; resume:true loads freshly read saved progress once. action vod uses
-  operation state|pause|resume|seek|stop|track with the exact observed local generation
-  and seven-field source identity; seek adds position seconds; track adds kind and
-  track_id. Verify the exact generation/source and property readback. For content
-  currently in Edge or another browser, first computer.observe the exact current window.
-  Use open only with a supported exact URL identified by fresh source evidence; a
-  URL from an earlier cast is not evidence of the current page. If that URL cannot
-  be established or is unsupported, explain the blocker instead of substituting a
-  content search. Control the registered TV with one intent call where possible. play
-  with query (optional app pluto|youtube) picks and opens content in one call: a strong
-  Pluto live-channel match first, else YouTube''s top result (a live stream for news/weather);
-  it returns what it chose and up to 3 alternatives (open one by id if the owner wants
-  another). A Pluto live channel starts in about a second on the PC route: the workstation
-  plays it and the TV shows that stream (foreground app pc); the Pluto app is only
-  the fallback. The PC route plays no advertisements: during a channel''s break the
-  TV shows a break card (tv line: commercial break) and the programme resumes by itself,
-  so a break is the channel playing, not a fault. volume with level 0-100 sets it
-  exactly; volume_up/volume_down step by 5; mute, unmute, pause and resume reach that
-  state. These read the TV back: delivery verified reports the new state, otherwise
-  say it is unverified; an already-reached state sends nothing. on|off verify power.
-  You can see the TV: while its foreground app is pc (the workstation''s stream, which
-  is what the TV normally shows) observe returns the current picture on the TV screen,
-  also while video plays, with the backend state (power, foreground app, playback,
-  volume/mute, what this Harness opened and what airs now). For any question about
-  what is on the screen (what is showing, who or what is in the picture, what someone
-  on screen is wearing or doing, text on screen), including a follow-up about something
-  on the TV, call observe and answer from that image; never say you cannot see the
-  TV, and never use camera.observe for the TV''s picture (the camera shows the room).
-  Only a video playing in one of the TV''s own apps returns the state without a picture.
-  The metadata tv line is the last state seen, with its age. For an exact library
-  item on this TV, find with app library and query returns current-turn selections.
-  open with that id revalidates the exact file; never substitute a different edition
-  or episode. Library playback is verified only by exact source/generation and TV
-  route readback. stop ends the observed local generation without deleting media.
-  Saved progress is read with media.library resume; never silently start a source
-  from historical progress. find otherwise lists Pluto/YouTube candidates; open plays
-  one by id, or an official https link (web.search for a specific Netflix/Hulu/Tubi/YouTube
-  title). Remote keys are only for navigation that play/open cannot reach: observe
-  -> keys (up to 8; the focused:true control is what select activates) -> check the
-  new screen. text types only into an active text field; launch opens an app home
-  screen. notice with text shows a short message card on the TV screen for six seconds.
-  After play/open, complete with verification established naming what plays. Never
-  replay a failed or uncertain effect; a correction_allowed failure sent nothing.
-  Never purchase, subscribe, install or change accounts without an explicit request.'
+description: 'Control the registered TV as an optional Media playback destination. For an
+  explicit library source use media.library select then open its returned current-activation
+  id; catalogue GUIDs are not open ids. For an explicit season request use media.library season,
+  then open_season with its fresh id. The tuner owns only that finite same-season catalogue
+  sequence, with no acquisition at EOF. The first receipt verifies only the first file. Each
+  next file has a new generation; reread state before controls. stop cancels the exact observed
+  queue even between files. Ordinary open remains single-file; resume:true loads freshly read
+  saved progress once. action vod uses operation state|pause|resume|seek|stop|track with the
+  exact observed local generation and seven-field source identity; seek adds position seconds;
+  track adds kind and track_id. Verify the exact generation/source and property readback.
+  For content currently in Edge or another browser, first computer.observe the exact current
+  window. Use open only with a supported exact URL identified by fresh source evidence; a
+  URL from an earlier cast is not evidence of the current page. If that URL cannot be established
+  or is unsupported, explain the blocker instead of substituting a content search. Control
+  the registered TV with one intent call where possible. For ''put <movie or show> on'' or
+  ''watch <title>'', call play with the title as query and no app: it plays from the owner''s
+  Media server, never Pluto or YouTube. A library movie opens as the exact file; a series
+  plays its next unwatched episode from Jellyfin watch state (S1E1 if never watched; add ''season
+  N'' or ''SxEy'' to the query for a specific one) as the finite same-season sequence; a title
+  or next episode missing from the library is registered once under the accepted best-source
+  policy and opened when the catalogue lists it, otherwise the result says it is pending (nothing
+  to replay). It wakes the TV if needed. Ambiguous titles, editions or sources return choices
+  and play nothing: ask the owner; a different library title (a sequel) is never played instead.
+  Only with app pluto|youtube, or a request that asks for live, channel, news, weather, YouTube
+  or Pluto (a title containing such a word, such as News of the World, is still a title),
+  does play pick a strong Pluto live channel, else YouTube''s top video (a live stream only
+  for live/news/weather/YouTube requests), returning what it chose and up to 3 alternatives
+  (open one by id if the owner wants another). A Pluto live channel starts in about a second
+  on the PC route: the workstation plays it and the TV shows that stream (foreground app pc);
+  the Pluto app is only the fallback. The PC route plays no advertisements: during a channel''s
+  break the TV shows a break card (tv line: commercial break) and the programme resumes by
+  itself, so a break is the channel playing, not a fault. volume with level 0-100 sets it
+  exactly; volume_up/volume_down step by 5; mute, unmute, pause and resume reach that state.
+  These read the TV back: delivery verified reports the new state, otherwise say it is unverified;
+  an already-reached state sends nothing. on|off verify power. You can see the TV: while its
+  foreground app is pc (the workstation''s stream, which is what the TV normally shows) observe
+  returns the current picture on the TV screen, also while video plays, with the backend state
+  (power, foreground app, playback, volume/mute, what this Harness opened and what airs now).
+  For any question about what is on the screen (what is showing, who or what is in the picture,
+  what someone on screen is wearing or doing, text on screen), including a follow-up about
+  something on the TV, call observe and answer from that image; never say you cannot see the
+  TV, and never use camera.observe for the TV''s picture (the camera shows the room). Only
+  a video playing in one of the TV''s own apps returns the state without a picture. The metadata
+  tv line is the last state seen, with its age. For an exact library item on this TV, find
+  with app library and query returns current-turn selections. open with that id revalidates
+  the exact file; never substitute a different edition or episode. Library playback is verified
+  only by exact source/generation and TV route readback. stop ends the observed local generation
+  without deleting media. Saved progress is read with media.library resume; never silently
+  start a source from historical progress. find otherwise lists Pluto/YouTube candidates;
+  open plays one by id, or an official https link (web.search for a specific Netflix/Hulu/Tubi/YouTube
+  title). Remote keys are only for navigation that play/open cannot reach: observe -> keys
+  (up to 8; the focused:true control is what select activates) -> check the new screen. text
+  types only into an active text field; launch opens an app home screen. notice with text
+  shows a short message card on the TV screen for six seconds. After play/open, complete with
+  verification established naming what plays. Never replay a failed or uncertain effect; a
+  correction_allowed failure sent nothing. Never purchase, subscribe, install or change accounts
+  without an explicit request.'
 obsidience:
   binding: capability:tv.control
   source: obsidience/harness/capabilities/tv/control.py

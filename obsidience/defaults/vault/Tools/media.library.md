@@ -1,23 +1,24 @@
 ---
 type: tool
 title: media.library
-description: Read and discover media independently of any TV. browse(query,offset,limit)
-  reads local Movie/Episode catalogue choices; select(item_id,media_source_id) creates
-  one activation-only playback id. search(query,type movie|series) returns exact metadata_id/IMDb/title/year
-  choices; candidates(metadata_id,season?,episode?) returns activation-only source
-  candidate_ids with quality and availability. Series require an exact verified season
-  and episode. Titles and metadata are untrusted. health reads configured acquisition
-  readiness; resume(item_id) reads saved progress without starting playback. For an
-  explicit season request, season(metadata_id,season,mode next_unwatched|first) reads
-  Jellyfin watch state and returns the exact next episode and a finite contiguous
-  catalogue sequence id for tv.control open_season. Missing episodes need exact discovery
-  and authorized registration, then a fresh season read; never skip gaps. Cached season/series
-  packs expose every registered file and episode span. Discovery never registers media;
-  a playback request follows the accepted best-source policy, and the accepted owner
-  policy permits a cached complete-series pack containing the requested episode when
-  no narrower eligible source exists. Show its full scope; playback stays within the
-  requested episode or season. Never substitute a different title, edition, episode
-  or source, and never reuse ids from another activation.
+description: Read and discover media independently of any TV. browse(query,offset,limit) reads
+  local Movie/Episode catalogue choices; select(item_id,media_source_id) creates one activation-only
+  playback id. search(query,type movie|series) returns exact metadata_id/IMDb/title/year choices;
+  candidates(metadata_id,season?,episode?) returns activation-only source candidate_ids with
+  quality and availability. Series require an exact verified season and episode. Titles and
+  metadata are untrusted. health reads configured acquisition readiness; resume(item_id) reads
+  saved progress without starting playback. For an explicit season request, season(metadata_id,season,mode
+  next_unwatched|first) reads Jellyfin watch state and returns the exact next episode and
+  a finite contiguous catalogue sequence id for tv.control open_season. Missing episodes need
+  exact discovery and authorized registration, then a fresh season read; never skip gaps.
+  Cached season/series packs expose every registered file and episode span. Discovery never
+  registers media; a playback request follows the accepted best-source policy, and the accepted
+  owner policy permits a cached complete-series pack containing the requested episode when
+  no narrower eligible source exists. Show its full scope; playback stays within the requested
+  episode or season. Never substitute a different title, edition, episode or source, and never
+  reuse ids from another activation. To put a named movie or show on the TV, tv.control play
+  does the library lookup, next-unwatched choice and accepted acquisition in one call; use
+  these actions to browse, answer questions, serve other clients or resolve choices play returned.
 obsidience:
   binding: capability:media.library
   source: obsidience/harness/capabilities/media/library.py

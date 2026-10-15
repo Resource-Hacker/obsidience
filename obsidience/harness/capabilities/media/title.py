@@ -49,15 +49,14 @@ def spec(query: str) -> tuple[str, int | None, int | None]:
     return text, None, None
 
 
-def match_titles(query: str, rows: list[dict]) -> list[dict]:
-    """Library rows for a title: exact (optionally with a trailing year), else contiguous words.
-
-    "Star Trek" is a contiguous run of "Star Trek Voyager", so it finds the one Star
-    Trek series; two matches are returned as choices, never ranked into one.
+def match_titles(query: str, rows: list[dict]) -> tuple[list[dict], list[dict]]:
+    """(exact, partial) rows for a title: exact (optionally with a trailing year), else
+    the rows whose title contains the words contiguously. A partial row is a different
+    title ("Toy Story" in "Toy Story 2"); only the caller may decide it stands for one.
     """
     wanted = tokens(query)
     if not wanted:
-        return []
+        return [], []
     variants = [(wanted, None)]
     if len(wanted) > 1 and re.fullmatch(r'(?:19|20)\d{2}', wanted[-1]):
         variants.append((wanted[:-1], int(wanted[-1])))
@@ -65,14 +64,49 @@ def match_titles(query: str, rows: list[dict]) -> list[dict]:
         exact = [row for row in rows if tokens(row['title']) == words
                  and (year is None or row['year'] == year)]
         if exact:
-            return exact
+            return exact, []
     for words, year in variants:
         size = len(words)
         partial = [row for row in rows if (year is None or row['year'] == year) and any(
             tokens(row['title'])[i:i + size] == words for i in range(len(tokens(row['title'])) - size + 1))]
         if partial:
-            return partial
-    return []
+            return [], partial
+    return [], []
+
+
+def _leads(title: str, partial: list[dict]) -> bool:
+    """Every partial hit is a Series whose name begins with the words: "Star Trek" names
+    the library's Star Trek series. A partial Movie hit (a sequel, a longer title) never does."""
+    words = tokens(title)
+    return bool(partial) and all(row['type'] == 'Series' and tokens(row['title'])[:len(words)] == words
+                                 for row in partial)
+
+
+async def _search(title: str, kind: str, context: dict) -> list[dict]:
+    """Exact metadata-catalogue titles, searched once per run (the discovery call budget is shared)."""
+    pages = context.setdefault('_tv_title_searches', {})
+    key = (tuple(tokens(title)), kind)
+    if key not in pages:
+        pages[key] = (await discovery.search(title, kind, context))['matches']
+    return match_titles(title, pages[key])[0]
+
+
+def named(query: str, context: dict, *, catalogue: bool) -> bool:
+    """Whether the request's title is exactly a library title or, with catalogue, a metadata-
+    catalogue title ("Live and Let Die", "News of the World"); read-only. A source that cannot
+    be read answers False, so the request keeps its live/web wording."""
+    title = spec(query)[0]
+    try:
+        if match_titles(title, service.catalogue().titles())[0]:
+            return True
+        if not catalogue:
+            return False
+
+        async def lookup():
+            return any([await _search(title, kind, context) for kind in ('movie', 'series')])
+        return asyncio.run(lookup())
+    except (asyncio.CancelledError, MediaUnavailable, OSError, ValueError):
+        return False
 
 
 def next_unwatched(progress: list[dict]) -> dict | None:
@@ -101,14 +135,18 @@ def _ids(pairs, context: dict) -> list[str]:
     return ids
 
 
-def _choices(title: str, rows: list[dict], context: dict) -> dict:
+def _rows(rows: list[dict], context: dict) -> list[dict]:
     choices = []
     for row in rows[:8]:
         choice = {'type': row['type'].lower(), 'title': row['title'], 'year': row['year']}
         if row['type'] == 'Movie':
             choice['ids'] = _ids(((row['item_id'], source) for source in row['sources']), context)
         choices.append(choice)
-    return _final(f'More than one library title matches "{title}"; nothing was played.', choices=choices,
+    return choices
+
+
+def _choices(title: str, rows: list[dict], context: dict) -> dict:
+    return _final(f'More than one library title matches "{title}"; nothing was played.', choices=_rows(rows, context),
                   note='Ask the owner which one. A movie choice opens with tv.control open and its id; '
                        'a series plays with play and its exact title followed by its year.')
 
@@ -223,11 +261,10 @@ async def _acquire(title: str, season: int | None, episode: int | None, context:
     explicit = episode is not None if explicit is None else explicit
     if 'media.acquire' not in (context.get('_tool_receipt_articles') or {}):
         return _final(f'"{title}" is not in the media library, and acquisition is not granted to this Agent.')
-    wanted, explicit_meta = tokens(title), meta is not None
+    explicit_meta = meta is not None
     found = [meta] if meta else []
     for kind in () if meta else ('series',) if season is not None else ('movie', 'series'):
-        page = await discovery.search(title, kind, context)
-        found += [row for row in page['matches'] if tokens(row['title']) == wanted]
+        found += await _search(title, kind, context)
     if not found:
         return _final(f'No movie or series named "{title}" is in the library or the metadata catalogue; '
                       'nothing was registered.',
@@ -303,14 +340,21 @@ async def _acquire(title: str, season: int | None, episode: int | None, context:
 async def _prepare(query: str, context: dict) -> dict:
     title, season, episode = spec(query)
     rows = await asyncio.to_thread(service.catalogue().titles)
-    matches = match_titles(title, rows)
     if season is not None:
-        matches = [row for row in matches if row['type'] == 'Series']
+        rows = [row for row in rows if row['type'] == 'Series']
+    exact, partial = match_titles(title, rows)
+    matches = exact or (partial if _leads(title, partial) else [])
     if len(matches) > 1:
         return _choices(title, matches, context)
     if matches:
         return await _play_row(matches[0], season, episode, context)
-    return await _acquire(title, season, episode, context)
+    # Not in the library under this name; a longer library title is never a substitute.
+    result = await _acquire(title, season, episode, context)
+    if partial and result.get('status') == 'failed' and result.get('effect_applied') is False:
+        result = {**result, 'library_choices': _rows(partial, context),
+                  'note': ' '.join(filter(None, (result.get('note'), 'The library holds only these different '
+                                                 'titles; offer them, never play one as the requested title.')))}
+    return result
 
 
 async def _play_row(row: dict, season: int | None, episode: int | None, context: dict,

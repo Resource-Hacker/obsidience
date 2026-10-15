@@ -522,11 +522,21 @@ class JellyfinCatalogue:
         "Star Trek Voyager"), so a series is found by its own Series item.
         """
         self._pin()
-        page = self._query(includeItemTypes='Movie,Series', fields='MediaSources,ProviderIds', limit=513)
-        items, total = page.get('Items'), page.get('TotalRecordCount')
-        if (not isinstance(items, list) or len(items) > 512
-                or type(total) is not int or total != len(items)):
-            raise MediaUnavailable('catalogue_title_inventory_limit')
+        items, total = [], None
+        while total is None or len(items) < total:
+            # Pages of 512 in SortName order, up to 4096 titles; a total that changes between
+            # pages is an inventory read during a library change, never a partial answer.
+            page = self._query(includeItemTypes='Movie,Series', fields='MediaSources,ProviderIds',
+                               startIndex=len(items), limit=512)
+            batch, count = page.get('Items'), page.get('TotalRecordCount')
+            if not isinstance(batch, list) or len(batch) > 512 or type(count) is not int or count > 4096:
+                raise MediaUnavailable('catalogue_title_inventory_limit')
+            if (total is not None and count != total) or (not batch and count > len(items)):
+                raise MediaUnavailable('catalogue_readback_unavailable')
+            total = count
+            items += batch
+        if len(items) != total:
+            raise MediaUnavailable('catalogue_readback_unavailable')
         rows = []
         for item in items:
             if not isinstance(item, dict) or item.get('Type') not in ('Movie', 'Series'):

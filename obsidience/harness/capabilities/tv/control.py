@@ -1481,9 +1481,9 @@ def _play_library(prepared, context, row, cancel):
     except OSError as error:
         if isinstance(error, InterruptedError):
             raise
-        woke = True
         with _phase(context, 'wake'):
             if row.get('mac'):
+                woke = True
                 raw, _boot, _ad = _after_wake(row, cancel, _POWER_READ)
             else:
                 _drop_offline(row)
@@ -1581,6 +1581,29 @@ _LIVE_WORDS = {'news', 'weather', 'live', 'forecast', 'headlines', *_TOPICS}
 # Owner, 2026-10-15: play uses Pluto/YouTube only when the request says so; otherwise the Media server.
 # Topic words (storm, hurricane, ...) only rank live results: "The Perfect Storm" is a named title.
 _PROVIDER_WORDS = {'live', 'channel', 'channels', 'news', 'weather', 'youtube', 'pluto', 'livestream'}
+_TRAILING = _PROVIDER_WORDS | {'forecast', 'headlines', 'stream'}
+_FILLER = {'the', 'a', 'an', 'on', 'tv', 'television', 'some', 'to', 'me'}
+
+
+def _asks_live(query, context):
+    """Whether play's request explicitly asks for Pluto/YouTube rather than naming a title.
+
+    A provider word inside a title ("Live and Let Die", "News of the World", "The
+    Weather Man") does not: an exact library title always plays from the Media server,
+    and a request whose words do not end in a provider word is a title when the
+    metadata catalogue lists it exactly. "CNN news", "star trek channel", "lofi on
+    youtube" and "the weather" keep the live/web route.
+    """
+    from ..media.title import named, spec, tokens
+    words = tokens(spec(query)[0])
+    if not set(words) & _PROVIDER_WORDS:
+        return False
+    if named(query, context, catalogue=False):
+        return False
+    if (words[-1] in _TRAILING or {'youtube', 'pluto'} & set(words)
+            or not set(words) - _TRAILING - _FILLER):
+        return True
+    return not named(query, context, catalogue=True)
 
 
 class _NoAutoPick(LookupError):
@@ -1594,7 +1617,7 @@ def _choose(args, context):
     stream for news/weather). Weak channel matches are discoverable with find, never
     an automatic substitute for content. YouTube is not searched when Pluto already
     has a strong match. A YouTube result of live or unknown length is chosen only for
-    a live/news/weather request; otherwise the candidates return unopened.
+    a live/news/weather or explicit YouTube request; otherwise the candidates return unopened.
     """
     query, app = args['query'], args.get('app')
     apps = _inventory()['apps']
@@ -1616,7 +1639,9 @@ def _choose(args, context):
     candidates = [candidate for _strong, candidate in order][:4]
     if not candidates:
         raise LookupError('No TV content matches this query' + (' (' + '; '.join(errors) + ')' if errors else ''))
-    live = bool(_words(query) & _LIVE_WORDS)
+    # An explicit YouTube request takes its top result, as before; otherwise a live or
+    # unknown-length video never stands in for a programme the request did not ask live.
+    live = bool(_words(query) & _LIVE_WORDS) or app == 'youtube' or 'youtube' in _words(query)
     chosen = next((candidate for candidate in candidates
                    if live or candidate.get('duration') != 'live or unknown'), None)
     if chosen is None:
@@ -1918,6 +1943,16 @@ def execute(args: dict, context: dict) -> dict:
     return result
 
 
+def _with_acquisition(result, library):
+    """A media server registration made for this play is an effect even when nothing reached the TV."""
+    if not (library or {}).get('acquired') or result.get('status') == 'completed':
+        return result
+    result = {**result, 'effect_applied': True, 'must_not_replay': True,
+              'acquired': library['acquired']}
+    result.pop('correction_allowed', None)
+    return result
+
+
 def _execute(args, context):
     if (context.get('_agent_ref') != 'Agents/Executive/Executive'
             or context.get('task') != 'Agents/Executive/Executive'):
@@ -1978,10 +2013,17 @@ def _execute(args, context):
     if action == 'play':
         # Content resolution is network and Media server work; it never holds the TV.
         query = args['query'].strip()
-        if 'app' not in args and not _words(query) & _PROVIDER_WORDS:
+        with _phase(context, 'route'):
+            media = 'app' not in args and not _asks_live(query, context)
+        if media:
             # A named movie or series plays from the owner's Media server; it never becomes
             # a Pluto channel or YouTube clip (owner, 2026-10-15).
             from ..media.title import prepare
+            if context.get('_tv_effect_uncertain'):
+                # Checked before any registration, like every other effect after an uncertain one.
+                return {'status': 'failed', 'delivery': 'not_dispatched', 'effect_applied': False,
+                        'must_not_replay': True, 'action': 'play',
+                        'failure': 'An earlier TV effect is uncertain; stop effects and report it'}
             with _phase(context, 'library'):
                 try:
                     library = prepare(query, context)
@@ -2005,7 +2047,8 @@ def _execute(args, context):
     cancel = context.get('_capability_cancel_event')
     while not _LOCK.acquire(timeout=.1):
         if cancel is not None and cancel.is_set():
-            return {'status': 'failed', 'delivery': 'not_dispatched', 'failure': 'cancelled'}
+            return _with_acquisition({'status': 'failed', 'delivery': 'not_dispatched', 'failure': 'cancelled'},
+                                     library)
     delivery = 'not_dispatched'
     uncertain_before = context.get('_tv_effect_uncertain')
     try:
@@ -2023,7 +2066,7 @@ def _execute(args, context):
         if action == 'open' and str(args.get('id', '')).startswith('m'):
             return _open_media(args['id'], context, row, cancel, args.get('resume', False))
         if library is not None:
-            return _play_library(library, context, row, cancel)
+            return _with_acquisition(_play_library(library, context, row, cancel), library)
         attempted = context.setdefault('_tv_attempted', set())
         opening = action in ('open', 'play')
         extra = {'query': args['query'].strip(), 'chosen': chosen, 'alternatives': alternatives} if action == 'play' else {}
@@ -2319,8 +2362,10 @@ def _execute(args, context):
     except (OSError, ValueError, KeyError, IndexError, MediaUnavailable) as error:
         if delivery == 'not_dispatched' and context.get('_tv_effect_uncertain') and not uncertain_before:
             delivery = 'uncertain'  # A target-state readback failed after its effect was sent.
-        return {'status': 'failed', 'delivery': delivery, 'effect_applied': None if delivery != 'not_dispatched' else False,
-                'failure': str(error), 'must_not_replay': True,
-                'next_step': 'Stop this turn. No retry is scheduled. If the connection is unavailable, check that the TV is awake and ADB debugging is enabled.'}
+        return _with_acquisition({
+            'status': 'failed', 'delivery': delivery, 'effect_applied': None if delivery != 'not_dispatched' else False,
+            'failure': str(error), 'must_not_replay': True,
+            'next_step': 'Stop this turn. No retry is scheduled. If the connection is unavailable, check that the TV is awake and ADB debugging is enabled.'},
+            library)
     finally:
         _LOCK.release()
