@@ -154,7 +154,7 @@ def _maintenance_candidate_evidence(
         for note in notes
     ):
         raise RuntimeError("maintenance candidate Articles are missing or no longer accepted")
-    from ..capabilities.vault.maintenance import candidate_invalidation, candidate_revision
+    from ..knowledge.maintenance import candidate_invalidation, candidate_revision
 
     invalidated = candidate_invalidation(task.ref, params, res)
     if invalidated is not None:
@@ -893,7 +893,7 @@ def _update_execution_status(owner: Note, status: str, extra: dict | None = None
 
 def _computer_request_evidence(runtime_params: object) -> dict | None:
     """Retain the bounded controller binding for an exact causal continuation."""
-    from obsidience.harness.capabilities.task.complete import (
+    from obsidience.harness.execution.completion import (
         COMPUTER_OUTCOME_TOOLS, validate_computer_outcome,
     )
 

@@ -335,7 +335,7 @@ async def run_adk_session(task, model, messages, allowed, ctx, agent_name, effor
     if (command is None and task.kind == 'agent' and task.ref == EXECUTIVE
             and params.get('event') == 'voice.activation'
             and CONFIG.extras.get('realtime_early_speech', True) is not False):
-        from ...capabilities.task.complete import public_claim_error
+        from ..completion import public_claim_error
         from ...conversation.runtime import RUNTIME as conversation
         if conversation.speech is not None:
             plugin.voice = conversation.speech.provisional_reply(run, lambda text: public_claim_error(text, ctx))

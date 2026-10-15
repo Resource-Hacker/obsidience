@@ -237,7 +237,7 @@ def link_evidence(existing, body: str, accepted_resolver: Resolver) -> list[dict
 
 
 def _validate_link_evidence(meta: dict, existing, body: str, accepted_resolver: Resolver) -> str:
-    from ..capabilities.vault.propose import PROPOSAL_METADATA_FIELDS
+    from .proposals import PROPOSAL_METADATA_FIELDS
 
     if meta.get("action") != "update":
         raise ValueError("Link proposals update existing Articles")
@@ -737,7 +737,7 @@ def _approve(name: str) -> dict:
         and target.startswith("Runbooks/")
     )
     if generated:
-        from ..capabilities.vault.propose import validate_generated_runbook
+        from .proposals import validate_generated_runbook
         from ..execution.assignments import library_candidates
         from .dependencies import dependency_resolver
 
@@ -759,7 +759,7 @@ def _approve(name: str) -> dict:
     # the common proposal envelope.
     note_meta = dict(existing.meta) if action == "update" and existing else {}
     if "authored_fields" in meta:
-        from ..capabilities.vault.propose import PROPOSAL_METADATA_FIELDS
+        from .proposals import PROPOSAL_METADATA_FIELDS
 
         authored_fields = meta["authored_fields"]
         if not isinstance(authored_fields, list) or any(

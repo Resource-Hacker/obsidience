@@ -526,7 +526,7 @@ def retry_blocked_reason(note: Note, run: dict | None = None, *, allow_source_ca
             binding_matches = False
         if not binding_matches:
             return "The original event inputs cannot be attested or are no longer valid."
-        from ..capabilities.vault.maintenance import candidate_invalidation
+        from ..knowledge.maintenance import candidate_invalidation
         from ..knowledge.vault import resolver
         if params.get("event") == "task.create" and candidate_invalidation(note.ref, params, resolver()):
             return "The maintenance inputs are invalidated; settle the old occurrence and let Curate inspect current Articles."
@@ -742,7 +742,7 @@ def _maintenance_recorded_args(value, signals: dict) -> dict | None:
 
 def _maintenance_creator_evidence(note: Note, params: dict) -> dict | None:
     """Match current inputs to a real, immutable Curate task.create receipt."""
-    from ..capabilities.vault.maintenance import agent_structural_hub, candidate_invalidation
+    from ..knowledge.maintenance import agent_structural_hub, candidate_invalidation
     from ..knowledge.vault import resolver
     from .executor import _bounded_trace_value
     from pathlib import PurePosixPath

@@ -400,7 +400,7 @@ def validate_decision(sample: dict, tool: str, args: dict) -> tuple[bool, str]:
     from ..capabilities.task.complete import execute as complete
     from ..capabilities.source.read import precondition_error
     from ..knowledge.scope import assert_proposal_scope
-    from ..capabilities.vault.propose import stage_proposal
+    from ..knowledge.proposals import stage_proposal
     import jsonschema
 
     context = deepcopy(sample['context'])

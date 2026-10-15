@@ -430,7 +430,7 @@ async def optimize(case_id: str, context: dict) -> dict:
         report_id = refinement._store('executive/reports', report)
         result = _report_result(report_id, report)
         if report['verdict'] == 'passed':
-            from ..capabilities.vault.propose import stage_proposal
+            from ..knowledge.proposals import stage_proposal
             agent = Resolver(refinement._notes(document)).resolve(subject_ref(document))
             context['_executive_optimization'] = {'case_id': case_id, 'report_id': report_id}
             try:

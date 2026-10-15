@@ -363,7 +363,7 @@ class NativeTrial(FrozenTrial):
                 self._responses[(name, _json(args))] = value if isinstance(value, str) else _json(value)
         result = await super().handle(name, args)
         if not result.get('done'):
-            from ...capabilities.task.complete import computer_completion_evidence
+            from ..completion import computer_completion_evidence
             try:
                 observed = json.loads(result['observation'])
             except ValueError:

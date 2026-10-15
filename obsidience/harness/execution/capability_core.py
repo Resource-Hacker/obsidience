@@ -111,7 +111,7 @@ async def run_capability(ex, name: str, args: dict, *, execute, execute_async, s
     optional ``blocked`` observation (with extra trace fields) for a call its own
     policy refuses before dispatch. ``started`` runs once the call is announced.
     """
-    from ..capabilities.task.complete import computer_completion_evidence, computer_request_target_error
+    from .completion import computer_completion_evidence, computer_request_target_error
     scope_checkpoint(ex.ctx, name)
     reflex_proposal = ex.ctx.pop("_reflex_proposal", None)
     if name != "task.complete":

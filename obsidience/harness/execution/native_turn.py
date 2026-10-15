@@ -460,7 +460,7 @@ async def settle_model_step(state, operate, text: str, has_calls: bool, reason: 
             result = [{'type': 'text', 'text': IMITATION_FEEDBACK}]
             state.strike('imitation', 'Three textual Tool imitations; no text was executed')
         else:
-            from ..capabilities.task.complete import native_text_arguments
+            from .completion import native_text_arguments
             result = await operate('task.complete', native_text_arguments(text.strip(), ctx))
         if not state.ex.done and voice is not None:
             await voice.retract(halt=True)  # Never voice a rejected reply further.

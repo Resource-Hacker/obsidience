@@ -367,7 +367,7 @@ class AgentPlugin(BasePlugin):
     def _decision_tools(self) -> tuple[list[str], dict]:
         """This Task step's Tools and the active proposal, completion and Repair schema modes."""
         from ...capabilities.source.read import available_tools
-        from ...capabilities.task.complete import (
+        from ..completion import (
             available_tools as completion_tools, completion_citations, completion_prerequisite_error,
             completion_requires_no_change,
         )

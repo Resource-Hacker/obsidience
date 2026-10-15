@@ -214,7 +214,7 @@ def _is_enabled(value: object) -> bool:
 
 
 def _auto_curate_state(request_ref: str, doc: dict) -> tuple[bool, str | None]:
-    from ...knowledge.auto_curate import policy_for, selection
+    from ...knowledge.curation import policy_for, selection
 
     if doc.get("managed_by") == "hindsight":
         # Native memory consolidation is automatic. It does not grant wiki
@@ -1217,7 +1217,7 @@ def _graph_snapshot():
             node["parent_id"] = subject["id"]
             if node["id"] == subject.get("article_ref"):
                 node["navigation_ref"] = subject["id"]
-    from ...knowledge.auto_curate import enabled
+    from ...knowledge.curation import enabled
     notes_by_ref = {note.ref: note for note in iter_notes()}
     auto_curated = {ref for ref, note in notes_by_ref.items()
                     if note.kind in {"knowledge", "agent"} and enabled(ref, notes_by_ref)}
@@ -1765,7 +1765,7 @@ def search(q: str):
 @app.post("/api/proposals")
 def stage_proposal(payload: dict):
     """Local Codex/agent boundary for one ordinary owner-review proposal."""
-    from ...capabilities.vault.propose import stage_proposal as stage
+    from ...knowledge.proposals import stage_proposal as stage
 
     try:
         return stage(
@@ -2171,7 +2171,7 @@ async def run_now(ref: str, payload: dict | None = None):
         if not key or len(key) > 64 or len(value) > 500:
             raise HTTPException(400, "runtime params are invalid")
         runtime_params[key] = value
-    from ...capabilities.task.complete import validate_computer_outcome
+    from ...execution.completion import validate_computer_outcome
 
     stored_params = note.meta.get("params")
     preserve_pending = str(note.meta.get("status", "")) == "pending" and "params" not in (payload or {})
