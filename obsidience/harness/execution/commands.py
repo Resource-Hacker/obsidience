@@ -226,6 +226,22 @@ def owner_media_command(value: object) -> dict:
             raise ValueError('Invalid media server command')
         return {'request_id': request_id, 'operation': operation, **(
             {'selection': _media_selection(value['selection'])} if 'selection' in value else {})}
+    if operation == 'cast':
+        # One YouTube video from the browser, by tv.control's own link rule; only its id is kept.
+        from urllib.parse import urlsplit
+        from ..capabilities.tv.control import _youtube_id
+        url = value.get('url')
+        video = _youtube_id(url) if isinstance(url, str) and len(url) <= 300 else None
+        if (value.get('destination') != 'tv' or video is None
+                or set(value) not in ({'request_id', 'operation', 'destination', 'url'},
+                                      {'request_id', 'operation', 'destination', 'url', 'start'})):
+            raise ValueError('Cast takes one YouTube video link for the registered TV')
+        live = urlsplit(url).path.startswith('/live/')
+        if 'start' in value and (type(value['start']) is not int or not 0 <= value['start'] <= 86400 or live):
+            raise ValueError('Cast start must be whole seconds between 0 and 86400 of a video, not a live stream')
+        return {'request_id': request_id, 'operation': operation, 'destination': 'tv',
+                'url': ('https://www.youtube.com/live/' if live else 'https://www.youtube.com/watch?v=') + video,
+                **({'start': value['start']} if 'start' in value else {})}
     if operation not in {'play', 'pause', 'resume', 'seek', 'stop'} or value.get('destination') != 'tv':
         raise ValueError('Choose the registered TV destination and one media operation')
     expected = {'request_id', 'operation', 'destination', 'selection'} if operation == 'play' else {
@@ -265,4 +281,7 @@ def owner_media_text(command: dict) -> str:
             'Resume the selected library source from its saved position on the registered TV.'
                 if command['operation'] == 'play' and command.get('resume') else
             'Play the selected library source on the registered TV.' if command['operation'] == 'play' else
+            f"Play the YouTube video {command['url']} from the browser on the registered TV"
+                + (f" from {command['start']} seconds." if command.get('start') else '.')
+                if command['operation'] == 'cast' else
             f"{command['operation'].capitalize()} the observed library playback on the registered TV.")

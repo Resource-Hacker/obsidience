@@ -141,6 +141,10 @@ async def _run_owner_media(plugin: AgentPlugin, command: dict, session_id: str, 
                                                 'serverId': config['catalogue']['instance_id']})
             call = {'name': 'application.launch', 'args': {
                 'application': 'microsoft_edge', 'url': url}}
+        elif operation == 'cast':
+            call = {'name': 'tv.control', 'args': {'action': 'open', 'url': command['url']}}
+            if 'start' in command:
+                call['args']['start'] = command['start']
         else:
             args = {'action': 'vod', 'operation': operation,
                     'generation': command['generation'], 'source': command['source']}
@@ -180,6 +184,11 @@ async def _run_owner_media(plugin: AgentPlugin, command: dict, session_id: str, 
                        + str(receipt.get('catalogue', {}).get('reason', 'catalogue_not_ready'))
                        + '. No registration was sent.')
             verified = catalogue_ready
+        if operation == 'cast' and verified:
+            # tv.control names the start position only when SmartTube's link carried it.
+            summary = 'The YouTube video is playing on the registered TV' + (
+                '; its start position was not applied.' if command.get('start')
+                and (ctx.get('_reflex_command_result') or {}).get('start') != command['start'] else '.')
         await plugin.operate('task.complete', {'status': 'completed' if verified else 'failed',
                                              'summary': summary})
         if not plugin.ex.done:

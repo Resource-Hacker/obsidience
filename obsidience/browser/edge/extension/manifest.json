@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "Obsidience",
+  "version": "0.1.0",
+  "description": "Obsidience in Edge: cast the YouTube video you are watching to the TV with one button.",
+  "permissions": [
+    "nativeMessaging",
+    "activeTab",
+    "scripting"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Cast to TV"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.youtube.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

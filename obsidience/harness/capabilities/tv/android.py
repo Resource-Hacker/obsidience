@@ -95,8 +95,12 @@ def available():
     return state() is not None
 
 
-def play(link, cancel=None, limit=START_LIMIT):
+def play(link, cancel=None, limit=START_LIMIT, start=0):
     """Play one YouTube video in the instance's player; the run of playback it started, else None.
+
+    start > 0 adds YouTube's t parameter (seconds). SmartTube 32.56 reads it from the link
+    (IntentExtractor.extractVideoTimeMs) and seeks there once the video loads, overriding its own saved
+    position (VideoStateController.restorePendingPosition); 0 or none leaves the position to SmartTube.
 
     The link is sent once. Playback counts only when the session started or changed after the link and
     reports playing: that is the instance's own readback that a player runs, not what its picture shows.
@@ -105,11 +109,14 @@ def play(link, cancel=None, limit=START_LIMIT):
     """
     if not LINK.fullmatch(link):
         raise ValueError('The Android TV instance opens YouTube video links only')
+    if type(start) is not int or not 0 <= start <= 86400:
+        raise ValueError('The start position must be whole seconds 0-86400')
+    target = link + (f'&t={start}' if start else '')
     before = state()
     if before is None:
         raise OSError('The Android TV instance does not answer')
     # A start that Android refuses (no such player) is told apart from one that got no answer.
-    started = _shell('am start -W -a android.intent.action.VIEW -d ' + shlex.quote(link) + ' ' + PLAYER
+    started = _shell('am start -W -a android.intent.action.VIEW -d ' + shlex.quote(target) + ' ' + PLAYER
                      + ' || echo Error: not started', limit=8.0)
     if 'Error' in started:
         raise ValueError('The Android TV instance did not start the video: ' + started.strip()[-160:])

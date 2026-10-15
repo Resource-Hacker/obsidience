@@ -1228,8 +1228,10 @@ def _stop_pc_player():
     _stop_pc(_android)
 
 
-def _android_video(context, cancel, token, attempted, link):
+def _android_video(context, cancel, token, attempted, link, start=0):
     """Play a YouTube video on the Android source: (the run that plays it or None, whether it was sent).
+
+    start (seconds) goes into the link SmartTube opens; a video already playing is sent again for it.
 
     None when the instance does not carry it (it is not running, refused the link, or took it, played
     nothing in time and reads back idle again): the TV's own app then opens the video as before.
@@ -1238,13 +1240,14 @@ def _android_video(context, cancel, token, attempted, link):
     if playing is None:
         return None
     previous = _OPENED.get(PC_APP) or {}
-    if playing['playback'] == 'playing' and playing['run'] == previous.get('player') and previous.get('link') == link:
+    if (not start and playing['playback'] == 'playing' and playing['run'] == previous.get('player')
+            and previous.get('link') == link):
         # The video its player still plays, in the run this Harness started, is not opened again.
         return playing['run'], False
     attempted.add(token)
     context['_tv_effect_uncertain'] = True
     try:
-        run = _android.play(link, cancel)
+        run = _android.play(link, cancel, start=start)
     except ValueError as error:  # Refused: nothing was started.
         _agent.log.info('Android route skipped: %s', error)
     else:
@@ -1844,6 +1847,12 @@ def _execute(args, context):
     if not isinstance(args, dict):
         raise ValueError('TV arguments must be an object')
     action = args.get('action')
+    start = None
+    if action == 'open' and 'url' in args and 'start' in args:
+        # A YouTube video link may name its start position in whole seconds (SmartTube's link carries it).
+        args, start = {key: value for key, value in args.items() if key != 'start'}, args['start']
+        if type(start) is not int or not 0 <= start <= 86400:
+            raise ValueError('start takes whole seconds 0-86400 for a YouTube video link')
     fields = {'on': [set()], 'off': [set()], 'observe': [set()], 'stop': [set()], 'launch': [{'app'}],
               'vod': [{'operation', 'generation', 'source'},
                       {'operation', 'generation', 'source', 'position'},
@@ -1928,6 +1937,8 @@ def _execute(args, context):
             else:
                 (alias, link), title = _link(args['url'], row['apps']), None
                 live = '/live/' in args['url']
+                if start is not None and (alias != 'youtube' or live):
+                    raise ValueError('start applies only to a YouTube video link')
         token = ('power' if action in ('on', 'off') else 'launch:' + args['app'] if action == 'launch'
                  else 'open:' + link if opening else '')
         if token and token in attempted:
@@ -1944,10 +1955,12 @@ def _execute(args, context):
             # The same route for a YouTube video: the workstation's Android TV instance plays it (one
             # to two seconds) and the TV only shows it. Without the instance, or when it does not play
             # the video, the Fire OS app remains. Live streams stay with the TV's YouTube app.
-            carried = _android_video(context, cancel, token, attempted, link)
+            carried = _android_video(context, cancel, token, attempted, link, start or 0)
             if carried is not None:
                 (run, loaded), source = carried, 'android'
                 pc, started = (title, None), run is not None
+                if start:
+                    extra['start'] = start  # Sent in SmartTube's link; the position is not read back.
         if source == 'player':
             title, ident = pc
             playing = _player.state() or {}

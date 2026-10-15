@@ -1,0 +1,7 @@
+{
+  "name": "org.obsidience.edge",
+  "description": "Obsidience: cast the YouTube video playing in Edge to the registered TV",
+  "path": "@HOST_PATH@",
+  "type": "stdio",
+  "allowed_origins": ["chrome-extension://@EXTENSION_ID@/"]
+}

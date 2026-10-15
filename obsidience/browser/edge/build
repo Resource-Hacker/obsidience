@@ -1,0 +1,85 @@
+#!/usr/bin/python3
+"""Pack the Obsidience Edge extension and install its native messaging host.
+
+    obsidience/browser/edge/build
+
+Edge force-installs the extension from a local update manifest named by the managed policy
+/etc/opt/edge/policies/managed/obsidience-extensions.json (printed below; root writes it once).
+The owner-only signing key fixes the extension ID; it is created on the first run, and losing it
+changes the ID (the policy and host manifest then need the new one). An update is: bump
+"version" in extension/manifest.json and run this again; Edge picks it up at its next update check.
+"""
+from __future__ import annotations
+
+import base64
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
+
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import pack_crx3  # noqa: E402
+
+DATA = Path.home() / '.local/share/obsidience'
+KEY = DATA / 'edge-extension.pem'
+OUT = DATA / 'edge-extension'
+
+
+def signing_key():
+    if not KEY.exists():
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        DATA.mkdir(parents=True, exist_ok=True)
+        fd = os.open(KEY, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, 'wb') as out:
+            out.write(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                        serialization.NoEncryption()))
+        print(f'Created signing key {KEY}: keep it; it fixes the extension ID.')
+    key = serialization.load_pem_private_key(KEY.read_bytes(), password=None)
+    return key.public_key().public_bytes(serialization.Encoding.DER,
+                                         serialization.PublicFormat.SubjectPublicKeyInfo)
+
+
+def write(path: Path, data: bytes):
+    temp = path.with_name(path.name + '.tmp')
+    temp.write_bytes(data)
+    temp.replace(path)
+
+
+def main():
+    spki = signing_key()
+    manifest = json.loads((HERE / 'extension/manifest.json').read_text())
+    version = manifest['version']
+    OUT.mkdir(parents=True, exist_ok=True)
+    updates = OUT / 'updates.xml'
+    crx = OUT / f'obsidience-{version}.crx'
+    # The staged copy alone carries the key and this machine's update address.
+    manifest.update(key=base64.b64encode(spki).decode(), update_url=updates.as_uri())
+    with tempfile.TemporaryDirectory() as stage:
+        shutil.copytree(HERE / 'extension', stage, dirs_exist_ok=True)
+        (Path(stage) / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+        temp = crx.with_name(crx.name + '.tmp')
+        sys.argv = ['pack_crx3', stage, str(KEY), str(temp)]
+        extension_id = pack_crx3.ext_id(spki)
+        pack_crx3.main()
+        temp.replace(crx)
+    write(updates, (
+        "<?xml version='1.0' encoding='UTF-8'?>\n"
+        "<gupdate xmlns='http://www.google.com/update2/response' protocol='2.0'>\n"
+        f"  <app appid='{extension_id}'>\n"
+        f"    <updatecheck codebase='{crx.as_uri()}' version='{version}' />\n"
+        "  </app>\n</gupdate>\n").encode())
+    subprocess.run([str(HERE / 'host/install-host'), extension_id], check=True)
+    print(f'Packed {crx} ({extension_id}).')
+    print('Managed policy /etc/opt/edge/policies/managed/obsidience-extensions.json:')
+    print(json.dumps({'ExtensionInstallForcelist': [f'{extension_id};{updates.as_uri()}']}, indent=2))
+
+
+if __name__ == '__main__':
+    main()

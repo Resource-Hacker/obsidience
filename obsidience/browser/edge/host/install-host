@@ -1,0 +1,30 @@
+#!/bin/sh
+# Install the Edge native messaging manifest for org.obsidience.edge.
+#
+#   install-host EXTENSION_ID
+#
+# EXTENSION_ID is the fixed ID of the packed Obsidience Cast extension (32 letters a-p, derived
+# from the key in ../extension/manifest.json). The manifest names this checkout's host script and
+# admits only that extension. Edge reads it when the extension next sends a message.
+set -eu
+id=${1:?usage: install-host EXTENSION_ID}
+case $id in
+    *[!a-p]*) echo "install-host: an extension ID is 32 letters a-p" >&2; exit 2 ;;
+esac
+[ ${#id} -eq 32 ] || { echo "install-host: an extension ID is 32 letters a-p" >&2; exit 2; }
+here=$(cd "$(dirname "$0")" && pwd -P)
+dir=${XDG_CONFIG_HOME:-$HOME/.config}/microsoft-edge/NativeMessagingHosts
+mkdir -p "$dir"
+python3 - "$here/org.obsidience.edge.json" "$here/obsidience_edge_host.py" "$id" \
+    > "$dir/org.obsidience.edge.json.tmp" <<'PY'
+import json, sys
+template, host, extension = sys.argv[1:]
+with open(template) as source:
+    manifest = json.load(source)
+manifest['path'] = host
+manifest['allowed_origins'] = [f'chrome-extension://{extension}/']
+print(json.dumps(manifest, indent=2))
+PY
+mv "$dir/org.obsidience.edge.json.tmp" "$dir/org.obsidience.edge.json"
+chmod 0755 "$here/obsidience_edge_host.py"
+echo "Installed $dir/org.obsidience.edge.json"
