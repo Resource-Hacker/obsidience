@@ -773,7 +773,7 @@ def _approve(name: str) -> dict:
         note_meta.update({k: v for k, v in meta.items()
                           if k not in ("proposal", "action", "target", "reason", "proposed_at",
                                        "agent", "task", "run_id", "base_sha256", "event_context",
-                                       "review_class", "link_evidence", "proposal_body_sha256", "optimization")})
+                                       "review_class", "link_evidence", "proposal_body_sha256", "refinement", "optimization")})
     if generated:
         note_meta["kind"] = "runbook"
         note_meta["task"] = f"[[{generation_params['target_task']}]]"

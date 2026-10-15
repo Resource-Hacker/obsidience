@@ -48,6 +48,9 @@ PARTIAL_LOG = STATE / "deploy-partials.jsonl"
 API = "http://127.0.0.1:8765"
 RESTART_SHELL = ROOT / "obsidience" / "shell" / "session" / "restart-shell"
 HARNESS_UNITS = "obsidience/harness/systemd/"
+SHELL_UNITS = ROOT / "obsidience" / "shell" / "systemd"
+# Unit templates whose installed copies are what runs; an identical move changes none of them.
+UNIT_SOURCES = ("obsidience/tv/systemd/", "obsidience/shell/systemd/", HARNESS_UNITS)
 
 
 def git(*args: str) -> str:
@@ -64,6 +67,16 @@ def ledger(sql: str) -> list:
     uri = f"file:{STATE / 'obsidience.sqlite3'}?mode=ro"
     with sqlite3.connect(uri, uri=True) as db:
         return db.execute(sql).fetchall()
+
+
+def changed_paths(base: str, head: str) -> list[str]:
+    paths = []
+    for row in git("diff", "-M", "--name-status", f"{base}..{head}").splitlines():
+        status, *names = row.split("\t")
+        if status == "R100" and names[-1].startswith(UNIT_SOURCES):
+            continue
+        paths.append(names[-1])
+    return paths
 
 
 def targets(changed: list[str]) -> list[str]:
@@ -190,6 +203,23 @@ def install_tv_unit(name: str) -> None:
     subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
 
 
+def install_shell_units() -> None:
+    """Make the installed Shell units match the tree the restart loads.
+
+    The host seeds its state from repository paths in ExecStartPre, so a stale
+    copy stops the Shell from starting after those paths move or are rolled back.
+    """
+    installed = pathlib.Path.home() / ".config/systemd/user"
+    stale = [source for source in sorted(SHELL_UNITS.iterdir())
+             if source.is_file() and (installed / source.name).is_file()
+             and (installed / source.name).read_bytes() != source.read_bytes()]
+    for source in stale:
+        shutil.copy2(source, installed / source.name)
+    if stale:
+        subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
+        print("Installed Shell units:", ", ".join(source.name for source in stale))
+
+
 def wait_idle(limit: float = 900) -> None:
     deadline = time.monotonic() + limit
     while time.monotonic() < deadline:
@@ -297,6 +327,7 @@ def restart(owner: str) -> None:
         subprocess.run(["systemctl", "--user", "restart", "obsidience-harness-dev.service"], check=True)
         wait_ready()
     elif owner == "shell":
+        install_shell_units()
         subprocess.run([str(RESTART_SHELL)], check=True)
     elif owner == "ui":
         subprocess.run(["npm", "--prefix", str(ROOT / "obsidience" / "ui"), "run", "build"], check=True)
@@ -394,7 +425,7 @@ def main() -> None:
         print("would revert", git("log", "--oneline", f"{previous}..HEAD"))
     head = git("rev-parse", "HEAD")
     base = previous if args.rollback else last
-    changed = git("diff", "--name-only", f"{base}..{head}").splitlines() if base else ["obsidience/harness/", "obsidience/shell/", "obsidience/ui/"]
+    changed = changed_paths(base, head) if base else ["obsidience/harness/", "obsidience/shell/", "obsidience/ui/"]
     owners = targets(changed)
     owners = list(dict.fromkeys([*owners, *args.restart]))
     if args.only:

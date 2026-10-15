@@ -70,6 +70,15 @@ QtObject {
                 && value.description.length <= 256) {
             result.description = value.description
         }
+        // Fields this Shell no longer reads are written back as read, so the
+        // previous Shell QML (a rollback, or a graph stage started before the
+        // 2026-10-15 reorg) still accepts the file.
+        for (const key of ["backend", "display", "x_screen", "pixel_width",
+                           "pixel_height", "device_scale", "map_rect"]) {
+            if (value[key] !== undefined) {
+                result[key] = value[key]
+            }
+        }
         return result
     }
 

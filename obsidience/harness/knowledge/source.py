@@ -32,7 +32,9 @@ MAX_SOURCE_FILES = 2_000
 MAX_SOURCE_PREVIEW_BYTES = 1_000_000
 MAX_SOURCE_TREE_SCOPES = 16
 PROJECT_SOURCE_ROOTS = (
+    Path("LICENSES"),
     Path("docs"),
+    Path("obsidience/browser"),
     Path("obsidience/harness"),
     Path("obsidience/shell"),
     Path("obsidience/ui/src"),

@@ -4,7 +4,6 @@ import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import QtWebEngine
-import "../api"
 import "../components/identity"
 
 Rectangle {
@@ -15,7 +14,7 @@ Rectangle {
     required property string graphSurfaceId
     readonly property bool showsGraph: surfaceId !== ""
         && surfaceId === graphSurfaceId
-    readonly property url graphUrl: Harness.origin + "/shell/knowledge/"
+    readonly property url graphUrl: "http://127.0.0.1:8765/shell/knowledge/"
         + "?surface=knowledge&surface_id="
         + encodeURIComponent(surfaceId) + "&lock=1"
 
