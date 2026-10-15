@@ -21,9 +21,10 @@ opened when the catalogue lists it; otherwise, within about 85 seconds, the
 result is pending with `effect_applied` and `must_not_replay`: say it is being
 added, never register it again or play a substitute. `choices` mean play sent
 nothing: ask the owner, then open the chosen library id or play the exact title
-with its year. An exact title wins; a library series that only begins with the
-words (Star Trek: Voyager for "Star Trek") is offered among the choices whenever
-the catalogue also has that exact title, and a one-word prefix never plays. A
+with its year. An exact title wins; a library series that contains the words (Star Trek:
+Voyager for "Star Trek" or "Voyager") is offered among the choices whenever the
+catalogue also has that exact title, which is then never registered; only a series
+that begins with two or more of the words may play, and a one-word request never. A
 request for a kind of content rather than a title (some music, cartoons, a
 movie) is no title and uses the live/web route below. A request ending in movie,
 film, show or series that is not exactly a library title ("a superhero movie",

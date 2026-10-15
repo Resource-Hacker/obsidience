@@ -25,8 +25,8 @@ description: 'Control the registered TV as an optional Media playback destinatio
   opened when the catalogue lists it, otherwise the result says it is pending within about
   85 s (nothing to replay). It wakes the TV if needed. Ambiguous titles, editions or sources
   return choices and play nothing: ask the owner; a different library title is never played
-  instead (a sequel, or a series that only begins with the words, such as Star Trek: Voyager
-  for Star Trek, which is also a film). A request ending in movie, film, show or series that
+  instead (a sequel, or a series that contains the words, such as Star Trek: Voyager for
+  Star Trek, which is also a film, or for Voyager; then nothing is registered either). A request ending in movie, film, show or series that
   is not exactly a library title (a superhero movie, also The Truman Show) or a lone content
   word that is also a title (Radio) registers nothing and returns catalogue choices; a title
   with no exact catalogue match returns similar ones: ask the owner, then play the exact title

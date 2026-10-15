@@ -31,7 +31,9 @@ catalogue title, the unique recommended source, and one `media.acquire` call
 with its own receipt; a source the media server already holds is refreshed
 instead. The result is playback, `choices` (nothing sent; ask the owner) or a
 pending registration (effect applied, never repeated). An exact title wins; a
-different or longer library title is only ever a choice. Generic requests
+different or longer library title is only ever a choice, and a library series
+containing the words (Star Trek: Voyager for "Voyager") keeps a catalogue title of
+that name from being registered: the owner chooses. Generic requests
 (music, cartoons, a movie) and explicit live, channel, news, weather, YouTube or
 Pluto requests use the live/web route. The steps below remain the procedure for
 explicit browse, source-search, selection and season requests.

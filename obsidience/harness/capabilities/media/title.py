@@ -18,10 +18,11 @@ clearly one named title (deterministic rules, no model call):
 - a request that ends in a content noun ("a superhero movie") describes rather than
   names: unless it is exactly a library title it never registers, even when the
   catalogue holds a title of that name ("Superhero Movie"); its rows become choices;
-- an exact library title plays; a library series whose name only begins with the
-  request ("Star Trek" -> Star Trek: Voyager) plays only for a request of two or
-  more words when the metadata catalogue has no title of exactly that name;
-  otherwise the owner chooses;
+- an exact library title plays; a library series whose name contains the request but
+  is not it ("Star Trek" or "Voyager" -> Star Trek: Voyager) never lets a catalogue
+  title of that name register: the owner chooses between them. Only a series whose name
+  begins with a request of two or more words plays, when it is the only such library
+  title and the metadata catalogue has no title of exactly that name;
 - an absent title needs exactly one exact metadata-catalogue title (any other
   number returns choices), and a source the media server already holds for it is
   refreshed (media.acquire refresh), never registered a second time;
@@ -77,7 +78,11 @@ def tokens(text: str) -> list[str]:
 
 def spec(query: str) -> tuple[str, int | None, int | None]:
     """(title, season, episode) from a request such as "Voyager season 2 episode 3"."""
-    text = re.sub(r'\s+on\s+(?:the\s+)?(?:tv|television)\s*$', '', query.strip(), flags=re.I)
+    text = query.strip()
+    bare = re.sub(r'\s+on\s+(?:the\s+)?(?:tv|television)\s*$', '', text, flags=re.I)
+    if bare != text:  # The whole phrase "put Star Trek on the TV": its verb is not part of the title.
+        bare = re.sub(r'^(?:please\s+)?(?:put|play|watch)\s+(?:on\s+)?(?=\S)', '', bare, flags=re.I)
+    text = bare
     for pattern in _SPEC:
         match = pattern.search(text)
         if match:
@@ -142,7 +147,11 @@ async def _search(title: str, kind: str, context: dict) -> tuple[list[dict], lis
     pages = context.setdefault('_tv_title_searches', {})
     key = (tuple(tokens(title)), kind)
     if key not in pages:
-        pages[key] = (await discovery.search(title, kind, context))['matches']
+        page = await discovery.search(title, kind, context)
+        # A page cut by the activation's record cap may hide a second exact title: fail closed.
+        pages[key] = None if page.get('truncated') else page['matches']
+    if pages[key] is None:
+        raise MediaUnavailable('media_discovery_record_limit')
     exact, partial = match_titles(title, pages[key])
     return exact, [] if exact else partial or pages[key]
 
@@ -517,7 +526,8 @@ async def _acquire(title: str, season: int | None, episode: int | None, context:
                          + ('Its existing registration was refreshed' if registered.get('operation') == 'refresh'
                             else 'One source was registered')
                          + ' with the media server, which has not listed it yet; nothing was sent to the TV. Say it '
-                           'is being added and can be played shortly. Do not register it again or play a substitute.')
+                           'is being added and that asking for it again in a minute plays it (that also finishes '
+                           'its setup if needed). Do not register it again or play a substitute.')
 
 
 async def _prepare(query: str, context: dict) -> dict:
@@ -545,19 +555,21 @@ async def _prepare(query: str, context: dict) -> dict:
                       note='Ask whether the owner meant one of these titles (play it with its exact title followed '
                            'by its year) or that kind of content (play again with app youtube or pluto).')
     words = tokens(title)
-    leading = [row for row in partial if row['type'] == 'Series' and tokens(row['title'])[:len(words)] == words]
-    if leading:
-        # A library series that only begins with the request stands for it only when the request has
-        # two or more words, it is the only such title, and the catalogue has no title of exactly
-        # that name ("Star Trek" is also a 2009 film). An unreadable catalogue leaves it a choice.
+    if any(row['type'] == 'Series' for row in partial):
+        # A library series containing the request ("Voyager" in Star Trek: Voyager) means the owner
+        # may mean it: a catalogue title of that name is then only a choice, never registered. It
+        # stands for the request only when its name begins with a request of two or more words, it is
+        # the only such library title, and the catalogue has no title of exactly that name ("Star
+        # Trek" is also a 2009 film). An unreadable catalogue leaves it a choice.
         try:
-            listed = await _catalogue_exact(title, season, context)
+            listed, near = await _catalogue(title, season, context)
         except (MediaUnavailable, OSError, ValueError):
-            listed = None
-        if listed == [] and len(words) >= 2 and len(partial) == 1:
+            listed, near = None, []
+        if (listed == [] and len(words) >= 2 and len(partial) == 1
+                and tokens(partial[0]['title'])[:len(words)] == words):
             return await _play_row(partial[0], season, episode, context)
         return _final(f'"{title}" is not exactly one library title; nothing was played.',
-                      choices=_rows(partial, context) + _catalogue_rows(listed or []), note=_CHOOSE)
+                      choices=_rows(partial, context) + _catalogue_rows(listed or near), note=_CHOOSE)
     # Not in the library under this name; a longer library title is never a substitute.
     result = await _acquire(title, season, episode, context)
     if partial and result.get('status') == 'failed' and result.get('effect_applied') is False:

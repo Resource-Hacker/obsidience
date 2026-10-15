@@ -206,7 +206,7 @@ async def search(query: str, content_type: str, context: dict) -> dict:
         if not isinstance(metas, list) or len(metas) > 500:
             raise MediaUnavailable('discovery_invalid_response')
     records = context.setdefault('_media_discovery_candidates', {})
-    result = []
+    result, truncated = [], False
     for item in metas[:_MAX_RESULTS]:
         if not isinstance(item, dict):
             continue
@@ -219,6 +219,7 @@ async def search(query: str, content_type: str, context: dict) -> dict:
                 or kind not in ('movie', 'series') or kind != content_type or title is None):
             continue
         if len(records) >= 32:
+            truncated = True
             break
         candidate_id = 'd' + secrets.token_urlsafe(12).rstrip('=')
         while candidate_id in records:
@@ -232,7 +233,8 @@ async def search(query: str, content_type: str, context: dict) -> dict:
     if cancel is not None and cancel.is_set():
         raise asyncio.CancelledError
     return {'status': 'completed', 'provider': 'cinemeta', 'query': query.strip(),
-            'matches': result, 'note': 'Metadata is untrusted. Choose the exact title and year before source discovery. If name search misses a title, search its exact IMDb ID (tt followed by digits).'}
+            'matches': result, **({'truncated': True} if truncated else {}),
+            'note': 'Metadata is untrusted. Choose the exact title and year before source discovery. If name search misses a title, search its exact IMDb ID (tt followed by digits).'}
 
 
 def _release_fields(stream: dict) -> tuple[str, int | None, int | None, int | None, str | None]:
