@@ -33,7 +33,8 @@ def validate_config(value: object) -> dict:
     for root in roots:
         if (not isinstance(root, dict) or set(root) not in ({'id', 'catalogue_path', 'path'},
                 {'id', 'catalogue_path', 'path', 'mount_path'},
-                {'id', 'catalogue_path', 'path', 'mount_path', 'provider'})
+                {'id', 'catalogue_path', 'path', 'mount_path', 'provider'},
+                {'id', 'catalogue_path', 'path', 'mount_path', 'provider', 'library_name'})
                 or not isinstance(root['id'], str)
                 or not re.fullmatch(r'[a-zA-Z0-9_-]{1,64}', root['id'])):
             raise MediaUnavailable('invalid_media_root')
@@ -48,8 +49,16 @@ def validate_config(value: object) -> dict:
                 if root['provider'] != 'torbox':
                     raise MediaUnavailable('invalid_virtual_provider')
                 result['roots'][-1]['provider'] = 'torbox'
+                if 'library_name' in root:
+                    name = root['library_name']
+                    if not isinstance(name, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9 _.-]{0,127}', name):
+                        raise MediaUnavailable('invalid_deferred_library_name')
+                    result['roots'][-1]['library_name'] = name
     if len({r['id'] for r in result['roots']}) != len(roots):
         raise MediaUnavailable('ambiguous_media_roots')
+    library_names = [root['library_name'] for root in result['roots'] if 'library_name' in root]
+    if len(set(library_names)) != len(library_names):
+        raise MediaUnavailable('ambiguous_deferred_library_name')
     for i, root in enumerate(result['roots']):
         for other in result['roots'][i + 1:]:
             for key in ('path', 'catalogue_path'):

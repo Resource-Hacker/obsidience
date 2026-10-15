@@ -47,7 +47,7 @@ def _dav(config: dict, method: str, relative: str, *, refresh=False) -> bytes:
     _parts(relative) if relative else None
     url = 'https://webdav.torbox.app/' + quote(relative, safe='/')
     if refresh:
-        url = 'https://webdav.torbox.app/refresh/'
+        url = 'https://webdav.torbox.app/refresh'
     headers = {'Accept-Encoding': 'identity', 'Depth': '1'}
     content = ('<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop>'
                '<d:resourcetype/><d:getcontentlength/><d:getetag/>'
@@ -57,8 +57,14 @@ def _dav(config: dict, method: str, relative: str, *, refresh=False) -> bytes:
         with httpx.Client(trust_env=False, follow_redirects=False, timeout=5,
                           auth=('torbox', _token(config['debrid']['credential']))) as client:
             with client.stream(method, url, headers=headers, content=content) as reply:
-                if reply.status_code not in ((200, 204) if refresh else (207,)):
+                if reply.status_code not in ((200, 204, 303) if refresh else (207,)):
                     raise MediaUnavailable('torbox_webdav_unavailable')
+                if refresh and reply.status_code == 303:
+                    target = urlsplit(reply.headers.get('location', ''))
+                    if (target.scheme not in ('', 'https') or target.netloc not in ('', 'webdav.torbox.app')
+                            or target.path != '/' or target.query or target.fragment):
+                        raise MediaUnavailable('torbox_refresh_unverified')
+                    return b''
                 body = bytearray()
                 for chunk in reply.iter_raw():
                     body.extend(chunk)

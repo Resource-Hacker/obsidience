@@ -351,12 +351,12 @@ class TorBoxAPI:
                              'tags': tags if tag in tags else tags + [tag]}, cancel=cancel)
             except MediaUnavailable:
                 pass  # An uncertain metadata write is reconciled, never resent.
-            for attempt in range(4):
+            for attempt in range(11):
                 rows = await self.mylist(torrent_id=registered['torrent_id'], cancel=cancel)
                 if (len(rows) == 1 and rows[0]['hash'] == registered['hash']
                         and tag in rows[0]['tags'] and rows[0]['name'] == name):
                     break
-                if attempt == 3:
+                if attempt == 10:
                     raise MediaUnavailable('torbox_library_tag_unverified')
                 await asyncio.sleep(.5)
         return {**registered, 'name': name, 'tag': tag}

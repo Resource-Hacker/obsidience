@@ -292,15 +292,58 @@ class JellyfinCatalogue:
         matches = [folder for folder in folders if isinstance(folder, dict)
                    and isinstance(folder.get('Locations'), list)
                    and root['catalogue_path'] in folder['Locations']]
-        if len(matches) != 1:
-            raise MediaUnavailable('catalogue_root_ambiguous')
-        folder_id = _id(matches[0].get('ItemId'))
-
         catalogue = self._catalogue()
         headers = {'Accept': 'application/json', 'Accept-Encoding': 'identity',
                    'Authorization': ('MediaBrowser Client="Obsidience Media", Device="Workstation", '
                                      'DeviceId="obsidience-media", Version="1", Token="'
                                      + _token(catalogue['credential']) + '"')}
+        if cancel is not None and cancel.is_set():
+            return {'status': 'pending', 'reason': 'refresh_skipped_cancelled'}
+        library_name = root.get('library_name') if root.get('provider') == 'torbox' else None
+        if not matches and library_name:
+            # The first acquired episode creates TorBox's tag directory. Attach
+            # only its approved root to the already-created empty TV collection.
+            named = [folder for folder in folders if isinstance(folder, dict)
+                     and folder.get('Name') == library_name]
+            if (len(named) != 1 or named[0].get('CollectionType') != 'tvshows'
+                    or named[0].get('Locations') != []):
+                raise MediaUnavailable('catalogue_deferred_root_not_empty_or_ambiguous')
+            expected_folder_id = _id(named[0].get('ItemId'))
+            if cancel is not None and cancel.is_set():
+                return {'status': 'pending', 'reason': 'refresh_skipped_cancelled'}
+            try:
+                with self.client.stream('POST', catalogue['url'] + '/Library/VirtualFolders/Paths',
+                        params={'refreshLibrary': 'false'},
+                        json={'Name': library_name, 'Path': root['catalogue_path']},
+                        headers=headers):
+                    pass
+            except (httpx.HTTPError, OSError):
+                pass  # A lost response never causes a second path attachment.
+            try:
+                folders = self._get('/Library/VirtualFolders')
+            except MediaUnavailable:
+                return {'status': 'pending', 'reason': 'catalogue_root_attachment_uncertain'}
+            if not isinstance(folders, list) or len(folders) > 64:
+                return {'status': 'pending', 'reason': 'invalid_virtual_folder_response'}
+            named = [folder for folder in folders if isinstance(folder, dict)
+                     and folder.get('Name') == library_name]
+            matches = [folder for folder in folders if isinstance(folder, dict)
+                       and isinstance(folder.get('Locations'), list)
+                       and root['catalogue_path'] in folder['Locations']]
+            if (len(named) != 1 or len(matches) != 1 or named[0] != matches[0]
+                    or _id(named[0].get('ItemId')) != expected_folder_id
+                    or named[0].get('CollectionType') != 'tvshows'
+                    or named[0].get('Locations') != [root['catalogue_path']]):
+                return {'status': 'pending', 'reason': 'catalogue_root_attachment_uncertain'}
+        if len(matches) != 1:
+            raise MediaUnavailable('catalogue_root_ambiguous')
+        if library_name and (matches[0].get('Name') != library_name
+                or matches[0].get('CollectionType') != 'tvshows'
+                or matches[0].get('Locations') != [root['catalogue_path']]
+                or sum(isinstance(folder, dict) and folder.get('Name') == library_name
+                       for folder in folders) != 1):
+            raise MediaUnavailable('catalogue_deferred_root_changed')
+        folder_id = _id(matches[0].get('ItemId'))
         if cancel is not None and cancel.is_set():
             return {'status': 'pending', 'reason': 'refresh_skipped_cancelled'}
         try:
