@@ -214,7 +214,7 @@ Rectangle {
     function command(operation, resumeSaved) {
         if (!visible || pendingRequest || !ShellCommandToken.value) return
         const body = {request_id: uuid(), operation: operation}
-        if (operation === "acquire") {
+        if (operation === "acquire" || operation === "refresh_source") {
             if (!selectedSource || !acquisitionReady) return
             body.preview_token = selectedSource.preview_token
         } else if (operation === "server" && selected && mode === 0) {
@@ -256,7 +256,7 @@ Rectangle {
             if (ok && data.settled) {
                 const completionMessage = data.summary || ("Command " + data.state)
                 root.message = completionMessage
-                const acquired = root.pendingOperation === "acquire" && data.state === "completed"
+                const acquired = (root.pendingOperation === "acquire" || root.pendingOperation === "refresh_source") && data.state === "completed"
                 root.pendingRequest = ""
                 root.pendingOperation = ""
                 root.refreshStatus()
@@ -332,6 +332,7 @@ Rectangle {
                     : root.selectedSource && root.selectedSource.acquisition_scope === "season_pack"
                     ? "Register season pack (" + root.selectedSource.registered_files + " files)" : "Acquire selected source"; enabled: root.selectedSource !== null && root.acquisitionReady && !root.pendingRequest; onClicked: root.command("acquire") }
             Button { text: "Refresh readiness"; onClicked: root.refreshStatus() }
+            Button { text: "Refresh registered source"; enabled: root.selectedSource !== null && root.acquisitionReady && !root.pendingRequest; onClicked: root.command("refresh_source") }
             Label { text: root.acquisitionReady ? (root.selectedSource && root.selectedSource.acquisition_scope === "series_pack"
                         ? "Registers all " + root.selectedSource.registered_files + " files across all included seasons: "
                             + root.selectedSource.season_numbers.join(", ")

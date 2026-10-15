@@ -49,6 +49,9 @@ finite tuner-owned sequence; watchlist sync and periodic upgrades stay disabled.
    only the approved deferred root to its uniquely named empty TV collection,
    verify that path, then refresh that collection. It creates no dummy media or
    new collection. Pending metadata/catalogue readback does not repeat registration.
+   Select that exact source again and use `media.acquire refresh` (the Media pane's
+   Refresh registered source command) to reconcile an existing TorBox registration.
+   It cannot create a torrent. Report any remaining visibility blocker literally.
 4. For an explicit playback request, select the exact Jellyfin item/source or
    use a fresh `tv.control find` with `app: library`, ensure the registered TV
    is on, then `tv.control open` that exact current-turn id. Admission is

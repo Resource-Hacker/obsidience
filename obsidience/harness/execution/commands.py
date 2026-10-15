@@ -206,12 +206,21 @@ def owner_media_command(value: object) -> dict:
     except (KeyError, ValueError, TypeError, AttributeError):
         raise ValueError('Media command requires one request UUID') from None
     operation = value.get('operation')
-    if operation == 'acquire':
+    if operation in ('acquire', 'refresh_source'):
         if (set(value) != {'request_id', 'operation', 'preview_token'}
                 or not isinstance(value.get('preview_token'), str)
                 or not re.fullmatch(r'[0-9a-f]{32}', value['preview_token'])):
-            raise ValueError('Acquire requires one exact, unexpired source choice')
+            raise ValueError('Source operation requires one exact, unexpired source choice')
         return {'request_id': request_id, 'operation': operation, 'preview_token': value['preview_token']}
+    if operation == 'play_season':
+        if (set(value) != {'request_id', 'operation', 'destination', 'imdb_id', 'season', 'mode'}
+                or value.get('destination') != 'tv'
+                or not isinstance(value.get('imdb_id'), str)
+                or not re.fullmatch(r'tt[0-9]{7,10}', value['imdb_id'])
+                or type(value.get('season')) is not int or not 1 <= value['season'] <= 99
+                or value.get('mode') not in ('first', 'next_unwatched')):
+            raise ValueError('Season playback requires an exact series, season and playback mode')
+        return {**value, 'request_id': request_id}
     if operation == 'server':
         if set(value) not in ({'request_id', 'operation'}, {'request_id', 'operation', 'selection'}):
             raise ValueError('Invalid media server command')
@@ -247,7 +256,10 @@ def owner_media_command(value: object) -> dict:
 
 
 def owner_media_text(command: dict) -> str:
-    return ('Register the exact source selected in the Media pane in the library.' if command['operation'] == 'acquire' else
+    return ('Refresh catalogue visibility for the exact already registered source.' if command['operation'] == 'refresh_source' else
+            f"Play season {command['season']} of series {command['imdb_id']} on the registered TV using {command['mode']}."
+                if command['operation'] == 'play_season' else
+            'Register the exact source selected in the Media pane in the library.' if command['operation'] == 'acquire' else
             'Open the selected library item in Jellyfin.' if command['operation'] == 'server' and command.get('selection') else
             'Open the configured media server.' if command['operation'] == 'server' else
             'Resume the selected library source from its saved position on the registered TV.'

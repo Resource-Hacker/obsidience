@@ -46,6 +46,13 @@ approved deferred root after the first real episode exists. Every metadata/path
 write has bounded native readback; pending catalogue visibility never triggers
 another registration.
 
+`refresh` takes a fresh run-bound candidate for an already registered TorBox
+source. It reads back the exact account file plan, then uses the same library
+tagging, WebDAV and bounded catalogue refresh owner. An absent registration
+fails: this operation has no path to torrent creation. It is effectful because
+metadata and catalogue visibility may change. Existing registration and ready
+catalogue readback are reported separately; pending visibility is not playback.
+
 This Tool cannot search titles, choose a candidate, configure Tiramisu or account
 settings, expose credentials or sockets, request arbitrary library scans, return
 paths, or control a player. The configured discovery provider is used as-is. Provider denial,

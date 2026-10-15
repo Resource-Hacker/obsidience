@@ -454,6 +454,14 @@ class TorBoxAPI:
                 await asyncio.sleep(.5)
         return {**registered, 'name': name, 'tag': tag}
 
+    async def reconcile(self, candidate: dict, cancel=None) -> dict:
+        """Read an exact existing registration; this path cannot create a torrent."""
+        self.validate_binding(candidate)
+        match = await self._list_exact(candidate, cancel)
+        if match is None:
+            raise MediaUnavailable('torbox_registration_not_found')
+        return self._result(candidate, match, effect=False, existing=True, reconciled=True)
+
     async def register(self, candidate: dict, cancel=None) -> dict:
         """One cached-only POST; one read-only reconciliation; no write retries."""
         self.validate_binding(candidate)

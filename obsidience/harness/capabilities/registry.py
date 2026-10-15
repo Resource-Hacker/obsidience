@@ -225,7 +225,7 @@ def _argument_schemas() -> dict[str, dict]:
                  "mode":{"enum":["first","next_unwatched"]}}, ("action","metadata_id","season")),
             obj({"action":{"const":"health"}},("action",)),
             obj({"action":{"const":"resume"},"item_id":text(64)},("action","item_id"))]},
-        "media.acquire": obj({"action":{"const":"register"},"candidate_id":text(64)},
+        "media.acquire": obj({"action":{"enum":["register", "refresh"]},"candidate_id":text(64)},
                              ("action","candidate_id")),
         "computer.observe": obj({"target":observe_target,"query":text(500)},("query",)),
         "computer.replay": obj({"query":text(500),"seconds":{"type":"integer","minimum":5,"maximum":60},

@@ -156,7 +156,7 @@ async def execute(args: dict, context: dict) -> dict:
     result = {'status': 'failed', 'delivery': 'not_dispatched',
               'effect_applied': False, 'must_not_replay': True}
     if (not isinstance(args, dict) or set(args) != {'action', 'candidate_id'}
-            or args.get('action') != 'register'
+            or args.get('action') not in ('register', 'refresh')
             or not isinstance(args.get('candidate_id'), str)
             or not args['candidate_id'].startswith('a')
             or len(args['candidate_id']) > 64):
@@ -173,7 +173,8 @@ async def execute(args: dict, context: dict) -> dict:
     if (not isinstance(run_id, str) or not isinstance(candidate, dict)
             or candidate.get('run_id') != run_id):
         return {**result, 'failure': {'code': 'media_candidate_stale'}}
-    if candidate.get('register_attempted'):
+    attempt_marker = 'refresh_attempted' if args['action'] == 'refresh' else 'register_attempted'
+    if candidate.get(attempt_marker):
         return {**result, 'failure': {'code': 'media_candidate_already_attempted',
                                       'correction_allowed': False}}
     metadata = context.get('_media_discovery_candidates', {}).get(candidate.get('metadata_id'))
@@ -192,14 +193,15 @@ async def execute(args: dict, context: dict) -> dict:
     async with lock:
         duplicate_key = (_normal_hash(candidate.get('hash')), candidate.get('type'),
                          candidate.get('season'), candidate.get('episode'))
-        attempts = context.setdefault('_media_acquisition_attempts', set())
+        attempts = context.setdefault('_media_refresh_attempts' if args['action'] == 'refresh'
+                                      else '_media_acquisition_attempts', set())
         if not duplicate_key[0] or duplicate_key in attempts:
             return {**result, 'failure': {'code': 'media_source_already_attempted',
                                           'correction_allowed': False}}
         # Key attempts by source identity, not opaque candidate id. Consume before the
         # preflight read so a second candidate cannot race a first registration.
         attempts.add(duplicate_key)
-        candidate['register_attempted'] = True
+        candidate[attempt_marker] = True
         candidate['_context'] = context
         try:
             client = Tiramisu()
@@ -214,15 +216,23 @@ async def execute(args: dict, context: dict) -> dict:
                 ready_mount(roots[0])
                 client = TorBoxAPI()
                 client.validate_binding(candidate)
-            registered = await client.register(candidate, cancel)
+            if args['action'] == 'refresh':
+                if not candidate.get('debrid_binding'):
+                    raise MediaUnavailable('media_registration_refresh_unsupported')
+                # No register() call: an absent source must never become a new add.
+                registered = await client.reconcile(candidate, cancel)
+            else:
+                registered = await client.register(candidate, cancel)
             if registered.get('status') == 'completed':
                 registered['catalogue'] = await _refresh_catalogue(client, candidate, cancel)
+            registered['operation'] = args['action']
             return registered
         except asyncio.CancelledError:
             raise
         except MediaUnavailable as error:
             outcome = context.get('_media_acquisition_outcome')
-            if isinstance(outcome, dict) and outcome.get('delivery') == 'uncertain':
+            if (args['action'] == 'register' and isinstance(outcome, dict)
+                    and outcome.get('delivery') == 'uncertain'):
                 return outcome
             return {**result, 'failure': {'code': str(error), 'correction_allowed': False}}
         finally:

@@ -42,3 +42,8 @@ contains two episodes. Never obtain an uncached source or fall back to local Bit
 The one registration owner handles native library tagging, mount visibility and
 the targeted catalogue refresh. Report tagging or catalogue state as pending
 when readback cannot verify it; never repeat registration to repair visibility.
+
+For a known TorBox registration with pending visibility, select the same exact
+source in a fresh activation and call `refresh`. This reconciles the existing
+complete file plan and requests visibility refresh without creating a torrent.
+Report the concrete pending reason if its catalogue readback is not ready.

@@ -42,8 +42,18 @@ def ready_mount(root: dict) -> dict:
         raise MediaUnavailable('torbox_mount_not_ready') from None
 
 
-def _dav(config: dict, method: str, relative: str, *, refresh=False) -> bytes:
+def _dav_client(config: dict) -> httpx.Client:
     from .jellyfin import _token
+    return httpx.Client(trust_env=False, follow_redirects=False, timeout=5,
+                        limits=httpx.Limits(max_connections=1, max_keepalive_connections=1),
+                        auth=('torbox', _token(config['debrid']['credential'])))
+
+
+def _dav(config: dict, method: str, relative: str, *, refresh=False,
+         client: httpx.Client | None = None, deadline: float | None = None) -> bytes:
+    if client is None:
+        with _dav_client(config) as owned:
+            return _dav(config, method, relative, refresh=refresh, client=owned, deadline=deadline)
     _parts(relative) if relative else None
     url = 'https://webdav.torbox.app/' + quote(relative, safe='/')
     if refresh:
@@ -52,33 +62,36 @@ def _dav(config: dict, method: str, relative: str, *, refresh=False) -> bytes:
     content = ('<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop>'
                '<d:resourcetype/><d:getcontentlength/><d:getetag/>'
                '</d:prop></d:propfind>') if method == 'PROPFIND' else None
-    deadline = time.monotonic() + 6
+    deadline = min(time.monotonic() + 6, deadline) if deadline is not None else time.monotonic() + 6
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise MediaUnavailable('torbox_webdav_limit')
     try:
-        with httpx.Client(trust_env=False, follow_redirects=False, timeout=5,
-                          auth=('torbox', _token(config['debrid']['credential']))) as client:
-            with client.stream(method, url, headers=headers, content=content) as reply:
-                if reply.status_code not in ((200, 204, 303) if refresh else (207,)):
-                    raise MediaUnavailable('torbox_webdav_unavailable')
-                if refresh and reply.status_code == 303:
-                    target = urlsplit(reply.headers.get('location', ''))
-                    if (target.scheme not in ('', 'https') or target.netloc not in ('', 'webdav.torbox.app')
-                            or target.path != '/' or target.query or target.fragment):
-                        raise MediaUnavailable('torbox_refresh_unverified')
-                    return b''
-                body = bytearray()
-                for chunk in reply.iter_raw():
-                    body.extend(chunk)
-                    if len(body) > 512 * 1024 or time.monotonic() > deadline:
-                        raise MediaUnavailable('torbox_webdav_limit')
-                return bytes(body)
+        with client.stream(method, url, headers=headers, content=content,
+                           timeout=min(5, remaining)) as reply:
+            if reply.status_code not in ((200, 204, 303) if refresh else (207,)):
+                raise MediaUnavailable('torbox_webdav_unavailable')
+            if refresh and reply.status_code == 303:
+                target = urlsplit(reply.headers.get('location', ''))
+                if (target.scheme not in ('', 'https') or target.netloc not in ('', 'webdav.torbox.app')
+                        or target.path != '/' or target.query or target.fragment):
+                    raise MediaUnavailable('torbox_refresh_unverified')
+                return b''
+            body = bytearray()
+            for chunk in reply.iter_raw():
+                body.extend(chunk)
+                if len(body) > 512 * 1024 or time.monotonic() > deadline:
+                    raise MediaUnavailable('torbox_webdav_limit')
+            return bytes(body)
     except (httpx.HTTPError, OSError):
         raise MediaUnavailable('torbox_webdav_unavailable') from None
 
 
-def dav_files(config: dict, directory: str) -> list[dict]:
+def dav_files(config: dict, directory: str, *, client: httpx.Client | None = None,
+              deadline: float | None = None) -> list[dict]:
     """One bounded directory, never a recursive account walk or an arbitrary URL."""
     try:
-        material = _dav(config, 'PROPFIND', directory)
+        material = _dav(config, 'PROPFIND', directory, client=client, deadline=deadline)
         if b'<!DOCTYPE' in material or b'<!ENTITY' in material:
             raise ValueError
         document = ET.fromstring(material)
@@ -109,8 +122,15 @@ def dav_files(config: dict, directory: str) -> list[dict]:
         raise MediaUnavailable('torbox_webdav_invalid_listing') from None
 
 
-def account_file_path(config: dict, registered: dict) -> str:
+def account_file_path(config: dict, registered: dict, *, client: httpx.Client | None = None,
+                      deadline: float | None = None) -> str:
     """Resolve a provider file to WebDAV only by exact native name/path and size."""
+    deadline = time.monotonic() + 12 if deadline is None else deadline
+    if client is None:
+        # The native DAV server sets a load-balancer affinity cookie. One exact
+        # ancestor walk must use the same backend rather than mix its snapshots.
+        with _dav_client(config) as owned:
+            return account_file_path(config, registered, client=owned, deadline=deadline)
     # Verify native paths against this account's current WebDAV listing.
     # No fuzzy filename match and no fallback to another edition.
     path = registered['path']
@@ -128,8 +148,7 @@ def account_file_path(config: dict, registered: dict) -> str:
     parents = {str(PurePosixPath(p).parent) for p in candidates}
     # Follow only exact candidate ancestors (bounded depth), never recurse over
     # the account or treat an unlisted nested directory as an admitted path.
-    deadline = time.monotonic() + 12
-    listings = {tag: dav_files(config, tag)}
+    listings = {tag: dav_files(config, tag, client=client, deadline=deadline)}
     for parent in sorted(parents):
         parts = PurePosixPath(parent).parts
         if len(parts) > 8:
@@ -142,12 +161,14 @@ def account_file_path(config: dict, registered: dict) -> str:
                     break
                 if len(listings) >= 16 or time.monotonic() > deadline:
                     raise MediaUnavailable('torbox_webdav_path_limit')
-                listings[child] = dav_files(config, child)
+                listings[child] = dav_files(config, child, client=client, deadline=deadline)
             current = child
         else:
             for row in listings[current]:
                 if not row['directory'] and row['path'] in candidates and row['size'] == registered['size']:
                     matches.append(row['path'])
+    if time.monotonic() > deadline:
+        raise MediaUnavailable('torbox_webdav_path_limit')
     matches = list(set(matches))
     if len(matches) != 1:
         raise MediaUnavailable('torbox_webdav_file_unverified')
@@ -162,8 +183,11 @@ def refresh(config: dict, registered: dict) -> str:
         raise MediaUnavailable('torbox_root_unavailable')
     root = roots[0]
     identity = ready_mount(root)
-    _dav(config, 'GET', '', refresh=True)
-    relative = account_file_path(config, registered)
+    # Refresh and readback must retain the provider's backend affinity.
+    deadline = time.monotonic() + 12
+    with _dav_client(config) as client:
+        _dav(config, 'GET', '', refresh=True, client=client, deadline=deadline)
+        relative = account_file_path(config, registered, client=client, deadline=deadline)
     runtime = Path(f'/run/user/{os.getuid()}/obsidience-media-torbox')
     try:
         with httpx.Client(transport=httpx.HTTPTransport(uds=str(runtime / 'control.sock')),

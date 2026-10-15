@@ -51,8 +51,9 @@ async def _run_owner_media(plugin: AgentPlugin, command: dict, session_id: str, 
     result = None
     try:
         operation = command['operation']
-        required = ({'media.library', 'media.acquire'} if operation == 'acquire' else
-                    {'media.library', 'tv.control'} if operation == 'play' else
+        acquisition = operation in ('acquire', 'refresh_source')
+        required = ({'media.library', 'media.acquire'} if acquisition else
+                    {'media.library', 'tv.control'} if operation in ('play', 'play_season') else
                     ({'application.launch', 'media.library'} if command.get('selection') else
                      {'application.launch'}) if operation == 'server' else {'tv.control'})
         if missing := required - set(plugin.ex.allowed):
@@ -65,7 +66,7 @@ async def _run_owner_media(plugin: AgentPlugin, command: dict, session_id: str, 
             settled = True
             return
         acquisition_choice = None
-        if operation == 'acquire':
+        if acquisition:
             from ...interfaces.api.media import claim_source_preview, source_fingerprint
             proof = claim_source_preview(command['preview_token'], command['request_id'])
             blocks = await plugin.operate('media.library', {
@@ -90,7 +91,23 @@ async def _run_owner_media(plugin: AgentPlugin, command: dict, session_id: str, 
             if source_page.get('status') != 'completed' or len(exact) != 1:
                 raise ValueError('The exact source changed or is unavailable; choose it again')
             candidate_id, acquisition_choice = exact[0]
-            call = {'name': 'media.acquire', 'args': {'action': 'register', 'candidate_id': candidate_id}}
+            call = {'name': 'media.acquire', 'args': {
+                'action': 'refresh' if operation == 'refresh_source' else 'register', 'candidate_id': candidate_id}}
+        elif operation == 'play_season':
+            blocks = await plugin.operate('media.library', {
+                'action': 'search', 'query': command['imdb_id'], 'type': 'series'}, raw_observation=True)
+            page = json.loads(next(block['text'] for block in blocks if block.get('type') == 'text'))
+            matches = [row for row in page.get('matches', []) if isinstance(row, dict)
+                       and row.get('imdb_id') == command['imdb_id'] and row.get('type') == 'series']
+            if page.get('status') != 'completed' or len(matches) != 1:
+                raise ValueError('The selected series is unavailable or ambiguous')
+            blocks = await plugin.operate('media.library', {
+                'action': 'season', 'metadata_id': matches[0]['metadata_id'],
+                'season': command['season'], 'mode': command['mode']}, raw_observation=True)
+            page = json.loads(next(block['text'] for block in blocks if block.get('type') == 'text'))
+            if page.get('status') != 'completed' or not page.get('id'):
+                raise ValueError('The selected season has no exact playable catalogue sequence')
+            call = {'name': 'tv.control', 'args': {'action': 'open_season', 'id': page['id']}}
         elif operation == 'play':
             selected = command['selection']
             blocks = await plugin.operate('media.library', {
@@ -133,25 +150,36 @@ async def _run_owner_media(plugin: AgentPlugin, command: dict, session_id: str, 
         ctx['_reflex_proposal'] = deepcopy(call)
         result = await plugin.operate(call['name'], call['args'], raw_observation=True)
         verified = ctx.get('_reflex_command_verified') is True
-        if operation == 'acquire':
+        if acquisition:
             receipt = json.loads(next(block['text'] for block in result if block.get('type') == 'text'))
             verified = (ctx.get('_receipt_covered') is True
-                        and acquisition_choice.get('register_attempted') is True
+                        and acquisition_choice.get('refresh_attempted' if operation == 'refresh_source'
+                                                   else 'register_attempted') is True
                         and receipt.get('status') == 'completed' and receipt.get('delivery') == 'verified'
+                        and receipt.get('operation') == ('refresh' if operation == 'refresh_source' else 'register')
+                        and (operation != 'refresh_source' or receipt.get('already_present') is True)
                         and receipt.get('title') == acquisition_choice['title']
                         and receipt.get('type') == ('movie' if acquisition_choice['type'] == 'movie' else 'tv')
                         and type(receipt.get('registered_files')) is int and receipt['registered_files'] > 0)
-        catalogue_ready = (operation == 'acquire' and verified
+        catalogue_ready = (acquisition and verified
                            and receipt.get('catalogue', {}).get('status') == 'ready'
                            and receipt['catalogue'].get('source_path_verified') is True)
         summary = (('The exact selected source is registered and ready in the library. Playback was not started.'
                     if catalogue_ready else
-                    'The exact selected source is registered. Catalogue availability is pending; refresh the library before selecting it. Playback was not started.') if operation == 'acquire' else
+                    'The exact selected source is registered. Catalogue availability is pending; use refresh on that source to reconcile it. Playback was not started.') if acquisition else
                    ('The selected Jellyfin item page was sent to the browser. Start playback in that client.'
                     if command.get('selection') else 'Media server opened.') if operation == 'server' else
+                   'The selected season has started on the registered TV; its queue is limited to that season.' if operation == 'play_season' else
                    'The selected library source is playing on the registered TV.' if operation == 'play' else
                    f"Library playback {operation} verified on the registered TV.") if verified else (
                    'The media command could not be verified. Use its receipt; do not resend it.')
+        if operation == 'refresh_source' and verified:
+            summary = ('The existing source is verified and ready in the library. No registration was sent.'
+                       if catalogue_ready else
+                       'The existing registration is verified, but catalogue visibility remains pending: '
+                       + str(receipt.get('catalogue', {}).get('reason', 'catalogue_not_ready'))
+                       + '. No registration was sent.')
+            verified = catalogue_ready
         await plugin.operate('task.complete', {'status': 'completed' if verified else 'failed',
                                              'summary': summary})
         if not plugin.ex.done:
