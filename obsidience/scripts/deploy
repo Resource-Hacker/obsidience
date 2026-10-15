@@ -89,8 +89,12 @@ def targets(changed: list[str]) -> list[str]:
         owners.append("shell")
     if any(p.startswith("obsidience/ui/") for p in changed):
         owners.append("ui")
-    if any(p.startswith("obsidience/discord/") for p in changed):
+    camera_unit = "obsidience/discord/systemd/obsidience-discord-camera.service"
+    if any(p.startswith("obsidience/discord/") and not p.startswith("obsidience/discord/camera/")
+           and p != camera_unit for p in changed):
         owners.append("discord")
+    if any(p.startswith("obsidience/discord/camera/") or p == camera_unit for p in changed):
+        owners.append("discord-camera")
     if "obsidience/tv/systemd/obsidience-tv-player.service" in changed:
         owners.append("tv-player")
     if (any(p in {"obsidience/tv/host/tuner.py", "obsidience/tv/host/break-view", "obsidience/tv/systemd/obsidience-tv-tuner.service",
@@ -307,7 +311,16 @@ def check_voice(limit: float = 90) -> str | None:
 
 
 def restart(owner: str) -> None:
-    if owner == "discord":
+    if owner == "discord-camera":
+        name = "obsidience-discord-camera.service"
+        destination = pathlib.Path.home() / ".config/systemd/user" / name
+        if not destination.exists():
+            print("Discord camera is not installed; installation remains explicit.")
+            return
+        shutil.copy2(ROOT / "obsidience/discord/systemd" / name, destination)
+        subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
+        subprocess.run(["systemctl", "--user", "restart", name], check=True)
+    elif owner == "discord":
         name = "obsidience-discord-bot.service"
         destination = pathlib.Path.home() / ".config/systemd/user" / name
         if not destination.exists():
@@ -433,10 +446,10 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--rollback", action="store_true")
     parser.add_argument("--restart", action="append", default=[],
-                        choices=("harness", "discord", "tv-player", "tv-tuner", "media-catalogue", "media-tiramisu", "media-prowlarr", "media-torbox"),
+                        choices=("harness", "discord", "discord-camera", "tv-player", "tv-tuner", "media-catalogue", "media-tiramisu", "media-prowlarr", "media-torbox"),
                         help="Include an affected owner after a private configuration change")
     parser.add_argument("--only", action="append", default=[],
-                        choices=("harness", "shell", "ui", "discord", "tv-player", "tv-tuner",
+                        choices=("harness", "shell", "ui", "discord", "discord-camera", "tv-player", "tv-tuner",
                                  "media-catalogue", "media-tiramisu", "media-prowlarr", "media-torbox"),
                         help="Deploy only selected affected owners; keep the full checkpoint unchanged")
     parser.add_argument("--recover-realtime", action="store_true",
