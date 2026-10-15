@@ -74,9 +74,9 @@ provides=("hyprland=$pkgver" wayland-compositor)
 conflicts=(hyprland)
 _archive="Hyprland-$pkgver"
 source=("$_archive.tar.gz::$url/releases/download/v$pkgver/source-v$pkgver.tar.gz"
-        "$startdir/../patches/0001-hit-test-overlapping-tiled-windows.patch"
-        "$startdir/../patches/0002-forward-lua-layout-resize.patch"
-        "$startdir/../patches/0003-restore-keyboard-focus-after-desktop-click.patch"
+        "0001-hit-test-overlapping-tiled-windows.patch::file://$startdir/patches/0001-hit-test-overlapping-tiled-windows.patch"
+        "0002-forward-lua-layout-resize.patch::file://$startdir/patches/0002-forward-lua-layout-resize.patch"
+        "0003-restore-keyboard-focus-after-desktop-click.patch::file://$startdir/patches/0003-restore-keyboard-focus-after-desktop-click.patch"
 )
 sha256sums=('03ad3f5ef152ff44116ffd56fcf808486211ecabf4f0ba567108ee746ba5cd2e'
             'a2388c206e76711e848f95ae04629606658bd1202e0adb8b9424046a76c05e41'

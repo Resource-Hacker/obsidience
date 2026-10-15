@@ -7,7 +7,7 @@
 -- the same rule outside the compositor.
 
 local HERE = debug.getinfo(1, "S").source:match("^@(.*/)") or "./"
-local DEFAULT_PATH = HERE .. "../../state/initial-surface-layout.json"
+local DEFAULT_PATH = HERE .. "../../defaults/initial-surface-layout.json"
 local SURFACE_IDS = { samsung = true, ["usb-c"] = true, ["dp-4"] = true }
 
 local function config_path()

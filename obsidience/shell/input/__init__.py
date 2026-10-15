@@ -1,2 +1,1 @@
-"""Physical input routing between Obsidience Surfaces."""
-
+"""Hyprland keybinding client for the Shell command socket."""

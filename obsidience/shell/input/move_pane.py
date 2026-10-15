@@ -4,8 +4,6 @@
 from __future__ import annotations
 
 import json
-import os
-import re
 import secrets
 import subprocess
 import sys
@@ -14,26 +12,15 @@ from pathlib import Path
 
 from websockets.sync.client import connect
 
-# Hyprland runs this file directly; share the package's Surface identity map.
+# Hyprland runs this file directly; share the Shell's client contract.
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from obsidience.shell.surface_identity import surface_outputs  # noqa: E402
+from obsidience.shell.command_token import command_url  # noqa: E402
+from obsidience.shell.surface_identity import SURFACE_IDS, surface_outputs  # noqa: E402
 
 SHELL_URL = "ws://127.0.0.1:8768"
 SUBPROTOCOL = "obsidience.shell.v1"
-SURFACES = frozenset(("samsung", "usb-c", "dp-4"))
 DIRECTIONS = frozenset(("left", "right", "top", "bottom"))
 ACTIONS = frozenset(("close", "surface", "resize", "tile"))
-
-
-def command_url() -> str:
-    """Authenticated Shell URL; this standalone script mirrors shell/command_token.py."""
-
-    runtime = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
-    path = Path(runtime) / "obsidience-shell" / "command.token"
-    token = path.read_text(encoding="ascii", errors="replace").strip()
-    if re.fullmatch(r"[0-9a-f]{64}", token) is None:
-        raise OSError(f"Shell command token is invalid: {path}")
-    return f"{SHELL_URL}/?token={token}"
 
 
 def focused_surface() -> str | None:
@@ -61,7 +48,7 @@ def apply_active_window_action(
     surface_id: str, action: str, direction: str = ""
 ) -> bool:
     if (
-        surface_id not in SURFACES
+        surface_id not in SURFACE_IDS
         or action not in ACTIONS
         or (action != "close" and direction not in DIRECTIONS)
     ):
@@ -73,7 +60,7 @@ def apply_active_window_action(
     result_type = "window.close.result" if action == "close" else "window.layout.result"
     try:
         with connect(
-            command_url(),
+            command_url(SHELL_URL),
             subprotocols=[SUBPROTOCOL],
             compression=None,
             proxy=None,

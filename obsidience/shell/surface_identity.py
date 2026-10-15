@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 SURFACE_IDS = ("samsung", "usb-c", "dp-4")
-DEFAULT_LAYOUT = Path(__file__).resolve().parent / "state" / "initial-surface-layout.json"
+DEFAULT_LAYOUT = Path(__file__).resolve().parent / "defaults" / "initial-surface-layout.json"
 OUTPUT = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
 
