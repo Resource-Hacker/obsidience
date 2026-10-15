@@ -162,9 +162,9 @@ class _MemberTurn(speech.ObsidienceNeMoTurnTakingService):
     def __init__(self, stream, **kwargs):
         self.stream = stream
         super().__init__(event_sink=stream.event, **kwargs)
-        # The supplied synthetic fixture is recognized as "Squonge Bot".
+        # Supplied PCM is recognized as "Squonge Bot" or "Squange Bot".
         # Keep this observed rendering local to Discord's address policy.
-        self._wake_pattern = re.compile(r"(?<!\w)(?:squanch|squonge)\s*bot(?!\w)", re.IGNORECASE)
+        self._wake_pattern = re.compile(r"(?<!\w)(?:squanch|squ[ao]nge)\s*bot(?!\w)", re.IGNORECASE)
 
     async def _open_wake(self, text, *, cue_name="ready"):
         if not self.stream.server.claim(self.stream):

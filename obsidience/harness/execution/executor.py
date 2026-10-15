@@ -1249,6 +1249,9 @@ async def _run_execution(task: Note, depth: int = 0, reasoning_effort: str | Non
             "trace": trace,
         }
         if conversation_binding is not None:
+            # Named conversations reach this compiler only after typed owner
+            # admission in run_conversation; model params cannot set this marker.
+            ctx["_conversation_agent_ref"] = agent.ref
             ctx["_discord"] = dict(conversation_binding.metadata)
         if task.ref == "Tasks/audit" and params.get("optimization_case"):
             allowed = [name for name in allowed if name in {"harness.optimize", "task.complete"}]

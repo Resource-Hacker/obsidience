@@ -121,8 +121,10 @@ def execute(args: dict, context: dict) -> dict:
         if citation and citation not in evidence:
             evidence.append(citation)
     conversational = (task is not None and task.kind == "agent"
-                      and task.ref == "Agents/Executive/Executive" and context.get("interactive") is True
-                      and context.get("_agent_ref") == task.ref)
+                      and context.get("interactive") is True
+                      and context.get("_agent_ref") == task.ref
+                      and (task.ref == "Agents/Executive/Executive"
+                           or context.get("_conversation_agent_ref") == task.ref))
     if not task or (task.kind != "task" and not conversational):
         return {
             "accepted": False,
