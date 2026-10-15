@@ -963,6 +963,31 @@
       "lockfile": "obsidience/discord/package-lock.json",
       "lockfile_sha256": "13c333c1e5bd6f465e32d2575acbcc224bc04054650ff85cf31491cc97389c98",
       "integration": "Optional official bot Gateway and DAVE per-member audio transport. Discord.js owns Discord connections; native Obsidience Agent ADK owns reasoning, dedicated ledger and Hindsight bank. Existing speech owner shares loaded models with isolated member decoder state. FFmpeg converts PCM and admitted file audio; no video sender, selfbot or account token."
+    },
+    "discord_graph_camera": {
+      "dependencies": {
+        "v4l2loopback": {
+          "version": "0.15.4",
+          "repository": "https://github.com/v4l2loopback/v4l2loopback",
+          "license": "GPL-2.0-or-later"
+        },
+        "websockets": {
+          "version": "17.1",
+          "repository": "https://github.com/python-websockets/websockets",
+          "license": "BSD-3-Clause"
+        },
+        "ffmpeg": {
+          "version": "9.0.2",
+          "repository": "https://git.ffmpeg.org/ffmpeg.git",
+          "license": "GPL-3.0-only"
+        },
+        "microsoft-edge": {
+          "version": "148.0.3967.96",
+          "documentation": "https://learn.microsoft.com/en-us/microsoft-edge/devtools/protocol/",
+          "license": "LicenseRef-Microsoft-Edge"
+        }
+      },
+      "integration": "System dependencies invoked without redistribution. A dedicated ephemeral headless Edge page uses CPU SwiftShader to render only the standalone Discord graph, CDP viewport frames feed FFmpeg and v4l2loopback. No desktop capture, audio, existing profile, general trace or bot-account video."
     }
   }
 }
