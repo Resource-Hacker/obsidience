@@ -48,8 +48,9 @@ attribute vec4 aRing;
 attribute vec4 aGlow;
 attribute vec4 aStyle; // (subject, ringScale, ringWidthPx, baseAlpha)
 attribute float aFocus;
-attribute float aLaser;
-attribute float aSwell; // extra size as a fraction: 1 doubles the node
+// x: extra size as a fraction (1 doubles the node); y: the thinking beam's
+// laser level on the node.
+attribute vec2 aSwell;
 attribute vec4 aActivity;
 attribute float aSeed;
 attribute float aCurate;
@@ -89,7 +90,7 @@ void main() {
   vStyle = aStyle;
   vGlowScale = aGlowScale;
   vFocus = aFocus;
-  vLaser = aLaser;
+  vLaser = aSwell.y;
   vActivity = aActivity;
   vSeed = aSeed;
   vCurate = aCurate;
@@ -122,7 +123,7 @@ void main() {
   // 2D parity: active/hovered discs grow ~2.5px, not a multiplicative bloom.
   float swell = 1.0 + aFocus * (0.10 + 0.06 * uPulse);
   swell *= 1.0 + 0.32 * vSpeech;
-  swell *= 1.0 + aSwell;
+  swell *= 1.0 + aSwell.x;
   float radiusPx = aRadius * uModelScale * swell * uPerspective / max(1.0, -mvPosition.z);
 #ifdef KNOWLEDGE_MEMORY
   // The same orbs read as a quiet ribbon at distance and reveal their full
@@ -133,7 +134,7 @@ void main() {
 #endif
   // A branch node the thinking beam lights spills its bloom and glint past
   // its glow, so its sprite grows to hold them.
-  float extent = aStyle.x > 0.5 && aStyle.x < 1.5 && aLaser > 0.001
+  float extent = aStyle.x > 0.5 && aStyle.x < 1.5 && aSwell.y > 0.001
     ? max(aExtent, 3.2) : aExtent;
   float size = clamp(radiusPx * extent * 2.0, 1.5, 1200.0);
   vRadiusPx = max(radiusPx, 0.75);

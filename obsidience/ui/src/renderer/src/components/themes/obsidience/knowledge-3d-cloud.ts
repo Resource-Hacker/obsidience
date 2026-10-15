@@ -444,14 +444,13 @@ export function createKnowledge3dCloud(
   const focusAttribute = new THREE.BufferAttribute(focusLevels, 1);
   focusAttribute.setUsage(THREE.DynamicDrawUsage);
   geometry.setAttribute("aFocus", focusAttribute);
-  const laserAttribute = new THREE.BufferAttribute(laserLevels, 1);
-  laserAttribute.setUsage(THREE.DynamicDrawUsage);
-  geometry.setAttribute("aLaser", laserAttribute);
   // When each node's beam arrived, for the arrival flash.
   const laserArrivedAt = new Float64Array(nodes.length).fill(-Infinity);
   const laserOn = new Uint8Array(nodes.length);
-  const swells = new Float32Array(nodes.length);
-  const swellAttribute = new THREE.BufferAttribute(swells, 1);
+  // Per node: an Article's extra size, and the laser level (WebGL allows
+  // sixteen attributes, so they share one).
+  const swells = new Float32Array(nodes.length * 2);
+  const swellAttribute = new THREE.BufferAttribute(swells, 2);
   swellAttribute.setUsage(THREE.DynamicDrawUsage);
   geometry.setAttribute("aSwell", swellAttribute);
   const activityLevels = new Float32Array(nodes.length * 4);
@@ -1679,6 +1678,7 @@ export function createKnowledge3dCloud(
         const laser = lit > 0 ? (lit + (flashAge < LASER_FLASH_SECONDS ? Math.exp(-flashAge / 0.3) : 0)) * opacity : 0;
         if (Math.abs(laserLevels[i] - laser) > 0.003) {
           laserLevels[i] = laser;
+          swells[i * 2 + 1] = laser;
           laserDirty = true;
         }
         reveal *= opacity;
@@ -1695,7 +1695,7 @@ export function createKnowledge3dCloud(
       }
       if (dirty) applyHoverLevels();
       if (laserDirty) {
-        laserAttribute.needsUpdate = true;
+        swellAttribute.needsUpdate = true;
         syncMarbleDust();
       }
       // Every node the route passes drops into its own shell as the front
@@ -1769,7 +1769,7 @@ export function createKnowledge3dCloud(
         if (landingAges[i] >= span) continue;
         const age = landingAges[i] += dtSeconds;
         const branch = nodes[i].subject;
-        swells[i] = !branch && age < landing.cometSwellSeconds
+        swells[i * 2] = !branch && age < landing.cometSwellSeconds
           ? (landing.cometSwell - 1) * Math.sin(Math.PI * age / landing.cometSwellSeconds) : 0;
         landingGlows[i] = age < landing.cometGlowSeconds
           ? (branch ? landing.cometNodeGlow : landing.cometGlow) * Math.sin(Math.PI * age / landing.cometGlowSeconds) : 0;
