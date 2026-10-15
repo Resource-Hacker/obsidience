@@ -91,6 +91,11 @@ def targets(changed: list[str]) -> list[str]:
             owners.append("media-" + provider)
     if any(p in {"obsidience/media/torbox-mount", "obsidience/media/obsidience-media-torbox.service"} for p in changed):
         owners.append("media-torbox")
+    if any(p in {"obsidience/media/obsidience-media-stremio.pod",
+                 "obsidience/media/obsidience-media-aiostreams.container",
+                 "obsidience/media/obsidience-media-stremthru.container",
+                 "obsidience/media/stremio-bootstrap.cjs"} for p in changed):
+        owners.append("media-stremio")
     return owners
 
 
@@ -261,7 +266,35 @@ def check_voice(limit: float = 90) -> str | None:
 
 
 def restart(owner: str) -> None:
-    if owner in {"media-tiramisu", "media-prowlarr", "media-torbox"}:
+    if owner == "media-stremio":
+        destination = pathlib.Path.home() / ".config/containers/systemd"
+        pod = "obsidience-media-stremio.pod"
+        if not (destination / pod).exists():
+            print("Optional Stremio backend is not installed; installation remains explicit.")
+            return
+        clients = subprocess.check_output(["flatpak", "ps", "--columns=application"], text=True)
+        if "com.stremio.Stremio" in clients.splitlines():
+            sys.exit("Stremio deployment deferred: close the native client before its backend maintenance.")
+        for name in (pod, "obsidience-media-aiostreams.container", "obsidience-media-stremthru.container"):
+            shutil.copy2(ROOT / "obsidience/media" / name, destination / name)
+        # Stop consumers first; upstream shutdown closes its stores and caches.
+        # Never replace a pod underneath its still-running members.
+        subprocess.run(["systemctl", "--user", "stop", "obsidience-media-aiostreams.service"], check=True)
+        subprocess.run(["systemctl", "--user", "stop", "obsidience-media-stremthru.service"], check=True)
+        subprocess.run(["systemctl", "--user", "stop", "obsidience-media-stremio-pod.service"], check=True)
+        subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
+        subprocess.run(["systemctl", "--user", "start", "obsidience-media-aiostreams.service"], check=True)
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            try:
+                with urllib.request.urlopen("http://127.0.0.1:8788/api/v1/health", timeout=3) as response:
+                    if response.status == 200 and json.load(response).get("success") is True:
+                        return
+            except OSError:
+                pass
+            time.sleep(.5)
+        sys.exit("Optional Stremio backend did not become healthy; inspect its owner.")
+    elif owner in {"media-tiramisu", "media-prowlarr", "media-torbox"}:
         provider = owner.removeprefix("media-")
         name = f"obsidience-media-{provider}.service"
         source = ROOT / "obsidience/media" / name
@@ -365,11 +398,11 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--rollback", action="store_true")
     parser.add_argument("--restart", action="append", default=[],
-                        choices=("harness", "tv-player", "tv-tuner", "media-catalogue", "media-tiramisu", "media-prowlarr", "media-torbox"),
+                        choices=("harness", "tv-player", "tv-tuner", "media-catalogue", "media-tiramisu", "media-prowlarr", "media-torbox", "media-stremio"),
                         help="Include an affected owner after a private configuration change")
     parser.add_argument("--only", action="append", default=[],
                         choices=("harness", "shell", "ui", "tv-player", "tv-tuner",
-                                 "media-catalogue", "media-tiramisu", "media-prowlarr", "media-torbox"),
+                                 "media-catalogue", "media-tiramisu", "media-prowlarr", "media-torbox", "media-stremio"),
                         help="Deploy only selected affected owners; keep the full checkpoint unchanged")
     parser.add_argument("--recover-realtime", action="store_true",
                         help="Repair an existing Realtime error with a Harness-only deployment")

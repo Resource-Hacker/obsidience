@@ -1,0 +1,31 @@
+[Unit]
+Description=Obsidience Media private Stremio debrid adapter (StremThru)
+
+[Container]
+Image=sha256:e2328657a3dde9c6ecf33327a5d8a2dde5ed49f91346b76f07f0d4893066230e
+Pull=never
+ContainerName=obsidience-media-stremthru
+Pod=obsidience-media-stremio.pod
+User=%U:%G
+Volume=%h/.local/share/obsidience-media/stremthru:/app/data
+Environment=STREMTHRU_LISTEN_ADDR=127.0.0.1:8080
+Environment=STREMTHRU_BASE_URL=http://127.0.0.1:8080
+Environment=STREMTHRU_DATA_DIR=/app/data
+Environment=STREMTHRU_DATABASE_URI=sqlite:///app/data/stremthru.db
+# Upstream request error logs include raw URL/query fields.
+Environment=STREMTHRU_LOG_LEVEL=FATAL
+Environment=STREMTHRU_TUNNEL=*:false
+Environment=STREMTHRU_STORE_TUNNEL=*:false
+StopTimeout=30
+NoNewPrivileges=true
+DropCapability=all
+PodmanArgs=--cpus=2 --memory=1g --pids-limit=128
+
+[Service]
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=90
+TimeoutStopSec=45
+CPUWeight=25
+IOWeight=25
+UMask=0077

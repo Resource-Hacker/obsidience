@@ -1,0 +1,62 @@
+FROM docker.io/library/node@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 AS dash
+WORKDIR /workspace
+ENV HUSKY=0 CI=true NODE_OPTIONS=--max-old-space-size=2048 UV_THREADPOOL_SIZE=2
+RUN npm install --global pnpm@10.17.0
+COPY . .
+RUN pnpm install --frozen-lockfile --network-concurrency=2 --child-concurrency=2
+RUN pnpm run dash:build
+
+FROM docker.io/tonistiigi/xx@sha256:40fe21f44bb8cddf1eb1226db190d0a984118f62ee02a91b77d99448d28264a6 AS xx
+
+FROM docker.io/library/golang@sha256:3082400e369fa24d5fc60bca20edab3f6d604e0c5a690ec66b295eff4dd87ade AS builder
+
+RUN apk add zig
+
+COPY --from=xx / /
+
+ARG TARGETOS TARGETARCH TARGETPLATFORM
+
+RUN xx-apk add musl-dev
+
+WORKDIR /workspace
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY migrations ./migrations
+COPY core ./core
+COPY internal ./internal
+COPY store ./store
+COPY stremio ./stremio
+COPY *.go ./
+
+COPY --from=dash /workspace/apps/dash/.output/public/ ./internal/dash/fs/
+
+ENV CGO_ENABLED=1
+ENV GOMAXPROCS=2 GOFLAGS=-p=2 GOMEMLIMIT=3GiB
+ENV XX_GO_PREFER_C_COMPILER=zig
+RUN xx-go build --tags 'sqlite_fts5,sqlite_stat4' -ldflags='-s -w -linkmode external' -o stremthru
+RUN xx-verify stremthru
+
+FROM docker.io/library/alpine@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+
+RUN apk add --no-cache git ffmpeg tini mimalloc2
+
+WORKDIR /app
+
+COPY --from=builder /workspace/stremthru ./stremthru
+
+VOLUME ["/app/data"]
+
+ENV STREMTHRU_ENV=prod
+
+# replace musl's allocator with mimalloc
+ENV LD_PRELOAD=/usr/lib/libmimalloc.so.2
+
+EXPOSE 8080
+
+ENTRYPOINT ["/sbin/tini", "--"]
+
+CMD ["./stremthru"]
+
+LABEL org.opencontainers.image.source="https://github.com/MunifTanjim/stremthru" org.opencontainers.image.revision="b66650a5c91833932ecaf815a98c53719f7c0e9f" org.opencontainers.image.version="0.105.3-obsidience-cached-only2" org.opencontainers.image.licenses="MIT"

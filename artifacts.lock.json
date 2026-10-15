@@ -614,6 +614,72 @@
       "artifact": "Prowlarr.master.2.6.5.5623.linux-core-x64.tar.gz",
       "sha256": "c0824e9f0e9c79e085882f6143041be5c2cde0519baa59e9477d9e4dcbe1b5e3",
       "integration": "Unmodified official standalone release, used only as source discovery behind its authenticated loopback API. Initial public indexer is built-in TorrentsCSV. No download client, Arr automation stack, RSS acquisition or watchlist. API key supplied privately through a systemd credential."
+    },
+    "stremio_linux": {
+      "repository": "https://github.com/Stremio/stremio-linux-shell",
+      "revision": "2f6efc2252780c8f22a6997b94081d258d81c876",
+      "version": "1.2.2",
+      "license": "GPL-3.0-only",
+      "flatpak_ref": "app/com.stremio.Stremio/x86_64/stable",
+      "flatpak_commit": "0496ce1d6d44ee462182b8779a6ff475bf58b2e77a48a528b5542a44fab7ae6c",
+      "integration": "Optional upstream desktop media client, separate from the existing television playback owner. Unmodified Flatpak; owner selects client/account. No second Obsidience agent, catalogue or scheduler."
+    },
+    "aiostreams": {
+      "repository": "https://github.com/Viren070/AIOStreams",
+      "revision": "ce6244454ee131bf0945b2bd6abc670a449b224d",
+      "version": "2.36.0",
+      "license": "AGPL-3.0-only",
+      "container_image": "ghcr.io/viren070/aiostreams@sha256:83893d1c37eaaaf9ad1e9286bd857220a6b8f042a4f1eac3fa7356017aa2b184",
+      "integration": "Optional loopback-only native-client addon. Unmodified upstream image; credential bootstrap passes private systemd credentials inside its Node process. Built-in Prowlarr discovery and private StremThru debrid interface, encrypted profile, direct CDN playback. No Jellyfin emulation, proxy, autoplay, prefetch or tracker sync."
+    },
+    "stremthru": {
+      "repository": "https://github.com/MunifTanjim/stremthru",
+      "revision": "b66650a5c91833932ecaf815a98c53719f7c0e9f",
+      "tag": "0.105.3",
+      "archive_sha256": "cc5291c4df02aee1d62e5f83fbd8f61ce62d9d67a8f21319909f5ddf60b1d137",
+      "license": "MIT",
+      "version": "0.105.3-obsidience-cached-only2",
+      "image_id": "e2328657a3dde9c6ecf33327a5d8a2dde5ed49f91346b76f07f0d4893066230e",
+      "image_digest": "sha256:ad69cb29f80b48a2ebfe0053d98f28b0a9513c8c6def49b219a1e71d6b50b833",
+      "base_pins": [
+        {
+          "repository": "docker.io/tonistiigi/xx",
+          "tag": "latest",
+          "digest": "sha256:40fe21f44bb8cddf1eb1226db190d0a984118f62ee02a91b77d99448d28264a6",
+          "amd64": [
+            "sha256:9cac31bf7d2eb8c3ccabe7b67e7db617e63ae2952a86273b634db2e0e18178de"
+          ]
+        },
+        {
+          "repository": "docker.io/library/golang",
+          "tag": "1.26-alpine",
+          "digest": "sha256:3082400e369fa24d5fc60bca20edab3f6d604e0c5a690ec66b295eff4dd87ade",
+          "amd64": [
+            "sha256:397ecc648150dd585f1734dfcd8d1bb4746664e54464191d77ad0ecffaf38bdb"
+          ]
+        },
+        {
+          "repository": "docker.io/library/alpine",
+          "tag": "latest",
+          "digest": "sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6",
+          "amd64": [
+            "sha256:d56c381f961d307a21b3ca004cf1e3910f106644aefb1f43e654c8a56c4fd395"
+          ]
+        },
+        {
+          "repository": "docker.io/library/node",
+          "tag": "20-alpine",
+          "digest": "sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293",
+          "amd64": [
+            "sha256:afdf98210b07b586eb71fa22ba2e432e058e4cd1304d31ed60888755b8c865fb"
+          ]
+        }
+      ],
+      "patches_sha256": {
+        "0001-torbox-require-cached-registration.patch": "ee2eac95ae842010f2292e2c9e7afce54308cb7b691711ffd8ffa08364ccbaca",
+        "0002-torbox-sanitize-request-errors.patch": "24c656e2183c609ef90e907eecb40ab125b95af8ef69c226ec12b34565cc2be4"
+      },
+      "integration": "Optional pod-private TorBox adapter for AIOStreams. MIT source with two narrow patches: require cached-only registration for both forms; remove transport-error URLs/causes that may contain account tokens. Local patches, license and pinned build recipe in obsidience/media/stremthru. No public listener, proxy, FUSE or additional media catalogue."
     }
   }
 }

@@ -1,0 +1,12 @@
+# Optional workstation Stremio add-on. No LAN/public listener.
+[Unit]
+Description=Obsidience Media native-client add-on network
+
+[Pod]
+PodName=obsidience-media-stremio
+UserNS=keep-id
+Network=pasta:--map-host-loopback,169.254.1.2
+PublishPort=127.0.0.1:8788:3000
+
+[Install]
+WantedBy=default.target

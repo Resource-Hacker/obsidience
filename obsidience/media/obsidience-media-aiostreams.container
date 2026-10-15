@@ -1,0 +1,49 @@
+[Unit]
+Description=Obsidience Media Stremio add-on (AIOStreams)
+Requires=obsidience-media-stremthru.service obsidience-media-prowlarr.service
+After=obsidience-media-stremthru.service obsidience-media-prowlarr.service
+
+[Container]
+Image=ghcr.io/viren070/aiostreams@sha256:83893d1c37eaaaf9ad1e9286bd857220a6b8f042a4f1eac3fa7356017aa2b184
+ContainerName=obsidience-media-aiostreams
+Pod=obsidience-media-stremio.pod
+User=%U:%G
+Volume=%h/.local/share/obsidience-media/aiostreams:/app/data
+Volume=%h/Projects/obsidience/obsidience/media/stremio-bootstrap.cjs:/app/obsidience-bootstrap.cjs:ro
+Volume=%d/obsidience-media-stremio:/run/credentials/obsidience-media-stremio:ro
+Volume=%d/obsidience-media-prowlarr:/run/credentials/obsidience-media-prowlarr:ro
+Exec=/app/obsidience-bootstrap.cjs
+Environment=PORT=3000
+Environment=BASE_URL=http://127.0.0.1:8788
+Environment=INTERNAL_URL=http://127.0.0.1:3000
+Environment=DATABASE_URI=sqlite:///app/data/db.sqlite
+Environment=AIOSTREAMS_AUTH_REQUIRED=true
+Environment=BUILTIN_STREMTHRU_URL=http://127.0.0.1:8080
+Environment=BUILTIN_PROWLARR_URL=http://169.254.1.2:9696
+Environment=DEFAULT_PROXY_ENABLED=false
+Environment=FORCE_PROXY_ENABLED=false
+Environment=JELLYFIN_ENABLED=false
+Environment=ANALYTICS_ENABLED=false
+Environment=USER_ANALYTICS_ENABLED=false
+Environment=WATCH_STATE_REPORT_ENABLED=false
+Environment=WATCH_STATE_PULL_ENABLED=false
+Environment=LOG_LEVEL=error
+Environment=LOG_SENSITIVE_INFO=false
+StopTimeout=30
+NoNewPrivileges=true
+DropCapability=all
+PodmanArgs=--cpus=2 --memory=2g --pids-limit=256
+
+[Service]
+LoadCredentialEncrypted=obsidience-media-stremio:%h/.config/credentials/obsidience-media-stremio.cred
+LoadCredentialEncrypted=obsidience-media-prowlarr:%h/.config/credentials/obsidience-media-prowlarr.cred
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=90
+TimeoutStopSec=45
+CPUWeight=25
+IOWeight=25
+UMask=0077
+
+[Install]
+WantedBy=default.target
