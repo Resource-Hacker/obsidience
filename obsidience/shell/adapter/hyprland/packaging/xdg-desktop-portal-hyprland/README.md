@@ -12,14 +12,15 @@ recipe backports three merged upstream changes onto v1.4.1:
 
 The patch files are exact upstream commits. Their hashes, the source archive
 hash, and the protocol revision are pinned in `PKGBUILD`; licensing and upstream
-provenance are recorded in the shell's `REUSE_MANIFEST.json`.
+provenance are recorded in the root `artifacts.lock.json`.
 
 The package is named `xdg-desktop-portal-hyprland-obsidience` and
 provides/conflicts with `xdg-desktop-portal-hyprland`, so a distribution
 rebuild cannot silently replace it (the same identity rule as the Hyprland
 package). Build using the normal Arch package tooling from this directory
-(`makepkg -s`); makepkg resolves the local patches by file name, so stage
-them in `SRCDEST` (or this directory) first. Install the resulting package
+(`makepkg -s`). The `PKGBUILD` fetches the patches from `patches/` by
+`file://` URL; set `SRCDEST` outside the repository to keep downloaded sources
+out of it. Install the resulting package
 through pacman, confirming removal of the conflicting stock package, and
 restart only
 `xdg-desktop-portal-hyprland.service` when existing screen shares can reconnect.

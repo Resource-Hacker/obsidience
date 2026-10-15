@@ -179,8 +179,8 @@ release. v0.3.2 already contains upstream `afb2c27`, which serializes
 session-lock surface realization. The build recipe under `adapter/quickshell`
 asserts the upstream commit, touched sources and patches by hash and records
 the produced binary hash (runtime directory name and `BUILDINFO`); a Qt update
-is a plain rebuild. `REUSE_MANIFEST.json` names the selected runtime; the
-distro-owned executable remains untouched and serves only as the IPC client.
+is a plain rebuild. The root `artifacts.lock.json` names the selected runtime;
+the distro-owned executable remains untouched and serves only as the IPC client.
 
 Hyprland keeps a secure `ext-session-lock` after its client dies. Obsidience
 therefore enables Hyprland's supported `allow_session_lock_restore` option and
@@ -251,12 +251,18 @@ the command listener when the new server binds before the previous server
 releases its port. An explicit guarded restart replaces the host once; no
 listener retry loop or compositor restart is needed for ordinary QML changes.
 
-`Obsidience` is the UWSM desktop session. Its services are:
+`Obsidience` is the UWSM desktop session. `obsidience-shell-session.target`
+wants its services, whose sources are in `systemd/`:
 
-- `obsidience-shell-session.target`;
-- `obsidience-shell-host.service`;
-- `obsidience-shell-knowledge.service`;
-- `obsidience-shell-notifications.service`.
+- `obsidience-shell-host.service`, the Quickshell host and command socket;
+- `obsidience-shell-knowledge.service`, the resident graph stage;
+- `obsidience-shell-window-adapter.service`, the Hyprland window adapter;
+- `obsidience-shell-notifications.service`, mako;
+- `obsidience-shell-agent-canvas.service`, the Terminal pane's nodeterm canvas;
+- `obsidience-shell-screen-replay@HDMI-A-1`, `@HDMI-A-2` and `@DP-8`, the
+  60-second RAM replay per output behind `computer.replay`;
+- `obsidience-harness-dev.service`, the Harness, ordered by the drop-ins in
+  `systemd/obsidience-harness-dev.service.d/`.
 
 The graph presenter belongs to the Shell session. It only wants the Shell host
 and the Harness for startup, with ordering and the existing HTML readiness
@@ -293,7 +299,7 @@ pane_id + surface_id + local_rect + open + optional tile_bounds
 
 The three-Surface data model maps Samsung, USB-C, and logical DP-4 into one
 Hyprland layout. `~/.config/obsidience-shell/surface-layout.json` (seeded from
-`state/initial-surface-layout.json`) is the one Surface identity map: each
+`defaults/initial-surface-layout.json`) is the one Surface identity map: each
 Surface's optional `description` is the monitor's Hyprland description (EDID
 make, model and serial, as `hyprctl -j monitors` reports it, matched as a prefix
 like `desc:`), and `output` is its connector, used only when no present monitor
@@ -312,16 +318,32 @@ placement revision.
 
 ## Package policy
 
-`system-packages.toml` is the names-only Arch package contract for this Module.
-It is additive: a missing name means "not managed here," never "remove it."
-The required groups describe the target Hyprland shell; protected groups mark
-the current boot/graphics and gaming packages that no cleanup may prune. Exact
-observed versions and upstream provenance
-remain evidence in `REUSE_MANIFEST.json`, not rolling-release policy.
+The Shell's Arch package policy is names-only and additive: a missing name
+means "not managed here," never "remove it." It installs, updates and removes
+nothing by itself, and is separate from the Applications pane.
 
-The package manifest is separate from the Applications pane and from any future
-community shell-package format. It performs no installation, update, or
-removal by itself.
+- Required host: bash, coreutils, curl, dbus, jq, polkit, procps-ng, sed, sudo,
+  systemd, tmux.
+- Required session: aquamarine, greetd, greetd-agreety, grim, hypridle,
+  hyprland, hyprpolkitagent, kitty, mako, uwsm, wl-clipboard,
+  xdg-desktop-portal, xdg-desktop-portal-gtk, xdg-desktop-portal-hyprland,
+  xorg-xwayland.
+- Required shell: packagekit, python-cairo, python-gobject, python-websockets,
+  qmltermwidget, qt6-declarative, qt6-multimedia, qt6-svg, qt6-wayland,
+  qt6-webengine, qt6-websockets, quickshell, ttf-jetbrains-mono.
+- Required services: bluez, bluez-utils, networkmanager, pipewire,
+  pipewire-alsa, pipewire-pulse, power-profiles-daemon, udisks2, upower,
+  wireplumber.
+- Protected boot and graphics (no cleanup may prune them): amd-ucode,
+  lib32-mesa, lib32-nvidia-utils, lib32-opencl-nvidia, lib32-vulkan-radeon,
+  libxnvctrl, limine, linux-cachyos, linux-cachyos-headers, linux-cachyos-lts,
+  linux-cachyos-lts-headers, linux-cachyos-lts-nvidia-open,
+  linux-cachyos-nvidia-open, linux-firmware, mesa, mkinitcpio,
+  nvidia-settings, nvidia-utils, opencl-nvidia, vulkan-radeon.
+- Protected workstation: gamemode, keyd, proton-cachyos, umu-launcher.
+
+Exact observed versions and upstream provenance remain evidence in the root
+`artifacts.lock.json`, not rolling-release policy.
 
 ## Verification
 

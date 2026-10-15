@@ -1,7 +1,7 @@
 # Patch-bearing Hyprland package
 
 Obsidience's overlapping tile layout depends on the three reviewed compositor
-patches in `../patches`: front-to-back tiled hit testing, native Lua resize
+patches in `patches/`: front-to-back tiled hit testing, native Lua resize
 callbacks, and keyboard refocus after clicking the desktop layer.
 
 The stock `hyprland 0.56.2-3.1` update replaced the previously patched package
@@ -15,9 +15,12 @@ package, so a normal repository upgrade cannot silently replace the patched
 compositor. This is not a kernel, driver, or system-wide update pin. Do not add
 `replaces=hyprland`, which would claim unrelated installations.
 
-Build from this directory with the installed development dependencies:
+Build from this directory with the installed development dependencies. The
+`PKGBUILD` fetches the patches from `patches/` by `file://` URL, so point
+`SRCDEST` outside the repository to keep downloaded sources out of it:
 
 ```sh
+SRCDEST=/home/wissenschafter/.cache/obsidience-hyprland-build/sources \
 BUILDDIR=/home/wissenschafter/.cache/obsidience-hyprland-build makepkg --syncdeps
 ```
 

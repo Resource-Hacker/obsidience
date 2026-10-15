@@ -1,4 +1,11 @@
-"""Project the Obsidience palette into supported application-native chrome."""
+"""Project the Shell palette into Microsoft Edge's managed theme policy.
+
+    python3 obsidience/browser/edge/theme_policy.py [--check]
+
+Writes /etc/opt/edge/policies/managed/obsidience-theme.json (through sudo) from
+obsidience/shell/theme/palette.json, the Shell's visual authority, and asks a
+running Edge to refresh its platform policy.
+"""
 
 from __future__ import annotations
 
@@ -12,7 +19,7 @@ import tempfile
 from pathlib import Path
 
 
-PALETTE_PATH = Path(__file__).with_name("palette.json")
+PALETTE_PATH = Path(__file__).resolve().parents[2] / "shell" / "theme" / "palette.json"
 EDGE_POLICY_PATH = Path("/etc/opt/edge/policies/managed/obsidience-theme.json")
 COLOR_KEYS = frozenset(
     {
@@ -152,7 +159,7 @@ def apply(theme: dict) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Apply the Obsidience application theme")
+    parser = argparse.ArgumentParser(description="Apply the Obsidience theme to Edge")
     parser.add_argument(
         "--check",
         action="store_true",

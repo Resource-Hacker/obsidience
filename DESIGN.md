@@ -679,7 +679,7 @@ Linux services -> Hyprland -> adapter/hyprland -> Shell API -> one Quickshell ho
 
 - Hyprland owns composition, outputs, windows, input, VRR, fullscreen and XWayland; Linux
   services stay upstream plumbing. New OS responsibilities arrive only as Module slices
-  with rollback; `system-packages.toml` is additive policy (omission never removes).
+  with rollback; the Shell README's package policy is additive (omission never removes).
 - Only the compositor adapter talks to Hyprland; it separates observation from validated
   commands and holds no retrieval, reasoning, presentation or Task logic. Shell events
   trigger only Tasks that declare them.

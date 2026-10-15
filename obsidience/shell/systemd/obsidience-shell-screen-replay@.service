@@ -11,8 +11,8 @@ StartLimitBurst=3
 
 [Service]
 Type=exec
-# Statically linked FFmpeg negotiates the NVENC API at runtime (driver 580 has
-# 13.0; the system FFmpeg needs 13.1), so the Samsung encodes on the RTX 4080.
+# The static build's FFmpeg negotiates the NVENC API version at runtime, so the
+# Samsung encodes on the RTX 4080 under any driver the host carries.
 ExecStartPre=/usr/bin/rm -rf %t/obsidience-screen-replay/%i
 ExecStartPre=/usr/bin/mkdir -p -m 0700 %t/obsidience-screen-replay/%i
 ExecStart=/var/lib/ai/opt/gpu-screen-recorder-6.1.2-static/bin/gpu-screen-recorder -w %i -c mkv -k hevc -f 30 -keyint 0.5 -r 60 -replay-storage ram -cursor yes -o %t/obsidience-screen-replay/%i
