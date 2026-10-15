@@ -1599,8 +1599,8 @@ def _asks_live(query, context):
     stays with the Media server, which reports the outage; a title never falls to a live pick.
     """
     from ..media.title import generic, named, spec, tokens
-    if generic(query):
-        return True
+    if generic(query):  # A library film named "Soul" or "Us" still plays from the library.
+        return named(query, context, catalogue=False) is not True
     words = tokens(spec(query)[0])
     if not set(words) & _PROVIDER_WORDS:
         return False

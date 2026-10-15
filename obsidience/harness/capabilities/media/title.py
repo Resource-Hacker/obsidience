@@ -63,7 +63,9 @@ GENERIC = frozenset({
     'show', 'shows', 'series', 'episode', 'episodes', 'cartoon', 'cartoons', 'anime', 'sports', 'sport',
     'game', 'games', 'tv', 'television', 'video', 'videos', 'clip', 'clips', 'news', 'weather', 'channel',
     'channels', 'live', 'stream', 'livestream', 'radio', 'podcast', 'podcasts', 'documentary',
-    'documentaries', 'comedy', 'kids', 'stuff', 'content', 'background', 'noise'})
+    'documentaries', 'comedy', 'kids', 'stuff', 'content', 'background', 'noise',
+    'rock', 'country', 'jazz', 'blues', 'classical', 'lofi', 'pop', 'rap', 'hip', 'hop', 'metal', 'soul',
+    'reggae', 'ambient', 'chill', 'electronic', 'techno', 'house', 'folk', 'punk', 'indie', 'disco'})
 _GENERIC_FILLER = frozenset({'the', 'a', 'an', 'some', 'any', 'on', 'to', 'me', 'us', 'for', 'of', 'please',
                              'put', 'play', 'watch', 'good', 'new', 'random', 'that', 'this', 'with', 'and'})
 # Nouns that end a description ("a superhero movie") rather than a title.
@@ -101,7 +103,10 @@ def _words(query: str) -> list[str]:
 
 def generic(query: str) -> bool:
     """Whether a request names only a kind of content ("put some music on", "cartoons")."""
-    return not set(_words(query)) - _GENERIC_FILLER - GENERIC
+    if spec(query)[1] is not None:  # "The Game season 2" names a series.
+        return False
+    words = set(_words(query))
+    return bool(words & GENERIC) and not words - _GENERIC_FILLER - GENERIC
 
 
 def described(query: str) -> bool:
@@ -143,16 +148,17 @@ async def _search(title: str, kind: str, context: dict) -> tuple[list[dict], lis
     if key not in pages:
         page = await discovery.search(title, kind, context)
         # A page cut by the activation's record cap may hide a second exact title: fail closed.
-        pages[key] = None if page.get('truncated') else page['matches']
-        if pages[key] is not None:
+        matches = None if page.get('truncated') else page['matches']
+        if matches is not None:
             # Same-named titles ranked past the result cap ("The Thing" 1982 and 2011) count too.
             unlisted = (context.get('_media_discovery_unlisted') or {}).get((kind, title.strip()), [])
             lower = match_titles(title, unlisted)[0]
-            if len(lower) == 1 and not match_titles(title, pages[key])[0]:
+            if len(lower) == 1 and not match_titles(title, matches)[0]:
                 # The only exact title ranked lower: look it up by IMDb id for its candidate record.
                 found = await discovery.search(lower[0]['imdb_id'], kind, context)
                 lower = None if found.get('truncated') else found['matches']
-            pages[key] = None if lower is None else pages[key] + lower
+            matches = None if lower is None else matches + lower
+        pages[key] = matches  # Only a completed search is remembered for this activation.
     if pages[key] is None:
         raise MediaUnavailable('media_discovery_record_limit')
     exact, partial = match_titles(title, pages[key])
@@ -537,18 +543,18 @@ async def _acquire(title: str, season: int | None, episode: int | None, context:
 
 async def _prepare(query: str, context: dict) -> dict:
     title, season, episode = spec(query)
-    if generic(title):
-        return _final(f'"{title}" names a kind of content, not a movie or show; nothing was played.',
-                      note='For music, videos or live channels call play again with app youtube or pluto; '
-                           'a film of that name is played with its year ("Music 2021").')
     rows = await asyncio.to_thread(service.catalogue().titles)
     if season is not None:
         rows = [row for row in rows if row['type'] == 'Series']
     exact, partial = match_titles(title, rows)
     if len(exact) > 1:
         return _choices(title, exact, context)
-    if exact:
+    if exact:  # A library title wins even when it is a content word ("The Game", "Soul").
         return await _play_row(exact[0], season, episode, context)
+    if season is None and generic(title):  # Never register a film for "music" or "cartoons".
+        return _final(f'"{title}" names a kind of content, not a movie or show; nothing was played.',
+                      note='For music, videos or live channels call play again with app youtube or pluto; '
+                           'a film of that name is played with its year ("Music 2021").')
     words = tokens(title)
     if any(row['type'] == 'Series' for row in partial):
         # A library series containing the request ("Voyager" in Star Trek: Voyager) means the owner
