@@ -1,7 +1,7 @@
-/** Obsidience daemon client (REST + WS). */
+/** The Harness API client: every page's HTTP calls and socket origin. */
 
-export const API_BASE = "http://127.0.0.1:8765";
-export const WS_BASE = "ws://127.0.0.1:8765";
+const API_BASE = "http://127.0.0.1:8765";
+export const WS_BASE = API_BASE.replace(/^http/, "ws");
 
 async function json<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, init);
@@ -103,35 +103,43 @@ export interface KnowledgeActivity {
   graphId?: string;
 }
 
-export const api = {
-  graph: () => json<GraphSnapshot>("/api/graph", { cache: "no-store" }),
+/** The Memory and Code providers' graph (/api/graphs/*) and their /ws/activity operations. */
+export interface ProviderNode {
+  id: string; name: string; kind: string; color: string;
+  x?: number; y?: number; z?: number; size?: number;
+  file?: string; qualified_name?: string; ref?: string; text?: string; graph_id?: string;
+  start_line?: number; end_line?: number; body_hash?: string; external?: boolean;
+  aliases?: string[];
+  date?: string; occurred_start?: string | null; occurred_end?: string | null;
+  tags?: string[]; proof_count?: number; support?: string[];
+}
+export interface ProviderEdge { source: string; target: string; kind: string; color?: string; weight?: number }
+export interface ProviderGraph {
+  provider: string; graph_id: string; nodes: ProviderNode[]; edges: ProviderEdge[];
+  total: number; limited: boolean; missed?: number; updated_at?: string; project?: string; revision?: string;
+  code_root?: string; code_file?: string; external_count?: number;
+  index?: {state: string; updated_at?: string; error?: string};
+}
+export interface GraphOperation {
+  id: string; kind: string; status: string; refs: string[]; label: string;
+  graph_id: string; at: number; expires_at: number; refresh: boolean;
+}
+
+export interface MemoryBank { id: string; name: string; agent_ref: string; count: number }
+/** Changed records and edges since the shown revision of one memory bank. */
+export type MemoryDelta = Pick<ProviderGraph, "provider" | "graph_id" | "nodes" | "edges" | "total" | "limited" | "updated_at"> & {
+  delta: true; since: string; revision: string; removed: string[]; removed_edges: ProviderGraph["edges"];
 };
 
-let readerSelection: string | null = null;
-let readerGraphId = "";
-
-export function openReader(ref: string, graphId = ""): void {
-  readerSelection = ref;
-  readerGraphId = graphId;
-  window.dispatchEvent(new CustomEvent("obsidience:open-reader", { detail: { ref, graphId } }));
-}
-
-export function onOpenReader(handler: (ref: string, graphId: string) => void): () => void {
-  const fn = (e: Event) => {
-    const { ref, graphId = "" } = (e as CustomEvent<{ ref: string; graphId?: string }>).detail;
-    handler(ref, graphId);
-  };
-  window.addEventListener("obsidience:open-reader", fn);
-  if (readerSelection) handler(readerSelection, readerGraphId);
-  return () => window.removeEventListener("obsidience:open-reader", fn);
-}
-
-export function announceKnowledgeActivity(activity: KnowledgeActivity): void {
-  window.dispatchEvent(new CustomEvent("obsidience:knowledge-activity", { detail: activity }));
-}
-
-export function onKnowledgeActivity(handler: (activity: KnowledgeActivity) => void): () => void {
-  const fn = (event: Event) => handler((event as CustomEvent<KnowledgeActivity>).detail);
-  window.addEventListener("obsidience:knowledge-activity", fn);
-  return () => window.removeEventListener("obsidience:knowledge-activity", fn);
-}
+export const api = {
+  graph: () => json<GraphSnapshot>("/api/graph", { cache: "no-store" }),
+  memoryBanks: (signal?: AbortSignal) => json<{ banks: MemoryBank[] }>("/api/graphs/memory/banks", { signal }),
+  memoryGraph: (bank: string, since?: string, signal?: AbortSignal) => json<ProviderGraph | MemoryDelta>(
+    "/api/graphs/memory?bank=" + encodeURIComponent(bank) + (since ? "&since=" + encodeURIComponent(since) : ""), { signal }),
+  memoryRecord: (bank: string, id: string, signal?: AbortSignal) => json<Record<string, unknown>>(
+    "/api/graphs/memory/record?bank=" + encodeURIComponent(bank) + "&id=" + encodeURIComponent(id), { signal }),
+  codeGraph: (signal?: AbortSignal) => json<ProviderGraph>("/api/graphs/code", { signal }),
+  refreshCodeGraph: () => json<ProviderGraph["index"]>("/api/graphs/code/refresh", { method: "POST" }),
+  /** The Shell command socket's user-only token, read again for every connection. */
+  shellCommandToken: () => json<{ token?: unknown }>("/api/shell/command-token", { cache: "no-store" }),
+};

@@ -5,5 +5,5 @@
     "strict": false, "skipLibCheck": true, "noEmit": true,
     "paths": { "@/*": ["./src/renderer/src/*"] }
   },
-  "include": ["src/renderer/src/**/*", "src/shared/**/*", "src/main/config/schema.ts"]
+  "include": ["src/renderer/src/**/*"]
 }

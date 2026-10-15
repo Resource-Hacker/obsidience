@@ -2,7 +2,7 @@ import {
   KNOWLEDGE_3D_TUNING_FIELDS,
   clampKnowledge3dTuning,
   type Knowledge3dTuning,
-} from "@/components/themes/obsidience/knowledge-3d";
+} from "@/graph/knowledge/knowledge-3d";
 import {
   CODE_GRAPH_ID,
   LIBRARY_GRAPH_ID,
@@ -16,12 +16,15 @@ import {
   requestGraphThinkingTest,
   saveGraphTuningProfile,
   selectGraphTuningProfile,
-} from "@/lib/graph-tuning";
+} from "@/graph/tuning";
+import { api } from "@/lib/api";
 
 const SHELL_URL = "ws://127.0.0.1:8768";
 const SHELL_SUBPROTOCOL = "obsidience.shell.v1";
 const COMMAND_SCHEMA = "obsidience.shell.command.v1";
 const EVENT_SCHEMA = "obsidience.shell.event.v1";
+/** The Shell's Surfaces, by placement identity. */
+export const SURFACE_IDS: readonly string[] = ["samsung", "usb-c", "dp-4"];
 
 const pending: string[] = [];
 const knowledgeVisibilityListeners = new Map<
@@ -256,7 +259,7 @@ function handleMessage(event: MessageEvent): void {
     if (
       message.type === "graph.display.state"
       && typeof message.selected_surface_id === "string"
-      && ["samsung", "usb-c", "dp-4"].includes(message.selected_surface_id)
+      && SURFACE_IDS.includes(message.selected_surface_id)
     ) {
       selectedGraphSurfaceId = message.selected_surface_id;
       for (const listener of graphDisplayListeners) {
@@ -291,9 +294,7 @@ function scheduleReconnect(): void {
 /** The Shell admits only clients presenting its user-only runtime token, which
  * this page's own Harness origin hands out; read it again for every connection. */
 async function shellCommandUrl(): Promise<string> {
-  const response = await fetch("/api/shell/command-token", { cache: "no-store" });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  const { token } = await response.json() as { token?: unknown };
+  const { token } = await api.shellCommandToken();
   if (typeof token !== "string" || !/^[0-9a-f]{64}$/.test(token)) throw new Error("invalid token");
   return `${SHELL_URL}/?token=${token}`;
 }
@@ -351,10 +352,6 @@ export function presentShellReader(ref: string, graphId = ""): void {
 
 export function presentShellSource(key: string): void {
   sendCommand({ type: "pane.present", pane_id: "reader", selection: { kind: "source", key } });
-}
-
-export function presentShellGraph(view: "knowledge" | "memory" | "code"): void {
-  sendCommand({ type: "pane.present", pane_id: "knowledge-graph", selection: {kind: "graph", view} });
 }
 
 export function selectShellGraphView(view: GraphView): void {
