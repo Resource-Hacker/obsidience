@@ -12,7 +12,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 import httpx
 
@@ -154,7 +154,8 @@ def authorize(client):
         raise ConnectError('TorBox returned invalid device authorization data.')
     url = urlsplit(verification_url)
     if (url.scheme != 'https' or url.hostname not in ('torbox.app', 'www.torbox.app')
-            or url.username or url.password or url.query or url.fragment
+            or url.username or url.password or url.fragment or url.path != '/oauth/device'
+            or parse_qs(url.query, keep_blank_values=True) not in ({}, {'app': ['Obsidience Media']})
             or url.port not in (None, 443) or any(ord(c) < 33 for c in verification_url)):
         raise ConnectError('TorBox returned an invalid verification URL.')
     print('Verification URL: ' + verification_url, flush=True)
