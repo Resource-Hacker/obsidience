@@ -21,26 +21,10 @@ export interface Knowledge3dOptics {
   uModelScale: { value: number };
 }
 
-const OPTICS_GLSL = `
-uniform float uFocusSwing;
-uniform float uPixelRatio;
-uniform float uReach;
-uniform float uModelScale;
-uniform float uTime;
+const RIPPLE_GLSL = `
 uniform vec4 uDrops[8];     // bearing; age, 0 as it lands to 1 when spent
 uniform vec4 uDropTints[8]; // colour; strength
 uniform float uDropSpans[8]; // how far the ring spreads in its life, radians
-// Depth past the cloud centre in cloud radii: -1 nearest, +1 farthest.
-float knowledgeDepth(vec4 view) {
-  return ((modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0)).z - view.z) / max(uReach * uModelScale, 1e-3);
-}
-float knowledgeFog(float depth) {
-  return exp(-max(0.0, depth + 0.55) * 1.15);
-}
-// Circle of confusion in canvas pixels.
-float knowledgeConfusion(float depth) {
-  return min(abs(depth - uFocusSwing) * 4.5, 18.0) * uPixelRatio;
-}
 // A node drops into its shell like a stone into water: a short train of
 // crests spreads across the shell from the node's bearing, in the node's
 // colour, fading as it goes. A wide drop crosses the whole layer; a small one
@@ -67,6 +51,25 @@ float rippleWave(vec3 direction, out vec3 tint) {
   return wave;
 }
 `;
+
+const OPTICS_GLSL = `
+uniform float uFocusSwing;
+uniform float uPixelRatio;
+uniform float uReach;
+uniform float uModelScale;
+uniform float uTime;
+// Depth past the cloud centre in cloud radii: -1 nearest, +1 farthest.
+float knowledgeDepth(vec4 view) {
+  return ((modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0)).z - view.z) / max(uReach * uModelScale, 1e-3);
+}
+float knowledgeFog(float depth) {
+  return exp(-max(0.0, depth + 0.55) * 1.15);
+}
+// Circle of confusion in canvas pixels.
+float knowledgeConfusion(float depth) {
+  return min(abs(depth - uFocusSwing) * 4.5, 18.0) * uPixelRatio;
+}
+${RIPPLE_GLSL}`;
 
 /** Light added to a premultiplied canvas: alpha follows the brightest channel. */
 export const LIGHT_GLSL = `
@@ -177,6 +180,14 @@ ${SHELL_GLSL}
 #ifdef CORE_HUG
 ${CORE_HUG_GLSL}
 #endif
+#ifdef SHELL_LENS
+uniform float uPerspective;
+varying vec4 vClip;
+varying float vRadiusPx;
+varying float vFacing;
+varying vec3 vEast;
+varying vec3 vNorth;
+#endif
 void main() {
   vSt = position.xy;
   vec3 direction = sphereDirection(vSt);
@@ -190,6 +201,58 @@ void main() {
   // Glass shows at its edge: how nearly this bearing is seen side-on.
   vEdge = 1.0 - abs(dot(normalize(normalMatrix * direction), normalize(view.xyz)));
   gl_Position = projectionMatrix * view;
+#ifdef SHELL_LENS
+  vClip = gl_Position;
+  vec4 hub = modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+  vRadiusPx = uShell.x * uPerspective * length(modelViewMatrix[0].xyz) / max(1.0, -hub.z);
+  vFacing = -dot(normalize(normalMatrix * direction), normalize(view.xyz));
+  // Which way the survey's s and t run across the glass as the camera sees
+  // it, per unit of each, in radians of arc.
+  float longitude = (vSt.x - 0.5) * 6.28318530718, polar = vSt.y * 3.14159265359;
+  vEast = normalize(normalMatrix * vec3(-sin(longitude), 0.0, cos(longitude)))
+    / (6.28318530718 * max(sin(polar), 0.05));
+  vNorth = normalize(normalMatrix * vec3(cos(polar) * cos(longitude), -sin(polar), cos(polar) * sin(longitude)))
+    / 3.14159265359;
+#endif
+}
+`;
+
+// The glass bends what lies behind it (Glass refraction): drawn just before a
+// layer's own light, over its front face, it puts back the canvas as it stood
+// a moment before, shifted down the slope of the glass. The plain glass is
+// level and shifts nothing; the craters' walls and the ripples' crests bend
+// the layers inside them, as wavy glass and water do.
+const LENS_FRAGMENT = `
+uniform sampler2D uSurvey;
+uniform vec2 uShell;
+uniform sampler2D uBackdrop;
+uniform vec2 uViewportPx;
+uniform float uRefraction;
+uniform float uTexel; // one survey texel across
+varying vec2 vSt;
+varying vec4 vClip;
+varying float vRadiusPx;
+varying float vFacing;
+varying vec3 vEast;
+varying vec3 vNorth;
+${SPHERE_GLSL}
+${RIPPLE_GLSL}
+// The glass's height above its plain sphere, in layer radii, as the vertex
+// shader lifts and sinks it.
+float glassHeight(vec2 st) {
+  vec3 tint;
+  return 0.05 * rippleWave(sphereDirection(st), tint) - uShell.y / max(uShell.x, 1e-4) * texture2D(uSurvey, st).a;
+}
+void main() {
+  if (vFacing < 0.0) discard;
+  // Its slope, rise per radian, as the camera sees it; a light shifts toward
+  // the low side, so a crater swells what lies under it.
+  float east = (glassHeight(vSt + vec2(uTexel, 0.0)) - glassHeight(vSt - vec2(uTexel, 0.0))) / (2.0 * uTexel);
+  float north = (glassHeight(vSt + vec2(0.0, 2.0 * uTexel)) - glassHeight(vSt - vec2(0.0, 2.0 * uTexel))) / (4.0 * uTexel);
+  vec3 slope = east * vEast + north * vNorth;
+  slope *= min(1.0, 2.0 / max(length(slope), 1e-4));
+  vec2 at = (vClip.xy / vClip.w * 0.5 + 0.5) * uViewportPx - slope.xy * vRadiusPx * 0.03 * uRefraction;
+  gl_FragColor = texture2D(uBackdrop, at / vec2(textureSize(uBackdrop, 0)));
 }
 `;
 
@@ -513,6 +576,8 @@ export interface Knowledge3dGlass {
   /** The core glass's distance: 1 hugs the core five pixels out. */
   coreGlassDistance: number;
   coreDust: number;
+  /** How strongly the layers' craters and ripples bend what lies behind them. */
+  glassRefraction: number;
 }
 
 export interface Knowledge3dShells {
@@ -554,12 +619,29 @@ export function createKnowledge3dShells(options: {
   speech?: { value: number };
   /** The marbles, so they hide the core's dust where they stand in front of it. */
   marbles?: MarbleCover;
+  /** The canvas behind each layer, which the layer bends: the texture, the
+   *  viewport in canvas pixels, and a refill of the texture from the canvas. */
+  backdrop?: {
+    texture: { value: THREE.Texture };
+    viewport: { value: THREE.Vector2 };
+    capture(renderer: THREE.WebGLRenderer): void;
+  };
 }): Knowledge3dShells {
   const { positions, layers, sizes, weights, tints, optics } = options;
   const core = options.core ?? -1;
   const detail = Math.min(1, Math.max(0.25, options.detail));
   const drawn: THREE.Object3D[] = [];
-  const show = (visible: boolean) => { for (const layer of drawn) layer.visible = visible; };
+  // A layer's lens draws only while it has something to bend.
+  const lenses: Array<{ mesh: THREE.Mesh; strength: { value: number } }> = [];
+  let shown = false;
+  const syncLenses = () => {
+    for (const lens of lenses) lens.mesh.visible = shown && lens.strength.value > 0;
+  };
+  const show = (visible: boolean) => {
+    shown = visible;
+    for (const layer of drawn) layer.visible = visible;
+    syncLenses();
+  };
   const disposables: Array<{ dispose(): void }> = [];
 
   // Layers closer than the tolerance share a shell; widen it until few enough.
@@ -662,6 +744,30 @@ export function createKnowledge3dShells(options: {
       // Added light needs no back-then-front ordering: one draw, both faces.
       side: THREE.DoubleSide, forceSinglePass: true, ...ADDITIVE,
     });
+    // The lens is made just before the glass: within a draw slot three orders
+    // by id, so it draws after the layers inside this one and before its light.
+    const backdrop = options.backdrop;
+    const refraction = { value: 0 };
+    if (backdrop) {
+      const lensMaterial = new THREE.ShaderMaterial({
+        uniforms: {
+          ...optics, ...rippling, uSurvey: survey, uShell: shape,
+          uBackdrop: backdrop.texture, uViewportPx: backdrop.viewport, uRefraction: refraction,
+          uTexel: { value: 1 / width },
+        },
+        defines: { SHELL_LENS: 1 },
+        vertexShader: GLASS_VERTEX, fragmentShader: LENS_FRAGMENT,
+        // The grid's winding faces inward; the shader keeps the near half.
+        side: THREE.DoubleSide, transparent: true, depthTest: false, depthWrite: false, blending: THREE.NoBlending,
+      });
+      const lens = new THREE.Mesh(glassGeometry, lensMaterial);
+      lens.name = "knowledge-shell-lens";
+      lens.frustumCulled = false;
+      lens.onBeforeRender = (renderer) => backdrop.capture(renderer);
+      lenses.push({ mesh: lens, strength: refraction });
+      drawn.push(lens);
+      disposables.push(lensMaterial);
+    }
     const glass = new THREE.Mesh(glassGeometry, glassMaterial);
     glass.name = "knowledge-shell-glass";
     glass.frustumCulled = false;
@@ -721,7 +827,7 @@ export function createKnowledge3dShells(options: {
     return { members, press, data, texture, surveyMaterial, survey, shape, width, levels,
       drops: drops.value, dropTints: dropTints.value, dropSpans: dropSpans.value,
       dropSeconds: new Float32Array(8).fill(1), nextDrop: 0,
-      glass: glassMaterial.uniforms, dust: dustMaterial.uniforms, seeds: seedMaterial.uniforms,
+      glass: glassMaterial.uniforms, dust: dustMaterial.uniforms, seeds: seedMaterial.uniforms, refraction,
       // Light per point for full dust at this shell's size.
       dustGain: 0.9 * 170_000 * reach * reach / dustCount,
       target: null as THREE.WebGLRenderTarget | null, floors: new Float32Array(count) };
@@ -936,7 +1042,10 @@ export function createKnowledge3dShells(options: {
         shell.dust.uGain.value = shell.dustGain * solid * glass.shellDust;
         shell.seeds.uGain.value = 1.1 * glass.seedGlow;
         shell.glass.uGlow.value = 0.16 * glass.craterGlow;
+        // A layer turned off bends nothing.
+        shell.refraction.value = solid > 0 ? glass.glassRefraction : 0;
       });
+      syncLenses();
       if (coreGlassUniforms) {
         coreGlassUniforms.uSolid.value = glass.coreGlass;
         coreUniforms.hug.value.z = glass.coreGlassDistance;

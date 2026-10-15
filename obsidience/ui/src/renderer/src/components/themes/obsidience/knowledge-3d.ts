@@ -221,6 +221,7 @@ export interface Knowledge3dTuning {
   coreGlass: number;
   coreGlassDistance: number;
   coreDust: number;
+  glassRefraction: number;
   craterDepth: number;
   craterGlow: number;
   seedGlow: number;
@@ -326,6 +327,7 @@ export const DEFAULT_KNOWLEDGE_3D_TUNING: Knowledge3dTuning = {
   coreGlass: 1,
   coreGlassDistance: 1,
   coreDust: 1,
+  glassRefraction: 0.5,
   craterDepth: 1,
   craterGlow: 1,
   seedGlow: 1,
@@ -413,6 +415,7 @@ export const KNOWLEDGE_3D_TUNING_FIELDS: readonly Knowledge3dTuningField[] = [
   { key: "shellLayer2", label: "Glass layer 2", group: "Glass", min: 0, max: 1.5, step: 0.05, description: "How solid the second glass layer out from the core is." },
   { key: "shellLayer3", label: "Glass layer 3", group: "Glass", min: 0, max: 1.5, step: 0.05, description: "How solid the third glass layer out from the core is. Lower values let the inner layers show through." },
   { key: "shellLayer4", label: "Glass layer 4", group: "Glass", min: 0, max: 1.5, step: 0.05, description: "How solid the fourth glass layer is. Only a graph with four layers has one." },
+  { key: "glassRefraction", label: "Glass refraction", group: "Glass", min: 0, max: 2, step: 0.05, description: "How strongly the glass layers bend what lies behind them where their craters dip and their ripples rise, like wavy glass or water. Zero leaves the layers flat." },
   // Dust marble glass works as a layer's (owner 2026-10-14): nothing at 0, almost opaque at the top.
   { key: "marbleOpacity", label: "Marble glass", group: "Glass", min: 0, max: 1.5, step: 0.05, description: "How solid the glass of Dust marble nodes is, as with the glass layers: 0 leaves only the dust, 1.5 is almost opaque." },
   { key: "marbleDust", label: "Marble dust", group: "Glass", min: 0, max: 2, step: 0.05, description: "How much floating dust fills Dust marble nodes. Higher values add more and brighter specks; zero leaves the glass empty." },

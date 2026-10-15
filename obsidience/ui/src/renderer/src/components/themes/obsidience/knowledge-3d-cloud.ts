@@ -569,6 +569,7 @@ export function createKnowledge3dCloud(
     core: nodes.findIndex((_, index) => styles[index * 4] === 2),
     speech: isMain ? deps.sharedUniforms.uSpeechLevel : undefined,
     marbles: marbleDust.cover,
+    backdrop: { texture: deps.sharedUniforms.uBackdrop, viewport: deps.viewportUniform, capture: deps.captureBackdrop },
   });
   shells.applyTuning(input.tuning);
   // Glass only adds light and draws in the beams' slot, behind the node sprites.
