@@ -17,7 +17,7 @@ never skipped) as the finite same-season sequence; add "season N" or "SxEy" for
 a specific one. A title or episode missing from the library is registered once
 through this turn's `media.acquire` under the accepted best-source policy (a
 source the media server already holds is refreshed, never registered again) and
-opened when the catalogue lists it; otherwise, within about 75 seconds, the
+opened when the catalogue lists it; otherwise, within about 85 seconds, the
 result is pending with `effect_applied` and `must_not_replay`: say it is being
 added, never register it again or play a substitute. `choices` mean play sent
 nothing: ask the owner, then open the chosen library id or play the exact title
@@ -25,7 +25,12 @@ with its year. An exact title wins; a library series that only begins with the
 words (Star Trek: Voyager for "Star Trek") is offered among the choices whenever
 the catalogue also has that exact title, and a one-word prefix never plays. A
 request for a kind of content rather than a title (some music, cartoons, a
-movie) is no title and uses the live/web route below. Never substitute a
+movie) is no title and uses the live/web route below. A request ending in movie,
+film, show or series that is not exactly a library title ("a superhero movie",
+also "The Truman Show") or a lone content word that is also a title ("Radio")
+registers nothing and returns catalogue `choices`; a title with no exact
+catalogue match returns similar ones. Ask the owner, then play the exact title
+with its year. Never substitute a
 YouTube clip or live channel for a requested film or episode.
 
 For an explicitly selected Jellyfin item on this TV, use `find` with `app:

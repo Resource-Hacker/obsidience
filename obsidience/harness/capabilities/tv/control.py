@@ -1588,8 +1588,10 @@ _ROUTE_FILLER = {'the', 'a', 'an', 'on', 'tv', 'television', 'some', 'to', 'me'}
 def _asks_live(query, context):
     """Whether play's request explicitly asks for Pluto/YouTube rather than naming a title.
 
-    A request made only of generic content words ("put some music on", "cartoons")
-    names no title and keeps the chooser. A provider word inside a title ("Live and
+    A request made only of generic content words ("put some music on", "a movie")
+    names no title and keeps the chooser; a lone content word that is exactly a library
+    or catalogue title ("Radio", "The Game") goes to the Media server, which offers
+    that title as a choice instead of a web pick. A provider word inside a title ("Live and
     Let Die", "News of the World", "The Weather Man") does not ask for live content:
     an exact library title always plays from the Media server, and a request whose
     words do not end in a provider word is a title when the metadata catalogue lists
@@ -1597,9 +1599,9 @@ def _asks_live(query, context):
     keep the live/web route. When the library or catalogue cannot be read the request
     stays with the Media server, which reports the outage; a title never falls to a live pick.
     """
-    from ..media.title import generic, named, spec, tokens
+    from ..media.title import generic, lone, named, spec, tokens
     if generic(query):
-        return True
+        return not (lone(query) and named(query, context, catalogue=True))
     words = tokens(spec(query)[0])
     if not set(words) & _PROVIDER_WORDS:
         return False

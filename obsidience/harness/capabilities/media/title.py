@@ -11,8 +11,13 @@ between choices.
 
 Registration is a real external effect, so it happens only for a request that is
 clearly one named title (deterministic rules, no model call):
-- a request made only of generic content words ("some music", "cartoons", "a
-  movie") is not a title; it keeps play's Pluto/YouTube chooser;
+- a request made only of generic content words ("some music", "a movie") is not a
+  title; it keeps play's Pluto/YouTube chooser. A lone content word that is also a
+  title ("Radio", "The Game") plays an exact library title, else offers the exact
+  catalogue titles as choices;
+- a request that ends in a content noun ("a superhero movie") describes rather than
+  names: unless it is exactly a library title it never registers, even when the
+  catalogue holds a title of that name ("Superhero Movie"); its rows become choices;
 - an exact library title plays; a library series whose name only begins with the
   request ("Star Trek" -> Star Trek: Voyager) plays only for a request of two or
   more words when the metadata catalogue has no title of exactly that name;
@@ -21,8 +26,10 @@ clearly one named title (deterministic rules, no model call):
   number returns choices), and a source the media server already holds for it is
   refreshed (media.acquire refresh), never registered a second time;
 - the registration is this turn's media.acquire capability call (its own grant,
-  scope check, receipt and attempt keys), and the whole call ends by DEADLINE_SECONDS
-  with a truthful pending result.
+  scope check, receipt and attempt keys). The whole call ends by DEADLINE_SECONDS with a
+  truthful pending result; a registration starts only with _REGISTER_RESERVE left, which
+  covers its bounded path (TorBox account, inventory and cache reads, then a create of at
+  most 35 s), so the call ends within about ten seconds of the deadline at worst.
 """
 from __future__ import annotations
 
@@ -39,7 +46,7 @@ from .library import bind
 
 WAIT_SECONDS = 30.0
 DEADLINE_SECONDS = 75.0  # The whole play-with-acquisition resolution; a voice turn waits for it.
-_REGISTER_RESERVE = 30.0  # A registration starts only with this much of the deadline left.
+_REGISTER_RESERVE = 50.0  # A registration starts only with this much of the deadline left.
 _TRANSIENT = {None, 'catalogue_source_pending', 'catalogue_readback_unavailable',
               'catalogue_refresh_uncertain', 'catalogue_readback_limit'}
 _SPEC = (re.compile(r'\bs(\d{1,2})\s*e(\d{1,3})\b', re.I),
@@ -55,6 +62,10 @@ GENERIC = frozenset({
     'documentaries', 'comedy', 'kids', 'stuff', 'content', 'background', 'noise'})
 _GENERIC_FILLER = frozenset({'the', 'a', 'an', 'some', 'any', 'on', 'to', 'me', 'us', 'for', 'of', 'please',
                              'put', 'play', 'watch', 'good', 'new', 'random', 'that', 'this', 'with', 'and'})
+# Nouns that end a description ("a superhero movie") rather than a title.
+_KIND_NOUNS = frozenset({'movie', 'movies', 'film', 'films', 'show', 'shows', 'series', 'cartoon', 'cartoons',
+                         'documentary', 'documentaries', 'episode', 'episodes'})
+_LIVE_KINDS = frozenset({'news', 'weather', 'live', 'channel', 'channels', 'stream', 'livestream'})
 
 
 def tokens(text: str) -> list[str]:
@@ -77,10 +88,27 @@ def spec(query: str) -> tuple[str, int | None, int | None]:
     return text, None, None
 
 
+def _words(query: str) -> list[str]:
+    return re.findall(r'[^\W_]+', unicodedata.normalize('NFKC', spec(query)[0]).casefold())
+
+
 def generic(query: str) -> bool:
     """Whether a request names only a kind of content ("put some music on", "cartoons")."""
-    words = set(re.findall(r'[^\W_]+', unicodedata.normalize('NFKC', spec(query)[0]).casefold()))
-    return not words - _GENERIC_FILLER - GENERIC
+    return not set(_words(query)) - _GENERIC_FILLER - GENERIC
+
+
+def lone(query: str) -> bool:
+    """Whether a generic request is one content word that may also be a title ("Radio", "Kids",
+    "The Game"); "some music", "a movie" and live words ("news", "the weather") are not."""
+    words = _words(query)
+    words = words[1:] if words[:1] == ['the'] else words
+    return len(words) == 1 and words[0] not in _LIVE_KINDS
+
+
+def described(query: str) -> bool:
+    """Whether a request ends in a content noun ("a superhero movie"): a description, not a title."""
+    words = _words(query)
+    return bool(words) and words[-1] in _KIND_NOUNS
 
 
 def match_titles(query: str, rows: list[dict]) -> tuple[list[dict], list[dict]]:
@@ -108,20 +136,28 @@ def match_titles(query: str, rows: list[dict]) -> tuple[list[dict], list[dict]]:
     return [], []
 
 
-async def _search(title: str, kind: str, context: dict) -> list[dict]:
-    """Exact metadata-catalogue titles, searched once per run (the discovery call budget is shared)."""
+async def _search(title: str, kind: str, context: dict) -> tuple[list[dict], list[dict]]:
+    """(exact, near) metadata-catalogue titles, searched once per run (the discovery call budget
+    is shared). near: the partial matches, else the catalogue's own results ("Oceans Eleven")."""
     pages = context.setdefault('_tv_title_searches', {})
     key = (tuple(tokens(title)), kind)
     if key not in pages:
         pages[key] = (await discovery.search(title, kind, context))['matches']
-    return match_titles(title, pages[key])[0]
+    exact, partial = match_titles(title, pages[key])
+    return exact, [] if exact else partial or pages[key]
+
+
+async def _catalogue(title: str, season: int | None, context: dict) -> tuple[list[dict], list[dict]]:
+    found, near = [], []
+    for kind in ('series',) if season is not None else ('movie', 'series'):
+        exact, others = await _search(title, kind, context)
+        found += exact
+        near += others
+    return found, near
 
 
 async def _catalogue_exact(title: str, season: int | None, context: dict) -> list[dict]:
-    found = []
-    for kind in ('series',) if season is not None else ('movie', 'series'):
-        found += await _search(title, kind, context)
-    return found
+    return (await _catalogue(title, season, context))[0]
 
 
 def named(query: str, context: dict, *, catalogue: bool) -> bool | None:
@@ -375,7 +411,7 @@ async def _register(metadata_id: str, season: int | None, episode: int | None, c
                                  context)
     except PermissionError as error:
         context.pop('_tv_title_registering', None)
-        return _final(f'Not in the library; media.acquire is not authorized now ({error}). Nothing was registered.')
+        return _final(f'Not in the library; media.acquire was not admitted ({error}). Nothing was registered.')
     context.pop('_tv_title_registering', None)
     scope = {key: row.get(key) for key in ('acquisition_scope', 'resolution', 'pack_episodes') if key in row}
     if receipt.get('status') != 'completed' or receipt.get('delivery') != 'verified':
@@ -401,14 +437,21 @@ async def _acquire(title: str, season: int | None, episode: int | None, context:
     if 'media.acquire' not in (context.get('_tool_receipt_articles') or {}):
         return _final(f'"{title}" is not in the media library, and acquisition is not granted to this Agent.')
     explicit_meta = meta is not None
-    found = [meta] if meta else await _catalogue_exact(title, season, context)
+    found, near = ([meta], []) if meta else await _catalogue(title, season, context)
     if not found:
-        return _final(f'No movie or series named "{title}" is in the library or the metadata catalogue; '
-                      'nothing was registered.',
-                      note='If the owner meant a live channel or a web video, call play again with app pluto or youtube.')
+        return _final(f'No movie or series is named exactly "{title}" in the library or the metadata catalogue; '
+                      'nothing was registered.', **({'choices': _catalogue_rows(near)} if near else {}),
+                      note='Ask the owner which title they meant' + (' (these are similarly named)' if near else '')
+                           + '; play it with its exact title followed by its year. A live channel or web video '
+                             'never stands in for a named title.')
     if len(found) > 1:
         return _final(f'"{title}" names more than one title; nothing was registered.',
                       choices=_catalogue_rows(found), note=_CHOOSE)
+    if not explicit_meta and described(title):
+        # "a superhero movie" is a description; a catalogue title of that name ("Superhero Movie")
+        # is only a candidate, never registered without the owner naming it.
+        return _final(f'"{title}" describes a kind of content rather than naming one title; nothing was '
+                      'registered.', choices=_catalogue_rows(found), note=_CHOOSE)
     meta = found[0]
     if not explicit_meta:
         # The library may hold this exact title under a differently scraped name: play it, never register twice.
@@ -479,9 +522,11 @@ async def _acquire(title: str, season: int | None, episode: int | None, context:
 
 async def _prepare(query: str, context: dict) -> dict:
     title, season, episode = spec(query)
-    if generic(title):
-        return _final(f'"{title}" names a kind of content, not a movie or show; nothing was played.',
-                      note='For music, videos or live channels call play again with app youtube or pluto.')
+    kind = generic(title)
+    unnamed = _final(f'"{title}" names a kind of content, not a movie or show; nothing was played.',
+                     note='For music, videos or live channels call play again with app youtube or pluto.')
+    if kind and not lone(title):
+        return unnamed
     rows = await asyncio.to_thread(service.catalogue().titles)
     if season is not None:
         rows = [row for row in rows if row['type'] == 'Series']
@@ -490,6 +535,15 @@ async def _prepare(query: str, context: dict) -> dict:
         return _choices(title, exact, context)
     if exact:
         return await _play_row(exact[0], season, episode, context)
+    if kind:
+        # A lone content word that is not a library title ("Radio", "The Game"): never registered.
+        listed = await _catalogue_exact(title, season, context)
+        if not listed:
+            return unnamed
+        return _final(f'"{title}" is a kind of content and also a title; nothing was played.',
+                      choices=_catalogue_rows(listed),
+                      note='Ask whether the owner meant one of these titles (play it with its exact title followed '
+                           'by its year) or that kind of content (play again with app youtube or pluto).')
     words = tokens(title)
     leading = [row for row in partial if row['type'] == 'Series' and tokens(row['title'])[:len(words)] == words]
     if leading:

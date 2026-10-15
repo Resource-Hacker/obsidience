@@ -114,6 +114,11 @@ def nested_caller(ex, parent: str, execute_async, scope_checkpoint):
     async def call(name: str, args: dict):
         if name in (parent, "task.complete") or name not in ex.allowed:
             raise PermissionError(f"Tool '{name}' is not authorized for this task.")
+        # Refused before dispatch, as the loop's own admission refuses a model call.
+        if ex.interruption_event is not None and ex.interruption_event.is_set():
+            raise PermissionError("interrupted by a foreground admission")
+        if ex.steering is not None and ex.steering.pending:
+            raise PermissionError("superseded by a current owner clarification")
         scope_checkpoint(ex.ctx, name)
         ex.step += 1  # The parent keeps its own step; its return advances past this one.
         step, run_id = ex.step + 1, ex.ctx.get("run_id")
@@ -127,6 +132,9 @@ def nested_caller(ex, parent: str, execute_async, scope_checkpoint):
                                          tool_ref=tool_ref, tool_sha256=tool_hash):
                 raise RuntimeError("Tool call already has a dispatch receipt; do not replay")
         status, result = "error", None
+        fields = {"step": step, **({"call_id": f"{run_id}:{step}"} if run_id else {})}
+        ex.emit("tool", f"{ex.agent_name} → {name} (within {parent})", [json.dumps(args, default=str)], {
+            **fields, "payload": {"kind": "tool", "name": name, "phase": "start", "arguments": args}})
         try:
             result = await execute_async(name, args, ex.ctx)
             status = "returned"
@@ -146,6 +154,10 @@ def nested_caller(ex, parent: str, execute_async, scope_checkpoint):
                     result_sha256=hashlib.sha256(encoded.encode()).hexdigest(), result_chars=len(encoded.encode()))
             ex.trace.append({"tool": name, "args": args, "sig": signature, "within": parent,
                              "obs": (result if isinstance(result, str) else encoded)[:600]})
+            ex.emit("result", f"{name} {status}", str(result).splitlines()[:12], {
+                **fields, "payload": {"kind": "tool", "name": name, "phase": "result", "status": status,
+                                      "duration_ms": round((time.perf_counter() - started) * 1_000, 3),
+                                      "result": result}})
             if name == "media.acquire" and not (isinstance(result, dict) and result.get("status") == "completed"
                                                 and result.get("delivery") == "verified"):
                 ex.ctx["_media_acquire_failed"] = True

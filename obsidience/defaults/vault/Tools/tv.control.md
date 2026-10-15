@@ -23,10 +23,14 @@ description: 'Control the registered TV as an optional Media playback destinatio
   or next episode missing from the library is registered once under the accepted best-source
   policy (a source the media server already holds is refreshed, never registered again) and
   opened when the catalogue lists it, otherwise the result says it is pending within about
-  75 s (nothing to replay). It wakes the TV if needed. Ambiguous titles, editions or sources
+  85 s (nothing to replay). It wakes the TV if needed. Ambiguous titles, editions or sources
   return choices and play nothing: ask the owner; a different library title is never played
   instead (a sequel, or a series that only begins with the words, such as Star Trek: Voyager
-  for Star Trek, which is also a film). Only with app pluto|youtube, a request for a kind
+  for Star Trek, which is also a film). A request ending in movie, film, show or series that
+  is not exactly a library title (a superhero movie, also The Truman Show) or a lone content
+  word that is also a title (Radio) registers nothing and returns catalogue choices; a title
+  with no exact catalogue match returns similar ones: ask the owner, then play the exact title
+  with its year. Only with app pluto|youtube, a request for a kind
   of content rather than a title (some music, cartoons, a movie), or a request that asks for
   live, channel, news, weather, YouTube or Pluto (a title containing such a word, such as News of the World, is still a title),
   does play pick a strong Pluto live channel, else YouTube''s top video (a live stream only
