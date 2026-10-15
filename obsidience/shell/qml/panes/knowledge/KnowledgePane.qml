@@ -418,8 +418,6 @@ Rectangle {
             selectedGraphId = String(event.selection.graph_id || "")
             revealSelection()
             rebuildRows()
-        } else if (event.type === "pane.dock.state" && event.layout) {
-            dockLayout.applyRecord(event.layout)
         }
     }
 

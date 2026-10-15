@@ -989,8 +989,8 @@ QtObject {
 
     function handleClickCommand(socket, command) {
         const type = command.type
-        if (["window.click", "window.drag", "window.click.guard", "window.click.cancel",
-                "window.drag.cancel", "window.click.result", "window.drag.result"].indexOf(type) < 0) {
+        if (["window.click", "window.drag", "window.click.guard",
+                "window.click.result", "window.drag.result"].indexOf(type) < 0) {
             return false
         }
         const token = cleanClickToken(command.token)
@@ -1006,13 +1006,6 @@ QtObject {
                 && command.lock_generation === pending.generation
             send(socket, {"schema": eventSchema, "type": "window.click.guard.result",
                 "token": token, "allowed": allowed === true})
-            return true
-        }
-        if (type === "window.click.cancel" || type === "window.drag.cancel") {
-            if (pending && pending.socket === socket) {
-                clickRequests = clickRequests.filter(item => item !== pending)
-                windowClickResult(socket, pending.command, false, "cancelled", "uncertain")
-            }
             return true
         }
         if (type === "window.click.result" || type === "window.drag.result") {
@@ -1730,11 +1723,6 @@ QtObject {
         }
         if (command.pane_id !== "reader") {
             commandError(socket, command, "unknown_command")
-            return
-        }
-        if (command.type === "pane.dismiss") {
-            readerPlacement.dismiss()
-            broadcast(readerState())
             return
         }
         if (command.type !== "pane.present") {

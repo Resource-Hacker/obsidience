@@ -389,8 +389,6 @@ Rectangle {
                 selectedKey = String(event.selection.key || "")
             }
             rebuildRows()
-        } else if (event.type === "pane.dock.state" && event.layout) {
-            dockLayout.applyRecord(event.layout)
         }
     }
 

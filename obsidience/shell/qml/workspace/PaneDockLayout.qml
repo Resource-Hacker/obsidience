@@ -12,7 +12,6 @@ QtObject {
         StandardPaths.ConfigLocation
     ) + "/obsidience-shell/pane-dock-layout.json"
 
-    property bool authoritative: false
     property int revision: 0
     property var modules: defaultModules()
 
@@ -181,13 +180,11 @@ QtObject {
     }
 
     function writeState() {
-        if (authoritative) {
-            layoutFile.setText(JSON.stringify(record(), null, 2) + "\n")
-        }
+        layoutFile.setText(JSON.stringify(record(), null, 2) + "\n")
     }
 
     function commitDock(expectedRevision, paneId, hostPaneId, side, position) {
-        if (!authoritative || revision !== expectedRevision
+        if (revision !== expectedRevision
                 || !canDock(paneId, hostPaneId)
                 || (side !== "left" && side !== "right")
                 || (position !== "top" && position !== "bottom")) {
@@ -227,7 +224,7 @@ QtObject {
     }
 
     function commitFloat(expectedRevision, paneId) {
-        if (!authoritative || revision !== expectedRevision
+        if (revision !== expectedRevision
                 || !cleanPaneId(paneId) || !modules[paneId]) {
             return false
         }
@@ -240,7 +237,7 @@ QtObject {
     }
 
     function commitCollapsed(expectedRevision, paneId, collapsed) {
-        if (!authoritative || revision !== expectedRevision
+        if (revision !== expectedRevision
                 || !cleanPaneId(paneId) || !modules[paneId]) {
             return false
         }
@@ -255,7 +252,7 @@ QtObject {
     }
 
     Component.onCompleted: {
-        if (authoritative && !layoutFile.text()) {
+        if (!layoutFile.text()) {
             writeState()
         }
     }

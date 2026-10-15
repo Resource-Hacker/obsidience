@@ -643,7 +643,8 @@ Rectangle {
                 GlowButton {
                     id: skillButton
 
-                    visible: root.shelf === "tool"
+                    // Each Tool has one paired Skill Article; a namespace has none.
+                    visible: root.shelf === "tool" && !libraryRow.modelData.node.synthetic
                     width: visible ? 50 : 0
                     height: 24
                     text: "SKILL"
@@ -655,8 +656,8 @@ Rectangle {
                     textPixelSize: 7
                     textLetterSpacing: 0.8
                     contentHorizontalPadding: 6
-                    onClicked: root.presentArticle("@library/Skills/"
-                        + String(libraryRow.modelData.node.title).split(".").join("/"))
+                    onClicked: root.presentArticle(String(libraryRow.modelData.node.id)
+                        .replace(/^Tools\//, "Skills/"))
                 }
 
 
