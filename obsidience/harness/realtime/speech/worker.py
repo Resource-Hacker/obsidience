@@ -96,6 +96,10 @@ SMART_TURN_PENDING_SECS = 3.0
 # frame (the old fixed pause covered it). An earlier end of turn decodes the
 # rest of that tail from silence before NeMo resets, instead of waiting for it.
 ASR_TAIL_SECS = 0.7
+# A trailing filled pause signals that the speaker is still formulating the
+# request. Reuse the existing pending-text grace, including after ASR tail
+# decoding, instead of accepting Smart Turn's early COMPLETE or delaying every turn.
+_HESITATION_END = re.compile(r"(?:^|\s)(?:u+h+|u+m+|erm+)$")
 _DANGLING_END = re.compile(
     r"(?:^|\s)(?:what's|whats|what is|you said|the|a|an|and|or|but|to|of|for|with|my|your)$",
 )
@@ -155,9 +159,10 @@ def _turn_words(text: str) -> str:
 
 
 def turn_text_pending(text: str) -> bool:
-    """True while recognized text cannot end a turn: no words, or a dangling end."""
+    """True for missing words, a dangling phrase or a trailing filled pause."""
     words = _turn_words(text)
-    return not words or _DANGLING_END.search(words) is not None
+    return (not words or _DANGLING_END.search(words) is not None
+            or _HESITATION_END.search(words) is not None)
 
 
 def turn_text_short_reply(text: str) -> bool:
