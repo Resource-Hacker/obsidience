@@ -170,6 +170,15 @@ def execute(args: dict, context: dict) -> str:
         maintenance = _maintenance_params(target.ref, raw_params, context, resolver())
     except ValueError as exc:
         return f"Task activation rejected: {exc}."
+    if (maintenance is None and target.ref in _MAINTENANCE_TARGETS.values()
+            and isinstance(context.get("_maintenance_snapshot"), dict)):
+        # A bare delegation after a maintenance scan would run the destination
+        # without its candidate, leaving it to guess which Articles to change.
+        return (
+            f"Task activation rejected: [[{target.ref}]] needs the exact candidate from this "
+            "run's vault.maintenance result. Pass params candidate_key, candidate_revision, "
+            "candidate_refs, candidate_kind and candidate_signals copied from that candidate."
+        )
     if maintenance is not None:
         raw_params = {
             key: value for key, value in raw_params.items()
