@@ -791,22 +791,36 @@ void main() {
 
 // Shared active-path timeline (owner 2026-08-02): every beam fragment
 // carries its plan-progress coordinate vP (-1 off-path). The BEAM head
-// (uBeamP) travels the path first, revealing/brightening the hollow tube;
-// the SOLID center line (uSolidP) launches once the head clears the first
-// node and fills behind its own comet; when the fill completes the whole
+// (uBeamP) travels the path first as the thin blue pilot light; the SOLID
+// beam (uSolidP), tube and centre line, launches once the head clears the
+// first node and fills behind its own comet; when the fill completes the whole
 // path pulses NEON (uGlow); then segmented dashes stream one direction
 // (uFlowAge) — information flowing — in the beam's own gradient colors.
-// On terminal cross-links vP is V-shaped, so both fronts naturally read
-// as two comets departing the endpoints and meeting at the middle.
+// On a cross-link whose endpoints were both reached another way vP is
+// V-shaped, so both fronts read as two comets meeting at the middle.
 const PATH_TIMELINE_GLSL = `
   float head = 1.0 - smoothstep(0.0, uHeadSpan, uBeamP - vP);
+#if defined(KNOWLEDGE_REVIEW_EFFECT) || defined(KNOWLEDGE_SELECTION)
   float alpha = max(uOpacity, 0.55) * band;
   vec3 color = mix(vColor, vec3(1.0), head * 0.6);
+#else
+  // The Independence Day beam (owner 2026-10-15): a thin blue pilot light
+  // runs the route first; the beam itself fires down it in the branch's
+  // colour, white-hot at its front, once the pilot reaches the first node.
+  float pilot = 1.0 - smoothstep(0.06, 0.2, t);
+  float alpha = pilot * (0.7 + head * 0.3);
+  vec3 color = mix(vec3(0.55, 0.8, 1.0), vec3(1.0), head * 0.7);
+#endif
   float coreA = 0.0;
   if (uSolidP >= vP) {
     float solidHead = 1.0 - smoothstep(0.0, uHeadSpan, uSolidP - vP);
     coreA = core * (0.85 + solidHead * 0.15);
+#if defined(KNOWLEDGE_REVIEW_EFFECT) || defined(KNOWLEDGE_SELECTION)
     color = mix(color, vec3(1.0), core * (0.25 + solidHead * 0.5));
+#else
+    alpha = max(uOpacity, 0.55) * band + solidHead * (1.0 - smoothstep(0.0, 1.0, t)) * 0.45;
+    color = mix(vColor, vec3(1.0), min(1.0, core * (0.25 + solidHead * 0.5) + solidHead * 0.3));
+#endif
   }
   if (uFlowAge >= 0.0) {
     float dashOn =

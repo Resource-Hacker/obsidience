@@ -72,7 +72,7 @@ const PASSED_GLOW = 0.45;
 const LANDING_RIPPLE = [0.3, 0.5] as const;
 const LANDING_RIPPLES_AT_ONCE = 7;
 
-export const KNOWLEDGE_ACTIVITY_FADE_MS = 420;
+export const KNOWLEDGE_ACTIVITY_FADE_MS = 2_000; // Owner 2026-10-15: a two-second fade.
 const SELECTION_TRANSITION_MS = 340;
 
 /** Transient Review paint over the separate scene presentation model. */
@@ -763,8 +763,11 @@ export function createKnowledge3dCloud(
     } else {
       crossPairs.push([a, b]);
       crossKeys.push(key);
-      const near = deps.parseColor(edge.colorEnd ?? edge.color);
-      const far = rgba;
+      // Each end wears the OTHER endpoint's colour (owner 2026-10-15). The
+      // dim 2D stroke is one cyan for every link, so the target end takes
+      // the source node's own colour instead.
+      const near = deps.parseColor(edge.colorEnd ?? nodes[b].core);
+      const far = deps.parseColor(nodes[a].core);
       crossNear.push(near.r, near.g, near.b);
       crossFar.push(far.r, far.g, far.b);
     }

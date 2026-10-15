@@ -70,7 +70,7 @@ import { previewLinkReviewCloud, projectLinkReviewEffects, recordLinkApproval, t
 import { claimShellKnowledgePresenter, onShellReaderSelection, type GraphSource } from "@/lib/shell-client";
 
 const ROOT_ID = "@vault";
-const FOCUS_LINGER_MS = 6_000; // The lit route stays on screen this long after its run ends.
+const FOCUS_LINGER_MS = 0; // Owner 2026-10-15: the route fades as soon as its run (and speech) ends.
 const READABLE_SWEEP_SECONDS = 1.6; // Initial branch travel; relationship tails keep this pace.
 
 interface ActivityWireEntry {
@@ -478,7 +478,7 @@ export function GraphBackdrop({
       }
       if (next.status === "idle" && next.playback_id && next.playback_id === previous.playback_id
         && next.run_id === previous.run_id) {
-        // Audio has ended; the route lingers like a text-only one before the Scene fades.
+        // Audio has ended; the Scene fades the route like a finished text-only one.
         finishRun(next.run_id);
       }
       const transaction = activityTransaction.current;
@@ -1274,8 +1274,7 @@ export function GraphBackdrop({
       return;
     }
     // Obsidience starts the thinking state immediately, admits the real path at
-    // 750 ms, flips to speaking at 3.2 s, and then gives the resolved path its
-    // six-second readable linger after the 5.8 s synthetic turn ends.
+    // 750 ms, flips to speaking at 3.2 s, and ends the synthetic turn at 5.8 s.
     setActivity({ refs: [], phase: "thinking", key, graphId, query: "Thinking test", startedAt: Date.now() });
     testTimers.current.push(window.setTimeout(() => {
       setActivity((current) => current?.key === key
@@ -1288,7 +1287,7 @@ export function GraphBackdrop({
     testTimers.current.push(window.setTimeout(() => {
       setActivity((current) => current?.key === key ? null : current);
       testTimers.current = [];
-    }, 11_800));
+    }, 5_800));
   }), [model]);
 
   const renderedActivityRefs = useMemo(() => {
