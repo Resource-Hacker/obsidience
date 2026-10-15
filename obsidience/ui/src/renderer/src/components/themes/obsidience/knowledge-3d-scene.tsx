@@ -259,9 +259,10 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
     let disposed = false;
     let created: THREE.WebGLRenderer | null = null;
     try {
+      // The frame draws multisampled into frameTarget, not the canvas.
       created = new THREE.WebGLRenderer({
         alpha: true,
-        antialias: true,
+        antialias: false,
         powerPreference: knowledge3dWebglPowerPreference(
           props.adapterPreference,
         ),
@@ -276,6 +277,32 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
     const renderer: THREE.WebGLRenderer = created;
     renderer.setClearColor(0x000000, 0);
     renderer.autoClear = false;
+    // Each frame draws into its own 4x multisampled target, as the canvas's
+    // own antialiasing did, so a glass layer's or marble's backdrop copy
+    // resolves only the rectangle it bends instead of the whole canvas; one
+    // blit then puts the finished frame on the canvas. Built-in materials
+    // (labels) encode sRGB as for the canvas, into a plain 8-bit store that
+    // blends as the canvas did.
+    const frameTarget = new THREE.WebGLRenderTarget(1, 1, { samples: 4, depthBuffer: true });
+    frameTarget.texture.colorSpace = THREE.SRGBColorSpace;
+    frameTarget.texture.internalFormat = "RGBA8";
+    frameTarget.resolveDepthBuffer = false;
+    const framebufferOf = (target: THREE.WebGLRenderTarget, multisampled: boolean): WebGLFramebuffer | undefined => {
+      const store = renderer.properties.get(target) as {
+        __webglFramebuffer?: WebGLFramebuffer; __webglMultisampledFramebuffer?: WebGLFramebuffer;
+      };
+      return multisampled ? store.__webglMultisampledFramebuffer : store.__webglFramebuffer;
+    };
+    // Copy the resolved frame (or a region of it) onto the canvas.
+    const presentFrame = (x: number, y: number, w: number, h: number): void => {
+      const resolved = framebufferOf(frameTarget, false);
+      if (!resolved) return;
+      const gl = renderer.getContext() as WebGL2RenderingContext;
+      renderer.state.bindFramebuffer(gl.READ_FRAMEBUFFER, resolved);
+      renderer.state.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+      gl.blitFramebuffer(x, y, x + w, y + h, x, y, x + w, y + h, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+      renderer.state.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+    };
     host.appendChild(renderer.domElement);
     renderer.domElement.style.width = "100%";
     renderer.domElement.style.height = "100%";
@@ -368,55 +395,79 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
     // sphere on the canvas. Nothing reads outside it before the next copy.
     const backdropSize = new THREE.Vector2();
     const captureView = new THREE.Vector3();
+    const captureViewport = new THREE.Vector4();
+    let backdropFramebuffer: WebGLFramebuffer | null = null;
+    let backdropAttached: WebGLTexture | null = null;
     const captureBackdrop = (target: THREE.WebGLRenderer, camera?: THREE.Camera, sphere?: THREE.Sphere): void => {
       target.getDrawingBufferSize(backdropSize);
       let backdrop = uniforms.uBackdrop.value as THREE.FramebufferTexture;
+      const perspective = camera as THREE.PerspectiveCamera | undefined;
+      // Without a sphere, or one the camera is inside, the whole canvas.
+      let whole = !perspective?.isPerspectiveCamera || !sphere;
       if (backdrop.image.width !== backdropSize.x || backdrop.image.height !== backdropSize.y) {
         backdrop.dispose();
         backdrop = new THREE.FramebufferTexture(backdropSize.x, backdropSize.y);
         backdrop.minFilter = backdrop.magFilter = THREE.LinearFilter;
         uniforms.uBackdrop.value = backdrop;
-        target.copyFramebufferToTexture(backdrop);
-        return;
+        target.initTexture(backdrop);
+        whole = true;
       }
-      const perspective = camera as THREE.PerspectiveCamera | undefined;
-      if (!perspective?.isPerspectiveCamera || !sphere) {
-        target.copyFramebufferToTexture(backdrop);
-        return;
+      let depth = 0, r = 0;
+      if (!whole) {
+        captureView.copy(sphere!.center).applyMatrix4(perspective!.matrixWorldInverse);
+        depth = -captureView.z;
+        r = sphere!.radius;
+        whole = depth - r <= perspective!.near;
       }
-      captureView.copy(sphere.center).applyMatrix4(perspective.matrixWorldInverse);
-      const depth = -captureView.z, r = sphere.radius;
-      if (depth - r <= perspective.near) {
-        target.copyFramebufferToTexture(backdrop);
-        return;
-      }
-      // The sphere's bounding box projects inside the box its corners span.
-      const e = perspective.projectionMatrix.elements;
-      let left = Infinity, right = -Infinity, bottom = Infinity, top = -Infinity;
-      for (const z of [depth - r, depth + r]) {
-        for (const x of [captureView.x - r, captureView.x + r]) {
-          left = Math.min(left, e[0] * x / z - e[8]);
-          right = Math.max(right, e[0] * x / z - e[8]);
-        }
-        for (const y of [captureView.y - r, captureView.y + r]) {
-          bottom = Math.min(bottom, e[5] * y / z - e[9]);
-          top = Math.max(top, e[5] * y / z - e[9]);
-        }
-      }
-      const x0 = Math.max(0, Math.floor((left * 0.5 + 0.5) * backdropSize.x) - 2);
-      const x1 = Math.min(backdropSize.x, Math.ceil((right * 0.5 + 0.5) * backdropSize.x) + 2);
-      const y0 = Math.max(0, Math.floor((bottom * 0.5 + 0.5) * backdropSize.y) - 2);
-      const y1 = Math.min(backdropSize.y, Math.ceil((top * 0.5 + 0.5) * backdropSize.y) + 2);
-      if (x1 <= x0 || y1 <= y0) return; // Off the canvas: nothing to bend.
-      const gl = target.getContext();
+      const multisampled = target.getRenderTarget() === frameTarget ? framebufferOf(frameTarget, true) : undefined;
       const texture = (target.properties.get(backdrop) as { __webglTexture?: WebGLTexture }).__webglTexture;
-      if (!texture) {
+      if (!multisampled && (whole || !texture)) {
         target.copyFramebufferToTexture(backdrop);
         return;
       }
-      target.state.bindTexture(gl.TEXTURE_2D, texture, gl.TEXTURE0);
-      gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, x0, y0, x0, y0, x1 - x0, y1 - y0);
-      target.state.unbindTexture();
+      // The sphere's bounding box projects inside the box its corners span,
+      // within the viewport being drawn (a preview draws into a corner).
+      target.getCurrentViewport(captureViewport);
+      let left = -1, right = 1, bottom = -1, top = 1;
+      if (!whole) {
+        const e = perspective!.projectionMatrix.elements;
+        left = bottom = Infinity;
+        right = top = -Infinity;
+        for (const z of [depth - r, depth + r]) {
+          for (const x of [captureView.x - r, captureView.x + r]) {
+            left = Math.min(left, e[0] * x / z - e[8]);
+            right = Math.max(right, e[0] * x / z - e[8]);
+          }
+          for (const y of [captureView.y - r, captureView.y + r]) {
+            bottom = Math.min(bottom, e[5] * y / z - e[9]);
+            top = Math.max(top, e[5] * y / z - e[9]);
+          }
+        }
+      }
+      const vx = captureViewport.x, vy = captureViewport.y, vw = captureViewport.z, vh = captureViewport.w;
+      const x0 = Math.max(vx, Math.floor(vx + (left * 0.5 + 0.5) * vw) - 2);
+      const x1 = Math.min(vx + vw, backdropSize.x, Math.ceil(vx + (right * 0.5 + 0.5) * vw) + 2);
+      const y0 = Math.max(vy, Math.floor(vy + (bottom * 0.5 + 0.5) * vh) - 2);
+      const y1 = Math.min(vy + vh, backdropSize.y, Math.ceil(vy + (top * 0.5 + 0.5) * vh) + 2);
+      if (x1 <= x0 || y1 <= y0 || !texture) return; // Off the canvas: nothing to bend.
+      const gl = target.getContext() as WebGL2RenderingContext;
+      if (!multisampled) {
+        target.state.bindTexture(gl.TEXTURE_2D, texture, gl.TEXTURE0);
+        gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, x0, y0, x0, y0, x1 - x0, y1 - y0);
+        target.state.unbindTexture();
+        return;
+      }
+      // Resolve just this rectangle of the multisampled frame into the texture.
+      if (!backdropFramebuffer) backdropFramebuffer = gl.createFramebuffer();
+      target.state.bindFramebuffer(gl.DRAW_FRAMEBUFFER, backdropFramebuffer);
+      if (backdropAttached !== texture) {
+        gl.framebufferTexture2D(gl.DRAW_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+        backdropAttached = texture;
+      }
+      target.state.bindFramebuffer(gl.READ_FRAMEBUFFER, multisampled);
+      gl.blitFramebuffer(x0, y0, x1, y1, x0, y0, x1, y1, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+      target.state.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+      target.state.bindFramebuffer(gl.DRAW_FRAMEBUFFER, multisampled);
     };
     const sharedParticleTime = { value: 0 };
     // The scene module owns the canonical shader strings; every cloud —
@@ -655,6 +706,7 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
       camera.lookAt(focusPoint);
     }
 
+    const frameSize = new THREE.Vector2();
     function resize(): void {
       const bounds = host.getBoundingClientRect();
       const nextWidth = Math.max(1, Math.round(bounds.width));
@@ -665,6 +717,8 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
       pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
       renderer.setPixelRatio(pixelRatio);
       renderer.setSize(width, height, false);
+      renderer.getDrawingBufferSize(frameSize);
+      frameTarget.setSize(frameSize.x, frameSize.y);
       labelLayer.resize(width, height, pixelRatio);
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
@@ -914,14 +968,20 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
       if (!active.length) return;
       const visibility = scene.children.map(child => [child, child.visible] as const);
       const side = Math.min(width, height, 1024);
-      renderer.setViewport(0, 0, side, side); renderer.setScissor(0, 0, side, side); renderer.setScissorTest(true);
+      // Drawn into a corner of the multisampled frame, then onto the canvas.
+      const sidePx = Math.min(frameTarget.width, frameTarget.height, Math.floor(side * pixelRatio));
+      frameTarget.viewport.set(0, 0, sidePx, sidePx); frameTarget.scissor.set(0, 0, sidePx, sidePx);
+      frameTarget.scissorTest = true;
       viewportUniform.value.set(side * pixelRatio, side * pixelRatio);
       uniforms.uPerspective.value = side * pixelRatio / (2 * Math.tan(FOV_DEGREES * Math.PI / 360));
       for (const preview of active) {
         const cloud = preview.cloud()!; positionPreview(preview, cloud);
         cloud.sortSprites(preview.camera.position);
         for (const [child] of visibility) child.visible = child === cloud.group;
+        renderer.setRenderTarget(frameTarget);
         renderer.clear(true, true, true); renderer.render(scene, preview.camera);
+        renderer.setRenderTarget(null);
+        presentFrame(0, 0, sidePx, sidePx);
         const transfer = preview.canvas.getContext("2d")!;
         transfer.globalCompositeOperation = "copy";
         transfer.drawImage(renderer.domElement, 0, renderer.domElement.height - side * pixelRatio,
@@ -929,7 +989,9 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
         preview.publisher.frame();
       }
       for (const [child, visible] of visibility) child.visible = visible;
-      renderer.setScissorTest(false); renderer.setViewport(0, 0, width, height);
+      frameTarget.viewport.set(0, 0, frameTarget.width, frameTarget.height);
+      frameTarget.scissor.set(0, 0, frameTarget.width, frameTarget.height);
+      frameTarget.scissorTest = false;
       viewportUniform.value.set(width * pixelRatio, height * pixelRatio); updatePerspectiveUniform();
     }
 
@@ -1599,10 +1661,13 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
         mainCloud?.sortSprites(camera.position);
         for (const cloud of satelliteClouds.values()) cloud.sortSprites(camera.position);
       }
+      renderer.setRenderTarget(frameTarget);
       renderer.clear(true, true, true);
       renderer.render(scene, camera);
-      renderer.clearDepth();
+      // The labels test no depth, so the scene's depth needs no clearing.
       labelLayer.render(renderer);
+      renderer.setRenderTarget(null);
+      presentFrame(0, 0, frameTarget.width, frameTarget.height);
     }
     rafId = requestAnimationFrame(frame);
 
@@ -1636,6 +1701,8 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
       mainPlate = null;
       labelLayer.dispose();
       uniforms.uBackdrop.value.dispose();
+      frameTarget.dispose();
+      if (backdropFramebuffer) renderer.getContext().deleteFramebuffer(backdropFramebuffer);
       renderer.dispose();
       renderer.domElement.remove();
     };
