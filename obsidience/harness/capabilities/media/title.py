@@ -29,7 +29,11 @@ clearly one named title (deterministic rules, no model call):
   scope check, receipt and attempt keys). The whole call ends by DEADLINE_SECONDS with a
   truthful pending result; a registration starts only with _REGISTER_RESERVE left, which
   covers its bounded path (TorBox account, inventory and cache reads, then a create of at
-  most 35 s), so the call ends within about ten seconds of the deadline at worst.
+  most 35 s). The deadline only signals the registration's cancel event once TorBox has
+  confirmed it; the bounded steps already running (organize verification, the 12 s TorBox
+  file refresh) finish first, so the call ends within about ten seconds of the deadline
+  (about 85 s) at worst. The reads before a registration are not cut by the deadline; they
+  only make it refuse when less than _REGISTER_RESERVE is left.
 """
 from __future__ import annotations
 
@@ -140,6 +144,15 @@ async def _search(title: str, kind: str, context: dict) -> tuple[list[dict], lis
         page = await discovery.search(title, kind, context)
         # A page cut by the activation's record cap may hide a second exact title: fail closed.
         pages[key] = None if page.get('truncated') else page['matches']
+        if pages[key] is not None:
+            # Same-named titles ranked past the result cap ("The Thing" 1982 and 2011) count too.
+            unlisted = (context.get('_media_discovery_unlisted') or {}).get((kind, title.strip()), [])
+            lower = match_titles(title, unlisted)[0]
+            if len(lower) == 1 and not match_titles(title, pages[key])[0]:
+                # The only exact title ranked lower: look it up by IMDb id for its candidate record.
+                found = await discovery.search(lower[0]['imdb_id'], kind, context)
+                lower = None if found.get('truncated') else found['matches']
+            pages[key] = None if lower is None else pages[key] + lower
     if pages[key] is None:
         raise MediaUnavailable('media_discovery_record_limit')
     exact, partial = match_titles(title, pages[key])
@@ -415,7 +428,7 @@ async def _register(metadata_id: str, season: int | None, episode: int | None, c
     scope = {key: row.get(key) for key in ('acquisition_scope', 'resolution', 'pack_episodes') if key in row}
     if receipt.get('status') != 'completed' or receipt.get('delivery') != 'verified':
         # The same end as a failed media.acquire call (its core marks it): nothing is repeated.
-        return _final('The media server registration did not verify; do not repeat it.', correction=False,
+        return _final(f'The media server {action} did not verify; do not repeat it.', correction=False,
                       delivery=receipt.get('delivery', 'uncertain'), effect_applied=receipt.get('effect_applied'),
                       registration=receipt)
     return {'status': 'registered', **scope, 'operation': action, 'already_present': receipt.get('already_present'),
@@ -470,7 +483,9 @@ async def _acquire(title: str, season: int | None, episode: int | None, context:
             return _pending(summary, None, 'already_registered_not_listed', effect=False,
                             note=f'"{meta["title"]}" is already registered with the media server under a source '
                                  'this search no longer returns; nothing new was registered and nothing was sent '
-                                 'to the TV. Say it is being added. Do not register it again or play a substitute.')
+                                 'to the TV. Say it is being added. Do not register it again or play a substitute. '
+                                 'If a later request still finds it absent, say its existing registration needs the '
+                                 "owner's attention on the media server (it is not visible in the library).")
         if outcome.get('status') != 'registered':
             return outcome
         done[key] = outcome

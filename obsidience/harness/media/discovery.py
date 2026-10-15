@@ -170,6 +170,22 @@ async def _json_get(url: str, timeout: float = 6.0, cancel=None) -> dict:
         raise
 
 
+def _listing(item, content_type: str) -> dict | None:
+    """A catalogue entry's sanitized fields, or None when it is not an eligible title of that type."""
+    if not isinstance(item, dict):
+        return None
+    imdb = item.get('id')
+    title = _text(item.get('name'))
+    kind = item.get('type')
+    year_raw = item.get('releaseInfo')
+    year_match = re.match(r'(?:19|20)\d{2}', year_raw) if isinstance(year_raw, str) else None
+    if (not isinstance(imdb, str) or not _IMDB.fullmatch(imdb)
+            or kind not in ('movie', 'series') or kind != content_type or title is None):
+        return None
+    return {'imdb_id': imdb, 'type': kind, 'title': title,
+            'year': int(year_match.group()) if year_match else None}
+
+
 async def search(query: str, content_type: str, context: dict) -> dict:
     """Search names or look up exact IMDb IDs; return sanitized metadata candidates."""
     run_id = _run(context)
@@ -208,15 +224,8 @@ async def search(query: str, content_type: str, context: dict) -> dict:
     records = context.setdefault('_media_discovery_candidates', {})
     result, truncated = [], False
     for item in metas[:_MAX_RESULTS]:
-        if not isinstance(item, dict):
-            continue
-        imdb = item.get('id')
-        title = _text(item.get('name'))
-        kind = item.get('type')
-        year_raw = item.get('releaseInfo')
-        year_match = re.match(r'(?:19|20)\d{2}', year_raw) if isinstance(year_raw, str) else None
-        if (not isinstance(imdb, str) or not _IMDB.fullmatch(imdb)
-                or kind not in ('movie', 'series') or kind != content_type or title is None):
+        listing = _listing(item, content_type)
+        if listing is None:
             continue
         if len(records) >= 32:
             truncated = True
@@ -224,12 +233,14 @@ async def search(query: str, content_type: str, context: dict) -> dict:
         candidate_id = 'd' + secrets.token_urlsafe(12).rstrip('=')
         while candidate_id in records:
             candidate_id = 'd' + secrets.token_urlsafe(12).rstrip('=')
-        record = {'run_id': run_id, 'imdb': imdb, 'type': kind,
-                  'title': title, 'year': int(year_match.group()) if year_match else None,
-                  **binding, 'provider': config.get('provider', 'torrentio')}
-        records[candidate_id] = record
-        result.append({'metadata_id': candidate_id, 'imdb_id': imdb,
-                       'type': kind, 'title': title, 'year': record['year']})
+        records[candidate_id] = {'run_id': run_id, 'imdb': listing['imdb_id'], 'type': content_type,
+                                 'title': listing['title'], 'year': listing['year'],
+                                 **binding, 'provider': config.get('provider', 'torrentio')}
+        result.append({'metadata_id': candidate_id, **listing})
+    # Activation-private: the eligible titles past the result cap (no candidate records), so a
+    # caller deciding that a title is unique can see a same-named one ranked lower.
+    context.setdefault('_media_discovery_unlisted', {})[(content_type, query.strip())] = [
+        listing for item in metas[_MAX_RESULTS:] if (listing := _listing(item, content_type))]
     if cancel is not None and cancel.is_set():
         raise asyncio.CancelledError
     return {'status': 'completed', 'provider': 'cinemeta', 'query': query.strip(),
