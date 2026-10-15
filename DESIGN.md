@@ -662,6 +662,9 @@ full current reads, unrelated hits do not.
   Quiet ASR words that never triggered VAD expire after sustained acoustic silence;
   their decoder state and unopened wake prefix cannot survive indefinitely into the
   next address. ASR delivery gaps alone never establish a new speech boundary.
+  Before wake opens, the pending-text guard reads the bounded wake prefix, since
+  unaddressed speech never enters the command buffer. A complete preceding segment
+  may accept its acoustic endpoint without waiting for the missing-command limit.
 - NeMo owns acoustic turns and interruptions; confirmed speech interrupts before
   endpointing. With contextual admission enabled, its endpoint supplies a candidate,
   and the Executive's completion verdict plus an exact worker acknowledgement admits

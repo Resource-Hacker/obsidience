@@ -850,11 +850,17 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
         return command
 
     def turn_pending(self) -> bool:
-        """True while the command text cannot end a turn: no words, a dangling
+        """True while the current speech cannot end a turn: no words, a dangling
         end, or only the wake-word address (Realtime keeps it in the text)."""
-        text = self._user_speaking_buffer
-        if self._semantic_turns:
-            text = self._semantic_text + " " + text
+        if self.mode == "wake" and not self._wake_open:
+            # Unaddressed speech lives only in the wake scanner. Its empty
+            # command buffer must not veto every acoustic endpoint and carry
+            # the preceding sentence into the next wake-word address.
+            text = self._wake_prefix
+        else:
+            text = self._user_speaking_buffer
+            if self._semantic_turns:
+                text = self._semantic_text + " " + text
         address = self._wake_pattern.sub("", text)
         # A bare "okay" or "hey" is not an address without the wake word.
         return turn_text_pending(text) or (address != text and _WAKE_LEAD.fullmatch(address) is not None)

@@ -322,12 +322,21 @@ async def prepare(runtime, text: str, response_contract: str) -> PreparedSpeechT
             spec = active_spec
             evidence = historical_evidence(conversation, conversation_id=conversation_id,
                                            before_sequence=before_sequence)
-            activation = await compile_activation(
-                agent, params=params, interactive=True, emit_activity=False,
-                conversation_evidence=evidence)
             from ..memory.hindsight import MEMORY
-            memory = memory_message(recall_reply(await MEMORY.recall(
-                agent.ref, *recall_query(clean, conversation_id), speculative=True)))
+            context_started = time.monotonic()
+            recall = asyncio.create_task(MEMORY.recall(
+                agent.ref, *recall_query(clean, conversation_id), speculative=True),
+                name="obsidience-speech-admission-recall")
+            try:
+                activation = await compile_activation(
+                    agent, params=params, interactive=True, emit_activity=False,
+                    conversation_evidence=evidence)
+                memory = memory_message(recall_reply(await recall))
+            finally:
+                if not recall.done():
+                    recall.cancel()
+                await asyncio.gather(recall, return_exceptions=True)
+            metrics['context_recall_ms'] = round((time.monotonic() - context_started) * 1000, 3)
             messages = activation_messages(agent, activation, agent_name=agent.title,
                                            response_contract=response_contract)
             system = _digest(messages[0]['content'])
