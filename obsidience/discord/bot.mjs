@@ -15,6 +15,9 @@ const { OpusEncoder } = opusBinding;
 const ALLOWED_MENTIONS = { parse: [], repliedUser: false };
 const TEXT_LIMIT = 8000;
 const SPEECH_LIMIT = 4000;
+const TTS_FRAME_BYTES = 24_000 * 2 * 0.020; // 480 mono S16 samples, exactly 20 ms.
+const TTS_PREBUFFER_FRAMES = 20; // Two 200 ms speech-owner chunks.
+const TTS_MAX_BUFFER_FRAMES = 100; // Two seconds, matching the former PCM bound.
 const SPEECH_ERROR_CODES = new Set(['asr_failed', 'utterance_limit', 'audio_backpressure', 'stream_capacity',
   'reply_not_current', 'speech_delivery_failed', 'audio_pipeline_stopped', 'utterance_timeout', 'reply_timeout']);
 const DIAGNOSTIC_COUNTS = ['received_pcm_frames', 'terminal_pcm_frames', 'stt_audio_frames',
@@ -64,7 +67,8 @@ export class DiscordTransport {
       this.lastError = 'speech_playback_failed'; this.finishSpeech(false);
     });
     this.speechPlayer.on(AudioPlayerStatus.Idle, (oldState) => {
-      if (oldState.resource === this.utterance?.resource) this.finishSpeech(true);
+      const utterance = this.utterance;
+      if (utterance && oldState.resource === utterance.resource) this.finishSpeech(utterance.ended);
     });
     this.client.on('error', () => { this.lastError = 'discord_client_error'; log('discord_client_error'); });
     this.client.on('interactionCreate', (interaction) => { void this.interaction(interaction); });
@@ -95,6 +99,9 @@ export class DiscordTransport {
       generation: this.generation, receivers: this.receivers.size,
       active_turns: this.turns.size, pending_speech: this.pendingSpeech.size,
       playback: this.mediaPlayer.state.status, speech_playback: this.speechPlayer.state.status,
+      speech_buffered_ms: this.utterance ? (this.utterance.input.readableLength + this.utterance.input.writableLength) * 20 : 0,
+      // An instantaneous native value, not a cumulative underrun measurement.
+      speech_player_missed_frames: this.speechPlayer.state.status === AudioPlayerStatus.Playing ? this.speechPlayer.state.missedFrames : null,
       media_kind: 'audio_only', video_supported: false, last_error: this.lastError,
       speech_worker_error: this.speechWorkerError, receive_error: this.receiveError, receive_counters: { ...this.receiveCounters } };
   }
@@ -484,18 +491,18 @@ export class DiscordTransport {
     } else if (message.type === 'speech_audio') {
       const pending = this.pendingSpeech.get(message.request_id);
       if (!pending || !this.samePrincipal(pending, principal) || !this.currentSpeaker(principal)) return;
-      if (message.sample_rate !== 24000 || typeof message.pcm !== 'string' || message.pcm.length > 60000
+      if (message.sample_rate !== 24000 || message.channels !== 1 || message.format !== 's16le' || typeof message.pcm !== 'string' || message.pcm.length > 60000
         || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(message.pcm)) fail('invalid_speech_audio');
       if (!this.utterance) this.startSpeech(principal, message.request_id);
       const utterance = this.utterance;
       if (utterance.request_id !== message.request_id || utterance.member_id !== message.member_id) return;
       const pcm = Buffer.from(message.pcm, 'base64');
-      if (pcm.length % 2 || utterance.input.writableLength > 96000) fail('speech_audio_backpressure');
-      utterance.input.write(pcm);
+      if (!pcm.length || pcm.length % 2) fail('invalid_speech_audio');
+      this.writeSpeech(pcm);
     } else if (message.type === 'speech_end') {
       const pending = this.pendingSpeech.get(message.request_id);
       if (!pending || !this.samePrincipal(pending, principal) || !this.currentSpeaker(principal)) return;
-      if (this.utterance?.request_id === message.request_id && this.samePrincipal(this.utterance, principal)) this.utterance.input.end();
+      if (this.utterance?.request_id === message.request_id && this.samePrincipal(this.utterance, principal)) this.writeSpeech(Buffer.alloc(0), true);
       else this.cancelRequest(message.request_id, pending, pending.source);
     }
   }
@@ -521,23 +528,51 @@ export class DiscordTransport {
 
   startSpeech(principal, requestId) {
     if (!this.connection || this.utterance) fail('voice_not_ready_or_speaking');
-    const input = new PassThrough({ highWaterMark: 48000 });
-    const child = spawn('/usr/bin/ffmpeg', ['-nostdin', '-hide_banner', '-loglevel', 'error', '-threads', '1', '-filter_threads', '1',
-      '-f', 's16le', '-ar', '24000', '-ac', '1', '-i', 'pipe:0', '-f', 's16le', '-ar', '48000', '-ac', '2', 'pipe:1'],
-    { stdio: ['pipe', 'pipe', 'ignore'], env: { PATH: '/usr/bin', LANG: 'C' } });
-    this.utterance = { ...principal, source: this.pendingSpeech.get(requestId)?.source, request_id: requestId, input, process: child,
+    // Opus accepts native 24k mono; Discord's player supplies the 20 ms wire
+    // clock. Avoid FFmpeg's byte-stream buffering and a second Opus encoder.
+    const encoder = new OpusEncoder(24000, 1);
+    const input = new PassThrough({ objectMode: true, highWaterMark: TTS_MAX_BUFFER_FRAMES });
+    const utterance = { ...principal, source: this.pendingSpeech.get(requestId)?.source, request_id: requestId,
+      input, encoder, remainder: Buffer.alloc(0), started: false, ended: false,
       resumeMedia: !!this.media && this.mediaPlayer.state.status === AudioPlayerStatus.Playing };
-    this.mediaPlayer.pause();
-    input.pipe(child.stdin);
-    const failed = () => { if (this.utterance?.process === child) this.finishSpeech(false); };
-    input.on('error', failed);
-    child.on('error', failed);
-    child.stdin.on('error', failed);
-    child.stdout.on('error', failed);
-    child.on('close', (code) => { if (code && this.utterance?.process === child) this.finishSpeech(false); });
-    this.connection.subscribe(this.speechPlayer);
-    this.utterance.resource = createAudioResource(child.stdout, { inputType: StreamType.Raw });
-    this.speechPlayer.play(this.utterance.resource);
+    this.utterance = utterance;
+    input.on('error', () => { if (this.utterance === utterance) this.finishSpeech(false); });
+  }
+
+  writeSpeech(pcm, end = false) {
+    const utterance = this.utterance;
+    if (!utterance || utterance.ended) fail('speech_not_current');
+    const enqueue = (frame) => {
+      if (utterance.input.readableLength + utterance.input.writableLength >= TTS_MAX_BUFFER_FRAMES) fail('speech_audio_backpressure');
+      utterance.input.write(utterance.encoder.encode(frame));
+    };
+    const data = Buffer.concat([utterance.remainder, pcm]);
+    let offset = 0;
+    for (; offset + TTS_FRAME_BYTES <= data.length; offset += TTS_FRAME_BYTES) {
+      enqueue(data.subarray(offset, offset + TTS_FRAME_BYTES));
+    }
+    // Copy only the sub-frame remainder, never retain the larger input buffer.
+    utterance.remainder = Buffer.from(data.subarray(offset));
+    if (end) {
+      if (utterance.remainder.length) {
+        const frame = Buffer.alloc(TTS_FRAME_BYTES);
+        utterance.remainder.copy(frame);
+        enqueue(frame);
+        utterance.remainder = Buffer.alloc(0);
+      }
+      // Drain the codec's lookahead so the final speech samples are preserved.
+      enqueue(Buffer.alloc(TTS_FRAME_BYTES));
+      utterance.ended = true;
+      utterance.encoder = null;
+    }
+    if (!utterance.started && (utterance.input.readableLength >= TTS_PREBUFFER_FRAMES || end)) {
+      utterance.started = true;
+      this.mediaPlayer.pause();
+      this.connection.subscribe(this.speechPlayer);
+      utterance.resource = createAudioResource(utterance.input, { inputType: StreamType.Opus });
+      this.speechPlayer.play(utterance.resource);
+    }
+    if (end) utterance.input.end();
   }
 
   finishSpeech(played) {
@@ -546,9 +581,8 @@ export class DiscordTransport {
     this.utterance = null;
     this.speechPlayer.stop(true);
     utterance.input.destroy();
-    utterance.process.stdin.destroy();
-    utterance.process.stdout.destroy();
-    utterance.process.kill('SIGKILL');
+    utterance.encoder = null;
+    utterance.remainder = Buffer.alloc(0);
     if (utterance.generation === this.generation) {
       this.pendingSpeech.delete(utterance.request_id);
       clearTimeout(this.speechDeadlines.get(utterance.request_id));

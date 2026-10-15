@@ -198,7 +198,23 @@ base64 PCM, `speech_end`, `error`. The transport drops stale generations or chan
 guild/channel identities. `speech_end` ends the synthesis stream. Only after the
 speech AudioPlayer reaches Idle does the transport send exact-principal `played`;
 that acknowledgement lets the worker open the invoking member's question followup.
-Playback failures send cancel instead. All FFmpeg and receiver resources close on
+TTS's native 24k mono S16LE PCM is encoded directly with libopus in exact 20 ms
+frames (480 samples); no FFmpeg process or intermediate stereo conversion is
+used for speech. The Discord AudioPlayer supplies the playback clock. Speech
+starts after two of the speech owner's 200 ms chunks (400 ms of queued packets),
+or immediately at synthesis EOF for a shorter reply. This bounded prebuffer gives
+one chunk of scheduling margin without a timer sleep or altered player stall
+threshold. The packet queue is capped at two seconds; a sub-frame PCM remainder
+is copied into at most 959 bytes. EOF pads that remainder and drains one silent
+codec frame before the normal Discord silence tail. Cancellation destroys the
+queue and drops codec state; no old audio is replayed.
+Status reports `speech_buffered_ms` and the native player's instantaneous
+`speech_player_missed_frames` while playing (`null` otherwise). The latter is
+consecutive current misses, not a cumulative underrun counter; a later zero
+cannot prove that earlier playback had no gaps.
+An Idle transition before `speech_end` cancels the exact request instead of
+acknowledging truncated playback as complete.
+Playback failures send cancel instead. All packet queues, media FFmpeg and receiver resources close on
 leave, dependency loss, stop or teardown.
 
 Transcripts POST once to `http://127.0.0.1:8765/api/discord/turns`, using Bearer
