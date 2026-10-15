@@ -1288,6 +1288,8 @@ export function createKnowledge3dCloud(
     meshes: THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial>[];
   }>();
   let selectionId = "";
+  // Whether a selection layer drew last frame, so its levels clear once.
+  let selectionShown = false;
   const disposeSelection = (layer: { meshes: THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial>[] }) => {
     for (const mesh of layer.meshes) {
       group.remove(mesh);
@@ -1450,7 +1452,7 @@ export function createKnowledge3dCloud(
       return cameraPosition.distanceTo(group.position);
     },
     projectInto(map, camera) {
-      group.updateMatrixWorld();
+      group.updateWorldMatrix(true, false); // The group's own matrix; render updates its children.
       for (let i = 0; i < nodeIds.length; i += 1) {
         projectionVector
           .set(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2])
@@ -1586,6 +1588,9 @@ export function createKnowledge3dCloud(
             nodeLevels: new Map(), nodeFrom: new Map() });
         }
       }
+      // Nothing selected now or last frame: the levels are already clear.
+      if (!selectionLayers.size && !selectionShown) return false;
+      selectionShown = selectionLayers.size > 0;
       selectionLevels.fill(0);
       let moving = false;
       for (const [key, layer] of selectionLayers) {
@@ -1725,7 +1730,7 @@ export function createKnowledge3dCloud(
     nodeWorldPosition(rawId, out) {
       const index = indexById.get(rawId);
       if (index === undefined) return false;
-      group.updateMatrixWorld();
+      group.updateWorldMatrix(true, false); // The group's own matrix; render updates its children.
       out
         .set(
           positions[index * 3],
@@ -1736,7 +1741,7 @@ export function createKnowledge3dCloud(
       return true;
     },
     sortSprites(cameraPosition) {
-      group.updateMatrixWorld();
+      group.updateWorldMatrix(true, false); // The group's own matrix; render updates its children.
       group.worldToLocal(localCamera.copy(cameraPosition));
       for (let i = 0; i < sortOrder.length; i += 1) {
         const dx = positions[i * 3] - localCamera.x;

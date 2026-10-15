@@ -705,6 +705,7 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
     }
 
     const frameSize = new THREE.Vector2();
+    const cullFrustum = new THREE.Frustum(), cullMatrix = new THREE.Matrix4(), cullSphere = new THREE.Sphere();
     function resize(): void {
       const bounds = host.getBoundingClientRect();
       const nextWidth = Math.max(1, Math.round(bounds.width));
@@ -1658,6 +1659,21 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
       if ([...previews.values()].some(preview => preview.publisher.hasViewers)) {
         mainCloud?.sortSprites(camera.position);
         for (const cloud of satelliteClouds.values()) cloud.sortSprites(camera.position);
+      }
+      // A satellite wholly outside the view adds no pixels: skip its draws.
+      // Its solver, orbit and glass clocks keep running, so it returns as it
+      // would have been; a preview forces its own cloud visible.
+      camera.updateMatrixWorld();
+      cullFrustum.setFromProjectionMatrix(cullMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+      for (const input of current.satellites ?? []) {
+        const cloud = satelliteClouds.get(input.agentId);
+        if (!cloud) continue;
+        const ball = Math.max(0.05, input.tuning.ballScale);
+        // Outer glass, glow halos and the role plate above it.
+        const local = cloud.layoutDiagnostics()?.radius ?? knowledge3dMaxShell(input.tuning);
+        cullSphere.center.copy(cloud.group.position);
+        cullSphere.radius = (local * 1.3 + 16 / ball) * cloud.group.scale.x;
+        cloud.group.visible = cullFrustum.intersectsSphere(cullSphere);
       }
       renderer.setRenderTarget(frameTarget);
       renderer.clear(true, true, true);

@@ -239,6 +239,7 @@ export function createMarbleDust(options: {
   const points = new THREE.Points(geometry, material);
   points.name = "knowledge-marble-dust";
   points.frustumCulled = false;
+  let changed = true;
   return {
     points,
     cover: {
@@ -246,10 +247,19 @@ export function createMarbleDust(options: {
       uMarbleOpacity: material.uniforms.uMarbleOpacity, uPulse: material.uniforms.uPulse,
     },
     setNode(slot, x, y, z, radius, focus) {
-      data.set([x, y, z, radius], slot * 4);
-      data[(count + slot) * 4 + 3] = focus;
+      // Only changed data is uploaded; most calls repeat the last frame's.
+      const at = slot * 4, lit = (count + slot) * 4 + 3;
+      const fx = Math.fround(x), fy = Math.fround(y), fz = Math.fround(z);
+      const fr = Math.fround(radius), ff = Math.fround(focus);
+      if (data[at] === fx && data[at + 1] === fy && data[at + 2] === fz && data[at + 3] === fr && data[lit] === ff) return;
+      data[at] = fx; data[at + 1] = fy; data[at + 2] = fz; data[at + 3] = fr; data[lit] = ff;
+      changed = true;
     },
-    update() { texture.needsUpdate = true; },
+    update() {
+      if (!changed) return;
+      texture.needsUpdate = true;
+      changed = false;
+    },
     dispose() {
       geometry.dispose();
       material.dispose();
