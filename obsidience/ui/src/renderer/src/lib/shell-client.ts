@@ -353,10 +353,6 @@ export function presentShellSource(key: string): void {
   sendCommand({ type: "pane.present", pane_id: "reader", selection: { kind: "source", key } });
 }
 
-export function presentShellGraph(view: "knowledge" | "memory" | "code"): void {
-  sendCommand({ type: "pane.present", pane_id: "knowledge-graph", selection: {kind: "graph", view} });
-}
-
 export function selectShellGraphView(view: GraphView): void {
   sendCommand({type: "pane.select", pane_id: "knowledge-graph", selection: {kind: "graph", view}});
 }

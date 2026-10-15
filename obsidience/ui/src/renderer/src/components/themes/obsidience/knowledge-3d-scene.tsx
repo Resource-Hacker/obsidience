@@ -40,14 +40,12 @@ import {
   extendKnowledge3dPathSpec,
   knowledgeSweepProgress3d,
   parseKnowledgeAgentNodeId,
+  type GraphicsAdapterPreference,
+  type GraphicsAnimationProfile,
   type Knowledge3dPathSpec,
   type Knowledge3dTuning,
   type KnowledgeFocusPhase,
 } from "./knowledge-3d";
-import type {
-  GraphicsAdapterPreference,
-  GraphicsAnimationProfile,
-} from "../../../../../main/config/schema";
 import {
   knowledgeRoleForAgent,
   paintKnowledgeRoleIcon,

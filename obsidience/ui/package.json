@@ -23,12 +23,6 @@
     "tailwindcss": "^4",
     "three": "^0.185.1",
     "typescript": "^5",
-    "vite": "^7.3.5",
-    "zod": "^4.4.3"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "onnxruntime-node"
-    ]
+    "vite": "^7.3.5"
   }
 }

@@ -15,21 +15,13 @@ import {
   forceLink,
   forceManyBody,
   forceSimulation,
-  forceX,
-  forceY,
   type ForceSimulation,
   type ForceSimulationNode,
 } from "d3-force-3d";
-import type {
-  KnowledgeLayout,
-  KnowledgeLayoutNode,
-} from "./knowledge-layout";
-import type {
-  GraphicsAdapterPreference,
-  GraphicsAnimationProfile,
-} from "../../../../../main/config/schema";
-import { isKnowledgeLeafRole } from "./knowledge-ontology";
 import type { KnowledgeHierarchyRole } from "./knowledge-ontology";
+
+export type GraphicsAdapterPreference = "system" | "low-power" | "high-performance";
+export type GraphicsAnimationProfile = "balanced" | "maximum";
 
 /** World-unit span the camera frames (the ball's outer shells live well
  *  inside this). */

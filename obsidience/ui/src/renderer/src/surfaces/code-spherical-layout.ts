@@ -1,11 +1,6 @@
-import type { KnowledgeForceNode, KnowledgeForceLink } from "@/components/themes/obsidience/knowledge-3d";
-import type { ProviderGraph, ProviderNode } from "./provider-graph-scene";
+import type { ProviderGraph } from "./provider-graph-scene";
 
 export const CODE_STRUCTURE = new Set(["Project", "Branch", "Folder", "File", "Module", "Package"]);
-export function codeNodeRadius(node: Pick<ProviderNode, "kind">): number {
-  return node.kind === "Project" ? 6.6 : node.kind === "Branch" ? 5
-    : node.kind === "Folder" ? 4.2 : CODE_STRUCTURE.has(node.kind) ? 3.2 : 2.2;
-}
 
 /** Layout-only ancestry over native identities. Calls/imports are never parents.
  * Exact file-path fallback groups incomplete index fragments without publishing
@@ -57,21 +52,6 @@ export function codeLayoutAncestry(data: ProviderGraph) {
     for (const child of path.reverse()) depths.set(child, ++depth);
   }
   return {members, root, parents, depths};
-}
-
-export function codeSphericalHierarchy(data: ProviderGraph) {
-  const {members, root, parents, depths} = codeLayoutAncestry(data);
-  const nodes: KnowledgeForceNode[] = members.map(node => ({
-    id: node.id, parentId: parents.get(node.id), depth: depths.get(node.id),
-    role: node === root ? "root" : "code", radius: node === root ? 6.6 : codeNodeRadius(node),
-  }));
-  // Dense call/reference fans remain visible native links, not containment
-  // forces: they must not collapse unrelated code branches onto one bearing.
-  const links: KnowledgeForceLink[] = [...parents].map(([child, parent]) => ({
-    source: child < parent ? child : parent, target: child < parent ? parent : child, taxonomy: true,
-  }));
-  links.sort((a, b) => a.source.localeCompare(b.source) || a.target.localeCompare(b.target));
-  return {nodes, links, parents};
 }
 
 /** A file lens over native nodes/edges, not a second graph or synthetic calls.

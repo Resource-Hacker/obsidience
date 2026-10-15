@@ -106,32 +106,3 @@ export interface KnowledgeActivity {
 export const api = {
   graph: () => json<GraphSnapshot>("/api/graph", { cache: "no-store" }),
 };
-
-let readerSelection: string | null = null;
-let readerGraphId = "";
-
-export function openReader(ref: string, graphId = ""): void {
-  readerSelection = ref;
-  readerGraphId = graphId;
-  window.dispatchEvent(new CustomEvent("obsidience:open-reader", { detail: { ref, graphId } }));
-}
-
-export function onOpenReader(handler: (ref: string, graphId: string) => void): () => void {
-  const fn = (e: Event) => {
-    const { ref, graphId = "" } = (e as CustomEvent<{ ref: string; graphId?: string }>).detail;
-    handler(ref, graphId);
-  };
-  window.addEventListener("obsidience:open-reader", fn);
-  if (readerSelection) handler(readerSelection, readerGraphId);
-  return () => window.removeEventListener("obsidience:open-reader", fn);
-}
-
-export function announceKnowledgeActivity(activity: KnowledgeActivity): void {
-  window.dispatchEvent(new CustomEvent("obsidience:knowledge-activity", { detail: activity }));
-}
-
-export function onKnowledgeActivity(handler: (activity: KnowledgeActivity) => void): () => void {
-  const fn = (event: Event) => handler((event as CustomEvent<KnowledgeActivity>).detail);
-  window.addEventListener("obsidience:knowledge-activity", fn);
-  return () => window.removeEventListener("obsidience:knowledge-activity", fn);
-}

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { onShellOledPolicy, onShellProviderGraph, onShellStageVisibility, type ShellOledPolicy } from "@/lib/shell-client";
 import { ProviderGraphScene, type ProviderGraph, type ProviderNode, type GraphOperation } from "./provider-graph-scene";
-import { GraphViewer } from "./graph-viewer";
 import { MEMORY_TYPES, type GraphControl, type GraphPublisher } from "./graph-stream";
 import { CODE_STRUCTURE, codeLayoutAncestry, codeFileGraph } from "./code-spherical-layout";
 import { knowledgeRoleForAgent, paintKnowledgeRoleIcon } from "@/components/themes/obsidience/knowledge-role-icons";
@@ -55,9 +54,7 @@ function aliases(data: ProviderGraph, refs: string[]): Set<string> {
 }
 
 export function ProviderGraphSurface() {
-  const query = new URLSearchParams(location.search);
-  return query.get("stage") === "1" ? query.get("surface") === "memory" ? <MemoryStageWall /> : <ProviderGraphStage />
-    : <GraphViewer view={query.get("surface") === "code" ? "code" : "memory"} />;
+  return new URLSearchParams(location.search).get("surface") === "memory" ? <MemoryStageWall /> : <ProviderGraphStage />;
 }
 
 function MemoryStageWall() {
@@ -135,7 +132,7 @@ function ProviderGraphStage({fixedBank, availableBanks, memoryPresentation}: {
   const [hover, setHover] = useState<{ node: ProviderNode; x: number; y: number } | null>(null);
   const [operations, setOperations] = useState<GraphOperation[]>([]), [connected, setConnected] = useState(false);
   const [follow, setFollow] = useState(true), [expanded, setExpanded] = useState<string[]>([]);
-  const [detail, setDetail] = useState<Record<string, unknown> | null>(null), [detailError, setDetailError] = useState("");
+  const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
   const [visible, setVisible] = useState(!document.hidden);
   const [consumers, setConsumers] = useState(0);
   // Code is drawn by the Knowledge renderer, which owns its own publisher.
@@ -214,10 +211,6 @@ function ProviderGraphStage({fixedBank, availableBanks, memoryPresentation}: {
 
   useEffect(() => {
     const onVisibility = () => setVisible(!document.hidden && document.documentElement.dataset.paneVisible !== "false");
-    const onPane = (event: Event) => {
-      const value = (event as CustomEvent<boolean>).detail;
-      document.documentElement.dataset.paneVisible = String(value); onVisibility();
-    };
     const onStage = (event: MessageEvent) => {
       if (event.origin === location.origin && event.data?.type === "obsidience-stage-visibility") {
         document.documentElement.dataset.paneVisible = String(event.data.visible === true); onVisibility();
@@ -225,15 +218,14 @@ function ProviderGraphStage({fixedBank, availableBanks, memoryPresentation}: {
     };
     window.addEventListener("message", onStage);
     document.addEventListener("visibilitychange", onVisibility);
-    window.addEventListener("obsidience-pane-visibility", onPane);
     onVisibility();
-    return () => { window.removeEventListener("message", onStage); document.removeEventListener("visibilitychange", onVisibility); window.removeEventListener("obsidience-pane-visibility", onPane); };
+    return () => { window.removeEventListener("message", onStage); document.removeEventListener("visibilitychange", onVisibility); };
   }, []);
 
   useEffect(() => {
     if (!host.current || code) return;
     try {
-      scene.current = new ProviderGraphScene(host.current, code, n => pickRef.current(n),
+      scene.current = new ProviderGraphScene(host.current, n => pickRef.current(n),
         (node, x, y) => setHover(current => current?.node.id === node?.id ? current : node ? {node, x, y} : null),
         command => commandRef.current(command), setConsumers,
         {presentation: presentationFactory, timeGuides: !fixedBank});
@@ -353,7 +345,7 @@ function ProviderGraphStage({fixedBank, availableBanks, memoryPresentation}: {
   pickRef.current = node => {
     if (code && node?.kind === "Module" && node.name === node.file)
       node = data?.nodes.find(file => file.kind === "File" && file.file === node?.file) || node;
-    setSelected(node); setTimeRange(""); setDetail(null); setDetailError("");
+    setSelected(node); setTimeRange(""); setDetail(null);
     if (code && node) {
       setFollowingFile("");
       if (node.kind === "File" || !codeFileId) {
@@ -369,7 +361,7 @@ function ProviderGraphStage({fixedBank, availableBanks, memoryPresentation}: {
     const controller = new AbortController();
     json<Record<string, unknown>>("/api/graphs/memory/record?bank=" + encodeURIComponent(bank)
       + "&id=" + encodeURIComponent(selected.id.split("/").at(-1)!), controller.signal)
-      .then(setDetail).catch(e => { if (!controller.signal.aborted) setDetailError(e.message); });
+      .then(setDetail).catch(() => {});
     return () => controller.abort();
   }, [selected?.id, code, bank]);
 

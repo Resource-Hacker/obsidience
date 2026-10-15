@@ -1,6 +1,5 @@
 // Shared Knowledge graph visual assets. Provider views reuse these shaders;
 // layout and data ownership remain specific to each graph.
-import { KNOWLEDGE_CROSS_SEGMENTS, KNOWLEDGE_SHELL_ROUTE_GLSL } from "./knowledge-3d-links";
 
 export const KNOWLEDGE_LINK_APPROVAL_DURATION_MS = 4000;
 
@@ -662,13 +661,7 @@ varying float vTint;
 vec2 nodeUv(float index) {
   return (vec2(mod(index, uTextureSize), floor(index / uTextureSize)) + 0.5) / uTextureSize;
 }
-#ifdef KNOWLEDGE_CODE
-${KNOWLEDGE_SHELL_ROUTE_GLSL}
-#endif
 vec3 threadPoint(vec3 a, vec3 b, float t, float phase) {
-#ifdef KNOWLEDGE_CODE
-  return knowledgeShellPoint(a, b, t);
-#else
   // The early Knowledge tendrils: the thread's middle is pushed outward
   // from the stream's axis by a share of its length, so a link arches
   // around the stream instead of cutting through it. Its x coordinate stays
@@ -677,7 +670,6 @@ vec3 threadPoint(vec3 a, vec3 b, float t, float phase) {
   float away = length(middle.yz);
   vec3 outward = away > 1e-3 ? vec3(0.0, middle.yz / away) : vec3(0.0, cos(phase), sin(phase));
   return mix(a, b, t) + 2.0 * t * (1.0 - t) * clamp(distance(a, b) * 0.22, 14.0, 80.0) * uCurve * outward;
-#endif
 }
 #else
 attribute vec3 aStart;
@@ -713,11 +705,7 @@ void main() {
   vec3 from = texture2D(uPositions, nodeUv(aLink.x)).xyz;
   vec3 to = texture2D(uPositions, nodeUv(aLink.y)).xyz;
   float t0 = position.x;
-  #ifdef KNOWLEDGE_CODE
-  float t1 = min(1.0, t0 + 1.0 / ${KNOWLEDGE_CROSS_SEGMENTS}.0);
-  #else
   float t1 = min(1.0, t0 + 0.125);
-  #endif
   vec3 aStart = threadPoint(from, to, t0, aLink.z);
   vec3 aEnd = threadPoint(from, to, t1, aLink.z);
   float aSide = position.y;

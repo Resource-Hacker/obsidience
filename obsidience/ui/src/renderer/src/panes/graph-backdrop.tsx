@@ -40,11 +40,7 @@ import {
 } from "@/components/themes/obsidience/knowledge-paint";
 import {
   WS_BASE,
-  announceKnowledgeActivity,
   api,
-  onKnowledgeActivity,
-  onOpenReader,
-  openReader,
   type GraphNavigation,
   type GraphLink,
   type GraphNavigationGroup,
@@ -67,7 +63,7 @@ import { currentOperations, operationDeadline, operationAccent, operationStatus,
   type GraphOperation, type GraphActivityAccent } from "./graph-activity";
 import { KNOWLEDGE_LINK_APPROVAL_DURATION_MS } from "@/components/themes/obsidience/knowledge-3d-cloud";
 import { previewLinkReviewCloud, projectLinkReviewEffects, recordLinkApproval, type LinkApproval } from "./graph-link-review";
-import { claimShellKnowledgePresenter, onShellReaderSelection, type GraphSource } from "@/lib/shell-client";
+import { claimShellKnowledgePresenter, onShellReaderSelection, presentShellReader, type GraphSource } from "@/lib/shell-client";
 
 const ROOT_ID = "@vault";
 const FOCUS_LINGER_MS = 6_000; // The lit route stays on screen this long after its run ends.
@@ -379,14 +375,12 @@ export function GraphBackdrop({
     return () => window.clearTimeout(timer);
   }, [operations]);
 
-  useEffect(() => {
-    const select = (ref: string, graphId: string) => setReaderSelection((previous) =>
+  function selectReader(ref: string, graphId: string): void {
+    setReaderSelection((previous) =>
       previous?.ref === ref && previous.graphId === (graphId || MAIN_GRAPH_ID) ? previous
         : ref ? { ref, graphId: graphId || MAIN_GRAPH_ID } : null);
-    const closeWeb = onOpenReader(select);
-    const closeNative = onShellReaderSelection(select);
-    return () => { closeWeb(); closeNative(); };
-  }, []);
+  }
+  useEffect(() => onShellReaderSelection(selectReader), []);
 
   function speechHolds(next: KnowledgeActivity): boolean {
     return playback.current.status !== "idle" && Boolean(next.runId)
@@ -490,7 +484,7 @@ export function GraphBackdrop({
           const transaction = latestActivityTransaction(recent, next.run_id);
           if (transaction.length) {
             resetActivity();
-            transaction.forEach(announceKnowledgeActivity);
+            transaction.forEach(receiveActivity);
           }
         }
       } else if (transaction?.runId && transaction.runId === previous.run_id) {
@@ -542,7 +536,7 @@ export function GraphBackdrop({
             recent = [...recent, message].slice(-100);
             reviewChanged(message);
             const activity = activityFromWire(message);
-            if (activity) announceKnowledgeActivity(activity);
+            if (activity) receiveActivity(activity);
           } else if (message.type === "snapshot" && Array.isArray(message.entries)) {
             resetActivity(); // Replace stale display state with the current stream snapshot.
             recent = message.entries.slice(-100);
@@ -554,7 +548,7 @@ export function GraphBackdrop({
             message.entries.forEach(reviewChanged);
             latestActivityTransaction(message.entries,
               playback.current.status !== "idle" ? playback.current.run_id : "",
-            ).forEach(announceKnowledgeActivity);
+            ).forEach(receiveActivity);
           } else if (message.type === "playback") {
             applyPlayback(message.playback);
           } else if (message.type === "operation" && message.operation) {
@@ -586,7 +580,7 @@ export function GraphBackdrop({
     };
   }, []);
 
-  useEffect(() => onKnowledgeActivity((next: KnowledgeActivity) => {
+  function receiveActivity(next: KnowledgeActivity): void {
     // Each specialist can finish independently of the foreground packet.
     // Voice remains animated through queued and playing audio, until playback ends.
     if (next.phase === "query_completed" && !speechHolds(next)) finishRun(next.runId, next.at);
@@ -655,7 +649,7 @@ export function GraphBackdrop({
     }
     setActivity((current) => current ? { ...current, phase: speechHolds(next) && playback.current.status === "pending" ? "thinking" : "speaking" } : null);
     settleActivity(next);
-  }), []);
+  }
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -781,8 +775,7 @@ export function GraphBackdrop({
     const primitiveFolderByKind: Record<string, string> = {
       tool: "Tools", skill: "Skills", runbook: "Runbooks", task: "Tasks",
     };
-    const primitiveNotes = all.filter((n) => Boolean(primitiveKindOf(n))
-      && !(n.kind === "skill" && !n.synthetic));
+    const primitiveNotes = all.filter((n) => Boolean(primitiveKindOf(n)));
     // Shared Tool+Skill pairs and Tasks belong to the curated Library satellite.
     // Runbooks are synthesized per agent; all four primitive kinds project on
     // an agent only when that identity carries them.
@@ -978,8 +971,7 @@ export function GraphBackdrop({
         satelliteSubjectByKey.get(key)?.id ?? identityRef;
       const satelliteMembers = graphArticleIds(navigationGroup, displayAliases);
       const localMembers = all.filter((node) => satelliteMembers.has(node.id)
-        && !subjectArticleRefs.has(node.id) && node.id !== identityRef
-        && !(node.kind === "skill" && !node.synthetic));
+        && !subjectArticleRefs.has(node.id) && node.id !== identityRef);
       const otherAgentMembers = [
         ...all.filter((node) => node.kind === "agent" && node.id !== identityRef),
       ];
@@ -1415,8 +1407,11 @@ export function GraphBackdrop({
     setNodeMenu(null);
     selectGraph(parsed.agentId ?? MAIN_GRAPH_ID);
     setReaderSelection({ ref: parsed.nodeId, graphId: parsed.agentId ?? MAIN_GRAPH_ID });
-    if (read) openReader(graph.nodes.find((node) => node.id === parsed.nodeId)?.article_ref ?? parsed.nodeId,
-      parsed.agentId ?? MAIN_GRAPH_ID);
+    if (read) {
+      const ref = graph.nodes.find((node) => node.id === parsed.nodeId)?.article_ref ?? parsed.nodeId;
+      selectReader(ref, parsed.agentId ?? MAIN_GRAPH_ID);
+      presentShellReader(ref, parsed.agentId ?? MAIN_GRAPH_ID);
+    }
   };
   const clearSelection = () => {
     setSelectedId(null);

@@ -271,13 +271,12 @@ function actionTitle(entry: ActionTraceEntry): string {
   const name = traceText(entry.payload.name);
   const titles: Record<string, string> = {
     "vault.read": "Read an article", "vault.search": "Find related knowledge", "vault.list": "Browse articles",
-    "web.search": "Search the web", "web.fetch": "Read a web page", "web.read": "Read a web page",
+    "web.search": "Search the web", "web.fetch": "Read a web page",
     "source.read": "Read source material", "source.handoff": "Hand research to Alexandria",
-    "vault.propose": "Propose an article change", "review.decide": "Apply a review decision",
+    "vault.propose": "Propose an article change",
     "task.complete": "Submit the task outcome", "task.create": "Create a follow-up task",
     "harness.status": "Check system health", "computer.observe": "Look at the current application",
-    "task.inspect": "Inspect a task", "review.inspect": "Inspect pending reviews",
-    "computer.click": "Click a control", "window.activate": "Focus an application",
+    "window.activate": "Focus an application",
     "window.place": "Place an application", "application.launch": "Open an application",
     "observations.recall": "Recall Hindsight observations",
     "observations.retain": "Retain a Hindsight observation",
@@ -300,7 +299,7 @@ export function traceActionTarget(entry: ActionTraceEntry): string {
 }
 
 const INSPECTION_STATUS_LABELS: Record<string, string> = {
-  "task.inspect": "Inspected task", "harness.status": "Harness health",
+  "harness.status": "Harness health",
 };
 
 /** Inspection findings describe the subject, separately from the Tool execution. */

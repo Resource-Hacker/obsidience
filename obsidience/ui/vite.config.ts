@@ -7,7 +7,6 @@ import { resolve } from "path";
 export default defineConfig({
   root: resolve(__dirname, "src/renderer"),
   base: "./",
-  envPrefix: ["RENDERER_VITE_", "VITE_"],
   resolve: { alias: { "@": resolve(__dirname, "src/renderer/src") } },
   plugins: [react(), tailwindcss()],
   build: {

@@ -1,4 +1,3 @@
-import type { KnowledgeEdge, KnowledgeNode } from "../../../../../shared/knowledge";
 import {
   DEFAULT_KNOWLEDGE_HUB_ANCHOR,
   type KnowledgeLayoutAnchor,
@@ -32,14 +31,16 @@ export interface KnowledgeLayout {
 export interface KnowledgeLayoutInput {
   anchor?: KnowledgeLayoutAnchor;
   viewport?: KnowledgeLayoutViewport;
-  nodes: Array<
-    Pick<KnowledgeNode, "id" | "degree" | "kind" | "label"> & {
-      parentId?: string | null;
-      order?: number;
-      role?: KnowledgeHierarchyRole;
-    }
-  >;
-  edges: Array<Pick<KnowledgeEdge, "id" | "source" | "target" | "type">>;
+  nodes: Array<{
+    id: string;
+    degree: number;
+    kind: string;
+    label?: string;
+    parentId?: string | null;
+    order?: number;
+    role?: KnowledgeHierarchyRole;
+  }>;
+  edges: Array<{ id: string; source: string; target: string; type: string }>;
   /** Optional radial distance scales (ambient 2D tuning): Brain→branch
    *  ring, the middle branch rings, and the article ring. Defaults of 1
    *  reproduce the canonical geometry exactly (contract pins unchanged). */

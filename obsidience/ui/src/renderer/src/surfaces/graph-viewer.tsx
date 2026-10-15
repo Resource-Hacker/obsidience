@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Brain, Braces, Network, Search, Scan, RefreshCw, Radio, X, ArrowUpRight, ArrowLeft, Layers, ChevronDown } from "lucide-react";
-import { presentShellGraph, presentShellReader, presentShellSource, onShellStageVisibility, onShellGraphView, selectShellGraphView, type GraphView, type GraphSource } from "@/lib/shell-client";
+import { presentShellReader, presentShellSource, onShellStageVisibility, onShellGraphView, selectShellGraphView, type GraphView, type GraphSource } from "@/lib/shell-client";
 import { GraphSubscriber, MEMORY_TYPES, type GraphCatalog, type GraphControl, type GraphViewState } from "./graph-stream";
 import type { ProviderNode } from "./provider-graph-scene";
 import "./provider-graph.css";
@@ -23,8 +23,8 @@ export function GraphPaneSurface() {
 }
 
 /** Common viewer chrome around the stage's video, with no graph renderer. */
-export function GraphViewer({view, onViewChange = presentShellGraph, initialGraphId = "main", onGraphIdChange}: {
-  view: GraphView; onViewChange?: (view: GraphView) => void;
+export function GraphViewer({view, onViewChange, initialGraphId = "main", onGraphIdChange}: {
+  view: GraphView; onViewChange: (view: GraphView) => void;
   initialGraphId?: string; onGraphIdChange?: (id: string) => void;
 }) {
   const {title, subtitle, source, Icon} = IDENTITIES[view];

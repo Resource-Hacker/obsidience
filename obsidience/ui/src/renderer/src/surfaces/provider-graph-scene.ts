@@ -2,7 +2,6 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { GraphPublisher, type GraphControl } from "./graph-stream";
 import { providerGraphAssets, providerLinkIndex } from "./provider-graph-assets";
-import { CODE_STRUCTURE } from "./code-spherical-layout";
 import { createKnowledge3dLabelLayer, type Knowledge3dLabelMeta } from "@/components/themes/obsidience/knowledge-3d-labels";
 import { memoryTimeAxis, memoryInitialOffset, memoryRelationshipWeight, memoryLens, memoryLensX, type MemoryLens, type MemoryTimeAxis } from "./memory-time-layout";
 
@@ -74,10 +73,6 @@ export class ProviderGraphScene {
   private memoryLens: MemoryLens | null = null;
   private memoryRange = "";
   private layoutPositions = new Map<string, LayoutPoint>();
-  private projectView: {positions: Map<string, LayoutPoint>; camera: THREE.Vector3; target: THREE.Vector3} | null = null;
-  private ghost: {group: THREE.Group; positions: THREE.DataTexture | null; colors: THREE.DataTexture | null} | null = null;
-  private transition: {at: number; kind: "enter" | "return" | "update"; unfolding: boolean; camera: boolean} | null = null;
-  private arrivals = new Map<string, LayoutPoint>();
   private layoutWorker: Worker | null = null;
   private layoutPending = false;
   private layoutReady = false;
@@ -116,10 +111,10 @@ export class ProviderGraphScene {
   private down = { x: 0, y: 0 };
   private pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
 
-  constructor(private host: HTMLElement, private code: boolean,
+  constructor(private host: HTMLElement,
     private onPick: (node: ProviderNode | null) => void,
     private onHover: (node: ProviderNode | null, x: number, y: number) => void,
-    private onCommand: (command: GraphControl) => void, onConsumers: (count: number) => void,
+    onCommand: (command: GraphControl) => void, onConsumers: (count: number) => void,
     private options: {presentation?: ProviderPresentationFactory; timeGuides?: boolean} = {}) {
     this.renderer.setPixelRatio(this.pixelRatio);
     this.renderer.setClearColor(0x02060c, 0);
@@ -127,12 +122,9 @@ export class ProviderGraphScene {
     this.host.appendChild(this.renderer.domElement);
     this.scene.add(this.group);
     this.scene.add(this.timeGuides);
-    this.camera.position.set(0, 0, 850);
-    if (!code) this.camera.position.set(310, 140, 850);
+    this.camera.position.set(310, 140, 850);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = false;
-    this.controls.autoRotateSpeed = 0.5; // One Code revolution every two minutes.
-    if (code) this.controls.mouseButtons.RIGHT = undefined;
     this.controls.minDistance = 15;
     this.controls.maxDistance = 50000;
     this.controls.addEventListener("change", this.cameraChanged);
@@ -147,9 +139,8 @@ export class ProviderGraphScene {
     canvas.addEventListener("pointerdown", this.pointerDown);
     canvas.addEventListener("pointerup", this.pointerUp);
     canvas.addEventListener("pointerleave", this.pointerLeave);
-    canvas.addEventListener("contextmenu", this.contextMenu);
     const presentation: ProviderPresentationFactory = options.presentation
-      || ((canvas, command, redraw, consumers) => new GraphPublisher(code ? "code" : "memory", canvas, command, redraw, consumers));
+      || ((canvas, command, redraw, consumers) => new GraphPublisher("memory", canvas, command, redraw, consumers));
     this.presentation = presentation(canvas,
       command => { if (!this.remote(command)) onCommand(command); }, this.request,
       count => {
@@ -189,7 +180,6 @@ export class ProviderGraphScene {
   }
   private stopFlight = () => {
     this.cameraFlight = null; this.fitAfterLayout = false;
-    if (this.transition) this.transition.camera = false;
   };
   private interactionStart = () => { this.interacting = true; this.stopFlight(); this.request(); };
   private interactionEnd = () => { this.interacting = false; this.request(); };
@@ -228,55 +218,16 @@ export class ProviderGraphScene {
     this.clearSprites(this.timeGuides);
     this.labels.update(new Map(), [], this.noLabelActivity, new Map(), 0);
   }
-  private clearGhost() {
-    if (!this.ghost) return;
-    this.scene.remove(this.ghost.group);
-    for (const object of this.ghost.group.children) {
-      const mesh = object as THREE.Mesh;
-      mesh.geometry.dispose(); (mesh.material as THREE.Material).dispose();
-    }
-    this.ghost.positions?.dispose(); this.ghost.colors?.dispose(); this.ghost = null;
-  }
-  private retainGeometry() {
-    this.clearGhost();
-    const group = new THREE.Group(); group.position.copy(this.group.position); group.scale.copy(this.group.scale);
-    for (const object of [...this.group.children]) group.add(object);
-    this.scene.add(group);
-    this.ghost = {group, positions: this.positionTexture, colors: this.colorTexture};
-    this.positionTexture = this.colorTexture = null; this.points = this.lines = null;
-  }
-  private opacity(group: THREE.Group, value: number) {
-    for (const object of group.children) {
-      const material = (object as THREE.Mesh).material as THREE.ShaderMaterial;
-      const uniform = material.uniforms.uProviderOpacity || material.uniforms.uOpacity;
-      if (uniform) uniform.value = value;
-    }
-  }
-  private changedSymbols(data: ProviderGraph, previous: ProviderGraph | null) {
-    if (!this.code || !previous || data.code_root !== previous.code_root) return;
-    const old = new Map(previous.nodes.map(node => [node.id, node]));
-    const now = Date.now();
-    for (const node of data.nodes) {
-      const before = old.get(node.id);
-      if (!before || before.body_hash && node.body_hash && before.body_hash !== node.body_hash) {
-        this.pulses.set(node.id, {start: now, until: now + 4000, color: new THREE.Color(before ? "#fbbf24" : "#6ee7b7")});
-        this.paintNodes.add(node.id);
-      }
-    }
-  }
   setData(data: ProviderGraph, visibleIds: Set<string>) {
     const visibleKey = [...visibleIds].join("|"), previous = this.sourceData;
     if (data === previous && visibleKey === this.visibleKey) return;
-    this.changedSymbols(data, previous);
-    const scopeChanged = this.code && !!previous && previous.code_root !== data.code_root;
     // A refresh carrying the same physical inputs updates metadata in place.
     // No geometry churn, giant sorted fingerprint, simulation restart or reheat.
-    const samePhysics = !scopeChanged && previous?.graph_id === data.graph_id
+    const samePhysics = previous?.graph_id === data.graph_id
       && previous.nodes.length === data.nodes.length && previous.edges.length === data.edges.length
       && data.nodes.every((n, i) => {
         const p = previous.nodes[i];
-        return n.id === p.id && (this.code ? n.kind === p.kind && n.file === p.file
-          : n.date === p.date && n.x === p.x && n.y === p.y && n.z === p.z);
+        return n.id === p.id && n.date === p.date && n.x === p.x && n.y === p.y && n.z === p.z;
       }) && data.edges.every((e, i) => {
         const p = previous.edges[i];
         return e.source === p.source && e.target === p.target && e.kind === p.kind && e.weight === p.weight;
@@ -301,34 +252,10 @@ export class ProviderGraphScene {
       this.layoutPositions.clear();
       this.searchMatches.clear();
     }
-    const transitioning = this.code && !!previous && (scopeChanged || !!data.code_root && !samePhysics);
-    if (transitioning) {
-      if (!scopeChanged && this.points) {
-        const next = new Set(data.nodes.map(node => node.id));
-        const colors = this.points.geometry.getAttribute("aCore") as THREE.BufferAttribute;
-        const removed = new THREE.Color("#fb7185");
-        for (const node of this.nodes) if (!next.has(node.id)) colors.setXYZ(this.indices.get(node.id)!, removed.r, removed.g, removed.b);
-        colors.needsUpdate = true;
-      }
-      this.retainGeometry(); this.arrivals.clear();
-      this.transition = {at: performance.now(), kind: scopeChanged ? data.code_root ? "enter" : "return" : "update", unfolding: false, camera: true};
-      if (scopeChanged) {
-        this.layoutWorker?.terminate(); this.layoutWorker = null; this.layoutReady = false;
-        if (!previous.code_root) this.projectView = {positions: new Map(this.layoutPositions),
-          camera: this.camera.position.clone(), target: this.controls.target.clone()};
-        this.layoutPositions = data.code_root ? new Map() : new Map(this.projectView?.positions);
-        const anchor = data.code_root ? this.projectView?.positions.get(data.code_root) : null;
-        this.group.position.set(anchor?.x || 0, anchor?.y || 0, anchor?.z || 0);
-        this.group.scale.setScalar(1);
-      } else {
-        for (const node of data.nodes) if (!this.layoutPositions.has(node.id))
-          this.arrivals.set(node.id, {x: 0, y: 0, z: 0});
-      }
-    }
     this.clearGeometry(); this.aliases.clear();
     // Filters retain the complete bank's scale, dates and undated bucket.
-    this.timeAxis = this.code ? null : memoryTimeAxis(data.nodes);
-    if (!this.code) for (const n of data.nodes) {
+    this.timeAxis = memoryTimeAxis(data.nodes);
+    for (const n of data.nodes) {
       const p = this.layoutPositions.get(n.id) || {x: 0, ...memoryInitialOffset(n.id)};
       this.layoutPositions.set(n.id, {...p, x: this.timeAxis?.position(n.id) ?? -100});
     }
@@ -343,35 +270,24 @@ export class ProviderGraphScene {
       if (n.file && n.kind === "File") this.aliases.set("file:" + n.file, n.id);
     }
     this.edges = data.edges.filter(e => e.source !== e.target && this.indices.has(e.source) && this.indices.has(e.target));
-    this.linkIndex = providerLinkIndex(this.nodes, this.edges, this.code);
+    this.linkIndex = providerLinkIndex(this.nodes, this.edges);
     // Lit links are numbered by the edges and records just replaced.
     this.live.clear(); this.lit.clear(); this.reaches.clear();
-    const assets = providerGraphAssets(this.nodes, this.code, this.pixelRatio);
+    const assets = providerGraphAssets(this.nodes, this.pixelRatio);
     this.points = assets.points; this.lines = assets.lines;
     this.positionTexture = assets.positions; this.colorTexture = assets.colors;
     this.nodeColors = new Float32Array(this.points.geometry.getAttribute("aCore").array);
     this.group.add(this.lines, this.points);
-    if (data.code_root) {
-      const root = this.indices.get(data.code_root);
-      if (root !== undefined) this.points.geometry.getAttribute("aRadius").setX(root, 6.6);
-    }
-    // Code's first frame comes from spherical seeds, never native flat layout.
-    this.group.visible = !this.code || this.layoutPositions.size > 0;
     this.selection.clear();
     this.paintNodes = new Set([...this.pulses.keys(), this.selected, this.hovered]);
     this.applyMemoryFocus(); this.search(this.searchQuery, true);
     this.updateLinks(); this.updatePositions(); this.updateTimeGuides(); this.onResize();
     if (!samePhysics) {
-      this.fitAfterLayout = !this.fitted && !this.transition;
+      this.fitAfterLayout = !this.fitted;
       this.startLayout(data);
     }
-    if (!this.fitted && this.nodes.length && this.group.visible) {
+    if (!this.fitted && this.nodes.length) {
       this.fitBounds(false); this.fitted = true;
-    }
-    if (scopeChanged) {
-      if (data.code_root) this.fly(this.group.position.clone(), 110, true);
-      else if (this.projectView) this.cameraFlight = {at: performance.now(), from: this.camera.position.clone(),
-        to: this.projectView.camera.clone(), targetFrom: this.controls.target.clone(), targetTo: this.projectView.target.clone()};
     }
     this.request();
   }
@@ -382,9 +298,7 @@ export class ProviderGraphScene {
     const indices = new Map(members.map((node, i) => [node.id, i]));
     for (const id of this.layoutPositions.keys()) if (!indices.has(id)) this.layoutPositions.delete(id);
     if (!members.length) return;
-    const worker = this.code
-      ? new Worker(new URL("./code-layout.worker.ts", import.meta.url), {type: "module"})
-      : new Worker(new URL("./memory-layout.worker.ts", import.meta.url), {type: "module"});
+    const worker = new Worker(new URL("./memory-layout.worker.ts", import.meta.url), {type: "module"});
     this.layoutWorker = worker; this.layoutPending = true; this.layoutAlpha = 0.85;
     worker.onmessage = event => {
       if (this.disposed || this.layoutWorker !== worker) return;
@@ -399,14 +313,8 @@ export class ProviderGraphScene {
     worker.onerror = () => {
       if (this.layoutWorker !== worker) return;
       worker.terminate(); this.layoutWorker = null; this.layoutPending = false; this.layoutAlpha = 0;
-      console.error(`${this.code ? "Code" : "Memory"} layout worker failed; retaining the last layout.`); this.request();
+      console.error("Memory layout worker failed; retaining the last layout."); this.request();
     };
-    if (this.code) {
-      worker.postMessage({type: "init", graph: {nodes: members.map(({id, kind, file}) => ({id, kind, file})), edges: data.edges, code_root: data.code_root},
-        preserve: !!data.code_root || this.transition?.kind === "return",
-        previous: [...this.layoutPositions].map(([id, point]) => ({id, ...point}))});
-      return;
-    }
     const edges = data.edges.filter(edge => edge.source !== edge.target && indices.has(edge.source) && indices.has(edge.target));
     const pairs = new Float32Array(edges.length * 3);
     edges.forEach((edge, i) => pairs.set([indices.get(edge.source)!, indices.get(edge.target)!, memoryRelationshipWeight(edge)], i * 3));
@@ -432,7 +340,7 @@ export class ProviderGraphScene {
     // A record many resting threads meet at would burn white: each of its
     // threads dims by how many share it.
     const shared = new Map<number, number>();
-    if (!this.code) for (const index of this.linkIndex.overview) {
+    for (const index of this.linkIndex.overview) {
       for (const end of ends(index)) shared.set(end, (shared.get(end) || 0) + 1);
     }
     const count = shown.size + reaches.length;
@@ -440,7 +348,7 @@ export class ProviderGraphScene {
     let at = 0;
     for (const index of shown) {
       const [a, b] = ends(index), kind = this.edges[index].kind;
-      const opacity = this.code ? 0.15 : (kind === "entity" ? 0.1 : kind === "temporal" ? 0.08 : 0.8)
+      const opacity = (kind === "entity" ? 0.1 : kind === "temporal" ? 0.08 : 0.8)
         / Math.sqrt(Math.max(1, shared.get(a) || 0, shared.get(b) || 0));
       values.set([a, b, (a * 0.6180339887 + b * 0.4142135624) % 1 * Math.PI * 2, opacity], at * 4);
       const live = this.live.get(index);
@@ -504,7 +412,7 @@ export class ProviderGraphScene {
     return found.length > 0 || recall;
   }
   private updateTimeGuides() {
-    if (this.code || !this.nodes.length || this.options.timeGuides === false) return;
+    if (!this.nodes.length || this.options.timeGuides === false) return;
     // Guides are part of the stage image, so viewers receive these exact pixels.
     const {start, end, length, origin, dateAt} = this.timeAxis || {start: 0, end: 0, length: 0, origin: 0, dateAt: () => 0};
     let y = Infinity;
@@ -564,11 +472,10 @@ export class ProviderGraphScene {
     this.paintNodes.add(this.selected); this.paintNodes.add(id);
     this.selected = id; this.memoryRange = range;
     this.fitAfterLayout = false;
-    if (!this.code) { this.applyMemoryFocus(); this.frameMemoryFocus(); }
+    this.applyMemoryFocus(); this.frameMemoryFocus();
     this.updateEmphasis(); this.updateLinks(); this.labelsDirty = true; this.request();
   }
   private applyMemoryFocus() {
-    if (this.code) return;
     let ids = this.selected ? [this.selected] : [];
     if (this.timeAxis && /^\d{4}-\d{2}-\d{2}\/\d{4}-\d{2}-\d{2}$/.test(this.memoryRange)) {
       const [from, to] = this.memoryRange.split("/");
@@ -590,7 +497,7 @@ export class ProviderGraphScene {
       const expansion = 1 + 0.3 / (1 + d * d);
       node.x = memoryLensX(point.x, this.memoryLens); node.y = point.y * expansion; node.z = point.z * expansion;
     }
-    if (!this.code && this.nodes.length) {
+    if (this.nodes.length) {
       this.reach = 1; this.newest = 0;
       this.nodes.forEach((node, index) => {
         this.reach = Math.max(this.reach, Math.hypot(node.y, node.z));
@@ -608,7 +515,7 @@ export class ProviderGraphScene {
       Math.max(700, this.memoryLens.radius * 10) * Math.max(1, 1 / this.camera.aspect), true);
   }
   search(query: string, force = false) {
-    if (this.code || !force && query === this.searchQuery) return;
+    if (!force && query === this.searchQuery) return;
     for (const id of this.searchMatches) this.paintNodes.add(id);
     this.searchQuery = query.slice(0, 256);
     const q = this.searchQuery.trim().toLocaleLowerCase();
@@ -618,7 +525,7 @@ export class ProviderGraphScene {
     this.updateEmphasis(); this.labelsDirty = true; this.request();
   }
   private updateEmphasis() {
-    if (this.code || !this.points) return;
+    if (!this.points) return;
     const context = new Set([this.selected, this.hovered, ...this.searchMatches]);
     for (const id of [this.selected, this.hovered]) for (const index of this.linkIndex.adjacency.get(id) || []) {
       const edge = this.edges[index]; context.add(edge.source); context.add(edge.target);
@@ -654,13 +561,12 @@ export class ProviderGraphScene {
     const projected = new Map<string, {x: number; y: number}>();
     const metadata = new Map<string, Knowledge3dLabelMeta>();
     for (const {node, x, y, depth} of candidates.slice(0, 12)) {
-      const root = this.code && (node.id === this.sourceData?.code_root || node.kind === "Project"), section = this.code && CODE_STRUCTURE.has(node.kind);
       const radius = this.points?.geometry.getAttribute("aRadius").getX(this.indices.get(node.id)!) || 3.2;
       projected.set(node.id, {x, y});
       metadata.set(node.id, {
         label: (node.external ? "↗ " : "") + node.name.slice(0, 74) + (node.name.length > 74 ? "…" : ""),
         // These are shared visual tiers only, never provider Article identities.
-        role: root ? "root" : section ? "section" : "claim", depth: root ? 0 : section ? 1 : 2,
+        role: "claim", depth: 2,
         branch: node.kind, radius: Math.max(3, radius * this.host.clientHeight
           / (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * depth)),
         accent: node.color,
@@ -682,65 +588,51 @@ export class ProviderGraphScene {
       const color = new THREE.Color(["failed", "interrupted"].includes(op.status) ? "#fb7185" : op.kind === "edit" ? "#fbbf24" : op.kind === "read" ? "#67e8f9" : op.kind === "consolidate" ? "#e9a8ff" : "#6ee7b7");
       // A Memory recall reaches back from the newest record, and each memory
       // it returned lights as its reach arrives.
-      const recall = !this.code && (op.kind === "read" || op.kind === "search");
+      const recall = op.kind === "read" || op.kind === "search";
       const ids = op.refs.map(ref => this.aliases.get(ref)).filter((id): id is string => !!id);
       ids.forEach((id, order) => {
         const start = op.at + (recall ? REACH_MS + Math.min(order, LIVE_REACHES) * REACH_STAGGER_MS : 0);
         this.pulses.set(id, { start, until: (op.expires_at || op.at + 3500) + 900, color });
         this.paintNodes.add(id);
       });
-      if (this.code || !ids.length) continue;
+      if (!ids.length) continue;
       relit = this.lightLinks(op, ids, recall) || relit;
     }
     if (relit) this.updateLinks();
     this.labelsDirty = true; this.request();
   }
   focus(ids: string[]) {
-    // An edit refresh inside a file never resets the owner's camera. The file
-    // entry transition already frames the local sphere; explicit picks may zoom.
-    if (this.transition?.kind === "enter") return;
     const nodes = ids.map(id => this.indices.get(this.aliases.get(id) || id)).filter(i => i !== undefined).map(i => this.nodes[i!]);
     if (!nodes.length) return;
-    if (!this.code) {
-      if (this.selected || this.memoryRange) return;
-      this.setMemoryLens(this.timeAxis ? memoryLens(this.timeAxis, nodes.map(n => n.id)) : null);
-      this.frameMemoryFocus(); return;
-    }
-    const box = new THREE.Box3().setFromPoints(nodes.map(n => new THREE.Vector3(n.x, n.y, n.z)));
-    this.fly(box.getCenter(new THREE.Vector3()).add(this.group.position), Math.max(100, box.getSize(new THREE.Vector3()).length() * 1.5), true);
+    if (this.selected || this.memoryRange) return;
+    this.setMemoryLens(this.timeAxis ? memoryLens(this.timeAxis, nodes.map(n => n.id)) : null);
+    this.frameMemoryFocus();
   }
   fit(animate = true) {
     this.fitAfterLayout = false;
-    if (!this.code) this.setMemoryLens(null);
+    this.setMemoryLens(null);
     this.fitBounds(animate);
   }
   private fitBounds(animate: boolean) {
     if (!this.nodes.length) return;
     const box = new THREE.Box3().setFromPoints(this.nodes.map(n => new THREE.Vector3(n.x, n.y, n.z)));
-    if (!this.code) {
-      // Include the whole axial sweep so an irregular coil cannot spin out of frame.
-      const radius = this.nodes.reduce((radius, node) => Math.max(radius, Math.hypot(node.y, node.z)), 0);
-      box.expandByPoint(new THREE.Vector3(box.min.x, -radius, -radius));
-      box.expandByPoint(new THREE.Vector3(box.max.x, radius, radius));
-    }
+    // Include the whole axial sweep so an irregular coil cannot spin out of frame.
+    const radius = this.nodes.reduce((radius, node) => Math.max(radius, Math.hypot(node.y, node.z)), 0);
+    box.expandByPoint(new THREE.Vector3(box.min.x, -radius, -radius));
+    box.expandByPoint(new THREE.Vector3(box.max.x, radius, radius));
     if (this.timeGuides.children.length) box.expandByObject(this.timeGuides);
-    if (!this.code) {
-      // Fit the actual viewport, not a sphere enclosing the long timeline.
-      // Four wide desktop rows should use their width without clipping depth.
-      box.expandByScalar(12);
-      const center = box.getCenter(new THREE.Vector3());
-      const inverse = this.camera.quaternion.clone().invert();
-      const tangent = Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2));
-      let distance = 130;
-      for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z]) {
-        const corner = new THREE.Vector3(x, y, z).sub(center).applyQuaternion(inverse);
-        distance = Math.max(distance, corner.z + 1.1 * Math.max(Math.abs(corner.x) / (tangent * this.camera.aspect), Math.abs(corner.y) / tangent));
-      }
-      this.fly(center, distance, animate); return;
+    // Fit the actual viewport, not a sphere enclosing the long timeline.
+    // Four wide desktop rows should use their width without clipping depth.
+    box.expandByScalar(12);
+    const center = box.getCenter(new THREE.Vector3());
+    const inverse = this.camera.quaternion.clone().invert();
+    const tangent = Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2));
+    let distance = 130;
+    for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z]) {
+      const corner = new THREE.Vector3(x, y, z).sub(center).applyQuaternion(inverse);
+      distance = Math.max(distance, corner.z + 1.1 * Math.max(Math.abs(corner.x) / (tangent * this.camera.aspect), Math.abs(corner.y) / tangent));
     }
-    const radius = box.getSize(new THREE.Vector3()).length() * 0.5;
-    const distance = radius / Math.sin(THREE.MathUtils.degToRad(24)) * Math.max(1, 1 / this.camera.aspect) * 0.94;
-    this.fly(box.getCenter(new THREE.Vector3()).add(this.group.position), Math.max(130, distance), animate);
+    this.fly(center, distance, animate);
   }
   private fly(target: THREE.Vector3, distance: number, animate: boolean) {
     const direction = this.camera.position.clone().sub(this.controls.target).normalize();
@@ -760,10 +652,10 @@ export class ProviderGraphScene {
     else this.request();
   }
   private canSpin() {
-    return this.nodes.length > 1 && this.group.visible && !this.motionPreference.matches
+    return this.nodes.length > 1 && !this.motionPreference.matches
       && !this.pointerInside && !this.remotePointerInside && !this.interacting
       && !this.selected && !this.hovered && !this.searchQuery.trim() && !this.memoryLens
-      && !this.transition && !this.cameraFlight;
+      && !this.cameraFlight;
   }
   /** Render on the coming display refresh; supersedes a pending idle wait. */
   private request = () => {
@@ -788,7 +680,7 @@ export class ProviderGraphScene {
     this.lastPaint = time;
     let moving = false;
     if (this.layoutReady) {
-      this.layoutReady = false; this.applyLayoutPositions(); this.group.visible = true;
+      this.layoutReady = false; this.applyLayoutPositions();
       if (!this.fitted && this.nodes.length) { this.fitBounds(false); this.fitted = true; }
     }
     if (this.layoutWorker && !this.layoutPending && this.layoutAlpha > 0.006) {
@@ -796,37 +688,6 @@ export class ProviderGraphScene {
     }
     if (this.fitAfterLayout && !this.layoutPending && this.layoutAlpha <= 0.006) {
       this.fitAfterLayout = false; this.fitBounds(true);
-    }
-    if (this.transition) {
-      const transition = this.transition;
-      const delay = transition.kind === "enter" ? 550 : 0;
-      const t = Math.max(0, Math.min(1, (time - transition.at - delay) / 650));
-      const eased = t * t * (3 - 2 * t);
-      if (transition.kind === "enter") {
-        this.group.scale.setScalar(0.015 + 0.985 * eased);
-        if (t > 0 && !transition.unfolding && this.layoutPositions.size) {
-          transition.unfolding = true;
-          if (transition.camera) this.fitBounds(true);
-        }
-      }
-      if (this.arrivals.size) {
-        for (const node of this.nodes) {
-          const from = this.arrivals.get(node.id), to = this.layoutPositions.get(node.id);
-          if (from && to) {
-            node.x = from.x + (to.x - from.x) * eased;
-            node.y = from.y + (to.y - from.y) * eased;
-            node.z = from.z + (to.z - from.z) * eased;
-          }
-        }
-        this.updatePositions();
-      }
-      this.opacity(this.group, eased);
-      if (this.ghost) this.opacity(this.ghost.group, 1 - eased);
-      this.labelsDirty = true;
-      if (t === 1) {
-        this.transition = null; this.arrivals.clear(); this.group.scale.setScalar(1); this.clearGhost();
-      }
-      moving = true;
     }
     if (this.cameraFlight) {
       const flight = this.cameraFlight, t = Math.min(1, (time - flight.at) / 550), eased = 1 - Math.pow(1 - t, 3);
@@ -839,14 +700,9 @@ export class ProviderGraphScene {
     if (spinning && !moving) {
       const seconds = this.spinAt ? Math.min(0.05, (time - this.spinAt) / 1000) : 0;
       this.spinAt = time;
-      if (this.code) {
-        // Orbit the existing camera; file transitions keep their exact coordinates.
-        this.controls.autoRotate = true; this.controls.update(seconds); this.controls.autoRotate = false;
-      } else {
-        // Chronology is x. Rotate only the rendered coil, never layout coordinates.
-        this.group.rotation.x = (this.group.rotation.x + seconds * Math.PI * 2 / 90) % (Math.PI * 2);
-        this.labelsDirty = true;
-      }
+      // Chronology is x. Rotate only the rendered coil, never layout coordinates.
+      this.group.rotation.x = (this.group.rotation.x + seconds * Math.PI * 2 / 90) % (Math.PI * 2);
+      this.labelsDirty = true;
       moving = true;
     } else this.spinAt = 0;
     const now = Date.now(), blend = Math.min(1, Math.max(1, time - this.lastFrame) / 130);
@@ -889,7 +745,7 @@ export class ProviderGraphScene {
     // pulsing a few returned records never rewrites the full bank's links.
     const scale = this.host.clientHeight / (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2))
       * Math.max(1, this.camera.position.distanceTo(this.controls.target)));
-    if (!this.code && this.lines) {
+    if (this.lines) {
       const uniforms = this.lines.material.uniforms;
       uniforms.uOverview.value = THREE.MathUtils.clamp(scale * 0.8, 0.45, 1)
         * (this.selected || this.hovered || this.searchQuery.trim() ? 0.2 : 1);
@@ -908,9 +764,7 @@ export class ProviderGraphScene {
     }
     if (this.labelsDirty) {
       this.labelsDirty = false;
-      if (this.transition?.kind === "enter" && !this.transition.unfolding)
-        this.labels.update(new Map(), [], this.noLabelActivity, new Map(), 0);
-      else this.updateDetailLabels(scale);
+      this.updateDetailLabels(scale);
     }
     this.renderer.render(this.scene, this.camera);
     this.renderer.autoClear = false;
@@ -926,10 +780,10 @@ export class ProviderGraphScene {
     this.cursor.set((event.clientX - rect.left) / rect.width * 2 - 1, -(event.clientY - rect.top) / rect.height * 2 + 1);
     this.ray.setFromCamera(this.cursor, this.camera);
     this.ray.params.Points!.threshold = this.camera.position.distanceTo(this.controls.target)
-      * (this.code ? 0.009 : 12 * Math.tan(THREE.MathUtils.degToRad(24)) / Math.max(1, rect.height));
+      * 12 * Math.tan(THREE.MathUtils.degToRad(24)) / Math.max(1, rect.height);
     this.group.updateMatrixWorld(true);
     const hits = this.ray.intersectObject(this.points);
-    if (!this.code) hits.sort((a, b) => (a.distanceToRay || 0) - (b.distanceToRay || 0));
+    hits.sort((a, b) => (a.distanceToRay || 0) - (b.distanceToRay || 0));
     return hits.length && hits[0].index !== undefined ? this.nodes[hits[0].index] : null;
   }
   private pointerEnter = () => { this.pointerInside = true; this.request(); };
@@ -945,23 +799,17 @@ export class ProviderGraphScene {
     if (event.button === 0 && Math.hypot(event.clientX - this.down.x, event.clientY - this.down.y) < 5) this.onPick(this.pick(event));
   };
   private pointerLeave = () => { this.pointerInside = false; this.setHover(""); this.onHover(null, 0, 0); this.request(); };
-  private contextMenu = (event: MouseEvent) => {
-    if (!this.code) return;
-    event.preventDefault();
-    if (this.sourceData?.code_root) this.onCommand({action: "back"});
-  };
   dispose() {
     this.presentation.dispose();
     this.disposed = true; cancelAnimationFrame(this.raf); clearTimeout(this.wakeTimer); this.resize.disconnect();
     this.layoutWorker?.terminate(); this.layoutWorker = null;
     this.motionPreference.removeEventListener("change", this.request);
-    this.controls.dispose(); this.clearGhost(); this.clearGeometry(); this.labels.dispose(); this.renderer.dispose();
+    this.controls.dispose(); this.clearGeometry(); this.labels.dispose(); this.renderer.dispose();
     this.renderer.domElement.removeEventListener("pointerenter", this.pointerEnter);
     this.renderer.domElement.removeEventListener("pointermove", this.pointerMove);
     this.renderer.domElement.removeEventListener("pointerdown", this.pointerDown);
     this.renderer.domElement.removeEventListener("pointerup", this.pointerUp);
     this.renderer.domElement.removeEventListener("pointerleave", this.pointerLeave);
-    this.renderer.domElement.removeEventListener("contextmenu", this.contextMenu);
     this.renderer.domElement.remove();
   }
 }
