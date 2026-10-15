@@ -1566,9 +1566,28 @@ def _wake_on_lan(row):
             sock.sendto(packet, (target, 9))
 
 
+def _drop_offline(row):
+    """Drop the TV's transport when network standby left it offline; the shared server keeps running.
+
+    `adb connect` reports an existing transport as already connected even while it is offline, so
+    reconnecting alone kept failing "device offline" until the wake deadline. Called once per
+    recovery: a fresh transport is briefly offline during its handshake and is left alone.
+    """
+    target = row['ip'] + ':5555'
+    try:
+        listed = subprocess.run(['/usr/bin/adb', 'devices'], stdin=subprocess.DEVNULL,
+                                capture_output=True, text=True, timeout=4).stdout
+        if any(line.split() == [target, 'offline'] for line in listed.splitlines()):
+            subprocess.run(['/usr/bin/adb', 'disconnect', target], stdin=subprocess.DEVNULL,
+                           capture_output=True, timeout=4)
+    except subprocess.TimeoutExpired:
+        raise TimeoutError('TV ADB connection timed out; the TV may be in network standby or disconnected') from None
+
+
 def _after_wake(row, cancel, read):
     """Wake the TV, then the identity preamble once ADB answers again (within 20 s)."""
     _wake_on_lan(row)
+    _drop_offline(row)
     deadline = time.monotonic() + 20
     while True:
         try:
@@ -1947,6 +1966,7 @@ def _execute(args, context):
                     woke = True
                 else:
                     # Reconnect only the transport and read again; never replay an input or restart the ADB server.
+                    _drop_offline(row)
                     _adb(row, cancel, connect=True, timeout=4)
                     tail, boot, ad = _preamble(row, cancel, read)
             # The agent connects (and is provisioned) on this freshly verified transport; ADB serves until then.
