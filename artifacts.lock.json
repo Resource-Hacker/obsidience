@@ -614,6 +614,15 @@
       "artifact": "Prowlarr.master.2.6.5.5623.linux-core-x64.tar.gz",
       "sha256": "c0824e9f0e9c79e085882f6143041be5c2cde0519baa59e9477d9e4dcbe1b5e3",
       "integration": "Unmodified official standalone release, used only as source discovery behind its authenticated loopback API. Initial public indexer is built-in TorrentsCSV. No download client, Arr automation stack, RSS acquisition or watchlist. API key supplied privately through a systemd credential."
+    },
+    "pipecat_contextual_turn_admission": {
+      "repository": "https://github.com/pipecat-ai/pipecat",
+      "revision": "8dc2093360750371e7027ec41dd8bdfda78e2a60",
+      "reference_sha256": "0e7da371f5551c40fb4777bc112839ef6933467fd2babb3ba5d2205f2cfa0283",
+      "license_sha256": "e31a733ecb79cbffafd5474e964e5eca15e0a0876a42b1d7253b51b198eb61aa",
+      "license": "BSD-2-Clause",
+      "reference_path": "src/pipecat/turns/user_turn_completion_mixin.py",
+      "integration": "Architectural adaptation of the contextual incomplete-turn filter, not copied runtime code or a Pipecat upgrade. The existing Executive buffers its actual first ADK response with a private C/I/W completion marker. Incomplete speech has no Tool dispatch, final transcript, or history write; complete responses are consumed once through ordinary ADK authority. Unlike the reference, missing markers fail closed and expiry discards rather than prompting or executing."
     }
   }
 }

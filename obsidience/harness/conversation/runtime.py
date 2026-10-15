@@ -194,6 +194,12 @@ class ConversationRuntime:
             if self.speech is not None:
                 await self.speech.publish_readiness()
 
+    async def prepare_speech_turn(self, text: str):
+        """Buffer the Executive's own first response before a public voice turn."""
+        from ..execution.speech_admission import prepare
+        await self._cancel_speech_prefill()
+        return await prepare(self, text, SPEECH_RESPONSE_CONTRACT)
+
     async def _cancel_speech_prefill(self) -> None:
         self._prefill_latest = None
         task = self._prefill_task
@@ -360,13 +366,17 @@ class ConversationRuntime:
     async def submit(
         self, text: str, *, source: Literal["text", "realtime"] = "text", wait: bool = True,
         speech_timing: dict | None = None, memory_writeback: bool = True,
-        owner_command: dict | None = None,
+        owner_command: dict | None = None, prepared_speech=None,
     ) -> dict[str, Any]:
         """Bind one exact user turn, independent of microphone state.
 
         memory_writeback=False keeps an owner-controlled diagnostic turn out of
         Hindsight; the turn is otherwise ordinary.
         """
+        if prepared_speech is not None:
+            from ..execution.speech_admission import PreparedSpeechTurn
+            if not isinstance(prepared_speech, PreparedSpeechTurn) or source != "realtime" or owner_command is not None:
+                raise ValueError("Prepared speech requires the internal voice ingress")
         owner_request = None
         if owner_command is not None:
             from ..execution.commands import owner_media_command, owner_media_text
@@ -392,9 +402,14 @@ class ConversationRuntime:
                     return {**existing, "duplicate": True}
                 if self._turn_task is not None and not self._turn_task.done():
                     raise RuntimeError("The owner conversation is active; wait before submitting a media command")
+            if prepared_speech is not None:
+                # Validate the original generation before cancel advances it.
+                await prepared_speech.validate_submission(self, clean)
             await self.cancel(stop_playback=source == "text", reason=f"{source}.final")
             user_turn = await self._conversation.append(role="user", source=source, text=clean,
                                                        owner_request=owner_request)
+            if prepared_speech is not None:
+                prepared_speech.bind(user_turn, self._generation)
             if not memory_writeback:
                 # Reserve before execution can commit a reply or continuation.
                 # A failed reservation aborts admission; restart cannot leak it.
@@ -405,7 +420,8 @@ class ConversationRuntime:
             turn_task = asyncio.create_task(
                 self._run_turn(clean, self._generation, user_turn, source=source,
                                received_ns=received_ns, speech_timing=speech_timing,
-                               memory_writeback=memory_writeback, owner_command=owner_command),
+                               memory_writeback=memory_writeback, owner_command=owner_command,
+                               prepared_speech=prepared_speech),
                 name=f"obsidience-conversation-turn-{user_turn['id']}",
             )
             self._turn_task = turn_task
@@ -457,7 +473,7 @@ class ConversationRuntime:
         self, text: str, generation: int, user_turn: dict, *,
         source: Literal["text", "realtime"],
         received_ns: int | None = None, speech_timing: dict | None = None,
-        memory_writeback: bool = True, owner_command: dict | None = None,
+        memory_writeback: bool = True, owner_command: dict | None = None, prepared_speech=None,
     ) -> dict[str, Any]:
         from ..execution.scheduler import foreground_admission
 
@@ -476,7 +492,8 @@ class ConversationRuntime:
             async with foreground_admission("conversation"):
                 return await self._run_admitted_turn(text, generation, user_turn, source=source,
                                                      speech_sequence=sequence,
-                                                     memory_writeback=memory_writeback, owner_command=owner_command)
+                                                     memory_writeback=memory_writeback, owner_command=owner_command,
+                                                     prepared_speech=prepared_speech)
         finally:
             knowledge_activity.emit("admission_completed", [], turn_id=str(user_turn["id"]))
             trace.reset(scope)
@@ -485,7 +502,7 @@ class ConversationRuntime:
         self, text: str, generation: int, user_turn: dict, *,
         source: Literal["text", "realtime"],
         speech_sequence: int | None = None, memory_writeback: bool = True,
-        owner_command: dict | None = None,
+        owner_command: dict | None = None, prepared_speech=None,
     ) -> dict[str, Any]:
         from ..execution.executor import run_conversation
 
@@ -501,7 +518,7 @@ class ConversationRuntime:
             trace.latency("admission", duration_ms=(time.monotonic() - admission_started) * 1000)
             from ..execution.commands import recognize_command
             from ..execution.native_turn import discard_recall, prefetch_recall
-            if owner_command is None and recognize_command(text, ["lights.set", "tv.control", "media.pause", "task.complete"]) is None:
+            if prepared_speech is None and owner_command is None and recognize_command(text, ["lights.set", "tv.control", "media.pause", "task.complete"]) is None:
                 # The native memory hook recalls for this exact request after the
                 # agent starts; begin it now so it overlaps preparation and compile.
                 recall = prefetch_recall(task.ref, text, user_turn)
@@ -539,7 +556,7 @@ class ConversationRuntime:
                 steering=inbox,
                 activity_completion=activity_completion,
                 verified_command=verified_command,
-                memory_recall=recall,
+                memory_recall=recall, prepared_speech=prepared_speech,
             )
             self.record_prompt_usage(result, request_text=text)
             if generation != self._generation:

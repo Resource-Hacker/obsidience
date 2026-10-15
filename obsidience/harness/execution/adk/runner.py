@@ -286,7 +286,7 @@ async def _invoke(runner, plugin: AgentPlugin, interruption_event, ctx: dict, **
 
 async def run_adk_session(task, model, messages, allowed, ctx, agent_name, effort,
                           interruption_event=None, *, initial_lease=None, evaluation=None,
-                          fast_lane=True):
+                          fast_lane=True, prepared_speech=None):
     from google.adk.agents import LlmAgent
     from google.adk.agents.run_config import RunConfig, StreamingMode
     from google.adk.apps import App
@@ -300,7 +300,7 @@ async def run_adk_session(task, model, messages, allowed, ctx, agent_name, effor
         ctx.update(run_id='trial-' + uuid.uuid4().hex, objective=evaluation.case['objective'])
     plugin = AgentPlugin(task, model, allowed, ctx, agent_name, effort, system=messages[0]['content'],
                          interruption_event=interruption_event, initial_lease=initial_lease,
-                         fast_lane=fast_lane, evaluation=evaluation)
+                         fast_lane=fast_lane, evaluation=evaluation, prepared_speech=prepared_speech)
     ex, trace, run = plugin.ex, plugin.trace, plugin.run
     ctx['_foreground_interruption_event'] = interruption_event
     for key in ('_reflex_proposal', '_reflex_command_verified', '_reflex_command_result', '_voice_confirmation'):
@@ -320,7 +320,7 @@ async def run_adk_session(task, model, messages, allowed, ctx, agent_name, effor
         command = owner_media_command(params['owner_command'])
         trace.append({'command_route': 'owner_media', 'request_id': command['request_id'],
                       'model_requests': 0, 'memory_recalls': 0})
-    elif (task.ref == EXECUTIVE and task.kind == 'agent' and conversation_id
+    elif (prepared_speech is None and task.ref == EXECUTIVE and task.kind == 'agent' and conversation_id
             and params.get('reply_to_turn_id') and not continuation
             and effort == 'none' and initial_lease is None and not trace
             and not (ex.steering is not None and (ex.steering.pending or ex.steering.applied))):
@@ -358,14 +358,15 @@ async def run_adk_session(task, model, messages, allowed, ctx, agent_name, effor
             settled = True  # The command records carry their own settlement.
             await _run_command(plugin, command, session_id, turn_id)
         else:
-            if conversation_id and ex.active_lease is None:
+            if conversation_id and ex.active_lease is None and prepared_speech is None:
                 # The first step always needs this model. Reserve it while the
                 # turn recalls memory, not after the recall.
                 plugin.lease_prefetch = asyncio.create_task(acquire_model(model))
             # One turn message: the compiler's runtime context, the owner request
             # (or continuation) and its recall; the projection orders them.
             if conversation_id:
-                parts = [sessions.part(row['content'], 'plugin:obsidience.context', run=run) for row in messages[1:]]
+                context_rows = prepared_speech.context if prepared_speech is not None else messages[1:]
+                parts = [sessions.part(row['content'], 'plugin:obsidience.context', run=run) for row in context_rows]
                 parts.append(sessions.part(ctx['objective'], 'plugin:obsidience.continuation', run=run)
                              if continuation else sessions.part(ctx['objective'], 'user', id=turn_id, run=run))
                 query = ctx['objective']
@@ -376,7 +377,11 @@ async def run_adk_session(task, model, messages, allowed, ctx, agent_name, effor
             else:
                 parts = [sessions.part(row['content'], 'user', run=run) for row in messages[1:]]
                 query = messages[-1]['content']
-            if not continuation and not plugin.task_mode:
+            if prepared_speech is not None:
+                # Preserve the recall actually seen by the buffered first step.
+                if prepared_speech.memory:
+                    parts.append(sessions.part(prepared_speech.memory, 'plugin:obsidience.memory', run=run))
+            elif not continuation and not plugin.task_mode:
                 recalled = await turn_recall(ctx, query, emit=plugin.emit, run=run, evaluation=evaluation,
                                              context_text=messages[1]['content'] if len(messages) > 1 else '')
                 if memory := memory_message(recalled):

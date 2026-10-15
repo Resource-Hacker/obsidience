@@ -117,13 +117,15 @@ class AgentPlugin(BasePlugin):
     """One activation's loop policy and capability state, for any accountable Agent."""
 
     def __init__(self, task, spec, allowed, ctx, agent_name, effort, *, system: str,
-                 interruption_event=None, initial_lease=None, fast_lane=True, evaluation=None):
+                 interruption_event=None, initial_lease=None, fast_lane=True, evaluation=None,
+                 prepared_speech=None):
         super().__init__(name='obsidience_activation')
         self.task = task
         # Agent-owned conversation (the Executive) or a specialist Task procedure.
         self.task_mode = task.kind != 'agent'
         self.spec, self.effort, self.system, self.agent_name = spec, effort, system, agent_name
         self.evaluation = evaluation
+        self.prepared_speech = prepared_speech
         self.max_steps = step_budget(evaluation)
         self.emit = trace_emitter(evaluation)
         self.trace = ctx.setdefault('trace', [])
@@ -412,6 +414,20 @@ class AgentPlugin(BasePlugin):
             return LlmResponse()
         self.model_steps += 1
         self.rotate()
+        if self.prepared_speech is not None:
+            prepared, self.prepared_speech = self.prepared_speech, None
+            response = await prepared.consume(self)
+            fields = {'step': self.ex.step + 1, 'call_id': f'{self.run}:model:{self.model_steps}'}
+            self.emit_model(f'{self.agent_name} prepared model step admitted', 'started', fields,
+                            engine=sessions.BACKEND)
+            metrics = deepcopy(prepared.metrics)
+            metrics['speech_prepared_first_step'] = True
+            self._step = {'fields': fields, 'metrics': metrics, 'started': time.monotonic(), 'menu': None}
+            self.ex.decision_messages[:] = deepcopy(prepared.wire)
+            # The model already generated this exact response. ADK appends its
+            # sanitized content and dispatches native calls through normal hooks.
+            await self._finish_step(response, from_choice=True)
+            return response
         await self.hold_model(self.adopt_lease)
         fields = {'step': self.ex.step + 1, 'call_id': f'{self.run}:model:{self.model_steps}'}
         self.emit_model(f'{self.agent_name} model started', 'started', fields, engine=sessions.BACKEND)
