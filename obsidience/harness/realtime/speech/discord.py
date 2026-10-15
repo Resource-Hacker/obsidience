@@ -171,6 +171,12 @@ class _MemberTurn(speech.ObsidienceNeMoTurnTakingService):
         return await super()._open_wake(text, cue_name=cue_name)
 
     async def _handle_transcription(self, frame, direction):
+        if self.stream.synthetic_probe:
+            # Only a fresh, explicitly supplied synthetic PCM stream can enter
+            # this finite inspection lane. It never admits an Agent turn.
+            if self.stream.server.current(self.stream) and time.monotonic() < self.stream.probe_deadline:
+                self.stream.probe_text = (self.stream.probe_text + frame.text)[:512]
+            return
         if self.stream.server.listening(self.stream):
             await super()._handle_transcription(frame, direction)
 
@@ -200,11 +206,15 @@ class _Owner:
 
 
 class _Member:
-    def __init__(self, server, principal, decoder):
+    def __init__(self, server, principal, decoder, *, synthetic_probe=False):
         self.server, self.principal = server, principal
         self.generation = server.generation
         self.last_input = time.monotonic()
         self.last_silence = self.last_input
+        self.synthetic_probe = synthetic_probe
+        self.probe_deadline = self.last_input + 30 if synthetic_probe else 0
+        self.probe_text = ""
+        self.probe_pcm_bytes = 0
         self.remainder = bytearray()
         self.closed = False
         self.ready = asyncio.Event()
@@ -269,8 +279,8 @@ class _Member:
         # Ambient words and partial transcripts never leave the speech owner.
 
     def diagnostics(self):
-        # Explicit owner-socket request only. Never include transcript, PCM,
-        # analyzer output or exception text, including before wake admission.
+        # Default diagnostics never includes transcript, PCM, analyzer output
+        # or exception text. Synthetic inspection is a separate one-shot opt-in.
         audio_task = self.input._audio_task
         return {
             "available": True,
@@ -313,6 +323,12 @@ class _Member:
         if self.closed or not self.server.listening(self):
             return
         if not terminal:
+            if self.synthetic_probe:
+                self.probe_pcm_bytes += len(pcm)
+                if self.probe_pcm_bytes > 320_000 or time.monotonic() >= self.probe_deadline:
+                    self.probe_text = ""
+                    self.fail("synthetic_probe_limit")
+                    return
             self.last_input = self.last_silence = time.monotonic()
             if self.last_input - self.stt.last_reset > 35:
                 # RNNT hypotheses grow across a continuous utterance. Bound
@@ -336,6 +352,7 @@ class _Member:
 
     async def close(self):
         self.closed = True
+        self.probe_text = ""
         self.remainder.clear()
         await self.task.cancel(reason="Discord member disconnected")
         await asyncio.gather(self.runner, return_exceptions=True)
@@ -506,8 +523,17 @@ class DiscordSpeechServer:
         principal = _principal(message)
         if kind == "diagnostics":
             member = self.members.get(principal)
-            self.emit("diagnostics", principal,
-                      **(member.diagnostics() if member is not None else {"available": False}))
+            result = member.diagnostics() if member is not None else {"available": False}
+            inspect_probe = message.get("synthetic_probe") is True
+            if inspect_probe:
+                if member is not None and member.synthetic_probe and time.monotonic() < member.probe_deadline:
+                    result["synthetic_probe_text"] = member.probe_text
+                    member.probe_text = ""
+                else:
+                    result["code"] = "synthetic_probe_unavailable"
+            self.emit("diagnostics", principal, **result)
+            if inspect_probe and member is not None and member.synthetic_probe:
+                await self._drop(principal)
         elif kind == "audio":
             if (message.get("sample_rate", 16000) != 16000
                     or message.get("channels", 1) != 1 or message.get("format", "s16le") != "s16le"):
@@ -530,13 +556,19 @@ class DiscordSpeechServer:
             if principal in self.dropping:
                 return
             member = self.members.get(principal)
+            synthetic_probe = message.get("synthetic_probe", False)
+            if type(synthetic_probe) is not bool:
+                raise ValueError("Invalid synthetic probe flag")
+            if member is not None and member.synthetic_probe != synthetic_probe:
+                self.emit("error", principal, code="synthetic_probe_requires_fresh_stream")
+                return
             if member is None:
                 if len(self.members) >= MAX_STREAMS:
                     self.emit("error", principal, code="stream_capacity")
                     return
                 async with self.stt._model_lock:
                     decoder = _decoder_context(self.stt._model)
-                member = _Member(self, principal, decoder)
+                member = _Member(self, principal, decoder, synthetic_probe=synthetic_probe)
                 self.members[principal] = member
                 await asyncio.wait_for(member.ready.wait(), timeout=5)
             await member.audio(pcm)
@@ -651,6 +683,10 @@ class DiscordSpeechServer:
             await asyncio.sleep(0.04)
             now = time.monotonic()
             for principal, member in tuple(self.members.items()):
+                if member.synthetic_probe and now >= member.probe_deadline:
+                    member.probe_text = ""
+                    member.fail("synthetic_probe_expired")
+                    continue
                 # Pipecat's audio task may terminate outside its frame error
                 # path. A live socket must not silently retain a dead stream.
                 audio_task = member.input._audio_task
