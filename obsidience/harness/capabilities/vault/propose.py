@@ -565,12 +565,24 @@ def stage_proposal(args: dict, context: dict, *, validate_only: bool = False) ->
                 context["_proposal_read_prerequisite"] = missing_reads
                 batch = list(missing_reads)[:10]
                 remaining = len(missing_reads) - len(batch)
+                # A long Article spans pages: name its exact continuation, since
+                # rereading offset 0 only returns the page already held.
+                next_reads = []
+                for ref in batch:
+                    receipt = reads.get(ref, {})
+                    ranges = receipt.get("ranges") or []
+                    if (receipt.get("article_sha256") == missing_reads[ref] and receipt.get("view_sha256")
+                            and ranges and ranges[0][0] == 0):
+                        next_reads.append({"ref": ref, "offset": ranges[0][1],
+                                           "expected_sha256": receipt["view_sha256"]})
+                    else:
+                        next_reads.append({"ref": ref})
                 raise ValueError(
-                    "Link requires a complete current vault.read of each changed endpoint: "
-                    + json.dumps({"refs": batch}, ensure_ascii=False)
+                    "Link requires a complete current vault.read of each changed endpoint. Next: "
+                    + "; ".join("vault.read " + json.dumps(item, ensure_ascii=False) for item in next_reads)
                     + (f"; {remaining} further endpoints remain" if remaining else "")
-                    + ". Complete these reads before retrying the proposal; unchanged arguments "
-                    "are valid after the missing evidence is supplied"
+                    + ". Follow each read's Next page until End of Article view, then retry the "
+                    "proposal; unchanged arguments are valid after the missing evidence is supplied"
                 )
             for item in proposal_meta["link_evidence"]:
                 if not item.get("source_citation") or item["change"] != "added":
