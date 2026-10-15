@@ -89,7 +89,8 @@ def _decoder_context(source):
 
 
 class _MemberSTT(speech.UtteranceNeMoSTTService):
-    def __init__(self, source, decoder):
+    def __init__(self, stream, source, decoder):
+        self.stream = stream
         self._shared_decoder = decoder
         super().__init__(model=source._model_name, device=source._device,
                          sample_rate=speech.SAMPLE_RATE, params=source._params,
@@ -102,10 +103,25 @@ class _MemberSTT(speech.UtteranceNeMoSTTService):
         self.transcription_frames = 0
         self.vad_starts = 0
         self.vad_stops = 0
+        self._terminal_frames = 0
+        self.skipped_terminal_frames = 0
 
     async def process_audio_frame(self, frame, direction):
+        if not self.stream.server.listening(self.stream):
+            return
+        terminal = frame.metadata.get("discord_terminal_silence", False)
+        if terminal:
+            self._terminal_frames += 1
+            # Input VAD/Smart Turn still sees the whole endpoint window. ASR
+            # needs only its existing tail, ending on a complete decoder batch.
+            # Do not keep competing with real speakers to transcribe zeros.
+            if self._terminal_frames > round(speech.ASR_TAIL_SECS / 0.02) and not self.audio_buffer:
+                self.skipped_terminal_frames = min(self.skipped_terminal_frames + 1, 1_000_000_000)
+                return
+        else:
+            self._terminal_frames = 0
         self.audio_frames = min(self.audio_frames + 1, 1_000_000_000)
-        if not frame.metadata.get("discord_terminal_silence", False):
+        if not terminal:
             self.utterance_pcm_bytes += len(frame.audio)
         await super().process_audio_frame(frame, direction)
 
@@ -125,6 +141,8 @@ class _MemberSTT(speech.UtteranceNeMoSTTService):
                     self.utterance_pcm_bytes = 0
             elif isinstance(frame, speech.VADUserStoppedSpeakingFrame):
                 self.vad_stops = min(self.vad_stops + 1, 1_000_000_000)
+                if not self.stream.server.listening(self.stream):
+                    frame.metadata["obsidience_asr_tail_frames"] = 0
         await super().process_frame(frame, direction)
         if isinstance(frame, speech.VADUserStoppedSpeakingFrame):
             self.utterance_pcm_bytes = 0
@@ -232,8 +250,9 @@ class _Member:
         self.ready = asyncio.Event()
         self.received_pcm_frames = 0
         self.terminal_pcm_frames = 0
+        self.queue_high_water = 0
         self.wake_rejected = {"possessive": 0, "mid_sentence": 0}
-        self.stt = _MemberSTT(server.stt, decoder)
+        self.stt = _MemberSTT(self, server.stt, decoder)
         turn_analyzer = speech.smart_turn_analyzer(
             lambda: self.turn.turn_pending(), lambda: self.turn.turn_short_reply(),
             model_path=speech.SMART_TURN_MODEL,
@@ -298,6 +317,7 @@ class _Member:
             "available": True,
             "received_pcm_frames": self.received_pcm_frames,
             "terminal_pcm_frames": self.terminal_pcm_frames,
+            "skipped_terminal_frames": self.stt.skipped_terminal_frames,
             "stt_audio_frames": self.stt.audio_frames,
             "stt_transcription_frames": self.stt.transcription_frames,
             "vad_starts": self.stt.vad_starts,
@@ -308,6 +328,7 @@ class _Member:
                                   and not audio_task.cancelled() and audio_task.exception() is not None),
             "runner_done": self.runner.done(),
             "queue_depth": self.input._audio_in_queue.qsize() if audio_task is not None else 0,
+            "queue_high_water": self.queue_high_water,
         }
 
     def final(self, text):
@@ -324,6 +345,14 @@ class _Member:
 
     def fail(self, code):
         if self.server.current(self):
+            if self.principal not in self.server.failures and len(self.server.failures) >= 64:
+                self.server.failures.pop(next(iter(self.server.failures)))
+            prior = self.server.failures.get(self.principal, {})
+            self.server.failures[self.principal] = {
+                "last_error": code,
+                "error_count": min(prior.get("error_count", 0) + 1, 1_000_000_000),
+                "failed_queue_depth": self.input._audio_in_queue.qsize(),
+            }
             owner = self.server.owner(self.principal)
             self.server.emit("error", self.principal, code=code,
                              **({"request_id": owner.request_id} if owner else {}))
@@ -356,6 +385,7 @@ class _Member:
                 frame = speech.InputAudioRawFrame(piece, speech.SAMPLE_RATE, 1)
                 frame.metadata["discord_terminal_silence"] = terminal
                 await self.input.push_audio_frame(frame)
+                self.queue_high_water = max(self.queue_high_water, self.input._audio_in_queue.qsize())
                 if terminal:
                     self.terminal_pcm_frames = min(self.terminal_pcm_frames + 1, 1_000_000_000)
                 else:
@@ -395,6 +425,7 @@ class DiscordSpeechServer:
         self.speaking_owner = None
         self.dropping: dict[tuple, asyncio.Task] = {}
         self.blocked: dict[tuple, float] = {}
+        self.failures: dict[tuple, dict] = {}
         self._inode = None
         self._closed = False
 
@@ -539,6 +570,9 @@ class DiscordSpeechServer:
         if kind == "diagnostics":
             member = self.members.get(principal)
             result = member.diagnostics() if member is not None else {"available": False}
+            result.update(self.failures.get(principal, {}))
+            result["blocked"] = (principal in self.blocked
+                                 and time.monotonic() - self.blocked[principal] < speech.TRANSCRIPT_IDLE_SECS)
             calibration_probe = message.get("calibration_probe", False)
             if type(calibration_probe) is not bool or (calibration_probe and message.get("synthetic_probe") is True):
                 raise ValueError("Invalid calibration probe flag")
@@ -700,6 +734,7 @@ class DiscordSpeechServer:
                 await task
         self.owners.clear()
         self.blocked.clear()
+        self.failures.clear()
         members, self.members = self.members, {}
         for member in members.values():
             await member.close()

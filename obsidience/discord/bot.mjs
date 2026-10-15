@@ -21,8 +21,9 @@ const TTS_MAX_BUFFER_FRAMES = 100; // Two seconds, matching the former PCM bound
 const SPEECH_ERROR_CODES = new Set(['asr_failed', 'utterance_limit', 'audio_backpressure', 'stream_capacity',
   'reply_not_current', 'speech_delivery_failed', 'audio_pipeline_stopped', 'utterance_timeout', 'reply_timeout']);
 const DIAGNOSTIC_COUNTS = ['received_pcm_frames', 'terminal_pcm_frames', 'stt_audio_frames',
-  'stt_transcription_frames', 'vad_starts', 'vad_stops', 'queue_depth'];
-const DIAGNOSTIC_FLAGS = ['available', 'input_task_done', 'input_task_failed', 'runner_done'];
+  'stt_transcription_frames', 'vad_starts', 'vad_stops', 'queue_depth', 'queue_high_water',
+  'skipped_terminal_frames', 'error_count', 'failed_queue_depth'];
+const DIAGNOSTIC_FLAGS = ['available', 'input_task_done', 'input_task_failed', 'runner_done', 'blocked'];
 const diagnosticCount = (value) => Number.isSafeInteger(value) && value >= 0 ? Math.min(value, 1_000_000_000) : null;
 const log = (event) => console.log(JSON.stringify({ component: 'discord_transport', event }));
 const fail = (code) => { throw new Error(code); };
@@ -171,6 +172,7 @@ export class DiscordTransport {
       return;
     }
     const result = { received: true };
+    if (SPEECH_ERROR_CODES.has(message.last_error)) result.last_error = message.last_error;
     for (const key of DIAGNOSTIC_FLAGS) if (typeof message[key] === 'boolean') result[key] = message[key];
     for (const key of DIAGNOSTIC_COUNTS) {
       const value = diagnosticCount(message[key]);

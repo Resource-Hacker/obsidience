@@ -12,6 +12,12 @@ wake confirmation, then retires unaddressed stream state. The next utterance
 starts fresh without reloading model weights. Claimed commands and question
 followups retain their speaker ownership. Generated endpoint silence does not
 count toward the continuous received-audio limit.
+VAD and turn detection receive the full endpoint window; ASR receives only its
+existing finite silence tail, ending on a complete decoder batch. Actual member
+audio, including quiet speech, is always recognized while that member is eligible
+to listen. This prevents idle streams from competing with current speakers for
+the shared decoder. Private diagnostics retain bounded per-member failure codes
+and queue counts after a failed stream is removed, without audio or transcript text.
 
 Discord's supported bot voice API carries audio. Local video files can supply their
 audio track, but this implementation does not transmit video or Go Live streams.
