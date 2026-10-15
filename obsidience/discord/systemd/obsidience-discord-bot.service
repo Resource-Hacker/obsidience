@@ -1,5 +1,5 @@
 [Unit]
-Description=Obsidience Discord Bot (Squanchbot)
+Description=Obsidience Discord Bot (Bard)
 After=network-online.target obsidience-harness-dev.service
 Wants=network-online.target
 

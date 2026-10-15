@@ -188,10 +188,6 @@ class _MemberTurn(speech.ObsidienceNeMoTurnTakingService):
     def __init__(self, stream, **kwargs):
         self.stream = stream
         super().__init__(event_sink=stream.event, **kwargs)
-        # NeMo also renders this name as "Squonge Bot", "Squange Bot",
-        # "squash bot" and "SpongeBot" in admitted Discord speech. Keep these
-        # observed aliases local; ordinary address/possessive guards still apply.
-        self._wake_pattern = re.compile(r"(?<!\w)(?:squanch|squ[ao]nge|squash|sponge)\s*bot(?!\w)", re.IGNORECASE)
 
     async def _open_wake(self, text, *, cue_name="ready"):
         if not self.stream.server.claim(self.stream):
@@ -269,7 +265,7 @@ class _Member:
             turn_analyzer=turn_analyzer,
         ))
         self.turn = _MemberTurn(self, timing=speech.SpeechInputTiming(), mode="wake",
-                                wake_word="Squanchbot", smart_turn=turn_analyzer is not None,
+                                wake_word="Bard", smart_turn=turn_analyzer is not None,
                                 semantic_turns=False, use_vad=True, use_diar=False,
                                 max_buffer_size=2, bot_stop_delay=0.5)
         self.task = speech.PipelineTask(

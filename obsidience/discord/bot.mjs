@@ -862,7 +862,7 @@ export class DiscordTransport {
         await interaction.editReply({ content: JSON.stringify(result).slice(0, 1900), allowedMentions: ALLOWED_MENTIONS });
       }
     } catch {
-      if (interaction.deferred) await interaction.editReply({ content: 'The request could not be completed. Check Squanchbot status or your channel permissions.', allowedMentions: ALLOWED_MENTIONS }).catch(() => {});
+      if (interaction.deferred) await interaction.editReply({ content: 'The request could not be completed. Check bot status or your channel permissions.', allowedMentions: ALLOWED_MENTIONS }).catch(() => {});
     }
   }
 

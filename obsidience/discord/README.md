@@ -1,6 +1,6 @@
 # Obsidience Discord Bot
 
-Squanchbot is an official Discord bot transport for the independently configured
+Bard is an official Discord bot transport for the independently configured
 Obsidience Discord Agent. The Harness owns that Agent's identity, Knowledge,
 conversation, grants and reasoning. This process owns Discord Gateway, voice,
 receivers and audio players. The existing speech worker owns ASR, wake admission,
@@ -19,10 +19,10 @@ to listen. This prevents idle streams from competing with current speakers for
 the shared decoder. Private diagnostics retain bounded per-member failure codes
 and queue counts after a failed stream is removed, without audio or transcript text.
 
-Wake recognition accepts the observed ASR spellings Squanchbot, Squonge Bot,
-Squange Bot, squash bot and SpongeBot. These aliases apply only to Discord's
-address matcher, with the same sentence-start/pause and possessive guards as the
-desktop. A question followup retains its original member without requiring a new
+Wake recognition uses the ordinary desktop wake-address matcher with `Bard`
+(for example, “Hey Bard”), including its sentence-start/pause and possessive guards.
+There is no name-specific alias list or biased decoder. A question followup
+retains its original member without requiring a new
 wake name; ordinary listening always requires an address.
 
 Discord's supported bot voice API carries audio. Local video files can supply their
@@ -68,7 +68,7 @@ The private owner-only JSON at `OBSIDIENCE_DISCORD_CONFIG` contains:
   "enabled": true,
   "guild_id": "YOUR_GUILD_ID",
   "application_id": "YOUR_APPLICATION_ID",
-  "bot_name": "Squanchbot",
+  "bot_name": "Bard",
   "allowed_channel_ids": [],
   "message_content_intent": false
 }
@@ -315,9 +315,7 @@ actual scoped operations drive highlighting. An empty bank is displayed as empty
 The [local camera producer](camera/README.md) publishes this view as
 `Squanchbot Graph` for a normal Discord client to select.
 
-Discord's wake address accepts the canonical name and the narrowly observed ASR
-spellings `Squonge Bot` and `Squange Bot`. This applies only to the Discord stream;
-the desktop wake address stays unchanged. The first addressed member owns the
+The desktop wake address stays unchanged. The first addressed member owns the
 current command and any invited follow-up; other members' audio is discarded
 until that ownership ends. Supplied-PCM validation establishes routing, not a
 human speaker's acoustic recognition or what listeners hear in Discord.
