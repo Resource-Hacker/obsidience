@@ -1136,7 +1136,9 @@ def _wait_for_playback(row, cancel, package, before, limit=20.0, resend=None, se
         mine = sorted(player for player, owner in players.items() if owner == uid)
         if mine and session_before is not _NO_SESSION:
             current = _session(row, cancel, package)
-            if current is not None and current[0] == 'playing' and current != session_before:
+            # A changed title: a reused player resuming its old video is not the new one playing.
+            if (current is not None and current[0] == 'playing'
+                    and (session_before is None or current[1] != session_before[1])):
                 return mine[0]
         try:
             focus = _focus(row, cancel)
@@ -1465,11 +1467,21 @@ def _open_media(candidate_id, context, row, cancel, resume=False, season=False):
 
 def _play_library(prepared, context, row, cancel):
     """play's Media server route: wake the TV once like the PC route, then the exact library open."""
+    season = prepared['kind'] == 'season'
+    player = _player.state()
+    # _open_media's own refusals, checked before any wake so a refusal leaves the TV untouched.
+    if player is None or (season and player.get('local_queue_supported') is not True):
+        return {'status': 'failed', 'delivery': 'not_dispatched', 'effect_applied': False,
+                'correction_allowed': player is not None, 'action': 'play', 'route_kind': 'library',
+                'failure': ('The existing TV player is unavailable' if player is None else
+                            'Season playback awaits the guarded TV tuner update at an idle boundary.')}
+    woke = False
     try:
         raw, _boot, _ad = _preamble(row, cancel, _POWER_READ, timeout=4)
     except OSError as error:
         if isinstance(error, InterruptedError):
             raise
+        woke = True
         with _phase(context, 'wake'):
             if row.get('mac'):
                 raw, _boot, _ad = _after_wake(row, cancel, _POWER_READ)
@@ -1483,7 +1495,18 @@ def _play_library(prepared, context, row, cancel):
         with _phase(context, 'wake'):
             _end_screensaver(row, cancel, limit=8.0)
         context['_tv_effect_uncertain'] = False
-    result = _open_media(prepared['id'], context, row, cancel, season=prepared['kind'] == 'season')
+        woke = True
+    try:
+        result = _open_media(prepared['id'], context, row, cancel, season=season)
+    except (OSError, ValueError, KeyError, IndexError, MediaUnavailable) as error:
+        if not woke or context.get('_tv_effect_uncertain') or isinstance(error, InterruptedError):
+            raise
+        result = {'status': 'failed', 'delivery': 'not_dispatched', 'failure': str(error)}
+    if woke and result.get('status') != 'completed':
+        # The wake itself was an effect: report it, and never replay this play.
+        result = {**result, 'effect_applied': True, 'must_not_replay': True,
+                  'woke': 'The TV was woken; no library media was sent to it.'}
+        result.pop('correction_allowed', None)
     return {**result, 'action': 'play', 'route_kind': 'library',
             'library': {key: value for key, value in prepared.items() if key not in ('status', 'id')}}
 
@@ -1556,7 +1579,8 @@ def _vod(args, context, cancel):
 
 _LIVE_WORDS = {'news', 'weather', 'live', 'forecast', 'headlines', *_TOPICS}
 # Owner, 2026-10-15: play uses Pluto/YouTube only when the request says so; otherwise the Media server.
-_PROVIDER_WORDS = _LIVE_WORDS | {'channel', 'channels', 'youtube', 'pluto', 'livestream'}
+# Topic words (storm, hurricane, ...) only rank live results: "The Perfect Storm" is a named title.
+_PROVIDER_WORDS = {'live', 'channel', 'channels', 'news', 'weather', 'youtube', 'pluto', 'livestream'}
 
 
 class _NoAutoPick(LookupError):
@@ -1942,7 +1966,8 @@ def _execute(args, context):
     if action in ('find', 'play') and (not isinstance(args['query'], str) or not 1 <= len(args['query'].strip()) <= 120
                                        or args.get('app', 'pluto') not in ({'pluto', 'youtube', 'library'}
                                                                           if action == 'find' else {'pluto', 'youtube'})):
-        raise ValueError(f'{action} takes a 1-120 character query; find also supports app library')
+        raise ValueError(f'{action} takes a 1-120 character query and app pluto|youtube; find also supports '
+                         'app library. For a named movie or show, play with no app uses the Media server')
     if action == 'find':
         try:
             return _find({**args, 'query': args['query'].strip()}, context)

@@ -110,7 +110,7 @@ def _choices(title: str, rows: list[dict], context: dict) -> dict:
         choices.append(choice)
     return _final(f'More than one library title matches "{title}"; nothing was played.', choices=choices,
                   note='Ask the owner which one. A movie choice opens with tv.control open and its id; '
-                       'a series plays with play and its exact title.')
+                       'a series plays with play and its exact title followed by its year.')
 
 
 def _movie(row: dict, context: dict, extra: dict | None = None) -> dict:
@@ -118,6 +118,9 @@ def _movie(row: dict, context: dict, extra: dict | None = None) -> dict:
     summary = {'kind': 'movie', 'title': row['title'], 'year': row['year'], **(extra or {})}
     if len(ids) == 1:
         return {'status': 'ready', 'id': ids[0], **summary}
+    if row.get('source_limit'):
+        return _final(f'"{row["title"]}" has more editions than play lists; nothing was played.', library=summary,
+                      note='Use media.library browse to list its editions, then tv.control open the chosen id.')
     if not ids:
         return _final(f'"{row["title"]}" is in the library without a playable local source.', library=summary)
     return _final(f'"{row["title"]}" has {len(ids)} editions; nothing was played.', library=summary,
@@ -142,20 +145,30 @@ async def _series(row: dict, season: int | None, episode: int | None, context: d
     summary = {'kind': 'season', 'title': row['title'], 'year': row['year'], **(extra or {})}
     if not row['imdb']:
         return _final(f'"{row["title"]}" has no verified IMDb identity in the library.', library=summary)
+    onward = False  # Every catalogued episode is watched: continue from the last one watched.
     if season is None:
         progress = await asyncio.to_thread(service.catalogue().series_progress, row['item_id'])
         upcoming = next_unwatched(progress)
-        if upcoming is None:
-            return _final(f'Every catalogued episode of "{row["title"]}" is watched; nothing was played.',
-                          library=summary, note='Ask which season or episode to watch again.')
-        season = upcoming['season']
+        onward = upcoming is None and bool(progress)
+        season = upcoming['season'] if upcoming else progress[-1]['season'] if progress else 1
     metadata_id = metadata_id or await _metadata_id(row['imdb'], context)
     plan = await seasons.plan(metadata_id, season, 'first' if episode else 'next_unwatched', context)
+    if onward and plan.get('selected') is None and plan.get('selection') == 'season_complete':
+        # The episode after a watched season is the next season's first; the roster, not the
+        # library, says whether it exists (it may still need acquisition).
+        try:
+            plan = await seasons.plan(metadata_id, season + 1, 'next_unwatched', context)
+        except MediaUnavailable as error:
+            if str(error) not in ('discovery_season_incomplete_or_unavailable', 'media_season_not_yet_released'):
+                raise
+            return _final(f'Every released episode of "{row["title"]}" is watched; nothing was played.',
+                          library=summary, note='Ask which season or episode to watch again.')
+        season += 1
     if episode is None:
         selected = plan.get('selected')
         if selected is None:
             return _final(f'Season {season} of "{row["title"]}" has no unwatched released episode.',
-                          library=summary)
+                          library=summary, note='Ask which season or episode to watch again.')
         summary.update(season=season, episode=selected['episode'], episode_title=selected['title'],
                        sequence=plan['sequence']['count'])
         if plan.get('id'):
@@ -190,7 +203,9 @@ async def _register(metadata_id: str, season: int | None, episode: int | None, c
     if rows[0].get('recommended') is not True:
         return _final('Not in the library, and no unique recommended source exists; nothing was registered.',
                       sources=rows, note='Ask the owner which source to register with media.acquire register.')
+    context['_tv_title_registering'] = True  # Cleared only by a returned receipt.
     receipt = await acquire({'action': 'register', 'candidate_id': rows[0]['candidate_id']}, context)
+    context.pop('_tv_title_registering', None)
     scope = {key: rows[0].get(key) for key in ('acquisition_scope', 'resolution', 'pack_episodes') if key in rows[0]}
     if receipt.get('status') != 'completed' or receipt.get('delivery') != 'verified':
         # The same end as a failed media.acquire call: effects stop and nothing is repeated.
@@ -208,7 +223,7 @@ async def _acquire(title: str, season: int | None, episode: int | None, context:
     explicit = episode is not None if explicit is None else explicit
     if 'media.acquire' not in (context.get('_tool_receipt_articles') or {}):
         return _final(f'"{title}" is not in the media library, and acquisition is not granted to this Agent.')
-    wanted = tokens(title)
+    wanted, explicit_meta = tokens(title), meta is not None
     found = [meta] if meta else []
     for kind in () if meta else ('series',) if season is not None else ('movie', 'series'):
         page = await discovery.search(title, kind, context)
@@ -222,6 +237,12 @@ async def _acquire(title: str, season: int | None, episode: int | None, context:
                       choices=[{key: row[key] for key in ('type', 'title', 'year', 'imdb_id')} for row in found],
                       note='Ask the owner which one (year or type), then play its exact title with the year.')
     meta = found[0]
+    if not explicit_meta:
+        # The library may hold this exact title under a differently scraped name: play it, never register twice.
+        owned = [row for row in await asyncio.to_thread(service.catalogue().titles)
+                 if row['imdb'] == meta['imdb_id'] and row['type'].lower() == meta['type']]
+        if len(owned) == 1:
+            return await _play_row(owned[0], season, episode, context, meta['metadata_id'])
     if meta['type'] == 'series':
         season, episode = season or 1, episode or 1  # Never watched: S1E1.
     key = (meta['imdb_id'], season, episode)
@@ -288,28 +309,42 @@ async def _prepare(query: str, context: dict) -> dict:
     if len(matches) > 1:
         return _choices(title, matches, context)
     if matches:
-        row = matches[0]
-        if row['type'] == 'Movie':
-            return _movie(row, context)
-        result = await _series(row, season, episode, context)
-        if result['status'] != 'absent':
-            return result
-        # The series is catalogued but this episode's file is not: acquire exactly that episode.
-        return await _acquire(row['title'], result['season'], result['episode'], context, result['meta'],
-                              explicit=episode is not None)
+        return await _play_row(matches[0], season, episode, context)
     return await _acquire(title, season, episode, context)
+
+
+async def _play_row(row: dict, season: int | None, episode: int | None, context: dict,
+                    metadata_id: str | None = None) -> dict:
+    if row['type'] == 'Movie':
+        return _movie(row, context)
+    result = await _series(row, season, episode, context, metadata_id)
+    if result['status'] != 'absent':
+        return result
+    # The series is catalogued but this episode's file is not: acquire exactly that episode.
+    return await _acquire(row['title'], result['season'], result['episode'], context, result['meta'],
+                          explicit=episode is not None)
 
 
 def prepare(query: str, context: dict) -> dict:
     """Resolve a named title (sync, for the destination's worker thread); status ready carries the id."""
     registered = len(context.get('_tv_title_registrations') or {})
+    context.pop('_tv_title_registering', None)
     try:
         return asyncio.run(_prepare(query, context))
-    except (asyncio.CancelledError, MediaUnavailable) as error:
-        reason = 'cancelled' if isinstance(error, asyncio.CancelledError) else str(error)
+    except (asyncio.CancelledError, Exception) as error:
+        reason = ('cancelled' if isinstance(error, asyncio.CancelledError)
+                  else str(error) or type(error).__name__)
+        if context.pop('_tv_title_registering', None):
+            # Interrupted inside the registration: its outcome is unknown and must never be repeated.
+            context['_media_acquire_failed'] = True
+            return _final(f'The media server registration was interrupted ({reason}); whether it registered '
+                          'is unknown. Nothing was sent to the TV; do not register it again.',
+                          correction=False, delivery='uncertain', effect_applied=None)
         if len(context.get('_tv_title_registrations') or {}) != registered:
             return _final(f'Registered once with the media server, then: {reason}. Nothing was sent to the TV; '
                           'do not register it again.', correction=False, effect_applied=True)
         if isinstance(error, asyncio.CancelledError):
             return _final('cancelled', correction=False)
+        if not isinstance(error, (MediaUnavailable, OSError, ValueError)):
+            raise
         return _final(f'Media server: {reason}. Nothing was played; no live channel or web video replaces a named title.')

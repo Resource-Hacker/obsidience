@@ -542,6 +542,9 @@ class JellyfinCatalogue:
             if item['Type'] == 'Movie':
                 sources = item.get('MediaSources')
                 row['sources'] = []
+                if isinstance(sources, list) and len(sources) > 4:
+                    # browse refuses this choice (catalogue_source_choice_limit); keep the title visible.
+                    row['source_limit'] = True
                 for source in sources if isinstance(sources, list) and len(sources) <= 4 else []:
                     source_id = source.get('Id') if isinstance(source, dict) else None
                     try:
