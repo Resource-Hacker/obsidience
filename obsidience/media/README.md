@@ -34,14 +34,17 @@ stay encrypted or in the client's authenticated session, never in a playback URL
 Tiramisu is an optional virtual-file provider with owner-only control/engine Unix
 sockets. Its integration exposes health, bounded search/list and one source add;
 configuration, delete, scheduler, telemetry and dashboard endpoints are not exposed.
+It remains the source-search bridge and owner of existing torrent-backed media
+when TorBox supplies new acquisitions.
 Prowlarr supplies configured indexers and requires authentication, including on
 loopback. The adapter currently supports its public TorrentsCSV indexer. Cinemeta
 supplies movie/series identity and exact episode metadata; exact IMDb queries work
 when its name search omits a short film. Ranking applies only to returned eligible
 sources. No provider can promise every title or universal best quality.
 Release identity excludes the provider's mutable seeder and size display lines;
-those statistics affect ranking only, so an updated swarm count cannot invalidate
-the owner's otherwise unchanged selection.
+those statistics affect ranking only. A cached source additionally binds its
+provider configuration, exact torrent hash, file path and byte size; changing
+that binding invalidates the selection.
 
 The private Tiramisu service uses bounded RAM caches with persistent media-byte
 caching disabled. There is no complete-offline guarantee. Watchlists, periodic
@@ -51,7 +54,7 @@ Peer networking does not grant control-API access or change router/VPN/firewall 
 ## Connecting a debrid account
 
 Tiramisu is a direct BitTorrent provider, not a debrid client. A TorBox account
-connection can be prepared with `obsidience/media/connect-torbox`. This installation
+connection is established with `obsidience/media/connect-torbox`. This installation
 helper uses TorBox's official device login: follow its verification URL and enter
 the displayed code in your own browser. It never asks for a password or API key in
 the terminal, buys a subscription, registers media or changes the active provider.
@@ -63,25 +66,46 @@ overwritten. `obsidience/media/connect-torbox --status` reads only connection/pl
 status into a sanitized report. Account authorization alone does not establish
 paid access, cache coverage, mounted file readiness or playback acceptance.
 
-The debrid runtime adapter is not yet installed. Keep the working Tiramisu route
-until the selected account's cache API, exact file mapping and native delivery
-have been verified. TorBox's supported WebDAV interface can provide media bytes
-through an upstream read-only filesystem mount; neither credentials nor generated
-download URLs belong in catalogue titles, QML, receipts or conversation context.
+The installed TorBox adapter uses the existing `media.library` and `media.acquire`
+capability owners. Private configuration enables `debrid` with provider `torbox`,
+an encrypted credential name, instance identity and approved mount path. A paid
+account is required for registration. Discovery returns only cached releases
+whose actual single video file matches the exact movie/year or season/episode.
+Registration rechecks cache and account state, then submits one cached-only
+request. Uncached sources, multi-video releases and season packs are excluded.
+Enabling TorBox preserves the selected provider binding; an unavailable or
+changed provider fails explicitly without falling back to uncached transfer or
+local BitTorrent.
+
+The account's native `obsidience movies` and `obsidience tv` tags separate the two
+approved libraries while preserving existing account tags. A metadata update is
+sent once and reconciled by bounded readback; registration may be verified while
+tagging, mounted visibility or catalogue discovery remains pending. TorBox's
+native WebDAV supplies bytes through unmodified packaged rclone. Credentials and
+generated download URLs never enter titles, QML, receipts or conversation context.
 
 ## Mount and catalogue lifecycle
 
 Each virtual root adds `mount_path` to its ordinary `id`, `path` and
-`catalogue_path` mapping. Admit only the actual `fuse.tiramisu` mount, its source,
-mount identity and exact provider release/file mapping. A directory alone is not
-readiness. The service readiness check finishes before dependent catalogue startup.
+`catalogue_path` mapping. Tiramisu roots admit only the actual `fuse.tiramisu`
+mount and `tiramisu` source. TorBox roots declare `provider: torbox` and admit
+only the `fuse.rclone` mount with source `obsidience-torbox`, its exact live owner
+and mount identity. Both require an exact provider release/file mapping and
+source revision. A directory alone is not readiness. The service readiness check
+finishes before dependent catalogue startup.
+
+`obsidience-media-torbox.service` owns the native read-only WebDAV mount. Its RAM
+buffer allocation is capped at 128 MiB; persistent media-byte caching is off and
+there is no offline guarantee. The mount uses no model or GPU. One shared mount
+serves the two approved tag roots. Native WebDAV refresh calls the exact `/refresh`
+endpoint and accepts its 303 response to the root without following the redirect.
 
 For a rootless Jellyfin container that reads an owner-only FUSE mount, map the host
 owner to container UID/GID zero with `UserNS=keep-id:uid=0,gid=0` and `User=0:0` in
 the installation's private Quadlet drop-in. The process remains rootless on the
 host, capabilities are dropped, and `allow_other` stays disabled. Bind the mount
-read-only and set `BindsTo`, `After` and `PartOf` for its Tiramisu service. This
-installation deliberately suspends Jellyfin if that mount owner fails, including
+read-only and set `BindsTo`, `After` and `PartOf` for each configured provider
+service. This installation deliberately suspends Jellyfin if that mount owner fails, including
 local catalogue browsing, instead of risking an empty-library scan. Already-playing
 ordinary local files remain under the tuner and continue independently.
 
@@ -93,16 +117,31 @@ configured roots, run one native `POST /Library/Refresh` and read back those bin
 A collection with no physical folders cannot discover files through a targeted
 refresh. This initialization is installation work, never an automatic fallback
 or a per-acquisition whole-library refresh.
+
+TorBox's TV tag directory appears only after the first explicitly acquired
+episode. Precreate the empty `Cached TV` collection with type `tvshows` and set
+its approved TorBox root's optional `library_name` to that exact collection name.
+On that first real episode, the registration owner may attach only the configured
+root through `POST /Library/VirtualFolders/Paths` with `refreshLibrary=false`.
+The collection must be uniquely named and empty. Fresh native readback must verify
+the same collection and sole approved location before targeted refresh; populated,
+ambiguous or changed collections fail explicitly. No dummy media, synthetic tag,
+new collection or whole-library refresh is created by acquisition. The movie
+root is attached to its configured `Cached Movies` library during installation.
+
 One registration owner queues `Items/{folder-id}/Refresh` for the exact configured
 virtual library, using metadata Default and image None. In the pinned server this
 queues folder ValidateChildren, including the initial stream probe. It does not
-refresh unrelated libraries. Admission caps virtual registration at 32 records per
-type, bounding that scan's collection. One exact-path readback distinguishes ready
+refresh unrelated libraries. Tiramisu admission caps virtual registration at 32
+records per type; TorBox account reconciliation admits a complete bounded inventory
+of fewer than 128 records. One exact-path readback distinguishes ready
 from pending; registration success does not claim catalogue or playback success.
 
 Tiramisu rejects new opens on shutdown and waits for existing readers/pumps before
-ordinary unmount. No lazy unmount, forced reader eviction or replacement worker is
-used. Guarded deployment refuses active/unknown Jellyfin sessions and provider reads.
+ordinary unmount. The TorBox owner closes admission and waits for ordinary unmount
+and its live readers to drain. No lazy unmount, forced reader eviction or replacement
+worker is used. Guarded deployment refuses active/unknown Jellyfin sessions and
+provider reads.
 A failed dependency stops new work; it never creates a second catalogue.
 
 ## Capabilities and presentation

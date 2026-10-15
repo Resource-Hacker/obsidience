@@ -12,7 +12,10 @@ obsidience:
 Jellyfin owns the catalogue, delivery and saved per-user resume position.
 Browsing and resume lookup work without the TV. Tiramisu is an optional
 on-demand acquisition provider behind its owner-only Unix socket; Prowlarr's
-public TorrentsCSV indexer is one configured discovery route. The TV is an
+public TorrentsCSV indexer is one configured discovery route. When TorBox is
+enabled it owns new cached-only acquisition, while Tiramisu retains source search
+and existing media. Only exact single-video releases are eligible; no uncached
+transfer, season-pack import or P2P fallback is substituted. The TV is an
 optional playback destination. This Runbook does not enable autonomous
 watchlist sync, periodic upgrades or next-episode playback.
 
@@ -31,6 +34,11 @@ watchlist sync, periodic upgrades or next-episode playback.
    registered, catalogue pending, and catalogue ready are distinct. Only use the
    exact returned item/source or a freshly selected exact catalogue record. A
    failed mount or pending scan is a visible blocker, never a fallback pathname.
+   The same owner may add the exact TorBox library tag, preserving existing tags,
+   and reconcile mounted visibility. For the first actual episode it may attach
+   only the approved deferred root to its uniquely named empty TV collection,
+   verify that path, then refresh that collection. It creates no dummy media or
+   new collection. Pending metadata/catalogue readback does not repeat registration.
 4. For an explicit playback request, select the exact Jellyfin item/source or
    use a fresh `tv.control find` with `app: library`, ensure the registered TV
    is on, then `tv.control open` that exact current-turn id. Admission is

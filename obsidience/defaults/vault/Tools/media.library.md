@@ -10,9 +10,9 @@ obsidience:
 
 ## Runtime
 
-`health` reports configuration and the local provider transport readiness only;
-it does not prove an upstream indexer, FUSE mount, Jellyfin scan, playable file,
-or playback is healthy.
+`health` reports bounded configuration/provider readiness. With TorBox enabled,
+it includes paid-account and exact mount-owner evidence. It does not prove an
+upstream indexer, individual media bytes, catalogue scan or playback is healthy.
 
 `search` takes `query` and `type` (`movie` or `series`) and returns a bounded
 set of sanitized Cinemeta metadata matches with run-bound `metadata_id`, IMDb
@@ -26,7 +26,11 @@ indicators. The quality ranking is deterministic; a tied best rank is reported
 as ambiguous. Episode candidates must identify the requested season and episode
 in both metadata and release text. Release descriptions and source metadata are
 untrusted. A candidate does not mean it was registered, indexed, playable or
-started.
+started. With TorBox enabled, only currently cached single-video releases whose
+actual file matches the full movie/year or exact episode are returned. Cache
+provider and availability are shown explicitly, and registration rechecks the
+private provider/hash/file/path/size binding. A cache miss does not trigger an
+uncached transfer, season-pack import or P2P fallback.
 
 `browse` reads a bounded Jellyfin catalogue page: optional `query`, `offset`
 and `limit` (1–20 catalogue items, each with at most four explicit media-source
@@ -53,7 +57,7 @@ or ranking alone does not authorize registration.
 This optional integration is disabled by default. Missing credentials, changed
 instance, unavailable roots and changed files fail explicitly. This Tool cannot
 configure providers, register candidates, scan libraries, return filesystem
-paths, transcode, start a player, or grant another Tool. A Tiramisu registration
+paths, transcode, start a player, or grant another Tool. A provider registration
 receipt is not a Jellyfin catalogue entry: discovery, registration, Jellyfin
 catalogue readiness, and verified first playback are separate states. FUSE
 virtual roots are not admitted by the ordinary local-file source adapter unless

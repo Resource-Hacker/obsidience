@@ -16,9 +16,14 @@ provider supplies release candidates; Prowlarr's public TorrentsCSV indexer is
 the supported self-hostable route when configured. Release metadata and hashes
 remain untrusted. Ranking can recommend a unique best match but cannot resolve
 an edition or episode ambiguity. The local Tiramisu provider is reached only
-through its owner-only Unix socket. It accepts one run-bound source registration
-after an explicit owner acquisition request; it does not autonomously sync a
-watchlist, replace releases, schedule upgrades or play media. Provider or
+through its owner-only Unix socket. When configured, TorBox supplies cached-only
+acquisition while Tiramisu retains source search and existing media. Cached
+candidates bind provider configuration, torrent hash, exact file path and byte
+size. Only single-video releases matching the full movie/year or exact episode
+are admitted; no season pack, uncached transfer or P2P fallback is substituted.
+The configured provider accepts one run-bound registration after an authorized
+acquisition request; it does not autonomously sync a watchlist, replace releases,
+schedule upgrades or play media. Provider or
 registration success is separate from Jellyfin catalogue readiness and
 verified playback.
 
@@ -50,8 +55,17 @@ in an isolated bounded process. A blocked probe retains its ownership until it
 exits; no replacement probe is spawned. Catalogue startup waits for that mount,
 and mount-owner loss stops the affected catalogue instead of scanning an empty
 directory. Existing tuner playback of ordinary local files remains independent.
-Never report an acquired title as playable based only
-on Tiramisu's registration reply.
+Never report an acquired title as playable based only on a registration reply.
+
+TorBox bytes arrive through its native read-only WebDAV interface and an
+unmodified upstream rclone mount with a 128 MiB RAM buffer budget. The account's
+native movie/TV tags separate approved roots; existing tags are preserved. One
+metadata update is followed by bounded readback and can remain pending. A deferred
+TV root attaches only to its preconfigured, uniquely named empty `tvshows`
+collection once the first real episode creates the provider directory. Exact
+collection/path readback precedes targeted refresh. Provider mount loss stops the
+dependent Jellyfin service, and ordinary unmount waits for readers to drain.
+Credentials and generated download URLs remain private to provider transports.
 
 The optional integrations default disabled. Disabling them rejects new source
 searches or registrations; existing playback and the ordinary TV route remain
