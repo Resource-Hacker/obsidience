@@ -23,7 +23,7 @@ TOOLS = {"search_graph": ("search", "Found"), "search_code": ("search", "Found")
          "trace_path": ("trace", "Traced"), "get_code_snippet": ("read", "Read"),
          "get_architecture": ("read", "Architecture"), "detect_changes": ("read", "Inspected changes"),
          "index_status": ("read", "Index status"), "check_index_coverage": ("read", "Checked coverage")}
-IGNORED = {".git", "node_modules", "__pycache__", ".venv", ".artifacts", "out", ".pytest_cache",
+IGNORED = {".git", "node_modules", "__pycache__", ".venv", ".artifacts", "out",
            ".ruff_cache", "state", "vault", "evidence", "defaults"}
 EXTENSIONS = {".py", ".ts", ".tsx", ".js", ".mjs", ".qml", ".css", ".c", ".h", ".sh", ".toml"}
 
