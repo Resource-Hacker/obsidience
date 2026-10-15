@@ -490,16 +490,6 @@ def eligible_rows(context: dict) -> list[dict]:
     return [row for row in plan if isinstance(row, dict) and row.get("operation") in {"retry", "settle"}]
 
 
-def available_tools(allowed: list[str], context: dict) -> list[str]:
-    """Expose the same fresh-inspection prerequisite as Repair completion."""
-    if context.get("task") == REPAIR_TASK and "harness.status" in allowed:
-        if not isinstance(context.get("_harness_snapshot"), dict):
-            return ["harness.status"]
-        if repair_attempt_count(context) >= PASS_ATTEMPT_LIMIT or not eligible_rows(context):
-            return [name for name in allowed if name != "harness.repair"]
-    return allowed
-
-
 def occurrence_key(note: Note) -> str:
     """A later run ID does not create a new original event commitment."""
     params = note.meta.get("params")

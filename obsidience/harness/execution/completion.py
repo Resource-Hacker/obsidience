@@ -529,23 +529,6 @@ def completion_citations(context: dict) -> list[str] | None:
     return citations
 
 
-def available_tools(allowed: list[str], context: dict) -> list[str]:
-    """Expose the required memory topic search before a terminal decision.
-
-    A real unsuccessful attempt leaves failure reporting available; merely
-    deciding the Source is uninteresting is not a failed search.
-    """
-    if (context.get("event") != "observations.memory.ready" or context.get("_vault_searches")
-            or "vault.search" not in allowed):
-        return allowed
-    from obsidience.harness.capabilities.source.read import bound_read_error
-
-    if bound_read_error(context) or any(row.get("tool") == "vault.search"
-                                      for row in context.get("trace", []) if isinstance(row, dict)):
-        return allowed
-    return ["vault.search"]
-
-
 def completion_error(
     task,
     status: str,

@@ -15,7 +15,8 @@ ROOT = Path(__file__).parents[1]
 REFINEMENT = (
     "execution/refinement.py", "execution/evaluation.py", "execution/executor.py",
     "execution/native.py", "execution/native_turn.py", "execution/capability_core.py",
-    "execution/adk/runner.py", "execution/adk/plugin.py",
+    "execution/adk/runner.py", "execution/adk/plugin.py", "execution/availability.py",
+    "capabilities/registry.py",
     "models/llm.py", "models/context.py", "models/runtime.py",
     "knowledge/dependencies.py",
 )
@@ -25,7 +26,7 @@ OPTIMIZATION = (
     "execution/optimization.py", "execution/adk/optimization.py",
     "execution/adk/runner.py", "execution/native.py", "execution/native_turn.py",
     "execution/capability_core.py",
-    "execution/adk/plugin.py", "execution/adk/tools.py", "requirements.lock.txt",
+    "execution/adk/plugin.py", "execution/availability.py", "execution/adk/tools.py", "requirements.lock.txt",
     "execution/adk/sessions.py", "capabilities/harness/optimize.py",
     "execution/executor.py", "execution/evaluation.py", "execution/trace.py",
     "capabilities/registry.py", "capabilities/task/complete.py", "execution/completion.py",
@@ -41,7 +42,7 @@ OPTIMIZATION = (
 
 # Repair (repair._code_revision): the bytes concatenated in this order, so order matters.
 REPAIR = (
-    "execution/repair.py", "execution/scheduler.py", "execution/executor.py",
+    "execution/repair.py", "execution/availability.py", "execution/scheduler.py", "execution/executor.py",
     "capabilities/registry.py", "capabilities/harness/repair.py",
     "capabilities/harness/status.py", "memory/hindsight.py",
 )
