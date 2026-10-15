@@ -139,8 +139,8 @@ _SENTENCE_END = re.compile(r"[.!?…][\"'”’)\]*_]*$")
 _QUESTION_END = re.compile(r"\?[\"'”’»)\]}]*$")
 
 
-def _speech_pcm(samples: np.ndarray) -> bytes:
-    boosted = samples * TTS_GAIN
+def _speech_pcm(samples: np.ndarray, *, gain: float = TTS_GAIN) -> bytes:
+    boosted = samples * gain
     magnitude = np.abs(boosted)
     # A continuous soft knee protects unusually loud peaks without chunk-level
     # normalization, lookahead, or an envelope that pumps between chunks.
@@ -1233,7 +1233,9 @@ class PocketTTSService(TTSService):
                         for chunk in self._model.generate_audio_stream(self._voice_state, clean):
                             if not cancelled.is_set():
                                 samples = chunk.detach().float().cpu().numpy().reshape(-1)
-                                put(_speech_pcm(samples))
+                                # Discord has its own playback volume. Preserve Pocket's
+                                # dynamics instead of applying the desk speaker's +9 dB.
+                                put(_speech_pcm(samples, gain=1.0))
                     finally:
                         hook.remove()
                 finally:
