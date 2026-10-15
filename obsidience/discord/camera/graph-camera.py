@@ -38,6 +38,29 @@ class CameraFailure(RuntimeError):
         self.browser_exit_code = browser_exit_code
 
 
+def failure_identity(error):
+    """Expose class and our own line numbers, never messages/source/locals."""
+    own_file = Path(__file__).resolve()
+    chain = []
+    seen = set()
+    while error is not None and len(chain) < 3 and id(error) not in seen:
+        seen.add(id(error))
+        name = type(error).__name__
+        item = {'exception_class': name if re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]{0,79}', name) else 'Exception',
+                'frames': []}
+        frame = error.__traceback__
+        while frame is not None:
+            if Path(frame.tb_frame.f_code.co_filename).resolve() == own_file:
+                item['frames'].append({'file': 'graph-camera.py', 'line': frame.tb_lineno})
+            frame = frame.tb_next
+        item['frames'] = item['frames'][-8:]
+        if isinstance(error, OSError) and isinstance(error.errno, int):
+            item['errno'] = error.errno
+        chain.append(item)
+        error = error.__cause__ or (None if error.__suppress_context__ else error.__context__)
+    return {'exception_chain': chain}
+
+
 class BrowserDiagnostics:
     def __init__(self):
         self.code = None
@@ -364,6 +387,7 @@ if __name__ == '__main__':
                 'permission_denied' if isinstance(error, PermissionError) else
                 'operation_timeout' if isinstance(error, TimeoutError) else 'component_failed')
         message = {'component': 'discord_graph_camera', 'state': 'failed', 'code': code}
+        message.update(failure_identity(error))
         if isinstance(error, CameraFailure) and error.browser_exit_code is not None:
             message['browser_exit_code'] = error.browser_exit_code
         print(json.dumps(message), flush=True)
