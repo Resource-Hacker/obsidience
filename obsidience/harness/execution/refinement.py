@@ -19,6 +19,7 @@ from ..config import CONFIG
 from ..knowledge import format as article_format
 from ..knowledge.index import INDEX
 from ..knowledge.vault import Note, Resolver, load_note, resolver
+from . import revision
 
 GENERATOR = "Tasks/generate/runbook"
 AUDITOR = "Tasks/audit"
@@ -83,18 +84,8 @@ def _load(lane: str, identity: str) -> dict:
 
 
 def _code_revision() -> str:
-    paths = [Path(__file__), Path(__file__).with_name("evaluation.py"),
-             Path(__file__).with_name("executor.py"),
-             Path(__file__).with_name("native.py"), Path(__file__).with_name("native_turn.py"),
-             Path(__file__).with_name("capability_core.py"),
-             Path(__file__).parent / "adk" / "runner.py", Path(__file__).parent / "adk" / "plugin.py",
-             Path(__file__).parents[1] / "models" / "llm.py",
-             Path(__file__).parents[1] / "models" / "context.py",
-             Path(__file__).parents[1] / "models" / "runtime.py",
-             Path(__file__).parents[1] / "knowledge" / "dependencies.py",
-             Path(__file__).parents[1] / "capabilities" / "harness" / "evaluate.py"]
-    return _hash(_json({str(path.relative_to(Path(__file__).parents[1])):
-                        _hash(path.read_bytes()) for path in paths}).encode())
+    return _hash(_json({name: _hash((revision.ROOT / name).read_bytes())
+                        for name in revision.REFINEMENT}).encode())
 
 
 def _model_contract(task: Note, agent_ref: str) -> dict:

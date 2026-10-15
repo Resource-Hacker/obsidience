@@ -59,13 +59,11 @@ DISPLAY_COMPONENT = "display-media"
 
 GEMMA_SERVICE = "obsidience-gemma.service"
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-PRODUCT_ROOT = PROJECT_ROOT / "obsidience"
-MODEL_SETTINGS_PATH = PRODUCT_ROOT / "state" / "model-settings.json"
-MODEL_LAUNCH_DIR = PRODUCT_ROOT / "state" / "model-launch"
-MODEL_CATALOG_STATE_PATH = PRODUCT_ROOT / "state" / "model-catalog.json"
-MODEL_SOURCE_ROOT = PRODUCT_ROOT / "evidence" / "models"
-GEMMA_MODEL = PRODUCT_ROOT / "state" / "models" / "executive.gguf"
+MODEL_SETTINGS_PATH = CONFIG.runtime_dir / "model-settings.json"
+MODEL_LAUNCH_DIR = CONFIG.runtime_dir / "model-launch"
+MODEL_CATALOG_STATE_PATH = CONFIG.runtime_dir / "model-catalog.json"
+MODEL_SOURCE_ROOT = CONFIG.source_dir / "models"
+GEMMA_MODEL = CONFIG.runtime_dir / "models" / "executive.gguf"
 GEMMA_TEMPLATE = GEMMA_MODEL.with_name("executive-template.jinja")
 GEMMA_MTP = Path(
     "/var/lib/ai/models/jarvis-fixed/gemma-4-26b-a4b-it-qat-7b92b5b2/"
@@ -565,7 +563,7 @@ def sync_model_source(model_id: str) -> dict:
     identity = _model_source_identity(configured_spec(model_id))
     fingerprint = str(identity["fingerprint"]).removeprefix("sha256:")
     relative = Path("models") / model_id / f"artifact--{fingerprint[:16]}.json"
-    _atomic_json(PRODUCT_ROOT / "evidence" / relative, identity)
+    _atomic_json(CONFIG.source_dir / relative, identity)
     return {
         "model_id": model_id,
         "fingerprint": identity["fingerprint"],
@@ -592,7 +590,7 @@ def record_model_source(model_id: str, record_kind: str, payload: dict) -> str:
         "recorded_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         **payload,
     }
-    _atomic_json(PRODUCT_ROOT / "evidence" / relative, record)
+    _atomic_json(CONFIG.source_dir / relative, record)
     return f"obsidience/evidence/{relative.as_posix()}"
 
 
@@ -969,7 +967,7 @@ class _HardwareModelRuntime:
 
     @staticmethod
     def _memory_script(spec: ModelSpec) -> Path:
-        return PRODUCT_ROOT / "scripts" / {EXECUTIVE_MODEL: "llm.sh"}[spec.id]
+        return CONFIG.product_root / "scripts" / {EXECUTIVE_MODEL: "llm.sh"}[spec.id]
 
     def _memory_plan(self, spec: ModelSpec, devices: tuple[str, ...]) -> dict[str, int] | None:
         profile = _read_settings()["models"][spec.id]

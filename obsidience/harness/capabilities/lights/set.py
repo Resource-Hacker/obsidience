@@ -13,6 +13,8 @@ import tempfile
 import threading
 import time
 
+from ...config import CONFIG
+
 FIXTURES = ("window_lamp", "woven_pendant", "north_lamp", "tv_floor_lamp",
             "desk_lantern", "room_lantern")
 TARGETS = ("all", *FIXTURES)
@@ -20,7 +22,7 @@ _LOCK = threading.Lock()
 
 
 def _state_path(name: str) -> Path:
-    return Path(__file__).resolve().parents[3] / "state" / name
+    return CONFIG.runtime_dir / name
 
 
 def _inventory() -> dict:

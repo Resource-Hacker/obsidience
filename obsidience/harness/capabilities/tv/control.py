@@ -18,6 +18,7 @@ import xml.etree.ElementTree as ET
 
 from PIL import Image
 
+from ...config import CONFIG
 from . import agent as _agent
 from . import android as _android
 from . import player as _player
@@ -91,7 +92,7 @@ STREAM_HOST, STREAM_APP = 'Obsidience', 'Obsidience TV'
 VOICE_CLIENT = ('am broadcast -a de.badaix.snapcast.{}_SERVICE -n de.badaix.snapcast/.BroadcastReceiver '
                 '>/dev/null 2>&1')
 _SUNSHINE_STATE = Path.home() / '.config' / 'sunshine' / 'sunshine_state.json'
-_TV_MODE = Path(__file__).resolve().parents[3] / 'tv' / 'host' / 'mode'
+_TV_MODE = CONFIG.product_root / 'tv' / 'host' / 'mode'
 # The PC route has two sources and the TV session shows one of them (obsidience/tv/host/show): the
 # tuner's player, or the workstation's Android TV instance (android.py is its client), where a
 # YouTube video starts in one to two seconds in the ad-free player instead of the Fire OS app's 26 s.
@@ -101,7 +102,7 @@ BREAK_NOTE = ('Commercial break on this channel: the PC player plays no advertis
 # The content last opened per app, once playback started: {app, link, title,
 # opened_at, player}, for idempotent repeats and state. Kept in private state so
 # a Harness restart still knows what the TV is showing.
-_OPENED_PATH = Path(__file__).resolve().parents[3] / 'state' / 'television-opened.json'
+_OPENED_PATH = CONFIG.runtime_dir / 'television-opened.json'
 
 
 def _load_opened():
@@ -255,7 +256,6 @@ def _youtube_id(url):
 def _youtube_matches(query, limit):
     """YouTube videos and live streams through the local SearXNG instance."""
     import httpx
-    from ...config import CONFIG
     base = str((CONFIG.extras.get('web') or {}).get('searxng_url', '')).rstrip('/')
     if not base:
         return []
@@ -298,7 +298,7 @@ def _link(url, apps):
 ZERO_AD_ID = '00000000-0000-0000-0000-000000000000'
 
 
-_POLICY_PATH = Path(__file__).resolve().parents[3] / 'state' / 'television-policy.json'
+_POLICY_PATH = CONFIG.runtime_dir / 'television-policy.json'
 _POLICY_BOOT = {'id': None}
 
 
@@ -1519,7 +1519,7 @@ def _choose(args, context):
 
 
 def _inventory():
-    path = Path(__file__).resolve().parents[3] / 'state' / 'television.json'
+    path = CONFIG.runtime_dir / 'television.json'
     raw = path.read_bytes()
     if len(raw) > 8192:
         raise ValueError('TV inventory exceeds its bound')

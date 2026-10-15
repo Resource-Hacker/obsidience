@@ -8,6 +8,8 @@ import re
 import subprocess
 from pathlib import Path
 
+from ..config import CONFIG
+
 
 CPU_DEVICE = "cpu"
 IGPU_DEVICE = "amd-igpu"
@@ -24,9 +26,8 @@ GPU_UUIDS = {
     RTX_4080_DEVICE: "GPU-4332e1a5-17a8-7e18-5347-5a296549ee81",
     RTX_4000_DEVICE: "GPU-3b820ab6-b7e7-c26b-b400-136780611a3e",
 }
-PRODUCT_ROOT = Path(__file__).resolve().parents[2]
 STORAGE_LOCATIONS = (
-    ("obsidience", "Obsidience", "product", PRODUCT_ROOT),
+    ("obsidience", "Obsidience", "product", CONFIG.product_root),
     ("models", "AI Models", "models", Path("/var/lib/ai")),
 )
 _MOUNT_ESCAPE = re.compile(r"\\([0-7]{3})")
@@ -423,7 +424,7 @@ def application_snapshot() -> dict[str, dict]:
             "role": "desktop-shell",
             "state": "development",
             "compositor_boundary": "Hyprland",
-            "project_path": str(PRODUCT_ROOT),
+            "project_path": str(CONFIG.product_root),
             "service": "obsidience-shell-host.service",
             "service_state": _command_value([
                 "systemctl", "--user", "is-active",

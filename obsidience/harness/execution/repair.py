@@ -7,10 +7,10 @@ import json
 import re
 import time
 from functools import cache
-from pathlib import Path
 
 from ..knowledge.index import INDEX
 from ..knowledge.vault import Note
+from . import revision
 from .ledger import current_task_issue
 
 REPAIR_TASK = "Tasks/repair"
@@ -45,10 +45,7 @@ def health_causes(notes: list[Note], source_issues: list | None = None) -> list[
 @cache
 def _code_revision() -> str:
     """A new repair implementation may reconsider an earlier blocked cycle."""
-    return hashlib.sha256(b"".join((Path(__file__).parent / name).read_bytes()
-                                   for name in ("repair.py", "scheduler.py", "executor.py",
-                                                "../capabilities/registry.py", "../capabilities/harness/repair.py",
-                                                "../capabilities/harness/status.py", "../memory/hindsight.py"))).hexdigest()
+    return hashlib.sha256(b"".join((revision.ROOT / name).read_bytes() for name in revision.REPAIR)).hexdigest()
 
 
 def definition_revision(notes: list[Note]) -> str:

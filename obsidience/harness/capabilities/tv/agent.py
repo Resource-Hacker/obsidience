@@ -24,12 +24,13 @@ from collections import deque
 import itertools
 import json
 import logging
-from pathlib import Path
 import re
 import socket
 import subprocess
 import threading
 import time
+
+from ...config import CONFIG
 
 PACKAGE = 'org.obsidience.tv'
 # Pinned app version: android:versionCode in obsidience/tv/android/AndroidManifest.xml.
@@ -38,7 +39,7 @@ SERVICE = PACKAGE + '/.AgentService'
 LISTENER = PACKAGE + '/' + PACKAGE + '.MediaListener'
 SOCKET = 'obsidience-tv'
 # Built by obsidience/tv/android/build.sh into ignored installation state.
-APK = Path(__file__).resolve().parents[3] / 'state' / 'tv-agent' / f'obsidience-tv-{VERSION}.apk'
+APK = CONFIG.runtime_dir / 'tv-agent' / f'obsidience-tv-{VERSION}.apk'
 # A failed connection rests this long; tv.control reads over ADB meanwhile.
 RETRY = 120.0
 _LINE_LIMIT = 4 * 1024 * 1024

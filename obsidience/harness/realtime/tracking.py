@@ -8,7 +8,9 @@ import json
 import threading
 from pathlib import Path
 
-SETTINGS = Path(__file__).resolve().parents[2] / "state/camera-owner/settings.json"
+from ..config import CONFIG
+
+SETTINGS = CONFIG.runtime_dir / "camera-owner/settings.json"
 _LOCK = threading.RLock()
 _tracker = None
 _error = None

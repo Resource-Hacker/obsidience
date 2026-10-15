@@ -14,7 +14,7 @@ from pathlib import Path
 from ..config import CONFIG
 from ..knowledge.index import INDEX
 from ..knowledge.vault import Resolver, load_note, resolver
-from . import refinement
+from . import refinement, revision
 
 UPSTREAM_REVISION = '6a2b7a9ab2412a8fe384fd5471d2a49b03a60013'
 EXECUTIVE = 'Agents/Executive/Executive'
@@ -231,24 +231,8 @@ def model_contract(note, agent_ref: str) -> dict:
 
 
 def _revision() -> str:
-    root = Path(__file__).parents[1]
-    paths = [Path(__file__), root / 'execution/adk/optimization.py',
-             root / 'execution/adk/runner.py', root / 'execution/native.py', root / 'execution/native_turn.py',
-             root / 'execution/capability_core.py',
-             root / 'execution/adk/plugin.py', root / 'execution/adk/tools.py', root / 'requirements.lock.txt',
-             root / 'execution/adk/sessions.py', root / 'capabilities/harness/optimize.py',
-             root / 'execution/executor.py', root / 'execution/evaluation.py', root / 'execution/trace.py',
-             root / 'capabilities/registry.py', root / 'capabilities/task/complete.py',
-             root / 'models/llm.py', root / 'models/context.py', root / 'models/runtime.py']
-    paths.extend([root / 'execution/optimization_incidents.py', root / 'capabilities/vault/propose.py',
-                  root / 'capabilities/source/read.py', root / 'capabilities/vault/read.py',
-                  root / 'capabilities/vault/search.py', root / 'capabilities/vault/validate.py',
-                  root / 'execution/refinement.py',
-                  root / 'memory/hindsight.py', root / 'knowledge/links.py', root / 'knowledge/format.py',
-                  root / 'knowledge/review.py', root / 'knowledge/scope.py',
-                  root / 'knowledge/curation.py', root / 'knowledge/source.py'])
-    return refinement._hash(refinement._json({str(p.relative_to(root)): refinement._hash(p.read_bytes())
-                                             for p in paths}).encode())
+    return refinement._hash(refinement._json({name: refinement._hash((revision.ROOT / name).read_bytes())
+                                             for name in revision.OPTIMIZATION}).encode())
 
 
 def _validate_suite_size(suite: dict) -> None:
