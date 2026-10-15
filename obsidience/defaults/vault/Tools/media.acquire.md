@@ -15,7 +15,8 @@ description: Register one exact source for an explicit acquisition or playback r
   For a known TorBox registration with pending visibility, action refresh takes a
   fresh exact candidate_id, reconciles its existing complete file plan and refreshes
   catalogue visibility without any torrent-creation path. An absent registration fails;
-  pending catalogue readback is not success or playback.
+  pending catalogue readback is not success or playback. tv.control play makes this
+  same call itself for an absent named title; never repeat it after play's result.
 obsidience:
   binding: capability:media.acquire
   source: obsidience/harness/capabilities/media/acquire.py

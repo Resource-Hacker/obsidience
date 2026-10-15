@@ -518,15 +518,18 @@ class JellyfinCatalogue:
     def titles(self) -> list[dict]:
         """Bounded Movie/Series inventory for named-title requests; GET only.
 
-        Episodes are excluded: their names are scraped metadata (Voyager's all read
-        "Star Trek Voyager"), so a series is found by its own Series item.
+        Names, ids, years, IMDb ids and types only: sources are read with
+        movie_sources for matched rows (a MediaSources inventory hit the response
+        cap at about 110 movies). Episodes are excluded: their names are scraped
+        metadata (Voyager's all read "Star Trek Voyager"), so a series is found by
+        its own Series item.
         """
         self._pin()
         items, total = [], None
         while total is None or len(items) < total:
             # Pages of 512 in SortName order, up to 4096 titles; a total that changes between
             # pages is an inventory read during a library change, never a partial answer.
-            page = self._query(includeItemTypes='Movie,Series', fields='MediaSources,ProviderIds',
+            page = self._query(includeItemTypes='Movie,Series', fields='ProviderIds',
                                startIndex=len(items), limit=512)
             batch, count = page.get('Items'), page.get('TotalRecordCount')
             if not isinstance(batch, list) or len(batch) > 512 or type(count) is not int or count > 4096:
@@ -546,24 +549,30 @@ class JellyfinCatalogue:
                 continue
             providers = item.get('ProviderIds') or {}
             imdb = str(providers.get('Imdb') or '').lower() if isinstance(providers, dict) else ''
-            row = {'item_id': _id(item.get('Id')), 'type': item['Type'], 'title': title,
-                   'year': _number(item.get('ProductionYear')),
-                   'imdb': imdb if re.fullmatch(r'tt[0-9]{7,10}', imdb) else None}
-            if item['Type'] == 'Movie':
-                sources = item.get('MediaSources')
-                row['sources'] = []
-                if isinstance(sources, list) and len(sources) > 4:
-                    # browse refuses this choice (catalogue_source_choice_limit); keep the title visible.
-                    row['source_limit'] = True
-                for source in sources if isinstance(sources, list) and len(sources) <= 4 else []:
-                    source_id = source.get('Id') if isinstance(source, dict) else None
-                    try:
-                        self._source(item, source_id)
-                    except MediaUnavailable:
-                        continue
-                    row['sources'].append(source_id)
-            rows.append(row)
+            rows.append({'item_id': _id(item.get('Id')), 'type': item['Type'], 'title': title,
+                         'year': _number(item.get('ProductionYear')),
+                         'imdb': imdb if re.fullmatch(r'tt[0-9]{7,10}', imdb) else None})
         return rows
+
+    def movie_sources(self, item_id: str) -> tuple[list[str], bool]:
+        """(admitted source ids, more than four) of one Movie from titles; GET only."""
+        self._pin()
+        item = self._item(item_id)
+        if item.get('Type') != 'Movie':
+            raise MediaUnavailable('catalogue_item_unavailable')
+        sources = item.get('MediaSources')
+        if isinstance(sources, list) and len(sources) > 4:
+            # browse refuses this choice (catalogue_source_choice_limit); keep the title visible.
+            return [], True
+        admitted = []
+        for source in sources if isinstance(sources, list) else []:
+            source_id = source.get('Id') if isinstance(source, dict) else None
+            try:
+                self._source(item, source_id)
+            except MediaUnavailable:
+                continue
+            admitted.append(source_id)
+        return admitted, False
 
     def series_progress(self, series_id: str) -> list[dict]:
         """Numbered episodes of one Series with native per-user watch state; GET only."""

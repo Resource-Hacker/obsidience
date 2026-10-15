@@ -43,6 +43,12 @@ The one registration owner handles native library tagging, mount visibility and
 the targeted catalogue refresh. Report tagging or catalogue state as pending
 when readback cannot verify it; never repeat registration to repair visibility.
 
+`tv.control play` for an absent named title makes this same call itself, with
+its own receipt and attempt keys: it first reads the media server's existing
+registrations of that IMDb id (and episode) and refreshes a held source instead
+of registering it again. After play reports a registration, refresh or pending
+result, never call `register` for that title again in the turn.
+
 For a known TorBox registration with pending visibility, select the same exact
 source in a fresh activation and call `refresh`. This reconciles the existing
 complete file plan and requests visibility refresh without creating a torrent.

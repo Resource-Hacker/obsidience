@@ -1582,28 +1582,33 @@ _LIVE_WORDS = {'news', 'weather', 'live', 'forecast', 'headlines', *_TOPICS}
 # Topic words (storm, hurricane, ...) only rank live results: "The Perfect Storm" is a named title.
 _PROVIDER_WORDS = {'live', 'channel', 'channels', 'news', 'weather', 'youtube', 'pluto', 'livestream'}
 _TRAILING = _PROVIDER_WORDS | {'forecast', 'headlines', 'stream'}
-_FILLER = {'the', 'a', 'an', 'on', 'tv', 'television', 'some', 'to', 'me'}
+_ROUTE_FILLER = {'the', 'a', 'an', 'on', 'tv', 'television', 'some', 'to', 'me'}
 
 
 def _asks_live(query, context):
     """Whether play's request explicitly asks for Pluto/YouTube rather than naming a title.
 
-    A provider word inside a title ("Live and Let Die", "News of the World", "The
-    Weather Man") does not: an exact library title always plays from the Media server,
-    and a request whose words do not end in a provider word is a title when the
-    metadata catalogue lists it exactly. "CNN news", "star trek channel", "lofi on
-    youtube" and "the weather" keep the live/web route.
+    A request made only of generic content words ("put some music on", "cartoons")
+    names no title and keeps the chooser. A provider word inside a title ("Live and
+    Let Die", "News of the World", "The Weather Man") does not ask for live content:
+    an exact library title always plays from the Media server, and a request whose
+    words do not end in a provider word is a title when the metadata catalogue lists
+    it exactly. "CNN news", "star trek channel", "lofi on youtube" and "the weather"
+    keep the live/web route. When the library or catalogue cannot be read the request
+    stays with the Media server, which reports the outage; a title never falls to a live pick.
     """
-    from ..media.title import named, spec, tokens
+    from ..media.title import generic, named, spec, tokens
+    if generic(query):
+        return True
     words = tokens(spec(query)[0])
     if not set(words) & _PROVIDER_WORDS:
         return False
     if named(query, context, catalogue=False):
         return False
     if (words[-1] in _TRAILING or {'youtube', 'pluto'} & set(words)
-            or not set(words) - _TRAILING - _FILLER):
+            or not set(words) - _TRAILING - _ROUTE_FILLER):
         return True
-    return not named(query, context, catalogue=True)
+    return named(query, context, catalogue=True) is False
 
 
 class _NoAutoPick(LookupError):
@@ -1641,7 +1646,8 @@ def _choose(args, context):
         raise LookupError('No TV content matches this query' + (' (' + '; '.join(errors) + ')' if errors else ''))
     # An explicit YouTube request takes its top result, as before; otherwise a live or
     # unknown-length video never stands in for a programme the request did not ask live.
-    live = bool(_words(query) & _LIVE_WORDS) or app == 'youtube' or 'youtube' in _words(query)
+    live = (bool(_words(query) & (_LIVE_WORDS | {'channel', 'channels', 'livestream'}))
+            or app == 'youtube' or 'youtube' in _words(query))
     chosen = next((candidate for candidate in candidates
                    if live or candidate.get('duration') != 'live or unknown'), None)
     if chosen is None:

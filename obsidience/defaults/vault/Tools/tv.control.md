@@ -21,11 +21,14 @@ description: 'Control the registered TV as an optional Media playback destinatio
   plays its next unwatched episode from Jellyfin watch state (S1E1 if never watched; add ''season
   N'' or ''SxEy'' to the query for a specific one) as the finite same-season sequence; a title
   or next episode missing from the library is registered once under the accepted best-source
-  policy and opened when the catalogue lists it, otherwise the result says it is pending (nothing
-  to replay). It wakes the TV if needed. Ambiguous titles, editions or sources return choices
-  and play nothing: ask the owner; a different library title (a sequel) is never played instead.
-  Only with app pluto|youtube, or a request that asks for live, channel, news, weather, YouTube
-  or Pluto (a title containing such a word, such as News of the World, is still a title),
+  policy (a source the media server already holds is refreshed, never registered again) and
+  opened when the catalogue lists it, otherwise the result says it is pending within about
+  75 s (nothing to replay). It wakes the TV if needed. Ambiguous titles, editions or sources
+  return choices and play nothing: ask the owner; a different library title is never played
+  instead (a sequel, or a series that only begins with the words, such as Star Trek: Voyager
+  for Star Trek, which is also a film). Only with app pluto|youtube, a request for a kind
+  of content rather than a title (some music, cartoons, a movie), or a request that asks for
+  live, channel, news, weather, YouTube or Pluto (a title containing such a word, such as News of the World, is still a title),
   does play pick a strong Pluto live channel, else YouTube''s top video (a live stream only
   for live/news/weather/YouTube requests), returning what it chose and up to 3 alternatives
   (open one by id if the owner wants another). A Pluto live channel starts in about a second

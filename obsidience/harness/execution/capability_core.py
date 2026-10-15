@@ -102,6 +102,57 @@ class CapabilityExecution:
     done: bool = False
 
 
+def nested_caller(ex, parent: str, execute_async, scope_checkpoint):
+    """One bounded call a running capability makes to another accepted capability.
+
+    tv.control play registers an absent title through media.acquire inside its own
+    call. The inner call is admitted like a model call (this run's grant and the
+    current accepted procedure), takes the next step with its own durable receipt and
+    trace entry, and a failed or uncertain registration ends this activation's effects
+    exactly as a direct media.acquire call does. Available only while the parent runs.
+    """
+    async def call(name: str, args: dict):
+        if name in (parent, "task.complete") or name not in ex.allowed:
+            raise PermissionError(f"Tool '{name}' is not authorized for this task.")
+        scope_checkpoint(ex.ctx, name)
+        ex.step += 1  # The parent keeps its own step; its return advances past this one.
+        step, run_id = ex.step + 1, ex.ctx.get("run_id")
+        signature = f"{name}:sha256:" + hashlib.sha256(json.dumps(args, sort_keys=True).encode()).hexdigest()
+        covered = bool(ex.ctx.get("_receipt_covered"))
+        started = time.perf_counter()
+        if covered:
+            tool_ref, tool_hash = ex.ctx["_tool_receipt_articles"].get(name, ("", ""))
+            if not INDEX.begin_tool_call(run_id=run_id, call_id=f"{run_id}:{step}", step=step, tool=name,
+                                         signature=signature, started=time.time(),
+                                         tool_ref=tool_ref, tool_sha256=tool_hash):
+                raise RuntimeError("Tool call already has a dispatch receipt; do not replay")
+        status, result = "error", None
+        try:
+            result = await execute_async(name, args, ex.ctx)
+            status = "returned"
+            return result
+        except asyncio.CancelledError:
+            status, result = "interrupted", "Tool interrupted; outcome unknown; do not replay"
+            raise
+        except Exception as exc:
+            result = f"Tool error: {exc}"
+            raise
+        finally:
+            encoded = json.dumps(result, sort_keys=True, default=str)
+            if covered:
+                INDEX.finish_tool_call(
+                    run_id=run_id, call_id=f"{run_id}:{step}", status=status, finished=time.time(),
+                    duration_ms=(time.perf_counter() - started) * 1000,
+                    result_sha256=hashlib.sha256(encoded.encode()).hexdigest(), result_chars=len(encoded.encode()))
+            ex.trace.append({"tool": name, "args": args, "sig": signature, "within": parent,
+                             "obs": (result if isinstance(result, str) else encoded)[:600]})
+            if name == "media.acquire" and not (isinstance(result, dict) and result.get("status") == "completed"
+                                                and result.get("delivery") == "verified"):
+                ex.ctx["_media_acquire_failed"] = True
+                ex.allowed = ["task.complete"]
+    return call
+
+
 async def run_capability(ex, name: str, args: dict, *, execute, execute_async, scope_checkpoint,
                          blocked: tuple[str, dict] | None = None, started=None) -> CallOutcome:
     """Run one call through the receipt and evidence boundary.
@@ -168,7 +219,7 @@ async def run_capability(ex, name: str, args: dict, *, execute, execute_async, s
         )
         receipt_finished = True
         try:
-            record_decision(decision_sample, ex.ctx['run_id'], ex.step + 1, result, call_status)
+            record_decision(decision_sample, ex.ctx['run_id'], call_fields["step"], result, call_status)
         except (ValueError, OSError, KeyError, TypeError) as exc:
             ex.emit('error', 'AutoSaddler decision capture unavailable', [str(exc)[:300]])
     ex.emit("tool", f"{ex.agent_name} → {name}", [json.dumps(public_args, default=str)], {
@@ -325,6 +376,8 @@ async def run_capability(ex, name: str, args: dict, *, execute, execute_async, s
             if name == "computer.act" and ex.response_observation_lease is not None:
                 ex.ctx[OBSERVATION_CONTEXT_FIELD] = ex.response_observation_lease
             begin_receipt()
+            if name == "tv.control":
+                ex.ctx["_nested_capability"] = nested_caller(ex, name, execute_async, scope_checkpoint)
             result = await execute_async(name, args, ex.ctx)
             if isinstance(result, dict):
                 result = dict(result)
@@ -404,6 +457,7 @@ async def run_capability(ex, name: str, args: dict, *, execute, execute_async, s
             call_status = "error"
         finally:
             ex.ctx.pop(OBSERVATION_CONTEXT_FIELD, None)
+            ex.ctx.pop("_nested_capability", None)
     ex.response_observation_lease = None
     entry = {"tool": name, "args": public_args, "obs": observation[:600], "sig": call_sig}
     if blocked is not None:

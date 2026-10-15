@@ -22,6 +22,20 @@ is substituted. The TV
 is an optional playback destination. Explicit season playback can create one
 finite tuner-owned sequence; watchlist sync and periodic upgrades stay disabled.
 
+Named-title playback (owner, 2026-10-15): "put <movie or show> on the TV" is one
+`tv.control play` with the title as query and no app. It plays from Jellyfin
+first; a series with no episode named continues at its next unwatched episode
+(S1E1 if never watched; a missing episode is next, never skipped). An absent
+title or episode is acquired by steps 1-3 inside that call: exactly one exact
+catalogue title, the unique recommended source, and one `media.acquire` call
+with its own receipt; a source the media server already holds is refreshed
+instead. The result is playback, `choices` (nothing sent; ask the owner) or a
+pending registration (effect applied, never repeated). An exact title wins; a
+different or longer library title is only ever a choice. Generic requests
+(music, cartoons, a movie) and explicit live, channel, news, weather, YouTube or
+Pluto requests use the live/web route. The steps below remain the procedure for
+explicit browse, source-search, selection and season requests.
+
 1. For a library request, use `media.library browse`; page with `next_offset` and
    identify the exact movie edition or series/season/episode. Resolve ambiguity
    before effects. For a source-search request, use `search`, choose the exact

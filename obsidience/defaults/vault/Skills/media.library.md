@@ -9,6 +9,11 @@ obsidience:
 
 ## Runtime
 
+To put a named movie or show on the TV, `tv.control play` does the library
+lookup, the next-unwatched choice and the accepted acquisition in one call. Use
+these actions to browse, answer questions, serve other clients, or resolve the
+`choices` that play returned.
+
 `health` is a bounded provider readiness summary. TorBox's paid-account and exact
 mount-owner evidence do not establish individual file delivery, catalogue-scan
 completion or playback. State only the evidence actually returned.
