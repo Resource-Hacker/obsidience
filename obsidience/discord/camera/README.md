@@ -66,7 +66,7 @@ loopback module that another producer owns.
 
 ```bash
 sudo modprobe v4l2loopback devices=1 video_nr=42 card_label='Squanchbot Graph' exclusive_caps=1 max_buffers=2
-v4l2-ctl --device=/dev/video42 --set-ctrl=timeout=1000
+v4l2-ctl --device=/dev/video42 --set-ctrl=timeout=1000 --set-output-parm=15
 install -m 0644 obsidience/discord/systemd/obsidience-discord-camera.service "$HOME/.config/systemd/user/obsidience-discord-camera.service"
 systemctl --user daemon-reload
 systemctl --user start obsidience-discord-camera.service
@@ -135,3 +135,7 @@ V4L2 frame flow at the selected size/15 fps. Sample the service's `TasksCurrent`
 Do not infer frame delivery or physical viewer acceptance from those startup
 receipts. If hardware initialization fails, retain the fixed failure code and
 stop; do not raise task limits or enable an implicit software fallback.
+
+The producer sets the loopback output time-per-frame explicitly before opening
+FFmpeg. FFmpeg output `-r` paces frames but does not update that kernel setting;
+leaving its default would advertise 30 fps for a 15-fps producer.

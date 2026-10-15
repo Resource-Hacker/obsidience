@@ -9,7 +9,7 @@ Type=notify
 NotifyAccess=main
 TimeoutStartSec=60s
 WorkingDirectory=%h/Projects/obsidience
-ExecStartPre=/usr/bin/v4l2-ctl --device=/dev/video42 --set-ctrl=timeout=1000
+ExecStartPre=/usr/bin/v4l2-ctl --device=/dev/video42 --set-ctrl=timeout=1000 --set-output-parm=15
 ExecStart=/usr/bin/python %h/Projects/obsidience/obsidience/discord/camera/graph-camera.py --size 1280x720
 UMask=0077
 Environment=CUDA_VISIBLE_DEVICES=
