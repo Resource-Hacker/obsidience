@@ -597,6 +597,15 @@
       "build": "Go 1.27.1; CGO_CFLAGS=-O2 -std=gnu17; go build -trimpath -ldflags=-s -w -X main.AppVersion=v1.11.4-obsidience3",
       "integration": "Optional native FUSE provider. Local patch replaces control and embedded engine TCP with owner-only Unix sockets, limits public operations, exposes actual reader readiness, disables LAN dashboard discovery and SMB watchdog in private mode, and drains readers before ordinary unmount. No lazy unmount, service restart loop, NAT mapping or scheduler. Unmodified torrent/FUSE implementation; copied license and module manifest accompany binary. Disk warmup disabled because pinned eviction does not protect live readers; bounded memory streaming cache only. Private mode parses strict JSON and rejects malformed configuration before starting providers. Source search passes a validated selected season to the existing upstream query. Prowlarr credentials use an HTTP header, never the logged request URL."
     },
+    "rclone_media_filesystem": {
+      "repository": "https://github.com/rclone/rclone",
+      "version": "1.75.2",
+      "revision": "be8d6044eacb843b74d335db0c5fbe09222031fe",
+      "license": "MIT",
+      "package": "rclone 1.75.2-1.1 (CachyOS)",
+      "binary_sha256": "77938fc265dbd4b8c2d8bb318d74349d6976e639699cb36c86a1ae8a60605fec",
+      "integration": "Prepared upstream WebDAV/FUSE dependency for an optional debrid media root. No source modifications. Account authorization, exact provider-file mapping, guarded mount lifecycle and native playback acceptance are required before activation. Installing the binary or saving a TorBox credential does not activate a mount or change acquisition. Existing Jellyfin/Tiramisu playback remains independent of this preparation."
+    },
     "prowlarr_discovery": {
       "repository": "https://github.com/Prowlarr/Prowlarr",
       "version": "2.6.5.5623",
