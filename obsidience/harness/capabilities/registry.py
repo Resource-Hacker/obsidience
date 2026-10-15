@@ -200,6 +200,9 @@ def _argument_schemas() -> dict[str, dict]:
     media_identity = obj({key: text(256) for key in media_identity_fields}, media_identity_fields)
     vod_binding = {"action":{"const":"vod"}, "generation":{"type":"string","pattern":"^[0-9a-f]{32}$"},
                    "source":media_identity}
+    # An update body once carried only its new section and replaced the whole Article.
+    proposal_body = ("The complete Article body, never only the new or changed part. An update replaces "
+                     "the entire current body: keep every section you are not changing.")
     schemas = {
         "application.launch": obj({"application": {"type":"string","enum":sorted(APPLICATIONS)},
             "url":text(2000)},("application",)),
@@ -240,12 +243,13 @@ def _argument_schemas() -> dict[str, dict]:
                     "description":"Continuation only: the view_sha256 returned with the previous page. Required with an offset above 0."}},(key,))
             for key,value in (("ref",text(500)),("refs",array(text(500),10,1)))]},
         "vault.list":obj({"folder":text(512,empty=True),"offset":integer}),
+        # The adapter refuses an authored source; Sources are cited in the body.
         "vault.propose":{"anyOf":[
             obj({"target":text(512),"action":{"enum":["create","update"]},
-                "title":text(300),"body":text(96000),"source":text(512),"reason":text(400,empty=True),
+                "title":text(300),"body":{**text(96000),"description":proposal_body},"reason":text(400,empty=True),
                 "metadata":{"type":"object","additionalProperties":True}},("target","body")),
             obj({"target":text(512),"action":{"const":"archive"},"title":text(300),
-                "body":text(96000,empty=True),"source":text(512),"reason":text(400,empty=True),
+                "body":{**text(96000,empty=True),"description":proposal_body},"reason":text(400,empty=True),
                 "metadata":{"type":"object","additionalProperties":True}},("target","action")),
         ]},
         "vault.maintenance":obj({}), "vault.validate":obj({}), "harness.status":obj({}),
@@ -351,15 +355,13 @@ def action_schema(allowed: list[str], *, completion_no_change: bool = False, com
             args = args["anyOf"][0]
             args["properties"]["action"] = {"const": "update"}
             args["required"].append("action")
-            for key in ("metadata", "source"):
-                args["properties"].pop(key, None)
+            args["properties"].pop("metadata", None)
         elif name == "vault.propose" and proposal_mode == "ingest":
             # General Inbox ingestion authors Knowledge. Retirement belongs to
             # Archive; documentary metadata is compiled by the publication owner.
             args = args["anyOf"][0]
             args["required"].append("action")
-            for key in ("metadata", "source"):
-                args["properties"].pop(key, None)
+            args["properties"].pop("metadata", None)
         if name == "task.complete" and completion_blocked:
             args["properties"]["status"] = {"const": "failed"}
             args["required"] = list(dict.fromkeys([*args["required"], "status"]))

@@ -622,10 +622,12 @@ def _completion_error(
             _agent, allowed = execution_scope(context, res)
             cited = "\n".join(evidence)
             # Retrieval offers leads; it does not establish their relevance.
-            # Require full reads for Articles claimed as completion evidence,
+            # Require full reads for Articles claimed as no-change evidence,
             # not an arbitrary search hit that the curator found unrelated.
+            # An approved change cites its publication receipt; that approval
+            # itself made the earlier read of its target stale.
             candidates = {ref: res.resolve(ref) for row in searches.values()
-                          for ref in row.get("refs", []) if ref in cited}
+                          for ref in row.get("refs", []) if ref in cited} if outcome == "no_change" else {}
             candidates = {ref: note for ref, note in candidates.items()
                           if note and note.kind == "knowledge" and ref in allowed
                           and not ref.startswith("Agents/") and not note.runtime_observation}
@@ -888,9 +890,10 @@ def execute(args: dict, context: dict) -> dict:
             ]
     if (context.get("event") == "observations.memory.ready"
             and (requested_status != args.get("status", "completed")
-                 or (requested_status == "completed" and outcome == "no_change"))):
+                 or (requested_status == "completed" and (outcome == "no_change" or approved)))):
         # The complete read of this Source is checked below; a no-change
-        # inspection cites it even when the model listed only Articles.
+        # inspection cites it even when the model listed only Articles, and so
+        # does a recommendation the owner approved before completion.
         citation = str((context.get("params") or {}).get("source_citation", ""))
         if citation and citation not in evidence:
             evidence.append(citation)

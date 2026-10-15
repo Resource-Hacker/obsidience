@@ -10,6 +10,7 @@ from copy import deepcopy
 from datetime import datetime, time as time_of_day, timedelta
 
 from jsonschema import Draft202012Validator
+from jsonschema.exceptions import best_match
 
 from ..capabilities.registry import _argument_schemas
 
@@ -360,20 +361,28 @@ def argument_diagnostic(name, args) -> str | None:
     errors = list(Draft202012Validator(_argument_schemas()[name]).iter_errors(args))
     if not errors:
         return None
-    path = '.'.join(map(str, errors[0].absolute_path)) or 'arguments'
     schema = _argument_schemas()[name]
     # The advertised union of the alternatives accepts calls that mix them. List
     # each alternative the fixed values sent can still select, or all when none can.
-    branches = schema.get('anyOf', [schema])
-    branches = [branch for branch in branches if isinstance(args, dict) and all(
+    alternatives = schema.get('anyOf', [schema])
+    branches = [branch for branch in alternatives if isinstance(args, dict) and all(
         key not in args or args[key] in value.get('enum', [value.get('const')])
-        for key, value in branch.get('properties', {}).items() if 'enum' in value or 'const' in value)] or branches
+        for key, value in branch.get('properties', {}).items() if 'enum' in value or 'const' in value)] or alternatives
+    error = errors[0]
+    if error.validator == 'anyOf':
+        # Name the failing field of a selectable alternative, not the whole union:
+        # the advertised structure omits length bounds (Curate, 2026-10-14).
+        selectable = {index for index, branch in enumerate(alternatives) if branch in branches}
+        error = best_match(sub for sub in error.context if sub.relative_schema_path[0] in selectable) or error
+    path = '.'.join(map(str, error.absolute_path)) or 'arguments'
     guidance = ('Use this argument structure: ' if len(branches) == 1
                 else 'Use exactly one of these argument structures: ') + ' or '.join(
         json.dumps(native_schema(branch), separators=(',', ':')) for branch in branches)
     sent = json.dumps(args, separators=(',', ':'))[:300]
-    diagnostic = (f'Invalid {name} {path}: {errors[0].validator} constraint ({errors[0].validator_value!r}). '
-                  f'You sent: {sent}. {guidance}')
+    # "additionalProperties constraint (False)" would not name the unexpected key.
+    constraint = (error.message if error.validator == 'additionalProperties'
+                  else f'{error.validator} constraint ({error.validator_value!r})')
+    diagnostic = f'Invalid {name} {path}: {constraint}. You sent: {sent}. {guidance}'
     if name == 'computer.act':
         diagnostic += (' The previous image was consumed without input. If a click is still needed, '
                        'first observe again and choose a new point. If the goal was already visible, '
