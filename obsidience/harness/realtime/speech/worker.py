@@ -757,7 +757,10 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
                 command = self._classify_wake(final=True)
                 if command is not None:
                     return command + text
-            self._wake_address = len(self._wake_prefix)
+            # NeMo deltas can split a word. An ASR delivery gap inside
+            # that word must not move its existing address past the prefix.
+            if not (re.search(r"\w$", self._wake_prefix) and re.match(r"\w", text)):
+                self._wake_address = len(self._wake_prefix)
         if words:
             self._wake_heard_at = now
         self._wake_prefix += text
