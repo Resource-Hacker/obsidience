@@ -313,7 +313,7 @@ async def candidates(metadata_id: str, *, season: int | None = None,
     transport = Tiramisu()
     transport.validate_binding(metadata)
     cached_provider = None
-    if load_config().get('debrid', {}).get('enabled'):
+    if metadata.get('debrid_binding') or load_config().get('debrid', {}).get('enabled'):
         from .torbox import TorBoxAPI
         cached_provider = TorBoxAPI()
         cached_provider.validate_binding(metadata)

@@ -204,7 +204,7 @@ async def execute(args: dict, context: dict) -> dict:
         try:
             client = Tiramisu()
             client.validate_binding(candidate)
-            if load_config().get('debrid', {}).get('enabled'):
+            if candidate.get('debrid_binding') or load_config().get('debrid', {}).get('enabled'):
                 from ...media.torbox import TorBoxAPI
                 from ...media.torbox_files import ready_mount
                 config = load_config()

@@ -285,8 +285,12 @@ class TorBoxAPI:
             if (not isinstance(name, str) or not 1 <= len(name) <= 512
                     or torrent_id is not None and identifier != torrent_id):
                 raise MediaUnavailable('torbox_invalid_inventory')
+            tags = row.get('tags') or []
+            if (not isinstance(tags, list) or len(tags) > 32
+                    or any(not isinstance(tag, str) or not 1 <= len(tag) <= 128 for tag in tags)):
+                raise MediaUnavailable('torbox_invalid_tags')
             result.append({'torrent_id': identifier, 'hash': _normal_hash(row['hash']), 'name': name,
-                           'tags': [tag for tag in (row.get('tags') or []) if isinstance(tag, str) and len(tag) <= 128][:32],
+                           'tags': tags,
                            'download_present': row.get('download_present') is True,
                            'download_finished': row.get('download_finished') is True,
                            'files': _files(row.get('files'))})
