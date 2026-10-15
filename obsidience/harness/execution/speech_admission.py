@@ -52,9 +52,13 @@ def _admission_messages(messages: list[dict], text: str) -> list[dict]:
     a distant system-only marker reminder is insufficient for the local model.
     This private request-only envelope is neither accepted owner text nor a
     second question. It is retained in the first decision's exact provenance.
+    It is the only place the admission protocol appears: the system message,
+    Tool declarations and history stay byte-identical to ordinary ADK steps, so
+    the step after a Tool result reuses the engine's cached prefix up to here.
     """
     return [*messages, {'role': 'user', 'content': (
         'PRIVATE SPEECH TRANSPORT CONTROL FOR THE CURRENT RESPONSE.\n'
+        + SEMANTIC_PROTOCOL + '\n\n'
         'The current owner transcript is: ' + json.dumps(text, ensure_ascii=False) + '\n'
         'Use the full preceding conversation to decide whether that transcript is complete or still unfinished. '
         'Your FIRST visible output MUST be exactly one control letter on its own line: C, I, or W. '
@@ -233,8 +237,7 @@ class PreparedSpeechTurn:
         self._bound_turn, self._bound_sequence = str(turn['id']), int(turn['sequence'])
         self._bound_generation = generation
 
-    async def _validate_contract(self, *, system: str | None = None, allowed=None,
-                                 spec=None, effort: str | None = None) -> None:
+    async def _validate_contract(self) -> None:
         agent, params, _ = admit_executive(self.text, 'voice')
         current = model_runtime.resolve_model(agent.meta.get('model'), agent.ref)
         current_effort = llm.normalize_reasoning_effort(agent.meta.get('reasoning_effort', 'none'))
@@ -245,10 +248,7 @@ class PreparedSpeechTurn:
         messages = activation_messages(agent, activation, agent_name=agent.title)
         names = activation['spine']['tools']
         if (_digest(messages[0]['content']) != self.system
-                or _digest([names, tool_schemas(names)]) != self.schema_binding
-                or (system is not None and _digest(system) != self.system)
-                or (allowed is not None and _digest([allowed, tool_schemas(allowed)]) != self.schema_binding)
-                or (spec is not None and _model_binding(spec, effort) != self.model_binding)):
+                or _digest([names, tool_schemas(names)]) != self.schema_binding):
             raise SpeechPreparationError('The Executive prompt or native Tools changed during speech admission')
 
     async def consume(self, plugin) -> LlmResponse:
@@ -285,8 +285,15 @@ class PreparedSpeechTurn:
                     break
                 if event.invocation_id != 'seed':
                     raise SpeechPreparationError('A native activation preceded the prepared owner turn')
-        await self._validate_contract(system=plugin.system, allowed=plugin.advertised,
-                                      spec=plugin.spec, effort=plugin.effort)
+        # This run compiled its activation fresh just before this step; its
+        # system, schemas, model and scope must bind the admitted digests. A
+        # further compilation here would only repeat that work on the
+        # critical path (validate_submission already recompiled before bind).
+        if (_digest(plugin.system) != self.system
+                or _digest([plugin.advertised, tool_schemas(plugin.advertised)]) != self.schema_binding
+                or _model_binding(plugin.spec, plugin.effort) != self.model_binding
+                or plugin.ctx.get('_scope_revision') != self.scope):
+            raise SpeechPreparationError('The Executive prompt or native Tools changed during speech admission')
         if (runtime._generation != self._bound_generation
                 or runtime._conversation.conversation_id != self.conversation_id
                 or native.window_anchor(self.conversation_id) != self.anchor
@@ -355,7 +362,6 @@ async def prepare(runtime, text: str, response_contract: str) -> PreparedSpeechT
             names = list(activation['spine']['tools'])
             schemas = tool_schemas(names)
             schema_binding = _digest([names, schemas])
-            messages[0] = {**messages[0], 'content': messages[0]['content'] + '\n\n' + SEMANTIC_PROTOCOL}
             messages = _admission_messages(messages, clean)
             payload = native.request_payload(messages, spec, effort, schemas)
             async with llm.provider_client() as client:

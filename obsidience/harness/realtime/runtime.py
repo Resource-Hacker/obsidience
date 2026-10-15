@@ -863,15 +863,21 @@ class RealtimeSessionManager:
     async def _prepare_speech_candidate(self, binding: tuple, text: str, timing: dict | None) -> None:
         started = time.monotonic()
         try:
-            prepared = await self.conversation.prepare_speech_turn(text)
+            from ..execution.commands import recognize_command
+            # A full-grammar HassIL command is complete by definition; it takes
+            # the runner's reflex route with no model admission or request.
+            prepared = None
+            if recognize_command(text, ["lights.set", "tv.control", "media.pause", "task.complete"]) is None:
+                prepared = await self.conversation.prepare_speech_turn(text)
             if not self._candidate_current(binding):
                 return
+            decision = "command" if prepared is None else prepared.decision
             trace.emit("speech", "Executive speech admission", [json.dumps({
-                "event": "speech.admission", "decision": prepared.decision,
+                "event": "speech.admission", "decision": decision,
                 "speech_sequence": binding[2], "candidate_revision": binding[3],
                 "duration_ms": round((time.monotonic() - started) * 1000, 3),
             }, sort_keys=True)])
-            if prepared.decision != "complete":
+            if decision not in {"complete", "command"}:
                 self._semantic_state = "waiting"
                 self._semantic_expiry = asyncio.create_task(
                     self._expire_speech_candidate(binding), name="obsidience-speech-expiry")

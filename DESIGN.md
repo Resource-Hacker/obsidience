@@ -306,7 +306,11 @@ neighbours); (9) history projected from the native conversation (no conversation
   regenerating that first response. Fresh audio, STOP, mode/session changes and teardown
   invalidate owned inference. Missing/invalid markers fail closed. A 30-second abandoned
   continuation expires without execution; it is not a sentence-completion timer. The
-  first response is buffered, so early speech starts only after this admission.
+  first response is buffered, so early speech starts only after this admission. The
+  completion protocol lives only in the request's trailing private control message, so
+  admission, speech warms and later ADK steps share one system/Tool/history prefix. An
+  exact HassIL command is complete by its full-grammar match and takes the reflex route
+  without a model admission.
 
 ### Specialist Task loop
 

@@ -138,12 +138,8 @@ async def prepare(conversation, text: str, response_contract: str, *, idle: bool
                 # context from the last checkpoint that still matches.
                 messages = prefill_messages(conversation_id, messages, '' if idle else text,
                                             memory=memory, preparation_prefix=True)
-            from ..config import CONFIG
-            if CONFIG.extras.get("realtime_semantic_turns", False) is True:
-                # Real speech admission shares this stable system prefix before
-                # the large schema/history. Its final control is request-only.
-                from .speech_admission import SEMANTIC_PROTOCOL
-                messages[0] = {**messages[0], "content": messages[0]["content"] + "\n\n" + SEMANTIC_PROTOCOL}
+            # Speech admission, ordinary ADK steps and this warm share one system
+            # message; admission's protocol lives only in its trailing control.
             payload = request_payload(messages, spec, effort, tool_schemas(activation["spine"]["tools"]))
             if native and not idle:
                 digest = _digest(json.dumps(payload, ensure_ascii=False, sort_keys=True))
