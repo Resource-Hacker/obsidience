@@ -286,6 +286,11 @@ class SpeechResetFrame(SystemFrame):
     pass
 
 
+@dataclass
+class UnvoicedSilenceFrame(SystemFrame):
+    """An unvoiced ASR segment ended after sustained acoustic silence."""
+
+
 class SpeechInputTiming:
     """Bounded boundary timestamps; NeMo remains the sole turn owner."""
 
@@ -376,6 +381,7 @@ class NeMoLocalAudioInputTransport(LocalAudioInputTransport):
 
     async def _vad_analyze(self, audio_frame: InputAudioRawFrame) -> VADState:
         state = await super()._vad_analyze(audio_frame)
+        audio_frame.metadata["obsidience_vad_quiet"] = state == VADState.QUIET
         if state == VADState.SPEAKING:
             self._last_voiced_ns = time.monotonic_ns()
         return state
@@ -613,13 +619,30 @@ class UtteranceNeMoSTTService(NemoSTTService):
         super().__init__(**kwargs)
         self._preroll = bytearray()
         self._recognized_since_stop = False
+        self._unvoiced_quiet_bytes = 0
 
     async def _handle_transcription(self, transcript, is_final, language=None):
         if transcript.strip():
             self._recognized_since_stop = True
+            self._unvoiced_quiet_bytes = 0
         await super()._handle_transcription(transcript, is_final, language)
 
     async def process_audio_frame(self, frame, direction) -> None:
+        if (not self._is_vad_active and self._recognized_since_stop
+                and frame.metadata.get("obsidience_vad_quiet") is True):
+            self._unvoiced_quiet_bytes += len(frame.audio)
+            if self._unvoiced_quiet_bytes >= SMART_TURN_PENDING_SECS * SAMPLE_RATE * 2:
+                # Quiet recognized speech has no VAD stop to clear its decoder
+                # or wake prefix. Use actual quiet PCM, never decoder delivery
+                # gaps, to give the next utterance the same fresh boundary.
+                async with self._model_lock:
+                    self._model.reset_state()
+                self.audio_buffer.clear()
+                self._recognized_since_stop = False
+                self._unvoiced_quiet_bytes = 0
+                await self.push_frame(UnvoicedSilenceFrame(), direction)
+        else:
+            self._unvoiced_quiet_bytes = 0
         if not self._is_vad_active:
             # 320 ms of mono s16/16 kHz, including the first 100 ms before
             # Silero confirms onset. Never retain an unbounded idle recording.
@@ -667,6 +690,7 @@ class UtteranceNeMoSTTService(NemoSTTService):
         if isinstance(frame, (VADUserStoppedSpeakingFrame, ListeningModeFrame,
                               EndFrame, CancelFrame)):
             self._preroll.clear()
+            self._unvoiced_quiet_bytes = 0
 
 
 class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
@@ -687,6 +711,7 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
         self._smart_turn = smart_turn
         self._semantic_turns = semantic_turns
         self._semantic_text = ""
+        self._semantic_timing: dict | None = None
         self._candidate_revision = 0
         self._candidate_sequence = 0
         self._candidate_ready = False
@@ -722,6 +747,7 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
         self._candidate_revision += 1
         self._candidate_ready = False
         self._semantic_text = ""
+        self._semantic_timing = None
         self._candidate_sequence = 0
 
     async def _admit_speech(self, frame: SpeechAdmissionFrame) -> None:
@@ -827,6 +853,8 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
         """True while the command text cannot end a turn: no words, a dangling
         end, or only the wake-word address (Realtime keeps it in the text)."""
         text = self._user_speaking_buffer
+        if self._semantic_turns:
+            text = self._semantic_text + " " + text
         address = self._wake_pattern.sub("", text)
         # A bare "okay" or "hey" is not an address without the wake word.
         return turn_text_pending(text) or (address != text and _WAKE_LEAD.fullmatch(address) is not None)
@@ -834,7 +862,10 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
     def turn_short_reply(self) -> bool:
         """True when the command text, without the wake-word address, is
         exactly one complete short reply ("yes", "never mind")."""
-        return turn_text_short_reply(self._wake_pattern.sub(" ", self._user_speaking_buffer))
+        text = self._user_speaking_buffer
+        if self._semantic_turns:
+            text = self._semantic_text + " " + text
+        return turn_text_short_reply(self._wake_pattern.sub(" ", text))
 
     def _reply_playing(self) -> bool:
         return self._bot_speaking or bool(self._playback is not None and self._playback._reply_active)
@@ -945,6 +976,11 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
                 emit("speech_candidate_failed", code="text_limit", mode_revision=self.mode_revision)
                 return
             self._semantic_text = text
+            timing = frame.metadata.get("obsidience_speech_timing")
+            if timing is not None:
+                # Keep the latest segment that actually supplied words.
+                # A noise-only refresh must not replace its endpoint evidence.
+                self._semantic_timing = timing
             self._candidate_revision += 1
             self._candidate_sequence = self._timing.sequence if self._timing else 0
             self._candidate_ready = True
@@ -1002,6 +1038,10 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
                 self._transcript_timeout = None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        if isinstance(frame, UnvoicedSilenceFrame):
+            if self.mode == "wake" and not self._wake_open and not self._vad_user_speaking:
+                await self._reset_wake_scan(segment_start=True)
+            return
         if isinstance(frame, SpeechAdmissionFrame):
             await self._admit_speech(frame)
             return
@@ -1032,15 +1072,15 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
         if isinstance(frame, (EndFrame, CancelFrame)):
             self._clear_semantic()
             await self._close_wake()
-        held_timing = None
         refresh_candidate = (self._semantic_turns and self._semantic_text
                              and isinstance(frame, VADUserStoppedSpeakingFrame)
                              and not self._user_speaking_buffer.strip()
                              and not self._mode_waiting_for_stop)
         if refresh_candidate and self._timing is not None:
             # A noise-only VAD edge invalidated the old verdict. Re-offer the
-            # held words with its new identity only after capture stops.
-            held_timing = self._timing.finish()
+            # held words with its new identity only after capture stops, while
+            # keeping the actual spoken text's timestamps.
+            self._timing.discard()
         if (isinstance(frame, VADUserStoppedSpeakingFrame) and self._smart_turn
                 and frame.metadata.get("obsidience_asr_tail_frames", 0) > 0
                 and any(c.isalnum() for c in self._user_speaking_buffer) and self.turn_pending()):
@@ -1093,7 +1133,10 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
             emit("speech_candidate", text=self._semantic_text,
                  speech_sequence=self._candidate_sequence,
                  candidate_revision=self._candidate_revision, mode_revision=self.mode_revision,
-                 **({"speech_timing": held_timing} if held_timing else {}))
+                 refreshed=True,
+                 **({"speech_timing": {**self._semantic_timing,
+                       "speech_sequence": self._candidate_sequence}}
+                    if self._semantic_timing else {}))
 
         if empty_vad_stop and self._have_sent_user_started_speaking:
             await self._handle_user_interruption(UserStoppedSpeakingFrame())

@@ -276,9 +276,12 @@ neighbours); (9) history projected from the native conversation (no conversation
 - **Contextual speech admission** (optional `realtime_semantic_turns`, off by default):
   an acoustic endpoint offers a provisional utterance to the same Executive and native
   Tool schema. Its actual first response begins with a private completion marker;
-  incomplete speech stays in the worker and joins the next segment. No public turn,
-  native session event, Tool dispatch or memory write occurs before completion. A complete
-  response binds the exact utterance, conversation/window, model and accepted instructions,
+  incomplete speech stays in the worker and joins the next segment.
+  Endpoint text checks include those held words; a noise-only VAD segment cannot
+  turn them into an empty request or replace their original timing evidence.
+  No public turn, native session event, Tool dispatch or memory write occurs before
+  completion. A complete response binds the exact utterance, conversation/window,
+  model and accepted instructions,
   then enters ADK once through its normal completion and capability authority without
   regenerating that first response. Fresh audio, STOP, mode/session changes and teardown
   invalidate owned inference. Missing/invalid markers fail closed. A 30-second abandoned
@@ -656,6 +659,9 @@ full current reads, unrelated hits do not.
   The wake word is the Executive title; no text before it is admitted or stored. Mode
   changes drain and reject old revisions; the mode persists per login (a failed restore
   reports, no retry loop) and never becomes conversation, Task or Knowledge state.
+  Quiet ASR words that never triggered VAD expire after sustained acoustic silence;
+  their decoder state and unopened wake prefix cannot survive indefinitely into the
+  next address. ASR delivery gaps alone never establish a new speech boundary.
 - NeMo owns acoustic turns and interruptions; confirmed speech interrupts before
   endpointing. With contextual admission enabled, its endpoint supplies a candidate,
   and the Executive's completion verdict plus an exact worker acknowledgement admits

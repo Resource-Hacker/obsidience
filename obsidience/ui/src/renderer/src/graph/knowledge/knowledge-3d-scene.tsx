@@ -360,9 +360,13 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
       uBackdrop: { value: new THREE.FramebufferTexture(1, 1) as THREE.Texture },
     };
     // Each cloud copies the canvas here just before its node sprites draw,
-    // for its Dust marbles to bend; one texture, sized to the drawing buffer.
+    // for its Dust marbles to bend, and each glass layer before its lens;
+    // one texture, sized to the drawing buffer. Only the rectangle the layer
+    // can bend is copied, into the same place in the texture: its bounding
+    // sphere on the canvas. Nothing reads outside it before the next copy.
     const backdropSize = new THREE.Vector2();
-    const captureBackdrop = (target: THREE.WebGLRenderer): void => {
+    const captureView = new THREE.Vector3();
+    const captureBackdrop = (target: THREE.WebGLRenderer, camera?: THREE.Camera, sphere?: THREE.Sphere): void => {
       target.getDrawingBufferSize(backdropSize);
       let backdrop = uniforms.uBackdrop.value as THREE.FramebufferTexture;
       if (backdrop.image.width !== backdropSize.x || backdrop.image.height !== backdropSize.y) {
@@ -370,8 +374,47 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
         backdrop = new THREE.FramebufferTexture(backdropSize.x, backdropSize.y);
         backdrop.minFilter = backdrop.magFilter = THREE.LinearFilter;
         uniforms.uBackdrop.value = backdrop;
+        target.copyFramebufferToTexture(backdrop);
+        return;
       }
-      target.copyFramebufferToTexture(backdrop);
+      const perspective = camera as THREE.PerspectiveCamera | undefined;
+      if (!perspective?.isPerspectiveCamera || !sphere) {
+        target.copyFramebufferToTexture(backdrop);
+        return;
+      }
+      captureView.copy(sphere.center).applyMatrix4(perspective.matrixWorldInverse);
+      const depth = -captureView.z, r = sphere.radius;
+      if (depth - r <= perspective.near) {
+        target.copyFramebufferToTexture(backdrop);
+        return;
+      }
+      // The sphere's bounding box projects inside the box its corners span.
+      const e = perspective.projectionMatrix.elements;
+      let left = Infinity, right = -Infinity, bottom = Infinity, top = -Infinity;
+      for (const z of [depth - r, depth + r]) {
+        for (const x of [captureView.x - r, captureView.x + r]) {
+          left = Math.min(left, e[0] * x / z - e[8]);
+          right = Math.max(right, e[0] * x / z - e[8]);
+        }
+        for (const y of [captureView.y - r, captureView.y + r]) {
+          bottom = Math.min(bottom, e[5] * y / z - e[9]);
+          top = Math.max(top, e[5] * y / z - e[9]);
+        }
+      }
+      const x0 = Math.max(0, Math.floor((left * 0.5 + 0.5) * backdropSize.x) - 2);
+      const x1 = Math.min(backdropSize.x, Math.ceil((right * 0.5 + 0.5) * backdropSize.x) + 2);
+      const y0 = Math.max(0, Math.floor((bottom * 0.5 + 0.5) * backdropSize.y) - 2);
+      const y1 = Math.min(backdropSize.y, Math.ceil((top * 0.5 + 0.5) * backdropSize.y) + 2);
+      if (x1 <= x0 || y1 <= y0) return; // Off the canvas: nothing to bend.
+      const gl = target.getContext();
+      const texture = (target.properties.get(backdrop) as { __webglTexture?: WebGLTexture }).__webglTexture;
+      if (!texture) {
+        target.copyFramebufferToTexture(backdrop);
+        return;
+      }
+      target.state.bindTexture(gl.TEXTURE_2D, texture, gl.TEXTURE0);
+      gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, x0, y0, x0, y0, x1 - x0, y1 - y0);
+      target.state.unbindTexture();
     };
     const sharedParticleTime = { value: 0 };
     // The scene module owns the canonical shader strings; every cloud —
