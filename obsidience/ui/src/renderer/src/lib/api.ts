@@ -1,7 +1,9 @@
-/** Obsidience daemon client (REST + WS). */
+/** The Harness API client: every page's HTTP calls and socket origin. */
 
-export const API_BASE = "http://127.0.0.1:8765";
-export const WS_BASE = "ws://127.0.0.1:8765";
+import type { ProviderGraph } from "@/surfaces/provider-graph-scene";
+
+const API_BASE = "http://127.0.0.1:8765";
+export const WS_BASE = API_BASE.replace(/^http/, "ws");
 
 async function json<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, init);
@@ -103,6 +105,21 @@ export interface KnowledgeActivity {
   graphId?: string;
 }
 
+export interface MemoryBank { id: string; name: string; agent_ref: string; count: number }
+/** Changed records and edges since the shown revision of one memory bank. */
+export type MemoryDelta = Pick<ProviderGraph, "provider" | "graph_id" | "nodes" | "edges" | "total" | "limited" | "updated_at"> & {
+  delta: true; since: string; revision: string; removed: string[]; removed_edges: ProviderGraph["edges"];
+};
+
 export const api = {
   graph: () => json<GraphSnapshot>("/api/graph", { cache: "no-store" }),
+  memoryBanks: (signal?: AbortSignal) => json<{ banks: MemoryBank[] }>("/api/graphs/memory/banks", { signal }),
+  memoryGraph: (bank: string, since?: string, signal?: AbortSignal) => json<ProviderGraph | MemoryDelta>(
+    "/api/graphs/memory?bank=" + encodeURIComponent(bank) + (since ? "&since=" + encodeURIComponent(since) : ""), { signal }),
+  memoryRecord: (bank: string, id: string, signal?: AbortSignal) => json<Record<string, unknown>>(
+    "/api/graphs/memory/record?bank=" + encodeURIComponent(bank) + "&id=" + encodeURIComponent(id), { signal }),
+  codeGraph: (signal?: AbortSignal) => json<ProviderGraph>("/api/graphs/code", { signal }),
+  refreshCodeGraph: () => json<ProviderGraph["index"]>("/api/graphs/code/refresh", { method: "POST" }),
+  /** The Shell command socket's user-only token, read again for every connection. */
+  shellCommandToken: () => json<{ token?: unknown }>("/api/shell/command-token", { cache: "no-store" }),
 };

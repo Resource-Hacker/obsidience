@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Brain, Braces, Network, Search, Scan, RefreshCw, Radio, X, ArrowUpRight, ArrowLeft, Layers, ChevronDown } from "lucide-react";
-import { presentShellReader, presentShellSource, onShellStageVisibility, onShellGraphView, selectShellGraphView, type GraphView, type GraphSource } from "@/lib/shell-client";
+import { SURFACE_IDS, presentShellReader, presentShellSource, onShellStageVisibility, onShellGraphView, selectShellGraphView, type GraphView, type GraphSource } from "@/lib/shell-client";
+import { useSurfaceVisibility } from "@/lib/surface-visibility";
 import { GraphSubscriber, MEMORY_TYPES, type GraphCatalog, type GraphControl, type GraphViewState } from "./graph-stream";
 import type { ProviderNode } from "./provider-graph-scene";
 import "./provider-graph.css";
@@ -31,7 +32,8 @@ export function GraphViewer({view, onViewChange, initialGraphId = "main", onGrap
   const video = useRef<HTMLVideoElement>(null), subscriber = useRef<GraphSubscriber | null>(null);
   const [catalog, setCatalog] = useState<GraphCatalog>({nodes: [], count: 0, links: 0});
   const [state, setState] = useState<GraphViewState>({}), [linked, setLinked] = useState(false), [ready, setReady] = useState(false);
-  const [error, setError] = useState(""), [query, setQuery] = useState(""), [visible, setVisible] = useState(!document.hidden);
+  const [error, setError] = useState(""), [query, setQuery] = useState("");
+  const visible = useSurfaceVisibility();
   const [cursor, setCursor] = useState({x: 0, y: 0}), [retry, setRetry] = useState(0);
   const [graphId, setGraphId] = useState(initialGraphId);
   const [fromDate, setFromDate] = useState(""), [toDate, setToDate] = useState("");
@@ -43,15 +45,10 @@ export function GraphViewer({view, onViewChange, initialGraphId = "main", onGrap
   useEffect(() => onShellStageVisibility(surfaceId, setSurfaceVisible), [surfaceId]);
   const send = (command: GraphControl) => subscriber.current?.send(view === "knowledge" ? {...command, graphId} : command);
   useEffect(() => {
-    let paneVisible = document.documentElement.dataset.paneVisible !== "false";
     setSurfaceId(document.documentElement.dataset.paneSurface || "samsung");
-    setVisible(paneVisible && !document.hidden);
-    const changed = () => setVisible(paneVisible && !document.hidden);
-    const pane = (event: Event) => { paneVisible = (event as CustomEvent<boolean>).detail === true; changed(); };
-    const surface = (event: Event) => { const id = (event as CustomEvent<string>).detail; if (["samsung", "usb-c", "dp-4"].includes(id)) setSurfaceId(id); };
-    document.addEventListener("visibilitychange", changed); window.addEventListener("obsidience-pane-visibility", pane);
+    const surface = (event: Event) => { const id = (event as CustomEvent<string>).detail; if (SURFACE_IDS.includes(id)) setSurfaceId(id); };
     window.addEventListener("obsidience-pane-surface", surface);
-    return () => { document.removeEventListener("visibilitychange", changed); window.removeEventListener("obsidience-pane-visibility", pane); window.removeEventListener("obsidience-pane-surface", surface); };
+    return () => window.removeEventListener("obsidience-pane-surface", surface);
   }, []);
   useEffect(() => {
     if (!visible || !surfaceVisible || !video.current) return;

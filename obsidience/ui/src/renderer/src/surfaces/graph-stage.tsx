@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { onShellStageVisibility, type StageRegion } from "@/lib/shell-client";
+import { useSurfaceVisibility } from "@/lib/surface-visibility";
 import "./provider-graph.css";
 
 const VIEWS = ["memory", "library", "code"];
 
 /** One background stage; provider frames keep their own graph and render lifetime. */
 export function GraphStage() {
-  const [active, setActive] = useState(!document.hidden);
+  const active = useSurfaceVisibility();
   // Each view pauses while its own part of the stage is locked, asleep or covered.
   const [shown, setShown] = useState<Record<string, boolean>>({});
   const frames = useRef<HTMLDivElement>(null);
@@ -22,11 +23,6 @@ export function GraphStage() {
       setShown(current => current[view] === visible ? current : { ...current, [view]: visible }),
     () => region(view)));
     return () => stops.forEach(stop => stop());
-  }, []);
-  useEffect(() => {
-    const changed = () => setActive(!document.hidden);
-    document.addEventListener("visibilitychange", changed);
-    return () => document.removeEventListener("visibilitychange", changed);
   }, []);
   function publishVisibility() {
     frames.current?.querySelectorAll("iframe").forEach(frame => frame.contentWindow?.postMessage({

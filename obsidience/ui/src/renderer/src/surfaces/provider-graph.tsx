@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { api, type MemoryBank, type MemoryDelta } from "@/lib/api";
+import { subscribeActivity } from "@/lib/activity-client";
 import { onShellOledPolicy, onShellProviderGraph, onShellStageVisibility, type ShellOledPolicy } from "@/lib/shell-client";
+import { useSurfaceVisibility } from "@/lib/surface-visibility";
 import { ProviderGraphScene, type ProviderGraph, type ProviderNode, type GraphOperation } from "./provider-graph-scene";
 import { MEMORY_TYPES, type GraphControl, type GraphPublisher } from "./graph-stream";
 import { CODE_STRUCTURE, codeLayoutAncestry, codeFileGraph } from "./code-spherical-layout";
@@ -8,22 +11,9 @@ import { MemoryStagePresentation } from "./memory-stage-presentation";
 import { CodeKnowledgeScene } from "./code-knowledge-scene";
 import "./provider-graph.css";
 
-const API = "http://127.0.0.1:8765";
 // A visible memory view replaces its incrementally patched graph at most hourly.
 const MEMORY_RECONCILE_MS = 3600_000;
-type Bank = { id: string; name: string; agent_ref: string; count: number };
-type MemoryDelta = Pick<ProviderGraph, "provider" | "graph_id" | "nodes" | "edges" | "total" | "limited" | "updated_at"> & {
-  delta: true; since: string; revision: string; removed: string[]; removed_edges: ProviderGraph["edges"];
-};
-const NO_BANKS: Bank[] = [];
-async function json<T>(path: string, signal?: AbortSignal): Promise<T> {
-  const r = await fetch(API + path, { signal });
-  if (!r.ok) {
-    const body = await r.json().catch(() => ({}));
-    throw new Error(body.detail || `Provider returned ${r.status}`);
-  }
-  return r.json();
-}
+const NO_BANKS: MemoryBank[] = [];
 const edgeKey = (e: ProviderGraph["edges"][number]) => `${e.source}\0${e.target}\0${e.kind}\0${e.weight}\0${e.color}`;
 /** Apply the Harness's changed records and edge multiset to the shown graph. */
 function applyMemoryDelta(current: ProviderGraph, delta: MemoryDelta): ProviderGraph {
@@ -58,31 +48,21 @@ export function ProviderGraphSurface() {
 }
 
 function MemoryStageWall() {
-  const [banks, setBanks] = useState<Bank[]>([]), [error, setError] = useState("");
+  const [banks, setBanks] = useState<MemoryBank[]>([]), [error, setError] = useState("");
   const [presentation, setPresentation] = useState<MemoryStagePresentation | null>(null);
   const [oled, setOled] = useState<ShellOledPolicy>({ enabled: false, shiftPx: 32, travelSeconds: 3600 });
-  const [shellVisible, setShellVisible] = useState(false), [pageVisible, setPageVisible] = useState(!document.hidden);
-  const [stageVisible, setStageVisible] = useState(true);
+  const [shellVisible, setShellVisible] = useState(false);
+  // Also false while the stage reports windows covering this view's region.
+  const pageVisible = useSurfaceVisibility();
   useEffect(() => onShellOledPolicy(setOled), []);
   useEffect(() => onShellStageVisibility("samsung", setShellVisible), []);
-  useEffect(() => {
-    const changed = () => setPageVisible(!document.hidden);
-    // The stage also reports when windows cover this view's own region.
-    const stage = (event: MessageEvent) => {
-      if (event.origin === location.origin && event.data?.type === "obsidience-stage-visibility")
-        setStageVisible(event.data.visible === true);
-    };
-    document.addEventListener("visibilitychange", changed);
-    window.addEventListener("message", stage);
-    return () => { document.removeEventListener("visibilitychange", changed); window.removeEventListener("message", stage); };
-  }, []);
   useEffect(() => {
     const owner = new MemoryStagePresentation(); setPresentation(owner);
     return () => owner.dispose();
   }, []);
   useEffect(() => {
     const controller = new AbortController();
-    json<{banks: Bank[]}>("/api/graphs/memory/banks", controller.signal)
+    api.memoryBanks(controller.signal)
       .then(result => { setBanks(result.banks); if (!result.banks.length) setError("No Agent memory banks are available yet."); })
       .catch(error => { if (!controller.signal.aborted) setError(error.message); });
     return () => controller.abort();
@@ -91,7 +71,7 @@ function MemoryStageWall() {
     if (settings.bank) presentation?.select(settings.bank);
   }), [presentation]);
   return <main className="memory-stage-wall" aria-label="All Agent memory graphs"
-    data-motion={shellVisible && pageVisible && stageVisible} data-oled={oled.enabled}
+    data-motion={shellVisible && pageVisible} data-oled={oled.enabled}
     style={{ "--oled-shift": `${oled.shiftPx}px`, "--oled-travel": `${oled.travelSeconds}s` } as CSSProperties}>
     {presentation && banks.map((bank, index) => <section className="memory-stage-row" key={bank.id} aria-label={`${bank.name} memory`}>
       <MemoryAgentIcon bank={bank} index={index}/>
@@ -101,7 +81,7 @@ function MemoryStageWall() {
   </main>;
 }
 
-function MemoryAgentIcon({bank, index}: {bank: Bank; index: number}) {
+function MemoryAgentIcon({bank, index}: {bank: MemoryBank; index: number}) {
   const host = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const canvas = paintKnowledgeRoleIcon(knowledgeRoleForAgent(bank.agent_ref), 256);
@@ -113,7 +93,7 @@ function MemoryAgentIcon({bank, index}: {bank: Bank; index: number}) {
 }
 
 function ProviderGraphStage({fixedBank, availableBanks, memoryPresentation}: {
-  fixedBank?: string; availableBanks?: Bank[]; memoryPresentation?: MemoryStagePresentation;
+  fixedBank?: string; availableBanks?: MemoryBank[]; memoryPresentation?: MemoryStagePresentation;
 }) {
   const code = new URLSearchParams(location.search).get("surface") === "code";
   const title = code ? "Code" : "Memory";
@@ -133,7 +113,7 @@ function ProviderGraphStage({fixedBank, availableBanks, memoryPresentation}: {
   const [operations, setOperations] = useState<GraphOperation[]>([]), [connected, setConnected] = useState(false);
   const [follow, setFollow] = useState(true), [expanded, setExpanded] = useState<string[]>([]);
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
-  const [visible, setVisible] = useState(!document.hidden);
+  const visible = useSurfaceVisibility();
   const [consumers, setConsumers] = useState(0);
   // Code is drawn by the Knowledge renderer, which owns its own publisher.
   const [codePublisher, setCodePublisher] = useState<GraphPublisher | null>(null);
@@ -156,10 +136,8 @@ function ProviderGraphStage({fixedBank, availableBanks, memoryPresentation}: {
     // An explicit refresh reloads the complete memory graph.
     if (!code) { memoryCursor.current = null; setRevision(r => r + 1); return; }
     setIndexState({state: "updating"});
-    fetch(API + "/api/graphs/code/refresh", {method: "POST"}).then(async response => {
-      if (!response.ok) throw new Error("Code index refresh could not start");
-      setIndexState(await response.json());
-    }).catch(error => setIndexState({state: "stale", error: error.message}));
+    api.refreshCodeGraph().then(setIndexState)
+      .catch(error => setIndexState({state: "stale", error: error.message}));
   };
 
   useEffect(() => onShellProviderGraph(code ? "code" : "memory", settings => {
@@ -185,9 +163,7 @@ function ProviderGraphStage({fixedBank, availableBanks, memoryPresentation}: {
     const cursor = memoryCursor.current;
     const since = !code && cursor?.graph.revision && cursor.graph.graph_id === "memory:" + bank
       && Date.now() - cursor.full < MEMORY_RECONCILE_MS ? cursor : null;
-    const path = code ? "/api/graphs/code" : "/api/graphs/memory?bank=" + encodeURIComponent(bank)
-      + (since ? "&since=" + encodeURIComponent(since.graph.revision!) : "");
-    json<ProviderGraph | MemoryDelta>(path, controller.signal).then(result => {
+    (code ? api.codeGraph(controller.signal) : api.memoryGraph(bank, since?.graph.revision, controller.signal)).then(result => {
       if ("delta" in result) {
         if (since && result.since === since.graph.revision) {
           const graph = applyMemoryDelta(since.graph, result);
@@ -208,19 +184,6 @@ function ProviderGraphStage({fixedBank, availableBanks, memoryPresentation}: {
     setSelected(null); setTimeRange(""); setDetail(null); setExpanded([]); setOperations([]);
     setData(null); lastFollow.current = "";
   }, [bank]);
-
-  useEffect(() => {
-    const onVisibility = () => setVisible(!document.hidden && document.documentElement.dataset.paneVisible !== "false");
-    const onStage = (event: MessageEvent) => {
-      if (event.origin === location.origin && event.data?.type === "obsidience-stage-visibility") {
-        document.documentElement.dataset.paneVisible = String(event.data.visible === true); onVisibility();
-      }
-    };
-    window.addEventListener("message", onStage);
-    document.addEventListener("visibilitychange", onVisibility);
-    onVisibility();
-    return () => { window.removeEventListener("message", onStage); document.removeEventListener("visibilitychange", onVisibility); };
-  }, []);
 
   useEffect(() => {
     if (!host.current || code) return;
@@ -256,7 +219,6 @@ function ProviderGraphStage({fixedBank, availableBanks, memoryPresentation}: {
   }, []);
   useEffect(() => {
     if (!rendering) return;
-    let socket: WebSocket | null = null, retry: ReturnType<typeof setTimeout> | null = null, disposed = false;
     function accept(op: GraphOperation, live: boolean) {
       if (!op || !Array.isArray(op.refs)) return;
       if (stranded.current && op.graph_id?.startsWith("code:")) { coalesceRefresh(); return; }
@@ -276,22 +238,17 @@ function ProviderGraphStage({fixedBank, availableBanks, memoryPresentation}: {
         }
       }
     }
-    function connect() {
-      if (disposed) return;
-      socket = new WebSocket(API.replace("http", "ws") + "/ws/activity");
+    const stop = subscribeActivity({
       // The Harness is reachable (again): one more load, never a poll.
-      socket.onopen = () => { setConnected(true); if (stranded.current) coalesceRefresh(); };
-      socket.onmessage = event => {
-        let value; try { value = JSON.parse(event.data); } catch { return; }
-        if (value.type === "snapshot") {
-          for (const op of value.operations || []) accept(op, false);
-        } else if (value.type === "operation") accept(value.operation, true);
-      };
-      socket.onclose = () => { setConnected(false); if (!disposed) retry = setTimeout(connect, 1500); };
-      socket.onerror = () => socket?.close();
-    }
-    connect();
-    return () => { disposed = true; if (retry) clearTimeout(retry); socket?.close(); setConnected(false); };
+      open: () => { setConnected(true); if (stranded.current) coalesceRefresh(); },
+      message: frame => {
+        if (frame.type === "snapshot") {
+          for (const op of frame.operations || []) accept(op as GraphOperation, false);
+        } else if (frame.type === "operation") accept(frame.operation as GraphOperation, true);
+      },
+      close: () => setConnected(false),
+    });
+    return () => { stop(); setConnected(false); };
   }, [rendering, bank, code, data?.graph_id, coalesceRefresh]);
   useEffect(() => () => { if (refreshTimer.current) clearTimeout(refreshTimer.current); }, []);
 
@@ -359,8 +316,7 @@ function ProviderGraphStage({fixedBank, availableBanks, memoryPresentation}: {
   useEffect(() => {
     if (!selected || code || !bank) return;
     const controller = new AbortController();
-    json<Record<string, unknown>>("/api/graphs/memory/record?bank=" + encodeURIComponent(bank)
-      + "&id=" + encodeURIComponent(selected.id.split("/").at(-1)!), controller.signal)
+    api.memoryRecord(bank, selected.id.split("/").at(-1)!, controller.signal)
       .then(setDetail).catch(() => {});
     return () => controller.abort();
   }, [selected?.id, code, bank]);

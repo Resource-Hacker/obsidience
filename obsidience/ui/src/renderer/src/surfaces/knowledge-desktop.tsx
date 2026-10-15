@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import {
+  SURFACE_IDS,
   onShellGraphDisplay,
   onShellKnowledgeVisibility,
 } from "@/lib/shell-client";
+import { useSurfaceVisibility } from "@/lib/surface-visibility";
 import { GraphBackdrop } from "@/panes/graph-backdrop";
 import "./provider-graph.css";
 
@@ -15,31 +17,15 @@ export function KnowledgeDesktopSurface() {
   const library = query.get("graph") === "library";
   const [consumers, setConsumers] = useState(0);
   const requestedSurfaceId = query.get("surface_id") ?? "samsung";
-  const surfaceId = ["samsung", "usb-c", "dp-4"].includes(requestedSurfaceId)
+  const surfaceId = SURFACE_IDS.includes(requestedSurfaceId)
     ? requestedSurfaceId
     : "samsung";
   const [visible, setVisible] = useState(true);
-  const [stageVisible, setStageVisible] = useState(true);
+  const stageVisible = useSurfaceVisibility();
   const [selectedSurfaceId, setSelectedSurfaceId] = useState("usb-c");
 
   useEffect(() => library ? undefined : onShellKnowledgeVisibility(surfaceId, setVisible), [surfaceId, library]);
   useEffect(() => onShellGraphDisplay(setSelectedSurfaceId), []);
-  useEffect(() => {
-    let paneVisible = true;
-    const visibility = () => setStageVisible(paneVisible && !document.hidden);
-    const changed = (event: MessageEvent) => {
-      if (event.origin === location.origin && event.data?.type === "obsidience-stage-visibility") {
-        paneVisible = event.data.visible === true; visibility();
-      }
-    };
-    window.addEventListener("message", changed);
-    document.addEventListener("visibilitychange", visibility);
-    visibility();
-    return () => {
-      window.removeEventListener("message", changed);
-      document.removeEventListener("visibilitychange", visibility);
-    };
-  }, []);
 
   const ownsStage = library || selectedSurfaceId === surfaceId;
   const showGraph = ownsStage && ((stageVisible && (library || lockMode || visible)) || consumers > 0);

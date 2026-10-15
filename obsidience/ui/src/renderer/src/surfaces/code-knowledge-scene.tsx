@@ -27,7 +27,7 @@ import {
 } from "@/components/themes/obsidience/knowledge-paint";
 import { CODE_GRAPH_ID, loadGraphTuning, onGraphThinkingTest, onGraphTuning } from "@/lib/graph-tuning";
 import { claimShellKnowledgePresenter } from "@/lib/shell-client";
-import { buildThinkingRoute } from "@/panes/graph-backdrop";
+import { buildThinkingRoute } from "@/panes/thinking-route";
 import { operationAccent, operationDeadline, type GraphOperation as ActivityOperation } from "@/panes/graph-activity";
 
 /** Containment is the hierarchy; every other native relationship is a link. */
