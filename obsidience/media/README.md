@@ -48,6 +48,27 @@ caching disabled. There is no complete-offline guarantee. Watchlists, periodic
 sync, automatic upgrades, autonomous playback and another LLM remain disabled.
 Peer networking does not grant control-API access or change router/VPN/firewall policy.
 
+## Connecting a debrid account
+
+Tiramisu is a direct BitTorrent provider, not a debrid client. A TorBox account
+connection can be prepared with `obsidience/media/connect-torbox`. This installation
+helper uses TorBox's official device login: follow its verification URL and enter
+the displayed code in your own browser. It never asks for a password or API key in
+the terminal, buys a subscription, registers media or changes the active provider.
+It waits only for the provider's bounded authorization window; Ctrl+C cancels it.
+
+The returned token is encrypted with user-scoped `systemd-creds` as
+`~/.config/credentials/obsidience-media-torbox.cred`; an existing credential is never
+overwritten. `obsidience/media/connect-torbox --status` reads only connection/plan
+status into a sanitized report. Account authorization alone does not establish
+paid access, cache coverage, mounted file readiness or playback acceptance.
+
+The debrid runtime adapter is not yet installed. Keep the working Tiramisu route
+until the selected account's cache API, exact file mapping and native delivery
+have been verified. TorBox's supported WebDAV interface can provide media bytes
+through an upstream read-only filesystem mount; neither credentials nor generated
+download URLs belong in catalogue titles, QML, receipts or conversation context.
+
 ## Mount and catalogue lifecycle
 
 Each virtual root adds `mount_path` to its ordinary `id`, `path` and

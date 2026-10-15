@@ -1,0 +1,218 @@
+#!/usr/bin/python
+"""Connect TorBox by its official device flow; never activate Media services."""
+import argparse
+from datetime import datetime, timezone
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+import time
+from urllib.parse import urlsplit
+
+import httpx
+
+API = 'https://api.torbox.app/v1/api/user/'
+NAME = 'obsidience-media-torbox'
+MAX_RESPONSE = 128 * 1024
+
+
+class ConnectError(Exception):
+    """Only fixed, credential-free messages may cross this boundary."""
+
+
+def request(client, method, endpoint, **kwargs):
+    deadline = time.monotonic() + 15
+    with client.stream(method, API + endpoint, **kwargs) as reply:
+        if reply.headers.get('content-encoding', 'identity') != 'identity':
+            raise ConnectError('TorBox returned an unsupported response encoding.')
+        body = bytearray()
+        for chunk in reply.iter_raw():
+            body.extend(chunk)
+            if len(body) > MAX_RESPONSE or time.monotonic() >= deadline:
+                raise ConnectError('TorBox response exceeded the request limit.')
+        try:
+            value = json.loads(body)
+        except (ValueError, UnicodeError):
+            raise ConnectError('TorBox returned an invalid response.') from None
+        if not isinstance(value, dict):
+            raise ConnectError('TorBox returned an invalid response.')
+        return reply.status_code, value
+
+
+def data_ok(status, value):
+    if not 200 <= status < 300 or value.get('success') is not True:
+        raise ConnectError('TorBox did not accept the request.')
+    data = value.get('data')
+    if not isinstance(data, dict):
+        raise ConnectError('TorBox returned an invalid response.')
+    return data
+
+
+def token_value(value):
+    if not isinstance(value, str) or not re.fullmatch(r'[A-Za-z0-9._~-]{16,8192}', value):
+        raise ConnectError('TorBox returned an invalid credential.')
+    return value
+
+
+def account_status(client, token):
+    status, value = request(client, 'GET', 'me', params={'settings': 'false'},
+                            headers={'Authorization': 'Bearer ' + token})
+    data = data_ok(status, value)
+    plan_id = data.get('plan')
+    plan = {0: 'free', 1: 'essential', 2: 'pro', 3: 'standard'}.get(
+        plan_id if type(plan_id) is int else None, 'unknown')
+    expiry = None
+    raw_expiry = data.get('premium_expires_at')
+    if isinstance(raw_expiry, str) and len(raw_expiry) <= 64:
+        try:
+            expiry = datetime.fromisoformat(raw_expiry.replace('Z', '+00:00'))
+            if expiry.tzinfo is None:
+                expiry = None
+        except ValueError:
+            pass
+    paid = None
+    if plan == 'free':
+        paid = False
+    elif plan != 'unknown' and expiry is not None:
+        paid = expiry > datetime.now(timezone.utc)
+    subscribed = data.get('is_subscribed')
+    return {'connection': 'connected', 'plan': plan, 'paid_active': paid,
+            'subscribed': subscribed if type(subscribed) is bool else None,
+            'premium_expires_at': expiry.astimezone(timezone.utc).isoformat() if expiry else None,
+            'runtime_changed': False}
+
+
+def credential_path(create):
+    directory = Path.home() / '.config/credentials'
+    if create:
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    info = directory.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+        raise ConnectError('Credential directory must be an owner-only directory.')
+    return directory / (NAME + '.cred')
+
+
+def store_token(path, token):
+    fd, temporary = tempfile.mkstemp(prefix='.' + NAME + '-', dir=path.parent)
+    try:
+        with os.fdopen(fd, 'wb') as output:
+            result = subprocess.run(
+                ['systemd-creds', '--user', '--name=' + NAME, 'encrypt', '-', '-'],
+                input=token.encode(), stdout=output, stderr=subprocess.DEVNULL, timeout=30)
+            if result.returncode or output.tell() == 0:
+                raise ConnectError('Credential encryption failed; nothing was installed.')
+            output.flush()
+            os.fsync(output.fileno())
+        try:
+            os.link(temporary, path, follow_symlinks=False)
+        except FileExistsError:
+            raise ConnectError('Credential already exists; it was not overwritten.') from None
+        directory_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        os.unlink(temporary)
+
+
+def saved_token(path):
+    info = path.lstat()
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+            or info.st_mode & 0o077 or not 0 < info.st_size <= 65536):
+        raise ConnectError('Saved credential has invalid ownership, mode or size.')
+    result = subprocess.run(
+        ['systemd-creds', '--user', '--name=' + NAME, 'decrypt', str(path), '-'],
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=30)
+    if result.returncode:
+        raise ConnectError('Could not decrypt the saved TorBox credential.')
+    try:
+        return token_value(result.stdout.decode().strip())
+    except UnicodeError:
+        raise ConnectError('Saved TorBox credential is invalid.') from None
+
+
+def authorize(client):
+    started = time.monotonic()
+    status, value = request(client, 'GET', 'auth/device/start', params={'app': 'Obsidience Media'})
+    data = data_ok(status, value)
+    device_code = data.get('device_code')
+    code = data.get('code')
+    verification_url = data.get('verification_url')
+    interval = data.get('interval', 5)
+    expires = data.get('expires_in', 600)
+    if (not isinstance(device_code, str) or not 1 <= len(device_code) <= 8192
+            or not isinstance(code, str) or not re.fullmatch(r'[A-Za-z0-9 -]{1,64}', code)
+            or not isinstance(verification_url, str) or len(verification_url) > 512
+            or type(interval) is not int or not 1 <= interval <= 60
+            or type(expires) is not int or expires <= 0):
+        raise ConnectError('TorBox returned invalid device authorization data.')
+    url = urlsplit(verification_url)
+    if (url.scheme != 'https' or url.hostname not in ('torbox.app', 'www.torbox.app')
+            or url.username or url.password or url.query or url.fragment
+            or url.port not in (None, 443) or any(ord(c) < 33 for c in verification_url)):
+        raise ConnectError('TorBox returned an invalid verification URL.')
+    print('Verification URL: ' + verification_url, flush=True)
+    print('Code: ' + code, flush=True)
+    deadline = started + min(expires, 900)
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= interval:
+            raise ConnectError('Authorization expired; run connect-torbox again when ready.')
+        time.sleep(interval)
+        status, value = request(client, 'POST', 'auth/device/token', json={'device_code': device_code})
+        if value.get('success') is True:
+            return token_value(data_ok(status, value).get('access_token'))
+        error = value.get('error')
+        if error == 'DEVICE_CODE_NOT_USED':
+            continue
+        if error == 'ITEM_NOT_FOUND':
+            raise ConnectError('Authorization expired; run connect-torbox again when ready.')
+        if error == 'DEVICE_CODE_USED':
+            raise ConnectError('Authorization was already collected; a new connection is required.')
+        raise ConnectError('TorBox could not complete device authorization; no retry was sent.')
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--status', action='store_true',
+                        help='read saved connection and plan status without starting authorization')
+    args = parser.parse_args()
+    if not shutil.which('systemd-creds'):
+        raise ConnectError('systemd-creds is required.')
+    path = credential_path(create=not args.status)
+    if args.status and not os.path.lexists(path):
+        raise ConnectError('No saved TorBox credential; run connect-torbox when ready.')
+    if not args.status and os.path.lexists(path):
+        raise ConnectError('TorBox credential already exists; use --status. Nothing was replaced.')
+    with httpx.Client(trust_env=False, follow_redirects=False,
+                      timeout=httpx.Timeout(5, connect=5),
+                      headers={'Accept': 'application/json', 'Accept-Encoding': 'identity'}) as client:
+        if args.status:
+            report = account_status(client, saved_token(path))
+        else:
+            token = authorize(client)
+            # Save before an additional API request: redemption is a one-use operation.
+            store_token(path, token)
+            try:
+                report = account_status(client, token)
+            except (ConnectError, httpx.HTTPError):
+                report = {'connection': 'saved_status_unavailable', 'runtime_changed': False}
+        print(json.dumps(report, sort_keys=True))
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except KeyboardInterrupt:
+        print('TorBox connection stopped. No Media service was activated.', file=sys.stderr)
+        raise SystemExit(130)
+    except (ConnectError, OSError, ValueError, subprocess.SubprocessError, httpx.HTTPError) as error:
+        message = str(error) if isinstance(error, ConnectError) else 'TorBox connection could not complete.'
+        print(message, file=sys.stderr)
+        raise SystemExit(1)
