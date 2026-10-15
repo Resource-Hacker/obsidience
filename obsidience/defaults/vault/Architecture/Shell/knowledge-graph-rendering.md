@@ -4,14 +4,16 @@ title: Knowledge graph rendering
 sources:
 - resource: obsidience/harness/knowledge/scope.py
 - resource: obsidience/harness/knowledge/index.py
-- resource: obsidience/ui/src/renderer/src/components/themes/obsidience/knowledge-3d.ts
-- resource: obsidience/ui/src/renderer/src/components/themes/obsidience/knowledge-3d-cloud.ts
-- resource: obsidience/ui/src/renderer/src/components/themes/obsidience/knowledge-3d-shell.ts
-- resource: obsidience/ui/src/renderer/src/components/themes/obsidience/knowledge-3d-scene.tsx
-- resource: obsidience/ui/src/renderer/src/panes/graph-backdrop.tsx
+- resource: obsidience/ui/src/renderer/src/graph/knowledge/knowledge-3d.ts
+- resource: obsidience/ui/src/renderer/src/graph/knowledge/knowledge-3d-cloud.ts
+- resource: obsidience/ui/src/renderer/src/graph/knowledge/knowledge-3d-shell.ts
+- resource: obsidience/ui/src/renderer/src/graph/knowledge/knowledge-3d-scene.tsx
+- resource: obsidience/ui/src/renderer/src/graph/knowledge-stage/graph-backdrop.tsx
+- resource: obsidience/ui/src/renderer/src/graph/knowledge-stage/knowledge-model.ts
+- resource: obsidience/ui/src/renderer/src/graph/knowledge-stage/satellites.ts
 - resource: obsidience/harness/interfaces/api/app.py
 - resource: obsidience/harness/execution/activity.py
-- resource: obsidience/ui/src/renderer/src/panes/graph-activity.ts
+- resource: obsidience/ui/src/renderer/src/graph/knowledge-stage/graph-activity.ts
 ---
 
 

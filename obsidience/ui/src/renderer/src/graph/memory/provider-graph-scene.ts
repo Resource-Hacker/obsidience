@@ -1,30 +1,11 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { GraphPublisher, type GraphControl } from "./graph-stream";
+import type { GraphOperation, ProviderEdge, ProviderGraph, ProviderNode } from "@/lib/api";
+import { GraphPublisher, type GraphControl } from "@/graph/stream";
 import { providerGraphAssets, providerLinkIndex } from "./provider-graph-assets";
-import { createKnowledge3dLabelLayer, type Knowledge3dLabelMeta } from "@/components/themes/obsidience/knowledge-3d-labels";
+import { createKnowledge3dLabelLayer, type Knowledge3dLabelMeta } from "@/graph/knowledge/knowledge-3d-labels";
 import { memoryTimeAxis, memoryInitialOffset, memoryRelationshipWeight, memoryLens, memoryLensX, type MemoryLens, type MemoryTimeAxis } from "./memory-time-layout";
 
-export interface ProviderNode {
-  id: string; name: string; kind: string; color: string;
-  x?: number; y?: number; z?: number; size?: number;
-  file?: string; qualified_name?: string; ref?: string; text?: string; graph_id?: string;
-  start_line?: number; end_line?: number; body_hash?: string; external?: boolean;
-  aliases?: string[];
-  date?: string; occurred_start?: string | null; occurred_end?: string | null;
-  tags?: string[]; proof_count?: number; support?: string[];
-}
-export interface ProviderEdge { source: string; target: string; kind: string; color?: string; weight?: number }
-export interface ProviderGraph {
-  provider: string; graph_id: string; nodes: ProviderNode[]; edges: ProviderEdge[];
-  total: number; limited: boolean; missed?: number; updated_at?: string; project?: string; revision?: string;
-  code_root?: string; code_file?: string; external_count?: number;
-  index?: {state: string; updated_at?: string; error?: string};
-}
-export interface GraphOperation {
-  id: string; kind: string; status: string; refs: string[]; label: string;
-  graph_id: string; at: number; expires_at: number; refresh: boolean;
-}
 type Point = ProviderNode & { x: number; y: number; z: number };
 type Pulse = { until: number; start: number; color: THREE.Color };
 type LayoutPoint = {x: number; y: number; z: number; vx?: number; vy?: number; vz?: number};

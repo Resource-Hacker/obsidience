@@ -1,4 +1,4 @@
-import type { GraphLink, GraphNavigationGroup } from "../lib/api";
+import type { GraphLink, GraphNavigationGroup } from "@/lib/api";
 
 /** Exact display identities shared by Article edges and Thinking Packet refs. */
 export function articleDisplayAliases(

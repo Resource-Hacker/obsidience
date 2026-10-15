@@ -5,8 +5,8 @@ import {
   onShellKnowledgeVisibility,
 } from "@/lib/shell-client";
 import { useSurfaceVisibility } from "@/lib/surface-visibility";
-import { GraphBackdrop } from "@/panes/graph-backdrop";
-import "./provider-graph.css";
+import { GraphBackdrop } from "@/graph/knowledge-stage/graph-backdrop";
+import "@/styles/provider-graph.css";
 
 const CENTERED_HUB = { x: 0.5, y: 0.5 } as const;
 

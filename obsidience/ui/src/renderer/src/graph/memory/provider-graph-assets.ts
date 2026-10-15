@@ -1,8 +1,8 @@
 import * as THREE from "three";
 import {
   POINT_VERTEX_SHADER, POINT_FRAGMENT_SHADER, BEAM_VERTEX_SHADER, CROSS_PATH_FRAGMENT_SHADER,
-} from "@/components/themes/obsidience/knowledge-3d-shaders";
-import type { ProviderNode, ProviderEdge } from "./provider-graph-scene";
+} from "@/graph/knowledge/knowledge-3d-shaders";
+import type { ProviderNode, ProviderEdge } from "@/lib/api";
 import { memoryRelationshipWeight } from "./memory-time-layout";
 
 /** Provider data adapted to the Knowledge graph's actual orb and beam shaders. */

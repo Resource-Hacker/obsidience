@@ -4,7 +4,7 @@ import {
   DEFAULT_KNOWLEDGE_3D_TUNING,
   clampKnowledge3dTuning,
   type Knowledge3dTuning,
-} from "@/components/themes/obsidience/knowledge-3d";
+} from "@/graph/knowledge/knowledge-3d";
 
 export const MAIN_GRAPH_ID = "main";
 export const LIBRARY_GRAPH_ID = "library";

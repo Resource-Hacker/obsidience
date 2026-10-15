@@ -1,5 +1,5 @@
 import type { GraphSource } from "@/lib/shell-client";
-import { GraphPublisher, type GraphControl } from "@/surfaces/graph-stream";
+import { GraphPublisher, type GraphControl } from "@/graph/stream";
 // Real-time 3D knowledge model (three.js). Owner-directed 2026-07-31: the
 // model IS the 2D radial map lifted into 3D space. Node positions are the
 // deterministic 2D layout verbatim (plus a bounded per-node depth), and the

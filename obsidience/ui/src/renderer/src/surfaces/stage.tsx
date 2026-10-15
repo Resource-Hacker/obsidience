@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { onShellStageVisibility, type StageRegion } from "@/lib/shell-client";
 import { useSurfaceVisibility } from "@/lib/surface-visibility";
-import "./provider-graph.css";
+import "@/styles/provider-graph.css";
 
 const VIEWS = ["memory", "library", "code"];
 

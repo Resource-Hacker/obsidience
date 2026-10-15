@@ -1,7 +1,5 @@
 /** The Harness API client: every page's HTTP calls and socket origin. */
 
-import type { ProviderGraph } from "@/surfaces/provider-graph-scene";
-
 const API_BASE = "http://127.0.0.1:8765";
 export const WS_BASE = API_BASE.replace(/^http/, "ws");
 
@@ -103,6 +101,28 @@ export interface KnowledgeActivity {
   retrievalMs?: number;
   /** Main Executive graph or one named satellite agent graph. */
   graphId?: string;
+}
+
+/** The Memory and Code providers' graph (/api/graphs/*) and their /ws/activity operations. */
+export interface ProviderNode {
+  id: string; name: string; kind: string; color: string;
+  x?: number; y?: number; z?: number; size?: number;
+  file?: string; qualified_name?: string; ref?: string; text?: string; graph_id?: string;
+  start_line?: number; end_line?: number; body_hash?: string; external?: boolean;
+  aliases?: string[];
+  date?: string; occurred_start?: string | null; occurred_end?: string | null;
+  tags?: string[]; proof_count?: number; support?: string[];
+}
+export interface ProviderEdge { source: string; target: string; kind: string; color?: string; weight?: number }
+export interface ProviderGraph {
+  provider: string; graph_id: string; nodes: ProviderNode[]; edges: ProviderEdge[];
+  total: number; limited: boolean; missed?: number; updated_at?: string; project?: string; revision?: string;
+  code_root?: string; code_file?: string; external_count?: number;
+  index?: {state: string; updated_at?: string; error?: string};
+}
+export interface GraphOperation {
+  id: string; kind: string; status: string; refs: string[]; label: string;
+  graph_id: string; at: number; expires_at: number; refresh: boolean;
 }
 
 export interface MemoryBank { id: string; name: string; agent_ref: string; count: number }

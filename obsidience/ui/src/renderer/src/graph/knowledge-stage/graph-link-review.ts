@@ -1,11 +1,11 @@
-import type { GraphLink, GraphLinkProposal, LinkReviewChange } from "../lib/api";
+import type { GraphLink, GraphLinkProposal, LinkReviewChange } from "@/lib/api";
 import {
   KNOWLEDGE_LINK_APPROVAL_DURATION_MS,
   type Knowledge3dRelationEffect,
   type Knowledge3dRenderNode,
   type Knowledge3dRenderEdge,
-} from "../components/themes/obsidience/knowledge-3d-cloud";
-import { knowledgeAmbientEdgeStroke, knowledgeNodeRadius, paletteForBranch } from "../components/themes/obsidience/knowledge-paint";
+} from "@/graph/knowledge/knowledge-3d-cloud";
+import { knowledgeAmbientEdgeStroke, knowledgeNodeRadius, paletteForBranch } from "@/graph/knowledge/knowledge-paint";
 import { withoutTaxonomyLinks } from "./graph-links";
 
 /** Preview the eventual physical graph only at the Scene boundary. Callers

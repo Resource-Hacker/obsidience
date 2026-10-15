@@ -1,5 +1,5 @@
 import { openGraphPort, type GraphSignal, type GraphSource } from "@/lib/shell-client";
-import type { ProviderNode } from "./provider-graph-scene";
+import type { ProviderNode } from "@/lib/api";
 
 export const MEMORY_TYPES: Record<string, string> = {world: "World facts", experience: "Experiences", observation: "Observations"};
 export type GraphControl = {action: string; id?: string; graphId?: string; value?: string | boolean; x?: number; y?: number; dx?: number; dy?: number};

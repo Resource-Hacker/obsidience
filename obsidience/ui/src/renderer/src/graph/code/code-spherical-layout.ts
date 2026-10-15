@@ -1,4 +1,4 @@
-import type { ProviderGraph } from "./provider-graph-scene";
+import type { ProviderGraph } from "@/lib/api";
 
 export const CODE_STRUCTURE = new Set(["Project", "Branch", "Folder", "File", "Module", "Package"]);
 

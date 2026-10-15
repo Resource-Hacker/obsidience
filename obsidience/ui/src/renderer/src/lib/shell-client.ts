@@ -2,7 +2,7 @@ import {
   KNOWLEDGE_3D_TUNING_FIELDS,
   clampKnowledge3dTuning,
   type Knowledge3dTuning,
-} from "@/components/themes/obsidience/knowledge-3d";
+} from "@/graph/knowledge/knowledge-3d";
 import {
   CODE_GRAPH_ID,
   LIBRARY_GRAPH_ID,
@@ -16,7 +16,7 @@ import {
   requestGraphThinkingTest,
   saveGraphTuningProfile,
   selectGraphTuningProfile,
-} from "@/lib/graph-tuning";
+} from "@/graph/tuning";
 import { api } from "@/lib/api";
 
 const SHELL_URL = "ws://127.0.0.1:8768";

@@ -1,5 +1,5 @@
 import { forceSimulation, forceLink, forceManyBody, forceCollide, forceCenter, forceY, forceZ, type ForceSimulationNode } from "d3-force-3d";
-import type { ProviderNode, ProviderEdge } from "./provider-graph-scene";
+import type { ProviderNode, ProviderEdge } from "@/lib/api";
 
 export interface MemoryLens { center: number; radius: number }
 export interface MemoryTimeAxis {

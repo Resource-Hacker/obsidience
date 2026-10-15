@@ -1,12 +1,12 @@
 /** The thinking route over one graph cloud: the refs that ignite, the
  *  waypoints the beam passes and its timing. Shared by the Knowledge and Code stages. */
 
-import type { Knowledge3dRenderEdge, Knowledge3dRenderNode } from "@/components/themes/obsidience/knowledge-3d-scene";
+import type { Knowledge3dRenderEdge, Knowledge3dRenderNode } from "@/graph/knowledge/knowledge-3d-scene";
 import {
   computeKnowledgeSweepPlan,
   knowledge3dPathSpec,
   type Knowledge3dPathSpec,
-} from "@/components/themes/obsidience/knowledge-3d";
+} from "@/graph/knowledge/knowledge-3d";
 
 export interface GraphCloud {
   nodes: Knowledge3dRenderNode[];

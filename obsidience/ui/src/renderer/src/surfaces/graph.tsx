@@ -2,9 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Brain, Braces, Network, Search, Scan, RefreshCw, Radio, X, ArrowUpRight, ArrowLeft, Layers, ChevronDown } from "lucide-react";
 import { SURFACE_IDS, presentShellReader, presentShellSource, onShellStageVisibility, onShellGraphView, selectShellGraphView, type GraphView, type GraphSource } from "@/lib/shell-client";
 import { useSurfaceVisibility } from "@/lib/surface-visibility";
-import { GraphSubscriber, MEMORY_TYPES, type GraphCatalog, type GraphControl, type GraphViewState } from "./graph-stream";
-import type { ProviderNode } from "./provider-graph-scene";
-import "./provider-graph.css";
+import { GraphSubscriber, MEMORY_TYPES, type GraphCatalog, type GraphControl, type GraphViewState } from "@/graph/stream";
+import type { ProviderNode } from "@/lib/api";
+import "@/styles/provider-graph.css";
 
 const IDENTITIES = {
   memory: {title: "Memory", subtitle: "OPERATIONAL MEMORY", source: "HINDSIGHT", Icon: Brain},

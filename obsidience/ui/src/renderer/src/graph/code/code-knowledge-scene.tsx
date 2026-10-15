@@ -4,16 +4,16 @@
  *  only maps them onto the renderer's nodes, links and activity. */
 
 import { useEffect, useMemo, useState } from "react";
-import type { GraphControl, GraphPublisher } from "./graph-stream";
-import type { GraphOperation, ProviderGraph, ProviderNode } from "./provider-graph-scene";
+import type { GraphControl, GraphPublisher } from "@/graph/stream";
+import type { GraphOperation, ProviderGraph, ProviderNode } from "@/lib/api";
 import { codeLayoutAncestry } from "./code-spherical-layout";
 import {
   Knowledge3dScene,
   type Knowledge3dLabelMeta,
   type Knowledge3dRenderEdge,
   type Knowledge3dRenderNode,
-} from "@/components/themes/obsidience/knowledge-3d-scene";
-import { layoutKnowledgeGraph } from "@/components/themes/obsidience/knowledge-layout";
+} from "@/graph/knowledge/knowledge-3d-scene";
+import { layoutKnowledgeGraph } from "@/graph/knowledge/knowledge-layout";
 import {
   BRAIN_PALETTE,
   chromaticKnowledgePalette,
@@ -24,11 +24,11 @@ import {
   knowledgeSubjectRingScale,
   knowledgeSubjectRingWidth,
   type KnowledgeBranchPalette,
-} from "@/components/themes/obsidience/knowledge-paint";
-import { CODE_GRAPH_ID, loadGraphTuning, onGraphThinkingTest, onGraphTuning } from "@/lib/graph-tuning";
+} from "@/graph/knowledge/knowledge-paint";
+import { CODE_GRAPH_ID, loadGraphTuning, onGraphThinkingTest, onGraphTuning } from "@/graph/tuning";
 import { claimShellKnowledgePresenter } from "@/lib/shell-client";
-import { buildThinkingRoute } from "@/panes/thinking-route";
-import { operationAccent, operationDeadline, type GraphOperation as ActivityOperation } from "@/panes/graph-activity";
+import { buildThinkingRoute } from "@/graph/knowledge-stage/thinking-route";
+import { operationAccent, operationDeadline, type GraphOperation as ActivityOperation } from "@/graph/knowledge-stage/graph-activity";
 
 /** Containment is the hierarchy; every other native relationship is a link. */
 const CONTAINMENT = new Set(["HAS_BRANCH", "CONTAINS_FOLDER", "CONTAINS_FILE", "DEFINES", "DEFINES_METHOD"]);

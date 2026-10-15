@@ -1,4 +1,4 @@
-import { GraphPublisher, type GraphCatalog, type GraphViewState } from "./graph-stream";
+import { GraphPublisher, type GraphCatalog, type GraphViewState } from "@/graph/stream";
 import type { ProviderPresentationFactory } from "./provider-graph-scene";
 
 type BankView = {
