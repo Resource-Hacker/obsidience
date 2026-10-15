@@ -40,6 +40,9 @@ export class DiscordTransport {
     this.mutating = false;
     this.closing = false;
     this.lastError = null;
+    this.receiveError = null;
+    this.receiveCounters = { starts: 0, failures: 0, rx_packets: 0, decoded_pcm_bytes: 0,
+      forwarded_pcm_bytes: 0, wake_events: 0, transcript_events: 0 };
     this.clients = new Set();
     const intents = [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.GuildMessages];
     if (config.message_content_intent) intents.push(GatewayIntentBits.MessageContent);
@@ -84,7 +87,8 @@ export class DiscordTransport {
       generation: this.generation, receivers: this.receivers.size,
       active_turns: this.turns.size, pending_speech: this.pendingSpeech.size,
       playback: this.mediaPlayer.state.status, speech_playback: this.speechPlayer.state.status,
-      media_kind: 'audio_only', video_supported: false, last_error: this.lastError };
+      media_kind: 'audio_only', video_supported: false, last_error: this.lastError,
+      receive_error: this.receiveError, receive_counters: { ...this.receiveCounters } };
   }
 
   allowed(channel) {
@@ -175,7 +179,7 @@ export class DiscordTransport {
     this.connection = connection;
     connection.on('error', () => { this.lastError = 'voice_connection_failed'; void this.leave(); });
     connection.on(VoiceConnectionStatus.Disconnected, () => { void this.leave(); });
-    connection.receiver.speaking.on('start', (id) => { void this.receive(id).catch(() => { this.lastError = 'receive_failed'; }); });
+    connection.receiver.speaking.on('start', (id) => { void this.receive(id).catch((error) => this.receiveFailed('receive', error)); });
     try { await entersState(connection, VoiceConnectionStatus.Ready, 15000); }
     catch { if (this.connection === connection) await this.leave(); fail('voice_not_ready'); }
     if (generation !== this.generation || this.connection !== connection) fail('join_cancelled');
@@ -193,54 +197,102 @@ export class DiscordTransport {
     receiver.process.kill('SIGKILL');
   }
 
+  countReceive(key, amount = 1) {
+    this.receiveCounters[key] = Math.min(1_000_000_000, this.receiveCounters[key] + amount);
+  }
+
+  receiveFailed(phase, error, exitCode = null) {
+    this.lastError = 'receive_failed';
+    this.countReceive('failures');
+    const name = error?.constructor?.name;
+    // Never emit error messages or raw stack lines: they can contain content.
+    const lines = [];
+    for (const frame of String(error?.stack ?? '').split('\n').slice(1, 24)) {
+      const offset = frame.indexOf(`${import.meta.url}:`);
+      if (offset < 0) continue;
+      const location = frame.slice(offset + import.meta.url.length + 1).match(/^(\d+):\d+\)?$/);
+      if (location) lines.push(Number(location[1]));
+    }
+    this.receiveError = { phase, exception_class: typeof name === 'string' && /^[A-Za-z_][A-Za-z0-9_]{0,79}$/.test(name) ? name : null,
+      file: 'bot.mjs', lines: lines.slice(0, 8), ...(Number.isInteger(exitCode) ? { exit_code: exitCode } : {}) };
+    console.log(JSON.stringify({ component: 'discord_transport', event: 'receive_failed', ...this.receiveError }));
+  }
+
   async receive(memberId) {
     if (!this.connection || !this.channel || this.receivers.has(memberId) || this.receivers.size >= 8) return;
     const generation = this.generation;
     let member = this.channel.members.get(memberId);
     if (!member || member.user.bot || member.voice.channelId !== this.channel.id) return;
-    // Recover only on a real speaking event. There is no idle reconnect loop,
-    // and no buffered utterance/request is replayed after dependency loss.
-    if (!this.speech || this.speech.destroyed) await this.connectSpeech();
-    if (generation !== this.generation || !this.connection || !this.channel || this.closing) return;
-    member = this.channel.members.get(memberId);
-    if (!member || member.user.bot || member.voice.channelId !== this.channel.id || this.receivers.has(memberId)) return;
-    const principal = this.principal(memberId);
-    const decoder = new OpusEncoder(48000, 2);
-    const opus = this.connection.receiver.subscribe(memberId, { end: { behavior: EndBehaviorType.AfterSilence, duration: 300 } });
-    const child = spawn('/usr/bin/ffmpeg', ['-nostdin', '-hide_banner', '-loglevel', 'error', '-threads', '1', '-filter_threads', '1',
-      '-f', 's16le', '-ar', '48000', '-ac', '2', '-i', 'pipe:0', '-f', 's16le', '-ar', '16000', '-ac', '1', '-blocksize', '3200', 'pipe:1'],
-    { stdio: ['pipe', 'pipe', 'ignore'], env: { PATH: '/usr/bin', LANG: 'C' } });
-    const record = { opus, process: child };
-    this.receivers.set(memberId, record);
-    const current = () => generation === this.generation && this.receivers.get(memberId) === record;
-    const destroy = () => { if (current()) this.dropReceiver(memberId); };
-    child.on('error', destroy);
-    child.stdin.on('error', destroy);
-    child.stdout.on('error', destroy);
-    opus.on('error', destroy);
-    opus.on('data', (packet) => {
-      if (!current()) return;
-      try {
-        const pcm = decoder.decode(packet);
-        if (child.stdin.writableLength > 192000) return destroy();
-        if (!child.stdin.write(pcm)) { opus.pause(); child.stdin.once('drain', () => { if (current()) opus.resume(); }); }
-      } catch { destroy(); }
-    });
-    opus.on('end', () => child.stdin.end());
-    child.stdout.on('data', (pcm) => {
-      if (!current()) return;
-      try {
-        for (let offset = 0; offset < pcm.length; offset += 12000) {
-          this.sendSpeech({ type: 'audio', ...principal, pcm: pcm.subarray(offset, offset + 12000).toString('base64'),
-            sample_rate: 16000, channels: 1, format: 's16le' });
-        }
-      } catch { destroy(); this.lastError = 'receive_backpressure'; }
-    });
-    child.on('close', () => {
-      if (!current()) return;
-      this.receivers.delete(memberId);
-      opus.destroy();
-    });
+    let phase = 'connect_speech';
+    let opus, child;
+    try {
+      // Recover only on a real speaking event. Never replay buffered requests.
+      if (!this.speech || this.speech.destroyed) await this.connectSpeech();
+      if (generation !== this.generation || !this.connection || !this.channel || this.closing) return;
+      member = this.channel.members.get(memberId);
+      if (!member || member.user.bot || member.voice.channelId !== this.channel.id || this.receivers.has(memberId)) return;
+      const principal = this.principal(memberId);
+      phase = 'opus_decoder';
+      const decoder = new OpusEncoder(48000, 2);
+      phase = 'subscribe';
+      opus = this.connection.receiver.subscribe(memberId, { end: { behavior: EndBehaviorType.AfterSilence, duration: 300 } });
+      phase = 'spawn_resampler';
+      child = spawn('/usr/bin/ffmpeg', ['-nostdin', '-hide_banner', '-loglevel', 'error', '-threads', '1', '-filter_threads', '1',
+        '-f', 's16le', '-ar', '48000', '-ac', '2', '-i', 'pipe:0', '-f', 's16le', '-ar', '16000', '-ac', '1', '-blocksize', '3200', 'pipe:1'],
+      { stdio: ['pipe', 'pipe', 'ignore'], env: { PATH: '/usr/bin', LANG: 'C' } });
+      const record = { opus, process: child };
+      this.receivers.set(memberId, record);
+      this.countReceive('starts');
+      const current = () => generation === this.generation && this.receivers.get(memberId) === record;
+      const destroy = () => { if (current()) this.dropReceiver(memberId); };
+      const rejected = (at, error) => {
+        if (!current()) return;
+        this.receiveFailed(at, error);
+        destroy();
+      };
+      child.on('error', (error) => rejected('spawn_resampler', error));
+      child.stdin.on('error', (error) => rejected('resampler_input', error));
+      child.stdout.on('error', (error) => rejected('resampler_output', error));
+      opus.on('error', (error) => rejected('opus_stream', error));
+      opus.on('data', (packet) => {
+        if (!current()) return;
+        this.countReceive('rx_packets');
+        let at = 'opus_decode';
+        try {
+          const pcm = decoder.decode(packet);
+          this.countReceive('decoded_pcm_bytes', pcm.length);
+          at = 'resampler_input';
+          if (child.stdin.writableLength > 192000) {
+            this.receiveFailed('resampler_backpressure', null); return destroy();
+          }
+          if (!child.stdin.write(pcm)) { opus.pause(); child.stdin.once('drain', () => { if (current()) opus.resume(); }); }
+        } catch (error) { rejected(at, error); }
+      });
+      opus.on('end', () => child.stdin.end());
+      child.stdout.on('data', (pcm) => {
+        if (!current()) return;
+        try {
+          for (let offset = 0; offset < pcm.length; offset += 12000) {
+            const chunk = pcm.subarray(offset, offset + 12000);
+            this.sendSpeech({ type: 'audio', ...principal, pcm: chunk.toString('base64'),
+              sample_rate: 16000, channels: 1, format: 's16le' });
+            this.countReceive('forwarded_pcm_bytes', chunk.length);
+          }
+        } catch (error) { rejected('speech_send', error); }
+      });
+      child.on('close', (code) => {
+        if (!current()) return;
+        if (code !== 0) this.receiveFailed('resampler_exit', null, code);
+        this.receivers.delete(memberId);
+        opus.destroy();
+      });
+    } catch (error) {
+      this.receiveFailed(phase, error);
+      opus?.destroy();
+      child?.stdin?.destroy();
+      child?.stdout?.destroy();
+      child?.kill('SIGKILL');
+    }
   }
 
   cancelRequest(requestId, principal = null, source = null) {
@@ -372,11 +424,12 @@ export class DiscordTransport {
     }
     if (!REQUEST_ID.test(message.request_id ?? '')) return;
     if (this.cancelledRequests.has(message.request_id)) return;
-    if (message.type === 'wake') return;
+    if (message.type === 'wake') { this.countReceive('wake_events'); return; }
     if (message.type === 'transcript') {
       if (this.admissions.has(`voice:${message.request_id}`)) return;
       const member = this.channel.members.get(message.member_id);
       if (!member || member.user.bot || member.voice.channelId !== this.channel.id) return;
+      this.countReceive('transcript_events');
       try {
         const result = await this.turn(message.text, principal, message.request_id, 'voice');
         if (result.status !== 'completed' || !result.reply.trim()) {

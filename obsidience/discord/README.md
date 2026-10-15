@@ -176,6 +176,14 @@ Transport sends `audio` with base64 `pcm`, `sample_rate:16000`, `channels:1`,
 received with `selfDeaf:false`, decoded per Discord user identity at 48k stereo and
 resampled to 16k mono. At most eight live receive pipelines exist. Stream/socket
 backpressure terminates that receiver instead of accumulating unbounded audio.
+Status includes saturating process-lifetime `receive_counters`: receiver starts,
+failures, Opus RX packets, decoded 48k stereo PCM bytes, successfully forwarded
+16k mono PCM bytes, accepted wake events and accepted transcript events. Values
+cap at one billion; they retain no speaker identity, audio or text. Compare
+before/after snapshots around one real utterance. `receive_error` and the matching
+journal event report only the fixed failing phase, exception class and line
+numbers in `bot.mjs` (plus a numeric FFmpeg exit code when available). Exception
+messages, raw stack lines, PCM, transcripts and credentials are never emitted.
 The speech owner supplies bounded silence for acoustic endpointing between packets.
 
 A global `{"type":"reset","generation":"UUID"}` clears all streams. A principal
