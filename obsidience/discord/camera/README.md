@@ -64,8 +64,11 @@ The owner is already a member of `video`; confirm the new device is writable by
 that group. The script refuses a physical video device or a virtual node whose
 name differs from `Squanchbot Graph`. Start the producer before selecting it in
 Discord: `exclusive_caps=1` exposes it as a capture camera only while a producer
-has established its format. The initial `frames_submitted` journal event means
-FFmpeg accepted source bytes, not camera readback or Discord delivery acceptance.
+has established its format. The `camera_ready` journal event and systemd READY notification follow a bounded
+readback of the exact V4L2 device label, capture capability, YU12 format, selected
+size and 15-fps setting. They do not establish a captured frame or Discord delivery
+acceptance. The initial format check stops after ten seconds; it does not become
+ongoing device polling.
 
 For 1080p, install a user service override replacing ExecStart with the same
 script and `--size 1920x1080`. Do not change desktop display resolution or the
@@ -90,3 +93,13 @@ those outcomes.
   supplies own-page viewport images. This adapter uses no input commands.
 - [v4l2loopback](https://github.com/v4l2loopback/v4l2loopback)
   documents the producer/capture capability transition and missing-input timeout.
+
+## Failure diagnosis
+
+Browser stderr is consumed through a bounded in-memory classifier and never
+printed or retained as raw lines. The journal reports only fixed failure codes
+(for example `browser_profile_read_only` or `browser_sandbox_unavailable`) and a
+numeric browser exit code where available. Browser profiles, configuration and
+cache belong to the same ephemeral runtime directory: Edge Crashpad uses
+`XDG_CONFIG_HOME` even when `--user-data-dir` is supplied, so a read-only home
+requires this explicit private XDG location. No browser sandbox is disabled.

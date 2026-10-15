@@ -5,7 +5,9 @@ Wants=obsidience-harness-dev.service
 ConditionPathExists=/dev/video42
 
 [Service]
-Type=simple
+Type=notify
+NotifyAccess=main
+TimeoutStartSec=60s
 WorkingDirectory=%h/Projects/obsidience
 ExecStartPre=/usr/bin/v4l2-ctl --device=/dev/video42 --set-ctrl=timeout=1000
 ExecStart=/usr/bin/python %h/Projects/obsidience/obsidience/discord/camera/graph-camera.py --size 1280x720
