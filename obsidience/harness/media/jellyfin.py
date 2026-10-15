@@ -314,6 +314,9 @@ class JellyfinCatalogue:
             queued = None
         if cancel is not None and cancel.is_set():
             return {'status': 'pending', 'reason': 'catalogue_refresh_interrupted'}
+        if queued is False:
+            return {'status': 'pending', 'reason': 'catalogue_refresh_rejected',
+                    'http_status': response.status_code}
 
         # Jellyfin queues folder validation asynchronously; verify exact source path,
         # never a fuzzy title. One bounded read may still legitimately return pending.

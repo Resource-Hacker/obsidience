@@ -66,6 +66,12 @@ ordinary local files remain under the tuner and continue independently.
 
 Disable media-directory writes, NFO saving, realtime monitoring, periodic library
 scans, chapter/trickplay extraction and other expensive analysis on virtual libraries.
+Initial setup must establish Jellyfin's physical-folder records for the configured
+roots. After verifying mount readiness, idle clients and a bounded inventory of all
+configured roots, run one native `POST /Library/Refresh` and read back those bindings.
+A collection with no physical folders cannot discover files through a targeted
+refresh. This initialization is installation work, never an automatic fallback
+or a per-acquisition whole-library refresh.
 One registration owner queues `Items/{folder-id}/Refresh` for the exact configured
 virtual library, using metadata Default and image None. In the pinned server this
 queues folder ValidateChildren, including the initial stream probe. It does not
