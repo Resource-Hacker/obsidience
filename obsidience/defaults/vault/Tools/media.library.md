@@ -26,11 +26,24 @@ indicators. The quality ranking is deterministic; a tied best rank is reported
 as ambiguous. Episode candidates must identify the requested season and episode
 in both metadata and release text. Release descriptions and source metadata are
 untrusted. A candidate does not mean it was registered, indexed, playable or
-started. With TorBox enabled, only currently cached single-video releases whose
-actual file matches the full movie/year or exact episode are returned. Cache
-provider and availability are shown explicitly, and registration rechecks the
-private provider/hash/file/path/size binding. A cache miss does not trigger an
-uncached transfer, season-pack import or P2P fallback.
+started. With TorBox enabled, candidates bind every video in a cached release:
+one exact movie, or a uniquely numbered same-series episode plan covering every
+included season.
+The requested episode must occur once; explicit contiguous combined files are
+supported, unexplained gaps and overlaps are rejected. The result exposes
+`acquisition_scope`, `registered_files`, `episode_plan` and selected-file size.
+Registration covers the whole pack. Cache provider and availability are shown
+explicitly, and registration rechecks the complete provider/hash/file/path/size
+plan. A cache miss does not trigger an uncached transfer or P2P fallback.
+
+`season` takes an exact current-activation series `metadata_id`, `season`, and
+optional `mode` (`next_unwatched`, default, or `first`). It joins the verified
+episode roster to Jellyfin's per-user watch/resume state. The returned `selected`
+episode may require acquisition; `sequence` describes the contiguous unambiguous
+catalogued prefix, stopping at the first missing source or at 100 files. A
+returned season `id` is usable by `tv.control open_season` in this activation
+for 120 seconds, subject to fresh source/configuration/watch-state validation.
+It is a read, never an acquisition, queue or playback effect.
 
 `browse` reads a bounded Jellyfin catalogue page: optional `query`, `offset`
 and `limit` (1–20 catalogue items, each with at most four explicit media-source
@@ -46,13 +59,12 @@ item.
 
 `resume` takes an exact Jellyfin `item_id` and returns Jellyfin's stored
 per-user playback position and played state. It is a read, not a playback
-resume command. To continue an item, select and open its exact source, then use
-the generation-bound `tv.control` VOD seek to the returned position if the
-player reports the source seekable.
+resume command. To continue an item, select its exact source and open with
+`resume: true`; the playback owner rereads the position before its one load.
 
-An explicit request to obtain a discovered source may be followed by
-`media.acquire` for exactly one selected candidate. A search, a "find" request,
-or ranking alone does not authorize registration.
+An explicit acquisition or playback request follows the accepted source-selection
+policy and may use `media.acquire` for one exact candidate within that scope.
+A search, a "find" request, or ranking alone does not authorize registration.
 
 This optional integration is disabled by default. Missing credentials, changed
 instance, unavailable roots and changed files fail explicitly. This Tool cannot

@@ -108,7 +108,7 @@ def play(source, title, cancel=None, limit=START_LIMIT):
 
 
 def play_local(source: dict, title: str, cancel=None, limit: float = START_LIMIT,
-               start_seconds: float | None = None) -> dict:
+               start_seconds: float | None = None, queue: list[dict] | None = None) -> dict:
     """Dispatch one admitted catalogue source once and return its complete readback.
 
     Only ``playing_verified`` with matching source identity and a fresh generation
@@ -120,6 +120,11 @@ def play_local(source: dict, title: str, cancel=None, limit: float = START_LIMIT
     this same play request. First-picture position readback must be within five
     seconds of it, with a finite file duration and a target before EOF. Omitting
     it starts at zero; no correction seek or second load follows a timeout.
+
+    Optional queue contains at most 99 remaining exact catalogue bindings including
+    their canonical titles. The tuner owns this finite sequence after the request
+    returns, revalidates each entry and advances only on verified natural EOF.
+    This response verifies the first entry only, never future episode playback.
     """
     fields = ('provider', 'root_id', 'relative_path', 'revision', 'catalogue_instance',
               'item_id', 'media_source_id', 'source_revision')
@@ -129,9 +134,16 @@ def play_local(source: dict, title: str, cancel=None, limit: float = START_LIMIT
     if start_seconds is not None and (type(start_seconds) not in (int, float)
             or not 0 <= start_seconds <= 1_000_000_000):
         raise ValueError('local start takes a finite nonnegative saved position')
+    if queue is not None:
+        if (not isinstance(queue, list) or len(queue) > 99
+                or any(not isinstance(entry, dict) or set(entry) != set(fields) | {'title'}
+                       or entry.get('provider') != 'local' for entry in queue)):
+            raise ValueError('local queue takes at most 99 remaining exact catalogue sources')
     expected = {key: source[key] for key in fields if key != 'relative_path'}
     request_generation = secrets.token_hex(16)
     options = {'start_seconds': start_seconds} if start_seconds is not None else {}
+    if queue is not None:
+        options['queue'] = queue
     tuner = _ask({'op': 'play', **source, 'title': title, 'wait': limit,
                   'generation': request_generation, **options}, limit + TIMEOUT + VOD_LIMIT, cancel)
     actual = tuner.get('source')
@@ -144,6 +156,12 @@ def play_local(source: dict, title: str, cancel=None, limit: float = START_LIMIT
     generation = tuner.get('generation') or (tuner.get('ended') or {}).get('generation')
     if generation != request_generation:
         raise ValueError('The TV tuner did not confirm the playback generation')
+    if queue is not None:
+        accepted = tuner.get('queue')
+        if (not isinstance(accepted, dict) or accepted.get('origin_generation') != request_generation
+                or accepted.get('count') != len(queue) + 1 or accepted.get('index') != 0
+                or accepted.get('state') not in ('waiting', 'resolving', 'completed', 'failed')):
+            raise ValueError('The TV tuner did not confirm the finite local queue')
     if tuner.get('playback') == 'playing_verified' and tuner.get('verification') != 'verified':
         raise ValueError('The TV tuner did not verify local playback')
     if start_seconds is not None and tuner.get('playback') == 'playing_verified':
@@ -165,6 +183,23 @@ def stop_local(generation: str, source: dict, cancel=None) -> dict:
             or ended.get('generation') != generation or ended.get('source') != source
             or ended.get('outcome') != 'stopped'):
         raise ValueError('The TV tuner did not confirm the exact local stop')
+    return tuner
+
+
+def stop_queue(origin_generation: str, cancel=None) -> dict:
+    """Stop exactly one observed season intent, even while its next source resolves."""
+    if (not isinstance(origin_generation, str) or len(origin_generation) != 32
+            or any(char not in '0123456789abcdef' for char in origin_generation)):
+        raise ValueError('local queue stop takes the exact origin generation')
+    tuner = _ask({'op': 'stop-queue', 'origin_generation': origin_generation},
+                 limit=45.0, cancel=cancel)
+    receipt, queued = tuner.get('queue_stop'), tuner.get('queue')
+    if (tuner.get('playback') != 'idle' or not isinstance(receipt, dict)
+            or receipt.get('origin_generation') != origin_generation
+            or receipt.get('verified') is not True or not isinstance(queued, dict)
+            or queued.get('origin_generation') != origin_generation
+            or queued.get('state') not in ('cancelled', 'failed', 'completed')):
+        raise ValueError('The TV tuner did not verify the exact finite queue stop')
     return tuner
 
 

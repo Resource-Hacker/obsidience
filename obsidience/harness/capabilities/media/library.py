@@ -52,6 +52,10 @@ async def execute(args: dict, context: dict) -> dict:
             from ...media import discovery
             return await discovery.candidates(args['metadata_id'], season=args.get('season'),
                                               episode=args.get('episode'), context=context)
+        if action == 'season' and not set(args) - {'action', 'metadata_id', 'season', 'mode'}:
+            from ...media import season
+            return await season.plan(args.get('metadata_id'), args.get('season'),
+                                     args.get('mode', 'next_unwatched'), context)
         if action == 'health' and set(args) == {'action'}:
             from .acquire import status
             return {'status': 'completed', 'acquisition': await status()}

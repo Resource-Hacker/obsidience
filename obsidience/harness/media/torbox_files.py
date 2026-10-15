@@ -126,19 +126,28 @@ def account_file_path(config: dict, registered: dict) -> str:
     candidates = {tag + '/' + p for p in candidates}
     matches = []
     parents = {str(PurePosixPath(p).parent) for p in candidates}
-    # Native directory variants are admitted only if present in a current root listing.
-    roots = dav_files(config, tag)
-    directories = {row['path'] for row in roots if row['directory']}
-    for parent in parents:
-        if parent == tag:
-            rows = roots
-        elif parent in directories:
-            rows = dav_files(config, parent)
+    # Follow only exact candidate ancestors (bounded depth), never recurse over
+    # the account or treat an unlisted nested directory as an admitted path.
+    deadline = time.monotonic() + 12
+    listings = {tag: dav_files(config, tag)}
+    for parent in sorted(parents):
+        parts = PurePosixPath(parent).parts
+        if len(parts) > 8:
+            raise MediaUnavailable('torbox_webdav_path_limit')
+        current = tag
+        for part in parts[1:]:
+            child = current + '/' + part
+            if child not in listings:
+                if not any(row['directory'] and row['path'] == child for row in listings[current]):
+                    break
+                if len(listings) >= 16 or time.monotonic() > deadline:
+                    raise MediaUnavailable('torbox_webdav_path_limit')
+                listings[child] = dav_files(config, child)
+            current = child
         else:
-            continue
-        for row in rows:
-            if not row['directory'] and row['path'] in candidates and row['size'] == registered['size']:
-                matches.append(row['path'])
+            for row in listings[current]:
+                if not row['directory'] and row['path'] in candidates and row['size'] == registered['size']:
+                    matches.append(row['path'])
     matches = list(set(matches))
     if len(matches) != 1:
         raise MediaUnavailable('torbox_webdav_file_unverified')
@@ -170,7 +179,7 @@ def refresh(config: dict, registered: dict) -> str:
 
 
 def describe(config: dict, root: dict, relative: str) -> tuple[str, dict]:
-    from .torbox import TorBoxAPI, _select
+    from .torbox import TorBoxAPI, _select, _episode_span, _selection_plan
     _parts(relative)
     if PurePosixPath(relative).suffix.lower() not in ('.mkv', '.mp4', '.m4v', '.webm'):
         raise MediaUnavailable('unsupported_virtual_media')
@@ -185,33 +194,36 @@ def describe(config: dict, root: dict, relative: str) -> tuple[str, dict]:
         if not row['download_finished'] or not row['download_present'] or tag not in row['tags']:
             continue
         # Provider-owned registration name carries exact metadata identity. It is
-        # checked with the actual single video filename, never trusted as a path.
+        # checked with every actual video filename, never trusted as a path.
         match = re.fullmatch(r'(.+) \((\d{4})\) \[imdbid-(tt\d{7,10})\]', row['name'])
         if not match:
             continue
         for file in row['files']:
             if PurePosixPath(file['path']).suffix.lower() not in ('.mkv', '.mp4', '.m4v', '.webm'):
                 continue
-            episode = re.search(r'(?i)(?<![a-z0-9])s(\d{1,2})e(\d{1,2})(?![a-z0-9])', PurePosixPath(file['path']).stem)
+            # Skip unrelated files before parsing the complete series plan.
+            native = {file['path'], row['name'] + '/' + file['path'],
+                      row['name'] + '/' + PurePosixPath(file['path']).name}
+            if '/' in file['path']:
+                native.add(row['name'] + '/' + file['path'].split('/', 1)[1])
+            if relative not in native:
+                continue
             candidate = {'title': match[1], 'year': int(match[2]),
-                         'type': 'series' if episode else 'movie',
-                         'season': int(episode[1]) if episode else None,
-                         'episode': int(episode[2]) if episode else None}
+                         'type': 'series' if tag == 'obsidience tv' else 'movie'}
+            span = _episode_span(file['path'], candidate) if candidate['type'] == 'series' else None
+            if candidate['type'] == 'series' and span is None:
+                continue
+            candidate.update({'season': span[0] if span else None,
+                              'episode': span[1] if span else None})
             selected = _select(candidate, row['files'])
             if selected != file:
                 continue
             registered = {'hash': row['hash'], 'torrent_id': row['torrent_id'],
                           'name': row['name'], 'tag': tag, **file}
-            # Avoid directory reads for unrelated provider records.
-            native = {file['path'], row['name'] + '/' + file['path'],
-                      row['name'] + '/' + PurePosixPath(file['path']).name}
-            if '/' in file['path']:
-                native.add(row['name'] + '/' + file['path'].split('/', 1)[1])
-            if ((tag == 'obsidience tv') != bool(episode)):
-                continue
-            if relative in native and account_file_path(config, registered) == tag + '/' + relative:
+            if account_file_path(config, registered) == tag + '/' + relative:
                 found.append({**registered, 'imdb': match[3], 'season': candidate['season'],
-                              'episode': candidate['episode'], 'fuse_path': relative})
+                              'episode': candidate['episode'], 'episode_end': span[2] if span else None,
+                              'plan': _selection_plan(candidate, row['files']), 'fuse_path': relative})
     if len(found) != 1 or ready_mount(root) != mount:
         raise MediaUnavailable('torbox_source_identity_unverified')
     identity = {'mount': mount['mount'], 'provider': {**client.binding(), 'mount_owner': mount},

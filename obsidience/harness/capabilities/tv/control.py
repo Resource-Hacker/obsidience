@@ -1306,17 +1306,36 @@ def _bind(candidates, context):
                                   candidate.get('duration') == 'live or unknown')
 
 
-def _open_media(candidate_id, context, row, cancel, resume=False):
+def _open_media(candidate_id, context, row, cancel, resume=False, season=False):
     """One exact catalogue selection through the same TV and playback owners."""
     from ...media import service
-    binding = (context.get('_media_candidates') or {}).get(candidate_id)
-    if binding is None:
-        return {'status': 'failed', 'delivery': 'not_dispatched', 'effect_applied': False,
-                'correction_allowed': True, 'failure': 'Select library content in this turn before opening it.'}
+    prepared, sequence = None, None
+    action = 'open_season' if season else 'open'
+    attempted = context.setdefault('_tv_attempted', set())
+    sequence_token = 'season:' + candidate_id if season else None
+    if sequence_token in attempted:
+        raise ValueError('This season was already attempted in this turn; do not replay it')
+    if season:
+        from ...media.season import resolve
+        prepared = resolve(candidate_id, context)
+        binding = prepared['bindings'][0]
+        record = context['_media_seasons'][candidate_id]
+        if record.get('used'):
+            raise ValueError('This season selection has already been used; do not replay it')
+        sequence = {'id': candidate_id, 'imdb_id': record['imdb'], 'season': record['season'],
+                    'count': len(prepared['bindings']), 'stop_reason': prepared['stop_reason'],
+                    'verification': 'first_source_only'}
+    else:
+        binding = (context.get('_media_candidates') or {}).get(candidate_id)
+        if binding is None:
+            return {'status': 'failed', 'delivery': 'not_dispatched', 'effect_applied': False,
+                    'correction_allowed': True, 'failure': 'Select library content in this turn before opening it.'}
     catalogue = service.catalogue()
     source = catalogue.revalidate(binding)
     start_seconds = None
-    if resume:
+    if season:
+        start_seconds = 0 if prepared['mode'] == 'first' else prepared['resume_position']
+    elif resume:
         saved = catalogue.resume(source['item_id'])
         position = saved.get('position')
         if (saved.get('item_id') != source['item_id'] or saved.get('persistence') != 'read_back'
@@ -1324,7 +1343,6 @@ def _open_media(candidate_id, context, row, cancel, resume=False):
             raise ValueError('The exact library item has no verified stored resume position')
         start_seconds = position
     token = 'media:' + source['source_revision']
-    attempted = context.setdefault('_tv_attempted', set())
     if token in attempted:
         raise ValueError('This media source was already attempted in this turn; do not replay it')
     if not _player.available():
@@ -1345,6 +1363,9 @@ def _open_media(candidate_id, context, row, cancel, resume=False):
     attempted.add(token)
     if cancel is not None and cancel.is_set():
         raise InterruptedError('TV command cancelled before media dispatch')
+    if season:
+        attempted.add(sequence_token)
+        record['used'] = True  # Consume the intent before the first source/route effect.
     context['_tv_effect_uncertain'] = True
     if android and android.get('playback') != 'idle' and not _android.stop():
         raise ValueError('The previous Android playback did not stop; no library item was loaded')
@@ -1353,13 +1374,15 @@ def _open_media(candidate_id, context, row, cancel, resume=False):
     if previous_source != 'player' and _show('player') != 'player':
         raise ValueError('The TV session did not select its existing player')
     title = binding.get('title') or 'Library item'
-    result = _player.play_local(source, title, cancel, start_seconds=start_seconds)
+    options = {'queue': prepared['bindings'][1:]} if season else {}
+    result = _player.play_local(source, title, cancel, start_seconds=start_seconds, **options)
     expected = {key: source[key] for key in ('provider', 'root_id', 'revision',
                                             'catalogue_instance', 'item_id', 'media_source_id', 'source_revision')}
     if (result.get('playback') != 'playing_verified' or not result.get('generation')
             or result.get('source') != expected):
         context['_tv_navigation_applied'] = True
-        return {'status': 'completed', 'delivery': 'acknowledged', 'action': 'open',
+        return {'status': 'completed', 'delivery': 'acknowledged', 'action': action,
+                **({'sequence': sequence} if season else {}),
                 'effect_applied': True, 'must_not_replay': True, 'playback_started': False,
                 'route': 'pc', 'source': 'player', 'pc': result,
                 'note': 'The request was sent once. Playback is pending or unverified; observe, never resend.'}
@@ -1375,15 +1398,37 @@ def _open_media(candidate_id, context, row, cancel, resume=False):
     tv = _state(row, cancel, power)
     context['_tv_effect_uncertain'] = False
     context.pop('_tv_navigation_applied', None)
-    return {'status': 'completed', 'delivery': 'verified', 'action': 'open', 'effect_applied': True,
+    return {'status': 'completed', 'delivery': 'verified', 'action': action, 'effect_applied': True,
+            **({'sequence': sequence} if season else {}),
             'must_not_replay': True, 'route': 'pc', 'source': 'player', 'playback_started': True,
             'pc': current, 'tv': tv,
             'note': 'The exact catalogue source started in the existing player and the TV shows its PC route. '
-                    'Physical picture and sound acceptance remain separate.'}
+                    'Physical picture and sound acceptance remain separate.'
+                    + (' Only this first source is verified; the tuner owns the finite same-season sequence.'
+                       if season else '')}
 
 
 def _stop_media(context, cancel):
     current = _player.state() or {}
+    queued = current.get('queue')
+    if isinstance(queued, dict) and queued.get('state') in ('waiting', 'resolving'):
+        origin = queued.get('origin_generation')
+        if not isinstance(origin, str) or not re.fullmatch(r'[0-9a-f]{32}', origin):
+            raise ValueError('The current season queue identity is unavailable')
+        if cancel is not None and cancel.is_set():
+            raise InterruptedError('TV command cancelled before season stop')
+        context['_tv_effect_uncertain'] = True
+        # The tuner checks this origin atomically, including between two files.
+        # A stale first-episode generation cannot stop a replacement playback.
+        result = _player.stop_queue(origin, cancel=cancel)
+        stopped = result.get('queue') or {}
+        if (result.get('playback') != 'idle' or stopped.get('origin_generation') != origin
+                or stopped.get('state') != 'cancelled'):
+            raise ValueError('The exact season queue did not read back cancelled and idle')
+        context['_tv_effect_uncertain'] = False
+        return {'status': 'completed', 'delivery': 'verified', 'action': 'stop',
+                'effect_applied': True, 'must_not_replay': True,
+                'sequence': {'origin_generation': origin, 'state': 'cancelled'}, 'pc': result}
     if not isinstance(current.get('source'), dict) or not current.get('generation'):
         return {'status': 'failed', 'delivery': 'not_dispatched', 'effect_applied': False,
                 'correction_allowed': True, 'failure': 'No local library playback is active.'}
@@ -1800,10 +1845,13 @@ def _execute(args, context):
                       {'operation', 'generation', 'source', 'kind', 'track_id'}],
               'key': [{'key'}], 'keys': [{'keys'}], 'text': [{'text'}],
               'find': [{'query'}, {'query', 'app'}], 'play': [{'query'}, {'query', 'app'}],
-              'open': [{'id'}, {'url'}, {'id', 'resume'}], 'volume': [{'level'}], 'notice': [{'text'}],
+              'open': [{'id'}, {'url'}, {'id', 'resume'}], 'open_season': [{'id'}], 'volume': [{'level'}], 'notice': [{'text'}],
               **{target: [set()] for target in TARGETS if target != 'volume'}}
     if action not in fields or set(args) - {'action'} not in fields[action]:
         raise ValueError('Invalid TV action arguments')
+    if action == 'open_season' and (not isinstance(args['id'], str)
+            or not re.fullmatch(r's[0-9a-f]{6}', args['id'])):
+        raise ValueError('open_season takes one exact current-activation season selection id')
     if action == 'open' and 'resume' in args and (type(args['resume']) is not bool
             or not isinstance(args.get('id'), str) or not args['id'].startswith('m')):
         raise ValueError('resume takes a boolean for an exact current library selection')
@@ -1856,6 +1904,8 @@ def _execute(args, context):
             return _stop_media(context, cancel)
         if action == 'vod':
             return _vod(args, context, cancel)
+        if action == 'open_season':
+            return _open_media(args['id'], context, row, cancel, season=True)
         if action == 'open' and str(args.get('id', '')).startswith('m'):
             return _open_media(args['id'], context, row, cancel, args.get('resume', False))
         attempted = context.setdefault('_tv_attempted', set())

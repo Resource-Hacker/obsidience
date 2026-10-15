@@ -380,10 +380,19 @@ def _admit(config: dict, root_id: str, relative: str, revision: str | None) -> A
         raise
 
 
-def describe(config: dict, root_id: str, relative_path: str) -> dict:
+def describe(config: dict, root_id: str, relative_path: str, *, expected_episode: dict | None = None) -> dict:
     root = _root(config, root_id)
     if 'mount_path' in root:
-        revision, _ = _virtual(config, root, relative_path)
+        revision, identity = _virtual(config, root, relative_path)
+        if expected_episode is not None:
+            file = identity['file']
+            # TorBox binds the explicit filename span; Tiramisu binds a native
+            # single episode. Missing series identity never becomes a guessed match.
+            actual = {'imdb': file.get('imdb'), 'season': file.get('season'),
+                      'episode': file.get('episode'),
+                      'episode_end': file.get('episode_end', file.get('episode'))}
+            if actual != expected_episode:
+                raise MediaUnavailable('media_episode_source_identity_unverified')
         return {'provider': 'local', 'root_id': root_id, 'relative_path': relative_path, 'revision': revision}
     with _admit(config, root_id, relative_path, None) as source:
         return dict(source.identity)

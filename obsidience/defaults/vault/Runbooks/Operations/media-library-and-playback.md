@@ -14,10 +14,13 @@ Browsing and resume lookup work without the TV. Tiramisu is an optional
 on-demand acquisition provider behind its owner-only Unix socket; Prowlarr's
 public TorrentsCSV indexer is one configured discovery route. When TorBox is
 enabled it owns new cached-only acquisition, while Tiramisu retains source search
-and existing media. Only exact single-video releases are eligible; no uncached
-transfer, season-pack import or P2P fallback is substituted. The TV is an
-optional playback destination. This Runbook does not enable autonomous
-watchlist sync, periodic upgrades or next-episode playback.
+and existing media. Movies require one exact video; episode sources may be
+validated season or series packs whose complete file scope is shown. The accepted
+owner policy allows a cached complete-series pack for the requested episode when
+a narrower eligible source is unavailable. No uncached transfer or P2P fallback
+is substituted. The TV
+is an optional playback destination. Explicit season playback can create one
+finite tuner-owned sequence; watchlist sync and periodic upgrades stay disabled.
 
 1. For a library request, use `media.library browse`; page with `next_offset` and
    identify the exact movie edition or series/season/episode. Resolve ambiguity
@@ -25,6 +28,13 @@ watchlist sync, periodic upgrades or next-episode playback.
    Cinemeta title/year, then `candidates` with the exact season/episode when
    applicable. Ranking is advisory. A tied top rank or ambiguous edition/episode
    needs owner choice.
+   For a season request, resolve its exact series then call `season`, normally
+   with `mode: next_unwatched`; use `first` only for a requested restart. Read
+   its selected episode and sequence boundary. If that episode is missing,
+   discover its exact numbers. Reject unmarked combined pilots and missing
+   numbering rather than skipping episodes. A pack registers all its files:
+   show the complete scope, prefer a narrower eligible source, and keep playback
+   within the requested episode or season even if a complete-series pack is registered.
 2. Browse-only and source-search requests end without registration. For an
    explicit play request, the owner's accepted preference permits obtaining one
    unique recommended exact source if no local item exists. Ask about an ambiguous
@@ -45,12 +55,21 @@ watchlist sync, periodic upgrades or next-episode playback.
    repeated before dispatch. Only verified source, generation, and TV route
    establish playback. Loading, pending or uncertain delivery must not trigger
    another open.
+   For a season request, read a fresh season plan after acquisition and use
+   `open_season` with its id. It plays only the contiguous already-catalogued
+   sources returned by that plan, at most 100 files. The first receipt attests
+   only the first file. Later natural EOF transitions are tuner-owned and
+   revalidate each source; a missing item ends the queue rather than triggering
+   more acquisition. Ordinary `open` never enables this sequence.
 5. To continue from saved progress, open the exact selected source with
    `resume: true`. The playback owner obtains fresh Jellyfin progress and uses it
    in the one load command; it verifies the position within five seconds. Do not
    follow open with an additional resume seek. For other controls first read VOD
    state, then bind pause, unpause, absolute seek, track or stop to its exact
    generation and source. No uncertain effect is replayed. Stop never deletes media.
+   Each queued file gets a new generation. Refresh state before later controls;
+   `stop` cancels the observed season queue even between files, with exact queue
+   identity checked by the tuner before any stop effect.
 
 Existing live TV keeps the same `tv.control` route. A missing library item by itself does not authorize effects. An explicit play
 request uses only the accepted source-selection policy; purchases, another

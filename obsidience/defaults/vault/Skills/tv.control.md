@@ -21,6 +21,18 @@ revalidates the exact item, edition/episode, source revision and approved local 
 file before dispatch. Only verified source/generation and TV-route readback
 establish playback.
 
+For an explicit season playback request, use `media.library season` and pass
+its fresh season id to `open_season`. The default continues at the first
+unfinished episode; the library plan's `first` mode starts from the beginning.
+The tuner owns only the returned contiguous sequence of catalogue sources,
+revalidates each next source at natural EOF and stops at its boundary. It never
+acquires a missing episode or crosses a season. The initial receipt verifies
+only the first file; report the queue count and any missing-source boundary
+without claiming later files already played. Ordinary `open` remains one file.
+Observe again for controls after advancement: each file has a new generation.
+`stop` cancels the observed queue, including the interval between files, and
+cannot act on a replacement queue from a stale observation.
+
 For local VOD controls, use `action: vod` with the exact current `generation`
 and `source` identity returned by VOD state. Use `state` before deciding what
 is playing or which tracks are available. `pause` and `resume` set the target

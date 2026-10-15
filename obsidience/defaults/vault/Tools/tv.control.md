@@ -10,6 +10,15 @@ obsidience:
 
 ## Runtime
 
+`open_season` takes one fresh `id` from `media.library season`. It uses the same
+exact-source admission and TV verification as library `open`, with a finite
+sequence of at most 100 already-catalogued same-season sources. The tuner alone
+advances after verified natural EOF, revalidates each source and issues a new
+generation. The first receipt attests only its first file. Stop cancels the exact
+observed queue even between files; changed origins are rejected before dispatch.
+No missing-source acquisition or cross-season continuation runs at EOF.
+
+
 For an explicitly selected Jellyfin item on this TV, use `find` with `app:
 library` and the query, then `open` its exact current-turn `id`. The catalogue
 is independent; this Tool owns only the TV and playback destination. Library

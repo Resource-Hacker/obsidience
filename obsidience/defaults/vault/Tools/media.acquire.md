@@ -19,12 +19,16 @@ Tiramisu Unix socket. When TorBox is enabled, its separate provider configuratio
 and cached file hash/path/size binding must also remain current. This source
 cannot fall back to Tiramisu or uncached transfer if TorBox becomes unavailable.
 
-This is an acquisition effect. Call it only after the owner explicitly asks to
-obtain the selected source and one exact candidate has been chosen. A search or
-best-rank recommendation by itself is not authorization. It registers one
-movie or one verified season/episode through the configured provider. TorBox
-requires paid access and rechecks the exact single-video cached file before one
-cached-only registration. Multi-video releases and season packs are excluded.
+This is an acquisition effect. Use one exact candidate only for an explicit
+acquisition or playback request under the accepted source-selection policy.
+A search or best-rank recommendation by itself is not authorization. TorBox
+requires paid access and rechecks the complete cached file plan before one
+cached-only registration. A movie has one video; a series pack identifies every
+video as the same series with no overlaps or unexplained gaps inside each included
+season range. The scope and all-file count are explicit. The accepted owner
+policy permits a cached season or complete-series pack containing the requested
+episode when a narrower eligible source is unavailable. Registration does not
+expand the episode or season requested for playback.
 It does not start playback or prove Jellyfin indexed the resulting media.
 
 Each candidate and source identity can be attempted once per activation. The

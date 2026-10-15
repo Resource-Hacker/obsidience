@@ -320,6 +320,8 @@ async def candidates(metadata_id: str, *, season: int | None = None,
     origin = _https_origin(config.get('torrentio_url'), 'torrentio.strem.fun')
     episode_title = None
     first_air_date = None
+    season_episodes = None
+    series_episodes = None
     if metadata['type'] == 'series':
         detail_origin = _https_origin(config.get('catalogue_url'), 'v3-cinemeta.strem.io')
         details = await _json_get(f'{detail_origin}/meta/series/{metadata["imdb"]}.json',
@@ -335,6 +337,22 @@ async def candidates(metadata_id: str, *, season: int | None = None,
                  and video.get('id') == f'{metadata["imdb"]}:{season}:{episode}']
         if len(exact) != 1:
             raise MediaUnavailable('discovery_episode_unavailable')
+        from .season import episode_roster
+        season_episodes = episode_roster(details, metadata['imdb'], season)
+        series_episodes = list(season_episodes)
+        # Validate every included season before a native series-pack tag can
+        # expose it. An invalid unrelated season need not hide a valid source;
+        # its missing roster ensures a pack containing it is refused.
+        if cached_provider is not None:
+            other_seasons = {video['season'] for video in videos if isinstance(video, dict)
+                             and type(video.get('season')) is int
+                             and 1 <= video['season'] <= 99 and video['season'] != season}
+            for number in sorted(other_seasons):
+                try:
+                    series_episodes.extend(episode_roster(details, metadata['imdb'], number))
+                except MediaUnavailable:
+                    continue
+            series_episodes.sort(key=lambda row: (row['season'], row['episode']))
         released = exact[0].get('released')
         if (not isinstance(released, str)
                 or not re.fullmatch(r'(?:19|20)\d{2}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z', released)):
@@ -380,7 +398,11 @@ async def candidates(metadata_id: str, *, season: int | None = None,
         if metadata['type'] == 'series':
             episode_patterns = (rf'(?<![a-z0-9])s{season:02d}\s*e{episode:02d}(?![0-9])',
                                 rf'(?<![a-z0-9]){season}\s*x\s*{episode:02d}(?![0-9])')
-            if not any(re.search(pattern, lower, re.I) for pattern in episode_patterns):
+            # A season release may contain the exact requested episode. Only the
+            # cache file plan can establish that; release labels alone cannot.
+            season_pack = cached_provider is not None and re.search(
+                rf'(?<![a-z0-9])s0*{season}(?=e[0-9]|[^a-z0-9]|$)', lower, re.I)
+            if not season_pack and not any(re.search(pattern, lower, re.I) for pattern in episode_patterns):
                 continue
         hdr = bool(re.search(r'(?<![a-z])(?:hdr10\+?|dolby[ ._-]?vision|dv)(?![a-z])', lower))
         remux = 'remux' in lower
@@ -410,6 +432,7 @@ async def candidates(metadata_id: str, *, season: int | None = None,
                    'release_title': release, 'title': metadata['title'], 'type': metadata['type'],
                    'imdb': metadata['imdb'], 'year': metadata['year'], 'first_air_date': first_air_date,
                    'episode_title': episode_title, 'season': season, 'episode': episode,
+                   'season_episodes': season_episodes, 'series_episodes': series_episodes,
                    'resolution': resolution, 'seeders': seeders, 'size': size,
                    'language_match': language, 'hdr': hdr, 'remux': remux,
                    'quality_score': max(0, rank[1] * 100 + rank[2] * 20 + rank[3] * 10)}
@@ -433,13 +456,30 @@ async def candidates(metadata_id: str, *, season: int | None = None,
                 private.update(match)
                 row['cached'] = True
                 row['cache_provider'] = 'torbox'
+                plan = private['debrid_plan']
+                from .torbox import _plan_scope
+                row.update(_plan_scope(plan))
+                row['episode_plan'] = [{key: file[key] for key in ('season', 'episode', 'episode_end')}
+                                       for file in plan] if private['type'] == 'series' else []
+                if private['type'] == 'series':
+                    selected = next(file for file in plan if file['path'] == private['debrid_file']['path'])
+                    row.update({key: selected[key] for key in ('season', 'episode', 'episode_end')})
+                    row['pack_episodes'] = sum(file['episode_end'] - file['episode'] + 1 for file in plan)
+                # Pack byte size describes the release, not the selected physical file.
+                row['selected_size_bytes'] = private['debrid_file']['size']
                 cached_output.append(row)
             else:
                 del pending[row['candidate_id']]
+        # Prefer the narrowest eligible registration scope, then retain the
+        # provider quality ordering within that scope. Wider choices stay visible.
+        scope_order = {'single_file': 0, 'season_pack': 1, 'series_pack': 2}
+        cached_output.sort(key=lambda row: scope_order[row['acquisition_scope']])
         output = cached_output[:8]
-        # Ranking remains quality-first among exact, currently cached files.
+        # Recommendations cover only this bounded set of currently cached plans.
         recommend = bool(output) and output[0]['resolution'] is not None
-        tied = (len(output) > 1 and all(output[0][key] == output[1][key]
+        tied = (len(output) > 1
+                and output[0]['acquisition_scope'] == output[1]['acquisition_scope']
+                and all(output[0][key] == output[1][key]
                 for key in ('resolution', 'preferred_language_match', 'hdr', 'remux', 'size_bytes')))
         recommend = recommend and not tied
     if len(chosen) + len(output) > 32:
@@ -451,4 +491,4 @@ async def candidates(metadata_id: str, *, season: int | None = None,
             'type': metadata['type'], 'season': season, 'episode': episode,
             'candidates': output, 'ambiguous_best_tie': tied or (not adequate_quality and not cached_provider),
             'cache_provider': 'torbox' if cached_provider else None,
-            'note': ('TorBox returns only cached exact single-video sources; cache is rechecked before registration. ' if cached_provider else '') + 'Recommendation ranks only the eligible results returned by the configured provider, using preferred language, resolution, HDR/remux, seeders and size. Release labels and availability are unverified; downloaded content has not been inspected. Choose one candidate_id to register exactly once; discovery has not acquired media.'}
+            'note': ('TorBox returns only cached exact file plans; season and series packs register every verified included file. Scope, included seasons and episode counts are explicit; playback remains a separate selection. The selected file may explicitly contain a contiguous episode range. Cache is rechecked before new registration. ' if cached_provider else '') + 'Recommendation prefers the narrowest eligible registration scope, then preferred language, resolution, HDR/remux, seeders and size within the bounded returned results. Release labels and availability are unverified; downloaded content has not been inspected. Choose one candidate_id to register exactly once; discovery has not acquired media.'}

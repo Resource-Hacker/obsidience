@@ -25,7 +25,10 @@ from .tiramisu import _normal_hash
 _API = 'https://api.torbox.app/v1/api'
 _BODY_LIMIT = 2 * 1024 * 1024
 _VIDEO = {'.mkv', '.mp4', '.m4v', '.webm'}
-_CONTAINERS = _VIDEO | {'.avi', '.mov', '.ts', '.m2ts', '.mpg', '.mpeg', '.wmv', '.vob', '.iso'}
+_CONTAINERS = _VIDEO | {'.avi', '.mov', '.ts', '.m2ts', '.mpg', '.mpeg', '.wmv', '.vob', '.iso',
+                         '.flv', '.divx', '.ogm', '.ogv', '.3gp', '.mts', '.strm'}
+_SIDECARS = {'.srt', '.sub', '.idx', '.ass', '.ssa', '.vtt', '.nfo', '.txt',
+             '.jpg', '.jpeg', '.png', '.webp', '.xml', '.sfv', '.md', '.torrent'}
 
 
 class TorBoxFile(TypedDict):
@@ -103,43 +106,111 @@ def _words(value: str) -> str:
     return re.sub(r'[\W_]+', ' ', unicodedata.normalize('NFKC', value).casefold()).strip()
 
 
-def _select(candidate: dict, files: list[TorBoxFile]) -> TorBoxFile | None:
-    """Require full filename identity; reject movie packs and episode ambiguity."""
+def _episode_span(path: str, candidate: dict) -> tuple[int, int, int] | None:
+    """Only explicit contiguous filename episode identities; never infer a pilot split."""
+    stem = PurePosixPath(path).stem
+    marker = re.search(r'(?<![a-z0-9])s([0-9]{1,3})e([0-9]{1,3})'
+                       r'((?:-?e[0-9]{1,3})+|-[0-9]{1,3})?(?![a-z0-9])', stem, re.I)
+    if not marker:
+        return None
+    prefixes = {_words(candidate['title'])}
+    year = candidate.get('year')
+    if type(year) is int and 1880 <= year <= 2200:
+        prefixes.add(_words(candidate['title']) + ' ' + str(year))
+    suffix = stem[marker.end():]
+    if (_words(stem[:marker.start()]) not in prefixes
+            or re.match(r'[-_ ]+[0-9]{1,3}(?![a-z0-9])', suffix, re.I)
+            or re.search(r'(?<![a-z0-9])(?:e[0-9]+|s[0-9]+e[0-9]+)', suffix, re.I)
+            or re.search(r'(?<![a-z0-9])(?:sample|trailer|extras?|featurette)(?![a-z0-9])', suffix, re.I)):
+        return None
+    first = int(marker[2])
+    extension = marker[3] or ''
+    numbers = [int(value) for value in re.findall(r'[0-9]+', extension)]
+    last = numbers[-1] if numbers else first
+    is_range = re.fullmatch(r'-e?[0-9]+', extension, re.I) is not None
+    if (first < 1 or not first <= last <= first + 7
+            or numbers and (last <= first or not is_range
+                            and numbers != list(range(first + 1, last + 1)))):
+        return None
+    return int(marker[1]), first, last
+
+
+def _selection_plan(candidate: dict, files: list[TorBoxFile]) -> list[dict] | None:
+    """Every exposed video must be identified before tagging a whole native torrent."""
     title = candidate.get('title')
     if not isinstance(title, str) or not 1 <= len(title) <= 180:
         raise MediaUnavailable('torbox_candidate_invalid')
     videos = [file for file in files if PurePosixPath(file['path']).suffix.lower() in _CONTAINERS]
-    matches = []
+    if not videos or any(file['size'] <= 0 or PurePosixPath(file['path']).suffix.lower()
+                         not in _VIDEO for file in videos):
+        return None
+    if candidate.get('type') == 'movie':
+        year = candidate.get('year')
+        if type(year) is not int or not 1880 <= year <= 2200:
+            raise MediaUnavailable('torbox_movie_year_required')
+        expected = _words(title) + ' ' + str(year)
+        words = _words(PurePosixPath(videos[0]['path']).stem)
+        return [dict(videos[0])] if len(videos) == 1 and (
+            words == expected or words.startswith(expected + ' ')) else None
+    if candidate.get('type') != 'series':
+        raise MediaUnavailable('torbox_candidate_invalid')
+    season, episode = candidate.get('season'), candidate.get('episode')
+    if (type(season) is not int or not 0 <= season <= 999
+            or type(episode) is not int or not 1 <= episode <= 999):
+        raise MediaUnavailable('torbox_episode_identity_required')
+    # Native tags expose the whole directory. Unknown/archived/redirect media
+    # cannot bypass the complete video plan merely through an unlisted suffix.
+    if any(PurePosixPath(file['path']).suffix.lower() not in _VIDEO | _SIDECARS for file in files):
+        return None
+    roster = candidate.get('series_episodes', candidate.get('season_episodes'))
+    known = ({(row['season'], row['episode']) for row in roster
+              if datetime.fromisoformat(row['released'].replace('Z', '+00:00'))
+              <= datetime.now(timezone.utc)} if isinstance(roster, list) else None)
+    plan, seen = [], {}
     for file in videos:
-        stem = PurePosixPath(file['path']).stem
-        if file['size'] <= 0 or PurePosixPath(file['path']).suffix.lower() not in _VIDEO:
-            continue
-        if candidate.get('type') == 'movie':
-            year = candidate.get('year')
-            if type(year) is not int or not 1880 <= year <= 2200:
-                raise MediaUnavailable('torbox_movie_year_required')
-            expected = _words(title) + ' ' + str(year)
-            words = _words(stem)
-            if len(videos) == 1 and (words == expected or words.startswith(expected + ' ')):
-                matches.append(file)
-        elif candidate.get('type') == 'series':
-            season, episode = candidate.get('season'), candidate.get('episode')
-            if (type(season) is not int or not 0 <= season <= 999
-                    or type(episode) is not int or not 1 <= episode <= 999):
-                raise MediaUnavailable('torbox_episode_identity_required')
-            marker = re.search(r'(?<![A-Za-z0-9])s([0-9]{1,3})e([0-9]{1,3})(?![A-Za-z0-9])', stem, re.I)
-            prefixes = {_words(title)}
-            year = candidate.get('year')
-            if type(year) is int and 1880 <= year <= 2200:
-                prefixes.add(_words(title) + ' ' + str(year))
-            if (len(videos) == 1 and marker and _words(stem[:marker.start()]) in prefixes
-                    and (int(marker[1]), int(marker[2])) == (season, episode)
-                    and not re.match(r'[-_ ]+[0-9]{1,3}(?![A-Za-z0-9])', stem[marker.end():])
-                    and not re.search(r'(?i)(?:^|[^a-z0-9])(?:e[0-9]+|s[0-9]+e[0-9]+)', stem[marker.end():])):
-                matches.append(file)
-        else:
-            raise MediaUnavailable('torbox_candidate_invalid')
-    return dict(matches[0]) if len(matches) == 1 else None
+        span = _episode_span(file['path'], candidate)
+        if span is None or not 1 <= span[0] <= 99:
+            return None
+        episodes = set(range(span[1], span[2] + 1))
+        occupied = seen.setdefault(span[0], set())
+        if (occupied & episodes or known is not None
+                and not {(span[0], number) for number in episodes} <= known):
+            return None
+        occupied.update(episodes)
+        plan.append({**file, 'season': span[0], 'episode': span[1], 'episode_end': span[2]})
+    # A hole inside a pack can hide an implicitly combined episode (for example
+    # E01 followed by E03). Never relabel that first file or guess the missing span.
+    if (episode not in seen.get(season, set())
+            or any(numbers != set(range(min(numbers), max(numbers) + 1))
+                   for numbers in seen.values())):
+        return None
+    return sorted(plan, key=lambda row: (row['season'], row['episode'], row['path']))
+
+
+def _select(candidate: dict, files: list[TorBoxFile]) -> TorBoxFile | None:
+    plan = _selection_plan(candidate, files)
+    if not plan:
+        return None
+    matching = [row for row in plan if candidate['type'] == 'movie'
+                or row['season'] == candidate['season']
+                and row['episode'] <= candidate['episode'] <= row['episode_end']]
+    return ({key: matching[0][key] for key in ('file_id', 'path', 'size')}
+            if len(matching) == 1 else None)
+
+
+def _plan_scope(plan: list[dict]) -> dict:
+    seasons = sorted({file['season'] for file in plan if 'season' in file})
+    return {'acquisition_scope': ('series_pack' if len(seasons) > 1 else
+                                  'season_pack' if len(plan) > 1 else 'single_file'),
+            'season_numbers': seasons, 'registered_files': len(plan),
+            'pack_episodes': sum(file['episode_end'] - file['episode'] + 1
+                                 for file in plan if 'episode' in file)}
+
+
+def _plan_paths(plan: list[dict]) -> list[dict]:
+    # Cache IDs and account IDs have different namespaces. Paths, sizes and the
+    # full episode plan must remain identical across that one explicit rebinding.
+    return [{key: value for key, value in row.items() if key != 'file_id'} for row in plan]
 
 
 def _invalid_constant(_value: str):
@@ -269,7 +340,8 @@ class TorBoxAPI:
             info_hash = _normal_hash(candidate.get('hash'))
             file = _select(candidate, cached.get(info_hash, []))
             if file is not None:
-                result[info_hash] = {**self.binding(), 'debrid_file': {'hash': info_hash, **file}}
+                result[info_hash] = {**self.binding(), 'debrid_file': {'hash': info_hash, **file},
+                                     'debrid_plan': _selection_plan(candidate, cached[info_hash])}
         return result
 
     async def mylist(self, *, limit: int = 128, torrent_id: int | None = None,
@@ -320,7 +392,11 @@ class TorBoxAPI:
         if not row['download_present'] or not row['download_finished']:
             raise MediaUnavailable('torbox_existing_not_ready')
         selected = _select(candidate, row['files'])
-        if selected is None or selected['path'] != bound['path'] or selected['size'] != bound['size']:
+        plan = _selection_plan(candidate, row['files'])
+        expected_plan = candidate.get('debrid_plan')
+        if (selected is None or selected['path'] != bound['path'] or selected['size'] != bound['size']
+                or not isinstance(expected_plan, list) or not plan
+                or _plan_paths(plan) != _plan_paths(expected_plan)):
             raise MediaUnavailable('torbox_file_identity_changed')
         # Account file IDs may differ from checkcached; the live ID is admitted here.
         return row, selected
@@ -330,10 +406,16 @@ class TorBoxAPI:
         torrent, file = match
         candidate['_context']['_media_registered_file'] = {
             'hash': torrent['hash'], 'torrent_id': torrent['torrent_id'],
-            'name': torrent['name'], 'tags': torrent['tags'], **file}
+            'name': torrent['name'], 'tags': torrent['tags'], **file,
+            'plan': _selection_plan(candidate, torrent['files'])}
         return {'status': 'completed', 'delivery': 'verified', 'effect_applied': effect,
                 'provider': 'torbox', 'type': 'movie' if candidate['type'] == 'movie' else 'tv',
-                'title': candidate['title'], 'registered_files': 1, 'already_present': existing,
+                'title': candidate['title'], **_plan_scope(candidate['debrid_plan']),
+                'season': candidate.get('season'), 'episode': candidate.get('episode'),
+                'episode_plan': [{key: value for key, value in file.items()
+                                  if key in ('season', 'episode', 'episode_end')}
+                                 for file in candidate['debrid_plan']],
+                'already_present': existing,
                 'reconciled': reconciled, 'must_not_replay': True}
 
     async def organize(self, registered: dict, candidate: dict, cancel=None) -> dict:
@@ -343,7 +425,15 @@ class TorBoxAPI:
         rows = await self.mylist(torrent_id=registered['torrent_id'], cancel=cancel)
         if len(rows) != 1 or rows[0]['hash'] != registered['hash']:
             raise MediaUnavailable('torbox_registration_changed')
+        selected = _select(candidate, rows[0]['files'])
+        plan = _selection_plan(candidate, rows[0]['files'])
+        if (not selected or any(selected[key] != registered[key] for key in ('file_id', 'path', 'size'))
+                or not plan or plan != registered.get('plan')):
+            raise MediaUnavailable('torbox_file_identity_changed')
         tags = rows[0]['tags']
+        other = 'obsidience tv' if tag == 'obsidience movies' else 'obsidience movies'
+        if other in tags:
+            raise MediaUnavailable('torbox_conflicting_library_tag')
         if tag not in tags or rows[0]['name'] != name:
             try:
                 await self._request('PUT', '/torrents/edittorrent',
@@ -354,7 +444,10 @@ class TorBoxAPI:
             for attempt in range(11):
                 rows = await self.mylist(torrent_id=registered['torrent_id'], cancel=cancel)
                 if (len(rows) == 1 and rows[0]['hash'] == registered['hash']
-                        and tag in rows[0]['tags'] and rows[0]['name'] == name):
+                        and tag in rows[0]['tags'] and other not in rows[0]['tags']
+                        and rows[0]['name'] == name
+                        and rows[0]['download_present'] and rows[0]['download_finished']
+                        and _selection_plan(candidate, rows[0]['files']) == plan):
                     break
                 if attempt == 10:
                     raise MediaUnavailable('torbox_library_tag_unverified')
@@ -369,7 +462,10 @@ class TorBoxAPI:
         if (not isinstance(context, dict) or not isinstance(bound, dict)
                 or set(bound) != {'hash', 'file_id', 'path', 'size'}
                 or not _normal_hash(candidate.get('hash'))
-                or bound.get('hash') != _normal_hash(candidate['hash'])):
+                or bound.get('hash') != _normal_hash(candidate['hash'])
+                or not isinstance(candidate.get('debrid_plan'), list)
+                or not candidate['debrid_plan']
+                or candidate.get('type') == 'series' and not isinstance(candidate.get('series_episodes'), list)):
             raise MediaUnavailable('torbox_candidate_binding_invalid')
         # This marker is present before any dispatch and owns all post-write outcomes.
         context['_media_acquisition_outcome'] = {
@@ -377,14 +473,16 @@ class TorBoxAPI:
             'effect_applied': False, 'must_not_replay': True}
         if not (await self.account(cancel))['paid_active']:
             raise MediaUnavailable('torbox_paid_account_required')
-        cached = await self.cache_matches([candidate], cancel)
-        if cached.get(_normal_hash(candidate['hash']), {}).get('debrid_file') != bound:
-            raise MediaUnavailable('torbox_cached_file_changed')
+        # Reconcile account registration before any new POST or cache-expiry failure.
         existing = await self._list_exact(candidate, cancel)
         if existing:
             result = self._result(candidate, existing, effect=False, existing=True)
             context['_media_acquisition_outcome'] = result
             return result
+        cached = await self.cache_matches([candidate], cancel)
+        fresh = cached.get(_normal_hash(candidate['hash']), {})
+        if fresh.get('debrid_file') != bound or fresh.get('debrid_plan') != candidate.get('debrid_plan'):
+            raise MediaUnavailable('torbox_cached_file_changed')
         imdb = candidate.get('imdb')
         if not isinstance(imdb, str) or not re.fullmatch(r'tt[0-9]{7,10}', imdb):
             raise MediaUnavailable('torbox_candidate_invalid')

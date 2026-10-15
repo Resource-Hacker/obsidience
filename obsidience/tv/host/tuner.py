@@ -37,6 +37,7 @@ import os
 import queue
 import re
 import select
+import secrets
 import signal
 import socket
 import socketserver
@@ -47,10 +48,11 @@ import time
 
 from streamlink import Streamlink
 
-# The tuner uses the same private source admission contract as the Harness, without
-# importing its runtime or owning a second catalogue client.
+# The tuner shares the private source admission/catalogue adapters without importing
+# the Harness runtime. Queue revalidation owns and closes its scoped read-only client.
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from harness.media.config import MediaUnavailable, load_config
+from harness.media.jellyfin import JellyfinCatalogue
 from harness.media.progress import PlaybackProgress
 from harness.media.sources import admit
 
@@ -353,6 +355,63 @@ def _card(title, elapsed):
             f'{minutes}:{seconds:02d}')
 
 
+_LOCAL_FIELDS = frozenset(('provider', 'root_id', 'relative_path', 'revision',
+                           'catalogue_instance', 'item_id', 'media_source_id', 'source_revision'))
+
+
+def _queue_entries(entries, first):
+    """Only frozen catalogue bindings, never paths accepted as independent sources."""
+    if not isinstance(entries, list) or len(entries) > 99:
+        raise ValueError('local queue takes at most 99 remaining catalogue sources')
+    seen = {(first['catalogue_instance'], first['item_id'], first['media_source_id'])}
+    checked = []
+    for entry in entries:
+        if (not isinstance(entry, dict) or set(entry) != _LOCAL_FIELDS | {'title'}
+                or entry.get('provider') != 'local'
+                or any(not isinstance(entry.get(key), str) or not entry[key]
+                       or len(entry[key]) > 256 or re.search(r'[\x00-\x1f]', entry[key])
+                       for key in _LOCAL_FIELDS - {'relative_path'})
+                or not isinstance(entry.get('relative_path'), str)
+                or not 0 < len(entry['relative_path']) <= 4096
+                or not isinstance(entry.get('title'), str) or not entry['title'].strip()
+                or len(entry['title']) > 160
+                or entry['catalogue_instance'] != first['catalogue_instance']):
+            raise ValueError('local queue takes exact catalogue bindings and bounded titles')
+        identity = (entry['catalogue_instance'], entry['item_id'], entry['media_source_id'])
+        if identity in seen:
+            raise ValueError('local queue cannot repeat a catalogue source')
+        seen.add(identity)
+        checked.append(dict(entry))
+    return checked
+
+
+class LocalQueue:
+    """One finite intent, owned by the tuner independently of the request connection."""
+
+    def __init__(self, entries, generation):
+        self.entries = entries
+        self.count, self.index = 1 + len(entries), 0
+        self.origin_generation = self.generation = generation
+        self.player_generation = None
+        self.state = 'waiting'
+        self.cancelled = threading.Event()
+        self.wake = threading.Event()
+        self.pending = None
+        self.thread = None
+
+    def cancel(self, state='cancelled'):
+        self.cancelled.set()
+        self.entries.clear()
+        self.pending = None
+        if self.state in ('waiting', 'resolving'):
+            self.state = state
+        self.wake.set()
+
+    def snapshot(self):
+        return {'count': self.count, 'index': self.index, 'state': self.state,
+                'origin_generation': self.origin_generation}
+
+
 class Tuner:
     def __init__(self, directory, player, break_view=None):
         self.directory, self.break_view = directory, break_view
@@ -373,6 +432,8 @@ class Tuner:
         self.restart_entry = None  # A first picture may precede the loadfile reply.
         self.finished = (None, None)  # The entry it ended last, and why.
         self.local_files = {}  # Keep admitted descriptors through matching unload events.
+        self.queue = None  # One finite, explicitly requested local sequence.
+        self.queue_workers = set()
         self.reporters = set()  # Includes a finite file's final report after its descriptor closes.
         self.ended = None  # A bounded terminal receipt for the most recent finite local file.
         self.ended_progress = None
@@ -442,6 +503,8 @@ class Tuner:
             state['ended'] = dict(self.ended)
             if self.ended_progress is not None:
                 state['ended']['progress'] = self.ended_progress.snapshot()
+        if self.queue is not None:
+            state['queue'] = self.queue.snapshot()
         if play is not None and play.phase == 'failed':
             state['reason'] = play.reason
         return state
@@ -650,6 +713,9 @@ class Tuner:
                 return  # An obsolete connection cannot change the replacement's state.
             play = self.play
             if name == 'connected':
+                if (self.queue is not None and (play is None
+                        or play.player_generation is not None)):
+                    self.queue.cancel('failed')
                 self.properties.clear()
                 self.entry, self.restart_entry, self.finished = None, None, (None, None)
                 if play is not None and play.local is not None and play.phase != 'loading':
@@ -679,6 +745,8 @@ class Tuner:
                 self.finished = (event.get('playlist_entry_id'), event.get('reason'))
                 self._finish()
             elif name == 'disconnected':
+                if self.queue is not None:
+                    self.queue.cancel('failed')
                 self.properties.clear()
                 self.entry = None
                 self.restart_entry = None
@@ -727,6 +795,21 @@ class Tuner:
             self.ended = {'generation': play.generation, 'source': play.identity,
                           'outcome': 'ended' if reason == 'eof' else 'failed'}
             self.ended_progress = play.progress
+            queued = self.queue
+            if (queued is not None and not queued.cancelled.is_set()
+                    and queued.generation == play.generation):
+                if (reason == 'eof' and play.verified and play.picture is not None
+                        and play.start_verified and play.player_generation == self.player.generation):
+                    if queued.entries:
+                        queued.pending = play
+                        queued.state = 'resolving'
+                        queued.wake.set()  # The owned worker commands mpv; never this IPC reader.
+                    else:
+                        queued.state = 'completed'
+                        queued.cancelled.set()
+                        queued.wake.set()
+                else:
+                    queued.cancel('failed')
             if reason == 'eof':
                 self.play = None
             else:
@@ -803,7 +886,7 @@ class Tuner:
             if message.get('provider') == 'local':
                 local_fields = {'op', 'provider', 'root_id', 'relative_path', 'revision',
                                 'catalogue_instance', 'item_id', 'media_source_id', 'source_revision',
-                                'title', 'wait', 'generation', 'start_seconds'}
+                                'title', 'wait', 'generation', 'start_seconds', 'queue'}
                 if set(message) - local_fields:
                     raise ValueError('local media takes one exact source identity')
                 generation = message.get('generation')
@@ -821,6 +904,8 @@ class Tuner:
                        or len(identity[key]) > 256 or re.search(r'[\x00-\x1f]', identity[key])
                        for key in identity):
                     raise ValueError('local media takes exact bounded source identifiers')
+                queue_entries = (_queue_entries(message['queue'], message)
+                                 if 'queue' in message else None)
                 with self.lock:
                     if len(self.local_files) >= 8:
                         raise ValueError('local media has unresolved player unloads')
@@ -833,14 +918,29 @@ class Tuner:
                 try:
                     self._start(title, {'provider': 'local', 'local': local, 'identity': identity,
                                         'local_config': config, 'generation': generation,
-                                        'start_seconds': start_seconds}, wait)
+                                        'start_seconds': start_seconds}, wait, queue_entries=queue_entries)
                 except Exception:
                     with self.lock:
                         adopted = any(held.local is local for held in self.local_files.values())
                     if not adopted:
                         local.close()
                     raise
-                return self.state()
+                # Capture only the first play's receipt before permitting EOF advancement.
+                result = self.state()
+                with self.lock:
+                    queued = self.queue
+                    if (queued is not None and queued.origin_generation == generation
+                            and self.play is not None and self.play.phase == 'failed'):
+                        queued.cancel('failed')
+                    if (queued is not None and queued.origin_generation == generation
+                            and queued.thread is None and not queued.cancelled.is_set()):
+                        queued.thread = threading.Thread(target=self._advance_queue, args=(queued,),
+                                                         name='local-season-queue', daemon=True)
+                        self.queue_workers.add(queued)
+                        queued.thread.start()
+                return result
+            if 'queue' in message:
+                raise ValueError('finite queue is available only for exact local catalogue sources')
             if 'url' in message:
                 if 'provider' in message or 'channel' in message:
                     raise ValueError('play takes one source')
@@ -867,6 +967,8 @@ class Tuner:
             with self.lock:
                 self.properties['pause'] = paused  # The player's own readback; its event confirms it.
                 self._refresh()
+        elif op == 'stop-queue':
+            return self._stop_queue(message)
         elif op == 'stop':
             expected = None
             if 'generation' in message or 'source' in message:
@@ -892,7 +994,44 @@ class Tuner:
             raise ValueError('op is play, pause, resume, stop or state')
         return self.state()
 
-    def _start(self, title, source, wait):
+    def _stop_queue(self, message):
+        """Cancel exactly one observed finite intent, including its between-file resolver."""
+        origin = message.get('origin_generation')
+        if (set(message) != {'op', 'origin_generation'} or not isinstance(origin, str)
+                or not re.fullmatch(r'[0-9a-f]{32}', origin)):
+            raise ValueError('queue stop takes the exact observed origin generation')
+        stopped = self._replace(None, queue_origin=origin)
+        # Replacement and worker drains run without holding the event-reader lock.
+        # Reacquire control for bounded verification; a newer request makes this fail
+        # without any further effect on that replacement.
+        with self.control:
+            with self.lock:
+                queued = self.queue
+                if (queued is None or queued.origin_generation != origin
+                        or not queued.cancelled.is_set() or self.play is not None):
+                    raise ValueError('local queue changed before stop verification')
+                if stopped is not None:
+                    confirmed = self.lock.wait_for(
+                        lambda: self.ended is None or self.ended.get('generation') != stopped.generation
+                        or self.ended.get('outcome') != 'stopping', timeout=TIMEOUT)
+                    if (not confirmed or self.ended is None
+                            or self.ended.get('generation') != stopped.generation
+                            or self.ended.get('outcome') != 'stopped'):
+                        raise ValueError('the player did not confirm the queue source unload')
+            if self.player.bound_command(queued.player_generation, 'get_property',
+                                         'idle-active', timeout=TIMEOUT) is not True:
+                raise ValueError('the player did not verify the exact queue stop')
+            with self.lock:
+                if (self.queue is not queued or self.play is not None
+                        or not queued.cancelled.is_set()
+                        or self.player._sock is None
+                        or self.player.generation != queued.player_generation):
+                    raise ValueError('local queue stop readback changed')
+                result = self._state(True)
+                result['queue_stop'] = {'origin_generation': origin, 'verified': True}
+                return result
+
+    def _start(self, title, source, wait, queue_entries=None, continuation=None):
         with self.lock:
             self.plays += 1
             play = Play(self.plays, title, **source)
@@ -901,7 +1040,8 @@ class Tuner:
                                                  lambda: self._sample_progress(play),
                                                  lambda: self._progress_current(play))
         log.info('%s: play', play.name)
-        self._replace(play)
+        queued = (LocalQueue(queue_entries, play.generation) if queue_entries is not None else continuation)
+        self._replace(play, queued=queued, continuation=continuation)
         if play.local is not None and not play.start_verified:
             with self.lock:
                 if self.play is play and not self.closed:
@@ -911,6 +1051,75 @@ class Tuner:
         with self.lock:
             self.lock.wait_for(lambda: self.closed or self.play is not play
                                or self.playback != 'loading', timeout=wait)
+
+    def _advance_queue(self, queued):
+        """One EOF schedules one revalidation and load; replacement fences every effect."""
+        try:
+            while not queued.cancelled.is_set():
+                queued.wake.wait()
+                queued.wake.clear()
+                with self.lock:
+                    if self.closed or self.queue is not queued or queued.cancelled.is_set():
+                        return
+                    previous, queued.pending = queued.pending, None
+                    if previous is None or not queued.entries:
+                        continue
+                    binding = dict(queued.entries[0])
+                # Finish the previous native session before the next one may start.
+                self._release(previous)
+                with self.lock:
+                    if self.closed or self.queue is not queued or queued.cancelled.is_set():
+                        return
+                config = load_config()
+                catalogue = JellyfinCatalogue(config)
+                try:
+                    catalogue.start()
+                    current = catalogue.revalidate(binding)
+                finally:
+                    catalogue.close()
+                with self.lock:
+                    if self.closed or self.queue is not queued or queued.cancelled.is_set():
+                        return
+                local = admit(config, {key: current[key] for key in
+                                      ('provider', 'root_id', 'relative_path', 'revision')})
+                try:
+                    identity = {key: current[key] for key in _LOCAL_FIELDS - {'relative_path'}}
+                    self._start(current['title'], {'provider': 'local', 'local': local,
+                                'identity': identity, 'local_config': config,
+                                'generation': secrets.token_hex(16)}, START_LIMIT,
+                                continuation=queued)
+                finally:
+                    with self.lock:
+                        adopted = any(held.local is local for held in self.local_files.values())
+                    if not adopted:
+                        local.close()
+                with self.lock:
+                    if self.queue is not queued or queued.cancelled.is_set():
+                        return
+                    if self.play is not None and self.play.phase == 'failed':
+                        queued.cancel('failed')
+                        self.lock.notify_all()
+                        return
+        except Exception:
+            # Jellyfin wraps transport errors; catch unexpected adapter/cleanup failures too
+            # so an exited worker cannot leave a resolving queue. Never emit raw exceptions.
+            with self.lock:
+                if self.queue is queued and not queued.cancelled.is_set():
+                    queued.cancel('failed')
+                    self.lock.notify_all()
+        finally:
+            with self.lock:
+                self.queue_workers.discard(queued)
+                self.lock.notify_all()
+
+    @staticmethod
+    def _drain_queue(queued):
+        if (queued is not None and queued.thread is not None
+                and queued.thread is not threading.current_thread()):
+            queued.thread.join(30)
+            if queued.thread.is_alive():
+                # Cancellation already revoked load authority. Retain it for shutdown drain.
+                raise MediaUnavailable('local_queue_cleanup_pending')
 
     def _complete_start(self, play):
         """Continue this start after a short caller wait; never reload or seek."""
@@ -973,13 +1182,23 @@ class Tuner:
                     except (OSError, ValueError):
                         pass  # Uncertain cleanup is never replayed; there is no correction seek/load.
 
-    def _replace(self, play, wait=False, expected=None):
+    def _replace(self, play, wait=False, expected=None, queued=None, continuation=None, queue_origin=None):
         """Make play (or nothing) the current play and release everything the previous one held.
 
         Closing a stream waits for its downloads in flight (0.4-3 s measured), so the previous
         play is released beside the new one's start; wait makes the caller see it through.
         """
         with self.control:
+            with self.lock:
+                if queue_origin is not None:
+                    current_queue = self.queue
+                    if (current_queue is None or current_queue.origin_generation != queue_origin
+                            or (self.play is not None and (self.play.local is None
+                                or self.play.generation != current_queue.generation))):
+                        raise ValueError('local queue changed before stop')
+                if continuation is not None and (self.closed or self.queue is not continuation
+                        or continuation.cancelled.is_set() or self.play is not None):
+                    raise MediaUnavailable('local_queue_cancelled')
             if play is not None and play.local is not None:
                 # Last admission check happens before the existing picture is replaced.
                 if load_config() != play.local_config:
@@ -1008,9 +1227,22 @@ class Tuner:
                     raise MediaUnavailable('tuner_closed')
                 if play is not None and play.local is not None and len(self.local_files) >= 8:
                     raise ValueError('local media has unresolved player unloads')
+                if continuation is not None and (self.queue is not continuation
+                        or continuation.cancelled.is_set() or self.play is not None):
+                    raise MediaUnavailable('local_queue_cancelled')
+                old_queue = self.queue if continuation is None else None
+                if old_queue is not None:
+                    old_queue.cancel()
+                if continuation is None:
+                    self.queue = queued if play is not None else old_queue
+                elif play is not None:
+                    continuation.entries.pop(0)
+                    continuation.index += 1
+                    continuation.generation = play.generation
+                    continuation.state = 'waiting'
                 old, self.play = self.play, play
                 self.ended = ({'generation': old.generation, 'source': old.identity,
-                               'outcome': 'stopping' if expected is not None else 'stopped'}
+                               'outcome': 'stopping' if expected is not None or queue_origin is not None else 'stopped'}
                               if play is None and old is not None and old.local is not None else None)
                 self.ended_progress = old.progress if self.ended is not None else None
                 if play is not None and play.local is not None:
@@ -1025,14 +1257,18 @@ class Tuner:
             try:
                 if play is None or play.channel:
                     # Nothing of the previous play stays on screen while a channel tunes in.
-                    if expected is None:
+                    if queue_origin is not None:
+                        self.player.bound_command(old_queue.player_generation, 'stop')
+                    elif expected is None:
                         self.player.command('stop')
                     else:
                         self.player.bound_command(old.player_generation, 'stop')
                 if play is not None and play.url:
                     self._load(play, play.url)
                 elif play is not None and play.local is not None:
-                    self._load(play, f'/proc/{os.getpid()}/fd/{play.local.fd}')
+                    self._load(play, f'/proc/{os.getpid()}/fd/{play.local.fd}',
+                               connection_generation=(continuation.player_generation
+                                                      if continuation is not None else None))
                 elif play is not None:
                     # The channel resolves while the previous play is released below.
                     play.thread = threading.Thread(target=self._run, args=(play,), name=f'play-{play.number}')
@@ -1048,6 +1284,7 @@ class Tuner:
             release.start()
             if wait:
                 release.join()
+        self._drain_queue(old_queue)
         if refused is not None and play is None:
             raise refused
         return old
@@ -1065,8 +1302,10 @@ class Tuner:
             old.progress.finished.wait(TIMEOUT)  # Matched unload may follow loadfile's acknowledgement.
             old.progress.close()
 
-    def _load(self, play, path):
+    def _load(self, play, path, connection_generation=None):
         """Tell the player to load this play's file in place of whatever it shows (control held)."""
+        command = (self.player.command if connection_generation is None else
+                   lambda *args: self.player.bound_command(connection_generation, *args))
         options = {**_FAST_START, 'force-media-title': play.title}
         if play.local is not None:
             options = {'force-media-title': play.title, 'demuxer': 'lavf',
@@ -1077,17 +1316,19 @@ class Tuner:
                        'resume-playback': 'no', 'start': str(play.start_seconds), 'aid': 'auto', 'sid': 'auto'}
         if play.channel:
             options.update(_CUSHION)
-        self.player.command('set_property', 'pause', False)
+        command('set_property', 'pause', False)
         with self.lock:
             play.player_generation = self.player.generation
-        entry = (self.player.command('loadfile', path, 'replace', -1, options) or {}).get('playlist_entry_id')
+            if self.queue is not None and self.queue.generation == play.generation:
+                self.queue.player_generation = play.player_generation
+        entry = (command('loadfile', path, 'replace', -1, options) or {}).get('playlist_entry_id')
         with self.lock:
             play.entry = entry
             self._finish()
             self._picture()
             self._refresh()
         if play.local is not None:
-            playlist = self.player.command('get_property', 'playlist')
+            playlist = command('get_property', 'playlist')
             matches = (isinstance(entry, int) and not isinstance(entry, bool)
                        and isinstance(playlist, list) and len(playlist) == 1
                        and isinstance(playlist[0], dict)
@@ -1102,7 +1343,7 @@ class Tuner:
                     self._picture()
                 self._refresh()
             if not matches:
-                self.player.command('stop')  # One bounded cleanup, never another load.
+                command('stop')  # One bounded cleanup, never another load.
 
     # A channel
 
@@ -1273,9 +1514,19 @@ class Tuner:
                 raise _Fault('the player did not open the stream')
 
     def close(self):
-        with self.lock:
-            self.closed = True
-            self.lock.notify_all()
+        # Linearize shutdown with the same control lease that authorizes loads.
+        with self.control:
+            with self.lock:
+                self.closed = True
+                if self.queue is not None:
+                    self.queue.cancel()
+                queue_workers = tuple(self.queue_workers)
+                self.lock.notify_all()
+        for queued in queue_workers:
+            try:
+                self._drain_queue(queued)
+            except MediaUnavailable:
+                log.warning('local queue cleanup is pending; load authority is revoked')
         self.presenter.join(10)  # It ends its idle/break view.
         try:
             self._replace(None, wait=True)

@@ -70,9 +70,13 @@ The installed TorBox adapter uses the existing `media.library` and `media.acquir
 capability owners. Private configuration enables `debrid` with provider `torbox`,
 an encrypted credential name, instance identity and approved mount path. A paid
 account is required for registration. Discovery returns only cached releases
-whose actual single video file matches the exact movie/year or season/episode.
-Registration rechecks cache and account state, then submits one cached-only
-request. Uncached sources, multi-video releases and season packs are excluded.
+whose complete video plan matches one movie or one series. Season and series packs
+bind every file, reject overlaps and unexplained gaps, and expose their entire
+registration scope before selection. Explicit combined-episode spans remain one
+file. Registration reconciles existing account state first, then rechecks cache
+before one cached-only request. The accepted owner policy permits a cached complete-series
+pack containing the requested episode when a narrower eligible source is unavailable;
+playback remains limited to the requested episode or season. Uncached sources are excluded.
 Enabling TorBox preserves the selected provider binding; an unavailable or
 changed provider fails explicitly without falling back to uncached transfer or
 local BitTorrent.
@@ -185,7 +189,15 @@ adapter separately verifies the intended PC route. Loading/unverified is not a
 retry instruction. Pause, unpause, absolute seek, track selection and stop bind the
 current source generation and use fresh readback. Seek tolerance is half a second;
 saved-resume start tolerance is five seconds. File EOF ends once, without live
-channel reconnection or next-episode autoplay.
+channel reconnection. An explicit `media.library season` plan followed by
+`tv.control open_season` can create one finite sequence of up to 100 already
+catalogued sources from that season. It uses Jellyfin's watch/resume state,
+stops at the first missing or ambiguous source, and never acquires at EOF.
+The tuner revalidates the next exact source, drains the previous progress owner,
+and assigns a fresh generation on each verified natural EOF. Stop, replacement,
+disconnect and shutdown revoke advancement. Queue stop checks the observed
+origin atomically, including between entries. The initial receipt verifies only
+the first source; physical multi-episode advancement is a separate acceptance gate.
 
 `open` with `resume:true` rereads Jellyfin's stored position and uses it in the one
 load command. It never adds a corrective second play/seek. The tuner reports bounded

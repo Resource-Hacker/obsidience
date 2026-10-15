@@ -183,10 +183,25 @@ Rectangle {
                 : (data && (data.reason || data.detail)) || "Sources unavailable."
         })
     }
+    function sourceScope(row) {
+        if (row.acquisition_scope === "series_pack")
+            return "Series pack · all " + row.registered_files + " files · included seasons "
+                + row.season_numbers.join(", ")
+                + (row.pack_episodes ? " · " + row.pack_episodes + " episodes" : "")
+        if (row.acquisition_scope === "season_pack")
+            return "Season " + row.season + " pack · all " + row.registered_files + " files"
+                + (row.pack_episodes ? " · " + row.pack_episodes + " episodes" : "")
+        if (row.file_episode !== undefined && row.file_episode !== null)
+            return "Season " + row.file_season + " · episode " + row.file_episode
+                + (row.file_episode_end > row.file_episode ? "–" + row.file_episode_end : "") + " file"
+        return ""
+    }
     function sourceLabel(row) {
-        return row.release_label + " · " + (row.resolution ? row.resolution + "p" : "resolution unknown")
+        const scope = sourceScope(row)
+        return (scope ? scope + " · " : "") + row.release_label + " · " + (row.resolution ? row.resolution + "p" : "resolution unknown")
             + (row.hdr ? " · HDR" : "") + (row.remux ? " · Remux" : "")
-            + (row.size_bytes ? " · " + (row.size_bytes / 1073741824).toFixed(1) + " GB" : "")
+            + (row.size_bytes ? " · " + (row.size_bytes / 1073741824).toFixed(1) + " GB release" : "")
+            + ((row.acquisition_scope === "season_pack" || row.acquisition_scope === "series_pack") && row.selected_size_bytes ? " · " + (row.selected_size_bytes / 1073741824).toFixed(1) + " GB selected file" : "")
             + (row.cached ? " · TorBox cached" : " · " + (row.seeders === null ? "availability unknown" : row.seeders + " peers"))
             + (row.recommended ? " · Recommended" : "")
     }
@@ -312,9 +327,19 @@ Rectangle {
         }
         RowLayout {
             visible: root.mode === 1
-            Button { text: "Acquire selected source"; enabled: root.selectedSource !== null && root.acquisitionReady && !root.pendingRequest; onClicked: root.command("acquire") }
+            Button { text: root.selectedSource && root.selectedSource.acquisition_scope === "series_pack"
+                    ? "Register series pack (" + root.selectedSource.registered_files + " files)"
+                    : root.selectedSource && root.selectedSource.acquisition_scope === "season_pack"
+                    ? "Register season pack (" + root.selectedSource.registered_files + " files)" : "Acquire selected source"; enabled: root.selectedSource !== null && root.acquisitionReady && !root.pendingRequest; onClicked: root.command("acquire") }
             Button { text: "Refresh readiness"; onClicked: root.refreshStatus() }
-            Label { text: root.acquisitionReady ? "Registration does not start playback" : (root.acquisitionReadiness || "Acquisition unavailable"); color: "#94a3b8"; Layout.fillWidth: true; wrapMode: Text.Wrap }
+            Label { text: root.acquisitionReady ? (root.selectedSource && root.selectedSource.acquisition_scope === "series_pack"
+                        ? "Registers all " + root.selectedSource.registered_files + " files across all included seasons: "
+                            + root.selectedSource.season_numbers.join(", ")
+                            + ". Registration does not start playback; season playback stays within the requested season."
+                        : root.selectedSource && root.selectedSource.acquisition_scope === "season_pack"
+                        ? "Registers all " + root.selectedSource.registered_files + " files in the Season " + root.selectedSource.season
+                            + " pack. Registration does not start playback."
+                        : "Registration does not start playback") : (root.acquisitionReadiness || "Acquisition unavailable"); color: "#94a3b8"; Layout.fillWidth: true; wrapMode: Text.Wrap }
         }
         RowLayout {
             visible: root.mode === 0

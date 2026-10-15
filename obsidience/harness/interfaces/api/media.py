@@ -70,7 +70,7 @@ def source_fingerprint(candidate: dict) -> str:
     identity = {key: candidate.get(key) for key in (
         'imdb', 'type', 'title', 'year', 'season', 'episode', 'first_air_date',
         'release_title', 'provider', 'instance_id', 'config_fingerprint', 'socket_identity',
-        'debrid_binding', 'debrid_file')}
+        'debrid_binding', 'debrid_file', 'debrid_plan', 'season_episodes', 'series_episodes')}
     identity['hash'] = _normal_hash(candidate.get('hash'))
     if not identity['hash']:
         raise MediaUnavailable('Invalid discovery source identity')
@@ -133,6 +133,14 @@ async def sources(metadata_token: str, season: int | None = None, episode: int |
             safe.update(cached=row.get('cached', False), cache_provider=row.get('cache_provider'),
                         preview_token=token, release_label=discovery._text(private['release_title']) or 'Selected release',
                         imdb_id=metadata['imdb_id'], type=metadata['type'], season=season, episode=episode)
+            # This is a projection of the exact private plan bound by the token.
+            # Paths/native IDs remain private; the owner sees the full registration scope.
+            safe.update({key: deepcopy(row[key]) for key in (
+                'acquisition_scope', 'registered_files', 'pack_episodes', 'episode_plan', 'season_numbers',
+                'selected_size_bytes') if key in row})
+            if metadata['type'] == 'series' and row.get('cached'):
+                safe.update(file_season=row.get('season'), file_episode=row.get('episode'),
+                            file_episode_end=row.get('episode_end'))
             output.append(safe)
         response = {'available': True, 'candidates': output,
                     'ambiguous_best_tie': result.get('ambiguous_best_tie', False),

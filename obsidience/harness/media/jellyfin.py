@@ -196,6 +196,9 @@ class JellyfinCatalogue:
         # Bind the complete selected source metadata and the exact mapping/file identity.
         material = {'item_id': _id(item.get('Id')), 'item_type': item['Type'],
                     'source': source, 'local': local}
+        if item['Type'] == 'Episode':
+            material['episode'] = {key: item.get(key) for key in
+                                   ('SeriesId', 'ParentIndexNumber', 'IndexNumber', 'IndexNumberEnd')}
         return hashlib.sha256(json.dumps(material, sort_keys=True, separators=(',', ':'),
                                          allow_nan=False).encode()).hexdigest()
 
@@ -247,12 +250,31 @@ class JellyfinCatalogue:
         return {'items': rows, 'offset': offset, 'limit': limit, 'total': total,
                 'next_offset': next_offset if items and next_offset < total else None}
 
-    def select(self, item_id: str, media_source_id: str) -> dict:
+    def select(self, item_id: str, media_source_id: str, *, expected_episode: dict | None = None) -> dict:
         catalogue = self._pin()
         item = self._item(item_id)
+        if expected_episode is not None:
+            if (not isinstance(expected_episode, dict)
+                    or set(expected_episode) != {'imdb', 'season', 'episode', 'episode_end'}
+                    or not isinstance(expected_episode['imdb'], str)
+                    or not re.fullmatch(r'tt[0-9]{7,10}', expected_episode['imdb'])
+                    or any(type(expected_episode[key]) is not int
+                           for key in ('season', 'episode', 'episode_end'))
+                    or not 1 <= expected_episode['season'] <= 99
+                    or not 1 <= expected_episode['episode'] <= expected_episode['episode_end'] <= 999
+                    or expected_episode['episode_end'] - expected_episode['episode'] >= 8):
+                raise MediaUnavailable('media_episode_identity_invalid')
+            end = item.get('IndexNumberEnd')
+            end = item.get('IndexNumber') if end is None else end
+            if (item['Type'] != 'Episode'
+                    or type(item.get('ParentIndexNumber')) is not int
+                    or type(item.get('IndexNumber')) is not int or type(end) is not int
+                    or (item['ParentIndexNumber'], item['IndexNumber'], end) != (
+                        expected_episode['season'], expected_episode['episode'], expected_episode['episode_end'])):
+                raise MediaUnavailable('catalogue_episode_identity_changed')
         source = self._source(item, media_source_id)
         root, relative = self._local(source)
-        local = describe(self.config, root, relative)
+        local = describe(self.config, root, relative, expected_episode=expected_episode)
         return {**local, 'catalogue_instance': catalogue['instance_id'],
                 'item_id': _id(item_id), 'media_source_id': media_source_id,
                 'source_revision': self._revision(item, source, local),
@@ -393,6 +415,96 @@ class JellyfinCatalogue:
                   'catalogue_readback_limit' if total > len(items) else
                   'catalogue_source_pending')
         return {'status': 'pending', 'reason': reason}
+
+    def season_state(self, imdb: str, season: int) -> list[dict]:
+        """Exact series identity and durable per-user episode progress; GET only.
+
+        Enumerate a bounded Series inventory instead of treating a fuzzy name
+        search or an unsupported provider-id query parameter as proof of absence.
+        """
+        if (not isinstance(imdb, str) or not re.fullmatch(r'tt[0-9]{7,10}', imdb)
+                or type(season) is not int or not 1 <= season <= 99):
+            raise MediaUnavailable('media_season_arguments_invalid')
+        self._pin()
+        page = self._query(includeItemTypes='Series', fields='ProviderIds', limit=257)
+        items, total = page.get('Items'), page.get('TotalRecordCount')
+        if (not isinstance(items, list) or len(items) > 256
+                or type(total) is not int or total != len(items)):
+            raise MediaUnavailable('catalogue_series_inventory_limit')
+        matches, unidentified = [], False
+        for item in items:
+            if not isinstance(item, dict) or item.get('Type') != 'Series':
+                raise MediaUnavailable('invalid_catalogue_series_response')
+            providers = item.get('ProviderIds') or {}
+            if not isinstance(providers, dict):
+                raise MediaUnavailable('invalid_catalogue_series_response')
+            identifier = providers.get('Imdb')
+            unidentified |= not (isinstance(identifier, str)
+                                 and re.fullmatch(r'tt[0-9]{7,10}', identifier))
+            if str(providers.get('Imdb', '')).lower() == imdb:
+                matches.append(item)
+        if len(matches) > 1:
+            raise MediaUnavailable('catalogue_series_identity_ambiguous')
+        if not matches:
+            if unidentified:
+                raise MediaUnavailable('catalogue_series_identity_unverified')
+            self._pin()
+            return []
+        series_id = _id(matches[0].get('Id'))
+        if matches[0].get('DisplayOrder') not in (None, '', 'aired'):
+            raise MediaUnavailable('catalogue_episode_order_unverified')
+        page = self._query(parentId=series_id, parentIndexNumber=season,
+                           includeItemTypes='Episode', fields='MediaSources,ProviderIds',
+                           enableUserData='true', limit=257)
+        items, total = page.get('Items'), page.get('TotalRecordCount')
+        if (not isinstance(items, list) or len(items) > 256
+                or type(total) is not int or total != len(items)):
+            raise MediaUnavailable('catalogue_season_inventory_limit')
+        rows, occupied = [], set()
+        for item in items:
+            if (not isinstance(item, dict) or item.get('Type') != 'Episode'
+                    or _id(item.get('SeriesId')) != series_id
+                    or type(item.get('ParentIndexNumber')) is not int
+                    or item['ParentIndexNumber'] != season):
+                raise MediaUnavailable('catalogue_episode_identity_unverified')
+            episode = item.get('IndexNumber')
+            end = item.get('IndexNumberEnd')
+            end = episode if end is None else end
+            if (type(episode) is not int or type(end) is not int
+                    or not 1 <= episode <= end <= 999 or end - episode >= 8):
+                raise MediaUnavailable('catalogue_episode_identity_unverified')
+            span = set(range(episode, end + 1))
+            if occupied & span:
+                raise MediaUnavailable('catalogue_episode_identity_ambiguous')
+            occupied.update(span)
+            data, providers = item.get('UserData'), item.get('ProviderIds') or {}
+            if (not isinstance(data, dict) or type(data.get('Played')) is not bool
+                    or type(data.get('PlaybackPositionTicks')) is not int
+                    or not 0 <= data['PlaybackPositionTicks'] <= 10**15
+                    or not isinstance(providers, dict)):
+                raise MediaUnavailable('catalogue_resume_unavailable')
+            sources = item.get('MediaSources') or []
+            if not isinstance(sources, list) or len(sources) > 4:
+                raise MediaUnavailable('catalogue_source_choice_limit')
+            choices = []
+            for source in sources:
+                if not isinstance(source, dict):
+                    raise MediaUnavailable('invalid_catalogue_response')
+                source_id = source.get('Id')
+                try:
+                    self._source(item, source_id)
+                except MediaUnavailable:
+                    continue
+                choices.append({'item_id': _id(item.get('Id')),
+                                'media_source_id': source_id})
+            tvdb = providers.get('Tvdb')
+            rows.append({'episode': episode, 'episode_end': end,
+                         'played': data['Played'],
+                         'resume_position': data['PlaybackPositionTicks'] / 10000000,
+                         'tvdb_id': str(tvdb) if tvdb is not None else None,
+                         'catalogue': choices})
+        self._pin()
+        return sorted(rows, key=lambda row: row['episode'])
 
     def resume(self, item_id: str) -> dict:
         """Stored per-user progress; never infer persistence from a player clock."""
