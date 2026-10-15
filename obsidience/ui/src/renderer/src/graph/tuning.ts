@@ -235,7 +235,12 @@ export function announceGraphTuning(change: GraphTuningChange): void {
 }
 
 export function onGraphTuning(handler: (change: GraphTuningChange) => void): () => void {
-  const fn = (event: Event) => handler((event as CustomEvent<GraphTuningChange>).detail);
+  // A record saved before a setting existed lacks it; an absent field would
+  // reach a shader as NaN (every Dust marble then drew as a square).
+  const fn = (event: Event) => {
+    const change = (event as CustomEvent<GraphTuningChange>).detail;
+    handler({ ...change, tuning: clampKnowledge3dTuning(change.tuning) });
+  };
   window.addEventListener("obsidience:graph-tuning", fn);
   return () => window.removeEventListener("obsidience:graph-tuning", fn);
 }
