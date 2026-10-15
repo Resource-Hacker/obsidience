@@ -649,16 +649,19 @@ export class DiscordTransport {
 
   async start(token) {
     const ready = new Promise((resolve) => this.client.once('clientReady', resolve));
+    this.startupPhase = 'gateway_login';
     await this.client.login(token);
     await ready;
     if (this.client.application.id !== this.config.application_id || !this.client.user.bot) fail('official_bot_identity_mismatch');
+    this.startupPhase = 'command_registration';
     const guild = await this.guild();
     const commands = ['join', 'leave', 'status', 'stop'].map((name) => new SlashCommandBuilder()
       .setName(name).setDescription(`${this.config.bot_name}: ${name}`));
     commands.push(new SlashCommandBuilder().setName('ask').setDescription(`Ask ${this.config.bot_name}`)
-      .addStringOption((option) => option.setName('text').setDescription('Your question').setRequired(true).setMaxLength(TEXT_LIMIT)));
+      .addStringOption((option) => option.setName('text').setDescription('Your question').setRequired(true).setMaxLength(6000)));
     await guild.commands.set(commands.map((command) => command.toJSON()));
     if (guild.members.me?.nickname !== this.config.bot_name) await guild.members.me.setNickname(this.config.bot_name).catch(() => { this.lastError = 'nickname_permission_missing'; });
+    this.startupPhase = 'control_socket';
     await this.listenControl();
     log('ready_disconnected');
   }
@@ -709,7 +712,12 @@ async function main() {
   process.once('SIGTERM', () => { void transport.close().then(() => process.exit(0)); });
   process.once('SIGINT', () => { void transport.close().then(() => process.exit(0)); });
   try { await transport.start(await credential('discord-bot-token')); }
-  catch { await transport.close(); throw new Error('discord_start_failed'); }
+  catch (error) {
+    console.log(JSON.stringify({ component: 'discord_transport', event: 'startup_failed',
+      phase: transport.startupPhase ?? 'configuration',
+      code: Number.isSafeInteger(error.code) ? error.code : null }));
+    await transport.close(); throw new Error('discord_start_failed');
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
