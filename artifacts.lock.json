@@ -118,7 +118,7 @@
       "repository": "https://github.com/microsoft/AutoSaddler",
       "revision": "30e20ce004486c58e7ee97c66182a8d0d41ec90e",
       "license": "MIT",
-      "integration": "Design reference for the independently implemented frozen-trial comparison in execution/evaluation.py and the immutable case store in refinement.py, both used by Executive optimization. Exact paired coverage, immutable identities, independent held-out criteria, no regressions and strict improvement remain required. The separate native Executive integration uses the upstream engine as recorded in autosaddler_v2."
+      "integration": "Design reference for the independently implemented frozen-trial comparison in execution/optimization/evaluation.py and the immutable case store in execution/optimization/store.py, both used by Executive optimization. Exact paired coverage, immutable identities, independent held-out criteria, no regressions and strict improvement remain required. The separate native Executive integration uses the upstream engine as recorded in autosaddler_v2."
     },
     "cpython_sqlite3_compatibility": {
       "repository": "https://github.com/python/cpython",

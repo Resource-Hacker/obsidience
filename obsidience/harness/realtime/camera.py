@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from obsidience.harness.realtime import media
+from obsidience.harness.realtime import devices
 
 MAX_CAPTURE_BYTES = 8 * 1024 * 1024
 CAPTURE_TIMEOUT_SECONDS = 8
@@ -45,7 +45,7 @@ class CameraCapture:
 
 
 def _selected() -> tuple[str, str, tuple[object, ...]]:
-    selection = media.settings()["camera"]
+    selection = devices.settings()["camera"]
     if not isinstance(selection, str) or re.fullmatch(r"v4l2:/dev/video\d+", selection) is None:
         raise CameraCaptureError("Select an available physical camera in AI & Voice settings.")
     device = Path(selection.removeprefix("v4l2:"))
@@ -127,7 +127,7 @@ async def wake_selected_camera(*, cancel_event: Any = None) -> None:
         # Otherwise the wake must reach the hardware owner: fresh frames alone
         # do not attest an awake camera.
         _check_cancel(cancel_event)
-        preparation = asyncio.create_task(asyncio.to_thread(media.set_obsbot_camera_active, True))
+        preparation = asyncio.create_task(asyncio.to_thread(devices.set_obsbot_camera_active, True))
         try:
             await _join(preparation)
         except RuntimeError as exc:
@@ -236,7 +236,7 @@ async def _capture(cancel_event: Any, turn: _Look) -> CameraCapture:
         if _is_obsbot(device) and awake is None and not await _awake_recently(identity):
             # Sleeping hardware can still clock blank V4L2 frames. Fresh pixels
             # and a cached power flag do not attest an awake physical camera.
-            readback = asyncio.create_task(asyncio.to_thread(media.obsbot_camera_state, refresh=True))
+            readback = asyncio.create_task(asyncio.to_thread(devices.obsbot_camera_state, refresh=True))
             try:
                 await _join(readback)
             except (RuntimeError, OSError, subprocess.TimeoutExpired) as exc:

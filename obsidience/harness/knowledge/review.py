@@ -329,7 +329,7 @@ def acknowledge_notification(identity: str) -> dict:
 
 
 def _list_proposals(accepted: list[Note] | None = None) -> list[dict]:
-    from ..execution.optimization import review_blocker
+    from ..execution.optimization.admission import review_blocker
     from .system import assert_system_article_writable
 
     accepted = iter_notes() if accepted is None else accepted
@@ -629,7 +629,7 @@ def approve(name: str) -> dict:
 
 
 def _approve(name: str) -> dict:
-    from ..execution.optimization import review_blocker
+    from ..execution.optimization.admission import review_blocker
     from .system import assert_system_article_writable
 
     path, meta, body = _load_proposal(name)

@@ -117,7 +117,7 @@ async def run_capability(ex, name: str, args: dict, *, execute, execute_async, s
     if name != "task.complete":
         ex.ctx.pop("_reflex_command_verified", None)
         ex.ctx.pop("_reflex_command_result", None)
-    from .optimization_incidents import snapshot, record as record_decision
+    from .optimization.incidents import snapshot, record as record_decision
     decision_sample = snapshot(ex, name, args)
     public_args = {key: value for key, value in args.items() if key != "point"}
     call_fields = {"step": ex.step + 1}

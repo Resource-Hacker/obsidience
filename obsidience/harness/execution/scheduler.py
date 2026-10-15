@@ -141,7 +141,7 @@ def _preflight_rejection(call: dict, note: Note) -> str | None:
         # current() can reject before or after isolated evaluation, but always
         # before report/proposal publication. Keep any evaluation artifacts;
         # this does not classify an arbitrary optimizer error as effect-free.
-        from .optimization import STALE_CASE_ERRORS, status as optimization_status, _report_result
+        from .optimization.admission import STALE_CASE_ERRORS, status as optimization_status, report_result
         case = (note.meta.get("params") or {}).get("optimization_case")
         if not isinstance(case, str) or not re.fullmatch(r"[a-f0-9]{64}", case):
             return None
@@ -172,12 +172,12 @@ def _preflight_rejection(call: dict, note: Note) -> str | None:
         # cannot have staged an instruction. Attest its exact Tool result, not
         # the clipped public trace, before permitting stale-case settlement.
         try:
-            from . import refinement
+            from .optimization import store as evaluation_store
             result = optimization_status(case).get("report") or {}
-            report = refinement._load("executive/reports", result.get("report_id", ""))
+            report = evaluation_store.load("executive/reports", result.get("report_id", ""))
             if (report.get("case_id") == case and report.get("audit_run_id") == note.meta.get("last_run")
                     and report.get("verdict") in {"incomplete", "not_improved", "regressed", "latency_regressed", "tool_count_regressed"}
-                    and result == _report_result(result["report_id"], report)
+                    and result == report_result(result["report_id"], report)
                     and call["tool_sha256"] == hashlib.sha256((CONFIG.vault_dir / "Tools/harness.optimize.md").read_bytes()).hexdigest()):
                 candidates.add(json.dumps(result, sort_keys=True))
         except (ValueError, OSError, KeyError):
@@ -880,7 +880,7 @@ def settle_maintenance_occurrence(note: Note) -> dict | None:
 def _resolved_input_evidence(note: Note, params: dict) -> dict | None:
     """Attest obsolete input through its owner; never infer it from a summary."""
     if note.ref == "Tasks/audit" and params.get("optimization_case"):
-        from .optimization import current, STALE_CASE_ERRORS
+        from .optimization.admission import current, STALE_CASE_ERRORS
         if note.meta.get("status") != "failed" or _receipt_retry_blocked_reason(
                 note, str(note.meta.get("last_run") or "")):
             return None
@@ -1662,7 +1662,7 @@ def reconcile_task_health(notes: list[Note]) -> dict | None:
             notifications.extend({**cause, "title": by_ref[cause["task"]].title if cause.get("task") in by_ref
                                    else cause.get("title", "Harness"), "reason": reason}
                                  for cause in ready)
-    from .optimization_incidents import notifications as optimization_notifications
+    from .optimization.incidents import notifications as optimization_notifications
     sync_health_notifications([*notifications, *optimization_notifications()])
     return result
 
@@ -2287,7 +2287,7 @@ async def shutdown() -> None:
 def _launch_due_tasks() -> None:
     """Admit only free executor capacity; overdue work stays in its Task."""
     notes = iter_notes()
-    from .optimization import publish_validated, reconcile_rejections
+    from .optimization.admission import publish_validated, reconcile_rejections
     publish_validated()
     reconcile_rejections(notes)
     # Audit may have acquired a new ordinary event; use its current runtime.

@@ -10,7 +10,7 @@ router = APIRouter()
 @router.post("/api/harness/optimizations")
 def prepare_executive_optimization(payload: dict):
     """Local owner registration; model Tools cannot author evaluation criteria."""
-    from ....execution.optimization import prepare
+    from ....execution.optimization.admission import prepare
     try:
         return prepare(payload)
     except (ValueError, KeyError, OSError) as cause:
@@ -19,7 +19,7 @@ def prepare_executive_optimization(payload: dict):
 
 @router.post("/api/harness/optimizations/{case_id}/run")
 def queue_executive_optimization(case_id: str):
-    from ....execution.optimization import queue
+    from ....execution.optimization.admission import queue
     try:
         return queue(case_id)
     except (ValueError, KeyError, OSError) as cause:
@@ -28,7 +28,7 @@ def queue_executive_optimization(case_id: str):
 
 @router.get("/api/harness/optimizations/{case_id}")
 def executive_optimization_status(case_id: str):
-    from ....execution.optimization import status
+    from ....execution.optimization.admission import status
     try:
         return status(case_id)
     except (ValueError, KeyError, OSError) as cause:

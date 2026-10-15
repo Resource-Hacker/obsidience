@@ -11,18 +11,17 @@ import json
 import re
 from pathlib import Path
 
-from ..config import CONFIG
-from ..knowledge.index import INDEX
-from ..knowledge.vault import Resolver, load_note, resolver
-from . import refinement, revision
+from ...config import CONFIG
+from ...knowledge.index import INDEX
+from ...knowledge.vault import Resolver, load_note, resolver
+from .. import revision
+from . import AUDITOR, EXECUTIVE, HEIMDALL, cases, store
 
 UPSTREAM_REVISION = '6a2b7a9ab2412a8fe384fd5471d2a49b03a60013'
-EXECUTIVE = 'Agents/Executive/Executive'
-AUDITOR = refinement.AUDITOR
 DECISION_CASE_COUNT = 5
 EVALUATION_REPETITIONS = 5
 _ACTIVE: set[str] = set()
-_INSPECTED_RUNS: set[str] = set()
+INSPECTED_RUNS: set[str] = set()
 STALE_CASE_ERRORS = frozenset({
     'Executive optimizer implementation changed; prepare a fresh case',
     'An accepted Executive dependency changed; prepare a fresh case',
@@ -34,7 +33,7 @@ STALE_CASE_ERRORS = frozenset({
 
 def _incident(task_ref: str, definition: str, tool: str, text: str) -> str:
     reason = re.sub(r'[0-9a-f]{8}-[0-9a-f-]{27,}', '<source>', text)
-    return refinement._hash(refinement._json([task_ref, definition, tool, reason]).encode())
+    return store.sha256(store.canonical_json([task_ref, definition, tool, reason]).encode())
 
 
 def reconcile_rejections(notes: list) -> None:
@@ -43,8 +42,8 @@ def reconcile_rejections(notes: list) -> None:
     This uses existing terminal runs and the ordinary event FIFO. It does not
     replay an action or manufacture AutoSaddler's independent evaluation cases.
     """
-    from .scheduler import enqueue_named_event
-    from ..knowledge.tasks import task_triggers
+    from ..scheduler import enqueue_named_event
+    from ...knowledge.tasks import task_triggers
     import hashlib
     import time
 
@@ -55,23 +54,23 @@ def reconcile_rejections(notes: list) -> None:
         return
     runs = {str(note.meta.get('last_run')) for note in notes
             if note.kind == 'task' and note.meta.get('last_run')}
-    runs.update(path.stem for path in sorted((refinement._root() / 'incidents').glob('*.json'),
+    runs.update(path.stem for path in sorted((store.root() / 'incidents').glob('*.json'),
                 key=lambda path: path.stat().st_mtime, reverse=True)[:64])
     # The Executive is an Agent, so its latest run has no Task runtime row.
     executive = next((run for run in INDEX.runs(30) if run['task_ref'] == EXECUTIVE), None)
     if executive:
         runs.add(executive['id'])
-    _INSPECTED_RUNS.intersection_update(runs)
-    for run_id in sorted(runs - _INSPECTED_RUNS):
+    INSPECTED_RUNS.intersection_update(runs)
+    for run_id in sorted(runs - INSPECTED_RUNS):
         run = INDEX.run(run_id)
         if not run or run['status'] not in {'completed', 'review', 'failed', 'blocked'}:
             continue
         if run['task_ref'] in {AUDITOR, 'Tasks/repair'}:
-            _INSPECTED_RUNS.add(run_id)
+            INSPECTED_RUNS.add(run_id)
             continue
         receipts = INDEX.tool_run_receipts(run_id)
         if not receipts or receipts.get('task_ref') != run['task_ref']:
-            _INSPECTED_RUNS.add(run_id)
+            INSPECTED_RUNS.add(run_id)
             continue
         try:
             entries = json.loads(run.get('trace') or '[]')
@@ -79,20 +78,20 @@ def reconcile_rejections(notes: list) -> None:
             entries = []
         if not isinstance(entries, list):
             entries = []
-        from . import optimization_incidents as incidents
+        from . import incidents
         if incidents.recovered_operational_incident(run_id):
-            _INSPECTED_RUNS.add(run_id)
+            INSPECTED_RUNS.add(run_id)
             continue
         rejected = terminal = rejection = legacy = None
         # The compact public trace may clip long rejection details. Prefer the
         # complete decision capture and its exact committed receipt when present.
-        captured = refinement._root() / 'incidents' / (run_id + '.json')
+        captured = store.root() / 'incidents' / (run_id + '.json')
         if captured.is_file():
             try:
-                samples = [refinement._load('decisions', identity)
+                samples = [store.load('decisions', identity)
                            for identity in json.loads(captured.read_text())]
                 attested = [sample for sample in samples
-                            if sample.get('rejected') and incidents._receipt_matches(sample)]
+                            if sample.get('rejected') and incidents.receipt_matches(sample)]
                 # The run's unrecovered rejection is its last one.
                 if attested and attested[-1] is samples[-1]:
                     terminal, result = samples[-1], samples[-1]['result']
@@ -129,7 +128,7 @@ def reconcile_rejections(notes: list) -> None:
                 break
         if rejected is None:
             if run['status'] not in {'failed', 'blocked'}:
-                _INSPECTED_RUNS.add(run_id)
+                INSPECTED_RUNS.add(run_id)
                 continue
             rejected = {'tool': 'execution', 'reason': str(run.get('summary') or 'Execution failed')[:1500]}
         subject = by_ref.get(run.get('runbook_ref')) or by_ref.get(run['task_ref'])
@@ -146,7 +145,7 @@ def reconcile_rejections(notes: list) -> None:
             incidents.attention(_incident(run['task_ref'], 'implementation', rejected['tool'],
                                           rejection or rejected['reason']),
                                 run_id, run['task_ref'], finding, rejected['reason'])
-            _INSPECTED_RUNS.add(run_id)
+            INSPECTED_RUNS.add(run_id)
             continue
         receipt_id = 'autosaddler-incident-' + identity
         # Jobs admitted before the identity became the validator's text hashed the
@@ -164,7 +163,7 @@ def reconcile_rejections(notes: list) -> None:
             except (ValueError, KeyError, OSError):
                 incidents.attention(identity, run_id, run['task_ref'],
                                     'Prior optimization evidence cannot be attested; implementation review is required')
-                _INSPECTED_RUNS.add(run_id)
+                INSPECTED_RUNS.add(run_id)
                 continue
             occurrences = [row for row in INDEX.activations(AUDITOR)
                            if row['params'].get('optimization_case') == previous_case]
@@ -173,12 +172,12 @@ def reconcile_rejections(notes: list) -> None:
                     or state.get('stale_reason') not in STALE_CASE_ERRORS
                     or not occurrences or any(row['status'] not in {'completed', 'failed', 'blocked', 'cancelled'}
                                               for row in occurrences)):
-                _INSPECTED_RUNS.add(run_id)
+                INSPECTED_RUNS.add(run_id)
                 continue
-            identity = hashlib.sha256(refinement._json([identity, _IMPLEMENTATION_AT_IMPORT]).encode()).hexdigest()
+            identity = hashlib.sha256(store.canonical_json([identity, IMPLEMENTATION_AT_IMPORT]).encode()).hexdigest()
             receipt_id = 'autosaddler-incident-' + identity
             if INDEX.run(receipt_id) is not None:
-                _INSPECTED_RUNS.add(run_id)
+                INSPECTED_RUNS.add(run_id)
                 continue
         params = {'activation_key': receipt_id, 'rejection_case': identity,
                   'origin_run_id': run_id, 'subject_task': run['task_ref'],
@@ -187,10 +186,10 @@ def reconcile_rejections(notes: list) -> None:
                   'rejected_step': rejected, 'queue_after_review': True}
         # All instruction improvement uses AutoSaddler, without an ordinary
         # model-authored inspection/proposal fallback.
-        case_dir = refinement._root() / 'executive/cases'
+        case_dir = store.root() / 'executive/cases'
         for path in sorted(case_dir.glob('*.json')) if run['task_ref'] == EXECUTIVE else []:
             try:
-                document = refinement._load('executive/cases', path.stem)
+                document = store.load('executive/cases', path.stem)
                 if document.get('origin', {}).get('id') == run_id:
                     current(path.stem)
                     params['optimization_case'] = path.stem
@@ -202,16 +201,16 @@ def reconcile_rejections(notes: list) -> None:
                 params['optimization_case'] = incidents.prepare(run_id)['case_id']
             except (ValueError, OSError, KeyError) as exc:
                 incidents.attention(identity, run_id, run['task_ref'], str(exc), rejected['reason'])
-                _INSPECTED_RUNS.add(run_id)
+                INSPECTED_RUNS.add(run_id)
                 continue
         incidents.attention(identity, run_id, run['task_ref'], '')
         try:
             deliveries = enqueue_named_event('harness.rejected', params, expected_task=AUDITOR)
         except ValueError as exc:
             # A broken optional Audit must not stop normal Task admission.
-            from . import trace as action_trace
+            from .. import trace as action_trace
             action_trace.emit('error', 'Rejected action Audit could not be admitted', [str(exc)[:500]],
-                              {'task_ref': AUDITOR, 'agent_ref': refinement.HEIMDALL})
+                              {'task_ref': AUDITOR, 'agent_ref': HEIMDALL})
             continue
         if len(deliveries) != 1 or deliveries[0]['state'] not in {'started', 'queued', 'processed'}:
             continue
@@ -220,18 +219,18 @@ def reconcile_rejections(notes: list) -> None:
             started=now, finished=now, status='dispatched', objective='AutoSaddler improvement for an agent incident',
             summary='Receipt-bound incident admitted one AutoSaddler job for this definition and failure.',
             trace=json.dumps([params], sort_keys=True))
-        _INSPECTED_RUNS.add(run_id)
+        INSPECTED_RUNS.add(run_id)
 
 
 def model_contract(note, agent_ref: str) -> dict:
-    from ..models import runtime
-    contract = refinement._model_contract(note, agent_ref)
+    from ...models import runtime
+    contract = cases.model_contract(note, agent_ref)
     spec = runtime.configured_spec(contract['spec']['id'])
     return {**contract, 'source_identity': runtime._model_source_identity(spec)}
 
 
-def _revision() -> str:
-    return refinement._hash(refinement._json({name: refinement._hash((revision.ROOT / name).read_bytes())
+def implementation_revision() -> str:
+    return store.sha256(store.canonical_json({name: store.sha256((revision.ROOT / name).read_bytes())
                                              for name in revision.OPTIMIZATION}).encode())
 
 
@@ -245,15 +244,15 @@ def _validate_suite_size(suite: dict) -> None:
 def prepare(specification: dict) -> dict:
     """Freeze a small owner-authored reconstruction and the actual native inputs."""
     if set(specification) == {'origin_run_id'}:
-        from .optimization_incidents import prepare as prepare_incident
+        from .incidents import prepare as prepare_incident
         # The owner re-checks an incident against the instructions in force now.
         return prepare_incident(str(specification['origin_run_id']), current_instructions=True)
     from .evaluation import validate_suite
-    from .executor import resolve_spine
+    from ..executor import resolve_spine
     _validate_suite_size(specification.get('suite', {}))
     if 'task' in specification:
-        registered = refinement.prepare_case(specification)
-        document = refinement._current(registered['case_id'])
+        registered = cases.prepare_case(specification)
+        document = cases.current_case(registered['case_id'])
         return adopt_runbook_case(document)
     if set(specification) != {'origin_run_id', 'problem', 'suite'}:
         raise ValueError('Use origin_run_id, problem and suite only')
@@ -281,11 +280,11 @@ def prepare(specification: dict) -> dict:
     document = {**specification, 'schema_version': 1, 'agent': EXECUTIVE,
                 'articles': {note.ref: (CONFIG.vault_dir / note.path).read_text() for note in notes},
                 'model_contract': model_contract(agent, agent.ref),
-                'optimizer_contract': model_contract(audit, refinement.HEIMDALL),
-                'evaluator_revision': _revision(), 'upstream_revision': UPSTREAM_REVISION,
+                'optimizer_contract': model_contract(audit, HEIMDALL),
+                'evaluator_revision': implementation_revision(), 'upstream_revision': UPSTREAM_REVISION,
                 'origin': {key: origin.get(key) for key in ('id', 'task_ref', 'status', 'summary')},
                 'scope': 'Frozen Tool reconstruction through the ADK Executive loop; no live effects.'}
-    case_id = refinement._store('executive/cases', document)
+    case_id = store.save('executive/cases', document)
     return {'case_id': case_id, 'source_path': _source_path('cases', case_id), 'scope': document['scope']}
 
 
@@ -295,24 +294,24 @@ def adopt_runbook_case(document: dict) -> dict:
     res = resolver(include_system=False)
     document = {**document, 'subject': document['runbook'], 'evaluation_mode': 'frozen',
                 'model_contract': model_contract(res.resolve(document['task']), document['agent']),
-                'optimizer_contract': model_contract(res.resolve(AUDITOR), refinement.HEIMDALL),
-                'evaluator_revision': _revision(), 'upstream_revision': UPSTREAM_REVISION,
+                'optimizer_contract': model_contract(res.resolve(AUDITOR), HEIMDALL),
+                'evaluator_revision': implementation_revision(), 'upstream_revision': UPSTREAM_REVISION,
                 'scope': 'Specialist execution with frozen Tool results; no live effects.'}
-    case_id = refinement._store('executive/cases', document)
+    case_id = store.save('executive/cases', document)
     return {'case_id': case_id, 'source_path': _source_path('cases', case_id), 'scope': document['scope']}
 
 
 def _source_path(lane: str, identity: str) -> str:
-    return str((refinement._root() / 'executive' / lane / (identity + '.json')).relative_to(CONFIG.project_root))
+    return str((store.root() / 'executive' / lane / (identity + '.json')).relative_to(CONFIG.project_root))
 
 
 def subject_ref(document: dict) -> str:
     return document.get('subject', EXECUTIVE)
 
 
-def prepare_decisions(sample: dict, cases: list[dict]) -> dict:
-    from .executor import resolve_spine
-    suite = {'cases': cases, 'repetitions': EVALUATION_REPETITIONS}
+def prepare_decisions(sample: dict, decision_cases: list[dict]) -> dict:
+    from ..executor import resolve_spine
+    suite = {'cases': decision_cases, 'repetitions': EVALUATION_REPETITIONS}
     _validate_suite_size(suite)
     res = resolver(include_system=False)
     task = res.resolve(sample['context']['task'])
@@ -330,19 +329,19 @@ def prepare_decisions(sample: dict, cases: list[dict]) -> dict:
                 'suite': suite,
                 'articles': {note.ref: (CONFIG.vault_dir / note.path).read_text() for note in notes},
                 'model_contract': model_contract(task, agent.ref),
-                'optimizer_contract': model_contract(res.resolve(AUDITOR), refinement.HEIMDALL),
-                'evaluator_revision': _revision(), 'upstream_revision': UPSTREAM_REVISION,
+                'optimizer_contract': model_contract(res.resolve(AUDITOR), HEIMDALL),
+                'evaluator_revision': implementation_revision(), 'upstream_revision': UPSTREAM_REVISION,
                 'origin': {'id': sample['run_id'], 'task_ref': task.ref},
                 'scope': 'Captured decision contracts and independent accepted controls; no live action replay.'}
-    case_id = refinement._store('executive/cases', document)
+    case_id = store.save('executive/cases', document)
     return {'case_id': case_id, 'source_path': _source_path('cases', case_id), 'scope': document['scope']}
 
 
 def current(case_id: str, accepted_resolver=None) -> dict:
-    document = refinement._load('executive/cases', case_id)
-    if _revision() != _IMPLEMENTATION_AT_IMPORT:
+    document = store.load('executive/cases', case_id)
+    if implementation_revision() != IMPLEMENTATION_AT_IMPORT:
         raise ValueError('Reload the changed Harness before preparing or running optimization')
-    if document['evaluator_revision'] != _revision() or document['upstream_revision'] != UPSTREAM_REVISION:
+    if document['evaluator_revision'] != implementation_revision() or document['upstream_revision'] != UPSTREAM_REVISION:
         raise ValueError('Executive optimizer implementation changed; prepare a fresh case')
     _validate_suite_size(document['suite'])
     res = accepted_resolver or resolver(include_system=False)
@@ -353,17 +352,17 @@ def current(case_id: str, accepted_resolver=None) -> dict:
     task = res.resolve(document.get('task', EXECUTIVE))
     if model_contract(task, document['agent']) != document['model_contract']:
         raise ValueError('Execution model configuration changed; prepare a fresh case')
-    if model_contract(res.resolve(AUDITOR), refinement.HEIMDALL) != document['optimizer_contract']:
+    if model_contract(res.resolve(AUDITOR), HEIMDALL) != document['optimizer_contract']:
         raise ValueError('Audit model configuration changed; prepare a fresh case')
     if document.get('evaluation_mode') == 'contract':
-        from .optimization_incidents import check_current
+        from .incidents import check_current
         for case in document['suite']['cases']:
             check_current(case['sample'])
     return document
 
 
 def queue(case_id: str) -> dict:
-    from .scheduler import enqueue_named_event
+    from ..scheduler import enqueue_named_event
     document = current(case_id)
     result = enqueue_named_event('executive.optimize', {
         'optimization_case': case_id, 'activation_key': 'executive-optimize:' + case_id,
@@ -374,7 +373,7 @@ def queue(case_id: str) -> dict:
 
 
 def validate_body(body: str, baseline: str, subject: str = EXECUTIVE) -> None:
-    from ..knowledge.links import body_links
+    from ...knowledge.links import body_links
     if not isinstance(body, str) or not body.strip() or len(body) > min(16_000, len(baseline) + 2000):
         raise ValueError('Candidate identity body exceeds its compact instruction budget')
     if body.lstrip().startswith('---'):
@@ -383,7 +382,7 @@ def validate_body(body: str, baseline: str, subject: str = EXECUTIVE) -> None:
         raise ValueError('Candidate must preserve the exact authored Article links')
 
 
-def _report_result(report_id: str, report: dict) -> dict:
+def report_result(report_id: str, report: dict) -> dict:
     return {'case_id': report['case_id'], 'report_id': report_id, 'verdict': report['verdict'],
             'comparison': report['comparison'], 'source_path': _source_path('reports', report_id),
             'optimizer_failures': report.get('optimizer_failures', []),
@@ -395,7 +394,7 @@ async def optimize(case_id: str, context: dict) -> dict:
     if context.get('task') != AUDITOR or params.get('optimization_case') != case_id or not context.get('run_id'):
         raise ValueError('Optimization requires the exact case bound to an active Audit')
     audit = load_note(AUDITOR + '.md')
-    if not audit or audit.meta.get('assignee') != f'[[{refinement.HEIMDALL}]]':
+    if not audit or audit.meta.get('assignee') != f'[[{HEIMDALL}]]':
         raise ValueError('Heimdall must own Executive optimization')
     document = current(case_id)
     from importlib.metadata import distribution
@@ -406,7 +405,7 @@ async def optimize(case_id: str, context: dict) -> dict:
         raise ValueError('This optimization case already has an active owner')
     _ACTIVE.add(case_id)
     try:
-        from .adk.optimization import run
+        from ..adk.optimization import run
         # Cancellation is joined, including while the native provider is
         # generating. The foreground does not wait for an evaluation response.
         worker = asyncio.create_task(run(case_id, document, audit, context))
@@ -427,11 +426,11 @@ async def optimize(case_id: str, context: dict) -> dict:
                     task.cancel()
             await asyncio.gather(*(t for t in (worker, waiter) if t is not None), return_exceptions=True)
         current(case_id)
-        report_id = refinement._store('executive/reports', report)
-        result = _report_result(report_id, report)
+        report_id = store.save('executive/reports', report)
+        result = report_result(report_id, report)
         if report['verdict'] == 'passed':
-            from ..knowledge.proposals import stage_proposal
-            agent = Resolver(refinement._notes(document)).resolve(subject_ref(document))
+            from ...knowledge.proposals import stage_proposal
+            agent = Resolver(cases.frozen_notes(document)).resolve(subject_ref(document))
             context['_executive_optimization'] = {'case_id': case_id, 'report_id': report_id}
             try:
                 staged = stage_proposal({'target': agent.path, 'action': 'update', 'title': agent.title,
@@ -441,7 +440,7 @@ async def optimize(case_id: str, context: dict) -> dict:
             finally:
                 context.pop('_executive_optimization', None)
         context['_harness_optimization'] = result
-        from .optimization_incidents import attention
+        from .incidents import attention
         # The incident is the training case: once its replays all pass, a control
         # that failed a repetition is not this incident's quality warning.
         baseline = [row for row in report.get('observations', {}).get(report.get('seed_id'), [])
@@ -451,16 +450,16 @@ async def optimize(case_id: str, context: dict) -> dict:
                       'AutoSaddler exhausted its bounded improvement attempt: ' + report['verdict'],
                       'Evidence and candidate history: ' + result['source_path'],
                       origin=str((document.get('origin') or {}).get('id') or ''))
-        from ..knowledge.vault import _atomic_write
-        _atomic_write(refinement._root() / 'executive/jobs' / case_id / 'report.json', json.dumps(result, sort_keys=True))
+        from ...knowledge.vault import _atomic_write
+        _atomic_write(store.root() / 'executive/jobs' / case_id / 'report.json', json.dumps(result, sort_keys=True))
         return result
     finally:
         _ACTIVE.discard(case_id)
 
 
 def status(case_id: str) -> dict:
-    document = refinement._load('executive/cases', case_id)
-    report = refinement._root() / 'executive/jobs' / case_id / 'report.json'
+    document = store.load('executive/cases', case_id)
+    report = store.root() / 'executive/jobs' / case_id / 'report.json'
     result = {'case_id': case_id, 'active': case_id in _ACTIVE, 'task': AUDITOR, 'scope': document['scope']}
     if report.is_file() and not report.is_symlink() and report.stat().st_size <= 16_000:
         result['report'] = json.loads(report.read_text())
@@ -484,9 +483,9 @@ def proposal_binding(context: dict, target: str, action: str, title: str, body: 
     marker = context.get('_executive_optimization')
     if not isinstance(marker, dict) or marker.get('case_id') != case_id or context.get('task') != AUDITOR:
         raise ValueError('This Audit may stage only the controller-selected optimization candidate')
-    report = refinement._load('executive/reports', marker['report_id'])
+    report = store.load('executive/reports', marker['report_id'])
     document = current(case_id)
-    agent = Resolver(refinement._notes(document)).resolve(subject_ref(document))
+    agent = Resolver(cases.frozen_notes(document)).resolve(subject_ref(document))
     if (report['verdict'] != 'passed' or report['audit_run_id'] != context['run_id']
             or target != agent.path or action != 'update' or title != agent.title or metadata
             or body.strip() != report['candidate_body'].strip()):
@@ -504,8 +503,8 @@ def review_blocker(note, accepted_resolver=None) -> str | None:
         if not isinstance(marker, dict) or set(marker) != {'case_id', 'report_id'}:
             raise ValueError('Executive candidate lost its optimization binding')
         document = current(marker['case_id'], accepted_resolver)
-        report = refinement._load('executive/reports', marker['report_id'])
-        agent = Resolver(refinement._notes(document)).resolve(subject_ref(document))
+        report = store.load('executive/reports', marker['report_id'])
+        agent = Resolver(cases.frozen_notes(document)).resolve(subject_ref(document))
         if (report['verdict'] != 'passed' or report['case_id'] != marker['case_id']
                 or note.meta.get('task') != AUDITOR or note.meta.get('run_id') != report['audit_run_id']
                 or note.meta.get('target') != agent.path or note.meta.get('action') != 'update'
@@ -515,11 +514,11 @@ def review_blocker(note, accepted_resolver=None) -> str | None:
         run = INDEX.run(report['audit_run_id'])
         if not run or run.get('status') not in {'completed', 'review'} or not receipts:
             raise ValueError('The owning Audit has not finished with complete Tool evidence')
-        from .adk.optimization import comparison
+        from ..adk.optimization import comparison
         if comparison(document, report['observations'], report['seed_id'], report['selected_id']) != report['comparison']:
             raise ValueError('Executive candidate comparison does not match the recorded outcomes')
-        result = {**_report_result(marker['report_id'], report), 'proposal': Path(note.path).name}
-        expected_hash = refinement._hash(json.dumps(json.dumps(result, sort_keys=True), sort_keys=True).encode())
+        result = {**report_result(marker['report_id'], report), 'proposal': Path(note.path).name}
+        expected_hash = store.sha256(json.dumps(json.dumps(result, sort_keys=True), sort_keys=True).encode())
         calls = receipts.get('calls', [])
         if not any(call.get('tool') == 'harness.optimize' and call.get('status') == 'returned'
                    and call.get('result_sha256') == expected_hash for call in calls):
@@ -535,8 +534,8 @@ def publish_validated() -> None:
     The existing Review writer revalidates the candidate, code, model, inputs
     and complete returned optimization receipt under its normal write lock.
     """
-    from ..knowledge import review
-    from .optimization_incidents import attention
+    from ...knowledge import review
+    from .incidents import attention
     audit = load_note(AUDITOR + '.md')
     if audit is None or audit.meta.get('optimization_auto_apply') is not True:
         return
@@ -550,18 +549,18 @@ def publish_validated() -> None:
             continue
         try:
             document = current(marker['case_id'])
-            subject = Resolver(refinement._notes(document)).resolve(subject_ref(document))
+            subject = Resolver(cases.frozen_notes(document)).resolve(subject_ref(document))
             if subject.kind not in {'agent', 'runbook'} or note.meta.get('authored_fields') != []:
                 raise ValueError('Automatic optimization publication is restricted to instruction bodies')
             review.approve(path.name)
             attention(marker['case_id'], run['id'], document.get('task', EXECUTIVE), '')
-            from . import trace as action_trace
+            from .. import trace as action_trace
             action_trace.emit('status', 'AutoSaddler instruction improvement applied', [subject.ref],
-                              {'task_ref': AUDITOR, 'agent_ref': refinement.HEIMDALL})
+                              {'task_ref': AUDITOR, 'agent_ref': HEIMDALL})
         except (ValueError, OSError, KeyError) as exc:
             attention(marker.get('case_id', path.stem), run['id'], AUDITOR,
                       'Validated instruction publication needs review: ' + str(exc))
 
 
 # Disk edits cannot attest a still-running process as the new implementation.
-_IMPLEMENTATION_AT_IMPORT = _revision()
+IMPLEMENTATION_AT_IMPORT = implementation_revision()

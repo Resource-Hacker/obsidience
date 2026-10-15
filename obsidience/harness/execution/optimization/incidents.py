@@ -9,10 +9,10 @@ from __future__ import annotations
 from copy import deepcopy
 import json
 
-from ..config import CONFIG
-from ..knowledge.index import INDEX
-from ..knowledge.vault import _atomic_write, load_note, resolver
-from . import refinement
+from ...config import CONFIG
+from ...knowledge.index import INDEX
+from ...knowledge.vault import _atomic_write, load_note, resolver
+from . import AUDITOR, store
 
 SUPPORTED = {'task.complete', 'vault.propose'}
 CONTEXT_FIELDS = {
@@ -26,7 +26,7 @@ CONTEXT_FIELDS = {
 
 
 def snapshot(dispatch, name: str, args: dict) -> dict | None:
-    if (name not in SUPPORTED or dispatch.task.ref in {refinement.AUDITOR, 'Tasks/repair'}
+    if (name not in SUPPORTED or dispatch.task.ref in {AUDITOR, 'Tasks/repair'}
             or dispatch.visual_context_seen or not dispatch.ctx.get('run_id')):
         return None
     context = {key: value for key, value in dispatch.ctx.items() if key in CONTEXT_FIELDS}
@@ -56,7 +56,7 @@ def record(sample: dict | None, run_id: str, step: int, result: object, status: 
     if not rejected and sample['tool'] == 'task.complete' and (
             not isinstance(result, dict) or not result.get('accepted') or result.get('status') == 'failed'):
         return
-    from . import optimization
+    from . import admission
     task = load_note(sample['context']['task'] + '.md')
     if task is None:
         return
@@ -65,48 +65,48 @@ def record(sample: dict | None, run_id: str, step: int, result: object, status: 
         return
     sample = {**sample, 'run_id': run_id, 'step': step, 'result': result,
               'rejected': bool(rejected), 'subject': subject.ref,
-              'subject_sha256': refinement._hash((CONFIG.vault_dir / subject.path).read_bytes()),
-              'implementation': optimization._IMPLEMENTATION_AT_IMPORT}
+              'subject_sha256': store.sha256((CONFIG.vault_dir / subject.path).read_bytes()),
+              'implementation': admission.IMPLEMENTATION_AT_IMPORT}
     # Freeze Articles consulted by the validator, not the whole changing wiki.
     refs = set(sample['context'].get('_article_reads', {}))
     if sample['tool'] == 'vault.propose':
-        from ..knowledge.links import metadata_ref
+        from ...knowledge.links import metadata_ref
         refs.add(metadata_ref(str(sample['args'].get('target', ''))))
-    sample['read_revisions'] = {note.ref: refinement._hash((CONFIG.vault_dir / note.path).read_bytes())
+    sample['read_revisions'] = {note.ref: store.sha256((CONFIG.vault_dir / note.path).read_bytes())
                                 for ref in refs if (note := load_note(ref + '.md')) is not None}
     if rejected:
-        identity = refinement._store('decisions', sample)
-        path = refinement._root() / 'incidents' / (run_id + '.json')
+        identity = store.save('decisions', sample)
+        path = store.root() / 'incidents' / (run_id + '.json')
         previous = json.loads(path.read_text()) if path.exists() else []
         if identity not in previous:
             # Four at most: the run's first three rejections and its newest one.
             _atomic_write(path, json.dumps([*previous[:3], identity]))
     else:
-        key = refinement._hash((task.ref + ':' + sample['tool']).encode())
+        key = store.sha256((task.ref + ':' + sample['tool']).encode())
         # Keep enough independent runs for four controls even when the current
         # incident's own recovery is the newest accepted decision.
-        path = refinement._root() / 'controls' / (key + '.json')
+        path = store.root() / 'controls' / (key + '.json')
         previous = json.loads(path.read_text()) if path.exists() else []
         previous = [row for row in previous if row['run_id'] != run_id]
         _atomic_write(path, json.dumps(
-            [*previous[-(optimization.DECISION_CASE_COUNT - 1):], sample], ensure_ascii=False))
-        optimization._INSPECTED_RUNS.clear()  # New independent controls can unblock an incident.
+            [*previous[-(admission.DECISION_CASE_COUNT - 1):], sample], ensure_ascii=False))
+        admission.INSPECTED_RUNS.clear()  # New independent controls can unblock an incident.
 
 
-def _receipt_matches(sample: dict) -> bool:
+def receipt_matches(sample: dict) -> bool:
     receipts = INDEX.tool_run_receipts(sample['run_id']) or {}
     encoded = json.dumps(sample['result'], sort_keys=True).encode()
-    signature = sample['tool'] + ':sha256:' + refinement._hash(json.dumps(sample['args'], sort_keys=True).encode())
+    signature = sample['tool'] + ':sha256:' + store.sha256(json.dumps(sample['args'], sort_keys=True).encode())
     return any(call.get('tool') == sample['tool'] and call.get('status') == 'returned'
-               and call.get('result_sha256') == refinement._hash(encoded)
+               and call.get('result_sha256') == store.sha256(encoded)
                and call.get('result_chars') == len(encoded)
                and call.get('signature') == signature and call.get('step') == sample['step']
                for call in receipts.get('calls', []))
 
 
 def check_current(sample: dict) -> None:
-    from . import optimization
-    if sample.get('validation_revision', sample['implementation']) != optimization._revision():
+    from . import admission
+    if sample.get('validation_revision', sample['implementation']) != admission.implementation_revision():
         raise ValueError('Captured decision predates the current implementation')
     _check_evidence(sample)
 
@@ -118,9 +118,9 @@ def _check_evidence(sample: dict) -> None:
         raise ValueError('Historical decision has no complete text-only provider prompt; a fresh capture is required')
     for ref, expected in {sample['subject']: sample['subject_sha256'], **sample['read_revisions']}.items():
         note = load_note(ref + '.md')
-        if note is None or refinement._hash((CONFIG.vault_dir / note.path).read_bytes()) != expected:
+        if note is None or store.sha256((CONFIG.vault_dir / note.path).read_bytes()) != expected:
             raise ValueError('Captured decision dependency changed: ' + ref)
-    if not _receipt_matches(sample):
+    if not receipt_matches(sample):
         raise ValueError('Captured decision has no exact committed Tool receipt')
     subject = load_note(sample['subject'] + '.md')
     if not any(subject.body.strip() in row['content'] for row in messages):
@@ -134,12 +134,12 @@ def _current_instructions(sample: dict) -> dict:
     Without it the sample is returned unchanged and fails the dependency check.
     """
     import subprocess
-    from ..knowledge import format as article_format
+    from ...knowledge import format as article_format
     subject = load_note(sample['subject'] + '.md')
     messages = sample.get('messages')
     if subject is None or not isinstance(messages, list):
         return sample
-    current = refinement._hash((CONFIG.vault_dir / subject.path).read_bytes())
+    current = store.sha256((CONFIG.vault_dir / subject.path).read_bytes())
     if current == sample['subject_sha256']:
         return sample
     git = ['git', '-C', str(CONFIG.vault_dir)]
@@ -149,7 +149,7 @@ def _current_instructions(sample: dict) -> dict:
         for commit in commits:
             raw = subprocess.run([*git, 'show', f'{commit}:{subject.path}'],
                                  capture_output=True, check=True, timeout=10).stdout
-            if refinement._hash(raw) == sample['subject_sha256']:
+            if store.sha256(raw) == sample['subject_sha256']:
                 captured = article_format.loads(raw.decode('utf-8'))[1].strip()
                 break
         else:
@@ -178,7 +178,8 @@ def revalidate(sample: dict, current_instructions: bool = False) -> dict:
     owner re-check may judge the current instructions instead of the captured
     ones; Articles the validator consulted must still be unchanged.
     """
-    from . import executor, optimization
+    from .. import executor
+    from . import admission
     if current_instructions:
         sample = _current_instructions(sample)
     _check_evidence(sample)
@@ -188,7 +189,7 @@ def revalidate(sample: dict, current_instructions: bool = False) -> dict:
     spine = executor.resolve_spine(task, resolver())
     if spine.get('error') or set(sample['allowed']) - (set(spine['tools']) | {'task.complete'}):
         raise ValueError('Captured decision Tool authority changed')
-    return {**deepcopy(sample), 'validation_revision': optimization._revision(),
+    return {**deepcopy(sample), 'validation_revision': admission.implementation_revision(),
             'validation_scope': ('Current contract and current instructions on otherwise unchanged captured inputs; '
                                  'no historical effect replay' if sample.get('captured_subject_sha256') else
                                  'Current contract on unchanged captured inputs; no historical effect replay')}
@@ -196,13 +197,13 @@ def revalidate(sample: dict, current_instructions: bool = False) -> dict:
 
 def prepare(run_id: str, current_instructions: bool = False) -> dict:
     """Automatic admission judges the captured instructions; an owner re-check may judge the current ones."""
-    from . import optimization
-    path = refinement._root() / 'incidents' / (run_id + '.json')
+    from . import admission
+    path = store.root() / 'incidents' / (run_id + '.json')
     if not path.is_file():
         recover_capture(run_id)
     if not path.is_file():
         raise ValueError('This historical execution has no complete decision evidence; retain its receipts for implementation review')
-    samples = [refinement._load('decisions', identity) for identity in json.loads(path.read_text())]
+    samples = [store.load('decisions', identity) for identity in json.loads(path.read_text())]
     selected, errors = None, []
     # The unrecovered rejection is the run's last; it corrected the earlier ones itself.
     for sample in samples[-1:]:
@@ -218,8 +219,8 @@ def prepare(run_id: str, current_instructions: bool = False) -> dict:
             errors.append(str(exc))
     if selected is None:
         raise ValueError(errors[0] if errors else 'No captured rejection is eligible for isolated evaluation')
-    key = refinement._hash((selected['context']['task'] + ':' + selected['tool']).encode())
-    controls_path = refinement._root() / 'controls' / (key + '.json')
+    key = store.sha256((selected['context']['task'] + ':' + selected['tool']).encode())
+    controls_path = store.root() / 'controls' / (key + '.json')
     controls = json.loads(controls_path.read_text()) if controls_path.exists() else []
     eligible = []
     seen_runs = {selected['run_id']}
@@ -234,7 +235,7 @@ def prepare(run_id: str, current_instructions: bool = False) -> dict:
                 seen_runs.add(control['run_id'])
         except ValueError:
             continue
-    required = optimization.DECISION_CASE_COUNT - 1
+    required = admission.DECISION_CASE_COUNT - 1
     if len(eligible) < required:
         raise ValueError(f'Awaiting independent accepted decisions for the five-case evaluation '
                          f'({len(eligible)}/{required} held-out controls available)')
@@ -243,7 +244,7 @@ def prepare(run_id: str, current_instructions: bool = False) -> dict:
         cases.append({'id': f'decision-{index}', 'split': 'train' if index == 0 else 'holdout',
                       'objective': sample['context'].get('objective', 'Continue the bound procedure'),
                       'sample': sample})
-    return optimization.prepare_decisions(selected, cases)
+    return admission.prepare_decisions(selected, cases)
 
 
 def recover_capture(run_id: str) -> None:
@@ -255,10 +256,10 @@ def recover_capture(run_id: str) -> None:
     """
     from types import SimpleNamespace
     import re
-    from . import executor
-    from ..capabilities.source.read import execute as source_read
-    from ..capabilities.vault.read import execute as vault_read
-    from ..capabilities.vault.search import execute as vault_search
+    from .. import executor
+    from ...capabilities.source.read import execute as source_read
+    from ...capabilities.vault.read import execute as vault_read
+    from ...capabilities.vault.search import execute as vault_search
 
     run = INDEX.run(run_id)
     if not run or run['task_ref'] == 'Agents/Executive/Executive':
@@ -291,7 +292,7 @@ def recover_capture(run_id: str) -> None:
     calls = receipts.get('calls', [])
     for entry, call in zip(decisions, calls):
         name, args = entry['tool'], entry.get('args', {})
-        signature = name + ':sha256:' + refinement._hash(json.dumps(args, sort_keys=True).encode())
+        signature = name + ':sha256:' + store.sha256(json.dumps(args, sort_keys=True).encode())
         if call.get('tool') != name or call.get('signature') != signature or call.get('status') != 'returned':
             return
         if name in {'source.read', 'vault.read'}:
@@ -303,7 +304,7 @@ def recover_capture(run_id: str) -> None:
             if result is None and name == 'vault.propose' and isinstance(entry.get('obs'), str):
                 result = entry['obs']  # Must still match the complete result receipt below.
         raw = json.dumps(result, sort_keys=True).encode()
-        if refinement._hash(raw) != call['result_sha256'] or len(raw) != call['result_chars']:
+        if store.sha256(raw) != call['result_sha256'] or len(raw) != call['result_chars']:
             if name == 'vault.search' and call.get('read_only') is True:
                 # Search snippets are not inputs to proposal syntax/citation
                 # validation. Omit missing bytes explicitly; do not recreate
@@ -374,8 +375,8 @@ def trial_read(sample: dict, context: dict, tool: str, args: dict) -> str | None
     would, so the contract then grades the following call on what was read.
     """
     from importlib import import_module
-    from ..capabilities.registry import argument_schema
-    from ..capabilities.source.read import precondition_error
+    from ...capabilities.registry import argument_schema
+    from ...capabilities.source.read import precondition_error
     import jsonschema
 
     if tool not in TRIAL_READS or tool == sample['tool'] or tool not in sample['allowed']:
@@ -388,7 +389,7 @@ def trial_read(sample: dict, context: dict, tool: str, args: dict) -> str | None
     if error := precondition_error(tool, args, context):
         observation, dispatched = 'Tool prerequisite rejected: ' + error, False
     else:
-        observation, dispatched = import_module('..capabilities.' + tool, __package__).execute(args, context), True
+        observation, dispatched = import_module('...capabilities.' + tool, __package__).execute(args, context), True
     context.setdefault('trace', []).append({'tool': tool, 'args': args, 'obs': observation,
                                             **({} if dispatched else {'not_dispatched': True})})
     return observation
@@ -396,11 +397,11 @@ def trial_read(sample: dict, context: dict, tool: str, args: dict) -> str | None
 
 def validate_decision(sample: dict, tool: str, args: dict) -> tuple[bool, str]:
     """Use executable contracts as the rubric; never execute a proposed effect."""
-    from ..capabilities.registry import argument_schema
-    from ..capabilities.task.complete import execute as complete
-    from ..capabilities.source.read import precondition_error
-    from ..knowledge.scope import assert_proposal_scope
-    from ..knowledge.proposals import stage_proposal
+    from ...capabilities.registry import argument_schema
+    from ...capabilities.task.complete import execute as complete
+    from ...capabilities.source.read import precondition_error
+    from ...knowledge.scope import assert_proposal_scope
+    from ...knowledge.proposals import stage_proposal
     import jsonschema
 
     context = deepcopy(sample['context'])
@@ -421,7 +422,7 @@ def validate_decision(sample: dict, tool: str, args: dict) -> tuple[bool, str]:
             outcome = complete(args, context)
             return bool(outcome.get('accepted')), str(outcome.get('error') or 'Completion contract satisfied')
         if tool == 'vault.propose':
-            from ..knowledge.links import metadata_ref
+            from ...knowledge.links import metadata_ref
             if (args.get('action', 'create') != sample['args'].get('action', 'create')
                     or metadata_ref(str(args.get('target', ''))) != metadata_ref(str(sample['args'].get('target', '')))):
                 raise ValueError('Changing the requested target or operation cannot pass this case')
@@ -436,7 +437,7 @@ def validate_decision(sample: dict, tool: str, args: dict) -> tuple[bool, str]:
 def notifications() -> list[dict]:
     """Project unresolved optimizer outcomes into the existing health Review."""
     rows = []
-    path = refinement._root() / 'optimization-attention.json'
+    path = store.root() / 'optimization-attention.json'
     if path.is_file():
         files = _evaluation_files()
         for row in json.loads(path.read_text()):
@@ -456,7 +457,7 @@ def notifications() -> list[dict]:
             if reason == 'AutoSaddler exhausted its bounded improvement attempt: not_improved':
                 reason = 'No instruction candidate met the quality gate; the current instructions were kept.'
             rows.append({**row, 'reason': reason, 'title': 'AutoSaddler',
-                         'task': row.get('task', refinement.AUDITOR)})
+                         'task': row.get('task', AUDITOR)})
     return rows
 
 
@@ -467,7 +468,7 @@ _REPLACEMENTS: dict = {}
 
 def _evaluation_files() -> tuple:
     """Identify what a replacement attestation reads: exhausted findings, and job reports as last written."""
-    root = refinement._root()
+    root = store.root()
     attention_path = root / 'optimization-attention.json'
     findings = json.loads(attention_path.read_text()) if attention_path.is_file() else []
     # Admission rewrites the record in another order on every inspection pass.
@@ -479,26 +480,26 @@ def _evaluation_files() -> tuple:
 
 def _replacement_reports(row: dict, baseline_failure: bool) -> list[dict]:
     """Attest from job artifacts alone which reports may replace this finding, newest first."""
-    from . import optimization
+    from . import admission
     found = []
     try:
-        previous = refinement._load('executive/cases', row['key'])
+        previous = store.load('executive/cases', row['key'])
         if not previous.get('origin'):
             return found
-        paths = sorted((refinement._root() / 'executive/jobs').glob('*/report.json'),
+        paths = sorted((store.root() / 'executive/jobs').glob('*/report.json'),
                        key=lambda p: p.stat().st_mtime, reverse=True)[:64]
-        attention_path = refinement._root() / 'optimization-attention.json'
+        attention_path = store.root() / 'optimization-attention.json'
         findings = json.loads(attention_path.read_text()) if attention_path.is_file() else []
         for path in paths:
             if path.is_symlink() or path.stat().st_size > 16_000 or path.parent.name == row['key']:
                 continue
             result = json.loads(path.read_text())
-            if result.get('comparison', {}).get('counts', {}).get('total') != optimization.DECISION_CASE_COUNT * optimization.EVALUATION_REPETITIONS:
+            if result.get('comparison', {}).get('counts', {}).get('total') != admission.DECISION_CASE_COUNT * admission.EVALUATION_REPETITIONS:
                 continue
-            current = refinement._load('executive/cases', path.parent.name)
+            current = store.load('executive/cases', path.parent.name)
             if current.get('origin') != previous['origin'] or current.get('subject') != previous.get('subject'):
                 continue
-            report = refinement._load('executive/reports', result['report_id'])
+            report = store.load('executive/reports', result['report_id'])
             replacement_finding = any(
                 finding.get('key') == report['case_id']
                 and finding.get('run_id') == report['audit_run_id']
@@ -518,15 +519,15 @@ def _replacement_reports(row: dict, baseline_failure: bool) -> list[dict]:
                 if not baseline_passed and not replacement_finding:
                     continue
             audit_run_id = report['audit_run_id']
-            expected = optimization._report_result(result['report_id'], report)
+            expected = admission.report_result(result['report_id'], report)
             if report['verdict'] == 'passed' and isinstance(result.get('proposal'), str):
                 expected['proposal'] = result['proposal']
             if result != expected or report['case_id'] != path.parent.name:
                 continue
             encoded = json.dumps(json.dumps(result, sort_keys=True), sort_keys=True).encode()
-            signature = 'harness.optimize:sha256:' + refinement._hash(json.dumps({'case_id': report['case_id']}, sort_keys=True).encode())
+            signature = 'harness.optimize:sha256:' + store.sha256(json.dumps({'case_id': report['case_id']}, sort_keys=True).encode())
             found.append({'case_id': report['case_id'], 'audit_run_id': audit_run_id, 'signature': signature,
-                          'result_chars': len(encoded), 'result_sha256': refinement._hash(encoded)})
+                          'result_chars': len(encoded), 'result_sha256': store.sha256(encoded)})
     except (ValueError, OSError, KeyError, TypeError):
         pass  # Nothing after unattestable evidence may resolve the finding.
     return found
@@ -539,7 +540,6 @@ def superseding_evaluation(row: dict, files: tuple | None = None) -> str | None:
     A new finding replaces an older finding for the same incident; an entirely
     passing baseline may resolve it. Historical reports and attention remain.
     """
-    from . import optimization
     reason = row.get('reason')
     baseline_failure = reason == 'AutoSaddler exhausted its bounded improvement attempt: not_improved'
     if not baseline_failure and reason != 'AutoSaddler exhausted its bounded improvement attempt: incomplete':
@@ -557,7 +557,7 @@ def superseding_evaluation(row: dict, files: tuple | None = None) -> str | None:
         for candidate in _REPLACEMENTS[row['key'], reason]:
             run = INDEX.run(candidate['audit_run_id'])
             if (not run or run['status'] not in {'completed', 'review', 'failed'}
-                    or run['task_ref'] != optimization.AUDITOR
+                    or run['task_ref'] != AUDITOR
                     or not run.get('finished') or run['finished'] <= (old_run.get('finished') or 0)):
                 continue
             if any(call.get('tool') == 'harness.optimize' and call.get('status') == 'returned'
@@ -581,7 +581,7 @@ def recovered_operational_incident(run_id: str) -> str | None:
     run = INDEX.run(run_id)
     if not run or not run.get('activation_id'):
         return None
-    path = refinement._root() / 'incidents' / (run_id + '.json')
+    path = store.root() / 'incidents' / (run_id + '.json')
     if not path.is_file():
         return None
     try:
@@ -601,14 +601,14 @@ def recovered_operational_incident(run_id: str) -> str | None:
             # The terminal trace holds normalized authority output, not the
             # model's original arguments. Attest the returned result itself.
             result = json.dumps({'accepted': True, **entries[-1]['args'], 'error': ''}, sort_keys=True).encode()
-            if (calls[-1].get('result_sha256') == refinement._hash(result)
+            if (calls[-1].get('result_sha256') == store.sha256(result)
                     and calls[-1].get('result_chars') == len(result)):
                 # Rebuild historical decision contexts only after a later exact
                 # occurrence has attested completion. Every original evidence
                 # gate still applies before resolving the incident.
-                samples = [refinement._load('decisions', sample_id)
+                samples = [store.load('decisions', sample_id)
                            for sample_id in json.loads(path.read_text())]
-                if not samples or any(not _receipt_matches(sample) or not validate_decision(
+                if not samples or any(not receipt_matches(sample) or not validate_decision(
                         sample, sample['tool'], sample['args'])[0] for sample in samples):
                     return None
                 return identity
@@ -618,7 +618,7 @@ def recovered_operational_incident(run_id: str) -> str | None:
 
 
 def attention(identity: str, run_id: str, task: str, reason: str, detail: str = '', origin: str = '') -> None:
-    path = refinement._root() / 'optimization-attention.json'
+    path = store.root() / 'optimization-attention.json'
     rows = json.loads(path.read_text()) if path.is_file() else []
     before = list(rows)
     rows = [row for row in rows if row['key'] != identity

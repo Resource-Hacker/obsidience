@@ -21,7 +21,7 @@ from ..conversation.selection import EXECUTIVE_REF
 from ..knowledge.vault import resolver
 from ..execution import activity, trace
 from ..models import runtime as model_runtime
-from . import media as media_runtime
+from . import devices as media_runtime
 
 RealtimePhase = Literal["off", "starting", "wake", "command", "proactive", "suspended", "stopping", "error"]
 READY_PHASES = {"wake", "command", "proactive"}

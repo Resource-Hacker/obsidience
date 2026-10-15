@@ -1,91 +1,25 @@
-"""Immutable evaluation-artifact store and frozen Runbook cases for AutoSaddler.
-
-AutoSaddler v2 supplies the matched-case and immutable-candidate design reference
-(MIT, 30e20ce004486c58e7ee97c66182a8d0d41ec90e). No upstream engine is imported.
-These are internal evaluation artifacts, not external Source intake or Articles.
-"""
+"""Frozen Runbook cases for AutoSaddler, kept in the evaluation-artifact store."""
 
 from __future__ import annotations
 
-import hashlib
 import json
-import re
 from dataclasses import asdict
-from pathlib import Path
 
-from ..config import CONFIG
-from ..knowledge import format as article_format
-from ..knowledge.index import INDEX
-from ..knowledge.vault import Note, Resolver, resolver
-from . import revision
-
-AUDITOR = "Tasks/audit"
-HEIMDALL = "Agents/Heimdall/Heimdall"
-# Five complete decision captures (up to 160 KB each) plus frozen definitions.
-MAX_ARTIFACT_BYTES = 1_024_000
-
-
-def _json(value) -> str:
-    return json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
-
-
-def _hash(value: bytes) -> str:
-    return hashlib.sha256(value).hexdigest()
-
-
-def _root() -> Path:
-    return CONFIG.source_dir / "evaluations"
-
-
-def _identity(value: object) -> str:
-    if not isinstance(value, str) or not re.fullmatch(r"[a-f0-9]{64}", value):
-        raise ValueError("Evaluation identity must be an exact SHA256")
-    return value
-
-
-def _store(lane: str, document: dict) -> str:
-    raw = _json(document).encode()
-    if len(raw) > MAX_ARTIFACT_BYTES:
-        raise ValueError("Evaluation artifact exceeds its byte bound")
-    identity = _hash(raw)
-    directory = _root() / lane
-    directory.mkdir(parents=True, exist_ok=True)
-    path = directory / (identity + ".json")
-    if any(parent.is_symlink() for parent in (path, *path.parents)):
-        raise ValueError("Evaluation artifacts cannot follow symlinks")
-    # Atomic publication keeps a killed writer from leaving an admitted partial
-    # artifact. Existing content identities are immutable and byte-attested.
-    from ..knowledge.vault import _atomic_write
-    if path.exists():
-        if path.read_bytes() != raw:
-            raise ValueError("Evaluation artifact identity conflicts")
-    else:
-        _atomic_write(path, raw.decode())
-    return identity
-
-
-def _load(lane: str, identity: str) -> dict:
-    path = _root() / lane / (_identity(identity) + ".json")
-    if any(parent.is_symlink() for parent in (path, *path.parents)):
-        raise ValueError("Evaluation artifacts cannot follow symlinks")
-    if path.stat().st_size > MAX_ARTIFACT_BYTES:
-        raise ValueError("Evaluation artifact exceeds its byte bound")
-    raw = path.read_bytes()
-    if _hash(raw) != identity:
-        raise ValueError("Evaluation artifact bytes changed")
-    result = json.loads(raw)
-    if not isinstance(result, dict):
-        raise ValueError("Evaluation artifact must be an object")
-    return result
+from ...config import CONFIG
+from ...knowledge import format as article_format
+from ...knowledge.index import INDEX
+from ...knowledge.vault import Note, Resolver, resolver
+from .. import revision
+from . import store
 
 
 def _code_revision() -> str:
-    return _hash(_json({name: _hash((revision.ROOT / name).read_bytes())
-                        for name in revision.REFINEMENT}).encode())
+    return store.sha256(store.canonical_json({name: store.sha256((revision.ROOT / name).read_bytes())
+                                              for name in revision.REFINEMENT}).encode())
 
 
-def _model_contract(task: Note, agent_ref: str) -> dict:
-    from ..models import llm, runtime
+def model_contract(task: Note, agent_ref: str) -> dict:
+    from ...models import llm, runtime
     spec = runtime.resolve_model(task.meta.get("model"), agent_ref)
     return {"spec": json.loads(json.dumps(asdict(spec), default=str)),
             "profile": runtime._read_settings()["models"][spec.id],
@@ -93,7 +27,7 @@ def _model_contract(task: Note, agent_ref: str) -> dict:
             "temperature": CONFIG.llm_temperature, "executor_max_steps": CONFIG.max_steps}
 
 
-def _notes(document: dict) -> list[Note]:
+def frozen_notes(document: dict) -> list[Note]:
     out = []
     for ref, raw in document["articles"].items():
         meta, body = article_format.loads(raw)
@@ -108,7 +42,7 @@ def prepare_case(specification: dict) -> dict:
     is an explicit reconstruction, never a claim that clipped trace is replay.
     """
     from .evaluation import validate_suite
-    from .executor import resolve_spine
+    from ..executor import resolve_spine
     validate_suite(specification["suite"])
     required = {"schema_version", "task", "runbook", "origin_run_id", "problem", "suite"}
     if set(specification) != required or specification["schema_version"] != 1:
@@ -139,26 +73,26 @@ def prepare_case(specification: dict) -> dict:
         if named - allowed:
             raise ValueError("Fixture names Tools outside the accepted Task authority")
     document = {**specification, "agent": agent.ref, "articles": articles,
-                "base_sha256": _hash(articles[books[0].ref].encode()),
-                "model_contract": _model_contract(task, agent.ref),
+                "base_sha256": store.sha256(articles[books[0].ref].encode()),
+                "model_contract": model_contract(task, agent.ref),
                 "evaluator_revision": _code_revision(),
                 "origin": {key: origin.get(key) for key in (
                     "id", "task_ref", "runbook_ref", "runbook_sha256", "status", "summary")},
                 "evidence_scope": "Explicit regression reconstruction from a recorded execution; not complete historical replay."}
-    identity = _store("cases", document)
+    identity = store.save("cases", document)
     return {"case_id": identity, "task": task.ref, "runbook": books[0].ref,
-            "source_path": str((_root() / "cases" / (identity + ".json")).relative_to(CONFIG.project_root))}
+            "source_path": str((store.root() / "cases" / (identity + ".json")).relative_to(CONFIG.project_root))}
 
 
-def _current(case_id: str) -> dict:
-    document = _load("cases", case_id)
+def current_case(case_id: str) -> dict:
+    document = store.load("cases", case_id)
     from .evaluation import validate_suite
     validate_suite(document["suite"])
     for ref, raw in document["articles"].items():
         if (CONFIG.vault_dir / (ref + ".md")).read_text() != raw:
             raise ValueError(f"Frozen Article changed: {ref}; prepare a fresh case")
-    notes = Resolver(_notes(document))
-    from .executor import resolve_spine
+    notes = Resolver(frozen_notes(document))
+    from ..executor import resolve_spine
     current = resolver()
     current_task = current.resolve(document["task"])
     current_spine = resolve_spine(current_task, current)
@@ -168,7 +102,7 @@ def _current(case_id: str) -> dict:
                 for key in ("runbooks", "skills", "tool_articles")}
     if "error" in current_spine or identities(current_spine) != identities(frozen_spine):
         raise ValueError("Current Task dependency selection changed after case preparation")
-    if _model_contract(notes.resolve(document["task"]), document["agent"]) != document["model_contract"]:
+    if model_contract(notes.resolve(document["task"]), document["agent"]) != document["model_contract"]:
         raise ValueError("Task model configuration changed after case preparation")
     if _code_revision() != document["evaluator_revision"]:
         raise ValueError("Evaluator implementation changed; prepare a fresh case")

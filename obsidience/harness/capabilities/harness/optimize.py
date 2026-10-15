@@ -3,7 +3,8 @@ import json
 
 
 async def execute(args: dict, context: dict) -> str:
-    from ...execution.optimization import AUDITOR, optimize
+    from ...execution.optimization import AUDITOR
+    from ...execution.optimization.admission import optimize
     if set(args) != {'case_id'} or not isinstance(args['case_id'], str):
         return json.dumps({'error': 'Use the exact bound case_id only'})
     if context.get('_harness_optimization_attempted'):

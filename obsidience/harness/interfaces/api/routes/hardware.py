@@ -11,7 +11,7 @@ from obsidience.shell.adapter.hyprland import input as input_adapter
 
 from ....host import monitor
 from ....models import runtime as model_runtime
-from ....realtime import media as media_runtime
+from ....realtime import devices
 from ....realtime import runtime as realtime
 
 router = APIRouter()
@@ -23,8 +23,8 @@ def hardware():
     return {
         **model_runtime.hardware_catalog(),
         **model_runtime.settings(),
-        "interfaces": media_runtime.interface_catalog(),
-        "speech": media_runtime.speech_runtime(),
+        "interfaces": devices.interface_catalog(),
+        "speech": devices.speech_runtime(),
     }
 
 
@@ -47,8 +47,8 @@ async def update_hardware(payload: dict):
         return {
             **model_runtime.hardware_catalog(),
             **model_runtime.settings(),
-            "interfaces": media_runtime.interface_catalog(),
-            "speech": media_runtime.speech_runtime(),
+            "interfaces": devices.interface_catalog(),
+            "speech": devices.speech_runtime(),
         }
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -59,12 +59,12 @@ def update_hardware_interface(payload: dict):
     """Persist one exact audio endpoint or preferred physical camera."""
 
     try:
-        media_runtime.set_interface(payload.get("interface"), payload.get("selection"))
+        devices.set_interface(payload.get("interface"), payload.get("selection"))
         return {
             **model_runtime.hardware_catalog(),
             **model_runtime.settings(),
-            "interfaces": media_runtime.interface_catalog(),
-            "speech": media_runtime.speech_runtime(),
+            "interfaces": devices.interface_catalog(),
+            "speech": devices.speech_runtime(),
         }
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -74,7 +74,7 @@ def update_hardware_interface(payload: dict):
 def update_voice(payload: dict):
     """Select the Pocket character voice; the speech engine itself is fixed."""
     try:
-        return media_runtime.set_voice(payload.get("voice"))
+        return devices.set_voice(payload.get("voice"))
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -84,7 +84,7 @@ def hardware_camera():
     """Return the physical OBSBOT camera power state."""
 
     try:
-        return media_runtime.obsbot_camera_state()
+        return devices.obsbot_camera_state()
     except RuntimeError as exc:
         raise HTTPException(503, str(exc)) from exc
 
@@ -97,7 +97,7 @@ def update_hardware_camera(payload: dict):
     if active is False and realtime.RUNTIME.snapshot()["enabled"]:
         raise HTTPException(409, "Realtime owns the camera while it is active")
     try:
-        return media_runtime.set_obsbot_camera_active(active)
+        return devices.set_obsbot_camera_active(active)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except RuntimeError as exc:

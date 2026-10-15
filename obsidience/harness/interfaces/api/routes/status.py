@@ -11,7 +11,7 @@ from ....config import CONFIG
 from ....knowledge import review, source
 from ....knowledge.vault import iter_notes
 from ....models import runtime as model_runtime
-from ....realtime import media as media_runtime
+from ....realtime import devices
 
 router = APIRouter()
 
@@ -56,7 +56,7 @@ def status():
         "sources": listings["sources"],
         "source_issues": listings["source_issues"],
         "source_coverage": listings["source_coverage"],
-        "speech": media_runtime.speech_runtime(),
+        "speech": devices.speech_runtime(),
         "llm": {
             "base_url": active_specs[0].base_url if len(active_specs) == 1 else None,
             "model": ",".join(spec.id for spec in active_specs) or "none",

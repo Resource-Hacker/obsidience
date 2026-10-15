@@ -27,7 +27,7 @@ def _object(value, required: set, optional: set, name: str) -> None:
         raise ValueError(f"{name} has missing or unknown fields")
 
 
-def _json(value, *, limit: int = 64_000) -> str:
+def fixture_json(value, *, limit: int = 64_000) -> str:
     def check(item, depth=0):
         if depth > 8:
             raise ValueError("JSON nesting exceeds the fixture bound")
@@ -62,7 +62,7 @@ def _strings(value, name: str, maximum: int, *, width: int = 128) -> None:
 
 
 def _validate_case(case: dict) -> None:
-    _json(case)
+    fixture_json(case)
     _object(case, {"id", "split", "objective", "max_steps", "responses", "expected"},
             {"bindings", "knowledge", "conversation"}, "case")
     _text(case["id"], "case id")
@@ -86,8 +86,8 @@ def _validate_case(case: dict) -> None:
             raise ValueError("response must bind a non-completion Tool to an argument object")
         if not isinstance(response["result"], (str, dict)):
             raise ValueError("response result must be text or a JSON object")
-        _json(response["result"], limit=16_000)
-        key = (response["tool"], _json(response["args"], limit=16_000))
+        fixture_json(response["result"], limit=16_000)
+        key = (response["tool"], fixture_json(response["args"], limit=16_000))
         if key in keys:
             raise ValueError("duplicate exact Tool/argument fixture")
         keys.add(key)
@@ -143,14 +143,14 @@ class FrozenTrial:
         self.calls: list[dict] = []
         self._expected = deepcopy(case["expected"])
         self._responses = {
-            (row["tool"], _json(row["args"])): row["result"] if isinstance(row["result"], str) else _json(row["result"])
+            (row["tool"], fixture_json(row["args"])): row["result"] if isinstance(row["result"], str) else fixture_json(row["result"])
             for row in deepcopy(case["responses"])
         }
         self._terminal: dict | None = None
 
     def _finish(self, status: str, summary: str, reason: str) -> dict:
         self._terminal = {"done": True, "status": status, "summary": summary,
-                          "observation": _json({"passed": self.passed, "reason": reason})}
+                          "observation": fixture_json({"passed": self.passed, "reason": reason})}
         return dict(self._terminal)
 
     async def handle(self, name: str, args: dict) -> dict:
@@ -160,7 +160,7 @@ class FrozenTrial:
             _text(name, "Tool name")
             if not isinstance(args, dict):
                 raise ValueError("Tool arguments must be a JSON object")
-            encoded = _json(args, limit=16_000)
+            encoded = fixture_json(args, limit=16_000)
         except ValueError as exc:
             self.error = "Invalid evaluation invocation: " + str(exc)
             return self._finish("failed", "Invalid evaluation invocation.", self.error)
@@ -226,7 +226,7 @@ def compare_observations(parent: list, child: list) -> dict:
         for row in rows:
             if not isinstance(row, dict) or not {"case_id", "split", "repetition", "passed", "error"} <= row.keys():
                 raise ValueError("observation is missing required fields")
-            _json(row)
+            fixture_json(row)
             _text(row["case_id"], "case_id")
             if row["split"] not in ("train", "holdout") or type(row["passed"]) is not bool or row["error"] is not None:
                 raise ValueError("observation has an error or invalid result")

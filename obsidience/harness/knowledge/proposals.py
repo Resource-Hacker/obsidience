@@ -466,7 +466,7 @@ def stage_proposal(args: dict, context: dict, *, validate_only: bool = False) ->
         raise ValueError("proposal body must contain 1-131072 characters")
     authored_meta = _authored_metadata(args.get("metadata", {}))
     merge_retention = _merge_retention(target, action, body, context)
-    from obsidience.harness.execution.optimization import proposal_binding
+    from obsidience.harness.execution.optimization.admission import proposal_binding
     optimization = proposal_binding(context, target, action, proposal_title, body, authored_meta)
 
     for pending_path in sorted(CONFIG.staging_dir.glob("*.md")):

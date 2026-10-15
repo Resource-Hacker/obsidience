@@ -26,7 +26,7 @@ from pathlib import Path
 import httpx
 import pynvml
 
-from . import memory as model_memory
+from . import vram_plan
 from ..config import CONFIG
 from ..host.gpu_memory import GpuMemory, process_identity
 
@@ -971,7 +971,7 @@ class _HardwareModelRuntime:
     def _memory_plan(self, spec: ModelSpec, devices: tuple[str, ...]) -> dict[str, int] | None:
         profile = _read_settings()["models"][spec.id]
         try:
-            key = model_memory.plan_key(spec, profile, devices, self._memory_script(spec))
+            key = vram_plan.plan_key(spec, profile, devices, self._memory_script(spec))
         except OSError:
             return None
         with self._memory_plan_lock:
@@ -1006,7 +1006,7 @@ class _HardwareModelRuntime:
                 profile = settings["models"][spec.id]
                 for devices in _device_sets(spec, profile["allowed_devices"]):
                     try:
-                        key = model_memory.plan_key(spec, profile, devices, self._memory_script(spec))
+                        key = vram_plan.plan_key(spec, profile, devices, self._memory_script(spec))
                         with self._memory_plan_lock:
                             if key in self._memory_plans:
                                 continue
@@ -1016,7 +1016,7 @@ class _HardwareModelRuntime:
                         # CUDA's estimator aborts when a selected GPU is nearly full.
                         if any(rows[device].free_mib < 1024 for device in devices):
                             continue
-                        amounts = await self._memory_operation(model_memory.estimate, spec, profile, devices)
+                        amounts = await self._memory_operation(vram_plan.estimate, spec, profile, devices)
                         with self._memory_plan_lock:
                             # Keep only the current profile for this model/layout.
                             self._memory_plans = {k: v for k, v in self._memory_plans.items()
