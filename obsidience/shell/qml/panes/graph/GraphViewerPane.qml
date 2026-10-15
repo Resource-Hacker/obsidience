@@ -3,6 +3,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls.Basic
 import QtWebEngine
+import "../../api"
 
 Rectangle {
     id: root
@@ -15,7 +16,7 @@ Rectangle {
         id: viewer
 
         anchors.fill: parent
-        url: "http://127.0.0.1:8765/shell/knowledge/?surface=graph&viewer=1"
+        url: Harness.origin + "/shell/knowledge/?surface=graph&viewer=1"
         backgroundColor: "#02060c"
         settings.errorPageEnabled: false
         property bool loadFailed: false
@@ -36,7 +37,7 @@ Rectangle {
         onNavigationRequested: request => {
             // Reader/Source navigation crosses the existing Shell API. This
             // display never becomes an external browser or a credential host.
-            if (!request.url.toString().startsWith("http://127.0.0.1:8765/shell/knowledge/"))
+            if (!request.url.toString().startsWith(Harness.origin + "/shell/knowledge/"))
                 request.action = WebEngineNavigationRequest.IgnoreRequest
         }
         onNewWindowRequested: request => {}

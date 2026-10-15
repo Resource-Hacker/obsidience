@@ -8,7 +8,7 @@ QtObject {
     id: root
 
     readonly property string schema: "obsidience.surface-placement.v1"
-    property string paneId: "displays"
+    property string paneId: ""
     property string stateFileName: paneId + "-placement.json"
     readonly property string statePath: StandardPaths.writableLocation(
         StandardPaths.GenericStateLocation
@@ -31,7 +31,6 @@ QtObject {
     property int zOrder: defaultZOrder
     property var tileBounds: null
     property int revision: 0
-    property bool authoritative: false
     property bool hydrated: false
 
     function isNumber(value) {
@@ -128,29 +127,6 @@ QtObject {
         placementFile.setText(JSON.stringify(record(), null, 2) + "\n")
     }
 
-    function commitGeometry(expectedRevision, nextSurfaceId, nextX, nextY,
-                            nextWidth, nextHeight, nextZOrder, nextTileBounds) {
-        if (!authoritative || revision !== expectedRevision
-                || (nextSurfaceId !== "samsung" && nextSurfaceId !== "usb-c"
-                    && nextSurfaceId !== "dp-4")
-                || !isNumber(nextX) || !isNumber(nextY)
-                || !isNumber(nextWidth) || !isNumber(nextHeight)
-                || nextWidth <= 0 || nextHeight <= 0) {
-            return false
-        }
-        surfaceId = nextSurfaceId
-        x = Math.round(nextX)
-        y = Math.round(nextY)
-        width = Math.round(nextWidth)
-        height = Math.round(nextHeight)
-        open = true
-        zOrder = isNumber(nextZOrder) ? Math.round(nextZOrder) : zOrder
-        tileBounds = normalizeTileBounds(nextTileBounds)
-        revision += 1
-        writeState()
-        return true
-    }
-
     function sameTileBounds(left, right) {
         if (!left || !right) {
             return !left && !right
@@ -164,9 +140,8 @@ QtObject {
     // Hyprland owns live geometry. The shell mirrors its settled, grid-snapped
     // result so every Obsidience surface reports the same placement truth.
     function observeNative(nextSurfaceId, rect, nextTileBounds) {
-        if (!authoritative
-                || (nextSurfaceId !== "samsung" && nextSurfaceId !== "usb-c"
-                    && nextSurfaceId !== "dp-4")
+        if ((nextSurfaceId !== "samsung" && nextSurfaceId !== "usb-c"
+                && nextSurfaceId !== "dp-4")
                 || !rect || !isNumber(rect.x) || !isNumber(rect.y)
                 || !isNumber(rect.width) || !isNumber(rect.height)
                 || rect.width <= 0 || rect.height <= 0) {

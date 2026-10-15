@@ -208,10 +208,6 @@ PanelWindow {
             try {
                 const event = JSON.parse(message)
                 if (event && event.schema === "obsidience.shell.event.v1"
-                        && event.type === "pane.dock.state" && event.layout) {
-                    root.dockLayout.applyRecord(event.layout)
-                } else if (event
-                        && event.schema === "obsidience.shell.event.v1"
                         && event.type === "application.state"
                         && event.surface_id === root.surfaceId
                         && Array.isArray(event.windows)) {

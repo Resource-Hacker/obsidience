@@ -8,7 +8,7 @@ sources:
 - resource: obsidience/shell/qml/workspace/PaneWorkspace.qml
 - resource: obsidience/shell/qml/workspace/PaneWindow.qml
 - resource: obsidience/shell/qml/workspace/PaneDockLayout.qml
-- resource: obsidience/shell/qml/api/ShellCommandServer.qml
+- resource: obsidience/shell/qml/api/command/ShellCommandServer.qml
 - resource: obsidience/shell/qml/graph-stage.qml
 - resource: obsidience/shell/systemd/obsidience-shell-knowledge.service
 - resource: obsidience/harness/interfaces/api/app.py

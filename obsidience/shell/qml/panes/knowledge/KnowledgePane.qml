@@ -339,49 +339,37 @@ Rectangle {
                 root.errorMessage = message
             }
         }
-        const filesRequest = new XMLHttpRequest()
-        filesRequest.open("GET", "http://127.0.0.1:8765/api/files")
-        filesRequest.onreadystatechange = function() {
-            if (filesRequest.readyState !== XMLHttpRequest.DONE) return
-            if (filesRequest.status < 200 || filesRequest.status >= 300) {
-                fail(filesRequest.responseText || "Knowledge hierarchy is unavailable.")
+        Harness.request("GET", "/api/files", null, function(reply) {
+            if (!reply.ok) {
+                fail(reply.text || "Knowledge hierarchy is unavailable.")
                 return
             }
             try {
-                nextFiles = JSON.parse(filesRequest.responseText)
+                nextFiles = JSON.parse(reply.text)
                 if (!Array.isArray(nextFiles)) throw new Error("invalid files")
                 finish()
             } catch (error) { fail("Knowledge hierarchy response was invalid.") }
-        }
-        const graphRequest = new XMLHttpRequest()
-        graphRequest.open("GET", "http://127.0.0.1:8765/api/graph")
-        graphRequest.onreadystatechange = function() {
-            if (graphRequest.readyState !== XMLHttpRequest.DONE) return
-            if (graphRequest.status < 200 || graphRequest.status >= 300) {
-                fail(graphRequest.responseText || "Knowledge graph is unavailable.")
+        })
+        Harness.request("GET", "/api/graph", null, function(reply) {
+            if (!reply.ok) {
+                fail(reply.text || "Knowledge graph is unavailable.")
                 return
             }
             try {
-                nextGraph = JSON.parse(graphRequest.responseText)
+                nextGraph = JSON.parse(reply.text)
                 if (!nextGraph || !Array.isArray(nextGraph.nodes)) {
                     throw new Error("invalid graph")
                 }
                 finish()
             } catch (error) { fail("Knowledge graph response was invalid.") }
-        }
-        const checkoutRequest = new XMLHttpRequest()
-        checkoutRequest.open("GET", "http://127.0.0.1:8765/api/library/assignments")
-        checkoutRequest.onreadystatechange = function() {
-            if (checkoutRequest.readyState !== XMLHttpRequest.DONE) return
-            if (checkoutRequest.status < 200 || checkoutRequest.status >= 300) {
+        })
+        Harness.request("GET", "/api/library/assignments", null, function(reply) {
+            if (!reply.ok) {
                 fail("Checkout state is unavailable."); return
             }
-            try { nextCheckout = JSON.parse(checkoutRequest.responseText); finish() }
+            try { nextCheckout = JSON.parse(reply.text); finish() }
             catch (error) { fail("Checkout state response was invalid.") }
-        }
-        filesRequest.send()
-        graphRequest.send()
-        checkoutRequest.send()
+        })
     }
 
     function sendShellCommand(command) {
@@ -418,8 +406,6 @@ Rectangle {
             selectedGraphId = String(event.selection.graph_id || "")
             revealSelection()
             rebuildRows()
-        } else if (event.type === "pane.dock.state" && event.layout) {
-            dockLayout.applyRecord(event.layout)
         }
     }
 

@@ -7,15 +7,14 @@ import "../panes/applications"
 import "../panes/media"
 import "../panes/camera"
 import "../panes/chat"
-import "../panes/displays"
 import "../panes/hardware"
 import "../panes/knowledge"
-import "../panes/graphs"
+import "../panes/graph"
 import "../panes/library"
 import "../panes/reader"
 import "../panes/reviews"
 import "../panes/source"
-import "../panes/status"
+import "../panes/models"
 import "../panes/tasks"
 import "../panes/terminal"
 import "../panes/settings"
@@ -29,17 +28,10 @@ Scope {
     property bool monitoringAllowed: true
     property var launcherOpenBySurface: ({})
 
-    property PaneDockLayout dockLayout: PaneDockLayout {
-        authoritative: true
-    }
+    property PaneDockLayout dockLayout: PaneDockLayout {}
 
-    property PanePlacement displaysPlacement: PanePlacement {
-        paneId: "displays"
-        authoritative: true
-    }
     property PanePlacement chatPlacement: PanePlacement {
         paneId: "chat"
-        authoritative: true
         defaultSurfaceId: "usb-c"
         defaultX: 20
         defaultY: 58
@@ -50,7 +42,6 @@ Scope {
     }
     property PanePlacement libraryPlacement: PanePlacement {
         paneId: "library"
-        authoritative: true
         defaultSurfaceId: "usb-c"
         defaultX: 640
         defaultY: 58
@@ -61,7 +52,6 @@ Scope {
     }
     property PanePlacement tasksPlacement: PanePlacement {
         paneId: "tasks"
-        authoritative: true
         defaultSurfaceId: "usb-c"
         defaultX: 1280
         defaultY: 58
@@ -72,7 +62,6 @@ Scope {
     }
     property PanePlacement reviewsPlacement: PanePlacement {
         paneId: "reviews"
-        authoritative: true
         defaultSurfaceId: "usb-c"
         defaultX: 640
         defaultY: 598
@@ -83,7 +72,6 @@ Scope {
     }
     property PanePlacement readerPlacement: PanePlacement {
         paneId: "reader"
-        authoritative: true
         defaultX: 3400
         defaultY: 90
         defaultWidth: 1600
@@ -93,7 +81,6 @@ Scope {
     }
     property PanePlacement knowledgePlacement: PanePlacement {
         paneId: "knowledge"
-        authoritative: true
         defaultSurfaceId: "usb-c"
         defaultX: 24
         defaultY: 100
@@ -104,7 +91,6 @@ Scope {
     }
     property PanePlacement sourcePlacement: PanePlacement {
         paneId: "source"
-        authoritative: true
         defaultSurfaceId: "usb-c"
         defaultX: 560
         defaultY: 100
@@ -116,7 +102,6 @@ Scope {
     // Keep the existing placement identity and geometry for the unified pane.
     property PanePlacement knowledgeGraphPlacement: PanePlacement {
         paneId: "knowledge-graph"
-        authoritative: true
         defaultSurfaceId: "samsung"
         defaultX: 2740
         defaultY: 100
@@ -127,7 +112,6 @@ Scope {
     }
     property PanePlacement statusPlacement: PanePlacement {
         paneId: "status"
-        authoritative: true
         defaultSurfaceId: "usb-c"
         defaultX: 160
         defaultY: 100
@@ -138,7 +122,6 @@ Scope {
     }
     property PanePlacement hardwarePlacement: PanePlacement {
         paneId: "hardware"
-        authoritative: true
         defaultSurfaceId: "usb-c"
         defaultX: 180
         defaultY: 100
@@ -149,7 +132,6 @@ Scope {
     }
     property PanePlacement cameraPlacement: PanePlacement {
         paneId: "camera"
-        authoritative: true
         defaultSurfaceId: "usb-c"
         defaultX: 260
         defaultY: 120
@@ -160,7 +142,6 @@ Scope {
     }
     property PanePlacement settingsPlacement: PanePlacement {
         paneId: "settings"
-        authoritative: true
         defaultSurfaceId: "usb-c"
         defaultX: 1080
         defaultY: 80
@@ -171,7 +152,6 @@ Scope {
     }
     property PanePlacement mediaPlacement: PanePlacement {
         paneId: "media"
-        authoritative: true
         defaultSurfaceId: "usb-c"
         defaultX: 360
         defaultY: 100
@@ -182,7 +162,6 @@ Scope {
     }
     property PanePlacement applicationsPlacement: PanePlacement {
         paneId: "applications"
-        authoritative: true
         defaultSurfaceId: "usb-c"
         defaultX: 420
         defaultY: 100
@@ -193,7 +172,6 @@ Scope {
     }
     property PanePlacement terminalPlacement: PanePlacement {
         paneId: "terminal"
-        authoritative: true
         defaultX: 100
         defaultY: 430
         defaultWidth: 1900
@@ -203,7 +181,6 @@ Scope {
     }
     property PanePlacement tftCompanionPlacement: PanePlacement {
         paneId: "tft-companion"
-        authoritative: true
         defaultSurfaceId: "samsung"
         defaultX: 3200
         defaultY: 6
@@ -213,9 +190,6 @@ Scope {
         defaultZOrder: 44
     }
 
-    property Component displaysComponent: Component {
-        DisplaysPane { surfaceLayout: root.shellApi.surfaceLayout }
-    }
     property Component chatComponent: Component { ChatPane { realtime: root.shellApi.realtime } }
     property Component libraryComponent: Component { LibraryPane {} }
     property Component tasksComponent: Component { TasksPane {} }
@@ -379,10 +353,7 @@ Scope {
             "component": terminalComponent, "minWidth": 660, "minHeight": 400},
         {"label": "TFT", "title": "TFT Ledger Companion", "icon": "applications", "accent": "#7ae8d4",
             "placement": tftCompanionPlacement,
-            "component": tftCompanionComponent, "minWidth": 520, "minHeight": 400},
-        {"label": "Displays", "title": "Displays", "icon": "displays", "accent": "#60a5fa",
-            "placement": displaysPlacement,
-            "component": displaysComponent, "minWidth": 520, "minHeight": 340}
+            "component": tftCompanionComponent, "minWidth": 520, "minHeight": 400}
     ]
 
     Variants {

@@ -36,10 +36,6 @@ Item {
         if (!event || event.schema !== "obsidience.shell.event.v1") {
             return
         }
-        if (event.type === "pane.dock.state" && event.layout) {
-            dockLayout.applyRecord(event.layout)
-            return
-        }
         if (event.type === "pane.dock.drag") {
             draggingModule = typeof event.pane_id === "string"
                 ? event.pane_id : ""

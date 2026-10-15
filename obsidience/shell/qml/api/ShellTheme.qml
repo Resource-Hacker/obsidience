@@ -11,7 +11,7 @@ QtObject {
     readonly property string schema: "obsidience.shell-theme.v1"
     readonly property string palettePath: String(
         Quickshell.env("OBSIDIENCE_THEME_PATH")
-        ?? "/home/wissenschafter/Projects/obsidience/obsidience/shell/theme/palette.json"
+        ?? Quickshell.shellPath("../theme/palette.json")
     )
 
     property color surface: "#eb030a10"

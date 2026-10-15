@@ -42,43 +42,21 @@ Rectangle {
             .replace(/^\[\[/, "").replace(/\]\]$/, "").split("|")[0]
     }
 
-    function requestError(request, fallback) {
-        const raw = String(request.responseText || "").trim()
-        if (!raw) {
-            return fallback
-        }
-        try {
-            const parsed = JSON.parse(raw)
-            return typeof parsed.detail === "string" ? parsed.detail : raw
-        } catch (error) {
-            return raw
-        }
-    }
-
     function requestJson(method, path, body, callback) {
-        const request = new XMLHttpRequest()
-        request.open(method, "http://127.0.0.1:8765" + path)
-        if (body !== undefined && body !== null) {
-            request.setRequestHeader("content-type", "application/json")
-        }
-        request.onreadystatechange = function() {
-            if (request.readyState !== XMLHttpRequest.DONE) {
-                return
-            }
-            if (request.status < 200 || request.status >= 300) {
-                callback(false, null, root.requestError(request, "Request failed (" + request.status + ")"))
+        Harness.request(method, path, body, function(reply) {
+            if (!reply.ok) {
+                callback(false, null, Harness.errorText(reply, "Request failed"))
                 return
             }
             let payload
             try {
-                payload = request.responseText ? JSON.parse(request.responseText) : {}
+                payload = reply.text ? JSON.parse(reply.text) : {}
             } catch (error) {
                 callback(false, null, "The harness returned invalid JSON.")
                 return
             }
             callback(true, payload, "")
-        }
-        request.send(body === undefined || body === null ? null : JSON.stringify(body))
+        })
     }
 
     function refreshTasks() {

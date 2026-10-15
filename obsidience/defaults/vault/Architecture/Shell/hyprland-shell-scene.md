@@ -7,7 +7,7 @@ sources:
 - resource: obsidience/harness/computer/runtime.py
 - resource: obsidience/harness/computer/capture.py
 - resource: obsidience/harness/shell_port/command.py
-- resource: obsidience/shell/qml/api/ShellCommandServer.qml
+- resource: obsidience/shell/qml/api/command/WindowSceneRelay.qml
 ---
 
 The Shell publishes one bounded, revisioned scene for the logical Surfaces and

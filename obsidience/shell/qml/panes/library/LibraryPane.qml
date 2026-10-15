@@ -31,40 +31,18 @@ Rectangle {
             .replace(/^\[\[/, "").replace(/\]\]$/, "").split("|")[0]
     }
 
-    function requestError(request, fallback) {
-        const raw = String(request.responseText || "").trim()
-        if (!raw) {
-            return fallback
-        }
-        try {
-            const parsed = JSON.parse(raw)
-            return typeof parsed.detail === "string" ? parsed.detail : raw
-        } catch (error) {
-            return raw
-        }
-    }
-
     function requestJson(method, path, body, callback) {
-        const request = new XMLHttpRequest()
-        request.open(method, "http://127.0.0.1:8765" + path)
-        if (body !== undefined && body !== null) {
-            request.setRequestHeader("content-type", "application/json")
-        }
-        request.onreadystatechange = function() {
-            if (request.readyState !== XMLHttpRequest.DONE) {
-                return
-            }
-            if (request.status < 200 || request.status >= 300) {
-                callback(false, null, root.requestError(request, "Request failed (" + request.status + ")"))
+        Harness.request(method, path, body, function(reply) {
+            if (!reply.ok) {
+                callback(false, null, Harness.errorText(reply, "Request failed"))
                 return
             }
             try {
-                callback(true, request.responseText ? JSON.parse(request.responseText) : {}, "")
+                callback(true, reply.text ? JSON.parse(reply.text) : {}, "")
             } catch (error) {
                 callback(false, null, "The harness returned invalid JSON.")
             }
-        }
-        request.send(body === undefined || body === null ? null : JSON.stringify(body))
+        })
     }
 
     function refresh() {
@@ -643,7 +621,8 @@ Rectangle {
                 GlowButton {
                     id: skillButton
 
-                    visible: root.shelf === "tool"
+                    // Each Tool has one paired Skill Article; a namespace has none.
+                    visible: root.shelf === "tool" && !libraryRow.modelData.node.synthetic
                     width: visible ? 50 : 0
                     height: 24
                     text: "SKILL"
@@ -655,8 +634,8 @@ Rectangle {
                     textPixelSize: 7
                     textLetterSpacing: 0.8
                     contentHorizontalPadding: 6
-                    onClicked: root.presentArticle("@library/Skills/"
-                        + String(libraryRow.modelData.node.title).split(".").join("/"))
+                    onClicked: root.presentArticle(String(libraryRow.modelData.node.id)
+                        .replace(/^Tools\//, "Skills/"))
                 }
 
 

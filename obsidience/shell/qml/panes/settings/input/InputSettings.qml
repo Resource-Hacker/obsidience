@@ -1,11 +1,11 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import "../../../api"
 
 Item {
     id: root
 
-    readonly property string apiBase: "http://127.0.0.1:8765"
     property string activeSection: "mouse"
     property var inputState: ({})
     property string errorMessage: ""
@@ -21,22 +21,19 @@ Item {
     }
 
     function refresh() {
-        const xhr = new XMLHttpRequest()
-        xhr.open("GET", apiBase + "/api/input")
-        xhr.onreadystatechange = function() {
-            if (xhr.readyState !== XMLHttpRequest.DONE || !root) return
-            if (xhr.status < 200 || xhr.status >= 300) {
-                root.errorMessage = "Input state unavailable (" + xhr.status + ")"
+        Harness.request("GET", "/api/input", null, function(reply) {
+            if (!root) return
+            if (!reply.ok) {
+                root.errorMessage = "Input state unavailable (" + reply.status + ")"
                 return
             }
             try {
-                root.inputState = JSON.parse(xhr.responseText) || ({})
+                root.inputState = JSON.parse(reply.text) || ({})
                 root.errorMessage = ""
             } catch (error) {
                 root.errorMessage = "Input state was invalid"
             }
-        }
-        xhr.send()
+        })
     }
 
     Component.onCompleted: refresh()

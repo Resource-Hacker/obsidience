@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtWebSockets
+import "../../api"
 
 QtObject {
     id: root
@@ -14,7 +15,7 @@ QtObject {
     property int generation: 0
     signal changed()
     property WebSocket updates: WebSocket {
-        url: "ws://127.0.0.1:8765/ws/activity"
+        url: Harness.socketOrigin + "/ws/activity"
         active: root.active
         onTextMessageReceived: message => {
             let event
@@ -72,15 +73,12 @@ QtObject {
     function refresh() {
         if (!active) return
         const current = ++generation
-        const request = new XMLHttpRequest()
-        request.open("GET", "http://127.0.0.1:8765/api/library/assignments")
-        request.onreadystatechange = function() {
-            if (!root || current !== root.generation || request.readyState !== XMLHttpRequest.DONE) return
-            if (request.status < 200 || request.status >= 300) { root.error = "Checkout state is unavailable."; return }
-            try { root.applyManifest(JSON.parse(request.responseText)) }
+        Harness.request("GET", "/api/library/assignments", null, function(reply) {
+            if (!root || current !== root.generation) return
+            if (!reply.ok) { root.error = "Checkout state is unavailable."; return }
+            try { root.applyManifest(JSON.parse(reply.text)) }
             catch (problem) { root.error = "Checkout response was invalid." }
-        }
-        request.send()
+        })
     }
     function toggle(node, agent) {
         const item = state(node, agent.role)
@@ -88,16 +86,13 @@ QtObject {
         if (pending || !item.editable || !revision) return
         pending = true
         error = ""
-        const request = new XMLHttpRequest()
-        request.open("PUT", "http://127.0.0.1:8765/api/library/assignments/" + encodeURIComponent(canonical(node)))
-        request.setRequestHeader("Content-Type", "application/json")
-        request.onreadystatechange = function() {
-            if (!root || request.readyState !== XMLHttpRequest.DONE) return
-            root.pending = false
-            if (request.status >= 200 && request.status < 300) root.changed()
-            else root.error = request.status === 409 ? "Checkout changed. Refresh and retry." : "Checkout was not changed."
-            root.refresh()
-        }
-        request.send(JSON.stringify({agent: agent.role, assigned: !item.checked, expected_revision: revision}))
+        Harness.request("PUT", "/api/library/assignments/" + encodeURIComponent(canonical(node)),
+            {agent: agent.role, assigned: !item.checked, expected_revision: revision}, function(reply) {
+                if (!root) return
+                root.pending = false
+                if (reply.ok) root.changed()
+                else root.error = reply.status === 409 ? "Checkout changed. Refresh and retry." : "Checkout was not changed."
+                root.refresh()
+            })
     }
 }
