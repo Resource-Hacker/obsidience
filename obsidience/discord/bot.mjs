@@ -192,9 +192,6 @@ export class DiscordTransport {
     if (!receiver) return;
     this.receivers.delete(id);
     receiver.opus.destroy();
-    receiver.process.stdin.destroy();
-    receiver.process.stdout.destroy();
-    receiver.process.kill('SIGKILL');
   }
 
   countReceive(key, amount = 1) {
@@ -224,7 +221,7 @@ export class DiscordTransport {
     let member = this.channel.members.get(memberId);
     if (!member || member.user.bot || member.voice.channelId !== this.channel.id) return;
     let phase = 'connect_speech';
-    let opus, child;
+    let opus;
     try {
       // Recover only on a real speaking event. Never replay buffered requests.
       if (!this.speech || this.speech.destroyed) await this.connectSpeech();
@@ -233,14 +230,12 @@ export class DiscordTransport {
       if (!member || member.user.bot || member.voice.channelId !== this.channel.id || this.receivers.has(memberId)) return;
       const principal = this.principal(memberId);
       phase = 'opus_decoder';
-      const decoder = new OpusEncoder(48000, 2);
+      // libopus converts encoded Discord audio directly to the ASR format.
+      // Preserve each RTC packet's arrival cadence; no resampler pipe buffering.
+      const decoder = new OpusEncoder(16000, 1);
       phase = 'subscribe';
       opus = this.connection.receiver.subscribe(memberId, { end: { behavior: EndBehaviorType.AfterSilence, duration: 300 } });
-      phase = 'spawn_resampler';
-      child = spawn('/usr/bin/ffmpeg', ['-nostdin', '-hide_banner', '-loglevel', 'error', '-threads', '1', '-filter_threads', '1',
-        '-f', 's16le', '-ar', '48000', '-ac', '2', '-i', 'pipe:0', '-f', 's16le', '-ar', '16000', '-ac', '1', '-blocksize', '3200', 'pipe:1'],
-      { stdio: ['pipe', 'pipe', 'ignore'], env: { PATH: '/usr/bin', LANG: 'C' } });
-      const record = { opus, process: child };
+      const record = { opus };
       this.receivers.set(memberId, record);
       this.countReceive('starts');
       const current = () => generation === this.generation && this.receivers.get(memberId) === record;
@@ -250,9 +245,6 @@ export class DiscordTransport {
         this.receiveFailed(at, error);
         destroy();
       };
-      child.on('error', (error) => rejected('spawn_resampler', error));
-      child.stdin.on('error', (error) => rejected('resampler_input', error));
-      child.stdout.on('error', (error) => rejected('resampler_output', error));
       opus.on('error', (error) => rejected('opus_stream', error));
       opus.on('data', (packet) => {
         if (!current()) return;
@@ -261,37 +253,22 @@ export class DiscordTransport {
         try {
           const pcm = decoder.decode(packet);
           this.countReceive('decoded_pcm_bytes', pcm.length);
-          at = 'resampler_input';
-          if (child.stdin.writableLength > 192000) {
-            this.receiveFailed('resampler_backpressure', null); return destroy();
-          }
-          if (!child.stdin.write(pcm)) { opus.pause(); child.stdin.once('drain', () => { if (current()) opus.resume(); }); }
+          // Opus packets hold at most 120 ms: 3,840 mono s16 bytes at 16 kHz.
+          if (!pcm.length || pcm.length % 2 || pcm.length > 3840) fail('invalid_decoded_pcm');
+          at = 'speech_send';
+          this.sendSpeech({ type: 'audio', ...principal, pcm: pcm.toString('base64'),
+            sample_rate: 16000, channels: 1, format: 's16le' });
+          this.countReceive('forwarded_pcm_bytes', pcm.length);
         } catch (error) { rejected(at, error); }
       });
-      opus.on('end', () => child.stdin.end());
-      child.stdout.on('data', (pcm) => {
+      opus.on('end', () => {
         if (!current()) return;
-        try {
-          for (let offset = 0; offset < pcm.length; offset += 12000) {
-            const chunk = pcm.subarray(offset, offset + 12000);
-            this.sendSpeech({ type: 'audio', ...principal, pcm: chunk.toString('base64'),
-              sample_rate: 16000, channels: 1, format: 's16le' });
-            this.countReceive('forwarded_pcm_bytes', chunk.length);
-          }
-        } catch (error) { rejected('speech_send', error); }
-      });
-      child.on('close', (code) => {
-        if (!current()) return;
-        if (code !== 0) this.receiveFailed('resampler_exit', null, code);
         this.receivers.delete(memberId);
         opus.destroy();
       });
     } catch (error) {
       this.receiveFailed(phase, error);
       opus?.destroy();
-      child?.stdin?.destroy();
-      child?.stdout?.destroy();
-      child?.kill('SIGKILL');
     }
   }
 

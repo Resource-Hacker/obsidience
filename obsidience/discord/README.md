@@ -173,16 +173,17 @@ Every principal-bound message has `generation` UUID string, `guild_id`, `channel
 
 Transport sends `audio` with base64 `pcm`, `sample_rate:16000`, `channels:1`,
 `format:"s16le"`; each raw PCM chunk is at most 12,000 bytes. Voice packets are
-received with `selfDeaf:false`, decoded per Discord user identity at 48k stereo and
-resampled to 16k mono. At most eight live receive pipelines exist. Stream/socket
+received with `selfDeaf:false` and decoded per Discord user identity directly to
+16k mono through libopus. Each packet reaches speech at its RTC arrival cadence;
+there is no receiver-side FFmpeg process or pipe buffering. At most eight live receive pipelines exist. Stream/socket
 backpressure terminates that receiver instead of accumulating unbounded audio.
 Status includes saturating process-lifetime `receive_counters`: receiver starts,
-failures, Opus RX packets, decoded 48k stereo PCM bytes, successfully forwarded
+failures, Opus RX packets, decoded 16k mono PCM bytes, successfully forwarded
 16k mono PCM bytes, accepted wake events and accepted transcript events. Values
 cap at one billion; they retain no speaker identity, audio or text. Compare
 before/after snapshots around one real utterance. `receive_error` and the matching
 journal event report only the fixed failing phase, exception class and line
-numbers in `bot.mjs` (plus a numeric FFmpeg exit code when available). Exception
+numbers in `bot.mjs`. Exception
 messages, raw stack lines, PCM, transcripts and credentials are never emitted.
 The speech owner supplies bounded silence for acoustic endpointing between packets.
 
