@@ -485,7 +485,8 @@ class Tuner:
         state = {'playback': self.playback, 'title': play.title if play is not None else '',
                  'video': size if play is not None and play.phase == 'playing'
                  and all(isinstance(side, int) for side in size) else None,
-                 'since': round(self.since, 1), 'player': reached}
+                 'since': round(self.since, 1), 'player': reached,
+                 'local_queue_supported': True}
         if play is not None and play.channel:
             state.update(provider=play.provider, channel=play.channel)
         if play is not None and play.local is not None:

@@ -1345,8 +1345,13 @@ def _open_media(candidate_id, context, row, cancel, resume=False, season=False):
     token = 'media:' + source['source_revision']
     if token in attempted:
         raise ValueError('This media source was already attempted in this turn; do not replay it')
-    if not _player.available():
+    player_state = _player.state()
+    if player_state is None:
         raise ValueError('The existing TV player is unavailable')
+    if season and player_state.get('local_queue_supported') is not True:
+        return {'status': 'failed', 'delivery': 'not_dispatched', 'effect_applied': False,
+                'correction_allowed': True,
+                'failure': 'Season playback awaits the guarded TV tuner update at an idle boundary.'}
     # Phase 1 never silently wakes or replaces a disconnected TV route.
     raw, _boot, _ad = _preamble(row, cancel, _POWER_READ, timeout=4)
     power = _parse_power(raw)
