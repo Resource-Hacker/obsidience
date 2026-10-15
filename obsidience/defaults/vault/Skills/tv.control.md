@@ -25,11 +25,11 @@ with its year. An exact title wins; a library series that contains the words (St
 Voyager for "Star Trek" or "Voyager") is offered among the choices whenever the
 catalogue also has that exact title, which is then never registered; only a series
 that begins with two or more of the words may play, and a one-word request never. A
-request for a kind of content rather than a title (some music, cartoons, a
-movie) is no title and uses the live/web route below. A request ending in movie,
+request for a kind of content rather than a title (music, some music, cartoons,
+a movie) is no title and uses the live/web route below, even when a film has that
+name; play such a film with its year ("Music 2021"). A request ending in movie,
 film, show or series that is not exactly a library title ("a superhero movie",
-also "The Truman Show") or a lone content word that is also a title ("Radio")
-registers nothing and returns catalogue `choices`; a title with no exact
+also "The Truman Show") registers nothing and returns catalogue `choices`; a title with no exact
 catalogue match returns similar ones. Ask the owner, then play the exact title
 with its year. Never substitute a
 YouTube clip or live channel for a requested film or episode.

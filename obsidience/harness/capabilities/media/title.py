@@ -11,10 +11,9 @@ between choices.
 
 Registration is a real external effect, so it happens only for a request that is
 clearly one named title (deterministic rules, no model call):
-- a request made only of generic content words ("some music", "a movie") is not a
-  title; it keeps play's Pluto/YouTube chooser. A lone content word that is also a
-  title ("Radio", "The Game") plays an exact library title, else offers the exact
-  catalogue titles as choices;
+- a request made only of generic content words ("music", "some music", "a movie") is not
+  a title, even when a film has that name: it keeps play's Pluto/YouTube chooser, and the
+  owner names such a film with its year ("Music 2021");
 - a request that ends in a content noun ("a superhero movie") describes rather than
   names: unless it is exactly a library title it never registers, even when the
   catalogue holds a title of that name ("Superhero Movie"); its rows become choices;
@@ -66,7 +65,6 @@ _GENERIC_FILLER = frozenset({'the', 'a', 'an', 'some', 'any', 'on', 'to', 'me', 
 # Nouns that end a description ("a superhero movie") rather than a title.
 _KIND_NOUNS = frozenset({'movie', 'movies', 'film', 'films', 'show', 'shows', 'series', 'cartoon', 'cartoons',
                          'documentary', 'documentaries', 'episode', 'episodes'})
-_LIVE_KINDS = frozenset({'news', 'weather', 'live', 'channel', 'channels', 'stream', 'livestream'})
 
 
 def tokens(text: str) -> list[str]:
@@ -100,14 +98,6 @@ def _words(query: str) -> list[str]:
 def generic(query: str) -> bool:
     """Whether a request names only a kind of content ("put some music on", "cartoons")."""
     return not set(_words(query)) - _GENERIC_FILLER - GENERIC
-
-
-def lone(query: str) -> bool:
-    """Whether a generic request is one content word that may also be a title ("Radio", "Kids",
-    "The Game"); "some music", "a movie" and live words ("news", "the weather") are not."""
-    words = _words(query)
-    words = words[1:] if words[:1] == ['the'] else words
-    return len(words) == 1 and words[0] not in _LIVE_KINDS
 
 
 def described(query: str) -> bool:
@@ -532,11 +522,10 @@ async def _acquire(title: str, season: int | None, episode: int | None, context:
 
 async def _prepare(query: str, context: dict) -> dict:
     title, season, episode = spec(query)
-    kind = generic(title)
-    unnamed = _final(f'"{title}" names a kind of content, not a movie or show; nothing was played.',
-                     note='For music, videos or live channels call play again with app youtube or pluto.')
-    if kind and not lone(title):
-        return unnamed
+    if generic(title):
+        return _final(f'"{title}" names a kind of content, not a movie or show; nothing was played.',
+                      note='For music, videos or live channels call play again with app youtube or pluto; '
+                           'a film of that name is played with its year ("Music 2021").')
     rows = await asyncio.to_thread(service.catalogue().titles)
     if season is not None:
         rows = [row for row in rows if row['type'] == 'Series']
@@ -545,15 +534,6 @@ async def _prepare(query: str, context: dict) -> dict:
         return _choices(title, exact, context)
     if exact:
         return await _play_row(exact[0], season, episode, context)
-    if kind:
-        # A lone content word that is not a library title ("Radio", "The Game"): never registered.
-        listed = await _catalogue_exact(title, season, context)
-        if not listed:
-            return unnamed
-        return _final(f'"{title}" is a kind of content and also a title; nothing was played.',
-                      choices=_catalogue_rows(listed),
-                      note='Ask whether the owner meant one of these titles (play it with its exact title followed '
-                           'by its year) or that kind of content (play again with app youtube or pluto).')
     words = tokens(title)
     if any(row['type'] == 'Series' for row in partial):
         # A library series containing the request ("Voyager" in Star Trek: Voyager) means the owner
