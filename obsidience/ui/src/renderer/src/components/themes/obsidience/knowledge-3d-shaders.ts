@@ -238,12 +238,13 @@ vec4 glassMarble(vec2 p, float r, float aa, float radiusPx, vec3 tint, vec3 dark
   // Light gathers on the far side of the marble from the sun, in its colour.
   float caustic = smoothstep(0.2, 0.95, dot(normalize(p * vec2(1.0, -1.0) + 1e-4), -sun.xy / length(sun.xy)))
     * smoothstep(0.45, 0.97, r);
-  // Dust too fine to resolve: a faint glow through the marble's depth. Focus
-  // and the Executive's voice lift it only a little: the dust itself carries
-  // the brightening, and the glass stays clear.
+  // Dust too fine to resolve: a faint glow through the marble's depth. A node
+  // the thinking front reaches lights from within (a passed one at under half
+  // strength), as the other node styles brighten; the glass stays clear. The
+  // Executive's voice lifts it a little.
   // The dust cloud's own glow, centred as the cloud is.
   vec3 haze = mix(tint, vec3(1.0), 0.2) * exp(-r * r / 0.4) * 0.06 * uMarbleDust
-    * (1.0 + 0.25 * boost / max(uMarbleDust, 1.0)) * (1.0 + 0.3 * uSpeechLevel);
+    * (1.0 + 5.0 * boost) * (1.0 + 0.3 * uSpeechLevel);
   float solid = uMarbleOpacity;
   vec3 light = (pale * (line * (1.0 + 0.6 * boost) + limb * limb * limb * 0.6)
     + mix(tint, vec3(1.0), 0.3) * caustic * 0.28
@@ -621,7 +622,8 @@ void main() {
   }
   if (accA <= 0.004) discard;
   vec3 color = acc / max(accA, 1e-4);
-  color = mix(color, vec3(1.0), boost * (marble ? 0.08 * (1.0 - glassCover) : 0.45));
+  // Focus whitens the node; a marble's glass is exempt, its ring and glow are not.
+  color = mix(color, vec3(1.0), boost * 0.45 * (marble ? 1.0 - glassCover : 1.0));
   gl_FragColor = vec4(color, accA);
 #ifdef KNOWLEDGE_PROVIDER
   gl_FragColor.a *= uProviderOpacity;
