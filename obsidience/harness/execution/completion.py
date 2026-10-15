@@ -309,6 +309,42 @@ def _effect_claim_error(summary: str, context: dict) -> str | None:
     return None
 
 
+# A direction must end its clause, so "I looked up the weather" or "turned up the
+# volume" is not a camera turn.
+_CAMERA_DIRECTION = (r"(?:down(?:wards?)?|up(?:wards?)?|left|right|lower|higher|to the (?:left|right))"
+                     r"(?=\s*(?:[,.;:!?]|$)|\s+(?:and|but|so|to|toward|towards|at|again|further|more|now|"
+                     r"a bit|slightly|as|for)\b)")
+_CAMERA_TURN_CLAIM = re.compile(
+    r"(?:^|[.!?]\s+)(?:i(?: have|['’]ve)?(?: now| just| already| also)? "
+    r"(?:looked|turned|moved|tilted|panned|pointed|angled|aimed)(?: the camera)?"
+    r"(?: further| a bit| slightly)? " + _CAMERA_DIRECTION + "|"
+    r"i(?: have|['’]ve)?(?: now| just| already| also)? (?:turned|moved|tilted|panned|pointed|angled|aimed) "
+    r"the camera\b|the camera (?:has |is now |is )?(?:turned|moved|tilted|panned|looking|pointing) "
+    + _CAMERA_DIRECTION + ")", re.I)
+
+
+def _camera_turn_claim_error(summary: str, context: dict) -> str | None:
+    """Reject a reported camera turn without this run's camera.observe look call.
+
+    Like the other claim checks, this inspects the claim only; it never maps a
+    query to a look direction or dispatches a call.
+    """
+    looked = any(
+        item.get("tool") == "camera.observe" and (item.get("args") or {}).get("look")
+        and '"failure"' not in str(item.get("obs") or "")
+        for item in context.get("trace", []) if isinstance(item, dict))
+    if looked:
+        return None
+    for claim in _CAMERA_TURN_CLAIM.finditer(summary):
+        sentence = re.split(r"[.!?]", summary[claim.start():].lstrip(".!? "), maxsplit=1)[0]
+        if not _RECAP.search(sentence):
+            return ("No camera.observe call with look ran in this execution, so the camera has not turned. "
+                    "Do not say you looked or turned it. If what was asked about is cut off by an edge or the "
+                    "owner named a direction, call camera.observe with the visual question as query and look "
+                    "set to left, right, up or down, then answer from that picture.")
+    return None
+
+
 def public_claim_error(summary: str, context: dict) -> str | None:
     """The Executive completion's unsupported unlock/effect claim check.
 
@@ -323,7 +359,8 @@ def public_claim_error(summary: str, context: dict) -> str | None:
             r"\b(?:successfully|started playing|is (?:now )?playing)\b", summary, re.I) and not re.search(
             r"\b(?:cannot|can't|couldn't|unable|unverified|uncertain|not verified)\b", summary, re.I):
         return "TV verification failed. State that the requested outcome could not be verified; do not report unqualified playback success."
-    return _unlock_claim_error(summary, context) or _effect_claim_error(summary, context)
+    return (_unlock_claim_error(summary, context) or _effect_claim_error(summary, context)
+            or _camera_turn_claim_error(summary, context))
 
 
 def _computer_completion_error(task, status: str, context: dict, verification=None) -> str | None:
