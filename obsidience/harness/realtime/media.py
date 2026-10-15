@@ -354,7 +354,9 @@ def realtime_aec_backend() -> str:
 def _uma8_reference_graph(speaker: str, *, require_capture: bool = True) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Attest the paired DSP device and exact stereo reference ports."""
 
-    graph = _run_json(("/usr/bin/pw-dump",))
+    # Indentation can exceed the inventory bound on a healthy busy graph.
+    # Keep every object and parameter, with the same bounded JSON admission.
+    graph = _run_json(("/usr/bin/pw-dump", "-i", "0"))
     if not isinstance(graph, list):
         raise RuntimeError("the UMA-8 reference graph is unavailable")
     endpoints = []

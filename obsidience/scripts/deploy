@@ -15,6 +15,7 @@ deploy restarts. Elsewhere it is named and left alone.
     obsidience/scripts/deploy --dry-run  # show what would restart
     obsidience/scripts/deploy --rollback # revert to the previous full deploy
     obsidience/scripts/deploy --only media-catalogue --restart media-catalogue
+    obsidience/scripts/deploy --only harness --restart harness --recover-realtime
 
 --only narrows the affected owners; --restart also selects a private-config
 owner when its tracked files did not change. Required dependent restarts stay
@@ -22,6 +23,9 @@ included. Scoped deploys record a separate receipt and leave the full-deploy
 checkpoint and rollback history unchanged; the next full deploy still handles
 all pending owners. Scoped rollback is not supported: restore the selected
 owner's matching configuration/source backup and deploy that owner explicitly.
+
+--recover-realtime permits a Harness-only repair when Realtime is already in
+error. Idle admission and every post-restart readiness check remain required.
 
 Gemma (obsidience/scripts/llm.sh) is never restarted automatically.
 """
@@ -351,6 +355,8 @@ def main() -> None:
                         choices=("harness", "shell", "ui", "tv-player", "tv-tuner",
                                  "media-catalogue", "media-tiramisu", "media-prowlarr"),
                         help="Deploy only selected affected owners; keep the full checkpoint unchanged")
+    parser.add_argument("--recover-realtime", action="store_true",
+                        help="Repair an existing Realtime error with a Harness-only deployment")
     args = parser.parse_args()
     if args.only and args.rollback:
         parser.error("--only cannot be combined with --rollback; scoped receipts are not full deploys")
@@ -375,6 +381,8 @@ def main() -> None:
     owners = list(dict.fromkeys([*owners, *args.restart]))
     if args.only:
         owners = [owner for owner in owners if owner in args.only]
+    if args.recover_realtime and set(owners) != {"harness"}:
+        parser.error("--recover-realtime requires a Harness-only deployment")
     if "tv-player" in owners and "tv-tuner" not in owners:
         owners.append("tv-tuner")
     for owner in tuple(owners):
@@ -407,9 +415,15 @@ def main() -> None:
                 baseline = get("/api/realtime")
             except OSError:
                 baseline = {}  # A down Harness can still be recovered normally.
-            if baseline.get("phase") == "error" and baseline.get("ready") is not True:
+            baseline_error = baseline.get("phase") == "error" and baseline.get("ready") is not True
+            if args.recover_realtime and not baseline_error:
+                sys.exit("Realtime recovery requires an observed existing Realtime error; nothing restarted.")
+            if baseline_error and not args.recover_realtime:
                 sys.exit("Deployment deferred before any restart: Realtime is already in error; "
-                         "resolve its existing dependency fault before the normal readiness check.")
+                         "resolve its existing dependency fault or deploy its Harness repair with "
+                         "--only harness --restart harness --recover-realtime.")
+            if args.recover_realtime:
+                print("Recovering the existing Realtime error; normal readiness checks remain required.")
         wait_idle()
         if any(owner in owners for owner in ("tv-player", "tv-tuner")):
             require_tv_idle()
