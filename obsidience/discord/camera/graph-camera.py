@@ -210,6 +210,23 @@ async def terminate(process):
         await process.wait()
 
 
+async def terminate_browser(process):
+    if process is None:
+        return
+    # This browser alone was started in its own session. Its renderer and
+    # Crashpad children may survive the main PID; do not leave them writing
+    # into the ephemeral profile while TemporaryDirectory removes it.
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(process.pid, signal.SIGTERM)
+    if process.returncode is None:
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(process.wait(), 3)
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(process.pid, signal.SIGKILL)
+    if process.returncode is None:
+        await asyncio.wait_for(process.wait(), 3)
+
+
 async def produce(size):
     camera_device()
     width, height = map(int, size.split('x'))
@@ -229,7 +246,9 @@ async def produce(size):
     environment['CUDA_VISIBLE_DEVICES'] = ''
     environment['LIBGL_ALWAYS_SOFTWARE'] = '1'
     environment['GALLIUM_DRIVER'] = 'llvmpipe'
-    with tempfile.TemporaryDirectory(prefix='discord-graph-camera-', dir=runtime) as directory:
+    # Best-effort deletion must never replace the actual capture/encoder
+    # failure with an ENOTEMPTY error from asynchronous browser teardown.
+    with tempfile.TemporaryDirectory(prefix='discord-graph-camera-', dir=runtime, ignore_cleanup_errors=True) as directory:
         environment['XDG_CONFIG_HOME'] = str(Path(directory) / 'config')
         environment['XDG_CACHE_HOME'] = str(Path(directory) / 'cache')
         try:
@@ -244,7 +263,7 @@ async def produce(size):
                 '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=0',
                 f'--user-data-dir={directory}', 'about:blank',
                 stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.PIPE, env=environment,
+                stderr=asyncio.subprocess.PIPE, env=environment, start_new_session=True,
             )
             stderr_task = asyncio.create_task(diagnostics.consume(browser.stderr), name='graph-camera-browser-diagnostics')
             active_port = Path(directory) / 'DevToolsActivePort'
@@ -280,6 +299,9 @@ async def produce(size):
                 await asyncio.sleep(0.1)
             encoder = await asyncio.create_subprocess_exec(
                 '/usr/bin/ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error',
+                # Codec, image format and cadence are known. Do not wait for
+                # multi-second/default-size live-stream format analysis.
+                '-probesize', '32', '-analyzeduration', '1', '-fpsprobesize', '0',
                 '-threads', '1', '-filter_threads', '1', '-f', 'image2pipe', '-vcodec', 'mjpeg',
                 '-framerate', str(FPS), '-i', 'pipe:0', '-an', '-vf', f'scale={width}:{height}',
                 '-pix_fmt', 'yuv420p', '-vcodec', 'rawvideo', '-r', str(FPS), '-f', 'v4l2', str(DEVICE),
@@ -357,7 +379,7 @@ async def produce(size):
             if encoder is not None and encoder.stdin is not None:
                 encoder.stdin.close()
             await terminate(encoder)
-            await terminate(browser)
+            await terminate_browser(browser)
             if stderr_task is not None:
                 stderr_task.cancel()
                 await asyncio.gather(stderr_task, return_exceptions=True)
