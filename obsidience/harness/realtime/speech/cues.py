@@ -4,7 +4,8 @@ from pathlib import Path
 import wave
 from pipecat.frames.frames import Frame, OutputAudioRawFrame
 
-NAMES = frozenset({'ready', 'accepted', 'complete', 'cancel', 'error'})
+OPENING_CUES = frozenset({'ready', 'follow_up'})
+NAMES = OPENING_CUES | frozenset({'accepted', 'complete', 'cancel', 'error'})
 RATE = 24000
 CHUNK_BYTES = 1920  # Existing transport: 40 ms, mono s16le.
 
@@ -39,7 +40,7 @@ def load_assets(root: Path) -> dict[str, bytes]:
                 pcm = wav.readframes(wav.getnframes())
             if len(pcm) != wav.getnframes() * 2:
                 continue
-            if name == "ready":
+            if name in OPENING_CUES:
                 # Start the opening cue on its first actual sample. Preserve
                 # every nonzero sample, its gain, and the rest of the clip.
                 start = 0

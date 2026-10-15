@@ -344,6 +344,7 @@ async def run_adk_session(task, model, messages, allowed, ctx, agent_name, effor
     turn_id = params.get('reply_to_turn_id') if conversation_id else None
     runner = None
     settled = False
+    failure_type = None
     try:
         if conversation_id:
             store = sessions.service()
@@ -423,20 +424,33 @@ async def run_adk_session(task, model, messages, allowed, ctx, agent_name, effor
         # ADK wraps a plugin callback's exception; keep the original (for
         # example a scope PermissionError) as the activation's failure.
         if str(exc).startswith(f"Error in plugin '{plugin.name}'") and isinstance(exc.__cause__, Exception):
+            failure_type = type(exc.__cause__).__name__
             raise exc.__cause__ from None
+        failure_type = type(exc).__name__
         raise
     except asyncio.CancelledError:
         if not settled and conversation_id:
             settled = True
             await asyncio.shield(_settle_interrupted(session_id, run, turn_id))
         raise
+    except Exception as exc:
+        failure_type = type(exc).__name__
+        raise
     finally:
         try:
             if not settled and conversation_id:
                 await sessions.close_interrupted_calls(session_id, run)
-                await sessions.append(session_id, run, [sessions.part(json.dumps({
+                outcome = {
                     'status': ex.status, 'summary': ex.summary, 'run_id': run, 'reply_to': turn_id,
-                }), 'plugin:obsidience.outcome', run=run)])
+                }
+                if ex.status == 'failed' and not any(
+                        row.get('tool') == 'task.complete' and row.get('accepted') is True
+                        for row in trace):
+                    from ...conversation.evidence import public_failure_notice
+                    outcome['failure_notice'] = public_failure_notice(
+                        {**outcome, 'failure_type': failure_type}, {'trace': json.dumps(trace)})
+                await sessions.append(session_id, run, [sessions.part(
+                    json.dumps(outcome), 'plugin:obsidience.outcome', run=run)])
         finally:
             try:
                 await plugin.release()

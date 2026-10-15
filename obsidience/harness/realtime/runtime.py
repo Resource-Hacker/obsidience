@@ -1267,7 +1267,7 @@ class RealtimeSessionManager:
                     generation = worker_event.get("generation")
                     if (name in self._cue_names and type(generation) is int
                             and (generation == self.conversation._generation
-                                 or (name == "ready" and 0 <= generation < self.conversation._generation))):
+                                 or (name in {"ready", "follow_up"} and 0 <= generation < self.conversation._generation))):
                         # A started opening chirp can finish after natural speech
                         # advances the turn. These events attest actual writes only.
                         trace.emit("speech", f"Computer cue: {name} ({event_type[4:]})", [
@@ -1409,7 +1409,7 @@ class RealtimeSessionManager:
                         # Cue assets belong to this worker, not its startup
                         # mode revision; a mode change before ready keeps them.
                         self._cue_names = [name for name in worker_event.get("cues", [])
-                                           if name in {"ready", "accepted", "complete", "cancel", "error"}]
+                                           if name in {"ready", "follow_up", "accepted", "complete", "cancel", "error"}]
                     if self._phase != "starting":
                         continue
                     if worker_event.get("mode_revision", 0) != self._mode_revision:

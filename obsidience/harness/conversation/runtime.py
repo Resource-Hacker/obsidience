@@ -11,7 +11,7 @@ from typing import Any, Literal
 
 from .store import CONVERSATION
 from .selection import EXECUTIVE_REF, admit_executive
-from .evidence import historical_evidence
+from .evidence import historical_evidence, public_failure_notice
 from ..execution import trace
 from ..execution import activity as knowledge_activity
 from ..knowledge.index import INDEX
@@ -431,9 +431,27 @@ class ConversationRuntime:
         else:
             result = task.result()
         status = str(result.get("status") or "failed")
-        summary = str(result.get("public_summary") or (result.get("summary") if status == "completed" else "")
-                      or "The media command did not settle successfully. Use its receipt; do not resend.")
+        summary = (str(result.get("public_summary") or result.get("summary") or "")
+                   if status == "completed" else self._outcome_notice(result))
         INDEX.finish_owner_command(request_id, status, result.get("run_id"), summary)
+
+    def _outcome_notice(self, result: dict) -> str:
+        """One safe failure explanation for spoken, Chat and owner-command views."""
+        if result.get("resource_blocked") is True:
+            return ("The selected model's hardware is currently reserved. "
+                    "Please retry this request when it is available.")
+        notice = str(result.get("public_summary") or "").strip()[:2000]
+        # This fixed controller fallback carries no diagnosis; project its
+        # actual run just like a controller failure without an accepted summary.
+        if notice == "The media command could not be verified. Use its receipt; do not resend it.":
+            notice = ""
+        if result.get("status") == "review":
+            return notice or "That request needs review before it can complete."
+        run = None
+        if result.get("run_id"):
+            with contextlib.suppress(Exception):
+                run = INDEX.run(str(result["run_id"]))
+        return public_failure_notice(result, run, fallback=notice)
 
     async def _run_turn(
         self, text: str, generation: int, user_turn: dict, *,
@@ -562,10 +580,11 @@ class ConversationRuntime:
         except Exception as exc:
             message = f"Executive turn failed: {type(exc).__name__}: {exc}"[:MAX_EVENT_TEXT]
             trace.emit("error", message)
-            await self._report_task_outcome(
-                {"status": "failed", "run_id": activity_completion.get("run_id")}, source=source, generation=generation,
-            )
-            return {"status": "failed", "summary": message, "run_id": activity_completion.get("run_id")}
+            failure = {"status": "failed", "run_id": activity_completion.get("run_id"),
+                       "failure_type": type(exc).__name__}
+            failure["summary"] = self._outcome_notice(failure)
+            await self._report_task_outcome(failure, source=source, generation=generation)
+            return failure
         finally:
             if recall is not None:
                 await discard_recall(recall)
@@ -586,27 +605,13 @@ class ConversationRuntime:
     async def _report_task_outcome(self, result: dict, *, source: str, generation: int) -> None:
         """Deliver a terminal notice without inventing a successful dialogue pair.
 
-        Only an accepted task.complete can supply public_summary. Internal
-        executor errors stay in the trace and get a fixed, credential-free notice.
+        Only an accepted task.complete can supply public_summary. Other failures
+        use fixed descriptions of the exact run's known error or delivery state.
         """
         if generation != self._generation:
             return
         status = str(result.get("status") or "failed")
-        notice = str(result.get("public_summary") or "").strip()[:2000]
-        if result.get("resource_blocked") is True:
-            # A live turn cannot be replayed later with a different Objective or
-            # saved model. Explain admission without leaking internal details or
-            # promising the continuation reserved for durable Task occurrences.
-            notice = (
-                "The selected model's hardware is currently reserved. "
-                "Please retry this request when it is available."
-            )
-        if not notice:
-            notice = (
-                "That request needs review before it can complete."
-                if status == "review" else
-                "I couldn't complete that request. The Action Trace has the error details."
-            )
+        notice = self._outcome_notice(result)
         self._conversation.publish({"type": "error", "text": notice,
                                     "status": status, "run_id": result.get("run_id")})
         await self._publish_speech("task_result", status=status, text=notice,

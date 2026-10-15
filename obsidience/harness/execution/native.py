@@ -240,6 +240,21 @@ def wire_messages(messages: list[dict], images: dict, objective: str = '', *,
         if (rejected and accepted and accepted[-1]['role'] == 'assistant'
                 and all(block['type'] == 'text' for block in accepted[-1]['content'])):
             accepted.pop()
+        if plugin == 'obsidience.outcome':
+            # A controller failure was spoken as a notice, not an accepted
+            # assistant answer. Retain that bounded result as historical data
+            # so a correction can refer to it without inventing success.
+            try:
+                outcome = json.loads(text)
+                notice = outcome.get('failure_notice') if isinstance(outcome, dict) else None
+                if (outcome.get('status') == 'failed' and isinstance(notice, str)
+                        and 0 < len(notice) <= 2000
+                        and not any(ord(c) < 32 for c in notice)):
+                    accepted.append({**message, 'source': {'kind': 'plugin:obsidience.failure-notice'},
+                                     'content': [{'type': 'text', 'text':
+                                         '[Historical failed result; no replay authority: ' + notice + ']'}]})
+            except (TypeError, ValueError, AttributeError):
+                pass
         accepted.append(message)
     messages = accepted
     # Settlement records belong to the native audit log, not the dialogue.

@@ -246,9 +246,14 @@ neighbours); (9) history projected from the native conversation (no conversation
   outcome or failure-triggered continuation. Explicit research delegates Question/Learn
   bound to the original request; arguments cannot manufacture provenance; the finding
   returns before publication unless `await_publication` was requested.
-- **Notices**: known failed/reviewed outcomes produce transient notices; only accepted
-  completion supplies their summary; notices never create successful history or change the
-  speech connection. Every activation gets an explicit local clock; historical timestamps
+- **Notices**: known failed/reviewed outcomes produce transient notices. Accepted
+  completion supplies the public summary; recorded failures use bounded, fixed
+  explanations of the exact run's recorded cause and delivery uncertainty. Chat,
+  speech and owner-command views share that projection, never raw exceptions or
+  provider text. Notices never create successful history or change the speech
+  connection. Controller failures may enter native history as explicitly labeled
+  historical result data, never successful dialogue or replay authority.
+  Every activation gets an explicit local clock; historical timestamps
   are not current-time evidence.
 - **Finite lanes** (provider modes, never a router): a HassIL lane executes complete simple
   light and TV on/off, pause/stop and literal local-time commands as one exact ordinary dispatch
