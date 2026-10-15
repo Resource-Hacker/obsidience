@@ -366,6 +366,15 @@ class JellyfinCatalogue:
                        for folder in folders) != 1):
             raise MediaUnavailable('catalogue_deferred_root_changed')
         folder_id = _id(matches[0].get('ItemId'))
+        # A deferred path attachment does not initialize Jellyfin's physical
+        # folder record. Collection refresh then acknowledges but scans nothing.
+        # Initialization belongs to installation, never a whole-library fallback.
+        physical = self._get('/Library/PhysicalPaths')
+        if (not isinstance(physical, list) or len(physical) > 256
+                or any(not isinstance(value, str) for value in physical)):
+            return {'status': 'pending', 'reason': 'catalogue_physical_roots_unverified'}
+        if root['catalogue_path'] not in physical:
+            return {'status': 'pending', 'reason': 'catalogue_root_initialization_required'}
         if cancel is not None and cancel.is_set():
             return {'status': 'pending', 'reason': 'refresh_skipped_cancelled'}
         try:

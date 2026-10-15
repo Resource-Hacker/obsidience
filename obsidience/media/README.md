@@ -132,6 +132,11 @@ the same collection and sole approved location before targeted refresh; populate
 ambiguous or changed collections fail explicitly. No dummy media, synthetic tag,
 new collection or whole-library refresh is created by acquisition. The movie
 root is attached to its configured `Cached Movies` library during installation.
+Attaching a deferred path does not create its native physical-folder record.
+If `GET /Library/PhysicalPaths` omits it, acquisition reports
+`catalogue_root_initialization_required`; finish the same one-time installation
+bootstrap above after the real tag directory exists. Do not repeat registration
+or automatically broaden an acquisition refresh to all libraries.
 
 One registration owner queues `Items/{folder-id}/Refresh` for the exact configured
 virtual library, using metadata Default and image None. In the pinned server this
