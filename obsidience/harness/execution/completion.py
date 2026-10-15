@@ -319,7 +319,7 @@ _CAMERA_TURN_CLAIM = re.compile(
     r"(?:looked|turned|moved|tilted|panned|pointed|angled|aimed)(?: the camera)?"
     r"(?: further| a bit| slightly)? " + _CAMERA_DIRECTION + "|"
     r"i(?: have|['’]ve)?(?: now| just| already| also)? (?:turned|moved|tilted|panned|pointed|angled|aimed) "
-    r"the camera\b|the camera (?:has |is now |is )?(?:turned|moved|tilted|panned|looking|pointing) "
+    r"the camera\b(?!\s+(?:back\s+)?(?:on|off)\b)|the camera (?:has |is now |is )?(?:turned|moved|tilted|panned|looking|pointing) "
     + _CAMERA_DIRECTION + ")", re.I)
 
 
@@ -329,8 +329,12 @@ def _camera_turn_claim_error(summary: str, context: dict) -> str | None:
     Like the other claim checks, this inspects the claim only; it never maps a
     query to a look direction or dispatches a call.
     """
+    # A look counts only when it returned a camera observation without a failure;
+    # a Tool error, an interrupted or an undispatched call proves no turn.
     looked = any(
         item.get("tool") == "camera.observe" and (item.get("args") or {}).get("look")
+        and not (item.get("interrupted") or item.get("not_dispatched") or item.get("must_not_replay"))
+        and str(item.get("obs") or "").startswith('{"observation"')
         and '"failure"' not in str(item.get("obs") or "")
         for item in context.get("trace", []) if isinstance(item, dict))
     if looked:

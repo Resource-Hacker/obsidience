@@ -28,7 +28,7 @@ description: 'Look through the preferred physical camera (OBSBOT/webcam) to answ
   direction you could not see. Leave wake off a look call unless a failed look says
   to use it: a wake of a sleeping or stopped camera turns it back to the centre first.
   Use look only for the current request. Only a call with look turns the camera;
-  never say you looked or turned it without one.'
+  never say you looked or turned the camera in a direction without one.'
 obsidience:
   binding: capability:camera.observe
   source: obsidience/harness/capabilities/camera/observe.py
