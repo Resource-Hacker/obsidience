@@ -96,6 +96,7 @@ eight clients, 20-second idle deadline. The exact command schema is:
 ```text
 {"command":"status"}
 {"command":"channels"}
+{"command":"speech_diagnostics"}
 {"command":"join","request_id":"UUID","channel_id":"SNOWFLAKE"}
 {"command":"leave","request_id":"UUID"}
 {"command":"say","request_id":"UUID","text":"Hello","member_id":"OPTIONAL_SNOWFLAKE"}
@@ -206,6 +207,30 @@ Text commands use `source:"text"`. Expected result is
 `{status:"completed",reply,run_id}`. An unfinished/failed result is never spoken.
 Stop POSTs the exact active request to `/api/discord/cancel` and aborts its local
 HTTP await; cancellation failures are explicit status, never retry authority.
+
+The owner-only `speech_diagnostics` control command reads the existing speech
+socket once for at most eight non-bot members currently in the joined voice
+channel. One diagnostic read may be pending, with a two-second total deadline.
+Only responses matching the current generation, socket, full principal and current
+channel membership are admitted. Stop or speech disconnect ends the pending read.
+No reconnect, pipeline creation, microphone, model invocation or periodic polling
+is started. Each local-only result includes its member ID and `received`; an absent
+response has `received:false`, and `complete:false` marks a partial result.
+
+Response fields are explicitly typed and allowlisted: `available`, received and
+terminal PCM frame counts, STT audio/transcription frame counts, VAD start/stop
+counts, the fixed possessive/mid-sentence wake rejection counts, input task
+completion/failure, runner completion and input queue depth. Counts cap at one
+billion. Synthetic probe options/text, PCM and transcripts are never requested,
+returned or logged. The command accepts only `command` and optional `request_id`;
+it is not a slash command or Agent capability. Worker errors appear in status as
+an allowlisted fixed `speech_worker_error` code, without text or identities.
+
+Receive status additionally reports `decoded_pcm_peak`, the largest absolute
+signed-16 PCM sample decoded during this process (0–32768), and a saturating
+`nonzero_pcm_frames` count of decoded Opus packets containing nonzero samples.
+No PCM is retained for these measurements. Read these with the packet/byte
+counters to distinguish actual silent input from wake or ASR routing failure.
 
 ## Direct verification
 

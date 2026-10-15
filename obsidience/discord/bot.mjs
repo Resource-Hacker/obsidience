@@ -15,6 +15,12 @@ const { OpusEncoder } = opusBinding;
 const ALLOWED_MENTIONS = { parse: [], repliedUser: false };
 const TEXT_LIMIT = 8000;
 const SPEECH_LIMIT = 4000;
+const SPEECH_ERROR_CODES = new Set(['asr_failed', 'utterance_limit', 'audio_backpressure', 'stream_capacity',
+  'reply_not_current', 'speech_delivery_failed', 'audio_pipeline_stopped', 'utterance_timeout', 'reply_timeout']);
+const DIAGNOSTIC_COUNTS = ['received_pcm_frames', 'terminal_pcm_frames', 'stt_audio_frames',
+  'stt_transcription_frames', 'vad_starts', 'vad_stops', 'queue_depth'];
+const DIAGNOSTIC_FLAGS = ['available', 'input_task_done', 'input_task_failed', 'runner_done'];
+const diagnosticCount = (value) => Number.isSafeInteger(value) && value >= 0 ? Math.min(value, 1_000_000_000) : null;
 const log = (event) => console.log(JSON.stringify({ component: 'discord_transport', event }));
 const fail = (code) => { throw new Error(code); };
 
@@ -41,8 +47,10 @@ export class DiscordTransport {
     this.closing = false;
     this.lastError = null;
     this.receiveError = null;
+    this.speechWorkerError = null;
+    this.diagnosticRead = null;
     this.receiveCounters = { starts: 0, failures: 0, rx_packets: 0, decoded_pcm_bytes: 0,
-      forwarded_pcm_bytes: 0, wake_events: 0, transcript_events: 0 };
+      forwarded_pcm_bytes: 0, decoded_pcm_peak: 0, nonzero_pcm_frames: 0, wake_events: 0, transcript_events: 0 };
     this.clients = new Set();
     const intents = [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.GuildMessages];
     if (config.message_content_intent) intents.push(GatewayIntentBits.MessageContent);
@@ -88,7 +96,7 @@ export class DiscordTransport {
       active_turns: this.turns.size, pending_speech: this.pendingSpeech.size,
       playback: this.mediaPlayer.state.status, speech_playback: this.speechPlayer.state.status,
       media_kind: 'audio_only', video_supported: false, last_error: this.lastError,
-      receive_error: this.receiveError, receive_counters: { ...this.receiveCounters } };
+      speech_worker_error: this.speechWorkerError, receive_error: this.receiveError, receive_counters: { ...this.receiveCounters } };
   }
 
   allowed(channel) {
@@ -111,6 +119,54 @@ export class DiscordTransport {
   sendSpeech(message, required = true) {
     try { sendFrame(this.speech, message); return true; }
     catch { if (required) fail('speech_unavailable_or_backpressure'); return false; }
+  }
+
+  async speechDiagnostics() {
+    if (!this.channel || !this.speech || this.speech.destroyed) fail('speech_not_ready');
+    if (this.diagnosticRead) fail('speech_diagnostics_busy');
+    const principals = [...this.channel.members.values()]
+      .filter((member) => !member.user.bot && member.voice.channelId === this.channel.id)
+      .slice(0, 8).map((member) => this.principal(member.id));
+    if (!principals.length) return { speech_diagnostics: [], complete: true };
+    return new Promise((resolve) => {
+      const read = { socket: this.speech, generation: this.generation,
+        waiting: new Map(principals.map((principal) => [principal.member_id, principal])), results: new Map() };
+      read.finish = () => {
+        if (this.diagnosticRead !== read) return;
+        clearTimeout(read.timer);
+        this.diagnosticRead = null;
+        resolve({ complete: read.waiting.size === 0,
+          speech_diagnostics: principals.map((principal) => ({ member_id: principal.member_id,
+            ...(read.results.get(principal.member_id) ?? { received: false }) })) });
+      };
+      this.diagnosticRead = read;
+      read.timer = setTimeout(read.finish, 2000);
+      for (const principal of principals) {
+        if (!this.sendSpeech({ type: 'diagnostics', ...principal }, false)) { read.finish(); break; }
+      }
+    });
+  }
+
+  acceptSpeechDiagnostics(message) {
+    const read = this.diagnosticRead;
+    const principal = read?.waiting.get(message.member_id);
+    if (!principal || read.socket !== this.speech || read.generation !== this.generation
+      || !this.samePrincipal(principal, message) || !this.currentSpeaker(principal)) return;
+    const result = { received: true };
+    for (const key of DIAGNOSTIC_FLAGS) if (typeof message[key] === 'boolean') result[key] = message[key];
+    for (const key of DIAGNOSTIC_COUNTS) {
+      const value = diagnosticCount(message[key]);
+      if (value !== null) result[key] = value;
+    }
+    const rejected = {};
+    for (const key of ['possessive', 'mid_sentence']) {
+      const value = diagnosticCount(message.wake_rejected?.[key]);
+      if (value !== null) rejected[key] = value;
+    }
+    if (Object.keys(rejected).length) result.wake_rejected = rejected;
+    read.results.set(message.member_id, result);
+    read.waiting.delete(message.member_id);
+    if (!read.waiting.size) read.finish();
   }
 
   async connectSpeech() {
@@ -150,6 +206,7 @@ export class DiscordTransport {
     if (this.speech !== socket) return;
     this.speech = null;
     this.lastError = 'speech_disconnected';
+    this.diagnosticRead?.finish();
     this.cancelTurns();
     for (const [id, pending] of [...this.pendingSpeech]) this.cancelRequest(id, pending, pending.source);
     for (const id of [...this.receivers.keys()]) this.dropReceiver(id);
@@ -255,6 +312,10 @@ export class DiscordTransport {
           this.countReceive('decoded_pcm_bytes', pcm.length);
           // Opus packets hold at most 120 ms: 3,840 mono s16 bytes at 16 kHz.
           if (!pcm.length || pcm.length % 2 || pcm.length > 3840) fail('invalid_decoded_pcm');
+          let peak = 0;
+          for (let offset = 0; offset < pcm.length; offset += 2) peak = Math.max(peak, Math.abs(pcm.readInt16LE(offset)));
+          this.receiveCounters.decoded_pcm_peak = Math.max(this.receiveCounters.decoded_pcm_peak, peak);
+          if (peak) this.countReceive('nonzero_pcm_frames');
           at = 'speech_send';
           this.sendSpeech({ type: 'audio', ...principal, pcm: pcm.toString('base64'),
             sample_rate: 16000, channels: 1, format: 's16le' });
@@ -324,6 +385,7 @@ export class DiscordTransport {
     this.cancelTurns();
     for (const [id, pending] of [...this.pendingSpeech]) this.cancelRequest(id, pending, pending.source);
     this.generation = randomUUID();
+    this.diagnosticRead?.finish();
     this.finishSpeech(false);
     this.stopMedia();
     for (const id of [...this.receivers.keys()]) this.dropReceiver(id);
@@ -390,7 +452,10 @@ export class DiscordTransport {
     if (message.generation !== this.generation || message.guild_id !== this.config.guild_id
       || !this.channel || message.channel_id !== this.channel.id || !SNOWFLAKE.test(message.member_id)) return;
     const principal = this.principal(message.member_id);
+    // Diagnostics intentionally has no turn request_id and never enters dialogue.
+    if (message.type === 'diagnostics') { this.acceptSpeechDiagnostics(message); return; }
     if (message.type === 'error') {
+      if (this.currentSpeaker(principal)) this.speechWorkerError = SPEECH_ERROR_CODES.has(message.code) ? message.code : 'unclassified_speech_worker_error';
       this.lastError = 'speech_worker_error';
       const pending = this.pendingSpeech.get(message.request_id);
       const turn = this.turns.get(message.request_id);
@@ -564,7 +629,7 @@ export class DiscordTransport {
   }
 
   async command(message) {
-    const readOnly = ['status', 'channels'].includes(message.command);
+    const readOnly = ['status', 'channels', 'speech_diagnostics'].includes(message.command);
     if (!readOnly && !REQUEST_ID.test(message.request_id ?? '')) fail('request_id_required');
     const fingerprint = createHash('sha256').update(JSON.stringify(message)).digest('hex');
     if (!readOnly && this.recent.has(message.request_id)) {
@@ -600,6 +665,9 @@ export class DiscordTransport {
       switch (message.command) {
         case 'status': value = this.status(); break;
         case 'channels': value = { channels: await this.channels() }; break;
+        case 'speech_diagnostics':
+          if (Object.keys(message).some((key) => !['command', 'request_id'].includes(key))) fail('owner_diagnostics_only');
+          value = await this.speechDiagnostics(); break;
         case 'join': value = await this.join(message.channel_id); break;
         case 'leave': value = await this.leave(); break;
         case 'stop': value = this.stop(message.origin_request_id ?? null, message.member_id ?? null); break;
