@@ -1,4 +1,4 @@
-"""obsidience CLI: serve / status / index / search / tasks / run / review / chat."""
+"""obsidience CLI: init / serve / status / index / search / tasks / run / review."""
 
 from __future__ import annotations
 

@@ -801,10 +801,6 @@ def _links(value) -> list[str]:
     return [str(v) for v in (value if isinstance(value, list) else [value])]
 
 
-def _link_ref(value: str) -> str:
-    return value.strip().strip("[]").split("|", 1)[0].split("#", 1)[0]
-
-
 def resolve_spine(task: Note, res: Resolver) -> dict:
     """Edge-exact resolution: runbook -> skills -> authorized tool set."""
     res = dependency_resolver(res)

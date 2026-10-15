@@ -75,13 +75,6 @@ def assert_system_article_writable(ref_or_path: str) -> None:
         raise ValueError(_OWNERSHIP_ERROR)
 
 
-def assert_system_move_allowed(source: str, destination: str | None = None) -> None:
-    origin = _ref(source).casefold()
-    assert_system_article_writable(origin)
-    if destination is not None:
-        assert_system_article_writable(destination)
-
-
 def _state_path():
     return CONFIG.runtime_dir / "system-knowledge.json"
 

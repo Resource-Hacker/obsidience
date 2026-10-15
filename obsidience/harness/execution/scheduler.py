@@ -1765,7 +1765,7 @@ def _independent_occurrence(task: Note, incoming: dict) -> bool:
     coverage = INDEX.tool_run_receipts(run_id)
     if not coverage or coverage.get("task_ref") != task.ref:
         return False  # Missing receipts are not evidence that no effect occurred.
-    append_only = {"source.ingest", "source.handoff", "observations.retain", "observations.temporary.append", "task.complete"}
+    append_only = {"source.ingest", "source.handoff", "observations.retain", "task.complete"}
     return all(call.get("status") == "returned" and (
         call.get("read_only") is True or call.get("read_only") == 1 or call.get("tool") in append_only
         or (call.get("tool") == "task.create" and _preflight_rejection(call, task) is not None)

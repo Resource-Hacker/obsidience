@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import platform
 import re
 import subprocess
 from pathlib import Path
@@ -401,92 +400,4 @@ def storage_snapshot() -> dict:
         "schema": "obsidience.storage.v1",
         "filesystems": sorted(filesystems.values(), key=lambda row: row["id"]),
         "locations": locations,
-    }
-
-
-def _command_value(command: list[str]) -> str | None:
-    try:
-        value = subprocess.run(
-            command, check=False, capture_output=True, text=True, timeout=3,
-        ).stdout.strip()
-    except (OSError, subprocess.SubprocessError):
-        return None
-    return value or None
-
-
-def application_snapshot() -> dict[str, dict]:
-    """Return actual application boundaries without pretending they are Tools."""
-    browser = _command_value(["xdg-settings", "get", "default-web-browser"])
-    return {
-        "obsidience": {
-            "id": "obsidience",
-            "label": "Obsidience",
-            "role": "desktop-shell",
-            "state": "development",
-            "compositor_boundary": "Hyprland",
-            "project_path": str(CONFIG.product_root),
-            "service": "obsidience-shell-host.service",
-            "service_state": _command_value([
-                "systemctl", "--user", "is-active",
-                "obsidience-shell-host.service",
-            ]) or "unavailable",
-            "components": {
-                "session": "obsidience-shell-session.target",
-                "shell": "obsidience-shell-host.service",
-                "knowledge": "obsidience-shell-knowledge.service",
-                "notifications": "obsidience-shell-notifications.service",
-                "harness": "obsidience-harness-dev.service",
-            },
-            "integrated": True,
-        },
-        "web-browser": {
-            "id": "web-browser",
-            "label": "Web Browser",
-            "role": "application",
-            "state": "external-not-integrated",
-            "default_desktop_entry": browser,
-            "integrated": False,
-        },
-    }
-
-
-def network_snapshot() -> list[dict]:
-    """Return the kernel's current local interface identities and link state."""
-    rows = []
-    for interface in sorted(Path("/sys/class/net").iterdir()):
-        if interface.name == "lo":
-            continue
-        try:
-            state = (interface / "operstate").read_text().strip()
-        except OSError:
-            state = "unknown"
-        try:
-            driver = (interface / "device" / "driver").resolve().name
-        except OSError:
-            driver = None
-        rows.append({
-            "id": interface.name,
-            "state": state,
-            "driver": driver,
-        })
-    return rows
-
-
-def system_snapshot() -> dict:
-    """Return the real host, application, and network inventory for Source."""
-    try:
-        release = platform.freedesktop_os_release()
-    except OSError:
-        release = {}
-    uname = os.uname()
-    return {
-        "schema": "obsidience.system.v1",
-        "system": {
-            "hostname": uname.nodename,
-            "operating_system": release.get("PRETTY_NAME") or release.get("NAME"),
-            "kernel": uname.release,
-            "architecture": uname.machine,
-        },
-        "applications": application_snapshot(),
-        "network": network_snapshot(),
     }

@@ -27,7 +27,7 @@ from ...execution.assignments import ensure_task_runbook
 from ...execution.ledger import current_task_issue
 from ...knowledge.dependencies import agent_dependencies, dependency_resolver
 from ...execution.executor import task_descendants
-from ...host import inventory, monitor, scene as shell_scene
+from ...host import monitor, scene as shell_scene
 from ...knowledge import retrieval, review, source, system as system_knowledge
 from ...knowledge.index import INDEX
 from ...knowledge.links import metadata_ref
@@ -52,7 +52,6 @@ from ...knowledge.vault import (
     is_folder_article,
     iter_notes,
     load_note,
-    move_vault_item,
     mutate_note_metadata,
     resolver,
     slugify,
@@ -94,37 +93,7 @@ EXECUTIVE_AGENT_SUBJECTS = {
     "Observations": "Distilled notes about the executive, its preferences, and its own runs.",
 }
 SATELLITE_AGENT_SUBJECTS = {
-    "architecture": ("Architecture", "How this agent is wired into Obsidience."),
-    "knowledge": ("Knowledge", "Knowledge branches related to checked-out Source trees."),
     "other-agents": ("Other Agents", "The executive and sibling agents: who they are and what they do."),
-    "observations": ("Observations", "The agent's distilled notes, preferences, and run observations."),
-}
-SATELLITE_ROLE_SUBJECTS = {
-    "Alexandria": {},
-    "Darwin": {
-        "sources": ("Sources", "Darwin's direct-source evidence and research material."),
-        "source-observations": ("Source Observations", "Distilled notes about research-source quality and behavior."),
-        "acquisition": ("Acquisition", "Fetching and filing: research tasks, runbooks, and inbox conventions."),
-        "acquisition-observations": ("Acquisition Observations", "Distilled notes from acquisition runs."),
-        "sites": ("Sites", "How specific sites and feeds are researched effectively."),
-        "site-observations": ("Site Observations", "Distilled notes on source quality, paywalls, and feeds."),
-    },
-    "Heimdall": {
-        "verification": ("Verification", "Task auditing and claim verification: runbooks and formats."),
-        "verification-observations": ("Verification Observations", "Distilled notes from verify and audit cycles."),
-        "merge-gate": ("Merge Gate", "The review gate: rules, checks, and proposals."),
-        "gate-observations": ("Gate Observations", "Distilled notes from merge-gate reviews."),
-        "task-board": ("Task Board", "The fleet's scheduled task calendar and taskmaster working surface."),
-    },
-}
-SATELLITE_ROLE_CHILDREN = {
-    "Alexandria": {},
-    "Darwin": {
-        "sources": ["source-observations"],
-        "acquisition": ["acquisition-observations"],
-        "sites": ["site-observations"],
-    },
-    "Heimdall": {"verification": ["verification-observations"], "merge-gate": ["gate-observations"]},
 }
 
 
@@ -618,8 +587,8 @@ def _navigation_subject(ref: str, parent_ref: str | None, overrides: dict[str, N
     # Reuse _base_article's subject vocabulary without reparsing every Article
     # for each label on every graph refresh.
     if ref.startswith("@sat/"):
-        _, agent, key = ref.split("/", 2)
-        subject = SATELLITE_AGENT_SUBJECTS.get(key) or SATELLITE_ROLE_SUBJECTS.get(agent, {}).get(key)
+        key = ref.split("/", 2)[2]
+        subject = SATELLITE_AGENT_SUBJECTS.get(key)
         title = subject[0] if subject else key.capitalize()
     else:
         title = ref.rsplit("/", 1)[-1]
@@ -775,7 +744,6 @@ async def lifespan(app: FastAPI):
         intake = SourceIntake()
         resources.push_async_callback(asyncio.to_thread, intake.stop)
         await asyncio.to_thread(intake.start)
-        app.state.shell_scene = shell_scene.SCENE
         resources.push_async_callback(realtime.RUNTIME.shutdown)
         from ...realtime import tracking as camera_tracking
         resources.push_async_callback(camera_tracking.close_lifecycle)
@@ -921,12 +889,6 @@ def models():
     return {"models": model_runtime.catalog()}
 
 
-@app.get("/api/model-settings")
-def model_settings():
-    """Compatibility surface for live hardware-slot residency."""
-    return model_runtime.settings()
-
-
 @app.get("/api/hardware")
 def hardware():
     """Physical compute, audio endpoints, and preferred camera."""
@@ -942,12 +904,6 @@ def hardware():
 def hardware_monitor():
     """Bounded read-only measurements shared by visible Hardware panes."""
     return monitor.snapshot()
-
-
-@app.get("/api/system")
-def system():
-    """Actual host, application, and network inventory behind Source."""
-    return inventory.system_snapshot()
 
 
 @app.get("/api/system/knowledge")
@@ -1108,14 +1064,6 @@ def realtime_status():
     return realtime.RUNTIME.snapshot()
 
 
-@app.post("/api/realtime/start")
-async def realtime_start():
-    try:
-        return await realtime.RUNTIME.start()
-    except (OSError, RuntimeError, ValueError) as exc:
-        raise HTTPException(409, str(exc)) from exc
-
-
 @app.patch("/api/realtime/mode")
 async def realtime_mode(payload: dict):
     try:
@@ -1124,11 +1072,6 @@ async def realtime_mode(payload: dict):
         return await realtime.RUNTIME.set_proactive(payload.get("proactive"))
     except (OSError, RuntimeError, TypeError, ValueError) as exc:
         raise HTTPException(409, str(exc)) from exc
-
-
-@app.post("/api/realtime/stop")
-async def realtime_stop():
-    return await realtime.RUNTIME.stop()
 
 
 async def _serve_websocket_events(ws: WebSocket, send_events):
@@ -1165,14 +1108,6 @@ async def realtime_ws(ws: WebSocket):
         await _serve_websocket_events(ws, send_events)
     finally:
         realtime.RUNTIME.unsubscribe(queue)
-
-
-@app.get("/api/models/{model_id}")
-def model(model_id: str):
-    try:
-        return model_runtime.model_document(model_id)
-    except ValueError as exc:
-        raise HTTPException(404, str(exc)) from exc
 
 
 @app.patch("/api/models/{model_id}")
@@ -1422,37 +1357,18 @@ def _base_article(ref: str):
             raise HTTPException(404, f"agent not found: {agent_name}")
         if kind not in CHECKOUT_FIELDS:
             subject = SATELLITE_AGENT_SUBJECTS.get(folder_key)
-            role_subjects = SATELLITE_ROLE_SUBJECTS.get(agent_name, {})
-            subject = subject or role_subjects.get(folder_key)
             if not subject:
                 raise HTTPException(404, f"agent node not found: {ref}")
             title, summary = subject
             target_folder = _auto_curate_target_path(ref, {"ref": ref})
             if _folder_index(target_folder):
                 return _folder_article(target_folder, ref)
-            child_keys = list(SATELLITE_ROLE_CHILDREN.get(agent_name, {}).get(folder_key, []))
-            subject_lookup = {**SATELLITE_AGENT_SUBJECTS, **role_subjects}
-            subnodes = [
-                (f"@sat/{agent_name}/{child_key}", subject_lookup[child_key][0])
-                for child_key in child_keys if child_key in subject_lookup
-            ]
-            if folder_key == "other-agents":
-                children = [item for item in iter_notes()
-                            if item.kind == "agent" and item.ref != identity.ref]
-                executive = resolver().resolve("Agents/Executive/Executive")
-                if executive:
-                    children.append(executive)
-            elif folder_key == "observations":
-                children = [item for item in iter_notes()
-                            if item.ref.startswith(f"Agents/{agent_name}/Observations/")
-                            and item.ref != identity.ref]
-            elif agent_name == "Darwin" and folder_key == "sources":
-                children = [item for item in iter_notes()
-                            if item.ref.startswith("Sources/")
-                            and not is_folder_article(item)]
-            else:
-                children = []
-            return _virtual_subject(ref, title, summary, subnodes, children)
+            children = [item for item in iter_notes()
+                        if item.kind == "agent" and item.ref != identity.ref]
+            executive = resolver().resolve("Agents/Executive/Executive")
+            if executive:
+                children.append(executive)
+            return _virtual_subject(ref, title, summary, children=children)
         res = resolver()
         refs = agent_dependencies(identity, res)[CHECKOUT_FIELDS[kind]]
         children = [target for raw in refs
@@ -1591,15 +1507,6 @@ def files():
     ]
 
 
-@app.get("/api/sources")
-def sources():
-    """Registered evidence records retained for provenance and Tool access."""
-    try:
-        return source.list_sources()
-    except source.SourceError as cause:
-        raise HTTPException(409, str(cause)) from cause
-
-
 @app.get("/api/source-files")
 def source_files(scope: str | None = None, after: str | None = None, limit: int = 2000):
     """Exact physical wiki, code, System, and raw-source paths in one view."""
@@ -1710,66 +1617,6 @@ def read_source(source_id: str):
         return source.get_source(source_id)
     except source.SourceError as cause:
         raise HTTPException(404, str(cause)) from cause
-
-
-@app.post("/api/sources")
-def capture_source(payload: dict):
-    """Capture Source and emit source.added only when the object is new."""
-    try:
-        return source.ingest_source(
-            source_type=str(payload.get("source_type", "tool")),
-            source_ref=str(payload.get("source_ref", "")),
-            media_type=str(payload.get("media_type", "text/markdown")),
-            captured_at=str(payload["captured_at"]) if payload.get("captured_at") else None,
-            content=str(payload.get("content", "")),
-        )
-    except source.SourceError as cause:
-        raise HTTPException(400, str(cause)) from cause
-
-
-@app.post("/api/files/move")
-def move_file(payload: dict):
-    """Owner filesystem operation for Reader rename and drag/drop."""
-    source = str(payload.get("source", ""))
-    destination_parent = str(payload.get("destination_parent", ""))
-    raw_name = payload.get("new_name")
-    new_name = str(raw_name) if raw_name is not None else None
-    try:
-        result = move_vault_item(source, destination_parent, new_name)
-    except ValueError as cause:
-        raise HTTPException(400, str(cause)) from cause
-    INDEX.sync()
-    knowledge_activity.emit_operation("edit", "completed", list(result["refs"].values()),
-        label="Articles moved", refresh=True)
-    return result
-
-
-@app.get("/api/actions/wiki")
-def wiki_actions():
-    """Runbook-backed Wiki tasks exposed as direct owner actions."""
-    by_ref = {note.ref: note for note in iter_notes() if note.kind == "task"}
-    rows = []
-    seen = set()
-    for path, ref in CANONICAL_TASK_BY_PATH.items():
-        note = by_ref.get(ref)
-        if not path.startswith("wiki/") or not note or note.ref in seen:
-            continue
-        if note.children or not note.meta.get("runbook"):
-            continue
-        seen.add(note.ref)
-        agent = resolver().resolve(_link_ref(str(note.meta.get("assignee", ""))))
-        rows.append({
-            "ref": note.ref,
-            "title": note.title,
-            "path": path,
-            "status": str(note.meta.get("status", "draft")),
-            "agent": agent.ref if agent else "Agents/Executive/Executive",
-            "agent_label": agent.title if agent else "Executive",
-            "reasoning_effort": llm.normalize_reasoning_effort(
-                note.meta.get("reasoning_effort")
-            ),
-        })
-    return rows
 
 
 def _assignment_row(agent: str, identity: Note, task: Note, res) -> dict:
@@ -2178,30 +2025,6 @@ async def set_task_reasoning(ref: str, payload: dict):
     return {"task": note.ref, "reasoning_effort": effort}
 
 
-@app.patch("/api/tasks/{ref:path}/assignee")
-async def set_task_assignee(ref: str, payload: dict):
-    """Persist an owner-selected agent on one executable task."""
-    from ...knowledge.vault import write_note
-
-    note = load_note(ref + ".md") or resolver().resolve(ref)
-    if not note or note.kind != "task":
-        raise HTTPException(404, f"task not found: {ref}")
-    if str(note.meta.get("status", "draft")) == "running":
-        raise HTTPException(409, "cannot edit a running task")
-    requested = str(payload.get("assignee", "")).strip()
-    agent = resolver().resolve(requested)
-    if not requested or not agent or agent.kind != "agent":
-        raise HTTPException(400, f"agent not found: {requested or '(empty)'}")
-    assignee = f"[[{agent.ref}]]"
-    meta = dict(note.meta)
-    meta["assignee"] = assignee
-    write_note(note.path, meta, note.body)
-    readiness = ensure_task_runbook(load_note(note.path), resolver())
-    INDEX.sync()
-    knowledge_activity.emit_operation("edit", "completed", [note.ref, agent.ref], label="Task assignment saved", refresh=True)
-    return {"task": note.ref, "assignee": assignee, "dependencies": readiness}
-
-
 @app.patch("/api/tasks/{ref:path}/model")
 async def set_task_model(ref: str, payload: dict):
     """Persist one model preference on one Task Article."""
@@ -2277,77 +2100,6 @@ async def set_task_exclusions(ref: str, payload: dict):
     INDEX.sync()
     knowledge_activity.emit_operation("edit", "completed", [note.ref], label="Task exclusions saved", refresh=True)
     return {"task": note.ref, "excluded_subtask_refs": ordered}
-
-
-@app.patch("/api/tasks/{ref:path}")
-async def update_task(ref: str, payload: dict):
-    """Owner editor for task instructions and scheduler-facing fields."""
-    from ...knowledge.vault import write_note
-
-    note = load_note(ref + ".md") or resolver().resolve(ref)
-    if not note or note.kind != "task":
-        raise HTTPException(404, f"task not found: {ref}")
-    if str(note.meta.get("status", "draft")) == "running":
-        raise HTTPException(409, "cannot edit a running task")
-    meta = dict(note.meta)
-
-    if "title" in payload:
-        title = str(payload["title"]).strip()
-        if not title:
-            raise HTTPException(400, "title required")
-        meta["title"] = title
-
-    if "schedule" in payload:
-        schedule = str(payload.get("schedule") or "").strip()
-        if schedule:
-            try:
-                croniter(schedule, time.time()).get_next(float)
-            except (ValueError, KeyError) as exc:
-                raise HTTPException(400, f"invalid cron schedule: {schedule}") from exc
-            meta["schedule"] = schedule
-            if str(meta.get("status", "draft")) == "draft":
-                meta["status"] = "pending"
-        else:
-            meta.pop("schedule", None)
-
-    res = resolver()
-    if "assignee" in payload:
-        requested = str(payload.get("assignee") or "").strip()
-        if requested:
-            agent = res.resolve(requested)
-            if not agent or agent.kind != "agent":
-                raise HTTPException(400, f"agent not found: {requested}")
-            meta["assignee"] = f"[[{agent.ref}]]"
-        else:
-            meta.pop("assignee", None)
-
-    if "runbook" in payload:
-        requested = str(payload.get("runbook") or "").strip()
-        if requested:
-            runbook = res.resolve(requested)
-            if not runbook or runbook.kind != "runbook":
-                raise HTTPException(400, f"runbook not found: {requested}")
-            meta["runbook"] = f"[[{runbook.ref}]]"
-        else:
-            meta.pop("runbook", None)
-
-    if "reasoning_effort" in payload:
-        try:
-            meta["reasoning_effort"] = llm.normalize_reasoning_effort(payload["reasoning_effort"])
-        except ValueError as exc:
-            raise HTTPException(400, str(exc)) from exc
-    if "model" in payload:
-        try:
-            meta["model"] = model_runtime.normalize_model(payload.get("model"))
-        except ValueError as exc:
-            raise HTTPException(400, str(exc)) from exc
-
-    body = str(payload["body"]) if "body" in payload else note.body
-    write_note(note.path, meta, body)
-    readiness = ensure_task_runbook(load_note(note.path), resolver())
-    INDEX.sync()
-    knowledge_activity.emit_operation("edit", "completed", [note.ref], label="Task saved", refresh=True)
-    return {"task": note.ref, "updated": True, "dependencies": readiness}
 
 
 @app.post("/api/tasks/{ref:path}/cancel")
@@ -2454,16 +2206,6 @@ async def run_now(ref: str, payload: dict | None = None):
         "model": preference,
         "resolved_model": model_runtime.resolve_model(preference, agent_ref).id,
     }
-
-
-@app.get("/api/runs")
-def runs():
-    return INDEX.runs()
-
-
-@app.get("/api/trace")
-def action_trace():
-    return trace.history()
 
 
 @app.websocket("/ws/trace")

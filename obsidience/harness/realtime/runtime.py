@@ -865,9 +865,7 @@ class RealtimeSessionManager:
             requested = {"mode": "wake"}
         if not isinstance(requested, dict):
             requested = {}
-        # Legacy intent is exactly {"enabled": true}; 1 == True must not match.
-        legacy = set(requested) == {"enabled"} and requested["enabled"] is True
-        mode = "realtime" if legacy else requested.get("mode", "wake")
+        mode = requested.get("mode", "wake")
         if mode == "off":
             return self.snapshot()
         if mode not in {"wake", "realtime"}:

@@ -233,10 +233,6 @@ def pause_local(generation: str, source: dict, paused: bool = True, cancel=None)
     return result
 
 
-def resume_local(generation: str, source: dict, cancel=None) -> dict:
-    return pause_local(generation, source, False, cancel)
-
-
 def seek_local(generation: str, source: dict, position: float, cancel=None) -> dict:
     """One absolute exact seek, settled within 0.5 s of the requested position.
 
@@ -270,10 +266,6 @@ def select_track_local(generation: str, source: dict, kind: str, track_id: int |
 def pause(paused=True):
     """Set the pause flag once; True when the player's own readback shows it."""
     return (_ask({'op': 'pause' if paused else 'resume'}).get('playback') == 'paused') is paused
-
-
-def resume():
-    return pause(False)
 
 
 def stop():

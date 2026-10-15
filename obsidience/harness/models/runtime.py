@@ -62,7 +62,6 @@ GEMMA_SERVICE = "obsidience-gemma.service"
 MODEL_SETTINGS_PATH = CONFIG.runtime_dir / "model-settings.json"
 MODEL_LAUNCH_DIR = CONFIG.runtime_dir / "model-launch"
 MODEL_CATALOG_STATE_PATH = CONFIG.runtime_dir / "model-catalog.json"
-MODEL_SOURCE_ROOT = CONFIG.source_dir / "models"
 GEMMA_MODEL = CONFIG.runtime_dir / "models" / "executive.gguf"
 GEMMA_TEMPLATE = GEMMA_MODEL.with_name("executive-template.jinja")
 GEMMA_MTP = Path(

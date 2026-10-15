@@ -16,12 +16,11 @@ from dataclasses import dataclass, field
 
 import httpx
 
-from .runtime import ModelSpec, model_auth_headers
+from .runtime import ModelSpec
 
 PROMPT_SAFETY_TOKENS = 256
 _TEXT_COUNTS: OrderedDict[tuple, int] = OrderedDict()
 _TEXT_COUNTS_LOCK = threading.Lock()
-_TOKENIZER = httpx.Client(timeout=0.5, trust_env=False, headers=model_auth_headers())
 
 
 def _artifact_key(spec: ModelSpec) -> tuple:
@@ -54,29 +53,6 @@ def _text_request(text: str, spec: ModelSpec) -> dict:
     if not spec.runtime.startswith("llama.cpp"):
         body = {"model": spec.id, "prompt": text, "add_special_tokens": False}
     return body
-
-
-def count_text(text: str, spec: ModelSpec) -> int:
-    """Legacy synchronous count for callers outside the asynchronous turn path."""
-    if not text:
-        return 0
-    encoded = text.encode("utf-8")
-    key = (*_artifact_key(spec), hashlib.sha256(encoded).digest())
-    cached = _cached_count(key)
-    if cached is not None:
-        return cached
-    try:
-        response = _TOKENIZER.post(spec.base_url.removesuffix("/v1") + "/tokenize",
-                                   json=_text_request(text, spec))
-        response.raise_for_status()
-        tokens = response.json()["tokens"]
-        if not isinstance(tokens, list):
-            raise ValueError("invalid runtime tokens")
-        count = len(tokens)
-    except (httpx.HTTPError, KeyError, TypeError, ValueError):
-        return len(encoded)
-    _store_count(key, count)
-    return count
 
 
 @dataclass(frozen=True)

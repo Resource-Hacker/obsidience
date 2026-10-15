@@ -1144,41 +1144,6 @@ class Index:
                 raise
         return json.loads(payload)
 
-    def remap_task_runtime(self, mapping: dict[str, str]) -> dict[str, str]:
-        """Move current state with an Article; preserve every historical receipt."""
-        moves = {old: new for old, new in mapping.items() if old != new}
-        if not moves:
-            return {}
-        with self.lock:
-            try:
-                self.db.execute("BEGIN IMMEDIATE")
-                rows = {
-                    ref: (state, updated_at)
-                    for ref, state, updated_at in self.db.execute(
-                        "SELECT task_ref,state,updated_at FROM task_runtime"
-                    )
-                }
-                destinations = list(moves.values())
-                if len(set(destinations)) != len(destinations) or any(
-                    new in rows and new not in moves for new in destinations
-                ):
-                    raise ValueError("destination already owns Task runtime state")
-                moves = {old: new for old, new in moves.items() if old in rows}
-                for old in moves:
-                    self.db.execute("DELETE FROM task_runtime WHERE task_ref=?", (old,))
-                for old, new in moves.items():
-                    self.db.execute("UPDATE task_activations SET task_ref=? WHERE task_ref=?", (new, old))
-                    state, updated_at = rows[old]
-                    self.db.execute(
-                        "INSERT INTO task_runtime(task_ref,state,updated_at) VALUES(?,?,?)",
-                        (new, state, updated_at),
-                    )
-                self.db.commit()
-            except BaseException:
-                self.db.rollback()
-                raise
-        return moves
-
     # ---------- execution receipts and public trace ----------
 
     @staticmethod

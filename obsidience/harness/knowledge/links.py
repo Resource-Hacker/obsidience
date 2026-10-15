@@ -82,15 +82,13 @@ def body_link_locations(body: str, path: str = "", *, include_sources: bool = Fa
     return links
 
 
-def canonical_body(body: str, path: str, mapping: dict[str, str] | None = None,
-                   *, accepted_refs: list[str] | None = None) -> str:
-    """Normalize authored wikilinks and moved paths to bundle-root Markdown links.
+def canonical_body(body: str, path: str, *, accepted_refs: list[str] | None = None) -> str:
+    """Normalize authored wikilinks to bundle-root Markdown links.
 
     Explicit typed metadata edges remain separate from body relationships.
     Code blocks and inline code are examples, not navigable links.
     An accepted path catalog permits repairing omitted document suffixes.
     """
-    mapping = {old.casefold(): new for old, new in (mapping or {}).items()}
     accepted = {ref.casefold(): ref for ref in accepted_refs or []}
 
     def wiki(match):
@@ -102,7 +100,6 @@ def canonical_body(body: str, path: str, mapping: dict[str, str] | None = None,
             # path. Preserve its URI instead of inventing /source:/...md.
             label = (match.group(3) or ref).replace("[", "\\[").replace("]", "\\]")
             return f"[{label}]({ref}{match.group(2) or ''})"
-        ref = mapping.get(ref.casefold(), ref)
         label = (match.group(3) or match.group(1).rsplit("/", 1)[-1]).replace("[", "\\[").replace("]", "\\]")
         fragment = match.group(2)
         href = "/" + quote(ref, safe="/") + ".md" + ("#" + quote(unquote(fragment[1:]), safe="/") if fragment else "")
@@ -123,7 +120,6 @@ def canonical_body(body: str, path: str, mapping: dict[str, str] | None = None,
             ref = accepted.get(candidate.casefold()) if candidate else None
         if ref is None:
             return match.group(0)
-        ref = mapping.get(ref.casefold(), ref)
         fragment = urlsplit(href).fragment
         url = "/" + quote(ref, safe="/") + ".md" + ("#" + fragment if fragment else "")
         return match.group("open") + url + match.group("close")
