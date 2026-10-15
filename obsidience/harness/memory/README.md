@@ -80,10 +80,11 @@ preserving bounded per-turn recall, explicit inspection and Curate handoffs.
 
 Hindsight's native configuration selects the extraction/consolidation provider;
 inspect the installation's selected environment rather than assuming a model.
-The optional local-model configuration uses the private port in `api.py`, borrowing
-only preemptible idle capacity from the existing resident model owner. Foreground
-work cancels that pure inference; Hindsight owns its bounded retry. That model
-port has no capabilities and restores the selected Executive context afterward.
+The optional local-model configuration uses the private port in
+`interfaces/api/routes/memory.py`, borrowing only preemptible idle capacity from
+the existing resident model owner. Foreground work cancels that pure inference;
+Hindsight owns its bounded retry. That model port has no capabilities and
+restores the selected Executive context afterward.
 CPU ONNX embeddings and FlashRank consume no CUDA model allocation.
 
 Conversation requests and Harness Task objectives have distinct provenance

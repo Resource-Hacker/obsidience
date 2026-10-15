@@ -15,9 +15,9 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse
 
-from ..config import CONFIG
-from ..memory.hindsight import MEMORY, hindsight_auth_headers, memory_ref
-from ..knowledge.vault import load_note
+from ....config import CONFIG
+from ....memory.hindsight import MEMORY, hindsight_auth_headers, memory_ref
+from ....knowledge.vault import load_note
 
 router = APIRouter(prefix="/api/graphs")
 CODE_PROJECT = str(CONFIG.project_root).strip("/").replace("/", "-")
@@ -83,8 +83,8 @@ MEMORY_VIEWS: dict[str, MemoryView] = {}
 @asynccontextmanager
 async def lifespan():
     global CLIENT, CODE_REFRESH
-    from .codex import CodeActivity
-    from .code_refresh import CodeRefresh
+    from ....graphs.agent_activity import CodeActivity
+    from ....graphs.code_refresh import CodeRefresh
     with httpx.Client(timeout=20, trust_env=False) as client:
         CLIENT = client
         project = str(CONFIG.extras.get("graphs", {}).get("codebase_project", CODE_PROJECT))
@@ -272,7 +272,7 @@ async def memory_record(bank: str, id: str):
         doc = await MEMORY.api("GET", quote(bank, safe="") + "/memories/" + quote(id, safe=""))
     except (httpx.HTTPError, RuntimeError) as exc:
         raise HTTPException(503, "Memory record is unavailable") from exc
-    from ..execution.activity import emit_operation
+    from ....execution.activity import emit_operation
     emit_operation("read", "returned", [memory_ref(bank, id)], label="Reading memory",
                    graph_id="memory:" + bank)
     return doc

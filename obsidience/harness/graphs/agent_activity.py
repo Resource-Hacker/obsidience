@@ -115,7 +115,7 @@ class CodeActivity(FileSystemEventHandler):
             if journals.is_dir():
                 self.observer.schedule(self, str(journals), recursive=True)
         self.observer.schedule(self, str(self.project), recursive=False)
-        for relative in ("obsidience/harness", "obsidience/shell/qml", "obsidience/shell/surfaces", "obsidience/ui/src", "obsidience/scripts"):
+        for relative in ("obsidience/harness", "obsidience/shell/qml", "obsidience/ui/src", "obsidience/scripts"):
             directory = self.project / relative
             if directory.is_dir():
                 self.observer.schedule(self, str(directory), recursive=True)

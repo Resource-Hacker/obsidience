@@ -67,7 +67,7 @@ async def _run_owner_media(plugin: AgentPlugin, command: dict, session_id: str, 
             return
         acquisition_choice = None
         if acquisition:
-            from ...interfaces.api.media import claim_source_preview, source_fingerprint
+            from ...media.previews import claim_source_preview, source_fingerprint
             proof = claim_source_preview(command['preview_token'], command['request_id'])
             blocks = await plugin.operate('media.library', {
                 'action': 'search', 'query': proof['query'], 'type': proof['type']}, raw_observation=True)

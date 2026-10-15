@@ -158,7 +158,8 @@ machine. Historical observations belong to the optional Hindsight provider.
 The optional voice/session unlock capability is documented in the library but
 is not granted by the starter Executive; enabling it is a local owner's choice.
 The Memory and Code views need their optional providers; see
-[graph adapters](obsidience/harness/graphs/README.md) for setup and limits.
+[Knowledge graph rendering](obsidience/defaults/vault/Architecture/Shell/knowledge-graph-rendering.md)
+for setup and limits.
 
 ### Run and develop
 
@@ -209,8 +210,8 @@ the shared React/Three.js knowledge graph.
 
 - [DESIGN.md](DESIGN.md): the ontology, design laws and execution rules.
 - [Shell](obsidience/shell/README.md): native desktop setup, panes and Surfaces.
-- [Graph adapters](obsidience/harness/graphs/README.md): the Memory and Code
-  views, their providers and limits.
+- [Knowledge graph rendering](obsidience/defaults/vault/Architecture/Shell/knowledge-graph-rendering.md):
+  the graph renderer and the Memory and Code views, their providers and limits.
 - [Installation knowledge](obsidience/defaults/README.md): the starter Vault and
   how defaults are published.
 

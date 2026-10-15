@@ -8,9 +8,9 @@ import json
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from .hindsight import MEMORY, token
-from ..models import llm, runtime
-from ..models.context import TaskContext, PROMPT_SAFETY_TOKENS
+from ....memory.hindsight import MEMORY, token
+from ....models import llm, runtime
+from ....models.context import TaskContext, PROMPT_SAFETY_TOKENS
 
 router = APIRouter(prefix="/api/memory")
 
@@ -80,7 +80,7 @@ async def model(request: Request):
             async with owner.resident_prefill(spec) as admitted:
                 if not admitted:
                     raise HTTPException(503, "Resident capacity is reserved", headers={"Retry-After": "1"})
-                from ..conversation.runtime import RUNTIME as executive
+                from ....conversation.runtime import RUNTIME as executive
                 executive.invalidate_readiness()
                 borrowed = True
                 async with llm.provider_client() as client:
