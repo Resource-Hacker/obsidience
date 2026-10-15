@@ -1,4 +1,4 @@
-"""Register one owner-selected, run-bound source through local Tiramisu."""
+"""Register one owner-selected source with the configured acquisition owner."""
 from __future__ import annotations
 
 import asyncio
@@ -72,7 +72,22 @@ async def _refresh_catalogue(client: Tiramisu, candidate: dict, cancel) -> dict:
     if cancel is not None and cancel.is_set():
         return {'status': 'pending', 'reason': 'refresh_skipped_cancelled'}
     try:
-        path = await _registered_path(client, candidate)
+        if candidate.get('debrid_binding'):
+            from ...media.torbox_files import refresh
+            config = load_config()
+            registered = candidate['_context']['_media_registered_file']
+            registered = await client.organize(registered, candidate['type'], cancel)
+            work = asyncio.create_task(asyncio.to_thread(refresh, config, registered))
+            try:
+                path = await asyncio.shield(work)
+            except asyncio.CancelledError:
+                try:
+                    await asyncio.shield(work)
+                except Exception:
+                    pass
+                raise
+        else:
+            path = await _registered_path(client, candidate)
         if cancel is not None and cancel.is_set():
             return {'status': 'pending', 'reason': 'refresh_skipped_cancelled'}
         catalogue = service.catalogue()
@@ -113,6 +128,21 @@ async def status() -> dict:
         if (code != 200 or not isinstance(health, dict) or health.get('ready') is not True
                 or health.get('draining') is not False):
             raise MediaUnavailable('tiramisu_not_ready')
+        if config.get('debrid', {}).get('enabled'):
+            from ...media.torbox import TorBoxAPI
+            from ...media.torbox_files import ready_mount
+            roots = [r for r in config['roots'] if r.get('provider') == 'torbox']
+            if not roots:
+                raise MediaUnavailable('torbox_root_unavailable')
+            ready_mount(roots[0])
+            account = await TorBoxAPI().account()
+            if not account['paid_active']:
+                raise MediaUnavailable('torbox_paid_account_required')
+            return {'enabled': True, 'ready': True,
+                    'providers': ['cinemeta', discovery['provider'], 'torbox'],
+                    'discovery_configured': health.get('discovery_configured') is True,
+                    'cache_only': True, 'plan': account['plan'],
+                    'disk_cache': False, 'offline_guaranteed': False}
         return {'enabled': True,
                 'providers': ['cinemeta', discovery.get('provider', 'torrentio'), 'tiramisu'],
                 'transport': 'owner_unix_socket', 'ready': True,
@@ -149,7 +179,7 @@ async def execute(args: dict, context: dict) -> dict:
     metadata = context.get('_media_discovery_candidates', {}).get(candidate.get('metadata_id'))
     if (not isinstance(metadata, dict) or metadata.get('run_id') != run_id
             or any(candidate.get(key) != metadata.get(key) for key in
-                   ('imdb', 'type', 'provider', 'instance_id', 'config_fingerprint', 'socket_identity'))):
+                   ('imdb', 'type', 'provider', 'instance_id', 'config_fingerprint', 'socket_identity', 'debrid_binding'))):
         return {**result, 'failure': {'code': 'media_candidate_stale'}}
     if candidate.get('type') not in ('movie', 'series'):
         return {**result, 'failure': {'code': 'media_candidate_invalid'}}
@@ -174,6 +204,16 @@ async def execute(args: dict, context: dict) -> dict:
         try:
             client = Tiramisu()
             client.validate_binding(candidate)
+            if load_config().get('debrid', {}).get('enabled'):
+                from ...media.torbox import TorBoxAPI
+                from ...media.torbox_files import ready_mount
+                config = load_config()
+                roots = [r for r in config['roots'] if r.get('provider') == 'torbox']
+                if not roots:
+                    raise MediaUnavailable('torbox_root_unavailable')
+                ready_mount(roots[0])
+                client = TorBoxAPI()
+                client.validate_binding(candidate)
             registered = await client.register(candidate, cancel)
             if registered.get('status') == 'completed':
                 registered['catalogue'] = await _refresh_catalogue(client, candidate, cancel)

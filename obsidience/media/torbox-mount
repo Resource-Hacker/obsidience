@@ -1,0 +1,144 @@
+#!/usr/bin/python
+"""One systemd-owned rclone lifetime; close admission, drain, then exit."""
+import json
+import os
+from pathlib import Path
+import re
+import signal
+import socket
+import subprocess
+import sys
+import time
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from harness.media.config import load_config
+from harness.media.sources import _mount
+import httpx
+
+runtime = Path(os.environ['RUNTIME_DIRECTORY'])
+config = load_config().get('debrid', {})
+mount = config.get('mount_path')
+if not mount or config.get('provider') != 'torbox' or not config.get('enabled'):
+    raise SystemExit('TorBox mount is not enabled')
+root = {'mount_path': mount, 'provider': 'torbox'}
+marker = runtime / 'ready.json'
+child = None
+owned = None
+stopping = False
+
+
+def stop(_signum, _frame):
+    global stopping
+    stopping = True
+
+
+def current():
+    try:
+        return _mount(root)
+    except Exception:
+        return None
+
+
+def notify(value):
+    address = os.environ.get('NOTIFY_SOCKET')
+    if address:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as sock:
+            sock.connect('\0' + address[1:] if address.startswith('@') else address)
+            sock.sendall(value.encode())
+
+
+signal.signal(signal.SIGTERM, stop)
+signal.signal(signal.SIGINT, stop)
+# Never cover an existing mount or ordinary directory's contents.
+if os.path.ismount(mount) or Path(mount).is_symlink():
+    raise SystemExit('TorBox mountpoint is already occupied')
+Path(mount).mkdir(parents=True, exist_ok=True, mode=0o700)
+if any(Path(mount).iterdir()):
+    raise SystemExit('TorBox mountpoint is not empty')
+marker.unlink(missing_ok=True)
+token = (Path(os.environ['CREDENTIALS_DIRECTORY']) / config['credential']).read_text().strip()
+if not re.fullmatch(r'[A-Za-z0-9._~-]{16,8192}', token):
+    raise SystemExit('TorBox credential is invalid')
+obscured = subprocess.run(['/usr/bin/rclone', 'obscure', '-'], input=token + '\n',
+                          capture_output=True, text=True, timeout=5, check=True).stdout.strip()
+path = runtime / 'rclone.conf'
+path.write_text('[torbox]\ntype = webdav\nurl = https://webdav.torbox.app/\nvendor = other\nuser = torbox\npass = ' + obscured + '\nauth_redirect = false\n')
+path.chmod(0o600)
+del token, obscured
+environment = {key: value for key, value in os.environ.items()
+               if not key.lower().endswith('_proxy') and not key.startswith('RCLONE_')
+               and key not in ('CREDENTIALS_DIRECTORY', 'NOTIFY_SOCKET')}
+args = ['/usr/bin/rclone', 'mount', 'torbox:', mount, '--config', str(path),
+        '--read-only', '--allow-other=false', '--allow-root=false', '--default-permissions',
+        '--uid', str(os.getuid()), '--gid', str(os.getgid()), '--dir-perms', '0700',
+        '--file-perms', '0400', '--umask', '077', '--devname', 'obsidience-torbox',
+        '--poll-interval', '0', '--vfs-cache-mode', 'off', '--vfs-handle-caching', '0s',
+        '--buffer-size', '8Mi', '--max-buffer-memory', '128Mi',
+        '--vfs-read-chunk-size', '8Mi', '--vfs-read-chunk-size-limit', '8Mi',
+        '--dir-cache-time', '15m', '--contimeout', '5s', '--timeout', '20s',
+        '--low-level-retries', '1', '--retries', '1', '--transfers', '4',
+        '--rc', '--rc-addr', 'unix://' + str(runtime / 'control.sock'), '--rc-no-auth',
+        '--log-level', 'ERROR', '--log-file', '/dev/null']
+try:
+    child = subprocess.Popen(args, env=environment, stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    deadline = time.monotonic() + 30
+    ready = False
+    while not stopping and child.poll() is None:
+        identity = current()
+        if owned is None and identity is not None:
+            owned = identity
+        if not ready and identity is not None and identity == owned:
+            try:
+                with httpx.Client(transport=httpx.HTTPTransport(uds=str(runtime / 'control.sock')),
+                                  timeout=2, trust_env=False) as client:
+                    reply = client.post('http://localhost/vfs/stats', json={})
+                    if reply.status_code == 200 and current() == owned:
+                        start = Path(f'/proc/{child.pid}/stat').read_text().rsplit(')', 1)[1].split()[19]
+                        temporary = marker.with_suffix('.new')
+                        temporary.write_text(json.dumps({'mount': owned, 'pid': child.pid, 'start': start}))
+                        temporary.chmod(0o600)
+                        os.replace(temporary, marker)
+                        notify('READY=1\nSTATUS=Read-only TorBox mount ready')
+                        ready = True
+            except (httpx.HTTPError, ValueError, OSError):
+                pass
+        if not ready and time.monotonic() >= deadline:
+            print('TorBox mount readiness was not verified; draining.', flush=True)
+            break
+        time.sleep(.2 if not ready else 1)
+finally:
+    try:
+        marker.unlink(missing_ok=True)
+        notify('STOPPING=1\nSTATUS=Waiting for TorBox readers to close')
+    except OSError:
+        pass
+    # Immutable startup identity, never a newly edited configuration path.
+    warned = False
+    while child is not None:
+        observed = current()
+        if observed is None and not os.path.ismount(mount):
+            if child.poll() is not None:
+                break
+            # A startup child may still mount. Continue observing until it exits
+            # or publishes its mount; never signal it while readers may appear.
+            time.sleep(.2)
+            continue
+        if owned is None:
+            # No ready marker was ever published; this mount appeared during startup.
+            owned = observed
+        if observed is not None and observed == owned:
+            try:
+                result = subprocess.run(['/usr/bin/fusermount3', '-u', mount],
+                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                if result.returncode == 0:
+                    continue
+            except OSError:
+                pass
+        if not warned:
+            print('TorBox unmount waits for readers or unchanged mount identity.', flush=True)
+            warned = True
+        time.sleep(1)
+    path.unlink(missing_ok=True)
+if not stopping:
+    raise SystemExit('TorBox filesystem stopped unexpectedly')

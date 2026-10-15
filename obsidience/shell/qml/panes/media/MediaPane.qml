@@ -187,7 +187,7 @@ Rectangle {
         return row.release_label + " · " + (row.resolution ? row.resolution + "p" : "resolution unknown")
             + (row.hdr ? " · HDR" : "") + (row.remux ? " · Remux" : "")
             + (row.size_bytes ? " · " + (row.size_bytes / 1073741824).toFixed(1) + " GB" : "")
-            + " · " + (row.seeders === null ? "availability unknown" : row.seeders + " peers")
+            + (row.cached ? " · TorBox cached" : " · " + (row.seeders === null ? "availability unknown" : row.seeders + " peers"))
             + (row.recommended ? " · Recommended" : "")
     }
     function uuid() {

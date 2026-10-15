@@ -1,0 +1,25 @@
+[Unit]
+Description=Obsidience Media cached storage (TorBox WebDAV)
+After=network-online.target
+
+[Service]
+Type=notify
+NotifyAccess=main
+KillMode=mixed
+ExecStart=%h/Projects/obsidience/obsidience/media/torbox-mount
+RuntimeDirectory=obsidience-media-torbox
+RuntimeDirectoryMode=0700
+UMask=0077
+LoadCredentialEncrypted=obsidience-media-torbox:%h/.config/credentials/obsidience-media-torbox.cred
+TimeoutStartSec=45
+# The bootstrap keeps rclone alive until ordinary unmount succeeds. Never kill readers.
+TimeoutStopSec=infinity
+SendSIGKILL=no
+Restart=no
+CPUWeight=25
+IOWeight=25
+MemoryHigh=512M
+TasksMax=128
+
+[Install]
+WantedBy=default.target

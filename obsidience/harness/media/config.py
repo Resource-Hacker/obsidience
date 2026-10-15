@@ -24,7 +24,7 @@ def _path(value: object) -> str:
 def validate_config(value: object) -> dict:
     if not isinstance(value, dict) or type(value.get('enabled', False)) is not bool:
         raise MediaUnavailable('invalid_media_config')
-    if set(value) - {'enabled', 'catalogue', 'roots', 'acquisition', 'discovery'}:
+    if set(value) - {'enabled', 'catalogue', 'roots', 'acquisition', 'discovery', 'debrid'}:
         raise MediaUnavailable('invalid_media_config')
     result = {'enabled': value.get('enabled', False), 'roots': []}
     roots = value.get('roots', [])
@@ -32,7 +32,8 @@ def validate_config(value: object) -> dict:
         raise MediaUnavailable('invalid_media_roots')
     for root in roots:
         if (not isinstance(root, dict) or set(root) not in ({'id', 'catalogue_path', 'path'},
-                {'id', 'catalogue_path', 'path', 'mount_path'})
+                {'id', 'catalogue_path', 'path', 'mount_path'},
+                {'id', 'catalogue_path', 'path', 'mount_path', 'provider'})
                 or not isinstance(root['id'], str)
                 or not re.fullmatch(r'[a-zA-Z0-9_-]{1,64}', root['id'])):
             raise MediaUnavailable('invalid_media_root')
@@ -43,6 +44,10 @@ def validate_config(value: object) -> dict:
             if root['path'] != mount and not root['path'].startswith(mount + '/'):
                 raise MediaUnavailable('invalid_virtual_root')
             result['roots'][-1]['mount_path'] = mount
+            if 'provider' in root:
+                if root['provider'] != 'torbox':
+                    raise MediaUnavailable('invalid_virtual_provider')
+                result['roots'][-1]['provider'] = 'torbox'
     if len({r['id'] for r in result['roots']}) != len(roots):
         raise MediaUnavailable('ambiguous_media_roots')
     for i, root in enumerate(result['roots']):
@@ -85,6 +90,19 @@ def validate_config(value: object) -> dict:
                                'user_id': user, 'credential': credential}
     if result['enabled'] and not roots:
         raise MediaUnavailable('media_roots_not_configured')
+    debrid = value.get('debrid')
+    if debrid is not None:
+        if (not isinstance(debrid, dict) or set(debrid) != {
+                'enabled', 'provider', 'credential', 'instance_id', 'mount_path'}
+                or type(debrid['enabled']) is not bool or debrid['provider'] != 'torbox'
+                or any(not isinstance(debrid[k], str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', debrid[k])
+                       for k in ('credential', 'instance_id'))):
+            raise MediaUnavailable('invalid_debrid_config')
+        result['debrid'] = {**debrid, 'mount_path': _path(debrid['mount_path'])}
+    for root in result['roots']:
+        if root.get('provider') == 'torbox' and (
+                not debrid or root['mount_path'] != result['debrid']['mount_path']):
+            raise MediaUnavailable('invalid_debrid_root')
     acquisition = value.get('acquisition')
     if acquisition is not None:
         if (not isinstance(acquisition, dict) or set(acquisition) != {'enabled', 'socket', 'instance_id'}

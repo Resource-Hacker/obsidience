@@ -70,7 +70,7 @@ def providers() -> dict:
         return {'enabled': False, 'providers': [], 'readiness': str(error)}
     names = ['cinemeta', discovery.get('provider', 'torrentio')] if discovery.get('enabled') else []
     if acquisition.get('enabled'):
-        names.append('tiramisu')
+        names.append('torbox' if load_config().get('debrid', {}).get('enabled') else 'tiramisu')
     return {'enabled': bool(names), 'providers': names}
 
 
@@ -184,6 +184,9 @@ async def search(query: str, content_type: str, context: dict) -> dict:
     _, config = _config()
     from .tiramisu import Tiramisu
     binding = Tiramisu().binding()
+    if load_config().get('debrid', {}).get('enabled'):
+        from .torbox import TorBoxAPI
+        binding.update(TorBoxAPI().binding())
     cancel = context.get('_capability_cancel_event')
     if cancel is not None and cancel.is_set():
         raise asyncio.CancelledError
@@ -309,6 +312,11 @@ async def candidates(metadata_id: str, *, season: int | None = None,
     from .tiramisu import Tiramisu
     transport = Tiramisu()
     transport.validate_binding(metadata)
+    cached_provider = None
+    if load_config().get('debrid', {}).get('enabled'):
+        from .torbox import TorBoxAPI
+        cached_provider = TorBoxAPI()
+        cached_provider.validate_binding(metadata)
     origin = _https_origin(config.get('torrentio_url'), 'torrentio.strem.fun')
     episode_title = None
     first_air_date = None
@@ -393,7 +401,7 @@ async def candidates(metadata_id: str, *, season: int | None = None,
     credible_identity = provider == 'torrentio' or _release_matches_identity(top[3], metadata, require_year=True)
     recommend = not tied and adequate_quality and credible_identity
     output = []
-    for rank, stream, info_hash, release, resolution, seeders, size, language, hdr, remux in scored[:8]:
+    for rank, stream, info_hash, release, resolution, seeders, size, language, hdr, remux in scored[:32 if cached_provider else 8]:
         if len(chosen) >= 32:
             raise MediaUnavailable('media_acquisition_candidate_limit')
         candidate_id = 'a' + secrets.token_urlsafe(14).rstrip('=')
@@ -414,9 +422,31 @@ async def candidates(metadata_id: str, *, season: int | None = None,
                        'seeders': seeders, 'size_bytes': size,
                        'preferred_language_match': language, 'hdr': hdr, 'remux': remux,
                        'recommended': False})
+    if cached_provider and output:
+        matches = await cached_provider.cache_matches(
+            [chosen[row['candidate_id']] for row in output], context.get('_capability_cancel_event'))
+        from .tiramisu import _normal_hash
+        cached_output = []
+        for row in output:
+            private = chosen[row['candidate_id']]
+            match = matches.get(_normal_hash(private['hash']))
+            if match:
+                private.update(match)
+                row['cached'] = True
+                row['cache_provider'] = 'torbox'
+                cached_output.append(row)
+            else:
+                del chosen[row['candidate_id']]
+        output = cached_output[:8]
+        # Ranking remains quality-first among exact, currently cached files.
+        recommend = bool(output) and output[0]['resolution'] is not None
+        tied = (len(output) > 1 and all(output[0][key] == output[1][key]
+                for key in ('resolution', 'preferred_language_match', 'hdr', 'remux', 'size_bytes')))
+        recommend = recommend and not tied
     if output:
         output[0]['recommended'] = recommend
     return {'status': 'completed', 'provider': provider, 'title': metadata['title'],
             'type': metadata['type'], 'season': season, 'episode': episode,
-            'candidates': output, 'ambiguous_best_tie': tied or not adequate_quality,
-            'note': 'Recommendation ranks only the eligible results returned by the configured provider, using preferred language, resolution, HDR/remux, seeders and size. Release labels and availability are unverified; downloaded content has not been inspected. Choose one candidate_id to register exactly once; discovery has not acquired media.'}
+            'candidates': output, 'ambiguous_best_tie': tied or (not adequate_quality and not cached_provider),
+            'cache_provider': 'torbox' if cached_provider else None,
+            'note': ('TorBox returns only cached exact single-video sources; cache is rechecked before registration. ' if cached_provider else '') + 'Recommendation ranks only the eligible results returned by the configured provider, using preferred language, resolution, HDR/remux, seeders and size. Release labels and availability are unverified; downloaded content has not been inspected. Choose one candidate_id to register exactly once; discovery has not acquired media.'}

@@ -100,7 +100,8 @@ def _mount(root: dict) -> dict:
                     rows.append({'id': int(fields[0]), 'parent': int(fields[1]), 'device': fields[2],
                                  'root': decoded(fields[3]), 'path': point,
                                  'type': tail[0], 'source': decoded(tail[1])})
-        if len(rows) != 1 or rows[0]['type'] != 'fuse.tiramisu' or rows[0]['source'] != 'tiramisu':
+        expected = ('fuse.rclone', 'obsidience-torbox') if root.get('provider') == 'torbox' else ('fuse.tiramisu', 'tiramisu')
+        if len(rows) != 1 or (rows[0]['type'], rows[0]['source']) != expected:
             raise MediaUnavailable('virtual_mount_unavailable')
         return rows[0]
     except (OSError, ValueError, IndexError):
@@ -109,6 +110,9 @@ def _mount(root: dict) -> dict:
 
 def _virtual(config: dict, root: dict, relative: str) -> tuple[str, dict]:
     """Read-only provider identity; opening a virtual media file would warm its torrent."""
+    if root.get('provider') == 'torbox':
+        from .torbox_files import describe as describe_cached
+        return describe_cached(config, root, relative)
     _parts(relative)
     virtual_path = str(PurePosixPath(root['path']).relative_to(root['mount_path']) / relative)
     parts = _parts(virtual_path)

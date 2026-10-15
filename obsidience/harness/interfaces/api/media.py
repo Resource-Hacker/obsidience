@@ -69,7 +69,8 @@ def source_fingerprint(candidate: dict) -> str:
     from ...media.tiramisu import _normal_hash
     identity = {key: candidate.get(key) for key in (
         'imdb', 'type', 'title', 'year', 'season', 'episode', 'first_air_date',
-        'release_title', 'provider', 'instance_id', 'config_fingerprint', 'socket_identity')}
+        'release_title', 'provider', 'instance_id', 'config_fingerprint', 'socket_identity',
+        'debrid_binding', 'debrid_file')}
     identity['hash'] = _normal_hash(candidate.get('hash'))
     if not identity['hash']:
         raise MediaUnavailable('Invalid discovery source identity')
@@ -129,7 +130,8 @@ async def sources(metadata_token: str, season: int | None = None, episode: int |
             token = _preview('source', proof)
             safe = {key: row[key] for key in ('title', 'resolution', 'seeders', 'size_bytes',
                     'preferred_language_match', 'hdr', 'remux', 'recommended')}
-            safe.update(preview_token=token, release_label=discovery._text(private['release_title']) or 'Selected release',
+            safe.update(cached=row.get('cached', False), cache_provider=row.get('cache_provider'),
+                        preview_token=token, release_label=discovery._text(private['release_title']) or 'Selected release',
                         imdb_id=metadata['imdb_id'], type=metadata['type'], season=season, episode=episode)
             output.append(safe)
         response = {'available': True, 'candidates': output,

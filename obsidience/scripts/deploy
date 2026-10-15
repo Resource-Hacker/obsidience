@@ -77,7 +77,8 @@ def targets(changed: list[str]) -> list[str]:
         owners.append("tv-player")
     if (any(p in {"obsidience/tv/host/tuner.py", "obsidience/tv/host/break-view", "obsidience/tv/host/obsidience-tv-tuner.service",
                   "obsidience/harness/media/config.py", "obsidience/harness/media/sources.py",
-                  "obsidience/harness/media/source_probe.py", "obsidience/harness/media/progress.py",
+                  "obsidience/harness/media/source_probe.py", "obsidience/harness/media/torbox_files.py",
+                  "obsidience/harness/media/torbox.py", "obsidience/harness/media/progress.py",
                   "obsidience/harness/media/jellyfin.py"} for p in changed)
             or "tv-player" in owners):
         owners.append("tv-tuner")
@@ -88,10 +89,22 @@ def targets(changed: list[str]) -> list[str]:
                 or "obsidience/media/provider-launch" in changed
                 or (provider == "tiramisu" and "obsidience/media/tiramisu-owner-sockets.patch" in changed)):
             owners.append("media-" + provider)
+    if any(p in {"obsidience/media/torbox-mount", "obsidience/media/obsidience-media-torbox.service"} for p in changed):
+        owners.append("media-torbox")
     return owners
 
 
 def provider_health(provider: str) -> dict:
+    if provider == "torbox":
+        sys.path.insert(0, str(ROOT / "obsidience"))
+        from harness.media.config import load_config
+        from harness.media.torbox_files import ready_mount
+        config = load_config()
+        roots = [r for r in config['roots'] if r.get('provider') == 'torbox']
+        if not roots:
+            return {"ready": False}
+        ready_mount(roots[0])
+        return {"ready": True}
     if provider == "tiramisu":
         import httpx
         path = f"/run/user/{os.getuid()}/obsidience-media-tiramisu/control.sock"
@@ -248,7 +261,7 @@ def check_voice(limit: float = 90) -> str | None:
 
 
 def restart(owner: str) -> None:
-    if owner in {"media-tiramisu", "media-prowlarr"}:
+    if owner in {"media-tiramisu", "media-prowlarr", "media-torbox"}:
         provider = owner.removeprefix("media-")
         name = f"obsidience-media-{provider}.service"
         source = ROOT / "obsidience/media" / name
@@ -256,9 +269,12 @@ def restart(owner: str) -> None:
         if not destination.exists():
             print(f"{provider} is not installed; provider installation remains explicit.")
             return
-        if provider == "tiramisu":
+        if provider in {"tiramisu", "torbox"}:
             require_catalogue_idle()
-            require_provider_idle()
+            if provider == "tiramisu":
+                require_provider_idle()
+            else:
+                require_tv_idle()
         shutil.copy2(source, destination)
         subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
         old_pid = subprocess.check_output(["systemctl", "--user", "show", name,
@@ -349,11 +365,11 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--rollback", action="store_true")
     parser.add_argument("--restart", action="append", default=[],
-                        choices=("harness", "tv-player", "tv-tuner", "media-catalogue", "media-tiramisu", "media-prowlarr"),
+                        choices=("harness", "tv-player", "tv-tuner", "media-catalogue", "media-tiramisu", "media-prowlarr", "media-torbox"),
                         help="Include an affected owner after a private configuration change")
     parser.add_argument("--only", action="append", default=[],
                         choices=("harness", "shell", "ui", "tv-player", "tv-tuner",
-                                 "media-catalogue", "media-tiramisu", "media-prowlarr"),
+                                 "media-catalogue", "media-tiramisu", "media-prowlarr", "media-torbox"),
                         help="Deploy only selected affected owners; keep the full checkpoint unchanged")
     parser.add_argument("--recover-realtime", action="store_true",
                         help="Repair an existing Realtime error with a Harness-only deployment")
@@ -430,8 +446,10 @@ def main() -> None:
         if "media-tiramisu" in owners:
             require_catalogue_idle()
             require_provider_idle()
-        elif "media-catalogue" in owners:
+        elif "media-catalogue" in owners or "media-torbox" in owners:
             require_catalogue_idle()
+        if "media-torbox" in owners:
+            require_tv_idle()
     if args.rollback:
         # Check the live owners before changing even the source checkout.
         git("revert", "--no-edit", f"{previous}..HEAD")
