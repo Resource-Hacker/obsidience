@@ -199,6 +199,33 @@ acceptance. The existing remote keyboard lifetime and Android route are preserve
 
 ## Deployment, Review and rollback
 
+The optional Stremio client can use the maintained AIOStreams add-on and StremThru
+TorBox adapter. They share one rootless pod; only the authenticated AIOStreams
+configuration/opaque add-on endpoints are published on workstation loopback.
+StremThru remains pod-private. Existing Prowlarr owns discovery, TorBox owns cached
+bytes, and Jellyfin remains the personal library and its clients' resume owner.
+Stremio has its own upstream client watch state; it is not silently synchronized
+to Jellyfin or made an Executive capability. The television tuner is unchanged.
+
+The pinned StremThru build recipe and MIT patches are in `stremthru/`: both TorBox
+registration forms require cache availability, and transport errors omit credential
+URLs. Keep its ordinary request logging disabled (`FATAL`); keep AIOStreams
+`LOG_SENSITIVE_INFO=false`. Credentials enter through systemd encrypted credentials
+and the in-process bootstrap, never container arguments. Preserve the private
+encryption key and application data together for restore.
+
+Use the upstream configuration API to save a cached-only profile with autoplay,
+precache, preload, cache-and-play, automatic deletion and tracker sync disabled.
+Strict episode matching still uses upstream file scoring, not the Obsidience
+identity-bound admission contract. Title/year filters additionally require a TMDB
+credential; do not advertise them as active without it. Client setup and actual
+playback remain separate acceptance gates from manifest/search/byte delivery.
+The optional `media-stremio` deploy owner refuses while the native client is open
+and stops consumers before its pod. Install the three Quadlet files explicitly;
+ordinary deployment never enables this optional backend by itself. Rollback stops
+the optional services and removes their installed Quadlets while retaining their
+private state, credentials and cached/acquired content.
+
 Compile affected Python, inspect the native pane with its current QML validator and
 use bounded real functional checks. Do not create tests or fixtures. Commit only
 this feature and deploy with `obsidience/scripts/deploy`; it preserves active TV,
