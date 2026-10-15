@@ -97,6 +97,8 @@ eight clients, 20-second idle deadline. The exact command schema is:
 {"command":"status"}
 {"command":"channels"}
 {"command":"speech_diagnostics"}
+{"command":"wake_calibration","request_id":"FRESH_UUID","member_id":"SNOWFLAKE"}
+{"command":"read_wake_calibration","request_id":"DIFFERENT_FRESH_UUID","member_id":"SNOWFLAKE"}
 {"command":"join","request_id":"UUID","channel_id":"SNOWFLAKE"}
 {"command":"leave","request_id":"UUID"}
 {"command":"say","request_id":"UUID","text":"Hello","member_id":"OPTIONAL_SNOWFLAKE"}
@@ -114,7 +116,30 @@ reject. This cache ends on restart; the Harness retains durable effect receipts 
 must never replay an uncertain prior operation after reconnect/restart. A read
 status is always safe. Concurrent effects reject as busy; stop/leave preempt.
 
-Commands carrying `member_id` originate in Discord and additionally verify that
+The two wake-calibration commands are private owner controls, absent from slash
+commands and the Agent's capability API. `wake_calibration` requires one current
+non-bot member of the joined channel, a ready speech connection, and no active
+Agent turn, reply, calibration or diagnostics read. It resets that exact member's
+speech stream, then marks only that member's subsequent PCM for a finite ASR
+inspection lane. Existing receivers consult the flag on each packet. The worker
+collects at most 512 characters, accepts at most ten seconds of PCM, and never
+admits an Agent turn from that lane. Other members retain ordinary wake behavior;
+the speech owner's existing exclusive-channel admission still applies.
+
+Arming returns immediately and expires after 30 seconds. After the requested
+utterance has ended, `read_wake_calibration` returns once within two seconds with
+`calibration_probe_text`, or `wake_calibration_unavailable`. Each read requires a
+fresh 8–96 character request ID and correlates the worker response to that ID,
+the exact member/guild/channel, socket and generation. The read stops additional
+probe PCM, consumes the result and resets the exact stream. Its text is never
+stored in the generic command replay cache, normal status, ordinary diagnostics,
+logs or persistent state. Do not pipe this private response into a journal or
+saved file. A lost read result requires a fresh calibration. Stop, leave,
+dependency loss, member departure, expiry or an ordinary Agent/reply activation
+also clears calibration and resets its stream; following conversation resumes
+through the ordinary wake path. Calibration does not alter wake aliases.
+
+Apart from those private calibration controls, commands carrying `member_id` originate in Discord and additionally verify that
 the member is currently in the joined voice channel for play/pause/resume/stop/say.
 Such joins target the invoker's own current channel and apply its Connect/Speak
 permissions; moving the bot or leaving requires Manage Server. Commands without

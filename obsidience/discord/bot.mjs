@@ -52,6 +52,7 @@ export class DiscordTransport {
     this.receiveError = null;
     this.speechWorkerError = null;
     this.diagnosticRead = null;
+    this.wakeCalibration = null;
     this.receiveCounters = { starts: 0, failures: 0, rx_packets: 0, decoded_pcm_bytes: 0,
       forwarded_pcm_bytes: 0, decoded_pcm_peak: 0, nonzero_pcm_frames: 0, wake_events: 0, transcript_events: 0 };
     this.clients = new Set();
@@ -78,6 +79,7 @@ export class DiscordTransport {
       if (state.id === this.client.user?.id && this.channel && state.channelId !== this.channel.id) {
         void this.leave(); // Moderator disconnect/move invalidates every identity; never follow it.
       } else if (oldState.channelId === this.channel?.id && state.channelId !== this.channel?.id) {
+        if (this.wakeCalibration?.principal.member_id === state.id) this.clearWakeCalibration();
         this.dropReceiver(state.id);
         this.cancelTurns(state.id);
         for (const [id, pending] of [...this.pendingSpeech]) {
@@ -159,6 +161,14 @@ export class DiscordTransport {
     const principal = read?.waiting.get(message.member_id);
     if (!principal || read.socket !== this.speech || read.generation !== this.generation
       || !this.samePrincipal(principal, message) || !this.currentSpeaker(principal)) return;
+    if (read.calibration) {
+      if (message.request_id !== read.request_id) return;
+      if (typeof message.calibration_probe_text === 'string' && message.calibration_probe_text.length <= 512) {
+        read.result = { received: true, calibration_probe_text: message.calibration_probe_text };
+      } else read.result = { received: true, error: 'wake_calibration_unavailable' };
+      read.finish();
+      return;
+    }
     const result = { received: true };
     for (const key of DIAGNOSTIC_FLAGS) if (typeof message[key] === 'boolean') result[key] = message[key];
     for (const key of DIAGNOSTIC_COUNTS) {
@@ -174,6 +184,65 @@ export class DiscordTransport {
     read.results.set(message.member_id, result);
     read.waiting.delete(message.member_id);
     if (!read.waiting.size) read.finish();
+  }
+
+  clearWakeCalibration() {
+    const calibration = this.wakeCalibration;
+    if (!calibration) return;
+    this.wakeCalibration = null;
+    clearTimeout(calibration.timer);
+    if (calibration.principal.generation === this.generation) {
+      this.sendSpeech({ type: 'reset', ...calibration.principal }, false);
+    }
+    if (this.diagnosticRead?.calibration === calibration) this.diagnosticRead.finish();
+  }
+
+  armWakeCalibration(memberId) {
+    if (!this.channel || !this.speech || this.speech.destroyed || !this.connection
+      || this.connection.state.status !== VoiceConnectionStatus.Ready) fail('speech_not_ready');
+    const principal = this.principal(memberId);
+    if (!SNOWFLAKE.test(memberId) || !this.currentSpeaker(principal)
+      || this.channel.members.get(memberId).user.bot) fail('calibration_member_not_current');
+    if (this.wakeCalibration || this.diagnosticRead || this.turns.size || this.pendingSpeech.size || this.utterance) fail('speech_busy');
+    // Reset first on the same FIFO socket; ongoing receivers consult this flag
+    // per packet, so no receive restart or old recognition can enter the probe.
+    this.sendSpeech({ type: 'reset', ...principal });
+    const calibration = { principal, expires: Date.now() + 30_000, reading: false };
+    this.wakeCalibration = calibration;
+    calibration.timer = setTimeout(() => {
+      if (this.wakeCalibration === calibration) this.clearWakeCalibration();
+    }, 30_000);
+    return { wake_calibration_armed: true, member_id: memberId, expires_at_ms: calibration.expires };
+  }
+
+  async readWakeCalibration(memberId, requestId) {
+    const calibration = this.wakeCalibration;
+    if (!calibration || calibration.reading || calibration.principal.member_id !== memberId
+      || !this.currentSpeaker(calibration.principal) || Date.now() >= calibration.expires) fail('wake_calibration_unavailable');
+    if (this.diagnosticRead) fail('speech_diagnostics_busy');
+    // Read results are deliberately excluded from the command replay cache.
+    if (!REQUEST_ID.test(requestId ?? '') || requestId.length > 96
+      || this.recent.has(requestId) || this.admissions.has(`calibration:${requestId}`)) fail('fresh_calibration_request_id_required');
+    this.admissions.add(`calibration:${requestId}`);
+    while (this.admissions.size > 256) this.admissions.delete(this.admissions.values().next().value);
+    calibration.reading = true;
+    return new Promise((resolve) => {
+      const read = { socket: this.speech, generation: this.generation, calibration, request_id: requestId,
+        waiting: new Map([[memberId, calibration.principal]]), result: null };
+      read.finish = () => {
+        if (this.diagnosticRead !== read) return;
+        clearTimeout(read.timer);
+        this.diagnosticRead = null;
+        this.clearWakeCalibration();
+        const result = read.result ?? { received: false, error: 'wake_calibration_unavailable' };
+        read.result = null;
+        resolve({ member_id: memberId, ...result });
+      };
+      this.diagnosticRead = read;
+      read.timer = setTimeout(read.finish, 2000);
+      if (!this.sendSpeech({ type: 'diagnostics', ...calibration.principal,
+        calibration_probe: true, request_id: requestId }, false)) read.finish();
+    });
   }
 
   async connectSpeech() {
@@ -211,6 +280,7 @@ export class DiscordTransport {
 
   speechLost(socket) {
     if (this.speech !== socket) return;
+    this.clearWakeCalibration();
     this.speech = null;
     this.lastError = 'speech_disconnected';
     this.diagnosticRead?.finish();
@@ -312,6 +382,10 @@ export class DiscordTransport {
       opus.on('error', (error) => rejected('opus_stream', error));
       opus.on('data', (packet) => {
         if (!current()) return;
+        if (this.wakeCalibration && Date.now() >= this.wakeCalibration.expires) this.clearWakeCalibration();
+        const calibration = this.wakeCalibration;
+        const calibrating = calibration && this.samePrincipal(calibration.principal, principal);
+        if (calibrating && calibration.reading) return;
         this.countReceive('rx_packets');
         let at = 'opus_decode';
         try {
@@ -325,7 +399,7 @@ export class DiscordTransport {
           if (peak) this.countReceive('nonzero_pcm_frames');
           at = 'speech_send';
           this.sendSpeech({ type: 'audio', ...principal, pcm: pcm.toString('base64'),
-            sample_rate: 16000, channels: 1, format: 's16le' });
+            sample_rate: 16000, channels: 1, format: 's16le', ...(calibrating ? { calibration_probe: true } : {}) });
           this.countReceive('forwarded_pcm_bytes', pcm.length);
         } catch (error) { rejected(at, error); }
       });
@@ -377,6 +451,7 @@ export class DiscordTransport {
   }
 
   stop(originRequestId = null, memberId = null) {
+    this.clearWakeCalibration();
     if (originRequestId !== null) {
       const origin = this.turns.get(originRequestId);
       if (!REQUEST_ID.test(originRequestId) || !origin || origin.controller.signal.aborted
@@ -415,6 +490,7 @@ export class DiscordTransport {
     if (typeof text !== 'string' || !text.trim() || text.length > TEXT_LIMIT) fail('invalid_text');
     if (this.turns.size) fail('agent_busy');
     if (!REQUEST_ID.test(requestId)) fail('invalid_request_id');
+    this.clearWakeCalibration();
     const admission = `${source}:${requestId}`;
     if (this.admissions.has(admission)) fail('turn_already_admitted');
     this.admissions.add(admission);
@@ -459,9 +535,12 @@ export class DiscordTransport {
     if (message.generation !== this.generation || message.guild_id !== this.config.guild_id
       || !this.channel || message.channel_id !== this.channel.id || !SNOWFLAKE.test(message.member_id)) return;
     const principal = this.principal(message.member_id);
-    // Diagnostics intentionally has no turn request_id and never enters dialogue.
+    // Diagnostics never enters dialogue; calibration uses a read correlation ID.
     if (message.type === 'diagnostics') { this.acceptSpeechDiagnostics(message); return; }
+    if (this.wakeCalibration && this.samePrincipal(this.wakeCalibration.principal, principal)
+      && ['wake', 'transcript'].includes(message.type)) return;
     if (message.type === 'error') {
+      if (this.wakeCalibration && this.samePrincipal(this.wakeCalibration.principal, principal)) this.clearWakeCalibration();
       if (this.currentSpeaker(principal)) this.speechWorkerError = SPEECH_ERROR_CODES.has(message.code) ? message.code : 'unclassified_speech_worker_error';
       this.lastError = 'speech_worker_error';
       const pending = this.pendingSpeech.get(message.request_id);
@@ -473,7 +552,7 @@ export class DiscordTransport {
     }
     if (!REQUEST_ID.test(message.request_id ?? '')) return;
     if (this.cancelledRequests.has(message.request_id)) return;
-    if (message.type === 'wake') { this.countReceive('wake_events'); return; }
+    if (message.type === 'wake') { this.clearWakeCalibration(); this.countReceive('wake_events'); return; }
     if (message.type === 'transcript') {
       if (this.admissions.has(`voice:${message.request_id}`)) return;
       const member = this.channel.members.get(message.member_id);
@@ -520,6 +599,7 @@ export class DiscordTransport {
   requestSpeech(principal, requestId, text, source) {
     if (this.cancelledRequests.has(requestId) || this.pendingSpeech.size || !this.currentSpeaker(principal)) fail('speech_not_current_or_busy');
     if (text.length > SPEECH_LIMIT) fail('speech_text_too_large');
+    this.clearWakeCalibration();
     this.pendingSpeech.set(requestId, { ...principal, source });
     this.speechDeadlines.set(requestId, setTimeout(() => this.cancelRequest(requestId, principal, source), 120000));
     try { this.sendSpeech({ type: 'speak', ...principal, source: source === 'owner' ? 'owner' : undefined, request_id: requestId, text }); }
@@ -663,7 +743,7 @@ export class DiscordTransport {
   }
 
   async command(message) {
-    const readOnly = ['status', 'channels', 'speech_diagnostics'].includes(message.command);
+    const readOnly = ['status', 'channels', 'speech_diagnostics', 'read_wake_calibration'].includes(message.command);
     if (!readOnly && !REQUEST_ID.test(message.request_id ?? '')) fail('request_id_required');
     const fingerprint = createHash('sha256').update(JSON.stringify(message)).digest('hex');
     if (!readOnly && this.recent.has(message.request_id)) {
@@ -681,7 +761,7 @@ export class DiscordTransport {
     let result;
     try {
       if (message.guild_id !== undefined && message.guild_id !== this.config.guild_id) fail('guild_not_allowed');
-      if (message.member_id !== undefined && message.command !== 'cancel_media') {
+      if (message.member_id !== undefined && !['cancel_media', 'wake_calibration', 'read_wake_calibration'].includes(message.command)) {
         if (!SNOWFLAKE.test(message.member_id)) fail('invalid_member_id');
         const guild = await this.guild();
         const member = await guild.members.fetch(message.member_id);
@@ -702,6 +782,12 @@ export class DiscordTransport {
         case 'speech_diagnostics':
           if (Object.keys(message).some((key) => !['command', 'request_id'].includes(key))) fail('owner_diagnostics_only');
           value = await this.speechDiagnostics(); break;
+        case 'wake_calibration':
+        case 'read_wake_calibration':
+          if (Object.keys(message).some((key) => !['command', 'request_id', 'member_id'].includes(key))) fail('owner_calibration_only');
+          value = message.command === 'wake_calibration' ? this.armWakeCalibration(message.member_id)
+            : await this.readWakeCalibration(message.member_id, message.request_id);
+          break;
         case 'join': value = await this.join(message.channel_id); break;
         case 'leave': value = await this.leave(); break;
         case 'stop': value = this.stop(message.origin_request_id ?? null, message.member_id ?? null); break;
