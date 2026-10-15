@@ -28,7 +28,7 @@ def editable_proposal_body(body: str, note, context: dict) -> str:
 
 def execute(args: dict, context: dict) -> str:
     from obsidience.harness.knowledge.vault import (
-        SYSTEM_DIRS, Resolver, _NOTE_WRITE_LOCK, iter_notes,
+        SYSTEM_DIRS, Resolver, NOTE_WRITE_LOCK, iter_notes,
     )
 
     args = args or {}
@@ -59,7 +59,7 @@ def execute(args: dict, context: dict) -> str:
         return "Article read cancelled."
     # One current snapshot and backlink traversal serve every requested page.
     # The existing owner lock prevents a group publication splitting this view.
-    with _NOTE_WRITE_LOCK:
+    with NOTE_WRITE_LOCK:
         from obsidience.harness.knowledge.scope import execution_scope
         notes = iter_notes()
         try:

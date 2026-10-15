@@ -13,7 +13,7 @@ from obsidience.harness.computer.capture import (
     capture_screen,
 )
 from obsidience.harness.computer.grounding import GroundingError, process_start_time
-from obsidience.harness.host.scene import (
+from obsidience.harness.shell_port.scene import (
     HANDLE,
     SCENE,
     SURFACE_IDS,

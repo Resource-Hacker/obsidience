@@ -617,8 +617,8 @@ def stage_proposal(args: dict, context: dict, *, validate_only: bool = False) ->
     if validate_only:
         return {"validated": True, "target": target, "action": action}
     if context.get("event") == "observations.memory.ready":
-        from obsidience.harness.knowledge.vault import _NOTE_WRITE_LOCK
-        with _NOTE_WRITE_LOCK:
+        from obsidience.harness.knowledge.vault import NOTE_WRITE_LOCK
+        with NOTE_WRITE_LOCK:
             _check_memory_recommendation_limit(context)
             staged = _stage(proposal_meta, body)
     else:

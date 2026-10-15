@@ -30,7 +30,8 @@ import subprocess
 import threading
 import time
 
-from ...config import CONFIG
+from ..config import CONFIG
+from . import adb
 
 PACKAGE = 'org.obsidience.tv'
 # Pinned app version: android:versionCode in obsidience/tv/android/AndroidManifest.xml.
@@ -188,42 +189,41 @@ def close():
 
 
 def _connect(row, cancel, boot, on_state):
-    from .control import _adb, _guard, _shell  # tv.control imports this module first.
     target = row['ip'] + ':5555'
-    guard = _guard(row)
-    raw = _shell(row, cancel, guard + '{ pm list packages --show-versioncode ' + PACKAGE + '; echo @@; '
-                 'settings get secure enabled_notification_listeners; }')
+    guard = adb.guard(row)
+    raw = adb.shell(row, cancel, guard + '{ pm list packages --show-versioncode ' + PACKAGE + '; echo @@; '
+                    'settings get secure enabled_notification_listeners; }')
     installed = re.search(r'^package:' + re.escape(PACKAGE) + r' versionCode:(\d+)\s*$', raw, re.M)
     provisioned = False
     if not installed or int(installed[1]) != VERSION:
         if not APK.is_file():
             raise FileNotFoundError(f'TV agent {VERSION} is not built; run obsidience/tv/android/build.sh')
-        _adb(row, cancel, 'push', str(APK), '/data/local/tmp/obsidience-tv.apk', timeout=30)
-        result = _shell(row, cancel, guard + '{ pm install -r /data/local/tmp/obsidience-tv.apk; '
-                        'rm -f /data/local/tmp/obsidience-tv.apk; }', timeout=90)
+        adb.run(row, cancel, 'push', str(APK), '/data/local/tmp/obsidience-tv.apk', timeout=30)
+        result = adb.shell(row, cancel, guard + '{ pm install -r /data/local/tmp/obsidience-tv.apk; '
+                           'rm -f /data/local/tmp/obsidience-tv.apk; }', timeout=90)
         if 'Success' not in result:
             raise ValueError('TV agent install failed: ' + result.strip()[-200:])
         log.info('TV agent %s installed', VERSION)
         provisioned = True
     if LISTENER not in raw.partition('@@')[2]:
-        _shell(row, cancel, guard + 'cmd notification allow_listener ' + LISTENER)
+        adb.shell(row, cancel, guard + 'cmd notification allow_listener ' + LISTENER)
         provisioned = True
     # Append the service to whatever is enabled; another service is never removed or replaced.
-    enabled = _shell(row, cancel, guard + '{ s=$(settings get secure enabled_accessibility_services); '
-                     'case "$s" in *' + PACKAGE + '/*) echo kept;; ""|null) settings put secure '
-                     'enabled_accessibility_services ' + SERVICE + ' && echo added;; *) settings put secure '
-                     'enabled_accessibility_services "$s:' + SERVICE + '" && echo added;; esac; '
-                     '[ "$(settings get secure accessibility_enabled)" = 1 ] || '
-                     '{ settings put secure accessibility_enabled 1 && echo switched; }; }')
+    enabled = adb.shell(row, cancel, guard + '{ s=$(settings get secure enabled_accessibility_services); '
+                        'case "$s" in *' + PACKAGE + '/*) echo kept;; ""|null) settings put secure '
+                        'enabled_accessibility_services ' + SERVICE + ' && echo added;; *) settings put secure '
+                        'enabled_accessibility_services "$s:' + SERVICE + '" && echo added;; esac; '
+                        '[ "$(settings get secure accessibility_enabled)" = 1 ] || '
+                        '{ settings put secure accessibility_enabled 1 && echo switched; }; }')
     if 'kept' not in enabled and 'added' not in enabled:
         raise ValueError('TV agent accessibility service could not be enabled')
     provisioned = provisioned or 'added' in enabled or 'switched' in enabled
     # A forward left by an earlier Harness process for this socket is removed; this process owns the name.
-    for line in _adb(row, cancel, 'forward', '--list').decode(errors='replace').splitlines():
+    for line in adb.run(row, cancel, 'forward', '--list').decode(errors='replace').splitlines():
         parts = line.split()
         if len(parts) == 3 and parts[0] == target and parts[2] == 'localabstract:' + SOCKET:
-            _adb(row, cancel, 'forward', '--remove', parts[1])
-    port = int(_adb(row, cancel, 'forward', 'tcp:0', 'localabstract:' + SOCKET).decode().strip())
+            adb.run(row, cancel, 'forward', '--remove', parts[1])
+    port = int(adb.run(row, cancel, 'forward', 'tcp:0', 'localabstract:' + SOCKET).decode().strip())
     # A just-provisioned service binds within a few seconds; until then the forward closes at once.
     deadline = time.monotonic() + (8 if provisioned else 0)
     while True:
@@ -242,9 +242,9 @@ def _connect(row, cancel, boot, on_state):
             if sock is not None:
                 sock.close()
             if time.monotonic() > deadline or (cancel is not None and cancel.is_set()):
-                _adb(row, None, 'forward', '--remove', f'tcp:{port}')
+                adb.run(row, None, 'forward', '--remove', f'tcp:{port}')
                 raise ConnectionError(f'TV agent did not answer: {error}') from error
             time.sleep(.5)
         except ValueError:
-            _adb(row, None, 'forward', '--remove', f'tcp:{port}')
+            adb.run(row, None, 'forward', '--remove', f'tcp:{port}')
             raise

@@ -32,7 +32,8 @@ CHILD_FIELD_BY_KIND = {
     "tool": "subtools",
 }
 HIERARCHY_FIELDS = tuple(CHILD_FIELD_BY_KIND.values())
-_NOTE_WRITE_LOCK = threading.RLock()
+# The in-process lock for vault Article writes, shared with the Harness's other vault writers.
+NOTE_WRITE_LOCK = threading.RLock()
 
 
 @dataclass
@@ -134,7 +135,7 @@ def _escapes_vault(rel_path: str | Path) -> bool:
 def load_note(rel_path: str | Path) -> Note | None:
     if _escapes_vault(rel_path):
         return None
-    with _NOTE_WRITE_LOCK:
+    with NOTE_WRITE_LOCK:
         p = CONFIG.vault_dir / rel_path
         if not p.exists() or p.suffix != ".md":
             return None
@@ -191,7 +192,7 @@ def _article_files(include_system: bool) -> list[tuple[tuple[str, ...], os.stat_
 
 
 def iter_notes(include_system: bool = False) -> list[Note]:
-    with _NOTE_WRITE_LOCK:
+    with NOTE_WRITE_LOCK:
         root = CONFIG.vault_dir
         cached_root, previous = _SNAPSHOTS.get(include_system, (None, {}))
         if cached_root != root:
@@ -316,7 +317,7 @@ def write_note(rel_path: str, meta: dict, body: str) -> str:
     """Write one native OKF Article; operational Task fields stay in SQLite."""
     if _escapes_vault(rel_path):
         raise ValueError("Article paths must stay inside the Vault")
-    with _NOTE_WRITE_LOCK:
+    with NOTE_WRITE_LOCK:
         p = CONFIG.vault_dir / rel_path
         meta = dict(meta)
         if "kind" not in meta and "type" not in meta:
@@ -393,7 +394,7 @@ def mutate_note_metadata(
     nearly the same time. Re-reading under the shared write lock preserves
     fields added after the scheduler took its original Note snapshot.
     """
-    with _NOTE_WRITE_LOCK:
+    with NOTE_WRITE_LOCK:
         current = load_note(note.path) or note
         if current.kind == "task" and not current.path.startswith(("_", ".")):
             from .index import INDEX

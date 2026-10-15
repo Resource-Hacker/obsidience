@@ -12,7 +12,7 @@ from datetime import datetime, time as time_of_day, timedelta
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import best_match
 
-from ..capabilities.registry import _argument_schemas
+from ..capabilities.registry import argument_schemas
 
 
 DESCRIPTIONS = {
@@ -263,7 +263,7 @@ def tool_schemas(allowed):
             description += ' point is an x,y coordinate normalized 0..999 in the immediately preceding observation image. It is consumed once.'
         if name == 'task.complete':
             description += ' Ordinary text answers finish directly. Use this for failed/review status or explicit state verification.'
-        schemas.append({'name': name, 'description': description, 'parameters': native_schema(_argument_schemas()[name])})
+        schemas.append({'name': name, 'description': description, 'parameters': native_schema(argument_schemas()[name])})
     return schemas
 
 
@@ -321,7 +321,7 @@ def task_tool_schemas(names, *, completion_no_change=False, completion_blocked=F
                 'summary. For failed status, an empty list is allowed. Never invent evidence.')
             # native_schema drops bounds. Let the decoder enforce the code-owned
             # ones for evidence only: the engine's bounded strings cannot contain '<'.
-            registered = _argument_schemas()['task.complete']['properties']['evidence']
+            registered = argument_schemas()['task.complete']['properties']['evidence']
             evidence['maxItems'] = registered['maxItems']
             evidence['items']['maxLength'] = registered['items']['maxLength']
             if evidence_citations:
@@ -355,10 +355,10 @@ def argument_diagnostic(name, args) -> str | None:
     Returns the model-facing diagnostic (with the "You sent" echo and the
     advertised structure) for an invalid call, else None.
     """
-    errors = list(Draft202012Validator(_argument_schemas()[name]).iter_errors(args))
+    errors = list(Draft202012Validator(argument_schemas()[name]).iter_errors(args))
     if not errors:
         return None
-    schema = _argument_schemas()[name]
+    schema = argument_schemas()[name]
     # The advertised union of the alternatives accepts calls that mix them. List
     # each alternative the fixed values sent can still select, or all when none can.
     alternatives = schema.get('anyOf', [schema])

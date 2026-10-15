@@ -121,7 +121,7 @@ def _package_owners(paths: list[Path]) -> dict[str, tuple[str, str]]:
     return owners
 
 
-def _desktop_entry(path: Path) -> dict | None:
+def desktop_entry(path: Path) -> dict | None:
     parser = configparser.ConfigParser(interpolation=None, strict=False)
     parser.optionxform = str
     try:
@@ -154,7 +154,7 @@ def installed_applications() -> dict:
     owners = _package_owners(paths)
     applications = []
     for path in paths:
-        entry = _desktop_entry(path)
+        entry = desktop_entry(path)
         if not entry:
             continue
         owner = owners.get(str(path))

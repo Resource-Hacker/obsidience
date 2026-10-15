@@ -16,7 +16,7 @@ from urllib.parse import quote, unquote
 
 from ..config import CONFIG
 from . import format as article_format
-from .vault import _NOTE_WRITE_LOCK, _atomic_write, canonical_body, load_note, write_note
+from .vault import NOTE_WRITE_LOCK, _atomic_write, canonical_body, load_note, write_note
 
 
 def system_articles() -> dict[str, dict]:
@@ -282,7 +282,7 @@ def _public_status(state: dict, *, error: str = "") -> dict:
 
 def system_knowledge_status() -> dict:
     """Read bounded schema receipts and Article hashes; never collect or publish."""
-    with _NOTE_WRITE_LOCK:
+    with NOTE_WRITE_LOCK:
         try:
             return _public_status(_read_state())
         except (OSError, ValueError, TypeError, KeyError) as exc:
@@ -306,7 +306,7 @@ def refresh_system_knowledge(*, sync: bool = True) -> dict:
             inventory = {category: {"status": "unavailable", "detail": type(exc).__name__}
                          for category in system_articles()}
         changed = 0
-        with _NOTE_WRITE_LOCK:
+        with NOTE_WRITE_LOCK:
             try:
                 state = _read_state()
             except (OSError, ValueError, TypeError, KeyError) as exc:
@@ -325,7 +325,7 @@ def refresh_system_knowledge(*, sync: bool = True) -> dict:
                 material = article_format.dumps(meta, body).encode()
                 intended = {"article_sha256": _hash(material), "source_id": source["id"],
                             "content_sha256": source["content_sha256"], "captured_at": source["captured_at"]}
-                with _NOTE_WRITE_LOCK:
+                with NOTE_WRITE_LOCK:
                     row = state["categories"].setdefault(category, {})
                     row["checked_at"] = checked_at
                     path = CONFIG.vault_dir / (item["ref"] + ".md")
@@ -350,11 +350,11 @@ def refresh_system_knowledge(*, sync: bool = True) -> dict:
                     row.update(published=intended, status="current", detail="")
                     _save_state(state)
             except Exception as exc:
-                with _NOTE_WRITE_LOCK:
+                with NOTE_WRITE_LOCK:
                     row = state["categories"].setdefault(category, {})
                     row.update(status="unavailable", detail=str(exc)[:300] or type(exc).__name__)
         receipt_error = ""
-        with _NOTE_WRITE_LOCK:
+        with NOTE_WRITE_LOCK:
             try:
                 _save_state(state)
                 result = _public_status(state)

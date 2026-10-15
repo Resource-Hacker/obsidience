@@ -667,15 +667,13 @@ class ShellSceneClient:
 
     def refresh(self, cancel_event=None) -> SceneSnapshot:
         """Read native geometry through its existing owner before using the cache."""
-        from obsidience.harness.capabilities.window.command import (
-            COMMAND_SCHEMA, EffectNotObserved, ShellCommandUnavailable, _send_command,
-        )
+        from .command import COMMAND_SCHEMA, EffectNotObserved, ShellCommandUnavailable, send  # command imports this module.
 
         before = self.snapshot()
         if before.workspace.get("session_locked") is True:
             raise SceneLocked("shell scene is locked")
         try:
-            receipt = _send_command({
+            receipt = send({
                 "schema": COMMAND_SCHEMA, "type": "window.state.refresh",
                 "token": "refresh." + secrets.token_hex(16),
                 "surface_id": "", "window_id": "",

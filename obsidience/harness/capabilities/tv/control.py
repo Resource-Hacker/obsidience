@@ -19,9 +19,10 @@ import xml.etree.ElementTree as ET
 from PIL import Image
 
 from ...config import CONFIG
-from . import agent as _agent
-from . import android as _android
-from . import player as _player
+from ...tv import adb
+from ...tv import agent as _agent
+from ...tv import android as _android
+from ...tv import player as _player
 from ...media.config import MediaUnavailable
 
 _LOCK = threading.Lock()
@@ -238,7 +239,8 @@ def _pluto_matches(query, limit):
                       'url': 'https://pluto.tv/us/live-tv/' + row['slug']}) for _score, strong, row in scored[:limit]]
 
 
-def _youtube_id(url):
+def youtube_id(url):
+    """The video id of a YouTube video or live link, else None: tv.control's YouTube link rule."""
     from urllib.parse import parse_qs, urlsplit
     parts = urlsplit(url)
     host = (parts.hostname or '').lower()
@@ -265,7 +267,7 @@ def _youtube_matches(query, limit):
     response.raise_for_status()
     found, seen = [], set()
     for row in response.json().get('results') or []:
-        video = _youtube_id(str(row.get('url') or '')) if isinstance(row, dict) else None
+        video = youtube_id(str(row.get('url') or '')) if isinstance(row, dict) else None
         if video and video not in seen:
             seen.add(video)
             found.append({'app': 'youtube', 'kind': 'video', 'title': str(row.get('title') or '')[:120],
@@ -288,7 +290,7 @@ def _link(url, apps):
     if parts.scheme != 'https' or alias is None or alias not in apps:
         raise ValueError('Only https links of a registered TV app (YouTube, Pluto, Tubi, Netflix, Hulu) open on the TV')
     if alias == 'youtube':
-        video = _youtube_id(url)
+        video = youtube_id(url)
         if not video:
             raise ValueError('Only a YouTube video or live link opens on the TV')
         url = 'https://www.youtube.com/watch?v=' + video
@@ -312,26 +314,26 @@ def _boot_policy(row, cancel, boot):
         _POLICY_BOOT['id'] = boot
         return
     name = re.compile(r'[a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)+')
-    disabled = set(re.findall(r'package:(\S+)', _shell(row, cancel, 'pm list packages -d')))
+    disabled = set(re.findall(r'package:(\S+)', adb.shell(row, cancel, 'pm list packages -d')))
     commands = [f'pm disable-user --user 0 {p}' for p in policy.get('disable', [])
                 if name.fullmatch(p) and p not in disabled]
     commands += [f'cmd appops set {p} RUN_ANY_IN_BACKGROUND ignore; cmd appops set {p} RUN_IN_BACKGROUND ignore'
                  for p in policy.get('background_restrict', []) if name.fullmatch(p)]
     if commands:
         # Each command is independent; a protected package's refusal must not stop the rest.
-        _shell(row, cancel, _guard(row) + '{ ' + '; '.join(c + ' >/dev/null 2>&1' for c in commands) + '; true; }')
+        adb.shell(row, cancel, adb.guard(row) + '{ ' + '; '.join(c + ' >/dev/null 2>&1' for c in commands) + '; true; }')
     _POLICY_BOOT['id'] = boot
 
 
 def _placeholder_ad_id(row, cancel, current):
     """Keep the owner-chosen opted-out advertising ID; Fire OS regenerates one at boot."""
     if current != [ZERO_AD_ID, '1']:
-        _shell(row, cancel, _guard(row) + 'settings put secure advertising_id ' + ZERO_AD_ID
-               + ' && settings put secure limit_ad_tracking 1')
+        adb.shell(row, cancel, adb.guard(row) + 'settings put secure advertising_id ' + ZERO_AD_ID
+                  + ' && settings put secure limit_ad_tracking 1')
 
 
 def _end_screensaver(row, cancel, limit=6.0):
-    _shell(row, cancel, _guard(row) + 'input keyevent KEYCODE_WAKEUP')
+    adb.shell(row, cancel, adb.guard(row) + 'input keyevent KEYCODE_WAKEUP')
     start = time.monotonic()
     while time.monotonic() - start < limit:
         state = _power(row, cancel)
@@ -419,7 +421,7 @@ def _remote(row, cancel, boot, check):
             atexit.register(close)  # Cleanup paired with the acquisition; EOF also removes it.
             _REMOTE['cleanup'] = True
         # The identity guard runs in the same remote shell: the session exists only on this TV.
-        process = subprocess.Popen(['/usr/bin/adb', '-s', row['ip'] + ':5555', 'shell', _guard(row) + 'exec hid -'],
+        process = subprocess.Popen(['/usr/bin/adb', '-s', row['ip'] + ':5555', 'shell', adb.guard(row) + 'exec hid -'],
                                    stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         _REMOTE.update(process=process, boot=boot, ready=False, started=time.monotonic())
         try:
@@ -431,7 +433,7 @@ def _remote(row, cancel, boot, check):
         return None
     if not _REMOTE['ready'] and check:
         # Reports sent before the TV's input reader lists the device could be lost.
-        if REMOTE_NAME in _shell(row, cancel, 'dumpsys input | grep -m1 -F ' + shlex.quote(REMOTE_NAME) + ' || true'):
+        if REMOTE_NAME in adb.shell(row, cancel, 'dumpsys input | grep -m1 -F ' + shlex.quote(REMOTE_NAME) + ' || true'):
             _REMOTE['ready'] = True
         elif time.monotonic() - _REMOTE['started'] > 10:
             _REMOTE['failed'] = (boot, time.monotonic())
@@ -443,7 +445,7 @@ def _press(row, cancel, boot, names):
     """Send remote keys once, in order; returns how ('remote' or 'input')."""
     process = _remote(row, cancel, boot, check=True)
     if process is None:
-        _shell(row, cancel, _guard(row) + ' && sleep 0.3 && '.join('input keyevent ' + KEYS[name] for name in names))
+        adb.shell(row, cancel, adb.guard(row) + ' && sleep 0.3 && '.join('input keyevent ' + KEYS[name] for name in names))
         return 'input'
     for n, name in enumerate(names):
         if n:
@@ -463,7 +465,7 @@ def _players(raw):
 
 def _media_players(row, cancel):
     """Started media players as {player id: app uid}, from the audio service (read-only text)."""
-    raw = _shell(row, cancel, _guard(row) + 'dumpsys audio')
+    raw = adb.shell(row, cancel, adb.guard(row) + 'dumpsys audio')
     return {player: uid for player, (uid, state) in _players(raw).items() if state == 'started'}
 
 
@@ -474,7 +476,7 @@ def _audio(row, cancel, command=''):
     """
     if not command and (raw := _ask('state')) is not None:
         return _agent_audio(raw)
-    return _audio_state(_shell(row, cancel, _guard(row) + command + 'dumpsys audio'))
+    return _audio_state(adb.shell(row, cancel, adb.guard(row) + command + 'dumpsys audio'))
 
 
 def _ask(op, **fields):
@@ -746,7 +748,7 @@ def _state(row, cancel, power):
     if (reply := _ask('state')) is not None:
         _LAST['state'] = _pluto_inactivity(_from_agent(row, reply))
         return _LAST['state']
-    raw = _shell(row, cancel, _guard(row) + (
+    raw = adb.shell(row, cancel, adb.guard(row) + (
         "{ f=$(dumpsys window | grep -m1 -E '^ *mCurrentFocus='); echo \"$f\"; echo @@; dumpsys audio; "
         "echo @@; dumpsys media_session; echo @@; dumpsys input_method | grep -m1 -E 'mInputShown='; "
         # The foreground package (letters, digits, _ and . only) selects its uid.
@@ -1081,7 +1083,7 @@ def reflex_summary(args, result):
 
 
 def _app_uid(row, cancel, package):
-    raw = _shell(row, cancel, _guard(row) + 'pm list packages -U ' + package)
+    raw = adb.shell(row, cancel, adb.guard(row) + 'pm list packages -U ' + package)
     match = re.search(r'^package:' + re.escape(package) + r' uid:(\d+)$', raw, re.M)
     return int(match[1]) if match else None
 
@@ -1120,7 +1122,7 @@ def _wait_for_playback(row, cancel, package, before, limit=20.0, resend=None):
                 settled = settled or time.monotonic()
                 if time.monotonic() - settled >= 10:
                     # The app dropped the link while starting: one more identical send.
-                    _shell(row, cancel, _guard(row) + resend)
+                    adb.shell(row, cancel, adb.guard(row) + resend)
                     resend, settled = None, None
         if cancel is not None:
             if cancel.wait(.5):
@@ -1164,8 +1166,8 @@ def _show_stream(row, cancel, context):
         subprocess.run([str(_TV_MODE), 'client'], stdin=subprocess.DEVNULL, capture_output=True, timeout=60)
     except (OSError, subprocess.TimeoutExpired) as error:
         _agent.log.info('TV mode client check skipped: %s', type(error).__name__)
-    started = _shell(row, cancel, _guard(row) + 'am start -n ' + MOONLIGHT + '/.ShortcutTrampoline --es UUID '
-                     + host + ' --es Name ' + STREAM_HOST + ' --es AppName ' + shlex.quote(STREAM_APP))
+    started = adb.shell(row, cancel, adb.guard(row) + 'am start -n ' + MOONLIGHT + '/.ShortcutTrampoline --es UUID '
+                        + host + ' --es Name ' + STREAM_HOST + ' --es AppName ' + shlex.quote(STREAM_APP))
     if 'Error' in started:
         raise ValueError('Moonlight did not start on the TV: ' + started.strip()[-160:])
     deadline = time.monotonic() + 15
@@ -1184,7 +1186,7 @@ def _voice_client(row, cancel, verb):
     without touching what the screen shows. Best effort: without it the voice simply stays on
     the desk speakers."""
     try:
-        _shell(row, cancel, _guard(row) + VOICE_CLIENT.format(verb) + '; true')
+        adb.shell(row, cancel, adb.guard(row) + VOICE_CLIENT.format(verb) + '; true')
     except (OSError, ValueError):
         pass
 
@@ -1542,47 +1544,6 @@ def _inventory():
     return row
 
 
-def _adb(row, cancel, *args, timeout=8, connect=False):
-    if cancel is not None and cancel.is_set():
-        raise InterruptedError('TV command cancelled')
-    target = row['ip'] + ':5555'
-    argv = ['/usr/bin/adb', *(['connect', target] if connect else ['-s', target, *args])]
-    with subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
-        deadline = time.monotonic() + timeout
-        try:
-            while True:
-                if cancel is not None and cancel.is_set():
-                    raise InterruptedError('TV command cancelled')
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise TimeoutError('TV ADB connection timed out; the TV may be in network standby or disconnected'
-                                       if connect else 'TV ADB command timed out before a response was received')
-                try:
-                    out, err = process.communicate(timeout=min(.1, remaining))
-                    break
-                except subprocess.TimeoutExpired:
-                    continue
-            if process.returncode:
-                raise OSError('ADB rejected or lost the TV connection: ' + err.decode(errors='replace')[:200])
-            if len(out) > 16 * 1024 * 1024:
-                raise ValueError('TV response exceeded its bound')
-            return out
-        finally:
-            if process.poll() is None:
-                process.kill()
-                process.communicate()
-
-
-def _shell(row, cancel, command, timeout=8):
-    return _adb(row, cancel, 'shell', command, timeout=timeout).decode(errors='replace')
-
-
-def _guard(row):
-    # The remote shell rechecks identity in the same command before any effect.
-    return ('test "$(getprop ro.serialno)" = ' + shlex.quote(row['serial'])
-            + ' && test "$(getprop ro.product.oemmodel)" = ' + shlex.quote(row['model']) + ' && ')
-
-
 # dumpsys power is ~140 KB and costs 0.2-0.9 s; only its two power lines cross the network.
 _POWER_READ = "dumpsys power | grep -E '^ *mWakefulness=|^Display Power: state=' || true"
 
@@ -1601,7 +1562,7 @@ def _parse_power(raw):
 
 
 def _power(row, cancel):
-    raw = _shell(row, cancel, 'getprop ro.serialno; getprop ro.product.oemmodel; ' + _POWER_READ)
+    raw = adb.shell(row, cancel, 'getprop ro.serialno; getprop ro.product.oemmodel; ' + _POWER_READ)
     _identity(row, raw)
     return _parse_power(raw)
 
@@ -1644,7 +1605,7 @@ def _after_wake(row, cancel, read):
     deadline = time.monotonic() + 20
     while True:
         try:
-            _adb(row, cancel, connect=True, timeout=4)
+            adb.run(row, cancel, connect=True, timeout=4)
             return _preamble(row, cancel, read, timeout=4)
         except OSError as error:
             if isinstance(error, InterruptedError) or time.monotonic() >= deadline:
@@ -1657,9 +1618,9 @@ def _preamble(row, cancel, read, timeout=8):
 
     Returns (read output, boot id, [advertising_id, limit_ad_tracking]).
     """
-    raw = _shell(row, cancel, 'getprop ro.serialno; getprop ro.product.oemmodel; cat /proc/sys/kernel/random/boot_id; '
-                 'settings get secure advertising_id; settings get secure limit_ad_tracking; echo @@; ' + read,
-                 timeout=timeout)
+    raw = adb.shell(row, cancel, 'getprop ro.serialno; getprop ro.product.oemmodel; cat /proc/sys/kernel/random/boot_id; '
+                    'settings get secure advertising_id; settings get secure limit_ad_tracking; echo @@; ' + read,
+                    timeout=timeout)
     _identity(row, raw)
     head, separator, tail = raw.partition('\n@@\n')
     lines = head.splitlines()
@@ -1669,7 +1630,7 @@ def _preamble(row, cancel, read, timeout=8):
 
 
 def _focus(row, cancel):
-    raw = _shell(row, cancel, _guard(row) + 'dumpsys window')
+    raw = adb.shell(row, cancel, adb.guard(row) + 'dumpsys window')
     match = re.search(r'^\s*mCurrentFocus=(Window\{[^\n]+\})', raw, re.M)
     if not match:
         raise ValueError('TV foreground window unavailable')
@@ -1726,7 +1687,7 @@ def _observe(row, cancel, context, power, after_input=False, started=False):
     for _ in range(3 if frame else 0):
         before = _window(row, cancel)
         try:
-            png = _adb(row, cancel, 'exec-out', _guard(row) + 'screencap -p')
+            png = adb.run(row, cancel, 'exec-out', adb.guard(row) + 'screencap -p')
         except TimeoutError:
             after = _window(row, cancel)
             break  # Use accessible controls if the screenshot transport stalls.
@@ -1756,7 +1717,7 @@ def _observe(row, cancel, context, power, after_input=False, started=False):
             nodes = [(bool(n.get('password')), n.get('text') or n.get('desc') or '', n.get('id', ''),
                       bool(n.get('focused')), bool(n.get('selected'))) for n in tree['nodes'] if not n.get('hidden')]
         else:
-            raw = _shell(row, cancel, _guard(row) +
+            raw = adb.shell(row, cancel, adb.guard(row) +
                 "sh -c 'trap \"rm -f /data/local/tmp/obsidience-ui.xml\" EXIT; "
                 "uiautomator dump /data/local/tmp/obsidience-ui.xml >/dev/null && cat /data/local/tmp/obsidience-ui.xml'")
             nodes = [(a.get('password') == 'true', a.get('text') or a.get('content-desc') or '',
@@ -2035,7 +1996,7 @@ def _execute(args, context):
                 else:
                     # Reconnect only the transport and read again; never replay an input or restart the ADB server.
                     _drop_offline(row)
-                    _adb(row, cancel, connect=True, timeout=4)
+                    adb.run(row, cancel, connect=True, timeout=4)
                     tail, boot, ad = _preamble(row, cancel, read)
             # The agent connects (and is provisioned) on this freshly verified transport; ADB serves until then.
             _agent.session(row, cancel, boot, _pushed(row))
@@ -2091,7 +2052,7 @@ def _execute(args, context):
                        else '{ ' + VOICE_CLIENT.format('STOP') + '; input keyevent KEYCODE_SLEEP; }')
         elif action == 'launch':
             package = row['apps'][args['app']]
-            resolved = _shell(row, cancel, _guard(row) + 'cmd package resolve-activity --brief '
+            resolved = adb.shell(row, cancel, adb.guard(row) + 'cmd package resolve-activity --brief '
                 '-a android.intent.action.MAIN -c android.intent.category.LEANBACK_LAUNCHER -p ' + package)
             component = resolved.strip().splitlines()[-1]
             if not re.fullmatch(re.escape(package) + r'/[A-Za-z0-9_.$]+', component):
@@ -2104,8 +2065,8 @@ def _execute(args, context):
             channel = PLUTO_CHANNEL.fullmatch(link)
             target = 'plutotv://live-tv/' + channel[1] if alias == 'pluto' and channel else link
             # Read-only: the link must resolve to its own app, never a chooser or browser.
-            resolved = _shell(row, cancel, _guard(row) + 'cmd package resolve-activity --brief '
-                              '-a android.intent.action.VIEW -d ' + shlex.quote(target) + ' -p ' + package)
+            resolved = adb.shell(row, cancel, adb.guard(row) + 'cmd package resolve-activity --brief '
+                                 '-a android.intent.action.VIEW -d ' + shlex.quote(target) + ' -p ' + package)
             if not resolved.strip().splitlines()[-1].startswith(package + '/'):
                 raise ValueError(f'The {alias} app does not accept this link')
             # Measured: Pluto's Home ignores a link delivered to its existing task;
@@ -2131,7 +2092,7 @@ def _execute(args, context):
                         'effect_applied': False, 'correction_allowed': True,
                         'failure': 'Observe the current TV screen before each remote key or text entry; no input was sent. You may observe and choose the next action.'}
             if action == 'text':
-                ime = _shell(row, cancel, _guard(row) + 'dumpsys input_method')
+                ime = adb.shell(row, cancel, adb.guard(row) + 'dumpsys input_method')
                 if not re.search(r'\bmInputShown=true\b', ime):
                     return {'status': 'failed', 'delivery': 'not_dispatched',
                             'effect_applied': False, 'correction_allowed': True,
@@ -2146,7 +2107,7 @@ def _execute(args, context):
         context.pop('_tv_observation', None)
         context['_tv_effect_uncertain'] = True
         delivery = 'uncertain'
-        how = _press(row, cancel, boot, names) if names else _shell(row, cancel, _guard(row) + command)
+        how = _press(row, cancel, boot, names) if names else adb.shell(row, cancel, adb.guard(row) + command)
         delivery = 'acknowledged'
         if action == 'key' and args['key'] in MEDIA_KEYS:
             context['_tv_effect_uncertain'] = False
@@ -2166,8 +2127,8 @@ def _execute(args, context):
             if playback is None and alias == AD_FREE_YOUTUBE:
                 alias = 'youtube'
                 before = set(_media_players(row, cancel))
-                _shell(row, cancel, _guard(row) + 'am start -W -a android.intent.action.VIEW -d '
-                       + shlex.quote(link) + ' ' + row['apps'][alias])
+                adb.shell(row, cancel, adb.guard(row) + 'am start -W -a android.intent.action.VIEW -d '
+                          + shlex.quote(link) + ' ' + row['apps'][alias])
                 playback = _wait_for_playback(row, cancel, row['apps'][alias], before)
                 extra['fallback'] = 'SmartTube did not start this video; it opened in the official YouTube app.'
         if action in ('on', 'off'):

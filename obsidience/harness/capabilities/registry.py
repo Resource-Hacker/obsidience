@@ -167,10 +167,10 @@ def _schema_array(item: dict, maximum: int, minimum: int = 0) -> dict:
 
 
 @lru_cache(maxsize=1)
-def _argument_schemas() -> dict[str, dict]:
+def argument_schemas() -> dict[str, dict]:
     """The registry's decoder-facing interface; adapters still validate effects."""
     from ..computer.applications import APPLICATIONS
-    from ..host.scene import HANDLE_PATTERN, SURFACE_IDS
+    from ..shell_port.scene import HANDLE_PATTERN, SURFACE_IDS
     text = _schema_text
     obj = _schema_object
     array = _schema_array
@@ -313,9 +313,9 @@ def _argument_schemas() -> dict[str, dict]:
 
 def argument_schema(name: str) -> dict:
     from copy import deepcopy
-    schema = deepcopy(_argument_schemas()[name])
+    schema = deepcopy(argument_schemas()[name])
     if name == "computer.observe":
-        from ..host.scene import SCENE
+        from ..shell_port.scene import SCENE
 
         # Copying a long Unicode title is unreliable. Constrain this optional
         # observation filter to exact public labels from the current Scene.

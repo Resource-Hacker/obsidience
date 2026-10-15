@@ -224,14 +224,14 @@ key with the time it spent in the agent, on the way, and here.
 
 Rollback: `systemctl --user disable --now obsidience-tv-remote` (the agent then takes no key);
 remove the unit copy. Agent version 1 again: uninstall `org.obsidience.tv` (a lower version does
-not install over a higher one), set `VERSION = 1` in `harness/capabilities/tv/agent.py` and let
+not install over a higher one), set `VERSION = 1` in `harness/tv/agent.py` and let
 the Harness install and enable it.
 
 ## Playing something
 
 Ask the tuner, never the player: one JSON line per request on `tuner.sock`, one JSON
 line back (`{"ok": true, "state": {...}}`). The Harness does this through
-`obsidience/harness/capabilities/tv/player.py`; by hand:
+`obsidience/harness/tv/player.py`; by hand:
 
     printf '%s\n' '{"op":"play","provider":"pluto","channel":"640a68880e884c0009979cc2","title":"FOX Weather","wait":12}' \
       | socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/obsidience-tv/tuner.sock
@@ -323,7 +323,7 @@ one screenshot (0.2 s) of the switch. So whoever switches also ends what the oth
 `tv.control` opens a YouTube video here instead of in the Fire OS app whenever this instance
 answers on its ADB address: one `am start` of the watch link in SmartTube, the media session's
 `playing` as the readback, `show android`, then Moonlight on the television as for a channel
-(`obsidience/harness/capabilities/tv/android.py` is the client). Live streams stay on Fire OS.
+(`obsidience/harness/tv/android.py` is the client). Live streams stay on Fire OS.
 
 Two properties are required, and `entrypoint.sh` sets both on the first start (in
 `state/waydroid.cfg`; to change one later, stop the unit and edit `[properties]` there and the

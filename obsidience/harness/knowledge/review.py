@@ -29,7 +29,7 @@ from .tasks import task_triggers
 from .vault import (
     Note,
     Resolver,
-    _NOTE_WRITE_LOCK,
+    NOTE_WRITE_LOCK,
     iter_notes,
     load_note,
     mutate_note_metadata,
@@ -132,7 +132,7 @@ def notify_link_review(proposal_id: str, meta: dict, state: str, *, links: list[
 
     run_id = str(meta.get("run_id", ""))
     if state == "pending":
-        with _NOTE_WRITE_LOCK:
+        with NOTE_WRITE_LOCK:
             # A concurrent owner decision may finish between staging and this
             # invalidation; never announce a removed proposal as pending.
             if (CONFIG.staging_dir / proposal_id).is_file() and INDEX.review_decision(proposal_id) is None:
@@ -288,7 +288,7 @@ def git_commit(message: str, rel_paths: list[str]) -> None:
 
 
 def list_proposals() -> list[dict]:
-    with _NOTE_WRITE_LOCK:
+    with NOTE_WRITE_LOCK:
         return _list_proposals()
 
 
@@ -454,7 +454,7 @@ def link_proposals(accepted: list[Note] | None = None) -> dict:
     """Pending additions are presentation evidence, never accepted graph links."""
     from ..execution.activity import MAX_REVIEW_REF_CHARS
 
-    with _NOTE_WRITE_LOCK:
+    with NOTE_WRITE_LOCK:
         accepted = iter_notes() if accepted is None else accepted
         res = Resolver(accepted)
         by_path = {note.path: note for note in accepted}
@@ -624,7 +624,7 @@ def _validate_capability_metadata(target: str, meta: dict) -> None:
 
 
 def approve(name: str) -> dict:
-    with _NOTE_WRITE_LOCK:
+    with NOTE_WRITE_LOCK:
         return _approve(name)
 
 
@@ -836,7 +836,7 @@ def _approve(name: str) -> dict:
 
 
 def reject(name: str, reason: str = "") -> dict:
-    with _NOTE_WRITE_LOCK:
+    with NOTE_WRITE_LOCK:
         return _reject(name, reason)
 
 

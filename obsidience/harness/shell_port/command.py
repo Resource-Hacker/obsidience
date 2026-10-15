@@ -8,7 +8,7 @@ import time
 
 from websockets.sync.client import connect
 
-from obsidience.harness.host.scene import (
+from .scene import (
     EVENT_SCHEMA,
     HANDLE,
     SCENE,
@@ -168,10 +168,14 @@ def _tile_bounds(
     }
 
 
-def _send_command(
+def send(
     command: dict[str, object], result_type: str, *,
     timeout: float = COMMAND_TIMEOUT_SECONDS, cancel_event=None,
 ) -> dict[str, object]:
+    """Send one command once and return the Shell's matching result; never replays.
+
+    ShellCommandUnavailable means nothing was sent; EffectNotObserved means delivery is uncertain.
+    """
     sent = False
     try:
         with connect(
@@ -326,7 +330,7 @@ def activate(args: dict[str, object], *, observed_target: SceneTarget | None = N
             target = _scene_target(SCENE.resolve_semantic(kind, name, surface))
         token = "tool." + secrets.token_hex(16)
         dispatched = True
-        result = _send_command(
+        result = send(
             {
                 "schema": COMMAND_SCHEMA,
                 "type": "window.activate",
@@ -388,7 +392,7 @@ def place(args: dict[str, object]) -> dict[str, object]:
         target = SCENE.validate(target)
         token = "tool." + secrets.token_hex(16)
         dispatched = True
-        result = _send_command(
+        result = send(
             {
                 "schema": COMMAND_SCHEMA,
                 "type": "window.place",

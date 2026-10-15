@@ -14,10 +14,9 @@ import platform
 import re
 import subprocess
 
-from . import inventory
+from . import inventory, packagekit
 from ..config import CONFIG
 from ..realtime import media
-from ...shell.applications import packagekit
 
 PROC = Path("/proc")
 SYS = Path("/sys")
@@ -286,7 +285,7 @@ def _applications() -> dict:
         title = _label(entry.get("Name"), 160)
         # Preserve the normal parser's chosen field semantics without its
         # display-only truncation becoming a changed inventory fact.
-        existing = packagekit._desktop_entry(path)
+        existing = packagekit.desktop_entry(path)
         if existing is None or existing["label"] != title:
             raise ValueError("Desktop entry changed during enumeration")
         rows.append({"desktop_id": _label(existing["desktop_id"]), "label": title})

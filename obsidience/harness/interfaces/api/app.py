@@ -27,7 +27,7 @@ from ...execution.assignments import ensure_task_runbook
 from ...execution.ledger import current_task_issue
 from ...knowledge.dependencies import agent_dependencies, dependency_resolver
 from ...execution.executor import task_descendants
-from ...host import monitor, scene as shell_scene
+from ...host import monitor, packagekit as application_packages
 from ...knowledge import retrieval, review, source, system as system_knowledge
 from ...knowledge.index import INDEX
 from ...knowledge.links import metadata_ref
@@ -62,7 +62,7 @@ from ...models import llm
 from ...models import runtime as model_runtime
 from ...realtime import media as media_runtime
 from ...realtime import runtime as realtime
-from obsidience.shell.applications import packagekit as application_packages
+from ...shell_port import scene as shell_scene
 from obsidience.shell.adapter.hyprland import input as input_adapter
 from obsidience.shell import command_token as shell_command_token
 
@@ -1196,9 +1196,9 @@ def _graph_article_membership(nodes: list[dict], groups: list[dict]) -> dict[str
 def graph():
     # The indexed graph and its filesystem navigation describe one accepted
     # publication, including a complete multi-Article news edition.
-    from ...knowledge.vault import _NOTE_WRITE_LOCK
+    from ...knowledge.vault import NOTE_WRITE_LOCK
 
-    with _NOTE_WRITE_LOCK:
+    with NOTE_WRITE_LOCK:
         return _graph_snapshot()
 
 
@@ -1702,8 +1702,8 @@ def set_library_assignment(ref: str, payload: dict):
     assigned = payload.get("assigned")
     if not isinstance(assigned, bool):
         raise HTTPException(400, "assigned must be boolean")
-    from ...knowledge.vault import _NOTE_WRITE_LOCK
-    with _CHECKOUT_LOCK, _NOTE_WRITE_LOCK:
+    from ...knowledge.vault import NOTE_WRITE_LOCK
+    with _CHECKOUT_LOCK, NOTE_WRITE_LOCK:
         res = dependency_resolver(resolver())
         identity = res.resolve(CHECKOUT_AGENTS[agent])
         if not identity:

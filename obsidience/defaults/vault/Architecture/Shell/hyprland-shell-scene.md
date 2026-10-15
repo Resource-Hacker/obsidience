@@ -2,11 +2,11 @@
 type: knowledge
 title: Desktop scene and computer use
 sources:
-- resource: obsidience/harness/host/scene.py
+- resource: obsidience/harness/shell_port/scene.py
 - resource: obsidience/harness/capabilities/computer/observe.py
 - resource: obsidience/harness/computer/runtime.py
 - resource: obsidience/harness/computer/capture.py
-- resource: obsidience/harness/capabilities/window/command.py
+- resource: obsidience/harness/shell_port/command.py
 - resource: obsidience/shell/qml/api/ShellCommandServer.qml
 ---
 

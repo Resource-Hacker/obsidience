@@ -23,7 +23,7 @@ from datetime import datetime
 from . import activity as knowledge_activity
 from . import trace as action_trace
 from ..config import CONFIG
-from ..host import scene as shell_scene
+from ..shell_port import scene as shell_scene
 from ..knowledge import retrieval, source
 from ..knowledge.index import INDEX
 from ..knowledge.tasks import task_triggers

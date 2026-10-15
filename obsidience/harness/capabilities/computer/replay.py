@@ -20,7 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
-from obsidience.harness.host.scene import SCENE, SceneLocked, SceneUnavailable
+from obsidience.harness.shell_port.scene import SCENE, SceneLocked, SceneUnavailable
 
 PRIVATE_IMAGE_FIELD = "_private_image_png"
 REPLAY_DIR = Path(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}") / "obsidience-screen-replay"

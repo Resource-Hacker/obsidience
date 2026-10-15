@@ -173,7 +173,7 @@ def require_tv_idle() -> None:
             raise ValueError("TV player is active or unavailable")
         if subprocess.run(["systemctl", "--user", "is-active", "--quiet", "obsidience-tv-android.service"]).returncode == 0:
             sys.path.insert(0, str(ROOT))
-            from obsidience.harness.capabilities.tv.android import state as android_state
+            from obsidience.harness.tv.android import state as android_state
             android = android_state()
             if android is None or android.get("playback") != "idle":
                 raise ValueError("TV Android playback is active or unavailable")

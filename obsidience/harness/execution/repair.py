@@ -414,7 +414,7 @@ def verified_source_captures(note: Note, run_id: str) -> dict:
     The shortened trace locates evidence, but the durable full-result digest
     and Source bytes, not trace prose, authorize this disposition.
     """
-    from ..capabilities.web.fetch import _render_batch, _render_result
+    from ..capabilities.web.fetch import render_batch, render_result
     from ..knowledge.source import _row_doc
     from .scheduler import _retry_trace
 
@@ -460,7 +460,7 @@ def verified_source_captures(note: Note, run_id: str) -> dict:
             continue
         for created in (True, False):
             result = {**source, "url": source["source_ref"], "created": created}
-            rendered = _render_batch(urls, [result]) if "urls" in args else _render_result(result)
+            rendered = render_batch(urls, [result]) if "urls" in args else render_result(result)
             encoded = json.dumps(rendered, sort_keys=True).encode()
             if (len(encoded) == call["result_chars"]
                     and hashlib.sha256(encoded).hexdigest() == call["result_sha256"]):

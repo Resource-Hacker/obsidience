@@ -419,9 +419,9 @@ def _scheduled_binding_matches(note: Note, params: dict) -> bool:
 def retry_blocked_reason(note: Note, run: dict | None = None, *, allow_source_captures: bool = False,
                          allow_retained_effects: bool = False) -> str:
     """Explain whether an explicit owner retry can preserve this failed event."""
-    from ..knowledge.vault import _NOTE_WRITE_LOCK
+    from ..knowledge.vault import NOTE_WRITE_LOCK
 
-    with _NOTE_WRITE_LOCK, INDEX.lock:
+    with NOTE_WRITE_LOCK, INDEX.lock:
         params = note.meta.get("params")
         if note.kind != "task" or note.meta.get("status") != "failed":
             return "Only a failed Task occurrence can be retried."
@@ -574,7 +574,7 @@ def retry_failed_occurrence(note: Note, expected_run_id: str, *, require_receipt
 def _settle_occurrence(note: Note, *, kind: str, classify, summary_for, previous_safe=None) -> dict | None:
     """One controller receipt and FIFO transaction for an evidenced disposition."""
     from ..knowledge.format import loads
-    from ..knowledge.vault import _NOTE_WRITE_LOCK
+    from ..knowledge.vault import NOTE_WRITE_LOCK
 
     params = note.meta.get("params")
     if (note.kind != "task"
@@ -586,7 +586,7 @@ def _settle_occurrence(note: Note, *, kind: str, classify, summary_for, previous
             or note.ref in _running):
         return None
     expected = INDEX._runtime_fields(note.meta)
-    with _NOTE_WRITE_LOCK:
+    with NOTE_WRITE_LOCK:
         fresh = load_note(note.path)
         if fresh is None or INDEX._runtime_fields(fresh.meta) != expected:
             return None
@@ -927,7 +927,7 @@ def cancel_task_occurrences(note: Note, *, reason: str, expected_last_run: str, 
     receipts and effects are retained; nothing is replayed.
     """
     from ..knowledge.format import loads
-    from ..knowledge.vault import _NOTE_WRITE_LOCK
+    from ..knowledge.vault import NOTE_WRITE_LOCK
 
     reason = reason.strip() if isinstance(reason, str) else ""
     if not 1 <= len(reason) <= 500:
@@ -940,7 +940,7 @@ def cancel_task_occurrences(note: Note, *, reason: str, expected_last_run: str, 
         raise ValueError("Only Tasks have occurrences.")
     summary = f"Cancelled by owner: {reason.rstrip('.')}. Original runs, receipts and effects retained; no work replayed."
     result = {}
-    with _NOTE_WRITE_LOCK:
+    with NOTE_WRITE_LOCK:
         try:
             pending_review = any(
                 str(meta.get("task", "")).strip("[]") == note.ref or meta.get("run_id") == expected_last_run
@@ -1388,9 +1388,9 @@ def _receipt_retry_blocked_reason(note: Note, run_id: str, *, allow_source_captu
 
 def reconcile_interrupted_runs() -> list[str]:
     """Close crashed attempts; only proven no-effect event work returns to pending."""
-    from ..knowledge.vault import _NOTE_WRITE_LOCK
+    from ..knowledge.vault import NOTE_WRITE_LOCK
 
-    with _NOTE_WRITE_LOCK, INDEX.lock:
+    with NOTE_WRITE_LOCK, INDEX.lock:
         return _reconcile_interrupted_runs()
 
 

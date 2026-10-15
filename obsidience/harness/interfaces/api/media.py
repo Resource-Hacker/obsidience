@@ -18,7 +18,7 @@ from ...execution.commands import owner_media_command
 from ...knowledge.index import INDEX
 from ...media import service
 from ...media.config import MediaUnavailable, load_config
-from ...capabilities.tv import player
+from ...tv import player
 from obsidience.shell.command_token import read_token
 
 router = APIRouter(prefix='/api/media', tags=['media'])

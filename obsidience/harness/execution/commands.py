@@ -229,9 +229,9 @@ def owner_media_command(value: object) -> dict:
     if operation == 'cast':
         # One YouTube video from the browser, by tv.control's own link rule; only its id is kept.
         from urllib.parse import urlsplit
-        from ..capabilities.tv.control import _youtube_id
+        from ..capabilities.tv.control import youtube_id
         url = value.get('url')
-        video = _youtube_id(url) if isinstance(url, str) and len(url) <= 300 else None
+        video = youtube_id(url) if isinstance(url, str) and len(url) <= 300 else None
         if (value.get('destination') != 'tv' or video is None
                 or set(value) not in ({'request_id', 'operation', 'destination', 'url'},
                                       {'request_id', 'operation', 'destination', 'url', 'start'})):

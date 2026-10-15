@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Obsidience TV agent. No INTERNET permission: the Harness reaches it only through
      ADB's own forward to an abstract Unix socket (see AgentService). versionCode is
-     pinned by obsidience/harness/capabilities/tv/agent.py VERSION. -->
+     pinned by obsidience/harness/tv/agent.py VERSION. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="org.obsidience.tv"
     android:versionCode="2"

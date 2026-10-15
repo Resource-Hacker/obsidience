@@ -483,9 +483,9 @@ class Index:
         # All publishers acquire the Article lock before the process sync lock.
         # Group Review and graph readers share this order; the ledger lock is
         # still released while encoding. flock is released even on failure.
-        from .vault import _NOTE_WRITE_LOCK
+        from .vault import NOTE_WRITE_LOCK
 
-        with _NOTE_WRITE_LOCK, Path(self.db_path + ".sync.lock").open("a") as lockfile:
+        with NOTE_WRITE_LOCK, Path(self.db_path + ".sync.lock").open("a") as lockfile:
             fcntl.flock(lockfile, fcntl.LOCK_EX)
             return self._sync(embed)
 
