@@ -139,6 +139,10 @@ export interface Knowledge3dCloudInput {
   /** True for the executive ball: no orbit transform, no ballScale
    *  render shrink, raw node ids in projections. */
   main?: boolean;
+  /** False drops the recursive branch-separation force. Deep code trees park
+   *  tiny-folder siblings on one bearing under it and the final contact fit
+   *  then inflates the whole ball (the Code stage). */
+  separateBranches?: boolean;
 }
 
 /** Shader sources + helpers handed over by the scene (its module owns the
@@ -338,6 +342,7 @@ export function createKnowledge3dCloud(
   const simulation: ForceSimulation<KnowledgeForceNode> =
     createKnowledgeForceSimulation([...simNodes].sort((a, b) => a.id.localeCompare(b.id)),
       links, tuning, 3, minimumRadius);
+  if (input.separateBranches === false) simulation.force("branchSeparation", null);
   // A proposed spring can change degree-sized glyphs and their layer spacing.
   // Keep the last painted state until the first ordinary simulation tick.
   // Fresh nodes or changed ancestry/spacing still require initial projection;

@@ -84,6 +84,8 @@ export interface Knowledge3dSceneProps {
   sharePresentation?: boolean;
   presentationSource?: import("@/lib/shell-client").GraphSource;
   primaryGraphId?: string;
+  /** False drops branch separation from the main cloud's physics (Code). */
+  separateBranches?: boolean;
   onPresentationReady?: (publisher: GraphPublisher | null) => void;
   onPresentationCommand?: (command: GraphControl) => void;
   onPresentationConsumers?: (count: number) => void;
@@ -619,6 +621,7 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
           tuning: current.tuning,
           hub,
           main: true,
+          separateBranches: current.separateBranches,
         },
         cloudDeps,
         height,

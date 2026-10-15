@@ -69,10 +69,11 @@ function codeCloud(data: ProviderGraph, visibleIds: ReadonlySet<string>): CodeCl
   for (const [child, parent] of parentOf) children.set(parent, [...children.get(parent) ?? [], child]);
   // A chain of sole containers below the root (project, branch, package
   // folder) folds into the core, so the first ring holds the real branches.
+  // A flat sibling folder (LICENSES/) does not stop the chain.
   let trunk = root?.id;
   for (;;) {
     const below = trunk ? children.get(trunk) ?? [] : [];
-    const containers = below.filter(id => children.has(id));
+    const containers = below.filter(id => children.get(id)?.some(child => children.has(child)));
     if (!trunk || containers.length !== 1 || !["Branch", "Folder"].includes(byId.get(containers[0])?.kind ?? "")) break;
     const next = containers[0];
     for (const child of children.get(next) ?? []) parentOf.set(child, trunk);
@@ -100,10 +101,17 @@ function codeCloud(data: ProviderGraph, visibleIds: ReadonlySet<string>): CodeCl
   const paletteOf = (id: string) => palettes.get(branchOf(id) ?? "") ?? BRAIN_PALETTE;
 
   const ids = [...shown].sort();
+  // Only relations between shown nodes are links: lifting every symbol call to
+  // its file turns ~500 native relations into thousands of springs, and the
+  // Knowledge physics then diverges as it cools.
+  const own = (id: string) => {
+    const node = byId.get(id), shownId = node ? folded(node) ?? id : undefined;
+    return shownId && shown.has(shownId) ? shownId : undefined;
+  };
   const links = new Map<string, {source: string; target: string}>();
   for (const edge of data.edges) {
     if (CONTAINMENT.has(edge.kind)) continue;
-    const source = shownAs(edge.source), target = shownAs(edge.target);
+    const source = own(edge.source), target = own(edge.target);
     if (!source || !target || source === target || parentOf.get(source) === target || parentOf.get(target) === source) continue;
     const key = source < target ? `${source}|${target}` : `${target}|${source}`;
     if (!links.has(key)) links.set(key, {source, target});
@@ -235,6 +243,7 @@ export function CodeKnowledgeScene({data, visibleIds, operations, selectedId, vi
       sharePresentation
       presentationSource="code"
       primaryGraphId={CODE_GRAPH_ID}
+      separateBranches={false}
       onPresentationReady={onPublisher}
       onPresentationConsumers={onConsumers}
       onPresentationCommand={onCommand}
