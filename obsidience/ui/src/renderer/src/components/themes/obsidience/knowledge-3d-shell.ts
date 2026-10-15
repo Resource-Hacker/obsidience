@@ -21,34 +21,17 @@ export interface Knowledge3dOptics {
   uModelScale: { value: number };
 }
 
+// Each shell's ripples, drawn every frame into its wave map (WAVE_FRAGMENT):
+// rgb the colour their crests carry, a the height of the glass (positive on a
+// crest). There is no cap on how many ripple at once.
 const RIPPLE_GLSL = `
-uniform vec4 uDrops[8];     // bearing; age, 0 as it lands to 1 when spent
-uniform vec4 uDropTints[8]; // colour; strength
-uniform float uDropSpans[8]; // how far the ring spreads in its life, radians
-// A node drops into its shell like a stone into water: a short train of
-// crests spreads across the shell from the node's bearing, in the node's
-// colour, fading as it goes. A wide drop crosses the whole layer; a small one
-// is the same ripple in miniature. Returns the height of the glass here
-// (positive on a crest) and the colour its crests carry.
+uniform sampler2D uWaves;
 float rippleWave(vec3 direction, out vec3 tint) {
-  float wave = 0.0;
-  float weight = 0.0;
-  tint = vec3(0.0);
-  for (int drop = 0; drop < 8; drop++) {
-    float age = uDrops[drop].w;
-    if (age >= 1.0) continue;
-    // Radians from the node, less how far its ring has spread, in units of
-    // a full-size ripple.
-    float offset = (acos(clamp(dot(direction, uDrops[drop].xyz), -1.0, 1.0)) - age * uDropSpans[drop])
-      * 2.4 / uDropSpans[drop];
-    float height = sin(offset * 20.0) * exp(-offset * offset * 14.0)
-      * (1.0 - age) * (1.0 - age) * uDropTints[drop].w;
-    wave += height;
-    tint += uDropTints[drop].rgb * max(height, 0.0);
-    weight += max(height, 0.0);
-  }
-  tint = weight > 0.0 ? tint / weight : vec3(1.0);
-  return wave;
+  vec2 st = vec2(atan(direction.z, direction.x) / 6.28318530718 + 0.5,
+    acos(clamp(direction.y, -1.0, 1.0)) / 3.14159265359);
+  vec4 wave = texture2D(uWaves, st);
+  tint = wave.rgb;
+  return wave.a;
 }
 `;
 
@@ -141,6 +124,41 @@ void main() {
   float drift = 0.1 * (valueNoise(across * 2.3) - 0.5) + 0.05 * (valueNoise(across * 5.1) - 0.5)
     + 0.02 * (valueNoise(across * 11.0) - 0.5);
   gl_FragColor = vec4(blend > 0.0 ? chroma / blend : vec2(0.0), drift, depth);
+}
+`;
+
+// A node drops into its shell like a stone into water: a short train of
+// crests spreads across the shell from the node's bearing, in the node's
+// colour, fading as it goes. A wide drop crosses the whole layer; a small one
+// is the same ripple in miniature. One pass draws every live drop.
+// Columns of uDrops: row 0 bearing and age (0 as it lands, 1 when spent),
+// row 1 colour and strength, row 2 how far it spreads in its life (radians).
+const WAVE_FRAGMENT = `
+precision highp float;
+uniform sampler2D uDrops;
+uniform int uCount;
+varying vec2 vUv;
+${SPHERE_GLSL}
+void main() {
+  vec3 direction = sphereDirection(vUv);
+  float wave = 0.0;
+  float weight = 0.0;
+  vec3 tint = vec3(0.0);
+  for (int drop = 0; drop < uCount; drop++) {
+    vec4 bearing = texelFetch(uDrops, ivec2(drop, 0), 0);
+    vec4 colour = texelFetch(uDrops, ivec2(drop, 1), 0);
+    float span = texelFetch(uDrops, ivec2(drop, 2), 0).x;
+    // Radians from the node, less how far its ring has spread, in units of
+    // a full-size ripple.
+    float offset = (acos(clamp(dot(direction, bearing.xyz), -1.0, 1.0)) - bearing.w * span) * 2.4 / span;
+    if (abs(offset) > 1.2) continue;
+    float height = sin(offset * 20.0) * exp(-offset * offset * 14.0)
+      * (1.0 - bearing.w) * (1.0 - bearing.w) * colour.w;
+    wave += height;
+    tint += colour.rgb * max(height, 0.0);
+    weight += max(height, 0.0);
+  }
+  gl_FragColor = vec4(weight > 0.0 ? tint / weight : vec3(1.0), wave);
 }
 `;
 
@@ -690,6 +708,11 @@ export function createKnowledge3dShells(options: {
   const dustBudget = 170_000 * Math.max(0.2, detail * detail);
   const area = bands.reduce((sum, band) => sum + band[band.length - 1] ** 2, 0);
 
+  // A wave map with no ripples: flat glass.
+  const stillWaves = new THREE.DataTexture(new Float32Array([1, 1, 1, 0]), 1, 1, THREE.RGBAFormat, THREE.FloatType);
+  stillWaves.needsUpdate = true;
+  disposables.push(stillWaves);
+
   const shells = bands.map((band, order) => {
     const members: number[] = [];
     layers.forEach((layer, index) => {
@@ -729,12 +752,15 @@ export function createKnowledge3dShells(options: {
     const survey = { value: null as THREE.Texture | null };
     const shape = { value: new THREE.Vector2(1, 0) };
     const levels = (detail > 0.6 ? 56 : 30) * reach;
-    // Eight ripples at a time, all spent to begin with: bearing and age,
-    // colour and strength, and how far each spreads.
-    const drops = { value: new Float32Array(32) }, dropTints = { value: new Float32Array(32) };
-    const dropSpans = { value: new Float32Array(8).fill(1) };
-    for (let drop = 0; drop < 8; drop++) drops.value[drop * 4 + 3] = 1;
-    const rippling = { uDrops: drops, uDropTints: dropTints, uDropSpans: dropSpans };
+    // The wave map is still until the shell's first ripple draws into it.
+    const waves = { value: stillWaves as THREE.Texture };
+    const rippling = { uWaves: waves };
+    const waveMaterial = new THREE.ShaderMaterial({
+      uniforms: { uDrops: { value: stillWaves as THREE.Texture }, uCount: { value: 0 } },
+      vertexShader: "varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }",
+      fragmentShader: WAVE_FRAGMENT,
+      depthTest: false, depthWrite: false, blending: THREE.NoBlending,
+    });
     const glassMaterial = new THREE.ShaderMaterial({
       uniforms: {
         ...optics, ...rippling, uSurvey: survey, uShell: shape, uSolid: { value: 1 }, uGlow: { value: 0 },
@@ -823,10 +849,14 @@ export function createKnowledge3dShells(options: {
     seeds.name = "knowledge-shell-seeds";
     seeds.frustumCulled = false;
     drawn.push(seeds);
-    disposables.push(texture, surveyMaterial, glassMaterial, dustGeometry, dustMaterial, seedGeometry, seedMaterial);
+    disposables.push(texture, surveyMaterial, waveMaterial, glassMaterial, dustGeometry, dustMaterial, seedGeometry, seedMaterial);
     return { members, press, data, texture, surveyMaterial, survey, shape, width, levels,
-      drops: drops.value, dropTints: dropTints.value, dropSpans: dropSpans.value,
-      dropSeconds: new Float32Array(8).fill(1), nextDrop: 0,
+      // Every live ripple on this shell, however many: bearing, age, colour,
+      // strength, spread and life in seconds.
+      drops: [] as Array<{ bearing: [number, number, number]; age: number;
+        tint: [number, number, number]; strength: number; spread: number; seconds: number }>,
+      waves, waveMaterial, waveTarget: null as THREE.WebGLRenderTarget | null,
+      dropTexture: null as THREE.DataTexture | null, wavesDrawn: false,
       glass: glassMaterial.uniforms, dust: dustMaterial.uniforms, seeds: seedMaterial.uniforms, refraction,
       // Light per point for full dust at this shell's size.
       dustGain: 0.9 * 170_000 * reach * reach / dustCount,
@@ -869,9 +899,7 @@ export function createKnowledge3dShells(options: {
       fragmentShader: SURVEY_FRAGMENT,
       depthTest: false, depthWrite: false, blending: THREE.NoBlending,
     });
-    const spent = { value: new Float32Array(32) };
-    for (let drop = 0; drop < 8; drop++) spent.value[drop * 4 + 3] = 1;
-    const still = { uDrops: spent, uDropTints: { value: new Float32Array(32) }, uDropSpans: { value: new Float32Array(8).fill(1) } };
+    const still = { uWaves: { value: stillWaves as THREE.Texture } };
     const glassMaterial = new THREE.ShaderMaterial({
       uniforms: {
         ...optics, ...still, uSurvey: coreUniforms.survey, uShell: coreUniforms.shape, uSolid: { value: 1 },
@@ -992,6 +1020,51 @@ export function createKnowledge3dShells(options: {
     return true;
   };
 
+  // Each shell with live ripples draws them all into its wave map, and once
+  // more after the last one is spent, so the glass settles flat.
+  const drawWaves = (renderer: THREE.WebGLRenderer): void => {
+    let previous: THREE.WebGLRenderTarget | null | undefined;
+    for (const shell of shells) {
+      const count = shell.drops.length;
+      if (!count && !shell.wavesDrawn) continue;
+      if (!shell.waveTarget) {
+        shell.waveTarget = new THREE.WebGLRenderTarget(512, 256, {
+          type: THREE.HalfFloatType, format: THREE.RGBAFormat,
+          minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
+          wrapS: THREE.RepeatWrapping, wrapT: THREE.ClampToEdgeWrapping,
+          depthBuffer: false, generateMipmaps: false,
+        });
+        shell.waves.value = shell.waveTarget.texture;
+      }
+      if (count && (!shell.dropTexture || shell.dropTexture.image.width < count)) {
+        shell.dropTexture?.dispose();
+        const capacity = Math.max(16, 2 ** Math.ceil(Math.log2(count)));
+        shell.dropTexture = new THREE.DataTexture(new Float32Array(capacity * 12), capacity, 3,
+          THREE.RGBAFormat, THREE.FloatType);
+        shell.dropTexture.minFilter = shell.dropTexture.magFilter = THREE.NearestFilter;
+        shell.dropTexture.generateMipmaps = false;
+        shell.waveMaterial.uniforms.uDrops.value = shell.dropTexture;
+      }
+      if (shell.dropTexture) {
+        const data = shell.dropTexture.image.data as Float32Array;
+        const width = shell.dropTexture.image.width;
+        shell.drops.forEach((drop, column) => {
+          data.set([...drop.bearing, Math.min(1, drop.age)], column * 4);
+          data.set([...drop.tint, drop.strength], (width + column) * 4);
+          data[(2 * width + column) * 4] = drop.spread;
+        });
+        shell.dropTexture.needsUpdate = true;
+      }
+      shell.waveMaterial.uniforms.uCount.value = count;
+      if (previous === undefined) previous = renderer.getRenderTarget();
+      surveyQuad.material = shell.waveMaterial;
+      renderer.setRenderTarget(shell.waveTarget);
+      renderer.render(surveyScene, surveyCamera);
+      shell.wavesDrawn = count > 0;
+    }
+    if (previous !== undefined) renderer.setRenderTarget(previous);
+  };
+
   return {
     layers: drawn,
     invalidate() { dirty = true; },
@@ -999,23 +1072,19 @@ export function createKnowledge3dShells(options: {
       for (const shell of shells) {
         const slot = shell.members.indexOf(node);
         if (slot < 0) continue;
-        const drop = shell.nextDrop;
-        shell.nextDrop = (drop + 1) % 8;
-        shell.drops.set([shell.data[slot * 4], shell.data[slot * 4 + 1], shell.data[slot * 4 + 2], 0], drop * 4);
-        // The node's colour, lifted a little toward white so it reads as light.
-        shell.dropTints.set([0.25 + 0.75 * tints[node * 3], 0.25 + 0.75 * tints[node * 3 + 1],
-          0.25 + 0.75 * tints[node * 3 + 2], strength], drop * 4);
-        shell.dropSpans[drop] = spread;
-        shell.dropSeconds[drop] = seconds;
+        shell.drops.push({
+          bearing: [shell.data[slot * 4], shell.data[slot * 4 + 1], shell.data[slot * 4 + 2]], age: 0,
+          // The node's colour, lifted a little toward white so it reads as light.
+          tint: [0.25 + 0.75 * tints[node * 3], 0.25 + 0.75 * tints[node * 3 + 1], 0.25 + 0.75 * tints[node * 3 + 2]],
+          strength, spread, seconds,
+        });
       }
     },
     advance(dtSeconds) {
       syncHugSwell();
       for (const shell of shells) {
-        for (let drop = 0; drop < 8; drop++) {
-          const age = shell.drops[drop * 4 + 3];
-          if (age < 1) shell.drops[drop * 4 + 3] = Math.min(1, age + dtSeconds / shell.dropSeconds[drop]);
-        }
+        for (const drop of shell.drops) drop.age += dtSeconds / drop.seconds;
+        shell.drops = shell.drops.filter((drop) => drop.age < 1);
       }
     },
     setFocus(levels) {
@@ -1055,6 +1124,7 @@ export function createKnowledge3dShells(options: {
       if (coreDustUniforms) coreDustUniforms.uGain.value = 0.7 * coreDustGain * glass.coreDust;
     },
     prepare(renderer) {
+      drawWaves(renderer);
       if (!dirty || ++skipped < cadence) return;
       skipped = 0;
       dirty = false;
@@ -1091,7 +1161,11 @@ export function createKnowledge3dShells(options: {
       show(true);
     },
     dispose() {
-      for (const shell of shells) shell.target?.dispose();
+      for (const shell of shells) {
+        shell.target?.dispose();
+        shell.waveTarget?.dispose();
+        shell.dropTexture?.dispose();
+      }
       coreTarget?.dispose();
       for (const disposable of disposables) disposable.dispose();
     },

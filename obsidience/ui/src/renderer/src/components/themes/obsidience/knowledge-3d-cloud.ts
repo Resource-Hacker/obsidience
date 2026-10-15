@@ -69,10 +69,12 @@ const PASSED_GLOW = 0.45;
 const LASER_FLASH_SECONDS = 1.2;
 
 /** The small ripple a landing comet sends (strength, spread in radians). Its
- *  duration is tuned; a ball starts at most seven in that time, so each runs
- *  its course on a shell that carries eight. */
+ *  duration is tuned; a ball starts at most seven in that time, so idle
+ *  comets keep the glass calm. */
 const LANDING_RIPPLE = [0.3, 0.5] as const;
 const LANDING_RIPPLES_AT_ONCE = 7;
+/** While the route is lit, each node on it ripples its glass this often. */
+const LIT_RIPPLE_SECONDS = 1.4;
 
 export const KNOWLEDGE_ACTIVITY_FADE_MS = 2_000; // Owner 2026-10-15: a two-second fade.
 const SELECTION_TRANSITION_MS = 340;
@@ -245,9 +247,8 @@ export interface Knowledge3dCloud {
   nodeWorldPosition(rawId: string, out: THREE.Vector3): boolean;
   sortSprites(cameraPosition: THREE.Vector3): void;
   /** Advance this cloud's glass: the twinkle and small ripple where a link
-   *  comet lands, and the ripples the thinking route sends while its Agent
-   *  is thinking. */
-  driveGlass(dtSeconds: number, thinking: boolean): void;
+   *  comet lands, and the ripples the thinking route sends while it is lit. */
+  driveGlass(dtSeconds: number, lit: boolean): void;
   /** Resurvey the glass if the solver moved its nodes. Before any render. */
   prepare(renderer: THREE.WebGLRenderer): void;
   dispose(scene: THREE.Scene): void;
@@ -1342,15 +1343,14 @@ export function createKnowledge3dCloud(
 
   const localCamera = new THREE.Vector3();
   const projectionVector = new THREE.Vector3();
-  // Which nodes the thinking front has reached on the current route. They
-  // keep sending soft ripples, one node at a time.
+  // Which nodes the thinking front has reached on the current route. Each
+  // keeps sending soft ripples on its own clock, however many are lit.
   let passed = new Uint8Array(nodes.length);
   let reached = new Uint8Array(nodes.length);
   // A cloud rebuilt under a lit route adopts it quietly instead of rippling
   // every reached node at once.
   let routeSeen = false;
-  let rippleDue = 0;
-  let rippleTurn = 0;
+  const rippleDue = new Float32Array(nodes.length).fill(LIT_RIPPLE_SECONDS);
   // Comets ride the article links on the shader clock; the same arithmetic
   // here tells when each one lands on the node at its link's far end.
   const landingCycles = new Int32Array(streakCount);
@@ -1779,18 +1779,18 @@ export function createKnowledge3dCloud(
         swellAttribute.needsUpdate = true;
         applyHoverLevels();
       }
-      // While the Agent thinks, each node its path has reached sends another,
-      // softer ripple in turn, so the glass keeps moving where the thought is.
-      rippleDue -= dtSeconds;
-      if (active && rippleDue <= 0) {
-        rippleDue = 0.45;
-        for (let step = 0; step < nodes.length; step += 1) {
-          const index = (rippleTurn + step) % nodes.length;
-          if (!passed[index] && revealLevels[index] < 0.5) continue;
-          shells.ripple(index, nodes[index].subject ? 0.35 : 0.5);
-          rippleTurn = index + 1;
-          break;
+      // While the route is lit, every node and Article on it keeps sending a
+      // softer ripple after the one it sent on arrival, so the glass keeps
+      // moving wherever the thought is (owner 2026-10-15: no limit).
+      for (let index = 0; index < nodes.length; index += 1) {
+        if (!active || (!passed[index] && revealLevels[index] < 0.5)) {
+          rippleDue[index] = LIT_RIPPLE_SECONDS;
+          continue;
         }
+        rippleDue[index] -= dtSeconds;
+        if (rippleDue[index] > 0) continue;
+        rippleDue[index] += LIT_RIPPLE_SECONDS;
+        shells.ripple(index, nodes[index].subject ? 0.35 : 0.5);
       }
       shells.advance(dtSeconds);
     },
