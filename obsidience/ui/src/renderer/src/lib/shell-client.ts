@@ -4,6 +4,7 @@ import {
   type Knowledge3dTuning,
 } from "@/components/themes/obsidience/knowledge-3d";
 import {
+  CODE_GRAPH_ID,
   LIBRARY_GRAPH_ID,
   MAIN_GRAPH_ID,
   announceGraphTuning,
@@ -62,9 +63,10 @@ let reconnect: ReturnType<typeof setTimeout> | null = null;
 const knowledgeVisibility = new Map<string, boolean>([["samsung", true]]);
 let selectedGraphSurfaceId = "samsung";
 let selectedGraphId = MAIN_GRAPH_ID;
-let knowledgePresenter: "knowledge" | "library" | null = null;
+type KnowledgePresenter = "knowledge" | "library" | "code";
+let knowledgePresenter: KnowledgePresenter | null = null;
 
-export function claimShellKnowledgePresenter(source: "knowledge" | "library" = "knowledge"): () => void {
+export function claimShellKnowledgePresenter(source: KnowledgePresenter = "knowledge"): () => void {
   knowledgePresenter = source;
   return () => { knowledgePresenter = null; };
 }
@@ -104,9 +106,11 @@ function sendCommand(payload: Record<string, unknown>): void {
 function publishGraphState(graphId: string): void {
   const id = graphId || MAIN_GRAPH_ID;
   const profiles = graphTuningProfilesFor(loadGraphTuningProfileStore(), id);
+  // Code is the primary graph of its own stage, never an orbiting satellite.
+  const primary = id === MAIN_GRAPH_ID || id === CODE_GRAPH_ID;
   const fields = KNOWLEDGE_3D_TUNING_FIELDS
-    .filter((field) => id !== MAIN_GRAPH_ID || !field.satelliteOnly)
-    .filter((field) => id === MAIN_GRAPH_ID || !field.mainOnly)
+    .filter((field) => !primary || !field.satelliteOnly)
+    .filter((field) => primary || !field.mainOnly)
     .map((field) => {
       if (id !== LIBRARY_GRAPH_ID && LIBRARY_NODE_STYLE_KEYS.has(field.key)) {
         // Round choices come first; subjects have one more (Dust marble).
@@ -140,7 +144,8 @@ function handleGraphCommand(message: {
   }
   if (!knowledgePresenter) return true;
   const graphId = message.graph_id || MAIN_GRAPH_ID;
-  if ((graphId === LIBRARY_GRAPH_ID) !== (knowledgePresenter === "library")) return true;
+  const owner = graphId === LIBRARY_GRAPH_ID ? "library" : graphId === CODE_GRAPH_ID ? "code" : "knowledge";
+  if (owner !== knowledgePresenter) return true;
   if (message.action === "state.request") {
     publishGraphState(graphId);
   } else if (message.action === "thinking.test") {

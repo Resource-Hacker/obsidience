@@ -8,6 +8,8 @@ import {
 
 export const MAIN_GRAPH_ID = "main";
 export const LIBRARY_GRAPH_ID = "library";
+/** The Code stage, drawn by the Knowledge renderer with its own tuning record. */
+export const CODE_GRAPH_ID = "code";
 
 const PROFILE_KEY = "obsidience.graph-tuning-profiles.v2";
 export const DEFAULT_GRAPH_TUNING_PROFILE = "Default";

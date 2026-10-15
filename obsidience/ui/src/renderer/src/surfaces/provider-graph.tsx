@@ -2,10 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { onShellOledPolicy, onShellProviderGraph, onShellStageVisibility, type ShellOledPolicy } from "@/lib/shell-client";
 import { ProviderGraphScene, type ProviderGraph, type ProviderNode, type GraphOperation } from "./provider-graph-scene";
 import { GraphViewer } from "./graph-viewer";
-import { MEMORY_TYPES, type GraphControl } from "./graph-stream";
+import { MEMORY_TYPES, type GraphControl, type GraphPublisher } from "./graph-stream";
 import { CODE_STRUCTURE, codeLayoutAncestry, codeFileGraph } from "./code-spherical-layout";
 import { knowledgeRoleForAgent, paintKnowledgeRoleIcon } from "@/components/themes/obsidience/knowledge-role-icons";
 import { MemoryStagePresentation } from "./memory-stage-presentation";
+import { CodeKnowledgeScene } from "./code-knowledge-scene";
 import "./provider-graph.css";
 
 const API = "http://127.0.0.1:8765";
@@ -137,6 +138,8 @@ function ProviderGraphStage({fixedBank, availableBanks, memoryPresentation}: {
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null), [detailError, setDetailError] = useState("");
   const [visible, setVisible] = useState(!document.hidden);
   const [consumers, setConsumers] = useState(0);
+  // Code is drawn by the Knowledge renderer, which owns its own publisher.
+  const [codePublisher, setCodePublisher] = useState<GraphPublisher | null>(null);
   const commandRef = useRef<(command: GraphControl) => void>(() => {});
   const followRef = useRef(follow), scope = useRef("");
   const lastFollow = useRef(""), refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -228,7 +231,7 @@ function ProviderGraphStage({fixedBank, availableBanks, memoryPresentation}: {
   }, []);
 
   useEffect(() => {
-    if (!host.current) return;
+    if (!host.current || code) return;
     try {
       scene.current = new ProviderGraphScene(host.current, code, n => pickRef.current(n),
         (node, x, y) => setHover(current => current?.node.id === node?.id ? current : node ? {node, x, y} : null),
@@ -412,19 +415,24 @@ function ProviderGraphStage({fixedBank, availableBanks, memoryPresentation}: {
     else if (command.action === "allSymbols" && typeof command.value === "boolean") setAllSymbols(command.value);
   };
   useEffect(() => {
-    scene.current?.presentation.publishCatalog({nodes: data?.nodes || [], count: data?.nodes.length || 0, links: data?.edges.length || 0,
+    (code ? codePublisher : scene.current?.presentation)?.publishCatalog({nodes: data?.nodes || [], count: data?.nodes.length || 0, links: data?.edges.length || 0,
       banks, limited: data?.limited});
-  }, [data, banks]);
+  }, [data, banks, code, codePublisher]);
   useEffect(() => {
-    scene.current?.presentation.publishState({bank, memoryType, allSymbols, follow, loading, error, connected, timeRange,
+    (code ? codePublisher : scene.current?.presentation)?.publishState({bank, memoryType, allSymbols, follow, loading, error, connected, timeRange,
       codeFile: viewData?.code_file, codeIndex: indexState,
       externalShown: viewData?.nodes.filter(node => node.external).length, externalTotal: viewData?.external_count,
       count: visibleIds.size, links: visibleEdges,
       selected: selected && {...selected, ...viewData?.nodes.find(node => node.id === selected.id),
         text: typeof detail?.text === "string" ? detail.text : selected.text}, neighbors, hover: hover?.node || null, latest: operations[0]});
-  }, [bank, memoryType, allSymbols, follow, loading, error, connected, selected, neighbors, hover?.node, operations, detail, visibleIds.size, visibleEdges, timeRange, viewData, indexState]);
+  }, [bank, memoryType, allSymbols, follow, loading, error, connected, selected, neighbors, hover?.node, operations, detail, visibleIds.size, visibleEdges, timeRange, viewData, indexState, code, codePublisher]);
   return <main className={`provider-graph ${code ? "code-graph" : "memory-graph"} provider-stage`} aria-label={`${title} graph stage`}>
-    <div className="pg-workspace"><div className="pg-canvas" ref={host}/></div>
+    <div className="pg-workspace">{code
+      ? <CodeKnowledgeScene data={viewData} visibleIds={visibleIds} operations={operations} selectedId={selected?.id || ""}
+        visible={rendering} onPick={node => pickRef.current(node)} onBack={back}
+        onHover={node => setHover(current => current?.node.id === node?.id ? current : node ? {node, x: 0, y: 0} : null)}
+        onCommand={command => commandRef.current(command)} onPublisher={setCodePublisher} onConsumers={setConsumers}/>
+      : <div className="pg-canvas" ref={host}/>}</div>
     {error && <div className="pg-empty" role="status"><strong>{title} unavailable</strong><p>{error}</p></div>}
   </main>;
 }

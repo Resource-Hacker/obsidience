@@ -18,7 +18,7 @@ export interface KnowledgeBranchPalette {
 }
 
 /* — verbatim: chromaticKnowledgePalette — */
-function chromaticKnowledgePalette(
+export function chromaticKnowledgePalette(
   hue: number,
   saturation: number,
   lightness: number,

@@ -202,7 +202,7 @@ function isArticleEndpoint(node: GraphNode): boolean {
 /** `refGroups` are the supplied refs again, one group per run: their Articles'
  *  links carry the beam. A route built without them (Reader selection) keeps
  *  to its hierarchy path. */
-function buildThinkingRoute(cloud: GraphCloud, refs: readonly string[], refGroups: readonly (readonly string[])[] = []): ThinkingRoute | null {
+export function buildThinkingRoute(cloud: GraphCloud, refs: readonly string[], refGroups: readonly (readonly string[])[] = []): ThinkingRoute | null {
   const byId = new Map(cloud.nodes.map((node) => [node.id, node]));
   const targets = [...new Set(refs)].filter((ref) => byId.has(ref));
   if (targets.length === 0) return null;

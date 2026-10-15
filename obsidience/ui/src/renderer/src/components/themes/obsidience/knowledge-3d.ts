@@ -407,6 +407,8 @@ export interface Knowledge3dTuningField {
  *  so a stale persisted value can never leave the sanctioned range. */
 export const KNOWLEDGE_3D_TUNING_FIELDS: readonly Knowledge3dTuningField[] = [
   { key: "branchClearance", label: "Branch clearance", group: "Layout", min: 0.5, max: 2, step: 0.05, description: "Space around nodes and branches. Lower values pack the sphere closer; higher values make it grow. Article and node sizes stay the same." },
+  // How large a graph is drawn; its layout is unchanged.
+  { key: "graphScale", label: "Graph size", group: "Layout", min: 0.2, max: 2, step: 0.05, description: "How large the graph is drawn in its frame. Its layout and spacing stay the same." },
   // The core's own glass and its band of white dust (owner 2026-10-14).
   { key: "coreGlass", label: "Core glass", group: "Glass", min: 0, max: 1.5, step: 0.05, description: "How solid the glass hugging the central core is." },
   { key: "coreGlassDistance", label: "Core glass distance", group: "Glass", min: 0.3, max: 4, step: 0.05, description: "How far the core glass sits from the core. 1 hugs it five pixels out; lower draws it into the core's glow, higher moves it out toward the first glass layer." },
@@ -501,7 +503,7 @@ export function clampKnowledge3dTuning(value: unknown): Knowledge3dTuning {
   // migrate that separately without resizing glyphs.
   const savedScale = source.graphScale ?? source.graphRadius;
   if (typeof savedScale === "number" && Number.isFinite(savedScale)) {
-    tuning.graphScale = Math.min(2, Math.max(0.4, savedScale));
+    tuning.graphScale = Math.min(2, Math.max(0.2, savedScale));
   }
   return tuning;
 }

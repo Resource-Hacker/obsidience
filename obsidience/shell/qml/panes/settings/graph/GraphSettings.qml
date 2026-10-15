@@ -86,11 +86,13 @@ Item {
                     "researcher": 3,
                     "library": 5
                 }
+                // The Code stage is drawn by the same renderer with its own tuning.
                 root.graphOptions = source.map(group => ({
                     "graphId": root.graphId(group),
                     "label": root.graphLabel(group),
                     "order": roleOrder[String(group.role || group.id || "").toLowerCase()] ?? 4
-                })).sort((left, right) => left.order - right.order
+                })).concat([{"graphId": "code", "label": "Code", "order": 6}])
+                    .sort((left, right) => left.order - right.order
                     || left.label.localeCompare(right.label))
                 const restored = root.graphOptions.findIndex(
                     option => option.graphId === current
