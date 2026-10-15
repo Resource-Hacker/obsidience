@@ -72,6 +72,7 @@ varying float vTwinkle;
 varying float vSeed;
 varying float vCurate;
 varying float vSpeech;
+varying vec2 vCentre; // the sprite's centre, in clip space
 varying vec3 vCloudX;
 varying vec3 vCloudY;
 void main() {
@@ -132,6 +133,7 @@ void main() {
   vDiscFrac = (radiusPx * 2.0) / size;
   gl_PointSize = size;
   gl_Position = projectionMatrix * mvPosition;
+  vCentre = gl_Position.xy / gl_Position.w;
 }
 `;
 
@@ -144,7 +146,10 @@ void main() {
 // dust is left, the glass light grows with it as a shell's does, and the body
 // darkens toward opaque, almost fully at the top. The dust inside is real
 // points drawn after the sprites (knowledge-3d-marble-dust.ts); here only its
-// unresolved haze.
+// unresolved haze. The body bends the scene behind it as a glass ball does
+// (uMarbleRefraction): the canvas as it stood before the node sprites, upside
+// down through the middle, crowding toward the limb, where the glass reflects
+// instead; each colour bends a little differently.
 const GLASS_MARBLE_GLSL = `
 uniform float uMarbleOpacity;
 uniform float uMarbleDust;
@@ -152,6 +157,25 @@ uniform float uMarbleSheen; // the Glass group's Sheen lines setting
 uniform float uSpeechLevel;
 varying vec3 vCloudX;
 varying vec3 vCloudY;
+#ifndef KNOWLEDGE_PROVIDER
+uniform sampler2D uBackdrop;
+uniform float uMarbleRefraction;
+uniform vec2 uViewportPx;
+varying vec2 vCentre;
+vec3 marbleLens(vec2 p, float r, float radiusPx) {
+  // This pixel from the centre, in canvas pixels, and where its ray lands
+  // behind the ball: mirrored through the centre, further out near the limb.
+  // (The centre comes from the vertex: reading gl_FragCoord turns the point
+  // sprite's own coordinates upside down under ANGLE's SwiftShader.)
+  vec2 rel = vec2(p.x, -p.y) * radiusPx;
+  float bend = 0.6 + 1.2 * r * r;
+  vec2 size = vec2(textureSize(uBackdrop, 0));
+  vec2 at = (vCentre * 0.5 + 0.5) * uViewportPx - rel * bend;
+  vec2 spread = rel * 0.02 * r;
+  return vec3(texture2D(uBackdrop, (at - spread) / size).r, texture2D(uBackdrop, at / size).g,
+    texture2D(uBackdrop, (at + spread) / size).b);
+}
+#endif
 // The shells' survey noise.
 float marbleHash(vec3 p) {
   p = fract(p * 0.1031);
@@ -234,7 +258,15 @@ vec4 glassMarble(vec2 p, float r, float aa, float radiusPx, vec3 tint, vec3 dark
   float shine = clamp(max(light.r, max(light.g, light.b)), 0.0, 1.0);
   float alpha = body + (1.0 - body) * shine;
   float edge = 1.0 - smoothstep(1.0 - aa, 1.0 + aa, r);
-  return vec4((dark * 0.35 * body + light + haze) / max(alpha, 0.02), alpha * edge);
+  vec3 seen = dark * 0.35;
+#ifndef KNOWLEDGE_PROVIDER
+  // Seen through the tinted body, coloured a little by the branch and lost
+  // to reflection at the limb.
+  vec3 stain = mix(vec3(1.0), tint / max(max(tint.r, max(tint.g, tint.b)), 1e-3), 0.35);
+  float through = 1.0 - pow(limb, 4.0);
+  seen += marbleLens(p, r, radiusPx) * stain * through * uMarbleRefraction;
+#endif
+  return vec4((seen * body + light + haze) / max(alpha, 0.02), alpha * edge);
 }
 `;
 

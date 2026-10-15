@@ -359,6 +359,21 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
       uTime: { value: 0 },
       uFocusSwing: { value: 0 },
       uPixelRatio: { value: 1 },
+      uBackdrop: { value: new THREE.FramebufferTexture(1, 1) as THREE.Texture },
+    };
+    // Each cloud copies the canvas here just before its node sprites draw,
+    // for its Dust marbles to bend; one texture, sized to the drawing buffer.
+    const backdropSize = new THREE.Vector2();
+    const captureBackdrop = (target: THREE.WebGLRenderer): void => {
+      target.getDrawingBufferSize(backdropSize);
+      let backdrop = uniforms.uBackdrop.value as THREE.FramebufferTexture;
+      if (backdrop.image.width !== backdropSize.x || backdrop.image.height !== backdropSize.y) {
+        backdrop.dispose();
+        backdrop = new THREE.FramebufferTexture(backdropSize.x, backdropSize.y);
+        backdrop.minFilter = backdrop.magFilter = THREE.LinearFilter;
+        uniforms.uBackdrop.value = backdrop;
+      }
+      target.copyFramebufferToTexture(backdrop);
     };
     const sharedParticleTime = { value: 0 };
     // The scene module owns the canonical shader strings; every cloud —
@@ -376,6 +391,7 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
       parseColor: parseKnowledgeCssColor,
       sharedUniforms: uniforms,
       viewportUniform,
+      captureBackdrop,
     };
     // Satellite clouds keyed by agent id; rebuilt per entry only when that
     // entry's inputs change, so one agent's tuning drag never replays
@@ -1577,6 +1593,7 @@ export function Knowledge3dScene(props: Knowledge3dSceneProps) {
       if (mainPlate) disposeRolePlate(mainPlate);
       mainPlate = null;
       labelLayer.dispose();
+      uniforms.uBackdrop.value.dispose();
       renderer.dispose();
       renderer.domElement.remove();
     };

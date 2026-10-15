@@ -286,6 +286,7 @@ export interface Knowledge3dTuning {
    *  much dust fills them (0 none, 2 the most; 1.7 by default, owner 2026-10-14). */
   marbleOpacity: number;
   marbleDust: number;
+  marbleRefraction: number;
   /** Role-glyph nameplates over every ball (read from the main record). */
   rolePlates: number;
   orbitRadius: number;
@@ -366,6 +367,7 @@ export const DEFAULT_KNOWLEDGE_3D_TUNING: Knowledge3dTuning = {
   coreStyle: 0,
   marbleOpacity: 1,
   marbleDust: 1.7,
+  marbleRefraction: 1,
   rolePlates: 1,
   orbitRadius: KNOWLEDGE_3D_ORBIT_RADIUS_DEFAULT,
   orbitSpeed: KNOWLEDGE_3D_ORBIT_SPEED_DEFAULT,
@@ -414,6 +416,7 @@ export const KNOWLEDGE_3D_TUNING_FIELDS: readonly Knowledge3dTuningField[] = [
   // Dust marble glass works as a layer's (owner 2026-10-14): nothing at 0, almost opaque at the top.
   { key: "marbleOpacity", label: "Marble glass", group: "Glass", min: 0, max: 1.5, step: 0.05, description: "How solid the glass of Dust marble nodes is, as with the glass layers: 0 leaves only the dust, 1.5 is almost opaque." },
   { key: "marbleDust", label: "Marble dust", group: "Glass", min: 0, max: 2, step: 0.05, description: "How much floating dust fills Dust marble nodes. Higher values add more and brighter specks; zero leaves the glass empty." },
+  { key: "marbleRefraction", label: "Marble refraction", group: "Glass", min: 0, max: 1, step: 0.05, description: "How much of the graph behind a Dust marble its glass shows, bent as through a glass ball: upside down and squeezed toward the edge. Zero leaves the plain tinted glass." },
   { key: "craterDepth", label: "Crater depth", group: "Glass", min: 0, max: 2, step: 0.05, description: "How deeply nodes press into their shell. Larger and better linked nodes always press deeper than small ones." },
   { key: "craterGlow", label: "Crater glow", group: "Glass", min: 0, max: 2, step: 0.05, description: "Coloured glow rising from the floor of each crater, in its node's colour." },
   { key: "seedGlow", label: "Seed glow", group: "Glass", min: 0, max: 2, step: 0.05, description: "Brightness of the orb of dust inside each crater." },

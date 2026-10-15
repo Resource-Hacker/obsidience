@@ -162,8 +162,12 @@ export interface Knowledge3dCloudDeps {
     /** The Scene's breathing focal plane, in cloud radii from each centre. */
     uFocusSwing: { value: number };
     uPixelRatio: { value: number };
+    /** The canvas as it stood before a cloud's node sprites, which its Dust
+     *  marbles bend; captureBackdrop refills it. */
+    uBackdrop: { value: THREE.Texture };
   };
   viewportUniform: { value: THREE.Vector2 };
+  captureBackdrop: (renderer: THREE.WebGLRenderer) => void;
 }
 
 /** Physics/geometry signature: a change rebuilds ONLY this cloud. */
@@ -465,6 +469,7 @@ export function createKnowledge3dCloud(
   const marbleOpacityUniform = { value: input.tuning.marbleOpacity };
   const marbleDustUniform = { value: input.tuning.marbleDust };
   const marbleSheenUniform = { value: input.tuning.sheenLines };
+  const marbleRefractionUniform = { value: input.tuning.marbleRefraction };
   const pointUniforms = {
     uActivityOpacity: { value: 1 },
     uPerspective: deps.sharedUniforms.uPerspective,
@@ -481,6 +486,9 @@ export function createKnowledge3dCloud(
     uMarbleOpacity: marbleOpacityUniform,
     uMarbleDust: marbleDustUniform,
     uMarbleSheen: marbleSheenUniform,
+    uMarbleRefraction: marbleRefractionUniform,
+    uBackdrop: deps.sharedUniforms.uBackdrop,
+    uViewportPx: deps.viewportUniform,
   };
   const material = new THREE.ShaderMaterial({
     uniforms: pointUniforms,
@@ -495,6 +503,11 @@ export function createKnowledge3dCloud(
   const points = new THREE.Points(geometry, material);
   points.frustumCulled = false;
   points.renderOrder = 1;
+  // Dust marbles bend what lies behind them: the canvas as it stands just
+  // before these sprites draw.
+  points.onBeforeRender = (renderer) => {
+    if (marblesShown && marbleRefractionUniform.value > 0) deps.captureBackdrop(renderer);
+  };
   group.add(points);
   const depthMaterial = new THREE.ShaderMaterial({
     uniforms: pointUniforms,
@@ -567,6 +580,7 @@ export function createKnowledge3dCloud(
   disposables.push(marbleDust);
   // Centres, sizes and focus follow the node sprites (the shader adds the
   // sprites' focus swell); a tier not drawn as a marble hides its slots.
+  let marblesShown = false;
   const syncMarbleDust = (): void => {
     let shown = false;
     marbleNodes.forEach((index, slot) => {
@@ -578,6 +592,7 @@ export function createKnowledge3dCloud(
     });
     marbleDust.update();
     marbleDust.points.visible = shown && marbleDustUniform.value > 0;
+    marblesShown = shown;
   };
 
   // --- Taxonomy beams: the main ball's TWO-mesh split — root SPOKES
@@ -1379,6 +1394,7 @@ export function createKnowledge3dCloud(
       marbleOpacityUniform.value = live.marbleOpacity;
       marbleDustUniform.value = live.marbleDust;
       marbleSheenUniform.value = live.sheenLines;
+      marbleRefractionUniform.value = live.marbleRefraction;
       if (marbleChanged) syncMarbleDust();
       group.scale.setScalar(ballFactor);
       spokeWidthUniform.value = live.tendrilWidth * ratio * ballFactor;
