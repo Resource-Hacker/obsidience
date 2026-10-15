@@ -836,6 +836,7 @@ class RealtimeSessionManager:
                 self._semantic_expiry = None
 
     async def _prepare_speech_candidate(self, binding: tuple, text: str, timing: dict | None) -> None:
+        started = time.monotonic()
         try:
             prepared = await self.conversation.prepare_speech_turn(text)
             if not self._candidate_current(binding):
@@ -843,6 +844,7 @@ class RealtimeSessionManager:
             trace.emit("speech", "Executive speech admission", [json.dumps({
                 "event": "speech.admission", "decision": prepared.decision,
                 "speech_sequence": binding[2], "candidate_revision": binding[3],
+                "duration_ms": round((time.monotonic() - started) * 1000, 3),
             }, sort_keys=True)])
             if prepared.decision != "complete":
                 self._semantic_state = "waiting"
@@ -904,6 +906,11 @@ class RealtimeSessionManager:
             if seen <= self._semantic_seen:
                 return
             self._semantic_seen = seen
+            if self._semantic_binding is not None:
+                trace.emit("speech", "Speech candidate invalidated by new capture", [json.dumps({
+                    "event": "speech.candidate_invalidated", "candidate_revision": revision,
+                    "speech_sequence": self._semantic_binding[2],
+                }, sort_keys=True)])
             await self._cancel_speech_candidate()
             return
         if kind == "speech_candidate_failed":
@@ -935,6 +942,11 @@ class RealtimeSessionManager:
         self._speech_sequence = binding[2]
         self._live_transcript = {"text": text, "final": False}
         timing = _input_speech_timing(event.get("speech_timing"))
+        trace.emit("speech", "Speech candidate ready for Executive admission", [json.dumps({
+            "event": "speech.candidate", "speech_sequence": binding[2],
+            "candidate_revision": binding[3], "refreshed": event.get("refreshed") is True,
+            "stages": timing["stages"] if timing else [],
+        }, sort_keys=True)])
         self._semantic_task = asyncio.create_task(
             self._prepare_speech_candidate(binding, text, timing), name="obsidience-speech-admission")
         await self._publish("runtime", reason="speech_candidate")
@@ -1432,7 +1444,7 @@ class RealtimeSessionManager:
                             and worker_event.get("mode_revision", 0) == self._mode_revision):
                         # Counts only; the rejected words never leave the worker.
                         self._wake_rejected[reason] += 1
-                        trace.emit("speech", "Wake word heard, not as an address", [json.dumps({
+                        trace.emit("speech", "Wake detector rejected an address candidate", [json.dumps({
                             "event": "speech.wake_rejected", "reason": reason,
                             "count": self._wake_rejected[reason],
                         }, sort_keys=True)])
