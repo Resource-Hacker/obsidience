@@ -302,8 +302,10 @@ class _Member:
             if reason in self.wake_rejected:
                 self.wake_rejected[reason] = min(self.wake_rejected[reason] + 1, 1_000_000_000)
         if kind == "wake_detected" and owner is not None and owner.principal == self.principal:
-            self.server.emit("wake", self.principal, request_id=owner.request_id)
+            self.server.emit("wake", self.principal, request_id=owner.request_id,
+                             cue_name=self.turn._wake_cue_name)
         elif kind == "wake_idle" and owner is not None and owner.phase == "listening":
+            self.server.emit("cue", self.principal, request_id=owner.request_id, name="cancel")
             self.server.release(self.principal)
         # Ambient words and partial transcripts never leave the speech owner.
 
@@ -676,6 +678,7 @@ class DiscordSpeechServer:
                 finally:
                     self._publish_ownership()
             else:
+                self.emit("cue", principal, request_id=owner.request_id, name="complete")
                 self.release(principal)
         elif kind == "cancel":
             owner = self.owner(principal)

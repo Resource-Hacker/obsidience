@@ -282,17 +282,14 @@ def wait_ready(limit: float = 300) -> None:
     deadline = time.monotonic() + limit
     while time.monotonic() < deadline:
         try:
-            state = get("/api/realtime")
-            # An initialized API with deliberately disabled desktop speech is
-            # healthy; Discord speech has its own optional readiness contract.
-            if (state.get("ready") is True
-                    or (state.get("mode") == "off" and state.get("phase") == "off"
-                        and state.get("enabled") is False and state.get("last_error") is None)):
+            # FastAPI serves requests only after its startup lifespan completes.
+            # Desktop speech health is checked separately by check_voice().
+            if get("/api/status").get("name") == "obsidience":
                 return
         except OSError:
             pass
         time.sleep(2)
-    sys.exit("The Harness did not report ready; inspect journalctl --user -u obsidience-harness-dev.")
+    sys.exit("The Harness API did not initialize; inspect journalctl --user -u obsidience-harness-dev.")
 
 
 def wait_camera_data(limit: float = 30) -> None:
@@ -573,20 +570,19 @@ def main() -> None:
     if owners:
         for owner in owners:
             if owner == "discord-camera" and camera_after_dependencies:
-                continue  # Restore once, after all dependency/voice readiness gates.
+                continue  # Restore once, after the Harness/UI dependency restarts.
             if owner == "tv-tuner" and "tv-player" in owners:
                 continue  # The player restart already restored the tuner with its current unit.
             restart(owner)
+        if camera_after_dependencies:
+            # The public graph depends on Harness/UI, not desktop audio hardware.
+            # A failed restart or unavailable graph still prevents restoration.
+            wait_camera_data()
+            restart("discord-camera")
         time.sleep(5)
     failures = failures_since(started)
     if "harness" in owners and (voice := check_voice()):
         failures.append(voice)
-    if camera_after_dependencies:
-        if failures:
-            print("Discord camera not restored because deployment readiness/trace checks failed.")
-        else:
-            wait_camera_data()
-            restart("discord-camera")
     for line in failures:
         print("trace failure:", line)
     if args.only:

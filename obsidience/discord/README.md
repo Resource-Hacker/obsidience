@@ -25,6 +25,25 @@ There is no name-specific alias list or biased decoder. A question followup
 retains its original member without requiring a new
 wake name; ordinary listening always requires an address.
 
+Voice feedback uses the installation's existing Executive cue WAVs, read only from
+`obsidience/state/realtime-cues/` at their existing quiet gain. Missing or invalid
+clips are silent; no copyrighted installation clips are bundled. A validated wake
+plays `ready`, an admitted final voice command plays `accepted` (command received,
+not action success), and a completed spoken reply plays `complete`. A native
+question follow-up plays its distinct `follow_up` instead; its empty-window expiry
+plays `cancel`. Explicit stop also plays `cancel`; actual request/reply failures
+play `error`. Ambient speech, idle listening and private calibration stay silent.
+
+Cues use the existing speech AudioPlayer and native 24k mono Opus encoder, without
+FFmpeg, another model or another connection. One bounded latest pending cue avoids
+a backlog; the first reply PCM discards all cues so spoken replies take priority.
+Cue playback pauses and resumes only the exact retained media object, and explicit
+pause suppresses that resume. Stop, leave and speech dependency loss clear cue
+state and timers. Incoming speech never waits for an outgoing chirp. Status exposes
+available `voice_cues` and `active_cue`; these attest local playback only, not what
+listeners hear. The speech owner's `wake` event carries `cue_name`; its request-bound
+`cue` events carry only `name:"complete"` or `name:"cancel"` after native transitions.
+
 Discord's supported bot voice API carries audio. Local video files can supply their
 audio track, but this implementation does not transmit video or Go Live streams.
 It uses no user account, user token, selfbot, screen capture or hidden client API.

@@ -819,7 +819,16 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
                 command = self._classify_wake(final=True)
                 if command is not None:
                     return command + text
-            self._wake_address = len(self._wake_prefix)
+            address = len(self._wake_prefix)
+            if self._wake_prefix[-1:].isalnum() and text[:1].isalnum():
+                # NeMo emits subword deltas. Preserve an eligible address
+                # when a recognition gap splits its name ("Bar" + "d play").
+                word = re.search(r"\w+$", self._wake_prefix)
+                if (word is not None and self._wake_address is not None
+                        and _WAKE_LEAD.fullmatch(self._wake_prefix,
+                                                self._wake_address, word.start())):
+                    address = self._wake_address
+            self._wake_address = address
         if words:
             self._wake_heard_at = now
         self._wake_prefix += text
