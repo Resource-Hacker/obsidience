@@ -374,8 +374,14 @@ class _Member:
             if self.stt.utterance_pcm_bytes > 35 * speech.SAMPLE_RATE * 2:
                 # RNNT hypotheses grow across a continuous utterance. Bound
                 # decoded audio, not quiet wall time between Discord packets.
-                # A returning speaker must reach VAD's ordinary onset reset.
-                self.fail("utterance_limit")
+                owner = self.server.owner(self.principal)
+                if owner is None or owner.principal != self.principal:
+                    # Ambient conversation can outlive one decoder window.
+                    # Retire its state without the failure/silence latch; the
+                    # next packet creates a fresh stream with shared weights.
+                    await self.server._drop(self.principal)
+                else:
+                    self.fail("utterance_limit")
                 return
         self.remainder.extend(pcm)
         while len(self.remainder) >= PCM_FRAME:
@@ -465,13 +471,16 @@ class DiscordSpeechServer:
 
     def listening(self, member):
         owner = self.owner(member.principal)
-        return self.current(member) and (owner is None or (
-            owner.principal == member.principal and owner.phase == "listening"))
+        # Keep unaddressed members in their own wake scanner during an open
+        # command/follow-up window. Final text still requires its exact owner;
+        # only an accepted explicit wake may transfer channel ownership.
+        return self.current(member) and (owner is None or owner.phase == "listening")
 
     def claim(self, member):
         if not self.listening(member):
             return False
-        if self.owner(member.principal) is None:
+        owner = self.owner(member.principal)
+        if owner is None or owner.principal != member.principal:
             self.owners[member.principal[:2]] = _Owner(
                 member.principal, uuid.uuid4().hex, deadline=time.monotonic() + 35)
             # Another participant's earlier unaddressed recognition cannot
@@ -618,7 +627,7 @@ class DiscordSpeechServer:
                     return
                 self.blocked.pop(principal, None)
             owner = self.owner(principal)
-            if owner is not None and (owner.principal != principal or owner.phase != "listening"):
+            if owner is not None and owner.phase != "listening":
                 return
             if principal in self.dropping:
                 return

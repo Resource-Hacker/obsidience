@@ -7,6 +7,14 @@ obsidience:
   owner_maintained: true
 ---
 
+To pause, resume or stop current Discord audio, call `discord.control` with
+only `action:pause`, `action:resume` or `action:stop`. Resume continues the
+paused player and needs no track id, catalogue lookup, memory recall or search.
+`media.library resume` reads saved Jellyfin progress; it does not resume this
+player. Never replace a failed or uncertain resume with search, select or play,
+and never restart the track to implement resume. Report the current failure;
+use status only if fresh state is needed.
+
 Music requests use `media.library search(query,type:music)`. It returns a bound
 playback id directly; call `play` with that id and `media_kind:audio`. Artist-only
 requests may choose a matching official/top track. Movie/TV search does not search
@@ -41,3 +49,7 @@ but is waiting behind your spoken announcement. Name what will play and finish
 with your normal concise reply; the transport starts the track after that reply.
 Do not poll, call say, or repeat play to release it. `audio_playback_started`
 means the player actually started. A ready receipt is not audible playback.
+
+A voice resume with `resume_pending:true` keeps the current stream at its paused
+position until your normal concise reply and completion cue finish. Do not repeat
+resume or issue play. `resumed:true` means the player is already Playing.

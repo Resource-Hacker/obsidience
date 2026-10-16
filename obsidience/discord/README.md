@@ -24,6 +24,12 @@ Wake recognition uses the ordinary desktop wake-address matcher with `Bard`
 There is no name-specific alias list or biased decoder. A question followup
 retains its original member without requiring a new
 wake name; ordinary listening always requires an address.
+Other members keep their own wake-only scanners during an open listening window;
+only an explicit accepted address can transfer ownership, and final command text
+still requires the current speaker. Agent work and reply playback stay exclusive.
+An unaddressed continuous stream reaching the existing 35-second decoder bound
+retires its decoder/VAD/turn state without blocking future packets; the next packet
+starts fresh on the same loaded weights. An addressed command retains its hard limit.
 
 Voice feedback uses the installation's existing Executive cue WAVs, read only from
 `obsidience/state/realtime-cues/` at their existing quiet gain. Missing or invalid
@@ -328,6 +334,14 @@ has finished. Natural end uses the existing media cleanup. No timer guesses
 when speech has ended, and ambient cues cannot release an announcement hold.
 Status exposes `media_handoff` as `awaiting_announcement` or `ready_held` while a
 prepared track is still held.
+
+`resume` keeps the exact existing stream and playback position; it never performs
+a catalogue lookup or starts a new source. A voice request holds that resume
+through its normal reply and completion cue. `resume_pending` attests that hold;
+`resumed` is true only when the player is actually Playing. Cancellation or
+departure during a deferred resume leaves the retained stream paused. With no
+retained media, resume fails explicitly. Status includes the opaque
+`playback_request_id`, `playback_position_ms` and manual `media_paused` state.
 
 Spoken replies pause current media and use a separate player. When speech drains,
 only the exact retained media generation resumes. Explicit pause cancels automatic

@@ -8,6 +8,13 @@ obsidience:
   owner_maintained: true
 ---
 
+For current Discord audio controls, use `discord.control` with only
+`action:pause`, `action:resume` or `action:stop`. Resuming paused audio needs no
+track id, catalogue lookup, memory recall or search. This Tool's `resume` action
+only reads saved Jellyfin progress for an exact catalogue item UUID, never a
+short playback selection id. Do not search or replay a track to recover from a
+failed or uncertain resume.
+
 For songs, artists or music, call `search` with `type:music`, never `movie` or
 `series`. This checks native music and then public YouTube music. Prefer the requested recording
 from its artist or official channel. Returned `id`
@@ -53,8 +60,9 @@ Use `select` with an exact returned Jellyfin item/source pair. Its id is a
 short-lived selection for the current activation, not a durable movie identity.
 Selection does not authorize playback and never acquires or registers media.
 `resume` reads Jellyfin's saved per-user position. It does not start a player.
-For an explicit continue request, open the exact selection with `resume: true`;
-the playback owner obtains fresh saved progress before its one load.
+For an explicit request to continue a saved catalogue item on the TV, open the
+exact selection with `resume: true`; the playback owner obtains fresh saved
+progress before its one load. This is separate from resuming a paused player.
 
 For an explicit season request, resolve the series with `search`, then call
 `season` with that metadata id and season number. `next_unwatched` (the default)

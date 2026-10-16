@@ -160,7 +160,7 @@ export class DiscordTransport {
         void this.leave(); // Moderator disconnect/move invalidates every identity; never follow it.
       } else if (oldState.channelId === this.channel?.id && state.channelId !== this.channel?.id) {
         if (this.pendingMedia?.announcementMemberId === state.id) this.stopMedia(this.pendingMedia);
-        if (this.media?.announcementMemberId === state.id && !this.media.started) this.stopMedia(this.media);
+        if (this.media?.announcementMemberId === state.id && (this.media.announcementPending || this.media.resumePending)) this.cancelMediaAnnouncement(this.media.announcementRequestId);
         if (this.wakeCalibration?.principal.member_id === state.id) this.clearWakeCalibration();
         if (this.cue?.principal?.member_id === state.id) this.finishCue(false);
         if (this.voiceRequest?.principal.member_id === state.id) { this.voiceRequest = null; this.syncSpeaking(); }
@@ -185,6 +185,9 @@ export class DiscordTransport {
       generation: this.generation, receivers: this.receivers.size, voice_samples: this.samples.status(),
       active_turns: this.turns.size, pending_speech: this.pendingSpeech.size,
       playback: this.mediaPlayer.state.status, speech_playback: this.speechPlayer.state.status,
+      playback_request_id: this.media?.requestId ?? null,
+      playback_position_ms: this.media?.resource?.playbackDuration ?? null,
+      media_paused: this.media?.paused ?? false,
       voice_cues: [...this.cueAssets.keys()], active_cue: this.cue?.name ?? null,
       voice_awake: this.voiceAwake(),
       media_handoff: this.media?.announcementPending ? 'awaiting_announcement'
@@ -371,7 +374,7 @@ export class DiscordTransport {
   speechLost(socket) {
     if (this.speech !== socket) return;
     if (this.pendingMedia?.announcementRequestId) this.stopMedia(this.pendingMedia);
-    if (this.media?.announcementRequestId && !this.media.started) this.stopMedia(this.media);
+    if (this.media?.announcementRequestId && (!this.media.started || this.media.resumePending)) this.cancelMediaAnnouncement(this.media.announcementRequestId);
     this.finishCue(false);
     this.voiceRequest = null;
     this.syncSpeaking();
@@ -586,7 +589,7 @@ export class DiscordTransport {
     this.cancelledRequests.add(requestId);
     while (this.cancelledRequests.size > 256) this.cancelledRequests.delete(this.cancelledRequests.values().next().value);
     if (this.pendingMedia?.announcementRequestId === requestId) this.stopMedia(this.pendingMedia);
-    if (this.media?.announcementRequestId === requestId) this.stopMedia(this.media);
+    this.cancelMediaAnnouncement(requestId);
     if (this.pendingCue?.requestId === requestId) this.pendingCue = null;
     if (this.cue?.requestId === requestId) this.finishCue(false);
     if (this.voiceRequest?.requestId === requestId) { this.voiceRequest = null; this.syncSpeaking(); }
@@ -977,7 +980,20 @@ export class DiscordTransport {
       if (this.connection) this.connection.subscribe(this.mediaPlayer);
       if (utterance.resumeMedia && this.media === utterance.media && this.media?.generation === this.generation
         && !this.media.announcementPending && !this.media.paused) this.mediaPlayer.unpause();
+      this.maybeStartMedia();
     }
+  }
+
+  cancelMediaAnnouncement(requestId) {
+    const media = this.media;
+    if (!media || media.announcementRequestId !== requestId) return;
+    if (media.started && media.resumePending) {
+      // Cancelling a resume keeps the exact paused stream and position.
+      media.paused = true;
+      media.resumePending = media.announcementPending = false;
+      media.announcementRequestId = media.announcementMemberId = null;
+      this.mediaPlayer.pause();
+    } else this.stopMedia(media);
   }
 
   releaseMediaAnnouncement(requestId) {
@@ -989,14 +1005,15 @@ export class DiscordTransport {
 
   maybeStartMedia() {
     const media = this.media;
-    if (!media?.ready || media.started || media.announcementPending || media.paused
+    if (!media?.ready || (media.started && !media.resumePending) || media.announcementPending || media.paused
       || this.cue || this.pendingCue || this.utterance || this.pendingSpeech.size
       || media.generation !== this.generation || this.closing
       || this.connection?.state.status !== VoiceConnectionStatus.Ready) return;
     try {
-      media.started = true;
       this.connection.subscribe(this.mediaPlayer);
-      this.mediaPlayer.play(media.resource);
+      if (media.started) this.mediaPlayer.unpause();
+      else { media.started = true; this.mediaPlayer.play(media.resource); }
+      media.resumePending = false;
     } catch { this.lastError = 'media_playback_failed'; this.stopMedia(media); }
   }
 
@@ -1253,11 +1270,22 @@ export class DiscordTransport {
           if (this.cue) this.cue.resumeMedia = false;
           value = { paused: this.mediaPlayer.pause() || !!this.media?.paused, ...this.status() }; break;
         case 'resume':
-          if (this.media) this.media.paused = false;
-          if (this.media?.ready && !this.media.started) { this.maybeStartMedia(); value = this.status(); }
-          else if (this.utterance) { this.utterance.resumeMedia = true; value = this.status(); }
-          else if (this.cue) { this.cue.resumeMedia = this.cue.media === this.media; value = this.status(); }
-          else value = { resumed: this.mediaPlayer.unpause(), ...this.status() };
+          if (!this.media?.ready) fail('no_media_to_resume');
+          this.media.paused = false;
+          this.media.resumePending = true;
+          {
+            const origin = [...this.turns].find(([, turn]) => turn.source === 'voice'
+              && message.member_id === turn.principal.member_id && this.currentSpeaker(turn.principal));
+            if (origin) {
+              this.media.announcementRequestId = origin[0];
+              this.media.announcementMemberId = origin[1].principal.member_id;
+              this.media.announcementPending = true;
+              this.mediaPlayer.pause();
+            }
+          }
+          this.maybeStartMedia();
+          value = { resumed: this.mediaPlayer.state.status === AudioPlayerStatus.Playing,
+            resume_pending: this.media.resumePending, ...this.status() };
           break;
         case 'play': value = await this.play(message); break;
         case 'cancel_media': value = this.cancelMedia(message.playback_request_id); break;

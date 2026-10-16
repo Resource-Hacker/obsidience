@@ -111,6 +111,16 @@ async def execute(args: dict, context: dict) -> dict:
             from .acquire import status
             return {'status': 'completed', 'acquisition': await status()}
         if action == 'resume' and set(args) == {'action', 'item_id'}:
+            if context.get('_discord'):
+                from ...media.jellyfin import _id
+                try:
+                    _id(args['item_id'])
+                except MediaUnavailable:
+                    return {'status': 'failed', 'delivery': 'not_dispatched', 'effect_applied': False,
+                            'correction_allowed': True,
+                            'failure': 'media.library resume only reads saved Jellyfin progress for a catalogue UUID. '
+                                'To continue paused Discord audio, call discord.control with {"action":"resume"} '
+                                'once and no id. Do not recall an old id, search, select or replay a track.'}
             return {'status': 'completed', **await asyncio.to_thread(service.catalogue().resume, args['item_id'])}
         if action == 'browse' and not set(args) - {'action', 'query', 'offset', 'limit'}:
             page = await asyncio.to_thread(service.catalogue().browse, query=args.get('query', ''),
