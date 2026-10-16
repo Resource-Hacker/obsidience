@@ -54,6 +54,8 @@ export class DiscordTransport {
     this.speechWorkerError = null;
     this.diagnosticRead = null;
     this.wakeCalibration = null;
+    this.voiceProbe = null;
+    this.voiceTiming = null;
     this.receiveCounters = { starts: 0, failures: 0, rx_packets: 0, decoded_pcm_bytes: 0,
       forwarded_pcm_bytes: 0, decoded_pcm_peak: 0, nonzero_pcm_frames: 0, invalid_opus_packets: 0,
       wake_events: 0, transcript_events: 0 };
@@ -106,6 +108,7 @@ export class DiscordTransport {
       speech_buffered_ms: this.utterance ? (this.utterance.input.readableLength + this.utterance.input.writableLength) * 20 : 0,
       // An instantaneous native value, not a cumulative underrun measurement.
       speech_player_missed_frames: this.speechPlayer.state.status === AudioPlayerStatus.Playing ? this.speechPlayer.state.missedFrames : null,
+      voice_timing: this.voiceTiming ? { ...this.voiceTiming } : null,
       media_kind: 'audio_only', video_supported: false, last_error: this.lastError,
       speech_worker_error: this.speechWorkerError, receive_error: this.receiveError, receive_counters: { ...this.receiveCounters } };
   }
@@ -465,6 +468,7 @@ export class DiscordTransport {
 
   stop(originRequestId = null, memberId = null) {
     this.clearWakeCalibration();
+    this.voiceProbe = null;
     if (originRequestId !== null) {
       const origin = this.turns.get(originRequestId);
       if (!REQUEST_ID.test(originRequestId) || !origin || origin.controller.signal.aborted
@@ -499,7 +503,7 @@ export class DiscordTransport {
     return this.status();
   }
 
-  async turn(text, principal, requestId, source) {
+  async turn(text, principal, requestId, source, memoryWriteback = true) {
     if (typeof text !== 'string' || !text.trim() || text.length > TEXT_LIMIT) fail('invalid_text');
     if (this.turns.size) fail('agent_busy');
     if (!REQUEST_ID.test(requestId)) fail('invalid_request_id');
@@ -517,7 +521,7 @@ export class DiscordTransport {
       const response = await fetch('http://127.0.0.1:8765/api/discord/turns', {
         method: 'POST', signal: controller.signal,
         headers: { Authorization: `Bearer ${this.ingressToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...principal, request_id: requestId, text, source }),
+        body: JSON.stringify({ ...principal, request_id: requestId, text, source, memory_writeback: memoryWriteback }),
       });
       if (!response.ok) fail('agent_ingress_rejected');
       const chunks = [];
@@ -571,8 +575,17 @@ export class DiscordTransport {
       const member = this.channel.members.get(message.member_id);
       if (!member || member.user.bot || member.voice.channelId !== this.channel.id) return;
       this.countReceive('transcript_events');
+      const probe = this.voiceProbe;
+      const diagnostic = probe && probe.member_id === message.member_id
+        && probe.generation === this.generation && performance.now() < probe.deadline;
+      if (diagnostic) this.voiceProbe = null; // One exact member turn only.
+      const timing = { request_id: message.request_id, diagnostic: !!diagnostic,
+        transcript_monotonic_ms: Number(process.hrtime.bigint()) / 1e6 };
+      this.voiceTiming = timing;
       try {
-        const result = await this.turn(message.text, principal, message.request_id, 'voice');
+        const result = await this.turn(message.text, principal, message.request_id, 'voice', !diagnostic);
+        timing.agent_ms = Math.round(Number(process.hrtime.bigint()) / 1e6 - timing.transcript_monotonic_ms);
+        timing.run_id = result.run_id ?? null;
         if (result.status !== 'completed' || !result.reply.trim()) {
           this.sendSpeech({ type: 'cancel', ...principal, request_id: message.request_id }, false); return;
         }
@@ -585,7 +598,11 @@ export class DiscordTransport {
       if (!pending || !this.samePrincipal(pending, principal) || !this.currentSpeaker(principal)) return;
       if (message.sample_rate !== 24000 || message.channels !== 1 || message.format !== 's16le' || typeof message.pcm !== 'string' || message.pcm.length > 60000
         || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(message.pcm)) fail('invalid_speech_audio');
-      if (!this.utterance) this.startSpeech(principal, message.request_id);
+      if (!this.utterance) {
+        if (this.voiceTiming?.request_id === message.request_id) this.voiceTiming.first_pcm_ms =
+          Math.round(Number(process.hrtime.bigint()) / 1e6 - this.voiceTiming.transcript_monotonic_ms);
+        this.startSpeech(principal, message.request_id);
+      }
       const utterance = this.utterance;
       if (utterance.request_id !== message.request_id || utterance.member_id !== message.member_id) return;
       const pcm = Buffer.from(message.pcm, 'base64');
@@ -664,6 +681,8 @@ export class DiscordTransport {
       this.connection.subscribe(this.speechPlayer);
       utterance.resource = createAudioResource(utterance.input, { inputType: StreamType.Opus });
       this.speechPlayer.play(utterance.resource);
+      if (this.voiceTiming?.request_id === utterance.request_id) this.voiceTiming.playback_ms =
+        Math.round(Number(process.hrtime.bigint()) / 1e6 - this.voiceTiming.transcript_monotonic_ms);
     }
     if (end) utterance.input.end();
   }
@@ -792,6 +811,12 @@ export class DiscordTransport {
       switch (message.command) {
         case 'status': value = this.status(); break;
         case 'channels': value = { channels: await this.channels() }; break;
+        case 'voice_probe':
+          if (Object.keys(message).some((key) => !['command', 'request_id', 'member_id'].includes(key))) fail('owner_probe_only');
+          if (!SNOWFLAKE.test(message.member_id ?? '') || !this.currentSpeaker(this.principal(message.member_id))) fail('probe_member_not_current');
+          if (this.turns.size || this.pendingSpeech.size || this.utterance) fail('speech_busy');
+          this.voiceProbe = { member_id: message.member_id, generation: this.generation, deadline: performance.now() + 30000 };
+          value = { armed: true, expires_in_seconds: 30, memory_writeback: false }; break;
         case 'speech_diagnostics':
           if (Object.keys(message).some((key) => !['command', 'request_id'].includes(key))) fail('owner_diagnostics_only');
           value = await this.speechDiagnostics(); break;
