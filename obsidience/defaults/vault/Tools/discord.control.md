@@ -20,6 +20,13 @@ obsidience:
   owner_maintained: true
 ---
 
+Music selections from `media.library search(type:music)` use the same `play`
+operation. The configured route may prepare the exact public YouTube source on
+TorBox before delivery; receipts distinguish pending preparation from audio
+entering the Discord player. Public receipts contain neither signed CDN URLs nor
+account credentials. The destination owns all decoder/provider children and
+cancels only its exact playback request.
+
 The optional Discord transport owns the connection and audio players. The executing Agent
 uses its granted Skill; the configured server and observed member identity remain controller
 bindings, never model-selected authority. Media catalogue selection and source admission

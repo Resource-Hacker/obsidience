@@ -898,7 +898,14 @@ a 30-second diagnostic window; default requests retain their normal Memory polic
 
 Media catalogue selection and source admission remain owned by Obsidience Media. The bot
 receives a held descriptor with exact file identity and a finite dispatch deadline, then
-opens its own descriptor for FFmpeg audio playback. Cancellation addresses the original
+opens its own descriptor for FFmpeg audio playback. Shared music search admits native
+Jellyfin Audio or exact public SoundCloud/YouTube identities. Online playback uses an explicitly
+configured direct best-audio route or the existing TorBox web-download service. Search
+is read-only; an explicit play can prepare its exact public source once, with pending
+and uncertain receipts distinct from playback. Expiring CDN URLs stay inside the
+private owner handoff and provider child stdin, never model context, argv or logs.
+The destination owns provider/decoder lifetimes and bounded streaming backpressure.
+Cancellation addresses the original
 play request, never a newer item. Current bot delivery is audio only; a soundtrack is not
 an acceptable implicit substitute for requested television/video. The implementation does
 not supply a supported bot camera/Go Live sender.

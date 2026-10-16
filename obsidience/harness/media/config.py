@@ -24,9 +24,15 @@ def _path(value: object) -> str:
 def validate_config(value: object) -> dict:
     if not isinstance(value, dict) or type(value.get('enabled', False)) is not bool:
         raise MediaUnavailable('invalid_media_config')
-    if set(value) - {'enabled', 'catalogue', 'roots', 'acquisition', 'discovery', 'debrid'}:
+    if set(value) - {'enabled', 'catalogue', 'roots', 'acquisition', 'discovery', 'debrid', 'music'}:
         raise MediaUnavailable('invalid_media_config')
     result = {'enabled': value.get('enabled', False), 'roots': []}
+    music = value.get('music')
+    if music is not None:
+        if (not isinstance(music, dict) or set(music) != {'enabled', 'delivery'}
+                or type(music['enabled']) is not bool or music['delivery'] not in ('direct', 'torbox')):
+            raise MediaUnavailable('invalid_music_config')
+        result['music'] = dict(music)
     roots = value.get('roots', [])
     if not isinstance(roots, list) or len(roots) > 32:
         raise MediaUnavailable('invalid_media_roots')

@@ -243,6 +243,113 @@ def _atoms(data: bytes, start: int, end: int, depth: int = 0) -> None:
 def _format(fd: int, relative: str) -> str:
     extension = PurePosixPath(relative).suffix.lower()
     head = os.pread(fd, 4096, 0)
+    if extension == '.mp3':
+        # Skip one bounded ID3v2 tag; require consecutive Layer III frames so a
+        # filename or metadata signature alone cannot admit a playlist.
+        offset = 0
+        if head.startswith(b'ID3'):
+            if (len(head) < 10 or head[3] not in (2, 3, 4) or head[4] == 255
+                    or any(value & 0x80 for value in head[6:10])):
+                raise MediaUnavailable('unsupported_media_header')
+            size = sum(value << shift for value, shift in zip(head[6:10], (21, 14, 7, 0)))
+            offset = 10 + size + (10 if head[3] == 4 and head[5] & 0x10 else 0)
+            if offset > 16 * 1024 * 1024:
+                raise MediaUnavailable('unsupported_media_header')
+        stream = None
+        for _ in range(2):
+            header = os.pread(fd, 4, offset)
+            if len(header) != 4:
+                raise MediaUnavailable('unsupported_media_header')
+            bits = int.from_bytes(header, 'big')
+            version, layer = (bits >> 19) & 3, (bits >> 17) & 3
+            bitrate, rate = (bits >> 12) & 15, (bits >> 10) & 3
+            if (bits >> 21 != 0x7ff or version == 1 or layer != 1
+                    or bitrate in (0, 15) or rate == 3):
+                raise MediaUnavailable('unsupported_media_header')
+            identity = (version, rate)
+            if stream is not None and stream != identity:
+                raise MediaUnavailable('unsupported_media_header')
+            stream = identity
+            rates = (44100, 48000, 32000)
+            sample_rate = rates[rate] // (1 if version == 3 else 2 if version == 2 else 4)
+            bitrates = ((0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320)
+                        if version == 3 else (0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160))
+            frame_size = (144000 if version == 3 else 72000) * bitrates[bitrate] // sample_rate
+            offset += frame_size + ((bits >> 9) & 1)
+            if offset > os.fstat(fd).st_size:
+                raise MediaUnavailable('unsupported_media_container')
+        return 'mp3'
+    if extension == '.flac':
+        # STREAMINFO is mandatory first; metadata is bounded and never followed
+        # as an external reference. The decoder owns frame validation.
+        if (len(head) < 42 or not head.startswith(b'fLaC') or head[4] & 0x7f != 0
+                or int.from_bytes(head[5:8], 'big') != 34):
+            raise MediaUnavailable('unsupported_media_header')
+        end, cursor = os.fstat(fd).st_size, 4
+        for _ in range(128):
+            block = os.pread(fd, 4, cursor)
+            if len(block) != 4 or block[0] & 0x7f == 127:
+                raise MediaUnavailable('unsupported_media_container')
+            cursor += 4 + int.from_bytes(block[1:4], 'big')
+            if cursor > min(end, 16 * 1024 * 1024):
+                raise MediaUnavailable('unsupported_media_container')
+            if block[0] & 0x80:
+                frame = os.pread(fd, 2, cursor)
+                if len(frame) != 2 or frame[0] != 255 or frame[1] & 0xfe != 0xf8:
+                    raise MediaUnavailable('unsupported_media_header')
+                return 'flac'
+        raise MediaUnavailable('unsupported_media_container')
+    if extension == '.wav':
+        if len(head) < 12 or head[:4] != b'RIFF' or head[8:12] != b'WAVE':
+            raise MediaUnavailable('unsupported_media_header')
+        end = 8 + struct.unpack_from('<I', head, 4)[0]
+        if end != os.fstat(fd).st_size:
+            raise MediaUnavailable('unsupported_media_container')
+        cursor, pcm, audio = 12, False, False
+        for _ in range(10000):
+            if cursor == end:
+                break
+            chunk = os.pread(fd, 24, cursor)
+            if len(chunk) < 8:
+                raise MediaUnavailable('unsupported_media_container')
+            kind, size = struct.unpack_from('<4sI', chunk)
+            if cursor + 8 + size + (size & 1) > end:
+                raise MediaUnavailable('unsupported_media_container')
+            if kind == b'fmt ':
+                if pcm or size < 16 or len(chunk) < 24:
+                    raise MediaUnavailable('unsupported_media_container')
+                encoding, channels, rate, _, align, bits = struct.unpack_from('<HHIIHH', chunk, 8)
+                if (encoding not in (1, 3) or not 1 <= channels <= 8 or not 8000 <= rate <= 384000
+                        or bits not in (8, 16, 24, 32, 64) or align != channels * bits // 8
+                        or (encoding == 3 and bits not in (32, 64))):
+                    raise MediaUnavailable('unsupported_media_container')
+                pcm = True
+            elif kind == b'data':
+                if not pcm or audio or not size:
+                    raise MediaUnavailable('unsupported_media_container')
+                audio = True
+            cursor += 8 + size + (size & 1)
+        if cursor != end or not pcm or not audio:
+            raise MediaUnavailable('unsupported_media_container')
+        return 'wav'
+    if extension in ('.ogg', '.opus'):
+        # Admit only native Vorbis/Opus identification packets in a BOS page;
+        # Ogg itself contains embedded packets, never file/URL references.
+        if (len(head) < 28 or head[:5] != b'OggS\x00' or head[5] != 2
+                or head[26] == 0 or len(head) < 27 + head[26]):
+            raise MediaUnavailable('unsupported_media_header')
+        segments = head[27:27 + head[26]]
+        try:
+            packet_size = sum(segments[:next(i + 1 for i, size in enumerate(segments) if size < 255)])
+        except StopIteration:
+            raise MediaUnavailable('unsupported_media_header') from None
+        start = 27 + head[26]
+        packet = head[start:start + packet_size]
+        if (len(packet) != packet_size
+                or not (packet_size >= 19 and packet.startswith(b'OpusHead')
+                        or packet_size >= 30 and packet.startswith(b'\x01vorbis'))):
+            raise MediaUnavailable('unsupported_media_header')
+        return 'ogg'
     if extension in ('.mkv', '.webm'):
         # EBML DocType must be in the bounded header, not merely an EBML signature.
         if (not head.startswith(b'\x1a\x45\xdf\xa3')
@@ -250,9 +357,10 @@ def _format(fd: int, relative: str) -> str:
                            for t in (b'matroska', b'webm'))):
             raise MediaUnavailable('unsupported_media_header')
         return 'matroska'
-    if extension not in ('.mp4', '.m4v') or len(head) < 16 or head[4:8] != b'ftyp':
+    if extension not in ('.mp4', '.m4v', '.m4a') or len(head) < 16 or head[4:8] != b'ftyp':
         raise MediaUnavailable('unsupported_media_header')
-    if head[8:12] not in (b'isom', b'iso2', b'iso4', b'iso5', b'iso6', b'mp41', b'mp42', b'avc1', b'M4V ', b'dash'):
+    brands = (b'isom', b'iso2', b'iso4', b'iso5', b'iso6', b'mp41', b'mp42', b'avc1', b'M4V ', b'dash')
+    if head[8:12] not in brands + ((b'M4A ', b'M4B ') if extension == '.m4a' else ()):
         raise MediaUnavailable('unsupported_media_header')
     end = os.fstat(fd).st_size
     cursor = 0

@@ -125,3 +125,9 @@ watchfiles==1.2.0
 websockets==15.0.1
 yarl==1.25.1
 zipp==4.1.1
+
+# 2026-10-15: shared public music provider.
+mutagen==1.48.1
+pycryptodomex==3.24.1
+yt-dlp==2026.8.19
+yt-dlp-ejs==0.8.0

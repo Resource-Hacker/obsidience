@@ -1,11 +1,23 @@
 ---
 type: skill
 title: Using media.library
-description: Read the configured catalogue and select one exact movie edition or episode source.
+description: Discover music, movies and episodes and select an exact source for the
+  requested destination.
 obsidience:
   tool: '[[Tools/media.library]]'
   owner_maintained: true
 ---
+
+For songs, artists or music, call `search` with `type:music`, never `movie` or
+`series`. This checks native music and then configured online music. Returned `id`
+values are already bound for playback in the same activation: no extra `select`
+call is required. For an explicit play request, send one matching id to the
+requested destination; in Discord use `discord.control play(id,media_kind:audio)`.
+For an artist-only request, choose a matching official/top track without asking
+which song unless the results are genuinely ambiguous. Preserve an explicitly
+requested song, version, live recording or remix. A search-only request remains
+a read. Report provider preparation as pending and actual player startup as
+playing; never infer an empty music library from film/TV discovery results.
 
 ## Runtime
 

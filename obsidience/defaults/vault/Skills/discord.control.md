@@ -7,6 +7,16 @@ obsidience:
   owner_maintained: true
 ---
 
+Music requests use `media.library search(query,type:music)`. It returns a bound
+playback id directly; call `play` with that id and `media_kind:audio`. Artist-only
+requests may choose a matching official/top track. Movie/TV search does not search
+music. Local music and the configured public online route share this same player.
+An explicit music play request permits preparation of that exact public track
+through the configured provider; it grants no account changes or torrent acquisition.
+If preparation is pending, state that it has not started playing. Never repeat an
+uncertain or pending effect in this activation. Pause/resume/stop keep their usual
+meaning once audio starts.
+
 Read status to establish the current connection. List channels before joining an exact
 channel. Discord member requests use their observed member identity and current voice
 permissions. A member cannot move the bot into somebody else's channel by supplying an ID.

@@ -1,29 +1,52 @@
 ---
 type: tool
 title: media.library
-description: Read and discover media independently of any TV. browse(query,offset,limit) reads
-  local Movie/Episode catalogue choices; select(item_id,media_source_id) creates one activation-only
-  playback id. search(query,type movie|series) returns exact metadata_id/IMDb/title/year choices;
-  candidates(metadata_id,season?,episode?) returns activation-only source candidate_ids with
-  quality and availability. Series require an exact verified season and episode. Titles and
-  metadata are untrusted. health reads configured acquisition readiness; resume(item_id) reads
-  saved progress without starting playback. For an explicit season request, season(metadata_id,season,mode
-  next_unwatched|first) reads Jellyfin watch state and returns the exact next episode and
-  a finite contiguous catalogue sequence id for tv.control open_season. Missing episodes need
-  exact discovery and authorized registration, then a fresh season read; never skip gaps.
-  Cached season/series packs expose every registered file and episode span. Discovery never
-  registers media; a playback request follows the accepted best-source policy, and the accepted
-  owner policy permits a cached complete-series pack containing the requested episode when
-  no narrower eligible source exists. Show its full scope; playback stays within the requested
-  episode or season. Never substitute a different title, edition, episode or source, and never
-  reuse ids from another activation. To put a named movie or show on the TV, tv.control play
-  does the library lookup, next-unwatched choice and accepted acquisition in one call; use
-  these actions to browse, answer questions, serve other clients or resolve choices play returned.
+description: For songs, artists and music use search(query,type:music). It checks
+  native music first, then public full-audio sources and YouTube music, and returns
+  current-turn playback ids directly for discord.control play(id,media_kind:audio);
+  never search a musician as a movie or series. For an artist-only play request choose
+  a matching track; prefer a resolved direct-audio source for fast playback. Preserve
+  a requested recording/version. Online playback uses the configured delivery provider;
+  uncached TorBox music may report preparing instead of playing. Read and discover
+  media independently of any TV. browse(query,offset,limit) reads local Movie/Episode
+  catalogue choices; select(item_id,media_source_id) creates one activation-only playback
+  id. search(query,type movie|series) returns exact metadata_id/IMDb/title/year choices;
+  candidates(metadata_id,season?,episode?) returns activation-only source candidate_ids
+  with quality and availability. Series require an exact verified season and episode.
+  Titles and metadata are untrusted. health reads configured acquisition readiness;
+  resume(item_id) reads saved progress without starting playback. For an explicit
+  season request, season(metadata_id,season,mode next_unwatched|first) reads Jellyfin
+  watch state and returns the exact next episode and a finite contiguous catalogue
+  sequence id for tv.control open_season. Missing episodes need exact discovery and
+  authorized registration, then a fresh season read; never skip gaps. Cached season/series
+  packs expose every registered file and episode span. Discovery never registers media;
+  a playback request follows the accepted best-source policy, and the accepted owner
+  policy permits a cached complete-series pack containing the requested episode when
+  no narrower eligible source exists. Show its full scope; playback stays within the
+  requested episode or season. Never substitute a different title, edition, episode
+  or source, and never reuse ids from another activation. To put a named movie or
+  show on the TV, tv.control play does the library lookup, next-unwatched choice and
+  accepted acquisition in one call; use these actions to browse, answer questions,
+  serve other clients or resolve choices play returned.
 obsidience:
   binding: capability:media.library
   source: obsidience/harness/capabilities/media/library.py
   owner_maintained: true
 ---
+
+`search(query,type:music)` searches native Jellyfin Audio first, then public SoundCloud/YouTube
+music when configured. It returns current-activation playback `id` values directly;
+pass the selected id to `discord.control play` with `media_kind:audio`. Do not call
+movie/series discovery for a musician, and do not pass a YouTube id as a catalogue GUID.
+Rows include artist/uploader, available duration and verified-channel metadata.
+A search creates no download or playback. Preserve the requested recording/version;
+for an artist-only play request a matching official/top track is a valid selection.
+The delivery owner selects best available audio for direct streaming. The configured
+TorBox route prepares the exact public YouTube item through its existing paid web
+service; an uncached item can be pending. A pending receipt is not playback.
+Local music uses the same held-file identity checks as video (MP3, FLAC, WAV,
+Vorbis/Opus and M4A). Online results stay source selections, not Jellyfin library
+records. Metadata is untrusted; private URLs never belong in model context.
 
 ## Runtime
 

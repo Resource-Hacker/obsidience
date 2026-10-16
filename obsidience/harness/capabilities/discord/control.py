@@ -75,27 +75,58 @@ async def execute(args: dict, context: dict) -> dict:
                 return rejected('This Discord transport supports audio playback only')
             candidate = context.get('_media_candidates', {}).get(args['id'])
             if candidate is None:
-                return rejected('Select the exact catalogue item in this turn before playback')
-            catalogue = service.catalogue()
-            current = await asyncio.to_thread(catalogue.revalidate, candidate)
-            descriptor = {key: current[key] for key in ('provider', 'root_id', 'relative_path', 'revision')}
-            # Admission owns an FD, so await its cleanup even if the caller is
-            # cancelled while the finite source probe is still completing.
-            pending = asyncio.create_task(asyncio.to_thread(sources.admit, catalogue.config, descriptor))
-            try:
-                admitted = await asyncio.shield(pending)
-            except asyncio.CancelledError:
+                return rejected('Select the exact music or catalogue item in this turn before playback')
+            if candidate.get('provider') in ('youtube', 'soundcloud'):
+                from ...media import online_music
+                from ...media.config import load_config as media_config
+                current = online_music.revalidate(candidate)
+                media = media_config()
+                music = media.get('music') or {}
+                if not media.get('enabled') or not music.get('enabled'):
+                    return rejected('Online music is disabled')
+                if current['provider'] == 'youtube' and music['delivery'] == 'torbox':
+                    from ...media.web_music import prepare
+                    # This provider can create an exact web source. Record the
+                    # attempt before dispatch, including cancellation/uncertainty.
+                    attempts[attempt_key] = {'status': 'failed', 'delivery': 'uncertain',
+                                            'must_not_replay': True, 'failure': 'Music preparation was already attempted'}
+                    prepared = await prepare(current, context, cancel)
+                    if 'source' not in prepared:
+                        attempts[attempt_key] = prepared
+                        return prepared
+                    payload['source'] = prepared['source']
+                else:
+                    if 'debrid_binding' in current:
+                        return rejected('Music delivery configuration changed; select the track again')
+                    field = 'video_id' if current['provider'] == 'youtube' else 'track_id'
+                    payload['source'] = {'provider': current['provider'], field: current[field]}
+            else:
+                catalogue = service.catalogue()
+                current = await asyncio.to_thread(catalogue.revalidate, candidate)
+                descriptor = {key: current[key] for key in ('provider', 'root_id', 'relative_path', 'revision')}
+                # Admission owns an FD; cancellation waits for bounded cleanup.
+                pending = asyncio.create_task(asyncio.to_thread(sources.admit, catalogue.config, descriptor))
                 try:
-                    (await pending).close()
-                finally:
-                    raise
-            admitted.validate()
+                    admitted = await asyncio.shield(pending)
+                except asyncio.CancelledError:
+                    try:
+                        (await pending).close()
+                    finally:
+                        raise
+                admitted.validate()
+                payload['path'] = f'/proc/{os.getpid()}/fd/{admitted.fd}'
+                info = os.fstat(admitted.fd)
+                payload['file_identity'] = {key: str(value) for key, value in (
+                    ('dev', info.st_dev), ('ino', info.st_ino), ('size', info.st_size), ('mtime_ns', info.st_mtime_ns))}
             if cancel is not None and cancel.is_set():
-                return rejected('Discord media playback was cancelled')
-            payload['path'] = f'/proc/{os.getpid()}/fd/{admitted.fd}'
-            info = os.fstat(admitted.fd)
-            payload['file_identity'] = {key: str(value) for key, value in (
-                ('dev', info.st_dev), ('ino', info.st_ino), ('size', info.st_size), ('mtime_ns', info.st_mtime_ns))}
+                if candidate.get('provider') in ('youtube', 'soundcloud'):
+                    # A provider preparation may already exist; never mislabel
+                    # this interrupted play as a safely repeatable non-effect.
+                    attempts[attempt_key] = {'status': 'cancelled', 'delivery': 'not_dispatched',
+                                            'must_not_replay': True}
+                    raise asyncio.CancelledError
+                else:
+                    return rejected('Discord media playback was cancelled')
             payload['expires_at_ms'] = int(time.time() * 1000) + 14000
         if not readonly:
             attempts[attempt_key] = {'status': 'failed', 'delivery': 'uncertain',
@@ -131,6 +162,8 @@ async def execute(args: dict, context: dict) -> dict:
             attempts[attempt_key] = receipt
         return receipt
     except MediaUnavailable:
+        if action == 'play' and attempt_key in attempts:
+            return attempts[attempt_key]
         return rejected('The exact selected media source is unavailable or changed')
     finally:
         if admitted is not None:

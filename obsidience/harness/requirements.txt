@@ -24,3 +24,5 @@ hassil==3.12.1
 google-adk==2.11.0
 litellm==1.101.0
 aiosqlite==0.22.1
+# Shared music discovery and best-audio streaming; pinned local JS challenge package.
+yt-dlp[default]==2026.8.19

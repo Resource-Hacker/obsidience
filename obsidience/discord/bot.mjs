@@ -3,7 +3,7 @@ import net from 'node:net';
 import { randomUUID, createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { PassThrough } from 'node:stream';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Client, GatewayIntentBits, PermissionFlagsBits, ChannelType, SlashCommandBuilder, MessageFlags } from 'discord.js';
 import { AudioPlayerStatus, VoiceConnectionStatus, EndBehaviorType, NoSubscriberBehavior, StreamType,
   createAudioPlayer, createAudioResource, entersState, joinVoiceChannel } from '@discordjs/voice';
@@ -45,6 +45,8 @@ export class DiscordTransport {
     this.speechDeadlines = new Map();
     this.speechConnecting = null;
     this.media = null;
+    this.pendingMedia = null;
+    this.mediaCleanups = new Set();
     this.cancelledMediaRequests = new Set();
     this.utterance = null;
     this.mutating = false;
@@ -65,8 +67,13 @@ export class DiscordTransport {
     this.client = new Client({ intents, allowedMentions: ALLOWED_MENTIONS });
     this.mediaPlayer = createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Pause } });
     this.speechPlayer = createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Pause } });
-    this.mediaPlayer.on('error', () => { this.lastError = 'media_playback_failed'; this.stopMedia(); });
-    this.mediaPlayer.on(AudioPlayerStatus.Idle, () => this.stopMedia());
+    this.mediaPlayer.on('error', (error) => {
+      if (!this.media || error.resource !== this.media.resource) return;
+      this.lastError = 'media_playback_failed'; this.stopMedia(this.media);
+    });
+    this.mediaPlayer.on(AudioPlayerStatus.Idle, (oldState) => {
+      if (this.media?.resource && oldState.resource === this.media.resource) this.stopMedia(this.media);
+    });
     this.speechPlayer.on('error', (error) => {
       if (error.resource !== this.utterance?.resource) return;
       this.lastError = 'speech_playback_failed'; this.finishSpeech(false);
@@ -500,6 +507,7 @@ export class DiscordTransport {
     this.speech?.destroy();
     this.speech = null;
     if (connection && connection.state.status !== VoiceConnectionStatus.Destroyed) connection.destroy();
+    await Promise.allSettled([...this.mediaCleanups]);
     return this.status();
   }
 
@@ -708,70 +716,151 @@ export class DiscordTransport {
     }
   }
 
-  stopMedia() {
-    const media = this.media;
-    this.media = null;
-    this.mediaPlayer.stop(true);
-    if (media) {
-      media.process.stdout.destroy(); media.process.kill('SIGKILL');
-      void media.handle.close().catch(() => {});
+  stopMedia(expected = null) {
+    if (!expected) {
+      if (this.pendingMedia) this.stopMedia(this.pendingMedia);
+      if (this.media) this.stopMedia(this.media);
+      return;
     }
+    const active = this.media === expected;
+    if (!active && this.pendingMedia !== expected) return;
+    const media = expected;
+    if (this.pendingMedia === media) this.pendingMedia = null;
+    if (active) this.media = null;
+    clearTimeout(media.startTimer);
+    media.startAbort.abort();
+    if (active) this.mediaPlayer.stop(true);
+    media.resource?.playStream.destroy();
+    for (const child of media.children) {
+      child.stdout?.unpipe();
+      child.stdin?.destroy();
+      child.stdout?.destroy();
+      // The extractor may spawn a JavaScript runtime; its whole owned group
+      // must stop even when its leader has already closed its output.
+      try { process.kill(-child.pid, 'SIGKILL'); } catch {}
+    }
+    if (media.handle) media.cleanup.push(media.handle.close().catch(() => {}));
+    const cleanup = Promise.allSettled(media.cleanup);
+    this.mediaCleanups.add(cleanup);
+    void cleanup.finally(() => this.mediaCleanups.delete(cleanup));
   }
 
   cancelMedia(requestId) {
     if (!REQUEST_ID.test(requestId ?? '')) fail('playback_request_id_required');
     this.cancelledMediaRequests.add(requestId);
     while (this.cancelledMediaRequests.size > 256) this.cancelledMediaRequests.delete(this.cancelledMediaRequests.values().next().value);
-    const stopped = this.media?.requestId === requestId;
-    if (stopped) this.stopMedia();
+    const active = this.media?.requestId === requestId ? this.media : null;
+    const pending = this.pendingMedia?.requestId === requestId ? this.pendingMedia : null;
+    const stopped = !!active || !!pending;
+    if (active) this.stopMedia(active);
+    if (pending) this.stopMedia(pending);
     return { playback_request_id: requestId, playback_stopped: stopped,
       delivery: stopped ? 'audio_playback_stopped' : 'media_cancellation_registered', ...this.status() };
   }
 
   async play(message) {
     if (!this.connection || !this.channel || this.connection.state.status !== VoiceConnectionStatus.Ready) fail('voice_not_ready');
-    if (this.utterance) fail('speech_busy');
-    const { path: filename, file_identity: identity, expires_at_ms: expiresAt, request_id: requestId } = message;
-    const identityFields = ['dev', 'ino', 'size', 'mtime_ns'];
-    if (!identity || typeof identity !== 'object' || Array.isArray(identity)
-      || Object.keys(identity).length !== identityFields.length
-      || identityFields.some((key) => typeof identity[key] !== 'string' || !/^[0-9]{1,30}$/.test(identity[key]))) fail('media_file_identity_required');
+    if (this.utterance || this.pendingSpeech.size) fail('speech_busy');
+    if (this.pendingMedia) fail('media_start_busy');
+    const { path: filename, file_identity: identity, source, expires_at_ms: expiresAt, request_id: requestId } = message;
+    const streamed = source !== undefined;
+    const torbox = source?.provider === 'torbox_web';
+    const soundcloud = source?.provider === 'soundcloud';
+    if (streamed) {
+      if (!source || typeof source !== 'object' || Array.isArray(source)
+        || Object.keys(source).length !== (torbox ? 3 : 2)
+        || !['youtube', 'torbox_web', 'soundcloud'].includes(source.provider)
+        || (soundcloud ? typeof source.track_id !== 'string' || !/^[0-9]{1,20}$/.test(source.track_id)
+          : typeof source.video_id !== 'string' || !/^[A-Za-z0-9_-]{11}$/.test(source.video_id))
+        || Object.hasOwn(message, 'path') || Object.hasOwn(message, 'file_identity')) fail('invalid_media_source');
+      if (torbox) {
+        if (typeof source.url !== 'string' || source.url.length > 8192
+          || /[\x00-\x20\x7f-\x9f]/.test(source.url) || source.url.includes('#')) fail('invalid_media_source');
+        let url;
+        try { url = new URL(source.url); } catch { fail('invalid_media_source'); }
+        if (url.protocol !== 'https:' || url.username || url.password || url.hash || url.port
+          || !/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+torbox\.app$/.test(url.hostname)
+          || url.href !== source.url) fail('invalid_media_source');
+      }
+    } else {
+      const identityFields = ['dev', 'ino', 'size', 'mtime_ns'];
+      if (!identity || typeof identity !== 'object' || Array.isArray(identity)
+        || Object.keys(identity).length !== identityFields.length
+        || identityFields.some((key) => typeof identity[key] !== 'string' || !/^[0-9]{1,30}$/.test(identity[key]))) fail('media_file_identity_required');
+      if (typeof filename !== 'string' || !/^\/proc\/\d+\/fd\/\d+$/.test(filename)) fail('admitted_media_descriptor_required');
+    }
     if (!Number.isSafeInteger(expiresAt) || expiresAt > Date.now() + 15000) fail('invalid_media_deadline');
-    const current = () => !this.cancelledMediaRequests.has(requestId) && Date.now() < expiresAt;
-    if (!current()) fail('media_request_expired_or_cancelled');
-    // The Harness retains its admitted source FD until our Playing receipt.
-    // Open that descriptor once, then pass our own held descriptor to FFmpeg.
-    if (typeof filename !== 'string' || !/^\/proc\/\d+\/fd\/\d+$/.test(filename)) fail('admitted_media_descriptor_required');
     const generation = this.generation;
-    const handle = await fs.open(filename, 'r');
-    let stat;
-    try { stat = await handle.stat({ bigint: true }); }
-    catch (error) { await handle.close(); throw error; }
-    if (!stat.isFile() || stat.dev.toString() !== identity.dev || stat.ino.toString() !== identity.ino
-      || stat.size.toString() !== identity.size || stat.mtimeNs.toString() !== identity.mtime_ns) {
-      await handle.close(); fail('admitted_media_identity_changed');
+    const channel = this.channel;
+    const connection = this.connection;
+    const current = () => generation === this.generation && channel === this.channel && connection === this.connection
+      && connection.state.status === VoiceConnectionStatus.Ready && !this.closing
+      && !this.cancelledMediaRequests.has(requestId) && Date.now() < expiresAt
+      && (!message.member_id || this.currentSpeaker({ generation, guild_id: this.config.guild_id,
+        channel_id: channel.id, member_id: message.member_id }));
+    if (!current()) fail('media_request_expired_or_cancelled');
+    const media = { generation, requestId, children: [], cleanup: [], startAbort: new AbortController() };
+    this.pendingMedia = media;
+    media.startTimer = setTimeout(() => this.stopMedia(media), Math.max(1, expiresAt - Date.now()));
+    const ownedChild = (executable, args, options) => {
+      const child = spawn(executable, args, { ...options, detached: true });
+      media.children.push(child);
+      media.cleanup.push(new Promise((resolve) => child.once('close', resolve)));
+      child.on('error', () => this.stopMedia(media));
+      child.stdin?.on('error', () => this.stopMedia(media));
+      child.stdout?.on('error', () => this.stopMedia(media));
+      child.on('close', (code) => { if (code) this.stopMedia(media); });
+      return child;
+    };
+    try {
+      if (!streamed) {
+        // Verify a replacement while the previous item remains owned/playing.
+        const admission = (async () => {
+          const handle = await fs.open(filename, 'r');
+          if (this.pendingMedia !== media || !current()) { await handle.close(); fail('play_cancelled'); }
+          media.handle = handle;
+          const stat = await handle.stat({ bigint: true });
+          if (!stat.isFile() || stat.dev.toString() !== identity.dev || stat.ino.toString() !== identity.ino
+            || stat.size.toString() !== identity.size || stat.mtimeNs.toString() !== identity.mtime_ns) fail('admitted_media_identity_changed');
+        })();
+        media.cleanup.push(admission.catch(() => {}));
+        await admission;
+      }
+      if (this.pendingMedia !== media || this.utterance || this.pendingSpeech.size || !current()) fail('play_cancelled');
+      if (this.media) this.stopMedia(this.media);
+      this.pendingMedia = null;
+      this.media = media;
+      const child = ownedChild('/usr/bin/ffmpeg', ['-nostdin', '-hide_banner', '-loglevel', 'error', '-threads', '1', '-filter_threads', '1',
+        '-protocol_whitelist', streamed ? 'pipe' : 'file,pipe', '-i', streamed ? 'pipe:0' : '/proc/self/fd/3',
+        '-vn', '-f', 's16le', '-ar', '48000', '-ac', '2', 'pipe:1'],
+      { stdio: streamed ? ['pipe', 'pipe', 'ignore'] : ['ignore', 'pipe', 'ignore', media.handle.fd], env: { PATH: '/usr/bin', LANG: 'C' } });
+      if (streamed) {
+        const runtime = fileURLToPath(new URL('../', import.meta.url));
+        const provider = ownedChild(fileURLToPath(new URL('../../.venv/bin/python', import.meta.url)),
+          torbox ? ['-m', 'harness.media.web_music', 'stream']
+            : ['-m', 'harness.media.online_music', 'stream', source.provider, soundcloud ? source.track_id : source.video_id],
+          { cwd: runtime, stdio: [torbox ? 'pipe' : 'ignore', 'pipe', 'ignore'], env: { PATH: '/usr/bin', LANG: 'C', PYTHONPATH: runtime } });
+        // The private CDN URL never enters argv, environment or logs.
+        if (torbox) provider.stdin.end(JSON.stringify({ url: source.url }));
+        // Native pipe backpressure bounds both the compressed and decoded queues.
+        provider.stdout.pipe(child.stdin);
+      }
+      media.resource = createAudioResource(child.stdout, { inputType: StreamType.Raw });
+      // prism-media exposes a supported encoder control capped at 128 kbps.
+      const bitrate = Number.isSafeInteger(channel.bitrate) ? Math.max(16000, Math.min(128000, channel.bitrate)) : null;
+      if (bitrate !== null) media.resource.encoder?.setBitrate(bitrate);
+      connection.subscribe(this.mediaPlayer);
+      this.mediaPlayer.play(media.resource);
+      try { await entersState(this.mediaPlayer, AudioPlayerStatus.Playing, media.startAbort.signal); }
+      catch { fail('audio_playback_not_started'); }
+      if (this.media !== media || !current()) fail('play_cancelled');
+      clearTimeout(media.startTimer);
+      return { delivery: 'audio_playback_started', playback_request_id: requestId, media_kind: 'audio_only', video_supported: false,
+        ...(streamed ? { provider: source.provider, audio_bitrate: bitrate ?? null } : {}), ...this.status() };
+    } catch (error) {
+      this.stopMedia(media);
+      throw error;
     }
-    if (generation !== this.generation || this.utterance || this.pendingSpeech.size || !current()) {
-      await handle.close(); fail('media_request_expired_or_cancelled');
-    }
-    this.stopMedia();
-    const child = spawn('/usr/bin/ffmpeg', ['-nostdin', '-hide_banner', '-loglevel', 'error', '-threads', '1', '-filter_threads', '1',
-      '-protocol_whitelist', 'file,pipe', '-i', '/proc/self/fd/3', '-vn', '-f', 's16le', '-ar', '48000', '-ac', '2', 'pipe:1'],
-    { stdio: ['ignore', 'pipe', 'ignore', handle.fd], env: { PATH: '/usr/bin', LANG: 'C' } });
-    this.media = { process: child, generation, handle, requestId };
-    child.on('error', () => { if (this.media?.process === child) this.stopMedia(); });
-    child.stdout.on('error', () => { if (this.media?.process === child) this.stopMedia(); });
-    child.on('close', (code) => { if (code && this.media?.process === child) this.stopMedia(); });
-    if (!current()) { this.stopMedia(); fail('media_request_expired_or_cancelled'); }
-    this.connection.subscribe(this.mediaPlayer);
-    this.mediaPlayer.play(createAudioResource(child.stdout, { inputType: StreamType.Raw }));
-    try { await entersState(this.mediaPlayer, AudioPlayerStatus.Playing, Math.min(5000, Math.max(1, expiresAt - Date.now()))); }
-    catch { if (this.media?.process === child) this.stopMedia(); fail('audio_playback_not_started'); }
-    if (generation !== this.generation || this.media?.process !== child || !current()) {
-      if (this.media?.process === child) this.stopMedia();
-      fail('play_cancelled');
-    }
-    return { delivery: 'audio_playback_started', playback_request_id: requestId, media_kind: 'audio_only', video_supported: false, ...this.status() };
   }
 
   async command(message) {

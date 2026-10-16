@@ -239,3 +239,25 @@ backups through supported APIs, SQLite's backup API, or a quiesced complete snap
 never copy an active database file alone or delete WAL sidecars. Code rollback cannot
 reverse a provider database migration. Remove a virtual catalogue bind/dependency
 only while the catalogue is stopped; drain owned readers before stopping its provider.
+
+## Music
+
+`media.library search(query,type:music)` returns activation-bound music choices.
+Native Jellyfin Audio is checked first through the ordinary source root and held-FD
+contract (MP3, FLAC, PCM/float WAV, Vorbis/Opus and M4A); virtual torrent roots stay
+video-only. No empty music root or new catalogue is created automatically.
+
+Optional private configuration `music: {enabled: true, delivery: direct|torbox}`
+enables public SoundCloud/YouTube discovery using pinned yt-dlp and local EJS/Node. SoundCloud candidates are checked for complete available audio and omit DRM-only
+results, short previews and unwanted covers. Direct
+delivery streams `bestaudio/best`; it uses no browser cookies and upstream access
+failures stay explicit. `torbox` uses the configured paid provider's exact web-download
+API, independently of the cached-only movie/series torrent policy. A play request
+reuses an exact existing item or submits it once. Uncached preparation can be pending;
+there is no hidden autoplay scheduler, P2P fallback or account change.
+
+Discord consumes the selection through its existing media player. Provider URLs
+remain private and short-lived; the Node-owned child streams bytes with backpressure
+to FFmpeg, with no complete local download. Stop/cancel/leave reap the provider and
+decoder. Channel-limited Opus delivery is not lossless. Video resolution is not an
+audio quality measure; this route does not implement bot video/Go Live.

@@ -140,7 +140,7 @@ class JellyfinCatalogue:
     def _query(self, **params) -> dict:
         catalogue = self._catalogue()
         result = self._get('/Items', {'userId': catalogue['user_id'],
-                                      'includeItemTypes': 'Movie,Episode', 'recursive': 'true',
+                                      'includeItemTypes': 'Movie,Episode,Audio', 'recursive': 'true',
                                       'fields': 'Path,MediaSources', 'enableImages': 'false',
                                       'enableUserData': 'false', 'sortBy': 'SortName',
                                       'sortOrder': 'Ascending', **params})
@@ -155,15 +155,16 @@ class JellyfinCatalogue:
             raise MediaUnavailable('catalogue_item_unavailable')
         item = items[0]
         if (not isinstance(item, dict) or _id(item.get('Id')) != _id(item_id)
-                or item.get('Type') not in ('Movie', 'Episode') or item.get('IsFolder') is True):
+                or item.get('Type') not in ('Movie', 'Episode', 'Audio') or item.get('IsFolder') is True):
             raise MediaUnavailable('catalogue_item_unavailable')
         return item
 
-    def _local(self, source: dict) -> tuple[str, str]:
+    def _local(self, source: dict, *, item_type: str) -> tuple[str, str]:
         if (source.get('Protocol') != 'File' or source.get('Type') != 'Default'
                 or source.get('RequiresOpening') or source.get('RequiresClosing')
                 or source.get('RequiresLooping') or source.get('IsRemote')
-                or source.get('VideoType', 'VideoFile') != 'VideoFile'):
+                or (item_type == 'Audio' and source.get('VideoType') not in (None, 'VideoFile'))
+                or (item_type != 'Audio' and source.get('VideoType', 'VideoFile') != 'VideoFile')):
             raise MediaUnavailable('unsupported_catalogue_source')
         path = source.get('Path')
         if (not isinstance(path, str) or len(path) > 4096 or not path.startswith('/')
@@ -175,7 +176,10 @@ class JellyfinCatalogue:
             raise MediaUnavailable('catalogue_source_not_mapped')
         root = matches[0]
         relative = path[len(root['catalogue_path']) + 1:]
-        if PurePosixPath(relative).suffix.lower() not in ('.mp4', '.m4v', '.mkv', '.webm'):
+        extensions = ('.mp3', '.flac', '.wav', '.ogg', '.opus', '.m4a') if item_type == 'Audio' else (
+            '.mp4', '.m4v', '.mkv', '.webm')
+        if (PurePosixPath(relative).suffix.lower() not in extensions
+                or (item_type == 'Audio' and 'mount_path' in root)):
             raise MediaUnavailable('unsupported_catalogue_source')
         return root['id'], relative
 
@@ -188,7 +192,7 @@ class JellyfinCatalogue:
         matches = [s for s in sources if isinstance(s, dict) and s.get('Id') == source_id]
         if len(matches) != 1:
             raise MediaUnavailable('catalogue_source_unavailable')
-        self._local(matches[0])
+        self._local(matches[0], item_type=item['Type'])
         return matches[0]
 
     @staticmethod
@@ -202,13 +206,17 @@ class JellyfinCatalogue:
         return hashlib.sha256(json.dumps(material, sort_keys=True, separators=(',', ':'),
                                          allow_nan=False).encode()).hexdigest()
 
-    def browse(self, query: str = '', offset: int = 0, limit: int = 20) -> dict:
+    def browse(self, query: str = '', offset: int = 0, limit: int = 20,
+               *, item_type: str | None = None) -> dict:
         if (not isinstance(query, str) or len(query) > 200 or any(ord(c) < 32 for c in query)
                 or type(offset) is not int or not 0 <= offset <= 100000
-                or type(limit) is not int or not 1 <= limit <= 20):
+                or type(limit) is not int or not 1 <= limit <= 20
+                or item_type not in (None, 'Movie', 'Episode', 'Audio')):
             raise MediaUnavailable('invalid_catalogue_query')
         self._pin()
-        page = self._query(searchTerm=query, startIndex=offset, limit=limit)
+        types = (item_type,) if item_type else ('Movie', 'Episode')
+        page = self._query(searchTerm=query, startIndex=offset, limit=limit,
+                           includeItemTypes=','.join(types))
         items = page.get('Items')
         total = page.get('TotalRecordCount')
         if (not isinstance(items, list) or len(items) > limit
@@ -216,7 +224,7 @@ class JellyfinCatalogue:
             raise MediaUnavailable('invalid_catalogue_response')
         rows = []
         for item in items:
-            if not isinstance(item, dict) or item.get('Type') not in ('Movie', 'Episode'):
+            if not isinstance(item, dict) or item.get('Type') not in types:
                 continue
             title = _text(item.get('Name'))
             if not title:
@@ -246,6 +254,15 @@ class JellyfinCatalogue:
                              'series': _text(item.get('SeriesName')),
                              'season': _number(item.get('ParentIndexNumber')),
                              'episode': _number(item.get('IndexNumber'))})
+                if item['Type'] == 'Audio':
+                    artists = item.get('Artists')
+                    artist = ', '.join(name for value in artists[:8]
+                                       if (name := _text(value))) if isinstance(artists, list) else ''
+                    rows[-1].update(season=None, episode=None,
+                                    artist=_text(artist) or _text(item.get('AlbumArtist')),
+                                    album=_text(item.get('Album')),
+                                    track=_number(item.get('IndexNumber')),
+                                    disc=_number(item.get('ParentIndexNumber')))
         next_offset = offset + len(items)
         return {'items': rows, 'offset': offset, 'limit': limit, 'total': total,
                 'next_offset': next_offset if items and next_offset < total else None}
@@ -273,7 +290,7 @@ class JellyfinCatalogue:
                         expected_episode['season'], expected_episode['episode'], expected_episode['episode_end'])):
                 raise MediaUnavailable('catalogue_episode_identity_changed')
         source = self._source(item, media_source_id)
-        root, relative = self._local(source)
+        root, relative = self._local(source, item_type=item['Type'])
         local = describe(self.config, root, relative, expected_episode=expected_episode)
         return {**local, 'catalogue_instance': catalogue['instance_id'],
                 'item_id': _id(item_id), 'media_source_id': media_source_id,

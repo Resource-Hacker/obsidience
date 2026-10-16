@@ -988,6 +988,18 @@
         }
       },
       "integration": "System dependencies invoked without redistribution. A dedicated ephemeral headless Edge page uses AMD-only ANGLE/Vulkan to render the standalone Discord Knowledge and Hindsight graphs, CDP viewport frames feed FFmpeg and v4l2loopback. No desktop capture, audio, existing profile, general trace or bot-account video."
+    },
+    "yt_dlp": {
+      "repository": "https://github.com/yt-dlp/yt-dlp",
+      "version": "2026.8.19",
+      "license": "Unlicense",
+      "integration": "Installed default-extra dependency for shared Media public SoundCloud/YouTube music metadata and optional direct bestaudio streaming. Destination-owned child only; no second catalogue, account cookies, scheduler or Harness byte proxy. JavaScript challenge runtime is the installed Node; no remote EJS updates."
+    },
+    "yt_dlp_ejs": {
+      "repository": "https://github.com/yt-dlp/ejs",
+      "version": "0.8.0",
+      "license": "Unlicense",
+      "integration": "Pinned yt-dlp JavaScript challenge package from its default extra, executed by existing Node runtime in the isolated provider child."
     }
   }
 }
