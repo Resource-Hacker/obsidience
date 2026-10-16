@@ -296,9 +296,38 @@ that prevents a pending delayed start. It never stops a newer unrelated media
 request, never cancels the Agent, and is absent from the Discord slash commands
 and model-facing action catalog. Parent cleanup may use it after member departure.
 FFmpeg network protocols are disabled. The receipt says
-`delivery: audio_playback_started` only after AudioPlayer enters Playing. This
-attests local audio packet playback, never a listener's speakers or video playback.
+`delivery: audio_playback_started` only after AudioPlayer enters Playing.
+A voice-turn preparation instead returns `delivery: audio_playback_ready` after
+a real encoded packet is buffered, while awaiting that turn's announcement.
+Readiness attests decoded source availability; started attests local player
+playback. Neither attests a listener's speakers or video playback.
 `say` reports only `speech_requested`; playback is observed separately in status.
+
+Discord speech applies a fixed +6.02 dB gain before native Opus encoding, using
+the existing Executive-style 0.85 soft knee and 0.95 peak ceiling. It preserves
+stream dynamics without per-chunk normalization or extra buffering. Media uses
+the existing FFmpeg owner's -4 dB gain and a 400 ms fade-in measured in the source
+PCM, so the fade starts with the first heard song samples, independent of how
+long preparation or the announcement took. Cue levels are unchanged.
+
+When the exact member's active voice request selects a track, media preparation
+waits for a real encoded packet but keeps the new track unplayed and backpressured.
+The owner receipt says `delivery:"audio_playback_ready"` and
+`awaiting_announcement:true`; it does not claim audible playback. After that
+same request's spoken announcement drains, the native completion/follow-up cue
+also drains, then the retained song starts with its fade. A successful empty
+announcement releases it after the completion cue. Missing cue assets do not
+block release. Owner/text play requests retain `audio_playback_started` only
+after the player actually enters Playing.
+
+Failure, interruption, speech delivery failure, cancellation, stop or departure
+removes only the matching held track; a replacement is never started by the old
+request's completion. Pausing a held track preserves that intent through its
+announcement and cues; resume can start it only after the exact announcement
+has finished. Natural end uses the existing media cleanup. No timer guesses
+when speech has ended, and ambient cues cannot release an announcement hold.
+Status exposes `media_handoff` as `awaiting_announcement` or `ready_held` while a
+prepared track is still held.
 
 Spoken replies pause current media and use a separate player. When speech drains,
 only the exact retained media generation resumes. Explicit pause cancels automatic
