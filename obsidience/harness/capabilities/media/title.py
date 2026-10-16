@@ -225,7 +225,10 @@ def _applied(result: dict) -> dict:
 
 
 def _ids(pairs, context: dict) -> list[str]:
-    """Activation-only selection ids for exact (item, source) pairs; a stale source is left out."""
+    """Activation-only selection ids for exact (item, source) pairs; a stale source is left out.
+
+    Blocking: binding a TorBox-mounted file reads the account with its own asyncio.run, so
+    _prepare's coroutines call this (and _movie, _rows, _choices) through asyncio.to_thread."""
     ids = []
     for item_id, source_id in pairs:
         try:
@@ -338,7 +341,8 @@ async def _series(row: dict, season: int | None, episode: int | None, context: d
     if not choices:
         return {'status': 'absent', 'meta': _meta(metadata_id, row), 'season': season, 'episode': episode,
                 'summary': summary}
-    ids = _ids(((choice['item_id'], choice['media_source_id']) for choice in choices), context)
+    ids = await asyncio.to_thread(_ids, [(choice['item_id'], choice['media_source_id']) for choice in choices],
+                                  context)
     if len(ids) == 1:
         return {'status': 'ready', 'id': ids[0], **summary}
     return _final('That episode has more than one library edition; nothing was played.', library=summary,
@@ -514,7 +518,7 @@ async def _acquire(title: str, season: int | None, episode: int | None, context:
                     or [row for row in movies if tokens(row['title']) == tokens(meta['title'])
                         and row['year'] in (None, meta['year'])])
             if len(rows) == 1 and await asyncio.to_thread(_sources, rows[0]):
-                result = _movie(rows[0], context, {'acquired': acquired})
+                result = await asyncio.to_thread(_movie, rows[0], context, {'acquired': acquired})
                 return result if result['status'] == 'ready' else _applied(result)
         else:
             rows = [row for row in rows if row['type'] == 'Series' and row['imdb'] == meta['imdb_id']]
@@ -548,7 +552,7 @@ async def _prepare(query: str, context: dict) -> dict:
         rows = [row for row in rows if row['type'] == 'Series']
     exact, partial = match_titles(title, rows)
     if len(exact) > 1:
-        return _choices(title, exact, context)
+        return await asyncio.to_thread(_choices, title, exact, context)
     if exact:  # A library title wins even when it is a content word ("The Game", "Soul").
         return await _play_row(exact[0], season, episode, context)
     if season is None and generic(title):  # Never register a film for "music" or "cartoons".
@@ -570,11 +574,12 @@ async def _prepare(query: str, context: dict) -> dict:
                 and tokens(partial[0]['title'])[:len(words)] == words):
             return await _play_row(partial[0], season, episode, context)
         return _final(f'"{title}" is not exactly one library title; nothing was played.',
-                      choices=_rows(partial, context) + _catalogue_rows(listed or near), note=_CHOOSE)
+                      choices=await asyncio.to_thread(_rows, partial, context) + _catalogue_rows(listed or near),
+                      note=_CHOOSE)
     # Not in the library under this name; a longer library title is never a substitute.
     result = await _acquire(title, season, episode, context)
     if partial and result.get('status') == 'failed' and result.get('effect_applied') is False:
-        result = {**result, 'library_choices': _rows(partial, context),
+        result = {**result, 'library_choices': await asyncio.to_thread(_rows, partial, context),
                   'note': ' '.join(filter(None, (result.get('note'), 'The library holds only these different '
                                                  'titles; offer them, never play one as the requested title.')))}
     return result
@@ -583,7 +588,7 @@ async def _prepare(query: str, context: dict) -> dict:
 async def _play_row(row: dict, season: int | None, episode: int | None, context: dict,
                     metadata_id: str | None = None) -> dict:
     if row['type'] == 'Movie':
-        return _movie(row, context)
+        return await asyncio.to_thread(_movie, row, context)
     result = await _series(row, season, episode, context, metadata_id)
     if result['status'] != 'absent':
         return result
