@@ -44,6 +44,17 @@ available `voice_cues` and `active_cue`; these attest local playback only, not w
 listeners hear. The speech owner's `wake` event carries `cue_name`; its request-bound
 `cue` events carry only `name:"complete"` or `name:"cancel"` after native transitions.
 
+The native addressed wake also immediately requests Discord's speaking indicator,
+even during a silent command/reply gap. It remains requested through that member's
+command, reply and native question follow-up, and releases on completion, empty
+window expiry, cancellation, failure, stop, departure or connection teardown.
+Ordinary cue/reply/media playback retains its normal speaking signal. Status
+`voice_awake` reflects that native request ownership; ambient input never sets it.
+The transport uses the official voice connection's `setSpeaking` API, with no
+silent audio loop or synthetic microphone packets. Discord clients may derive
+the visible green ring from received audio as well as the speaking signal, so
+this state alone does not prove a listener sees a persistent ring during silence.
+
 Discord's supported bot voice API carries audio. Local video files can supply their
 audio track, but this implementation does not transmit video or Go Live streams.
 It uses no user account, user token, selfbot, screen capture or hidden client API.

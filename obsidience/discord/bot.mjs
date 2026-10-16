@@ -86,6 +86,7 @@ export class DiscordTransport {
     this.ingressToken = ingressToken;
     this.generation = randomUUID();
     this.connection = null;
+    this.restoreSpeaking = null;
     this.channel = null;
     this.speech = null;
     this.receivers = new Map();
@@ -123,6 +124,8 @@ export class DiscordTransport {
     this.client = new Client({ intents, allowedMentions: ALLOWED_MENTIONS });
     this.mediaPlayer = createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Pause } });
     this.speechPlayer = createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Pause } });
+    this.mediaPlayer.on('stateChange', () => this.syncSpeaking());
+    this.speechPlayer.on('stateChange', () => this.syncSpeaking());
     this.mediaPlayer.on('error', (error) => {
       if (!this.media || error.resource !== this.media.resource) return;
       this.lastError = 'media_playback_failed'; this.stopMedia(this.media);
@@ -155,7 +158,7 @@ export class DiscordTransport {
       } else if (oldState.channelId === this.channel?.id && state.channelId !== this.channel?.id) {
         if (this.wakeCalibration?.principal.member_id === state.id) this.clearWakeCalibration();
         if (this.cue?.principal?.member_id === state.id) this.finishCue(false);
-        if (this.voiceRequest?.principal.member_id === state.id) this.voiceRequest = null;
+        if (this.voiceRequest?.principal.member_id === state.id) { this.voiceRequest = null; this.syncSpeaking(); }
         this.dropReceiver(state.id);
         this.cancelTurns(state.id);
         for (const [id, pending] of [...this.pendingSpeech]) {
@@ -178,6 +181,7 @@ export class DiscordTransport {
       active_turns: this.turns.size, pending_speech: this.pendingSpeech.size,
       playback: this.mediaPlayer.state.status, speech_playback: this.speechPlayer.state.status,
       voice_cues: [...this.cueAssets.keys()], active_cue: this.cue?.name ?? null,
+      voice_awake: this.voiceAwake(),
       speech_buffered_ms: this.utterance ? (this.utterance.input.readableLength + this.utterance.input.writableLength) * 20 : 0,
       // An instantaneous native value, not a cumulative underrun measurement.
       speech_player_missed_frames: this.speechPlayer.state.status === AudioPlayerStatus.Playing ? this.speechPlayer.state.missedFrames : null,
@@ -361,6 +365,7 @@ export class DiscordTransport {
     if (this.speech !== socket) return;
     this.finishCue(false);
     this.voiceRequest = null;
+    this.syncSpeaking();
     this.clearWakeCalibration();
     this.speech = null;
     this.lastError = 'speech_disconnected';
@@ -398,6 +403,12 @@ export class DiscordTransport {
     const connection = joinVoiceChannel({ channelId, guildId: guild.id, adapterCreator: guild.voiceAdapterCreator,
       selfDeaf: false, selfMute: false });
     this.connection = connection;
+    // The public setter is also called by AudioPlayer at cue idle/unsubscribe.
+    // Keep native request ownership visible through those silent playback gaps.
+    const setSpeaking = connection.setSpeaking;
+    connection.setSpeaking = (enabled) => setSpeaking.call(connection,
+      enabled || (this.connection === connection && this.voiceAwake()));
+    this.restoreSpeaking = () => { connection.setSpeaking = setSpeaking; };
     connection.on('error', () => { this.lastError = 'voice_connection_failed'; void this.leave(); });
     connection.on(VoiceConnectionStatus.Disconnected, () => { void this.leave(); });
     connection.receiver.speaking.on('start', (id) => { void this.receive(id).catch((error) => this.receiveFailed('receive', error)); });
@@ -405,6 +416,7 @@ export class DiscordTransport {
     catch { if (this.connection === connection) await this.leave(); fail('voice_not_ready'); }
     if (generation !== this.generation || this.connection !== connection) fail('join_cancelled');
     connection.subscribe(this.mediaPlayer);
+    this.syncSpeaking();
     return this.status();
   }
 
@@ -566,7 +578,7 @@ export class DiscordTransport {
     while (this.cancelledRequests.size > 256) this.cancelledRequests.delete(this.cancelledRequests.values().next().value);
     if (this.pendingCue?.requestId === requestId) this.pendingCue = null;
     if (this.cue?.requestId === requestId) this.finishCue(false);
-    if (this.voiceRequest?.requestId === requestId) this.voiceRequest = null;
+    if (this.voiceRequest?.requestId === requestId) { this.voiceRequest = null; this.syncSpeaking(); }
     if (this.utterance?.request_id === requestId) this.finishSpeech(false);
     if (!first) return;
     if (!principal) return;
@@ -608,6 +620,7 @@ export class DiscordTransport {
     }
     this.finishCue(false);
     this.voiceRequest = null;
+    this.syncSpeaking();
     this.cancelTurns();
     for (const [id, pending] of [...this.pendingSpeech]) this.cancelRequest(id, pending, pending.source);
     this.generation = randomUUID();
@@ -623,6 +636,8 @@ export class DiscordTransport {
   async leave() {
     this.stop(null, null, false);
     const connection = this.connection;
+    this.restoreSpeaking?.();
+    this.restoreSpeaking = null;
     this.connection = null;
     this.channel = null;
     this.speech?.destroy();
@@ -707,8 +722,10 @@ export class DiscordTransport {
     if (!REQUEST_ID.test(message.request_id ?? '')) return;
     if (this.cancelledRequests.has(message.request_id)) return;
     if (message.type === 'wake') {
+      if (!this.currentSpeaker(principal)) return;
       this.clearWakeCalibration(); this.countReceive('wake_events');
       this.voiceRequest = { requestId: message.request_id, principal };
+      this.syncSpeaking();
       this.queueCue(message.cue_name === 'follow_up' ? 'follow_up' : 'ready', principal, message.request_id);
       return;
     }
@@ -717,6 +734,7 @@ export class DiscordTransport {
         && ['complete', 'cancel'].includes(message.name)) {
         this.queueCue(message.name, principal, message.request_id);
         this.voiceRequest = null;
+        this.syncSpeaking();
       }
       return;
     }
@@ -738,6 +756,7 @@ export class DiscordTransport {
         timing.run_id = result.run_id ?? null;
         if (result.status !== 'completed' || !result.reply.trim()) {
           this.sendSpeech({ type: 'cancel', ...principal, request_id: message.request_id }, false);
+          if (this.voiceRequest?.requestId === message.request_id) { this.voiceRequest = null; this.syncSpeaking(); }
           this.queueCue(result.status === 'interrupted' ? 'cancel' : 'error', principal, message.request_id); return;
         }
         const memberNow = this.channel?.members.get(message.member_id);
@@ -769,6 +788,19 @@ export class DiscordTransport {
       if (this.utterance?.request_id === message.request_id && this.samePrincipal(this.utterance, principal)) this.writeSpeech(Buffer.alloc(0), true);
       else this.cancelRequest(message.request_id, pending, pending.source);
     }
+  }
+
+  voiceAwake() {
+    return !!this.voiceRequest && this.currentSpeaker(this.voiceRequest.principal);
+  }
+
+  syncSpeaking() {
+    const connection = this.connection;
+    if (!connection || connection.state.status !== VoiceConnectionStatus.Ready) return;
+    const player = connection.state.subscription?.player;
+    // Real cue/reply/media packets keep their ordinary speaking signal. A native
+    // awake request additionally holds it without generating any extra audio.
+    connection.setSpeaking(player?.state.status === AudioPlayerStatus.Playing);
   }
 
   samePrincipal(a, b) {
