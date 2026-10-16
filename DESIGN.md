@@ -869,7 +869,7 @@ only when recorded in `artifacts.lock.json`; a coding agent's code index grants 
 
 `obsidience/discord` owns the official bot Gateway, voice receiver and audio players.
 It uses a private configuration and systemd credentials, restricts itself to one configured
-guild, and connects to voice only when explicitly asked. Squanchbot is an installation's
+guild, and connects to voice only when explicitly asked. Bard is this installation's
 public display name; the internal identity is `Agents/Discord/Discord`, the Obsidience
 Discord Bot with role OmniBot. Additional bot features require implemented paired
 Tools/Skills and an explicit Agent grant.
@@ -883,11 +883,18 @@ and their attributed requests enter that Agent's separate historical Hindsight b
 
 The existing speech owner accepts per-member PCM through an owner-only socket. Decoder,
 VAD, wake and follow-up state are member-scoped; loaded NeMo and Pocket models and inference
-locks stay shared. The first addressed Squanchbot wake claims the channel until its reply
+locks stay shared. The first addressed Bard wake claims the channel until its reply
 has drained. Other members' audio is not admitted to that request. Unaddressed audio/text
 stays ephemeral. Muting the desktop input can retain the same sole worker in a mode with
 no desktop microphone, AEC, output transport or Executive speech attachment. Dependency
 loss cancels pending work; a later voice event can reconnect without replaying it.
+While that member owns a command, reply or native question-follow-up window, a
+content-free speech ownership event defers optional Executive standby prefill. Desktop
+wake, partial-speech preparation and foreground requests remain available. Native release
+or worker teardown restores standby eligibility. Outgoing PCM fills the existing 400 ms
+Opus prebuffer as soon as synthesis supplies it, then paces with that bounded lead.
+The owner socket can exclude one specified member's next voice turn from Memory for
+a 30-second diagnostic window; default requests retain their normal Memory policy.
 
 Media catalogue selection and source admission remain owned by Obsidience Media. The bot
 receives a held descriptor with exact file identity and a finite dispatch deadline, then

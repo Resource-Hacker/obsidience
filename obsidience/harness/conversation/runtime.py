@@ -90,6 +90,7 @@ class ConversationRuntime:
         self._prefill_task: asyncio.Task | None = None
         self._prefill_latest: tuple[int, str] | None = None
         self._warm_state = "waiting"
+        self._idle_preparation_blocked = False
         self._context_refresh_task: asyncio.Task | None = None
         self._context_refresh_requested: tuple[int, str] | None = None
         # The spoken reply owner speech last cut off and its audible chunks.
@@ -102,9 +103,25 @@ class ConversationRuntime:
         self._warm_state = "busy"
         self._prefill_latest = None
 
+    async def set_idle_preparation_blocked(self, blocked: bool) -> None:
+        """Yield optional standby warming to a current external speech owner.
+
+        Desktop wake, partial-prefix preparation and foreground turns remain
+        available. The speech owner clears this lease on release or teardown.
+        """
+        if type(blocked) is not bool:
+            raise TypeError("idle preparation block must be boolean")
+        self._idle_preparation_blocked = blocked
+        if blocked:
+            if self._prefill_latest == (0, ""):
+                await self._cancel_speech_prefill()
+        else:
+            self.prepare_idle()
+
     def prepare_idle(self) -> None:
         """Prepare the selected Executive conversation when model work releases."""
-        if (self._lock.locked() or not self.continuation_resume_available()
+        if (self._idle_preparation_blocked or self._lock.locked()
+                or not self.continuation_resume_available()
                 or model_runtime.RUNTIME.work_requested):
             return
         self._rebase_window()

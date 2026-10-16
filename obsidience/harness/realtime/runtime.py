@@ -212,6 +212,7 @@ class RealtimeSessionManager:
         self._transport_ready = False
         self._desktop_disabled = False
         self._discord_ready = False
+        self._discord_owned = False
         self._discord_stopping = False
         self._discord_error: str | None = None
         self._phase: RealtimePhase = "off"
@@ -310,6 +311,7 @@ class RealtimeSessionManager:
             "ready": self._phase in READY_PHASES,
             "transport_ready": self._transport_ready,
             "discord_speech": {"ready": self._discord_ready,
+                               "active": self._discord_owned,
                                "desktop_disabled": self._desktop_disabled,
                                "last_error": self._discord_error},
             "proactive": self._phase == "proactive",
@@ -384,6 +386,12 @@ class RealtimeSessionManager:
 
     async def publish_readiness(self) -> None:
         await self._publish("state", reason="executive_readiness")
+
+    async def _discord_speech_ownership(self, active: bool) -> None:
+        if type(active) is not bool or active == self._discord_owned:
+            return
+        self._discord_owned = active
+        await self.conversation.set_idle_preparation_blocked(active)
 
     def _model_activity(self, busy: bool) -> None:
         if busy and not self._desktop_disabled:
@@ -1055,6 +1063,7 @@ class RealtimeSessionManager:
             if not REALTIME_PYTHON.is_file() or not NEMOTRON_MODEL.is_file():
                 raise RuntimeError("the pinned shared speech runtime is unavailable")
             self._operation += 1
+            await self._discord_speech_ownership(False)
             operation = self._operation
             self._desktop_disabled = True
             self._discord_stopping = False
@@ -1153,6 +1162,10 @@ class RealtimeSessionManager:
                     event = json.loads(raw)
                 except (ValueError, TypeError):
                     continue
+                if (isinstance(event, dict) and event.get("type") == "discord_ownership"
+                        and not self._discord_stopping):
+                    await self._discord_speech_ownership(event.get("active"))
+                    continue
                 if isinstance(event, dict) and event.get("type") == "discord_ready" and not self._discord_stopping:
                     self._discord_ready = True
                     await self._publish("state", reason="discord_speech_ready")
@@ -1182,6 +1195,8 @@ class RealtimeSessionManager:
                 self._discord_error = "shared_speech_monitor_failed"
                 await self._stop_discord_only(force=True)
         finally:
+            if self._operation == operation:
+                await self._discord_speech_ownership(False)
             if not drain.done():
                 drain.cancel()
             await asyncio.gather(drain, return_exceptions=True)
@@ -1294,6 +1309,7 @@ class RealtimeSessionManager:
             if not NEMOTRON_MODEL.is_file():
                 raise RuntimeError("the pinned Nemotron streaming ASR model is unavailable")
             self._operation += 1
+            await self._discord_speech_ownership(False)
             self._desktop_disabled = False
             self._discord_stopping = False
             self._discord_ready = False
@@ -1629,6 +1645,9 @@ class RealtimeSessionManager:
                 if self._mode == "wake" and not isinstance(worker_event, dict):
                     # Upstream diagnostic text may include raw ASR tokens.
                     # Ambient recognition is never a retained public log.
+                    continue
+                if event_type == "discord_ownership":
+                    await self._discord_speech_ownership(worker_event.get("active"))
                     continue
                 if event_type == "discord_ready":
                     self._discord_ready = True
@@ -1985,6 +2004,7 @@ class RealtimeSessionManager:
                     # another operation's lease. Stop retains exact ownership.
         finally:
             if operation == self._operation:
+                await self._discord_speech_ownership(False)
                 await self._cancel_speech_candidate()
 
     @staticmethod

@@ -37,6 +37,7 @@ PCM_FRAME = 640  # 20 ms, mono s16/16 kHz.
 MAX_QUEUED_FRAMES = 50  # One second per member, including terminal silence.
 MAX_COMMAND_CHARS = 2_000
 TERMINAL_SILENCE_SECS = 4.0  # Covers Smart Turn's three-second pending bound.
+PLAYBACK_LEAD_SECS = 0.4  # Fill the transport's unchanged 400 ms Opus prebuffer promptly.
 _PRINCIPAL_FIELDS = ("guild_id", "channel_id", "member_id")
 _ID = re.compile(r"[0-9]{1,20}\Z")
 _TOKEN = re.compile(r"[A-Za-z0-9_-]{1,96}\Z")
@@ -425,6 +426,7 @@ class DiscordSpeechServer:
         self.failures: dict[tuple, dict] = {}
         self._inode = None
         self._closed = False
+        self._ownership_active = False
 
     async def start(self):
         if not self.path.is_absolute() or self.path.parent.stat().st_uid != os.getuid():
@@ -475,7 +477,15 @@ class DiscordSpeechServer:
             for principal in tuple(self.members):
                 if principal[:2] == member.principal[:2] and principal != member.principal:
                     self.schedule_drop(principal)
+        self._publish_ownership()
         return True
+
+    def _publish_ownership(self):
+        """Only occupancy crosses the worker event pipe; no member or text data."""
+        active = bool(self.owners)
+        if active != self._ownership_active:
+            self._ownership_active = active
+            speech.emit("discord_ownership", active=active)
 
     def block(self, principal):
         if len(self.blocked) >= 64:
@@ -486,6 +496,7 @@ class DiscordSpeechServer:
         owner = self.owner(principal)
         if owner is not None and owner.principal == principal:
             self.owners.pop(principal[:2], None)
+            self._publish_ownership()
 
     def emit(self, kind, principal, **payload):
         if self.outgoing is None:
@@ -641,6 +652,7 @@ class DiscordSpeechServer:
             if owner is None and message.get("source") == "owner":
                 owner = _Owner(principal, request_id, phase="waiting", deadline=time.monotonic() + 120)
                 self.owners[principal[:2]] = owner
+                self._publish_ownership()
             if (owner is None or owner.principal != principal or owner.request_id != request_id
                     or owner.phase != "waiting" or self.speaking is not None):
                 self.emit("error", principal, request_id=request_id, code="reply_not_current")
@@ -654,10 +666,17 @@ class DiscordSpeechServer:
             if (owner is None or owner.principal != principal or owner.phase != "draining"
                     or owner.request_id != _token(message.get("request_id"))):
                 return
-            self.release(principal)
             member = self.members.get(principal)
             if owner.question and member is not None and self.current(member):
-                await member.turn._open_wake("", cue_name="follow_up")
+                # Transfer reply ownership to its native follow-up without
+                # publishing an idle edge between release and claim.
+                self.owners.pop(principal[:2], None)
+                try:
+                    await member.turn._open_wake("", cue_name="follow_up")
+                finally:
+                    self._publish_ownership()
+            else:
+                self.release(principal)
         elif kind == "cancel":
             owner = self.owner(principal)
             request_id = message.get("request_id")
@@ -684,9 +703,11 @@ class DiscordSpeechServer:
                         await self.send("speech_audio", principal, request_id=owner.request_id,
                                         pcm=base64.b64encode(chunk).decode(), sample_rate=24_000,
                                         channels=1, format="s16le")
-                        # Pace media, preserving socket and downstream PCM bounds.
+                        # Fill the initial playback reserve as PCM becomes available,
+                        # then pace with that same bounded lead. Waiting in real
+                        # time to fill it adds latency without improving jitter tolerance.
                         samples += len(chunk) // 2
-                        await asyncio.sleep(max(0, first_write + samples / 24_000 - time.monotonic()))
+                        await asyncio.sleep(max(0, first_write + samples / 24_000 - PLAYBACK_LEAD_SECS - time.monotonic()))
             if self.generation == generation and self.owner(principal) is owner:
                 owner.phase, owner.deadline = "draining", time.monotonic() + 30
                 await self.send("speech_end", principal, request_id=owner.request_id)
@@ -730,6 +751,7 @@ class DiscordSpeechServer:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
         self.owners.clear()
+        self._publish_ownership()
         self.blocked.clear()
         self.failures.clear()
         members, self.members = self.members, {}
