@@ -165,6 +165,10 @@ def public_failure_notice(result: dict, run: dict | None = None, *, fallback: st
                 notice += " That action was not sent."
         elif isinstance(code, str) and code.startswith("No TV content matches this query"):
             notice = "No matching TV content was found from the available sources."
+        elif (entry.get("tool") == "tv.control" and observation.get("route") == "library"
+              and observation.get("status") == "failed" and observation.get("delivery") == "not_dispatched"):
+            # Title-route failures are model-facing prose; the owner hears what happened instead.
+            notice = "The media server could not play that title, so nothing was sent to the TV."
         if (entry.get("tool") in effect_tools
                 and observation.get("delivery") in {"acknowledged", "uncertain", "verified"}
                 and observation.get("effect_applied") is not False):
