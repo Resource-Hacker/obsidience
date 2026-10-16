@@ -867,6 +867,13 @@ only when recorded in `artifacts.lock.json`; a coding agent's code index grants 
 
 ## Optional Discord integration
 
+An explicit private installation consent attestation may separately enable local
+per-member original voice samples in the Discord transport's own private state
+directory. This opt-in dataset has bounded chunks, async writes and quotas,
+excludes diagnostic streams, and gives each member native self-service status,
+stop, start and deletion controls. It never enters Knowledge/Hindsight or changes
+the shared speech model, TTS or voice identity.
+
 `obsidience/discord` owns the official bot Gateway, voice receiver and audio players.
 It uses a private configuration and systemd credentials, restricts itself to one configured
 guild, and connects to voice only when explicitly asked. Bard is this installation's

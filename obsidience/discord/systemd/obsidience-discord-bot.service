@@ -8,6 +8,7 @@ Type=simple
 WorkingDirectory=%h/Projects/obsidience/obsidience/discord
 Environment=NODE_ENV=production
 Environment=OBSIDIENCE_DISCORD_CONFIG=%h/Projects/obsidience/obsidience/state/discord.json
+Environment=OBSIDIENCE_DISCORD_SAMPLES_CONFIG=%h/Projects/obsidience/obsidience/state/discord-voice-samples.json
 LoadCredentialEncrypted=discord-bot-token:%h/.config/credentials/obsidience-discord-bot-token.cred
 LoadCredentialEncrypted=discord-ingress-token:%h/.config/credentials/obsidience-discord-ingress-token.cred
 ExecStart=/usr/bin/node %h/Projects/obsidience/obsidience/discord/bot.mjs
@@ -15,6 +16,8 @@ UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
+StateDirectory=obsidience-discord-samples
+StateDirectoryMode=0700
 ReadWritePaths=%t
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 KillMode=control-group

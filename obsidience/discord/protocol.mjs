@@ -1,18 +1,28 @@
 import fs from 'node:fs/promises';
 import net from 'node:net';
 import path from 'node:path';
+import { sampleConfig } from './samples.mjs';
 
 export const MAX_FRAME = 65536;
 export const SNOWFLAKE = /^\d{17,20}$/;
 
-export async function loadConfig(filename) {
+async function readPrivateConfig(filename, optional = false) {
+  if (optional && !filename) return undefined;
   if (!filename || !path.isAbsolute(filename)) throw new Error('private_config_path_required');
-  const stat = await fs.lstat(filename);
+  const stat = await fs.lstat(filename).catch((error) => {
+    if (optional && error.code === 'ENOENT') return null;
+    throw error;
+  });
+  if (!stat) return undefined;
   if (!stat.isFile() || stat.uid !== process.getuid() || (stat.mode & 0o077)) {
     throw new Error('private_config_owner_or_mode_invalid');
   }
   if (stat.size > MAX_FRAME) throw new Error('private_config_too_large');
-  const c = JSON.parse(await fs.readFile(filename, 'utf8'));
+  return JSON.parse(await fs.readFile(filename, 'utf8'));
+}
+
+export async function loadConfig(filename) {
+  const c = await readPrivateConfig(filename);
   const fields = ['enabled', 'guild_id', 'application_id', 'bot_name', 'allowed_channel_ids', 'message_content_intent'];
   if (Object.keys(c).some((k) => !fields.includes(k))) throw new Error('unknown_config_field');
   if (!SNOWFLAKE.test(c.guild_id) || !SNOWFLAKE.test(c.application_id)) throw new Error('invalid_config_id');
@@ -23,7 +33,7 @@ export async function loadConfig(filename) {
       || c.allowed_channel_ids.length > 128 || c.allowed_channel_ids.some((id) => !SNOWFLAKE.test(id)))) {
     throw new Error('invalid_allowed_channels');
   }
-  return Object.freeze({ ...c, allowed_channel_ids: c.allowed_channel_ids ?? [], message_content_intent: c.message_content_intent === true });
+  return Object.freeze({ ...c, voice_samples: sampleConfig(await readPrivateConfig(process.env.OBSIDIENCE_DISCORD_SAMPLES_CONFIG, true)), allowed_channel_ids: c.allowed_channel_ids ?? [], message_content_intent: c.message_content_intent === true });
 }
 
 export async function credential(name) {

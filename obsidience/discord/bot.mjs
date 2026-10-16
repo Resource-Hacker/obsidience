@@ -11,6 +11,7 @@ import { AudioPlayerStatus, VoiceConnectionStatus, EndBehaviorType, NoSubscriber
   createAudioPlayer, createAudioResource, entersState, joinVoiceChannel } from '@discordjs/voice';
 import opusBinding from '@discordjs/opus';
 import { credential, loadConfig, readFrames, sendFrame, removeStaleSocket, SNOWFLAKE } from './protocol.mjs';
+import { VoiceSamples } from './samples.mjs';
 
 const REQUEST_ID = /^[A-Za-z0-9_-]{8,128}$/;
 const { OpusEncoder } = opusBinding;
@@ -33,6 +34,7 @@ const fail = (code) => { throw new Error(code); };
 export class DiscordTransport {
   constructor(config, ingressToken) {
     this.config = config;
+    this.samples = new VoiceSamples(config.voice_samples, config.guild_id, log);
     this.ingressToken = ingressToken;
     this.generation = randomUUID();
     this.connection = null;
@@ -111,7 +113,7 @@ export class DiscordTransport {
     return { name: 'Obsidience Discord Bot', display_name: this.config.bot_name, ready: this.client.isReady(),
       guild_id: this.config.guild_id, channel_id: this.channel?.id ?? null,
       voice: this.connection?.state.status ?? 'disconnected', speech_ready: !!this.speech && !this.speech.destroyed,
-      generation: this.generation, receivers: this.receivers.size,
+      generation: this.generation, receivers: this.receivers.size, voice_samples: this.samples.status(),
       active_turns: this.turns.size, pending_speech: this.pendingSpeech.size,
       playback: this.mediaPlayer.state.status, speech_playback: this.speechPlayer.state.status,
       speech_buffered_ms: this.utterance ? (this.utterance.input.readableLength + this.utterance.input.writableLength) * 20 : 0,
@@ -301,7 +303,9 @@ export class DiscordTransport {
     this.diagnosticRead?.finish();
     this.cancelTurns();
     for (const [id, pending] of [...this.pendingSpeech]) this.cancelRequest(id, pending, pending.source);
-    for (const id of [...this.receivers.keys()]) this.dropReceiver(id);
+    for (const id of [...this.receivers.keys()]) {
+      if (!this.samples.eligible(id)) this.dropReceiver(id);
+    }
     this.finishSpeech(false);
   }
 
@@ -315,12 +319,16 @@ export class DiscordTransport {
       fail('bot_missing_voice_permissions');
     }
     if (this.channel?.id === channelId && this.connection?.state.status === VoiceConnectionStatus.Ready) {
-      await this.connectSpeech();
+      await this.connectSpeech().catch((error) => {
+        if (!this.samples.enabled || !this.samples.ready || this.samples.halted) throw error;
+      });
       return this.status();
     }
     await this.leave();
     const generation = this.generation;
-    await this.connectSpeech();
+    await this.connectSpeech().catch((error) => {
+      if (!this.samples.enabled || !this.samples.ready || this.samples.halted) throw error;
+    });
     if (generation !== this.generation || this.closing) fail('join_cancelled');
     this.channel = channel;
     const connection = joinVoiceChannel({ channelId, guildId: guild.id, adapterCreator: guild.voiceAdapterCreator,
@@ -340,6 +348,7 @@ export class DiscordTransport {
     const receiver = this.receivers.get(id);
     if (!receiver) return;
     this.receivers.delete(id);
+    receiver.sample?.finish();
     receiver.opus.destroy();
   }
 
@@ -373,7 +382,11 @@ export class DiscordTransport {
     let opus;
     try {
       // Recover only on a real speaking event. Never replay buffered requests.
-      if (!this.speech || this.speech.destroyed) await this.connectSpeech();
+      if (!this.speech || this.speech.destroyed) {
+        if (this.samples.eligible(memberId)) {
+          void this.connectSpeech().catch(() => { this.lastError = 'speech_disconnected'; });
+        } else await this.connectSpeech();
+      }
       if (generation !== this.generation || !this.connection || !this.channel || this.closing) return;
       member = this.channel.members.get(memberId);
       if (!member || member.user.bot || member.voice.channelId !== this.channel.id || this.receivers.has(memberId)) return;
@@ -400,7 +413,18 @@ export class DiscordTransport {
         if (this.wakeCalibration && Date.now() >= this.wakeCalibration.expires) this.clearWakeCalibration();
         const calibration = this.wakeCalibration;
         const calibrating = calibration && this.samePrincipal(calibration.principal, principal);
+        const probe = this.voiceProbe;
+        const probing = probe && probe.member_id === memberId && probe.generation === generation
+          && performance.now() < probe.deadline;
+        if (calibrating || probing) {
+          // Exclude the complete current packet stream, including its buffered
+          // tail, even if a diagnostic finishes before speaking.end.
+          record.sampleExcluded = true;
+          record.sample?.finish(false);
+          record.sample = null;
+        }
         if (calibrating && calibration.reading) return;
+        if (!this.speech || this.speech.destroyed || record.blockedSpeech === this.speech) return;
         this.countReceive('rx_packets');
         let at = 'opus_decode';
         try {
@@ -425,17 +449,40 @@ export class DiscordTransport {
             this.countReceive('invalid_opus_packets');
             return;
           }
-          rejected(at, error);
+          if (at === 'speech_send' && this.samples.eligible(memberId)) {
+            record.blockedSpeech = this.speech;
+            this.receiveFailed(at, error);
+          } else rejected(at, error);
         }
       });
+      // Feed sample decoding after the existing ASR listener has forwarded PCM.
+      opus.on('data', (packet) => { if (current()) this.samplePacket(record, packet, member, principal); });
       opus.on('end', () => {
         if (!current()) return;
-        this.receivers.delete(memberId);
-        opus.destroy();
+        this.dropReceiver(memberId);
       });
     } catch (error) {
       this.receiveFailed(phase, error);
       opus?.destroy();
+    }
+  }
+
+  samplePacket(record, packet, member, principal) {
+    if (record.sampleExcluded || !this.samples.eligible(member.id)) return;
+    try {
+      if (record.sample?.closed) record.sample = null;
+      if (!record.sample) {
+        record.sample = this.samples.begin(member.id, member.displayName, principal.channel_id);
+        if (!record.sample) return;
+        record.sampleDecoder = new OpusEncoder(48000, 1);
+      }
+      record.sample.push(record.sampleDecoder.decode(packet));
+    } catch (error) {
+      if (error instanceof TypeError && error.message === 'The compressed data passed is corrupted') return;
+      record.sample?.finish(false);
+      record.sample = null;
+      record.sampleExcluded = true;
+      log('sample_decode_failed');
     }
   }
 
@@ -510,6 +557,7 @@ export class DiscordTransport {
     this.speech = null;
     if (connection && connection.state.status !== VoiceConnectionStatus.Destroyed) connection.destroy();
     await Promise.allSettled([...this.mediaCleanups]);
+    await this.samples.drain();
     return this.status();
   }
 
@@ -874,7 +922,8 @@ export class DiscordTransport {
   }
 
   async command(message) {
-    const readOnly = ['status', 'channels', 'speech_diagnostics', 'read_wake_calibration'].includes(message.command);
+    const readOnly = ['status', 'channels', 'speech_diagnostics', 'read_wake_calibration'].includes(message.command)
+      || (message.command === 'samples' && (message.action ?? 'status') === 'status');
     if (!readOnly && !REQUEST_ID.test(message.request_id ?? '')) fail('request_id_required');
     const fingerprint = createHash('sha256').update(JSON.stringify(message)).digest('hex');
     if (!readOnly && this.recent.has(message.request_id)) {
@@ -909,6 +958,10 @@ export class DiscordTransport {
       let value;
       switch (message.command) {
         case 'status': value = this.status(); break;
+        case 'samples':
+          if (Object.keys(message).some((key) => !['command', 'request_id', 'guild_id', 'member_id', 'action'].includes(key))) fail('invalid_samples_request');
+          value = { voice_samples: await this.samples.control(message.action ?? 'status', message.member_id) };
+          break;
         case 'channels': value = { channels: await this.channels() }; break;
         case 'voice_probe':
           if (Object.keys(message).some((key) => !['command', 'request_id', 'member_id'].includes(key))) fail('owner_probe_only');
@@ -961,12 +1014,29 @@ export class DiscordTransport {
   async interaction(interaction) {
     if (!interaction.isChatInputCommand() || interaction.guildId !== this.config.guild_id) return;
     const name = interaction.commandName;
-    if (!['join', 'leave', 'status', 'ask', 'stop'].includes(name)) return;
+    if (!['join', 'leave', 'status', 'ask', 'stop', 'samples'].includes(name)) return;
     try {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const guild = await this.guild();
       const member = await guild.members.fetch(interaction.user.id);
       const manager = member.permissions.has(PermissionFlagsBits.ManageGuild);
+      if (name === 'samples') {
+        const action = interaction.options.getString('action', true);
+        const result = await this.samples.control(action, member.id);
+        let content;
+        if (action === 'delete') content = 'Your saved voice samples were deleted. Recording is paused for you. Use /samples action:start to opt back in.';
+        else if (action === 'stop') content = 'Your voice sampling is paused. Your existing samples are kept.';
+        else {
+          const state = !result.enabled ? 'Voice sampling is disabled.'
+            : !result.ready || result.halted ? 'Voice sampling is currently paused. Your existing samples are kept.'
+              : result.opted_out ? 'Your voice sampling is paused.'
+                : result.member_quota_reached ? 'Your sample storage limit has been reached. Recording is paused for you.'
+                  : 'Your voice sampling is enabled while you share Bard’s voice channel.';
+          content = `${state} Saved samples: ${(result.member_stored_bytes / (1024 * 1024)).toFixed(1)} MiB. Use /samples action:stop to pause or action:delete to remove your samples.`;
+        }
+        await interaction.editReply({ content, allowedMentions: ALLOWED_MENTIONS });
+        return;
+      }
       if (name === 'ask') {
         const result = await this.turn(interaction.options.getString('text', true),
           { guild_id: guild.id, channel_id: interaction.channelId, member_id: member.id, generation: this.generation },
@@ -1004,6 +1074,8 @@ export class DiscordTransport {
 
   async start(token) {
     const ready = new Promise((resolve) => this.client.once('clientReady', resolve));
+    this.startupPhase = 'sample_storage';
+    await this.samples.initialize();
     this.startupPhase = 'gateway_login';
     await this.client.login(token);
     await ready;
@@ -1014,6 +1086,9 @@ export class DiscordTransport {
       .setName(name).setDescription(`${this.config.bot_name}: ${name}`));
     commands.push(new SlashCommandBuilder().setName('ask').setDescription(`Ask ${this.config.bot_name}`)
       .addStringOption((option) => option.setName('text').setDescription('Your question').setRequired(true).setMaxLength(6000)));
+    commands.push(new SlashCommandBuilder().setName('samples').setDescription('Manage your own voice samples')
+      .addStringOption((option) => option.setName('action').setDescription('Your recordings only; delete also stops capture')
+        .setRequired(true).addChoices(...['status', 'stop', 'start', 'delete'].map((value) => ({ name: value, value })))));
     await guild.commands.set(commands.map((command) => command.toJSON()));
     if (guild.members.me?.nickname !== this.config.bot_name) await guild.members.me.setNickname(this.config.bot_name).catch(() => { this.lastError = 'nickname_permission_missing'; });
     this.startupPhase = 'control_socket';

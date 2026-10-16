@@ -95,7 +95,8 @@ Stopping the unit kills its FFmpeg children through the same service cgroup.
 
 ## Discord commands
 
-The bot registers guild-scoped `/join`, `/leave`, `/status`, `/ask text`, `/stop`.
+The bot registers guild-scoped `/join`, `/leave`, `/status`, `/ask text`, `/stop`,
+and `/samples action`.
 `/join` joins the invoker's current voice channel when both bot and invoker have
 Connect/Speak; moving an already joined bot to another channel requires Manage
 Server. `/leave` and `/stop` require Manage Server because they affect the whole
@@ -103,6 +104,81 @@ room. `/ask` uses the exact invoking guild/channel/member identity. Replies disa
 all mention expansion, including `@everyone` and replied-user notifications.
 Mention replies use the same Agent ingress and identity rules. Interactions and
 message IDs are request IDs. Transport never retries an uncertain send.
+
+## Optional private voice samples
+
+Voice sample capture is off until the installation explicitly enables it in a
+separate Node-owned private JSON file at `OBSIDIENCE_DISCORD_SAMPLES_CONFIG`
+(the unit selects `obsidience/state/discord-voice-samples.json`). A missing file
+leaves capture disabled. Do not add sample fields to the shared `discord.json`,
+which is also validated by the Harness. After confirming consent for all members
+of the configured guild, create the owner-only mode-0600 sample file as:
+
+```json
+{
+  "enabled": true,
+  "all_members": true,
+  "consent_attested_at": "2026-01-01T00:00:00Z",
+  "consent_provenance": "Owner attests that everyone in this configured server agreed to voice sampling for Bard training."
+}
+```
+
+Replace the date/provenance with the actual consent record. This flag applies only
+to current human members heard in the bot's explicitly joined, allowed voice
+channel in its single configured guild. It never joins another channel or guild.
+It records ordinary transmitted voice whether or not Bard is addressed, and works
+while the speech socket is unavailable. Bots, `voice_probe` and wake-calibration
+streams are excluded. Diagnostics never synthesize recordings. For other synthetic
+voice checks, stop samples for the transmitting member before injecting audio.
+
+The unit's `StateDirectory=obsidience-discord-samples` creates the private root,
+normally `~/.local/state/obsidience-discord-samples`. Originals are stored as
+`<root>/<guild_id>/<member_id>/<UTC-timestamp>-<UUID>.wav` with an adjacent JSON
+metadata file. Stable member IDs keep recordings together after a nickname change;
+each chunk records the observed display name, channel, dates, duration, sample
+rate and owner-attested consent provenance. Directories are mode 0700 and files
+0600. This is a separate local dataset, with no Knowledge/Hindsight ingestion,
+transcription, training or voice imitation. `trained:false` describes these source
+chunks; collecting them alone does not make Bard sound like anyone.
+
+Each member has an independent 48 kHz mono S16LE libopus decoder after the ASR
+forwarding listener. Clips split at about 20 seconds and flush on the existing
+300 ms receive endpoint, member departure, leave and shutdown. A light energy
+gate trims quiet edges and requires at least 600 ms total with 400 ms above roughly
+-46 dBFS RMS; it is a useful-signal filter, not speaker or speech classification.
+Quiet voices below this threshold may need review. Continuous sample buffers are
+limited to eight receivers, with 16 MiB / 32 chunks pending on one async disk
+writer. Full queues drop new chunks and report `sample_write_queue_full` rather
+than delay speech. No recordings, names or PCM enter the journal.
+
+Defaults are 20 GiB total and 2 GiB per member. Optional `chunk_seconds` (2–30),
+`max_total_bytes` and `max_member_bytes` override them in the same private object.
+Quotas count original WAV and metadata files across restarts and halt collection
+with visible status/journal codes; originals are never automatically deleted.
+Disk/permission failures halt sample storage while ordinary speech continues.
+`/status` includes aggregate `voice_samples` counters and a fixed `halted` reason.
+A write interrupted by process or disk failure may leave an incomplete file pair;
+these files are preserved and counted when the service next starts.
+
+Every member can use `/samples action:status`, `stop`, `start` or `delete` for their
+own data, without Manage Server. Replies are private. `stop` persists their opt-out
+and discards buffered/pending chunks; it waits for an already-started write before
+acknowledging. `start` opts that member back in while installation-wide consent is
+enabled. `delete` first stops capture, then removes only that member's original
+folder, leaving them opted out. The trusted local owner socket has the same
+`samples` command with an exact `member_id`. Other members cannot select an ID
+through the slash command. The persistent per-guild `preferences.json` is owned by
+this store and contains only opt-out IDs; retain it when moving the dataset.
+
+Install the updated unit, run `systemctl --user daemon-reload`, then use the normal
+guarded Discord deployment/restart. Startup returns disconnected: one fresh
+`/join` or owner join is required. Inspect `/status` and `/samples action:status`;
+actual saved chunks appear only after useful live speech. To move the dataset,
+set `output_directory` to an absolute private path and update the unit's exact
+`StateDirectory` (or remove it and grant only that root with `ReadWritePaths`).
+`STATE_DIRECTORY` must match the configured root when present. Do not broaden the
+filesystem sandbox to the whole home directory. Setting `enabled` in the separate
+sample file to false disables capture after the next transport restart and preserves originals.
 
 ## Owner control
 
@@ -114,6 +190,8 @@ eight clients, 20-second idle deadline. The exact command schema is:
 
 ```text
 {"command":"status"}
+{"command":"samples","action":"status","member_id":"SNOWFLAKE"}
+{"command":"samples","action":"stop|start|delete","request_id":"FRESH_UUID","member_id":"SNOWFLAKE"}
 {"command":"channels"}
 {"command":"speech_diagnostics"}
 {"command":"wake_calibration","request_id":"FRESH_UUID","member_id":"SNOWFLAKE"}
