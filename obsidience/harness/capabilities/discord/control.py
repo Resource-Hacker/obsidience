@@ -155,7 +155,9 @@ async def execute(args: dict, context: dict) -> dict:
         if action == 'play':
             receipt.update(title=current['title'], item_id=current['item_id'],
                            media_kind='audio_only', video_supported=False,
-                           verification='Audio entered the Discord player; this does not verify a listener heard it.')
+                           verification=("Source decoded and ready behind this request's spoken announcement; playback has not started."
+                                         if result.get('delivery') == 'audio_playback_ready' else
+                                         'Audio entered the Discord player; this does not verify a listener heard it.'))
         elif action == 'say':
             receipt['verification'] = 'Speech was requested; audible completion is not yet verified.'
         if not readonly:

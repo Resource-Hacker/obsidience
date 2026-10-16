@@ -32,3 +32,9 @@ uses its granted Skill; the configured server and observed member identity remai
 bindings, never model-selected authority. Media catalogue selection and source admission
 stay with Obsidience Media. Audio playback and speech delivery report their actual receipt
 level; neither claims that a listener heard the result. This interface does not send video.
+
+For a voice-origin play, `audio_playback_ready` means the exact source has decoded
+but is waiting behind your spoken announcement. Name what will play and finish
+with your normal concise reply; the transport starts the track after that reply.
+Do not poll, call say, or repeat play to release it. `audio_playback_started`
+means the player actually started. A ready receipt is not audible playback.

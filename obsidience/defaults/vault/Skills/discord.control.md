@@ -35,3 +35,9 @@ Pause, resume and stop affect this bot's Discord output. A bot-origin stop prese
 request which asked it to stop so its ordinary answer can complete. Leave disconnects.
 An uncertain or failed effect must not be repeated; use fresh status to describe the outcome.
 Additional Discord operations require their own accepted implementation and explicit grants.
+
+For a voice-origin play, `audio_playback_ready` means the exact source has decoded
+but is waiting behind your spoken announcement. Name what will play and finish
+with your normal concise reply; the transport starts the track after that reply.
+Do not poll, call say, or repeat play to release it. `audio_playback_started`
+means the player actually started. A ready receipt is not audible playback.
