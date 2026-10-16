@@ -148,6 +148,7 @@ def revalidate(candidate: dict) -> dict:
 
 def _stream(provider: str, identity: str) -> None:
     from yt_dlp import YoutubeDL
+    from tempfile import TemporaryDirectory
     if provider == 'youtube' and VIDEO_ID.fullmatch(identity):
         url = 'https://www.youtube.com/watch?v=' + identity
     elif provider == 'soundcloud' and TRACK_ID.fullmatch(identity):
@@ -155,14 +156,21 @@ def _stream(provider: str, identity: str) -> None:
     else:
         raise ValueError('invalid_music_source')
     def full_track(info, *, incomplete=False):
+        if not incomplete and info.get('is_live'):
+            return 'Live source is unavailable on this music route'
         if provider == 'soundcloud' and not incomplete and (
                 not isinstance(info.get('duration'), (int, float)) or info['duration'] <= 45):
             return 'Full audio is unavailable'
         return None
-    with YoutubeDL({**_options(), 'format': 'bestaudio/best', 'outtmpl': '-',
-                    'match_filter': full_track, 'logtostderr': True}) as client:
-        if client.download([url]):
-            raise ValueError('source_unavailable')
+    # Native HLS can otherwise fall back to FFmpeg and expose its signed URL
+    # in argv. Give upstream an explicitly empty executable directory. Only
+    # Node's independent /usr/bin/ffmpeg decoder receives our pipe bytes.
+    with TemporaryDirectory(prefix='obsidience-music-native-') as no_external:
+        with YoutubeDL({**_options(), 'format': 'bestaudio/best', 'outtmpl': '-',
+                        'ffmpeg_location': no_external,
+                        'match_filter': full_track, 'logtostderr': True}) as client:
+            if client.download([url]):
+                raise ValueError('source_unavailable')
 
 
 if __name__ == '__main__':
