@@ -886,8 +886,10 @@ VAD, wake and follow-up state are member-scoped; loaded NeMo and Pocket models a
 locks stay shared. The first addressed Bard wake claims the channel until its reply
 has drained. Other members' audio is not admitted to that request. Unaddressed audio/text
 stays ephemeral. Muting the desktop input can retain the same sole worker in a mode with
-no desktop microphone, AEC, output transport or Executive speech attachment. Dependency
-loss cancels pending work; a later voice event can reconnect without replaying it.
+no desktop microphone, AEC, output transport or Executive speech attachment. The same
+mode retains Discord speech while desktop audio awaits hardware reconnection; the desired
+desktop mode and hardware error remain visible. Reconnection drains that worker and its
+model lease before reacquiring desktop transport. Dependency loss cancels pending work; a later voice event can reconnect without replaying it.
 While that member owns a command, reply or native question-follow-up window, a
 content-free speech ownership event defers optional Executive standby prefill. Desktop
 wake, partial-speech preparation and foreground requests remain available. Native release

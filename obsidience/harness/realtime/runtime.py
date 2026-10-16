@@ -272,6 +272,10 @@ class RealtimeSessionManager:
         except (OSError, ValueError, TypeError):
             return False  # Malformed integration configuration grants no worker.
 
+    def _discord_only_wanted(self) -> bool:
+        return (not self._closed and self._discord_enabled()
+                and (self._desired_mode == "off" or self._audio_reconnect_pending))
+
     def scheduler_paused(self) -> bool:
         # Accepted wake/recognized speech is foreground demand. Passive room
         # VAD and idle listening do not pause background work. Keep the final
@@ -569,12 +573,12 @@ class RealtimeSessionManager:
             if self._closed:
                 return
             if not model_runtime.RUNTIME.work_requested:
-                if self._paused_for_work and self._desired_mode == "off" and self._discord_enabled():
+                if (self._audio_reconnect_pending or self._paused_for_work) and self._discord_only_wanted():
                     try:
                         await self._start_discord_only()
                     except (OSError, RuntimeError, ValueError) as exc:
                         self._discord_error = type(exc).__name__
-                if self._paused_for_work and self._desired_mode == "wake":
+                elif self._paused_for_work and self._desired_mode == "wake":
                     try:
                         await self._start_admitted(mode="wake", only_if_requested=True)
                     except (OSError, RuntimeError, ValueError):
@@ -1051,14 +1055,14 @@ class RealtimeSessionManager:
         })
 
     async def _start_discord_only(self) -> dict[str, Any]:
-        """Retain the sole model/PCM owner while the desktop microphone is off."""
-        if self._closed or self._desired_mode != "off" or not self._discord_enabled():
+        """Retain the sole PCM owner while desktop input is muted or unavailable."""
+        if not self._discord_only_wanted():
             return self.snapshot()
         if model_runtime.RUNTIME.work_requested:
             self._paused_for_work = True
             return self.snapshot()
         async with self._lock:
-            if self._process is not None or self._closed or self._desired_mode != "off":
+            if self._process is not None or not self._discord_only_wanted():
                 return self.snapshot()
             if not REALTIME_PYTHON.is_file() or not NEMOTRON_MODEL.is_file():
                 raise RuntimeError("the pinned shared speech runtime is unavailable")
@@ -1069,7 +1073,7 @@ class RealtimeSessionManager:
             self._discord_stopping = False
             self._discord_ready = False
             self._discord_error = None
-            self._phase = "off"
+            self._phase = "error" if self._audio_reconnect_pending else "off"
             self._transport_ready = False
             try:
                 # Read only voice selection. No device catalog, microphone
@@ -1113,22 +1117,20 @@ class RealtimeSessionManager:
             await self._publish("state", reason="discord_speech_starting")
             return self.snapshot()
 
-    async def _stop_discord_only(self, *, force: bool = False) -> dict[str, Any]:
-        """Desktop mute keeps Discord; shutdown and model reclaim drain it."""
-        if not force and not self._closed and self._discord_enabled():
-            return self.snapshot()
-        async with self._lock:
-            process, operation = self._process, self._operation
-            self._discord_stopping = True
-            self._discord_ready = False
-            if process is not None and process.returncode is None:
-                if process.stdin is not None:
-                    with contextlib.suppress(OSError, RuntimeError):
-                        process.stdin.write(b'{"type":"stop"}\n')
-                        await process.stdin.drain()
-                    process.stdin.close()
-                with contextlib.suppress(ProcessLookupError):
-                    os.killpg(process.pid, signal.SIGINT)
+    async def _stop_discord_only_locked(self) -> dict[str, Any]:
+        # Keep admission locked through reaping and lease release: a desktop
+        # reconnect must not race another Discord-only model acquisition.
+        process = self._process
+        self._discord_stopping = True
+        self._discord_ready = False
+        if process is not None and process.returncode is None:
+            if process.stdin is not None:
+                with contextlib.suppress(OSError, RuntimeError):
+                    process.stdin.write(b'{"type":"stop"}\n')
+                    await process.stdin.drain()
+                process.stdin.close()
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGINT)
         if process is not None:
             try:
                 await asyncio.wait_for(process.wait(), timeout=60)
@@ -1136,16 +1138,15 @@ class RealtimeSessionManager:
                 with contextlib.suppress(ProcessLookupError):
                     os.killpg(process.pid, signal.SIGKILL)
                 await process.wait()
-        async with self._lock:
-            if self._process is process and self._operation == operation:
-                self._process = None
-                if self._hardware_leased:
-                    await model_runtime.release_devices(RUNTIME_LEASE_OWNER)
-                    self._hardware_leased = False
-                self._desktop_disabled = False
-                self._started_ns = None
-                self._phase = "off"
-                await self._publish("state", reason="discord_speech_stopped")
+        await self._discord_speech_ownership(False)
+        self._process = None
+        if self._hardware_leased:
+            await model_runtime.release_devices(RUNTIME_LEASE_OWNER)
+            self._hardware_leased = False
+        self._desktop_disabled = False
+        self._started_ns = None
+        self._phase = "error" if self._audio_reconnect_pending else "off"
+        await self._publish("state", reason="discord_speech_stopped")
         return self.snapshot()
 
     async def _monitor_discord_process(self, process, operation):
@@ -1181,7 +1182,7 @@ class RealtimeSessionManager:
                 if self._hardware_leased:
                     await model_runtime.release_devices(RUNTIME_LEASE_OWNER)
                     self._hardware_leased = False
-                restart = (not self._closed and self._desired_mode == "off" and self._discord_enabled()
+                restart = (self._discord_only_wanted()
                            and (self._crash_restart_at is None
                                 or time.monotonic() - self._crash_restart_at > CRASH_RESTART_WINDOW_SECS))
                 await self._publish("state", reason="discord_speech_exited", returncode=returncode)
@@ -1191,9 +1192,10 @@ class RealtimeSessionManager:
             raise
         except Exception:
             # A failed reader cannot leave a live, unobserved model lease.
-            if self._process is process and self._operation == operation:
-                self._discord_error = "shared_speech_monitor_failed"
-                await self._stop_discord_only(force=True)
+            async with self._lock:
+                if self._process is process and self._operation == operation:
+                    self._discord_error = "shared_speech_monitor_failed"
+                    await self._stop_discord_only_locked()
         finally:
             if self._operation == operation:
                 await self._discord_speech_ownership(False)
@@ -1213,7 +1215,7 @@ class RealtimeSessionManager:
                 self._restart_task = None
 
     async def _ensure_muted_shared(self):
-        if self._desired_mode == "off" and self._discord_enabled() and not self._closed:
+        if self._discord_only_wanted():
             try:
                 await self._start_discord_only()
             except (OSError, RuntimeError, ValueError) as exc:
@@ -1223,11 +1225,7 @@ class RealtimeSessionManager:
     async def start(self, *, mode: str = "realtime") -> dict[str, Any]:
         from ..execution.scheduler import foreground_admission
 
-        if self._desktop_disabled:
-            # Also covers a shared launch that currently holds the lock while
-            # creating its process. Drain it before admitting desktop input.
-            return await self.set_listening_mode(mode)
-        if self._process is not None:
+        if self._process is not None and not self._desktop_disabled:
             return await self.set_listening_mode(mode)
         if self._unsubscribe_activity is not None:
             # restore() owns the device watcher; it ends while voice is off.
@@ -1244,8 +1242,9 @@ class RealtimeSessionManager:
             async with self._lock:
                 self._mode = self._desired_mode = "wake"
                 self._paused_for_work = True
-                self._phase = "suspended"
-                self._last_error = None
+                self._phase = "error" if self._audio_reconnect_pending else "suspended"
+                if not self._audio_reconnect_pending:
+                    self._last_error = None
                 if self._requested_state_path is not None:
                     media_runtime._atomic_json(self._requested_state_path, {"mode": "wake"})
                 self._standby_event.set()
@@ -1298,6 +1297,8 @@ class RealtimeSessionManager:
             if only_if_requested and (self._closed or self._desired_mode != mode
                                       or not self._paused_for_work):
                 return self.snapshot()
+            if self._desktop_disabled:
+                await self._stop_discord_only_locked()
             if self._process is not None:
                 return self.snapshot()
             # Bind the worker and its status to the accepted Executive identity.
@@ -1329,6 +1330,8 @@ class RealtimeSessionManager:
             self._aec_active = False
             self._recent_log.clear()
             try:
+                if self._requested_state_path is not None:
+                    media_runtime._atomic_json(self._requested_state_path, {"mode": mode})
                 media = await asyncio.to_thread(media_runtime.settings)
                 self._audio_source = media["microphone"]
                 self._audio_sink = media["speaker"]
@@ -1388,8 +1391,6 @@ class RealtimeSessionManager:
                 )
                 model_runtime.RUNTIME.set_reservation_process(RUNTIME_LEASE_OWNER, self._process.pid)
                 self.conversation.speech = self
-                if self._requested_state_path is not None:
-                    media_runtime._atomic_json(self._requested_state_path, {"mode": mode})
                 # Reconnecting speech preserves the one selected conversation.
                 # Only the explicit Conversation control creates a new identity.
                 self._audio_reconnect_pending = False
@@ -1423,6 +1424,7 @@ class RealtimeSessionManager:
                         )
                         self._audio_reconnect_attempt = generation
                         self._audio_reconnect_pending = True
+                        self._standby_event.set()
                 raise
             self._monitor = asyncio.create_task(
                 self._monitor_process(self._process, operation),
@@ -1437,7 +1439,6 @@ class RealtimeSessionManager:
         if mode not in {"wake", "realtime"}:
             raise ValueError("Voice mode must be wake, realtime or off")
         if self._desktop_disabled:
-            await self._stop_discord_only(force=True)
             return await self.start(mode=mode)
         if self._process is not None and self._process.returncode is not None:
             await self.stop(preserve_requested=True)
@@ -1480,8 +1481,6 @@ class RealtimeSessionManager:
 
     async def stop(self, *, preserve_requested: bool = False, for_work: bool = False,
                    audio_lost: bool = False) -> dict[str, Any]:
-        if self._desktop_disabled:
-            return await self._stop_discord_only(force=for_work or self._closed)
         finalize_observations = False
         intent_error = None
 
@@ -1497,12 +1496,21 @@ class RealtimeSessionManager:
                 self._audio_reconnect_pending = False
                 self._audio_reconnect_attempt = None
             self._wake_open = False
-            self._discord_ready = False
             if not preserve_requested and self._requested_state_path is not None:
                 try:
                     media_runtime._atomic_json(self._requested_state_path, {"mode": "off"})
                 except OSError as exc:
                     intent_error = exc
+            if self._desktop_disabled:
+                # Explicit mute still clears the preserved desktop wake intent;
+                # the independent Discord consumer keeps the same worker.
+                if for_work or self._closed or not self._discord_enabled():
+                    await self._stop_discord_only_locked()
+                else:
+                    self._phase = "error" if self._audio_reconnect_pending else "off"
+                    await self._publish("state", reason="desktop_speech_stopped")
+                return stopped_snapshot()
+            self._discord_ready = False
             conversation_id = self.conversation._conversation.conversation_id
             process = self._process
             operation = self._operation
@@ -1520,7 +1528,7 @@ class RealtimeSessionManager:
                     await asyncio.to_thread(
                         media_runtime.set_realtime_camera_active, self._audio_source, False,
                     )
-                self._phase = "off"
+                self._phase = "error" if self._audio_reconnect_pending else "off"
                 self._transport_ready = False
                 self._input_level = 0.0
                 self._capture_active = False
@@ -1534,7 +1542,7 @@ class RealtimeSessionManager:
                     await model_runtime.release_devices(RUNTIME_LEASE_OWNER)
                 if self.conversation.speech is self and not for_work:
                     self.conversation.speech = None
-                if for_work:
+                if for_work and not self._audio_reconnect_pending:
                     self._phase = "suspended"
                 result = self.snapshot()
             else:
@@ -1586,7 +1594,8 @@ class RealtimeSessionManager:
             if self.conversation.speech is self and not for_work:
                 self.conversation.speech = None
             self._process = None
-            self._phase = "suspended" if for_work else "off"
+            self._phase = ("error" if self._audio_reconnect_pending
+                           else "suspended" if for_work else "off")
             self._transport_ready = False
             self._input_level = 0.0
             self._capture_active = False
