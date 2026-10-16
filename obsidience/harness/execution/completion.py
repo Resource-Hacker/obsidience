@@ -284,13 +284,28 @@ _EFFECT_CLAIMS = (
      "Do not report opening or pulling something up from an earlier reply. If the current owner request "
      "asks for it, call application.launch now (with url for a web page) and use its result; to report "
      "what is already showing, call computer.observe. Otherwise answer without claiming the action."),
-    (re.compile(r"(?:^|[.!?]\s+)i(?: have|'ve)?(?: now| just| successfully| already)? (?:paused|stopped) "
+    (re.compile(r"(?:^|[.!?]\s+)i(?: have|'ve)?(?: now| just| successfully| already)? (?P<media_action>paused|stopped) "
                 r"(?:the |your |that |this )?(?:video|music|song|track|playback|media|youtube|it)\b", re.I),
      {"media.pause"},
      "No verified media.pause result exists in this execution. Do not report pausing from an earlier "
      "reply. If the current owner request asks to pause or stop media, call media.pause and use its "
      "result; otherwise answer without claiming the action."),
 )
+
+
+def _discord_media_claim_verified(claim: str, context: dict) -> bool:
+    """Use this run's complete transport receipt, not truncated trace text."""
+    for encoded_args, receipt in reversed(list(context.get("_discord_control_attempts", {}).items())):
+        action = json.loads(encoded_args).get("action")
+        if action not in {"play", "pause", "resume", "stop", "leave"}:
+            continue
+        # A later playback/resume or failed effect invalidates an earlier stop.
+        expected = "stop" if claim == "stopped" else "pause"
+        return (action == expected and receipt.get("ok") is True
+                and receipt.get("status") == "completed"
+                and receipt.get("playback") == ("idle" if expected == "stop" else "paused")
+                and not receipt.get("must_not_replay"))
+    return False
 
 
 def _effect_claim_error(summary: str, context: dict) -> str | None:
@@ -305,6 +320,13 @@ def _effect_claim_error(summary: str, context: dict) -> str | None:
         for claim in pattern.finditer(summary):
             sentence = re.split(r"[.!?]", summary[claim.start():].lstrip(".!? "), maxsplit=1)[0]
             if not _RECAP.search(sentence) and not tools & verified:
+                action = claim.groupdict().get("media_action")
+                if action and _discord_media_claim_verified(action, context):
+                    continue
+                if action and context.get("_discord"):
+                    return ("No current verified Discord pause/stop receipt supports this claim. "
+                            "Use discord.control only if the current request calls for that action; "
+                            "never replay failed or uncertain delivery or restart rejected media.")
                 return message
     return None
 

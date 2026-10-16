@@ -248,11 +248,11 @@ contract (MP3, FLAC, PCM/float WAV, Vorbis/Opus and M4A); virtual torrent roots 
 video-only. No empty music root or new catalogue is created automatically.
 
 Optional private configuration `music: {enabled: true, delivery: direct|torbox}`
-enables public SoundCloud/YouTube discovery using pinned yt-dlp and local EJS/Node.
-SoundCloud candidates are resolved before presentation and omit DRM-only results,
-short previews and unwanted covers. Matching direct audio avoids an additional
-YouTube search. SoundCloud always streams directly; the delivery setting applies
-to YouTube. Direct delivery streams `bestaudio/best`; it uses no browser cookies
+enables public YouTube discovery using pinned yt-dlp and local EJS/Node.
+Search prioritizes verified channels and excludes unrequested named covers/remixes;
+metadata still requires selection of the requested artist and recording. No other
+music service is silently substituted. Direct delivery streams `bestaudio/best` without
+waiting for provider download preparation; it uses no browser cookies
 and upstream access failures stay explicit. `torbox` uses the configured paid provider's exact web-download
 API, independently of the cached-only movie/series torrent policy. A play request
 reuses an exact existing item or submits it once. Uncached preparation can be pending;

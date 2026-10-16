@@ -993,7 +993,7 @@
       "repository": "https://github.com/yt-dlp/yt-dlp",
       "version": "2026.8.19",
       "license": "Unlicense",
-      "integration": "Installed default-extra dependency for shared Media public SoundCloud/YouTube music metadata and optional direct bestaudio streaming. Destination-owned child only; no second catalogue, account cookies, scheduler or Harness byte proxy. JavaScript challenge runtime is the installed Node; no remote EJS updates."
+      "integration": "Installed default-extra dependency for shared Media public YouTube music metadata and optional direct bestaudio streaming. Destination-owned child only; no second catalogue, account cookies, scheduler or Harness byte proxy. JavaScript challenge runtime is the installed Node; no remote EJS updates."
     },
     "yt_dlp_ejs": {
       "repository": "https://github.com/yt-dlp/ejs",

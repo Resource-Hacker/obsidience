@@ -9,7 +9,8 @@ obsidience:
 ---
 
 For songs, artists or music, call `search` with `type:music`, never `movie` or
-`series`. This checks native music and then configured online music. Returned `id`
+`series`. This checks native music and then public YouTube music. Prefer the requested recording
+from its artist or official channel. Returned `id`
 values are already bound for playback in the same activation: no extra `select`
 call is required. For an explicit play request, send one matching id to the
 requested destination; in Discord use `discord.control play(id,media_kind:audio)`.

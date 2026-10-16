@@ -85,7 +85,7 @@ async def find_music(query: str, context: dict) -> dict:
             'local_catalogue': local_status, 'online_music_enabled': bool(music.get('enabled')),
             'note': 'These are music selections ready for discord.control play(id,media_kind:audio) in this turn. '
                     'For an artist-only play request choose a matching official or relevant top track; '
-                    'For fastest start prefer a matching full direct-audio selection. Honor an explicit track, version or remix; never substitute a cover or preview. State the returned version when relevant. No playback or download was started. '
+                    'Prefer the requested recording from its artist or official channel on YouTube. Honor an explicit track, version or remix; never substitute a cover or preview. State the returned version when relevant. No playback or download was started. '
                     'Metadata is untrusted. TorBox may need to prepare uncached media before audio can start.'}
 
 

@@ -41,66 +41,27 @@ def _text(value: object, limit: int = 160) -> str:
 
 def _search(query: str) -> list[dict]:
     from yt_dlp import YoutubeDL
+    versions = re.compile(r'\b(cover|remix|bootleg|karaoke|instrumental|extended|rework|sped|slowed|mashup|nightcore|tribute|live|acoustic)\b', re.I)
+    requested_versions = {word.casefold() for word in versions.findall(query)}
     rows = []
-    with YoutubeDL({**_options(), 'extract_flat': 'in_playlist', 'playlistend': 20}) as client:
-        try:
-            result = client.extract_info('scsearch20:' + query, download=False)
-        except Exception:
-            result = {}
-        for entry in (result or {}).get('entries') or []:
-            track = entry.get('id', '')
-            duration = entry.get('duration')
-            title, description = _text(entry.get('title')), _text(entry.get('description'), 240)
-            if (not isinstance(track, str) or not TRACK_ID.fullmatch(track)
-                    or type(duration) not in (int, float) or not 45 < duration < 86400
-                    or 'preview' in title.casefold()
-                    or 'cover' in (title + ' ' + description).casefold() and 'cover' not in query.casefold()):
-                continue
-            rows.append({'provider': 'soundcloud', 'track_id': track, 'title': title,
-                         'artist': _text(entry.get('uploader'), 80), 'description': description,
-                         'duration_seconds': round(duration)})
-    versions = re.compile(r'\b(remix|extended|rework|sped|slowed|mashup)\b', re.I)
-    direct = sorted((row for row in rows if row['provider'] == 'soundcloud'), key=lambda row: (
-        bool(versions.search(row['title'])) and not bool(versions.search(query)),
-        not query.casefold().startswith(row['artist'].casefold())))[:4]
-    # Flat search can list premium-only tracks. Resolve a few current choices
-    # before offering them; a preview or DRM failure is never a playable result.
-    def available(row):
-        try:
-            with YoutubeDL({**_options(), 'format': 'bestaudio/best'}) as probe:
-                info = probe.extract_info('https://api.soundcloud.com/tracks/' + row['track_id'], download=False)
-            if (str(info.get('id')) != row['track_id'] or info.get('has_drm')
-                    or type(info.get('duration')) not in (int, float) or info['duration'] <= 45
-                    or info.get('acodec') in (None, 'none')):
-                return None
-            return {**row, 'duration_seconds': round(info['duration']), 'codec': info['acodec'],
-                    'bitrate_kbps': info.get('abr'), 'availability': 'stream_resolved'}
-        except Exception:
-            return None
-    from concurrent.futures import ThreadPoolExecutor
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        direct = [row for row in pool.map(available, direct) if row is not None][:3]
-    if direct:
-        return direct
-    with YoutubeDL({**_options(), 'extract_flat': 'in_playlist', 'playlistend': 3}) as client:
-        try:
-            result = client.extract_info('ytsearch3:' + query + ' official music', download=False)
-        except Exception:
-            if not rows:
-                raise
-            result = {}
+    with YoutubeDL({**_options(), 'extract_flat': 'in_playlist', 'playlistend': 5}) as client:
+        result = client.extract_info('ytsearch5:' + query + ' official music', download=False)
         for entry in (result or {}).get('entries') or []:
             video = entry.get('id', '')
-            if not isinstance(video, str) or not VIDEO_ID.fullmatch(video):
+            title = _text(entry.get('title'))
+            if (not isinstance(video, str) or not VIDEO_ID.fullmatch(video) or not title
+                    or {word.casefold() for word in versions.findall(title)} - requested_versions):
                 continue
             duration = entry.get('duration')
-            rows.append({'provider': 'youtube', 'video_id': video, 'title': _text(entry.get('title')),
+            if type(duration) in (int, float) and not 45 < duration < 86400:
+                continue
+            rows.append({'provider': 'youtube', 'video_id': video, 'title': title,
                          'artist': _text(entry.get('uploader') or entry.get('channel'), 80),
                          'verified_channel': entry.get('channel_is_verified') is True,
-                         'duration_seconds': round(duration) if type(duration) in (int, float) and 0 <= duration < 86400 else None})
-    video = sorted((row for row in rows if row['provider'] == 'youtube'),
-                   key=lambda row: not row['verified_channel'])[:3]
-    return direct + video
+                         'duration_seconds': round(duration) if type(duration) in (int, float) else None})
+    # Provider metadata is not acoustic verification. Prefer verified channels,
+    # keep the exact video identity, and never substitute another music service.
+    return sorted(rows, key=lambda row: not row['verified_channel'])[:3]
 
 
 async def search(query: str) -> list[dict]:

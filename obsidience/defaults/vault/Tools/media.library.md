@@ -2,10 +2,10 @@
 type: tool
 title: media.library
 description: For songs, artists and music use search(query,type:music). It checks
-  native music first, then public full-audio sources and YouTube music, and returns
+  native music first, then public YouTube music, and returns
   current-turn playback ids directly for discord.control play(id,media_kind:audio);
   never search a musician as a movie or series. For an artist-only play request choose
-  a matching track; prefer a resolved direct-audio source for fast playback. Preserve
+  a matching track; prefer the requested recording from its artist or official YouTube channel. Preserve
   a requested recording/version. Online playback uses the configured delivery provider;
   uncached TorBox music may report preparing instead of playing. Read and discover
   media independently of any TV. browse(query,offset,limit) reads local Movie/Episode
@@ -34,7 +34,7 @@ obsidience:
   owner_maintained: true
 ---
 
-`search(query,type:music)` searches native Jellyfin Audio first, then public SoundCloud/YouTube
+`search(query,type:music)` searches native Jellyfin Audio first, then public YouTube
 music when configured. It returns current-activation playback `id` values directly;
 pass the selected id to `discord.control play` with `media_kind:audio`. Do not call
 movie/series discovery for a musician, and do not pass a YouTube id as a catalogue GUID.
