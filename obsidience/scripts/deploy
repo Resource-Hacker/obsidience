@@ -19,7 +19,9 @@ deploy restarts. Elsewhere it is named and left alone.
 
 --only narrows the affected owners; --restart also selects a private-config
 owner when its tracked files did not change. Required dependent restarts stay
-included. Scoped deploys record a separate receipt and leave the full-deploy
+included. An installed Discord camera active before a Harness/UI deployment is
+restored after dependency readiness, including scoped Realtime recovery. Scoped
+deploys record a separate receipt and leave the full-deploy
 checkpoint and rollback history unchanged; the next full deploy still handles
 all pending owners. Scoped rollback is not supported: restore the selected
 owner's matching configuration/source backup and deploy that owner explicitly.
@@ -280,12 +282,30 @@ def wait_ready(limit: float = 300) -> None:
     deadline = time.monotonic() + limit
     while time.monotonic() < deadline:
         try:
-            if get("/api/realtime").get("ready") is True:
+            state = get("/api/realtime")
+            # An initialized API with deliberately disabled desktop speech is
+            # healthy; Discord speech has its own optional readiness contract.
+            if (state.get("ready") is True
+                    or (state.get("mode") == "off" and state.get("phase") == "off"
+                        and state.get("enabled") is False and state.get("last_error") is None)):
                 return
         except OSError:
             pass
         time.sleep(2)
     sys.exit("The Harness did not report ready; inspect journalctl --user -u obsidience-harness-dev.")
+
+
+def wait_camera_data(limit: float = 30) -> None:
+    """Require the camera's public graph dependency before restoring its owner."""
+    deadline = time.monotonic() + limit
+    while time.monotonic() < deadline:
+        try:
+            if get("/api/discord/presentation").get("available") is True:
+                return
+        except OSError:
+            pass
+        time.sleep(.5)
+    sys.exit("Discord graph data did not become available; camera not restored.")
 
 
 def check_voice(limit: float = 90) -> str | None:
@@ -480,6 +500,18 @@ def main() -> None:
         owners = [owner for owner in owners if owner in args.only]
     if args.recover_realtime and set(owners) != {"harness"}:
         parser.error("--recover-realtime requires a Harness-only deployment")
+    # Validate the requested recovery scope above before adding its dependent.
+    # Preserve intentionally stopped/failed cameras; never install one implicitly.
+    camera_unit = pathlib.Path.home() / ".config/systemd/user/obsidience-discord-camera.service"
+    if ({"harness", "ui"} & set(owners) and "discord-camera" not in owners
+            and camera_unit.is_file()
+            and subprocess.run(["systemctl", "--user", "is-active", "--quiet",
+                                "obsidience-discord-camera.service"]).returncode == 0):
+        owners.append("discord-camera")
+        print("Dependency restoration: the active Discord camera will restart after "
+              "Harness/UI readiness; the requested --only scope stays unchanged.")
+    camera_after_dependencies = ("discord-camera" in owners
+                                 and bool({"harness", "ui"} & set(owners)))
     if "tv-player" in owners and "tv-tuner" not in owners:
         owners.append("tv-tuner")
     for owner in tuple(owners):
@@ -540,6 +572,8 @@ def main() -> None:
         head = git("rev-parse", "HEAD")
     if owners:
         for owner in owners:
+            if owner == "discord-camera" and camera_after_dependencies:
+                continue  # Restore once, after all dependency/voice readiness gates.
             if owner == "tv-tuner" and "tv-player" in owners:
                 continue  # The player restart already restored the tuner with its current unit.
             restart(owner)
@@ -547,6 +581,12 @@ def main() -> None:
     failures = failures_since(started)
     if "harness" in owners and (voice := check_voice()):
         failures.append(voice)
+    if camera_after_dependencies:
+        if failures:
+            print("Discord camera not restored because deployment readiness/trace checks failed.")
+        else:
+            wait_camera_data()
+            restart("discord-camera")
     for line in failures:
         print("trace failure:", line)
     if args.only:
