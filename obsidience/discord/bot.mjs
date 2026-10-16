@@ -1,5 +1,7 @@
 import fs from 'node:fs/promises';
 import net from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { PassThrough } from 'node:stream';
@@ -740,7 +742,11 @@ export class DiscordTransport {
       try { process.kill(-child.pid, 'SIGKILL'); } catch {}
     }
     if (media.handle) media.cleanup.push(media.handle.close().catch(() => {}));
-    const cleanup = Promise.allSettled(media.cleanup);
+    const cleanup = Promise.allSettled(media.cleanup).then(async () => {
+      // Reap the downloader before removing its fragment workspace. Admission
+      // is included above, so a cancellation during mkdtemp cannot orphan it.
+      if (media.directory) await fs.rm(media.directory, { recursive: true, force: true }).catch(() => {});
+    });
     this.mediaCleanups.add(cleanup);
     void cleanup.finally(() => this.mediaCleanups.delete(cleanup));
   }
@@ -813,7 +819,11 @@ export class DiscordTransport {
       return child;
     };
     try {
-      if (!streamed) {
+      if (streamed) {
+        const admission = fs.mkdtemp(join(tmpdir(), 'obsidience-music-')).then((directory) => { media.directory = directory; });
+        media.cleanup.push(admission.catch(() => {}));
+        await admission;
+      } else {
         // Verify a replacement while the previous item remains owned/playing.
         const admission = (async () => {
           const handle = await fs.open(filename, 'r');
@@ -839,7 +849,7 @@ export class DiscordTransport {
         const provider = ownedChild(fileURLToPath(new URL('../../.venv/bin/python', import.meta.url)),
           torbox ? ['-m', 'harness.media.web_music', 'stream']
             : ['-m', 'harness.media.online_music', 'stream', source.provider, soundcloud ? source.track_id : source.video_id],
-          { cwd: runtime, stdio: [torbox ? 'pipe' : 'ignore', 'pipe', 'ignore'], env: { PATH: '/usr/bin', LANG: 'C', PYTHONPATH: runtime } });
+          { cwd: media.directory, stdio: [torbox ? 'pipe' : 'ignore', 'pipe', 'ignore'], env: { PATH: '/usr/bin', LANG: 'C', PYTHONPATH: runtime } });
         // The private CDN URL never enters argv, environment or logs.
         if (torbox) provider.stdin.end(JSON.stringify({ url: source.url }));
         // Native pipe backpressure bounds both the compressed and decoded queues.

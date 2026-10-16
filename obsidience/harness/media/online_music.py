@@ -165,7 +165,7 @@ def _stream(provider: str, identity: str) -> None:
     # Native HLS can otherwise fall back to FFmpeg and expose its signed URL
     # in argv. Give upstream an explicitly empty executable directory. Only
     # Node's independent /usr/bin/ffmpeg decoder receives our pipe bytes.
-    with TemporaryDirectory(prefix='obsidience-music-native-') as no_external:
+    with TemporaryDirectory(dir='.', prefix='native-') as no_external:
         with YoutubeDL({**_options(), 'format': 'bestaudio/best', 'outtmpl': '-',
                         'ffmpeg_location': no_external,
                         'match_filter': full_track, 'logtostderr': True}) as client:
