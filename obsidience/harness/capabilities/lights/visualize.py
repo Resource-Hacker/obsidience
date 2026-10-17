@@ -258,6 +258,15 @@ class _Session:
             raise RuntimeError("light_update_not_acknowledged")
         return True
 
+    def _audit_audio(self):
+        rows, nodes, _metadata_rows = self._current_nodes(routed=True)
+        forward = next((node for node in nodes.values() if _props(node).get("node.name") == self.name + "_forward"), None)
+        if (self.virtual_identity[0] not in _linked_sinks(rows, nodes, self.stream_identity[0])
+                or forward is None or self.sink_identity[0] not in _linked_sinks(rows, nodes, forward["id"])):
+            raise RuntimeError("audio_link_lost")
+        if any(child.poll() is not None for child in self.children):
+            raise RuntimeError("audio_child_failed")
+
     def _animate(self, capture):
         history = deque(maxlen=math.ceil(self.effective_delay / 100) + 25)
         pending = {}
@@ -268,8 +277,9 @@ class _Session:
         bins = np.fft.rfftfreq(BLOCK, 1 / RATE)
         bands = [(bins >= low) & (bins < high) for low, high in ((40, 220), (220, 1800), (1800, 8000))]
         next_render = next_audit = time.monotonic()
+        audit = None
         os.set_blocking(capture.stdout.fileno(), False)
-        with selectors.DefaultSelector() as selector, ThreadPoolExecutor(max_workers=6, thread_name_prefix="light-frame") as pool:
+        with selectors.DefaultSelector() as selector, ThreadPoolExecutor(max_workers=6, thread_name_prefix="light-frame") as pool, ThreadPoolExecutor(max_workers=1, thread_name_prefix="light-route-audit") as audit_pool:
             selector.register(capture.stdout, selectors.EVENT_READ)
             while True:
                 self._check_stop()
@@ -297,13 +307,10 @@ class _Session:
                             self.ready.set()
                 now = time.monotonic()
                 if now >= next_audit:
-                    rows, nodes, _metadata_rows = self._current_nodes(routed=True)
-                    forward = next((node for node in nodes.values() if _props(node).get("node.name") == self.name + "_forward"), None)
-                    if (self.virtual_identity[0] not in _linked_sinks(rows, nodes, self.stream_identity[0])
-                            or forward is None or self.sink_identity[0] not in _linked_sinks(rows, nodes, forward["id"])):
-                        raise RuntimeError("audio_link_lost")
-                    if any(child.poll() is not None for child in self.children):
-                        raise RuntimeError("audio_child_failed")
+                    if audit is None or audit.done():
+                        if audit is not None:
+                            audit.result()
+                        audit = audit_pool.submit(self._audit_audio)
                     next_audit = now + 1
                 if now < next_render:
                     continue
@@ -340,7 +347,7 @@ class _Session:
                     # rotates the same three current musical bands.
                     dim = max(5, min(100, round(math.sqrt(min(1, rms * 8)) * 100)))
                     rgb = np.roll(weights, index % 3)
-                    params = {"state": True, "sceneId": 0, "dimming": dim,
+                    params = {"state": True, "dimming": dim,
                               **dict(zip(("r", "g", "b"), (max(1, round(float(v) * 255)) for v in rgb)))}
                     pending[name] = pool.submit(self._write, name, params)
 

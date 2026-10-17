@@ -56,7 +56,7 @@ def _frame():
 
 def _pose():
     state = tracking.snapshot()
-    pose = state.get("pose", {})
+    pose = state.get("pose") or {}
     if state.get("state") != "running" or not all(type(pose.get(k)) in (int, float) for k in ("yaw", "pitch")):
         raise RuntimeError("Fresh camera pose is unavailable")
     return pose["yaw"], pose["pitch"]
@@ -139,8 +139,8 @@ def _measure(request_cancel):
             _check(deadline, request_cancel)
             _STATUS = {"state": "measuring", "fixture": name, "completed": len(results)}
             pose = _pose()
-            low = {"state": True, "sceneId": 0, "r": 12, "g": 20, "b": 255,
-                   "c": 0, "w": 0, "dimming": 12}
+            low = {"state": True, "r": 12, "g": 20, "b": 255,
+                   "dimming": 12}
             high = {**low, "dimming": 85}
             modified.add(name)
             _write(inventory, name, low, deadline, request_cancel)
