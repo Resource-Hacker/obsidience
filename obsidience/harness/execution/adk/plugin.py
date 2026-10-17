@@ -271,6 +271,21 @@ class AgentPlugin(BasePlugin):
                 self.ex, name, args, execute=executor.execute_capability,
                 execute_async=executor.execute_capability_async, scope_checkpoint=executor._scope_checkpoint,
                 blocked=blocked)
+            if self.ctx.get('_discord') and name != 'task.complete':
+                # A corrected call must actually run: its prerequisite may now
+                # be satisfied. Bound only identical proven non-effect failures.
+                receipt = sessions._receipt_object(outcome.observation) or {}
+                prefix = 'correction:' + hashlib.sha256(
+                    json.dumps([name, args], sort_keys=True).encode()).hexdigest() + ':'
+                if (receipt.get('status') == 'failed' and receipt.get('correction_allowed') is True
+                        and receipt.get('delivery') == 'not_dispatched' and receipt.get('effect_applied') is False):
+                    reason = str(receipt.get('failure') or 'Capability prerequisite rejected')
+                    self.strike(prefix + hashlib.sha256(reason.encode()).hexdigest(),
+                                'Repeated request rejected before playback: ' + reason)
+                else:
+                    for key in list(self.strikes):
+                        if key.startswith(prefix):
+                            del self.strikes[key]
             if queries:
                 current = self.ctx.get('_vault_searches', {})
                 fresh = [current.get(query) for query in queries]

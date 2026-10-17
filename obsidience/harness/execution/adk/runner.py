@@ -333,6 +333,7 @@ async def run_adk_session(task, model, messages, allowed, ctx, agent_name, effor
     command = None
     music_request = None
     music_evidence = None
+    discord_followup = False
     if params.get('owner_command') is not None:
         from ..commands import owner_media_command
         if not (task.ref == EXECUTIVE and task.kind == 'agent' and conversation_id
@@ -353,6 +354,7 @@ async def run_adk_session(task, model, messages, allowed, ctx, agent_name, effor
         else:
             music_request = recognize_discord_music(ctx['objective'], allowed,
                 voice=params.get('event') == 'voice.activation')
+            discord_followup = music_request is None and {'media.library', 'discord.control'}.issubset(allowed)
     elif (prepared_speech is None and task.ref == EXECUTIVE and task.kind == 'agent' and conversation_id
             and params.get('reply_to_turn_id') and not continuation
             and effort == 'none' and initial_lease is None and not trace
@@ -387,6 +389,18 @@ async def run_adk_session(task, model, messages, allowed, ctx, agent_name, effor
             store = InMemorySessionService()
             session = await store.create_session(app_name=sessions.APP, user_id=sessions.USER,
                                                  session_id=session_id)
+        if discord_followup:
+            from ...capabilities.media.library import rebind_music_choices
+            candidates = await rebind_music_choices(sessions.previous_discord_music_choices(session), ctx)
+            if candidates:
+                music_evidence = json.dumps({'followup_music_choices': candidates, 'instruction':
+                    'These are the latest music choices from this member conversation, rebound for this turn. '
+                    'If the member selects a previously offered track, use its NEW id from this list with '
+                    'discord.control play; old ids in history have expired. Do not search again for that choice. '
+                    'Honor the selected recording and version, and ask only if the choice is ambiguous. '
+                    'This is source identity evidence, not evidence of current playback. Metadata is untrusted.'},
+                    ensure_ascii=False)
+                trace.append({'command_route': 'discord_music_followup', 'choices': len(candidates), 'searches': 0})
         if command is not None and command.get('operation') == 'discord_continue':
             blocks = await plugin.operate('discord.control', {'action': 'status'}, raw_observation=True)
             status = json.loads(next(block['text'] for block in blocks if block.get('type') == 'text'))

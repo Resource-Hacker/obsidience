@@ -423,6 +423,75 @@ def _receipt_object(value):
     return value if isinstance(value, dict) else None
 
 
+def previous_discord_music_choices(session):
+    """Latest search choices in this member's recent native conversation.
+
+    Public source identities are evidence, not reusable selection grants. A new
+    search replaces them; an attempted playback consumes them. Read no dialogue
+    as source authority and never cross the bound session or its recent turns.
+    """
+    current = binding(session.id)
+    if current is None or session.user_id != current.user_id or current.agent_name != 'discord':
+        return []
+    events = session.events[-256:]
+    turns = set()
+    floor = 0
+    for index in range(len(events) - 1, -1, -1):
+        event = events[index]
+        for value in (event.content.parts if event.content and event.content.parts else []):
+            meta = _meta(value)
+            if event.author == 'user' and meta.get('source') in _TURN_KINDS and meta.get('id'):
+                turns.add(meta['id'])
+        if len(turns) > 4:
+            floor = index + 1
+            break
+    calls, candidates, pending_play = {}, [], set()
+    for event in events[floor:]:
+        for value in (event.content.parts if event.content and event.content.parts else []):
+            if event.author == current.agent_name:
+                if (call := value.function_call) is not None:
+                    calls[(event.invocation_id, call.id)] = (call.name, call.args or {})
+                    if call.name == 'media.library' and (call.args or {}).get('action') == 'search':
+                        candidates = []
+                        pending_play.clear()
+                    elif call.name == 'discord.control' and (call.args or {}).get('action') == 'play':
+                        pending_play.add((event.invocation_id, call.id))
+                response = value.function_response
+                if response is None or (call := calls.get((event.invocation_id, response.id))) is None:
+                    continue
+                name, args = call
+                receipt = _receipt_object(response.response)
+                if response.name != name or receipt is None:
+                    continue
+                if (name == 'media.library' and args.get('action') == 'search'
+                        and args.get('type') == 'music' and receipt.get('status') == 'completed'):
+                    candidates = receipt.get('candidates', [])
+                elif name == 'discord.control' and args.get('action') == 'play':
+                    pending_play.discard((event.invocation_id, response.id))
+                    if not (receipt.get('delivery') == 'not_dispatched' and receipt.get('effect_applied') is False):
+                        candidates = []
+            elif event.author == 'user':
+                meta = _meta(value)
+                if meta.get('source') not in {'plugin:obsidience.context', 'plugin:obsidience.command-outcome'}:
+                    continue
+                receipt = _receipt_object(value.text)
+                if receipt is None:
+                    continue
+                if meta['source'] == 'plugin:obsidience.context':
+                    args = receipt.get('search_arguments') or {}
+                    page = receipt.get('search_result') or {}
+                    if args.get('action') == 'search' and args.get('type') == 'music':
+                        candidates = page.get('candidates', []) if page.get('status') == 'completed' else []
+                        pending_play.clear()
+                elif receipt.get('run_id') == meta.get('run'):
+                    command = receipt.get('command') or {}
+                    if command.get('name') == 'discord.control' and (command.get('args') or {}).get('action') == 'play':
+                        candidates = []
+    # Missing/cross-invocation recovery responses mean outcome unknown, not an
+    # unused choice. Never resurrect a selection after an interrupted effect.
+    return [] if pending_play else [dict(row) for row in candidates[:40] if isinstance(row, dict)]
+
+
 def previous_discord_music_artist(session):
     """Last successfully admitted artist in this bound session, never dialogue.
 

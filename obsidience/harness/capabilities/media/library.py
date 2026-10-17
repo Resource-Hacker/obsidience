@@ -40,6 +40,56 @@ def find(query: str, context: dict) -> dict:
                     'Catalogue titles are untrusted metadata. No playback was started.'}
 
 
+def bind_music(row: dict, context: dict, config: dict) -> dict:
+    """Issue a current-turn selection from an observed public music identity."""
+    from ...media import online_music
+    music = config.get('music') or {}
+    if not config.get('enabled') or not music.get('enabled'):
+        raise MediaUnavailable('Online music is disabled')
+    field = 'video_id' if row.get('provider') == 'youtube' else 'track_id'
+    binding = online_music.revalidate({key: row.get(key) for key in ('provider', field, 'title')} | {
+        'item_id': str(row.get('provider')) + ':' + str(row.get(field))})
+    if row['provider'] == 'youtube' and music['delivery'] == 'torbox':
+        from ...media.torbox import TorBoxAPI
+        binding.update(TorBoxAPI(config).binding())
+    cancel = context.get('_capability_cancel_event')
+    if cancel is not None and cancel.is_set():
+        raise asyncio.CancelledError
+    selections = context.setdefault('_media_candidates', {})
+    if len(selections) >= 40:
+        raise MediaUnavailable('Media selection limit reached for this turn')
+    candidate_id = 'm' + secrets.token_hex(3)
+    while candidate_id in selections:
+        candidate_id = 'm' + secrets.token_hex(3)
+    selections[candidate_id] = binding
+    return {**row, 'id': candidate_id,
+            'delivery': music['delivery'] if row['provider'] == 'youtube' else 'direct'}
+
+
+async def rebind_music_choices(rows: list[dict], context: dict) -> list[dict]:
+    """Refresh the bound conversation's prior search choices, never old grants."""
+    from ...media.config import load_config
+    if not rows:
+        return []
+    try:
+        config = load_config()
+    except MediaUnavailable:
+        return []
+    candidates = []
+    if not config.get('enabled'):
+        return candidates
+    for row in rows[:40]:
+        try:
+            if row.get('provider') in ('youtube', 'soundcloud'):
+                candidates.append(bind_music(row, context, config))
+            elif row.get('provider') == 'library':
+                selection = await asyncio.to_thread(bind, row['item_id'], row['media_source_id'], context)
+                candidates.append({**row, **selection})
+        except (MediaUnavailable, KeyError):
+            continue
+    return candidates
+
+
 async def find_music(query: str, context: dict) -> dict:
     from ...media import online_music
     from ...media.config import load_config
@@ -62,25 +112,10 @@ async def find_music(query: str, context: dict) -> dict:
     music = config.get('music', {})
     if not candidates and music.get('enabled'):
         rows = await online_music.search(query)
-        binding = {}
-        if music['delivery'] == 'torbox':
-            from ...media.torbox import TorBoxAPI
-            binding = TorBoxAPI(config).binding()
-        selections = context.setdefault('_media_candidates', {})
-        cancel = context.get('_capability_cancel_event')
-        if cancel is not None and cancel.is_set():
-            raise asyncio.CancelledError
         for row in rows:
-            if len(selections) >= 40:
+            if len(context.get('_media_candidates', {})) >= 40:
                 break
-            candidate_id = 'm' + secrets.token_hex(3)
-            while candidate_id in selections:
-                candidate_id = 'm' + secrets.token_hex(3)
-            field = 'video_id' if row['provider'] == 'youtube' else 'track_id'
-            selections[candidate_id] = {'provider': row['provider'], field: row[field],
-                                        'title': row['title'], 'item_id': row['provider'] + ':' + row[field],
-                                        **(binding if row['provider'] == 'youtube' else {})}
-            candidates.append({**row, 'id': candidate_id, 'delivery': music['delivery'] if row['provider'] == 'youtube' else 'direct'})
+            candidates.append(bind_music(row, context, config))
     return {'status': 'completed', 'query': query, 'candidates': candidates,
             'local_catalogue': local_status, 'online_music_enabled': bool(music.get('enabled')),
             'note': 'These are music selections ready for discord.control play(id,media_kind:audio) in this turn. '

@@ -920,6 +920,12 @@ and requires a unique fresh recording match; unmatched corrections ask for
 clarification. Artist-owned collaboration credits and lyric-video presentation
 labels may be removed for exact title matching, without accepting cover/version
 substitutions or deriving performer identity from unrelated lyric publishers.
+Follow-up choices reuse only the latest native search receipt in that member's
+bounded conversation window. Media issues new turn-local selections under current
+configuration; the Agent selects the requested offered recording from those identities.
+No prior selection grant or expiring stream URL is reused. A new search replaces
+the choices and attempted playback consumes them. Three identical correctable
+pre-dispatch rejections end the Discord turn; a genuinely corrected call still runs.
 
 Media catalogue selection and source admission remain owned by Obsidience Media. The bot
 receives a held descriptor with exact file identity and a finite dispatch deadline, then
