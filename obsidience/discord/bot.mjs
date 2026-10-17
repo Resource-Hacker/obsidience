@@ -18,6 +18,8 @@ const { OpusEncoder } = opusBinding;
 const ALLOWED_MENTIONS = { parse: [], repliedUser: false };
 const TEXT_LIMIT = 8000;
 const SPEECH_LIMIT = 4000;
+const MUSIC_ERROR_CODES = new Set(['source_unavailable', 'source_http_429', 'source_http_403',
+  'source_auth_required', 'source_challenge_failed', 'source_format_unavailable', 'source_timeout']);
 const TTS_FRAME_BYTES = 24_000 * 2 * 0.020; // 480 mono S16 samples, exactly 20 ms.
 const TTS_PREBUFFER_FRAMES = 20; // Two 200 ms speech-owner chunks.
 const TTS_MAX_BUFFER_FRAMES = 100; // Two seconds, matching the former PCM bound.
@@ -112,6 +114,7 @@ export class DiscordTransport {
     this.mutating = false;
     this.closing = false;
     this.lastError = null;
+    this.mediaDiagnostic = null;
     this.receiveError = null;
     this.speechWorkerError = null;
     this.diagnosticRead = null;
@@ -197,6 +200,7 @@ export class DiscordTransport {
       speech_player_missed_frames: this.speechPlayer.state.status === AudioPlayerStatus.Playing ? this.speechPlayer.state.missedFrames : null,
       voice_timing: this.voiceTiming ? { ...this.voiceTiming } : null,
       media_kind: 'audio_only', video_supported: false, last_error: this.lastError,
+      media_diagnostic: this.mediaDiagnostic,
       speech_worker_error: this.speechWorkerError, receive_error: this.receiveError, receive_counters: { ...this.receiveCounters } };
   }
 
@@ -1110,16 +1114,55 @@ export class DiscordTransport {
     const media = { generation, requestId, children: [], cleanup: [], startAbort: new AbortController(),
       announcementRequestId: origin?.[0] ?? null, announcementMemberId: origin?.[1].principal.member_id ?? null,
       announcementPending: !!origin, ready: false, started: false, paused: false };
+    this.mediaDiagnostic = null;
     this.pendingMedia = media;
     media.startTimer = setTimeout(() => this.stopMedia(media), Math.max(1, expiresAt - Date.now()));
-    const ownedChild = (executable, args, options) => {
+    const ownedChild = (stage, executable, args, options) => {
       const child = spawn(executable, args, { ...options, detached: true });
+      const diagnostic = (fields) => {
+        if (this.media !== media && this.pendingMedia !== media) return;
+        this.mediaDiagnostic ??= { playback_request_id: requestId };
+        this.mediaDiagnostic[stage] = { ...this.mediaDiagnostic[stage], ...fields };
+      };
+      // Drain stderr without forwarding raw provider URLs or decoder text.
+      // Parse our provider's bounded JSON, classify decoder text in memory.
+      let stderr = '';
+      child.stderr?.on('data', (chunk) => {
+        if (stderr.length >= 1024) return;
+        stderr += chunk.toString('utf8').slice(0, 1024 - stderr.length);
+        if (stage === 'decoder') {
+          const text = stderr.toLowerCase();
+          for (const [code, fragments] of [
+            ['decoder_protocol_rejected', ['not on whitelist', 'protocol not found']],
+            ['decoder_invalid_input', ['invalid data', 'could not find codec', 'error opening input']],
+            ['decoder_permission_denied', ['permission denied']],
+            ['decoder_io_failed', ['input/output error']],
+          ]) {
+            if (fragments.some((fragment) => text.includes(fragment))) { diagnostic({ code }); break; }
+          }
+          return;
+        }
+        const line = stderr.indexOf('\n');
+        if (line < 0) return;
+        try {
+          const value = JSON.parse(stderr.slice(0, line));
+          if (MUSIC_ERROR_CODES.has(value.code)) diagnostic({ code: value.code,
+            error_class: /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(value.error_class ?? '') ? value.error_class : null,
+            errno: Number.isSafeInteger(value.errno) ? value.errno : null });
+        } catch {}
+      });
       media.children.push(child);
       media.cleanup.push(new Promise((resolve) => child.once('close', resolve)));
-      child.on('error', () => this.stopMedia(media));
+      child.on('error', (error) => {
+        diagnostic({ code: 'child_spawn_failed', error_class: error.constructor.name,
+          errno: Number.isSafeInteger(error.errno) ? error.errno : null });
+        this.stopMedia(media);
+      });
       child.stdin?.on('error', () => this.stopMedia(media));
       child.stdout?.on('error', () => this.stopMedia(media));
-      child.on('close', (code) => { if (code) this.stopMedia(media); });
+      child.on('close', (code) => {
+        if (code) { diagnostic({ exit_code: code }); this.stopMedia(media); }
+      });
       return child;
     };
     try {
@@ -1145,16 +1188,16 @@ export class DiscordTransport {
       if (this.media) this.stopMedia(this.media);
       this.pendingMedia = null;
       this.media = media;
-      const child = ownedChild('/usr/bin/ffmpeg', ['-nostdin', '-hide_banner', '-loglevel', 'error', '-threads', '1', '-filter_threads', '1',
+      const child = ownedChild('decoder', '/usr/bin/ffmpeg', ['-nostdin', '-hide_banner', '-loglevel', 'error', '-threads', '1', '-filter_threads', '1',
         '-protocol_whitelist', streamed ? 'pipe' : 'file,pipe', '-i', streamed ? 'pipe:0' : '/proc/self/fd/3',
         '-vn', '-af', 'volume=-4dB,afade=t=in:st=0:d=0.4', '-f', 's16le', '-ar', '48000', '-ac', '2', 'pipe:1'],
-      { stdio: streamed ? ['pipe', 'pipe', 'ignore'] : ['ignore', 'pipe', 'ignore', media.handle.fd], env: { PATH: '/usr/bin', LANG: 'C' } });
+      { stdio: streamed ? ['pipe', 'pipe', 'pipe'] : ['ignore', 'pipe', 'pipe', media.handle.fd], env: { PATH: '/usr/bin', LANG: 'C' } });
       if (streamed) {
         const runtime = fileURLToPath(new URL('../', import.meta.url));
-        const provider = ownedChild(fileURLToPath(new URL('../../.venv/bin/python', import.meta.url)),
+        const provider = ownedChild('provider', fileURLToPath(new URL('../../.venv/bin/python', import.meta.url)),
           torbox ? ['-m', 'harness.media.web_music', 'stream']
             : ['-m', 'harness.media.online_music', 'stream', source.provider, soundcloud ? source.track_id : source.video_id],
-          { cwd: media.directory, stdio: [torbox ? 'pipe' : 'ignore', 'pipe', 'ignore'], env: { PATH: '/usr/bin', LANG: 'C', PYTHONPATH: runtime } });
+          { cwd: media.directory, stdio: [torbox ? 'pipe' : 'ignore', 'pipe', 'pipe'], env: { PATH: '/usr/bin', LANG: 'C', PYTHONPATH: runtime } });
         // The private CDN URL never enters argv, environment or logs.
         if (torbox) provider.stdin.end(JSON.stringify({ url: source.url }));
         // Native pipe backpressure bounds both the compressed and decoded queues.
@@ -1173,6 +1216,8 @@ export class DiscordTransport {
             stream.off('readable', readable); stream.off('end', closed);
             stream.off('close', closed); stream.off('error', closed);
             media.startAbort.signal.removeEventListener('abort', closed);
+            if (error && !this.mediaDiagnostic && (this.media === media || this.pendingMedia === media)) this.mediaDiagnostic = {
+              playback_request_id: requestId, readiness: { code: 'stream_closed_before_packet' } };
             error ? reject(new Error('audio_playback_not_ready')) : resolve();
           };
           const readable = () => { if (stream.readableLength) done(); else if (stream.readableEnded) done(true); };

@@ -5,7 +5,8 @@ import asyncio
 import contextlib
 import threading
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import Response
 
 from ....capabilities.lights import calibration, visualize
 
@@ -29,6 +30,34 @@ def sources():
 @router.get("/api/lights/visualizer/calibration")
 def calibration_status():
     return calibration.status()
+
+
+@router.post("/api/lights/visualizer/observe")
+async def observe_sync(payload: dict, request: Request):
+    from ....capabilities.lights import observe
+    cancel = threading.Event()
+    pending = asyncio.create_task(asyncio.to_thread(observe.capture, payload, cancel))
+    async def watch_disconnect():
+        while not pending.done():
+            if await request.is_disconnected():
+                cancel.set()
+                return
+            await asyncio.sleep(.25)
+    watcher = asyncio.create_task(watch_disconnect())
+    try:
+        material = await asyncio.shield(pending)
+        return Response(material, media_type="application/octet-stream", headers={"Cache-Control": "no-store"})
+    except asyncio.CancelledError:
+        cancel.set()
+        with contextlib.suppress(Exception):
+            await asyncio.shield(pending)
+        raise
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+    finally:
+        watcher.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await watcher
 
 
 @router.post("/api/lights/visualizer/calibration")

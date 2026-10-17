@@ -404,6 +404,17 @@ def steering_context(clarifications) -> str:
 
 def command_summary(command: dict, verified: bool, result) -> str:
     """The controller's public settlement of one explicit (HassIL) command."""
+    if command['name'] == 'discord.control':
+        action = command['args']['action']
+        if not verified:
+            return f'The Discord {action} could not be confirmed; no action was replayed.'
+        if action == 'play':
+            identity = command['music_identity']
+            verb = 'Starting' if result.get('delivery') == 'audio_playback_ready' else 'Playing'
+            return f'{verb} "{identity["title"]}" by {identity["artist"]}.'
+        if action == 'resume' and result.get('resume_pending'):
+            return 'Resuming.'
+        return {'pause': 'Paused.', 'resume': 'Resumed.', 'stop': 'Stopped.'}[action]
     if command['name'] == 'tv.control':
         from ..capabilities.tv.control import reflex_summary
         return reflex_summary(command['args'], result if verified else None)

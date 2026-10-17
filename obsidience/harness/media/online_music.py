@@ -21,13 +21,30 @@ TRACK_ID = re.compile(r'[0-9]{1,20}')
 
 
 class _Quiet:
+    code = 'source_unavailable'
+
     def debug(self, *_args): pass
     def warning(self, *_args): pass
-    def error(self, *_args): pass
+    def error(self, message):
+        # Classify in memory only: upstream text can contain signed URLs.
+        text = str(message).lower()
+        for code, fragments in (
+                ('source_http_429', ('http error 429', 'too many requests')),
+                ('source_http_403', ('http error 403', 'forbidden')),
+                ('source_auth_required', ('sign in', 'not a bot')),
+                ('source_challenge_failed', ('challenge', 'signature', 'javascript')),
+                ('source_format_unavailable', ('requested format', 'no video formats')),
+                ('source_timeout', ('timed out', 'timeout'))):
+            if any(fragment in text for fragment in fragments):
+                self.code = code
+                break
+
+
+_LOGGER = _Quiet()
 
 
 def _options() -> dict:
-    return {'quiet': True, 'no_warnings': True, 'noprogress': True, 'logger': _Quiet(),
+    return {'quiet': True, 'no_warnings': True, 'noprogress': True, 'logger': _LOGGER,
             'cachedir': False, 'socket_timeout': 5, 'retries': 0, 'fragment_retries': 0,
             'extractor_retries': 0, 'noplaylist': True, 'remote_components': set(),
             'js_runtimes': {'node': {'path': '/usr/bin/node'}},
@@ -144,7 +161,9 @@ if __name__ == '__main__':
             _stream(sys.argv[2], sys.argv[3])
         else:
             raise ValueError('invalid_operation')
-    except Exception:
+    except Exception as error:
         # Upstream exceptions may contain signed delivery URLs: never log them.
-        print('music_source_unavailable', file=sys.stderr)
+        print(json.dumps({'code': _LOGGER.code, 'error_class': type(error).__name__[:64],
+                          'errno': error.errno if isinstance(error, OSError) else None}),
+              file=sys.stderr)
         sys.exit(1)
