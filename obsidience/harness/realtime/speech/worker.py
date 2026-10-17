@@ -111,14 +111,15 @@ SHORT_REPLIES = frozenset({
 })
 WAKE_COMMAND_WAIT_SECS = 8
 SEMANTIC_TEXT_MAX_CHARS = 2_000
-# The wake word is an address, not any mention: it must start the speech
-# segment or follow a pause in recognized words, optionally after hey/ok/okay.
+# A bare wake name starts a segment or follows a recognized-word pause,
+# optionally after hey/ok/okay. Explicit "hey <name>" also addresses mid-segment.
 WAKE_PAUSE_SECS = 0.4
 # A name ending the recognized text may still become "computer's"; the next
 # ASR delta normally arrives within one or two 80-160 ms steps.
 WAKE_CONFIRM_SECS = 0.35
 WAKE_STRIP = " ,.!?:;—-'’\t\n"
 _WAKE_LEAD = re.compile(r"[\W_]*(?:(?:hey|ok|okay)\b[\W_]*)?", re.IGNORECASE)
+_WAKE_EXPLICIT_LEAD = re.compile(r"(?<!\w)hey\b[\W_]*$", re.IGNORECASE)
 # Short acknowledgements that must not interrupt a playing Realtime reply.
 BACKCHANNEL_PHRASES = ("okay", "uh-huh", "mm-hmm", "yeah", "right")
 # Speech PCM needs level correction independently of the selected device volume.
@@ -242,7 +243,8 @@ def classify_wake(text: str, address: int | None, scanned: int, pattern: re.Patt
     """Classify unaddressed wake-word mentions in one speech segment's text.
 
     ``address`` is where an address may begin (segment start or after a pause);
-    only hey/ok/okay may precede the name there. Possessives and contractions
+    only hey/ok/okay may precede the name there. An explicit "hey <name>"
+    address may also interrupt ongoing speech. Possessives and contractions
     ("computer's") are never addresses. A name ending the text stays pending
     until more text arrives, unless ``final``. Returns (decision, end, scanned,
     rejected): accept/pending/none, the end of the name, the index up to which
@@ -255,8 +257,9 @@ def classify_wake(text: str, address: int | None, scanned: int, pattern: re.Patt
             return "pending", match.end(), scanned, rejected
         if after[:1] in ("'", "’") and after[1:2].isalnum():
             rejected.append("possessive")
-        elif (address is not None and match.start() >= address
-              and _WAKE_LEAD.fullmatch(text, address, match.start())):
+        elif (_WAKE_EXPLICIT_LEAD.search(text, 0, match.start()) is not None
+              or (address is not None and match.start() >= address
+                  and _WAKE_LEAD.fullmatch(text, address, match.start()))):
             return "accept", match.end(), match.end(), rejected
         else:
             rejected.append("mid_sentence")
