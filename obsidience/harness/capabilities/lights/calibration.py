@@ -80,10 +80,15 @@ def _collect(seconds, deadline, request_cancel, pose=None):
     return frames
 
 
-def _write(inventory, name, params, deadline, request_cancel):
+def _write(inventory, name, params, deadline, request_cancel, method="setPilot"):
     _check(deadline, request_cancel)
     sent = time.monotonic()
-    reply = power._request(inventory[name]["ip"], "setPilot", params, _CANCEL)
+    if method == "setEffect_preview":
+        params = {"preview": {"state": 1, "duration": 5,
+                  "color": [params[k] for k in ("r", "g", "b")] + [0, 0],
+                  "dimming": params["dimming"]}}
+    reply = power._request(inventory[name]["ip"],
+        "setEffect" if method == "setEffect_preview" else "setPilot", params, _CANCEL)
     if reply.get("success") is not True:
         raise RuntimeError("Calibration flash was not acknowledged")
     return sent
@@ -102,11 +107,13 @@ def _atomic_json(path: Path, payload):
         Path(temporary).unlink(missing_ok=True)
 
 
-def measure(request_cancel=None, fixtures=None):
+def measure(request_cancel=None, fixtures=None, method="setPilot"):
     """Measure five low-to-high colour flashes per fixture, restoring on every exit."""
     from . import visualize
     global _STATUS
     names = tuple(power.FIXTURES if fixtures is None else fixtures)
+    if type(method) is not str or method not in {"setPilot", "setEffect_preview"}:
+        raise ValueError("Choose a supported light command method")
     if not names or len(set(names)) != len(names) or any(name not in power.FIXTURES for name in names):
         raise ValueError("Choose registered fixtures once each")
     if not _RUN.acquire(blocking=False):
@@ -128,7 +135,7 @@ def measure(request_cancel=None, fixtures=None):
                         break
                     previous = pose
                     _CANCEL.wait(.25)
-                return _measure(request_cancel, names)
+                return _measure(request_cancel, names, method)
             finally:
                 tracking.end_measurement_hold(lease)
     except BaseException:
@@ -138,7 +145,7 @@ def measure(request_cancel=None, fixtures=None):
         _RUN.release()
 
 
-def _measure(request_cancel, names):
+def _measure(request_cancel, names, method="setPilot"):
     global _STATUS
     deadline = time.monotonic() + 150
     _STATUS = {"state": "measuring", "fixture": None, "completed": 0}
@@ -161,9 +168,9 @@ def _measure(request_cancel, names):
                    "dimming": 12}
             high = {**low, "dimming": 85}
             modified.add(name)
-            _write(inventory, name, low, deadline, request_cancel)
+            _write(inventory, name, low, deadline, request_cancel, method)
             dark = _collect(1.2, deadline, request_cancel, pose)
-            _write(inventory, name, high, deadline, request_cancel)
+            _write(inventory, name, high, deadline, request_cancel, method)
             bright = _collect(1.2, deadline, request_cancel, pose)
             a = np.median([item[1] for item in dark[-3:]], axis=0)
             b = np.median([item[1] for item in bright[-3:]], axis=0)
@@ -174,8 +181,11 @@ def _measure(request_cancel, names):
             mask = strength >= max(18.0, float(np.quantile(strength, .97)))
             if int(mask.sum()) < 12:
                 results[name] = {"status": "not_visible", "mac": inventory[name]["mac"]}
-                _restore_one(name, inventory, before)
+                preview_stopped = _restore_one(name, inventory, before, preview=method == "setEffect_preview")
                 modified.remove(name)
+                if not preview_stopped:
+                    restore_errors.append(name)
+                    raise RuntimeError("Preview effect stop was not acknowledged")
                 continue
             vector = delta[mask]
             scale = float(np.sum(vector * vector))
@@ -187,10 +197,10 @@ def _measure(request_cancel, names):
                 # Rebase between flashes: slow mechanical drift must not turn
                 # into accumulated ROI brightness error over all five trials.
                 pose = _pose()
-                _write(inventory, name, low, deadline, request_cancel)
+                _write(inventory, name, low, deadline, request_cancel, method)
                 quiet = _collect(1.0, deadline, request_cancel, pose)
                 reference = np.median([item[1] for item in quiet[-3:]], axis=0)[mask]
-                sent = _write(inventory, name, high, deadline, request_cancel)
+                sent = _write(inventory, name, high, deadline, request_cancel, method)
                 flash = _collect(1.2, deadline, request_cancel, pose)
                 frames = quiet[-2:] + flash
                 if any(item[2] != camera_identity for item in frames):
@@ -228,12 +238,15 @@ def _measure(request_cancel, names):
                     "valid_flashes": len(delays), "observations_ms": [round(v, 2) for v in delays]}
             # Restore each fixture before measuring the next one. Leave it
             # marked until verified, so a failed restoration stays explicit.
-            _restore_one(name, inventory, before)
+            preview_stopped = _restore_one(name, inventory, before, preview=method == "setEffect_preview")
             modified.remove(name)
+            if not preview_stopped:
+                restore_errors.append(name)
+                raise RuntimeError("Preview effect stop was not acknowledged")
         payload = {"version": 1, "measured_at": time.time(), "fixtures": results,
             "camera_binding": {"identity": list(camera_identity), "width": 1280, "height": 720,
                 "timestamp_source": "v4l2_kernel_pts_monotonic_compatible",
-                "measurement": "half_transition_driver_timestamp",
+                "measurement": "half_transition_driver_timestamp", "command_method": method,
                 "sensor_exposure_offset_verified": False},
             "physical_output_delay_verified": False}
         _check(deadline, request_cancel)
@@ -247,7 +260,8 @@ def _measure(request_cancel, names):
     finally:
         for name in modified:
             try:
-                _restore_one(name, inventory, before)
+                if not _restore_one(name, inventory, before, preview=method == "setEffect_preview"):
+                    restore_errors.append(name)
             except (OSError, ValueError, RuntimeError):
                 restore_errors.append(name)
         if restore_errors:
@@ -255,7 +269,15 @@ def _measure(request_cancel, names):
             raise RuntimeError("Calibration appearance restoration failed: " + ", ".join(restore_errors))
 
 
-def _restore_one(name, inventory, before):
+def _restore_one(name, inventory, before, *, preview=False):
+    preview_stopped = True
+    if preview:
+        # Attempt appearance restoration even if the preceding stop is uncertain.
+        try:
+            reply = power._request(inventory[name]["ip"], "setEffect", {"preview": {"state": 0}}, None)
+            preview_stopped = reply.get("success") is True
+        except (OSError, ValueError, RuntimeError):
+            preview_stopped = False
     pilot = before[name]
     appearance = power._appearance(pilot)
     reply = power._request(inventory[name]["ip"], "setPilot", {"state": pilot["state"], **appearance}, None)
@@ -264,3 +286,4 @@ def _restore_one(name, inventory, before):
     after = power._settled_pilot(name, inventory, None, pilot["state"], appearance)
     if after["state"] != pilot["state"] or (pilot["state"] and any(after.get(k) != v for k, v in appearance.items())):
         raise RuntimeError("Calibration restoration did not match")
+    return preview_stopped

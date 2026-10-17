@@ -201,6 +201,9 @@ class _Session:
         self.process_identity, self.old_target = process, old_target
         self.delay, self.profile, self.inventory = delay, profile, inventory
         self.effective_delay = profile["native_audio_delay_ms"] if profile else delay
+        self.command_method = ("setEffect_preview" if profile and
+                               profile["camera_binding"].get("command_method") == "setEffect_preview"
+                               else "setPilot")
         self.cancel = cancel
         self.stop_event = threading.Event()
         self.ready = threading.Event()
@@ -223,6 +226,7 @@ class _Session:
         return {"state": self.state, "calibrated": False,
                 "calibration_state": "owner_profile_supplied" if self.profile else "uncalibrated",
                 "profile_id": self.profile["profile_id"] if self.profile else None,
+                "command_method": self.command_method,
                 "timing_verified_by_runtime": False, "audio_delay_ms": self.delay,
                 "measured_monitor_delay_ms": self.profile["native_audio_delay_ms"] if self.profile else None,
                 "physical_output_delay_verified": False, "analysis_interval_ms": 100, "source": {"stream_id": self.stream_identity[0],
@@ -302,7 +306,10 @@ class _Session:
             '{ factory.name=support.null-audio-sink node.name=%s media.class=Audio/Sink '
             'audio.position=[FL FR] object.linger=false priority.session=0 }' % self.name], stdin=True)
         def virtual():
-            _rows, nodes, _meta = self._current_nodes()
+            # Adding the device can replace Discord's stream before the sink
+            # appears. Bind our sink first so the existing exact-source rebind
+            # can observe that native transition on the next identity check.
+            _rows, nodes, _meta = _graph()
             return next((node for node in nodes.values() if _props(node).get("node.name") == self.name), None)
         self.virtual_identity = _identity(self._wait(virtual))
         self._spawn(["pw-loopback", "-n", self.name + "_delay", "-C", self.name,
@@ -328,7 +335,13 @@ class _Session:
     def _write(self, name, params):
         self._check_stop()
         self.mutated.add(name)
-        result = power._request(self.inventory[name]["ip"], "setPilot", params, self.stop_event, timeout=.45)
+        method = "setPilot"
+        if self.command_method == "setEffect_preview":
+            method = "setEffect"
+            params = {"preview": {"state": 1, "duration": 5,
+                      "color": [params[k] for k in ("r", "g", "b")] + [0, 0],
+                      "dimming": params["dimming"]}}
+        result = power._request(self.inventory[name]["ip"], method, params, self.stop_event, timeout=.45)
         if result.get("success") is not True:
             raise RuntimeError("light_update_not_acknowledged")
         return True
@@ -497,6 +510,16 @@ class _Session:
                     except (OSError, subprocess.SubprocessError):
                         self.cleanup_errors.append("audio_child_cleanup_failed")
         def restore_light(name):
+            preview_stopped = True
+            if self.command_method == "setEffect_preview":
+                # All frame requests have drained before restoration. Even an
+                # uncertain preview stop must not skip the original appearance.
+                try:
+                    reply = power._request(self.inventory[name]["ip"], "setEffect",
+                        {"preview": {"state": 0}}, None)
+                    preview_stopped = reply.get("success") is True
+                except (OSError, ValueError, RuntimeError):
+                    preview_stopped = False
             before = self.before[name]
             appearance = power._appearance(before)
             acknowledgement = power._request(self.inventory[name]["ip"], "setPilot",
@@ -506,6 +529,8 @@ class _Session:
             after = power._settled_pilot(name, self.inventory, None, before["state"], appearance)
             if after["state"] != before["state"] or (before["state"] and any(after.get(k) != v for k, v in appearance.items())):
                 raise RuntimeError("light_restore_readback_mismatch")
+            if not preview_stopped:
+                raise RuntimeError("light_preview_stop_not_acknowledged")
         with ThreadPoolExecutor(max_workers=6, thread_name_prefix="light-restore") as pool:
             jobs = {name: pool.submit(restore_light, name) for name in self.mutated}
             for name, job in jobs.items():

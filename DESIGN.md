@@ -905,6 +905,13 @@ Opus prebuffer as soon as synthesis supplies it, then paces with that bounded le
 The owner socket can exclude one specified member's next voice turn from Memory for
 a 30-second diagnostic window; default requests retain their normal Memory policy.
 
+Bard uses a direct media-command path for exact pause, resume and stop requests, and
+for unambiguous artist or recording matches from one fresh search. Those requests
+execute the accepted capabilities and completion checks without model generation or
+Memory recall. Ambiguous requests enter the ordinary Agent with the actual search
+results; they do not search twice. Successful voice playback uses a brief handoff
+while retaining the full title in history; the final speech frame releases music.
+
 Media catalogue selection and source admission remain owned by Obsidience Media. The bot
 receives a held descriptor with exact file identity and a finite dispatch deadline, then
 opens its own descriptor for FFmpeg audio playback. Shared music search admits native

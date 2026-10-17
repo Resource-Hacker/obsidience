@@ -63,10 +63,10 @@ async def observe_sync(payload: dict, request: Request):
 @router.post("/api/lights/visualizer/calibration")
 async def measure_flashes(payload: dict | None = None):
     payload = payload or {}
-    if set(payload) - {"fixtures"} or ("fixtures" in payload and (not isinstance(payload["fixtures"], list) or not all(isinstance(name, str) for name in payload["fixtures"]))):
+    if set(payload) - {"fixtures", "method"} or ("fixtures" in payload and (not isinstance(payload["fixtures"], list) or not all(isinstance(name, str) for name in payload["fixtures"]))):
         raise HTTPException(400, "Choose registered fixture names")
     cancel = threading.Event()
-    pending = asyncio.create_task(asyncio.to_thread(calibration.measure, cancel, payload.get("fixtures")))
+    pending = asyncio.create_task(asyncio.to_thread(calibration.measure, cancel, payload.get("fixtures"), payload.get("method", "setPilot")))
     try:
         return await asyncio.shield(pending)
     except asyncio.CancelledError:

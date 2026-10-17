@@ -132,7 +132,7 @@ def _discord_music_intents():
 
 
 def recognize_discord_music(objective, allowed):
-    """Explicit title/artist slots only; no fuzzy identity or historical id."""
+    """Explicit music slots; selection still requires fresh exact metadata."""
     if (not isinstance(objective, str) or len(objective) > 240
             or not {'media.library', 'discord.control', 'task.complete'}.issubset(allowed)):
         return None
@@ -140,6 +140,11 @@ def recognize_discord_music(objective, allowed):
     choices = {(str(result.entities['music_title'].value).strip(),
                 str(result.entities['music_artist'].value).strip())
                for result in recognize_all(text, _discord_music_intents())}
+    if not choices:
+        plain = re.fullmatch(r'(?:please )?play (?:some )?(.+?)(?: please)?', text, re.I)
+        if plain and 0 < len(query := plain[1].strip()) <= 115:
+            return {'query': query}
+        return None
     if len(choices) != 1:
         return None
     title, artist = choices.pop()
@@ -158,15 +163,26 @@ def exact_discord_music(request, candidates):
     Only a leading exact artist and finite official presentation decorations
     are removed. Live/remix/remaster/cover/version words remain part of identity.
     """
-    wanted_title, wanted_artist = (_music_identity(request[key]) for key in ('title', 'artist'))
-    matches = []
+    query_only = 'query' in request
+    wanted_artist = _music_identity(request['query'] if query_only else request['artist'])
+    wanted_title = _music_identity(request['query'] if query_only else request['title'])
+    valid = []
     for row in candidates:
         if (not isinstance(row, dict) or row.get('provider') != 'youtube'
                 or row.get('verified_channel') is not True
                 or not isinstance(row.get('artist'), str) or not isinstance(row.get('title'), str)
                 or not isinstance(row.get('id'), str)
-                or _music_identity(row['artist']) != wanted_artist):
+                or not query_only and _music_identity(row['artist']) != wanted_artist):
             continue
+        valid.append(row)
+    if query_only:
+        # Any recording by this exact verified artist satisfies an artist-only
+        # request. Preserve the provider's relevance order; never infer aliases.
+        artists = [row for row in valid if _music_identity(row['artist']) == wanted_artist]
+        if artists:
+            return artists[0]
+    matches = []
+    for row in valid:
         title, rank = row['title'], 2
         decoration = re.fullmatch(r'(.+?)\s*[\(\[](official audio|official music video|official video)[\)\]]',
                                   title, re.I)
@@ -174,11 +190,16 @@ def exact_discord_music(request, candidates):
             title = decoration[1]
             rank = 0 if decoration[2].casefold() == 'official audio' else 1
         identity = _music_identity(title)
-        if identity.startswith(wanted_artist + ' '):
-            identity = identity[len(wanted_artist) + 1:]
+        artist = _music_identity(row['artist'])
+        if identity.startswith(artist + ' '):
+            identity = identity[len(artist) + 1:]
         if identity == wanted_title:
             matches.append((rank, row))
     if not matches:
+        return None
+    # A title without an artist must resolve to one artist/recording identity
+    # before presentation ranking; two artists with the same song need judgment.
+    if query_only and len({_music_identity(row['artist']) for _, row in matches}) != 1:
         return None
     rank = min(value for value, _ in matches)
     best = {row['id']: row for value, row in matches if value == rank}
