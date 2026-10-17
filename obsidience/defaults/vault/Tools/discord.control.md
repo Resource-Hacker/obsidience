@@ -46,9 +46,11 @@ cancels only its exact playback request.
 
 Direct YouTube playback may require a provider-reported availability wait before
 the selected audio can be downloaded. `provider_wait_ms` reports that preparation
-duration, not ready or playing audio. The owner allows one such wait up to 60
-seconds in addition to the normal startup budget. Cancellation stops the exact
-request immediately; it does not wait for the provider's delay to elapse.
+duration, not ready or playing audio. The total native wait is capped at 60
+seconds in addition to the normal startup budget. Before any audio write is
+attempted, an anonymous download refusal may use the existing YouTube account
+once for the same recording; that attempt shares the wait limit. Cancellation
+stops the exact request immediately; it does not wait for the provider's delay.
 
 The optional Discord transport owns the connection and audio players. The executing Agent
 uses its granted Skill; the configured server and observed member identity remain controller
