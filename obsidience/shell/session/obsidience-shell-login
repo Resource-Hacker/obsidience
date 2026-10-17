@@ -1,17 +1,36 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Adding a PCIe card can renumber the integrated GPU's bus and DRM nodes.
+# Resolve only this installation's unique Granite Ridge AMD display device;
+# neither RTX 4000 model GPU may enter the compositor's device list.
+resolve_side_drm_card() {
+    local card device
+    local -a matches=()
+    for card in /sys/class/drm/card[0-9]*; do
+        [[ "${card##*/}" =~ ^card[0-9]+$ ]] || continue
+        device="$card/device"
+        [[ -r "$device/vendor" && -r "$device/device" ]] || continue
+        [[ "$(< "$device/vendor")" == 0x1002 \
+            && "$(< "$device/device")" == 0x13c0 \
+            && "$(readlink -f "$device/driver")" == */amdgpu ]] || continue
+        matches+=("/dev/dri/${card##*/}")
+    done
+    if (( ${#matches[@]} != 1 )); then
+        printf 'Obsidience: expected one Granite Ridge AMD display GPU; found %s\n' "${#matches[@]}" >&2
+        return 1
+    fi
+    printf '%s\n' "${matches[0]}"
+}
+
 main_drm_card="$(readlink -f /dev/dri/by-path/pci-0000:01:00.0-card)"
-side_drm_card="$(readlink -f /dev/dri/by-path/pci-0000:7a:00.0-card)"
+side_drm_card="$(resolve_side_drm_card)"
 [[ "$main_drm_card" == /dev/dri/card[0-9]* && -c "$main_drm_card" ]] || exit 1
 [[ "$side_drm_card" == /dev/dri/card[0-9]* && -c "$side_drm_card" ]] || exit 1
 
 main_device_path="$(udevadm info -q property -n "$main_drm_card" \
     | sed -n 's/^ID_PATH=//p')"
-side_device_path="$(udevadm info -q property -n "$side_drm_card" \
-    | sed -n 's/^ID_PATH=//p')"
 [[ "$main_device_path" == "pci-0000:01:00.0" ]] || exit 1
-[[ "$side_device_path" == "pci-0000:7a:00.0" ]] || exit 1
 
 export AQ_DRM_DEVICES="$main_drm_card:$side_drm_card"
 
