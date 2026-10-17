@@ -243,7 +243,8 @@ def native_text_arguments(text: str, context: dict) -> dict:
     if any((item.get("completion_evidence") or {}).get("verified") is not True
            for item in _latest_computer_results(context).values()):
         status = "failed"
-    if context.get("_tv_control_failed") or context.get("_media_acquire_failed"):
+    if (context.get("_tv_control_failed") or context.get("_media_acquire_failed")
+            or context.get("_discord_control_failed")):
         status = "failed"
     if _pending_staged_proposals(context):
         status = "review"
@@ -371,6 +372,32 @@ def _camera_turn_claim_error(summary: str, context: dict) -> str | None:
     return None
 
 
+def _discord_playback_claim_error(summary: str, context: dict) -> str | None:
+    """A failed play/resume receipt cannot establish current playback."""
+    if context.get("_discord_control_failed") not in {"play", "resume"}:
+        return None
+    # Check clauses separately: an honest failure explanation must not mask a
+    # later positive claim. Negated, conditional and ordinary explanatory
+    # forms do not match these affirmative state statements.
+    for clause in re.split(r"[.!?;]\s+|\n+|\s*,?\s+but\s+", summary, flags=re.I):
+        clause = clause.strip()
+        if re.match(r"(?:now\s+)?(?:playing|starting|resuming|resumed)\b", clause, re.I):
+            if not re.search(r"\b(?:not|never|failed|fails|unsuccessful|unverified|uncertain|unable|cannot|"
+                             r"can['’]t|couldn['’]t|didn['’]t|requires?|needs?|depends?|would|could|might)\b",
+                             clause, re.I):
+                return "Discord playback failed or is uncertain. Report the actual blocker; do not claim playback started or resumed."
+        if re.match(
+                r"(?:i(?:['’]m| am) (?:now |already )?(?:playing|resuming)"
+                r"|i(?:['’]ve| have)?(?: now| just)? (?:started|resumed) (?:playing|playback|(?:the |your )?(?:music|song|track|audio))"
+                r"|(?:the |your )?(?:music|song|track|audio|playback) "
+                r"(?:is (?:now |already )?playing|has (?:now )?(?:started playing|resumed playback)"
+                r"|(?:started|resumed)(?=\s*[.!?,:]?\s*$))"
+                r"|it(?:['’]s| is) (?:now |already )?playing)\b",
+                clause, re.I):
+            return "Discord playback failed or is uncertain. Report the actual blocker; do not claim playback started or resumed."
+    return None
+
+
 def public_claim_error(summary: str, context: dict) -> str | None:
     """The Executive completion's unsupported unlock/effect claim check.
 
@@ -385,7 +412,8 @@ def public_claim_error(summary: str, context: dict) -> str | None:
             r"\b(?:successfully|started playing|is (?:now )?playing)\b", summary, re.I) and not re.search(
             r"\b(?:cannot|can't|couldn't|unable|unverified|uncertain|not verified)\b", summary, re.I):
         return "TV verification failed. State that the requested outcome could not be verified; do not report unqualified playback success."
-    return (_unlock_claim_error(summary, context) or _effect_claim_error(summary, context)
+    return (_discord_playback_claim_error(summary, context)
+            or _unlock_claim_error(summary, context) or _effect_claim_error(summary, context)
             or _camera_turn_claim_error(summary, context))
 
 
@@ -398,6 +426,8 @@ def _computer_completion_error(task, status: str, context: dict, verification=No
     """
     if context.get("_tv_control_failed") and status != "failed":
         return "TV control failed in this run; finish with status failed and the actual blocker."
+    if context.get("_discord_control_failed") and status != "failed":
+        return "Discord control failed or is uncertain in this run; finish failed with its actual receipt and do not replay."
     if context.get("_media_acquire_failed") and status != "failed":
         return "Media registration failed or is uncertain; finish failed with its receipt and do not replay."
     if status != "completed":

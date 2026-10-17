@@ -485,7 +485,8 @@ def previous_discord_music_choices(session):
                         pending_play.clear()
                 elif receipt.get('run_id') == meta.get('run'):
                     command = receipt.get('command') or {}
-                    if command.get('name') == 'discord.control' and (command.get('args') or {}).get('action') == 'play':
+                    if (command.get('declined_music') is True or command.get('name') == 'discord.control'
+                            and (command.get('args') or {}).get('action') == 'play'):
                         candidates = []
     # Missing/cross-invocation recovery responses mean outcome unknown, not an
     # unused choice. Never resurrect a selection after an interrupted effect.
@@ -536,6 +537,20 @@ def previous_discord_music_artist(session):
                                 and receipt.get('item_id') == 'youtube:' + row['video_id']
                                 and receipt.get('title') == row.get('title')):
                             artist = row['artist'].strip()
+            elif event.author == 'user' and _meta(value).get('source') == 'plugin:obsidience.context':
+                context = _receipt_object(value.text)
+                if context is None:
+                    continue
+                rows = context.get('followup_music_choices')
+                if not isinstance(rows, list):
+                    args = context.get('search_arguments') or {}
+                    page = context.get('search_result') or {}
+                    rows = (page.get('candidates') if isinstance(args, dict) and isinstance(page, dict)
+                            and args.get('action') == 'search' and args.get('type') == 'music'
+                            and page.get('status') == 'completed' else None)
+                if isinstance(rows, list):
+                    candidates.update({(event.invocation_id, row['id']): row for row in rows
+                                       if isinstance(row, dict) and isinstance(row.get('id'), str)})
             elif event.author == 'user' and _meta(value).get('source') == 'plugin:obsidience.command-outcome':
                 try:
                     outcome = json.loads(value.text or '')

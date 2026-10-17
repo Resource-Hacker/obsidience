@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from difflib import SequenceMatcher
 import io
 import json
 import math
@@ -17,6 +18,7 @@ import signal
 import stat
 import sys
 import time
+import unicodedata
 from pathlib import Path
 
 from .config import MediaUnavailable
@@ -76,6 +78,38 @@ def _text(value: object, limit: int = 160) -> str:
     return ' '.join(str(value or '').split())[:limit].replace('<', '').replace('>', '')
 
 
+def _rank_artists(query: str, rows: list[dict]) -> list[dict]:
+    """Whole-channel name relevance, never an automatic recording match."""
+    def words(text):
+        return re.findall(r'[^\W_]+', unicodedata.normalize('NFKC', text).casefold())
+
+    query_words, scores = words(query), {}
+    for row in rows:
+        artist_words = words(row['artist'])
+        artist = ' '.join(artist_words)
+        if not artist or not row['verified_channel']:
+            continue
+        spans = [' '.join(query_words[i:i + len(artist_words)])
+                 for i in range(len(query_words) - len(artist_words) + 1)]
+        score = max((SequenceMatcher(None, artist, span).ratio() for span in spans), default=0)
+        # Short names are too collision-prone for spelling hints. Exact names
+        # still rank normally, and close names never enter exact autoplay.
+        if score == 1 or len(artist) >= 6 and score >= .9:
+            scores[artist] = score
+    ranked = sorted(scores.items(), key=lambda item: item[1], reverse=True)
+    close = (ranked[0][0] if ranked and ranked[0][1] < 1
+             and (len(ranked) == 1 or ranked[0][1] - ranked[1][1] >= .08) else None)
+    for row in rows:
+        artist = ' '.join(words(row['artist']))
+        if row['verified_channel'] and scores.get(artist) == 1:
+            row['artist_match'] = 'exact'
+        elif row['verified_channel'] and artist == close:
+            row['artist_match'] = 'close'
+    return sorted(rows, key=lambda row: (
+        {'exact': 0, 'close': 1}.get(row.get('artist_match'), 2),
+        not row['verified_channel'], not bool(re.search(r'\bofficial audio\b', row['title'], re.I))))
+
+
 def _search(query: str) -> list[dict]:
     from yt_dlp import YoutubeDL
     versions = re.compile(r'\b(cover|remix|bootleg|karaoke|instrumental|extended|rework|sped|slowed|mashup|nightcore|tribute|live|acoustic)\b', re.I)
@@ -84,22 +118,26 @@ def _search(query: str) -> list[dict]:
     with YoutubeDL({**_options(), 'extract_flat': 'in_playlist', 'playlistend': 5}) as client:
         result = client.extract_info('ytsearch5:' + query + ' official audio', download=False)
         for entry in (result or {}).get('entries') or []:
+            if entry.get('is_live') is True or entry.get('live_status') in {'is_live', 'is_upcoming'}:
+                continue  # This byte-source route admits finite recordings only.
             video = entry.get('id', '')
             title = _text(entry.get('title'))
             if (not isinstance(video, str) or not VIDEO_ID.fullmatch(video) or not title
                     or {word.casefold() for word in versions.findall(title)} - requested_versions):
                 continue
             duration = entry.get('duration')
-            if type(duration) in (int, float) and not 45 < duration < 86400:
+            # Flat YouTube search sometimes omits live_status even for radio.
+            # Admit a bounded recording only when its duration is known; an
+            # unknown duration is not proof of live content or playability.
+            if type(duration) not in (int, float) or not math.isfinite(duration) or not 45 < duration < 86400:
                 continue
             rows.append({'provider': 'youtube', 'video_id': video, 'title': title,
                          'artist': _text(entry.get('uploader') or entry.get('channel'), 80),
                          'verified_channel': entry.get('channel_is_verified') is True,
-                         'duration_seconds': round(duration) if type(duration) in (int, float) else None})
-    # Provider metadata is not acoustic verification. Prefer verified channels,
-    # keep the exact video identity, and never substitute another music service.
-    return sorted(rows, key=lambda row: (not row['verified_channel'],
-                  not bool(re.search(r'\bofficial audio\b', row['title'], re.I))))[:3]
+                         'duration_seconds': round(duration)})
+    # Provider metadata is not acoustic verification. A relevant whole artist
+    # name outranks presentation labels on another artist's recording.
+    return _rank_artists(query, rows)[:3]
 
 
 async def search(query: str) -> list[dict]:

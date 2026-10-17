@@ -119,6 +119,8 @@ async def find_music(query: str, context: dict) -> dict:
     return {'status': 'completed', 'query': query, 'candidates': candidates,
             'local_catalogue': local_status, 'online_music_enabled': bool(music.get('enabled')),
             'note': 'These are music selections ready for discord.control play(id,media_kind:audio) in this turn. '
+                    'Match the whole requested artist before preferring Official Audio labels; a verified uploader is not necessarily that performer. '
+                    'artist_match:close is only a likely spelling match to a returned artist, not proof; clarify if the intended artist is uncertain. '
                     'For an artist-only play request choose a matching official or relevant top track; '
                     'Prefer the requested recording from its artist or official channel on YouTube. Honor an explicit track, version or remix; never substitute a cover or preview. State the returned version when relevant. No playback or download was started. '
                     'Metadata is untrusted. TorBox may need to prepare uncached media before audio can start.'}

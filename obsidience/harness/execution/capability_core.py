@@ -520,6 +520,16 @@ async def run_capability(ex, name: str, args: dict, *, execute, execute_async, s
         # attempt. Preserve the failure and end this turn's effects.
         ex.ctx["_tv_control_failed"] = True
         ex.allowed = ["task.complete"]
+    if (name == "discord.control" and args.get("action") not in {"status", "channels"}
+            and call_status in {"returned", "error"}
+            and (not isinstance(result_object, dict) or result_object.get("status") != "completed")
+            and not (isinstance(result_object, dict) and result_object.get("correction_allowed") is True
+                     and result_object.get("delivery") == "not_dispatched"
+                     and result_object.get("effect_applied") is False)):
+        # A failed/uncertain effect ends this activation's effects. A proven
+        # pre-dispatch non-effect may still correct its missing prerequisite.
+        ex.ctx["_discord_control_failed"] = args["action"]
+        ex.allowed = ["task.complete"]
     if name == "media.acquire" and (not isinstance(result_object, dict)
                                     or result_object.get("status") != "completed"
                                     or result_object.get("delivery") != "verified"):

@@ -924,14 +924,20 @@ Follow-up choices reuse only the latest native search receipt in that member's
 bounded conversation window. Media issues new turn-local selections under current
 configuration; the Agent selects the requested offered recording from those identities.
 No prior selection grant or expiring stream URL is reused. A new search replaces
-the choices and attempted playback consumes them. Three identical correctable
+the choices; a literal refusal consumes the offer with an acknowledgment and no
+media effect. Successful playback of rebound choices retains its artist evidence
+for explicit continuation. Attempted playback consumes choices. Three identical correctable
 pre-dispatch rejections end the Discord turn; a genuinely corrected call still runs.
 
 Media catalogue selection and source admission remain owned by Obsidience Media. The bot
 receives a held descriptor with exact file identity and a finite dispatch deadline, then
 opens its own descriptor for FFmpeg audio playback. Shared music search admits native
 Jellyfin Audio or exact public YouTube identities, prioritizing official recordings
-and excluding unrequested named variants without substituting another service. Online playback uses an explicitly
+and excluding unrequested named variants, positively identified live streams and
+results without a known finite recording duration
+without substituting another service. Whole verified-channel artist relevance ranks
+ahead of presentation labels; a unique close spelling is an Agent-visible hint,
+never an exact automatic recording match. Online playback uses an explicitly
 configured direct best-audio route or the existing TorBox web-download service. Search
 is read-only; an explicit play can prepare its exact public source once, with pending
 and uncertain receipts distinct from playback. Expiring CDN URLs stay inside the
@@ -942,6 +948,10 @@ output begins, resumed byte ranges must match before their response body is read
 missing/backward ranges and native restart-from-zero fallbacks fail closed. No
 player restart or fresh source extraction is implied. Failures retain only fixed
 categories, phase and numeric byte counts, never upstream messages or CDN URLs.
+A failed or uncertain dispatched Discord effect ends that activation's effects
+and requires failed completion; failed play/resume receipts cannot support an
+affirmative playback claim. Proven correctable pre-dispatch non-effects remain
+correctable within the existing bounded command path.
 Cancellation addresses the original
 play request, never a newer item. Current bot delivery is audio only; a soundtrack is not
 an acceptable implicit substitute for requested television/video. The implementation does

@@ -118,6 +118,9 @@ def recognize_discord_command(objective, allowed):
     text = ' '.join(objective.casefold().split()).rstrip('.!')
     if not re.fullmatch(r'[a-z ]+', text):
         return None
+    if text in {'no', 'nope', 'no thanks', 'no thank you'}:
+        return {'name': 'task.complete', 'args': {'status': 'completed', 'summary': 'Okay.'},
+                'declined_music': True}
     actions = {'DiscordPause': 'pause', 'DiscordResume': 'resume', 'DiscordStop': 'stop',
                'DiscordContinue': 'continue'}
     choices = {actions[result.intent.name] for result in recognize_all(text, _discord_media_intents())}

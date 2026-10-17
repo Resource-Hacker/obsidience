@@ -151,7 +151,8 @@ def execute(args: dict, context: dict) -> dict:
     else:
         verification = dict(verification) if valid_verification else None
         error = completion_error(task, requested_status, outcome, evidence, context, verification)
-        if not error and conversational and requested_status == "completed":
+        if not error and conversational and (requested_status == "completed"
+                or context.get("_discord_control_failed") in {"play", "resume"}):
             error = public_claim_error(summary, context)
     if error:
         return {
