@@ -260,7 +260,8 @@ sample file to false disables capture after the next transport restart and prese
 UID-owned mode-0700 runtime directory, itself mode 0600. This filesystem boundary
 admits the owner UID (and root); there is no public HTTP/control listener. One
 NDJSON request and response per connection, maximum 65,536 bytes including newline,
-eight clients, 20-second idle deadline. The exact command schema is:
+eight clients, 20-second idle deadline (75 seconds for YouTube play, whose
+startup deadline extends only for a reported source availability wait). The exact command schema is:
 
 ```text
 {"command":"status"}
@@ -333,7 +334,13 @@ The parent includes exact `os.fstat` device/inode/size/mtime-nanosecond values a
 decimal strings and a deadline `expires_at_ms = now + 14000`. The transport checks
 BigInt fstat on its newly opened descriptor, rejecting a reused FD or changed file,
 and rechecks the deadline before starting. It accepts no deadline over 15 seconds
-ahead. The parent shields/drains its bounded control request under cancellation,
+ahead. A YouTube provider can report one numeric `source_wait` before its first
+packet: the transport adds that exact native availability wait, at most 60 seconds,
+to this request's startup deadline. All identity/cancellation guards stay active;
+ordinary extraction and local files retain the original deadline. The selected
+best-audio format and yt-dlp's required wait remain unchanged. `provider_wait_ms`
+is preparation evidence only. Provider stderr stays bounded and sanitized.
+The parent sends exact cancellation before draining its bounded control request,
 then releases its admitted descriptor. Internal `cancel_media` names only the
 original play request: it stops that exact playback or records a cancellation
 that prevents a pending delayed start. It never stops a newer unrelated media

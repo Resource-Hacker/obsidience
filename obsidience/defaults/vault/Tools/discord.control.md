@@ -37,6 +37,12 @@ entering the Discord player. Public receipts contain neither signed CDN URLs nor
 account credentials. The destination owns all decoder/provider children and
 cancels only its exact playback request.
 
+Direct YouTube playback may require a provider-reported availability wait before
+the selected audio can be downloaded. `provider_wait_ms` reports that preparation
+duration, not ready or playing audio. The owner allows one such wait up to 60
+seconds in addition to the normal startup budget. Cancellation stops the exact
+request immediately; it does not wait for the provider's delay to elapse.
+
 The optional Discord transport owns the connection and audio players. The executing Agent
 uses its granted Skill; the configured server and observed member identity remain controller
 bindings, never model-selected authority. Media catalogue selection and source admission

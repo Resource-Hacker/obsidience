@@ -10,11 +10,13 @@ import asyncio
 import contextlib
 import io
 import json
+import math
 import os
 import re
 import signal
 import stat
 import sys
+import time
 from pathlib import Path
 
 from .config import MediaUnavailable
@@ -223,6 +225,18 @@ def _stream(provider: str, identity: str) -> None:
         # Native extraction has already merged the selected bestaudio/best
         # format into this resolved result. Download it exactly once. Errors
         # from here onward never enter the authentication fallback above.
+        available_at = info.get('available_at')
+        if type(available_at) in (int, float) and math.isfinite(available_at):
+            # yt-dlp enforces this server-provided preroll wait. Tell the owner
+            # its numeric duration before the native downloader sleeps; no URL,
+            # account data or media bytes cross this diagnostic boundary.
+            wait_ms = math.ceil(max(0, available_at - int(time.time())) * 1000)
+            if wait_ms > 60000:
+                _LOGGER.code = 'source_wait_exceeds_budget'
+                raise ValueError('source_wait_exceeds_budget')
+            if wait_ms:
+                print(json.dumps({'event': 'source_wait', 'wait_ms': wait_ms}),
+                      file=sys.stderr, flush=True)
         client.process_info(info)
         if info.get('__pending_error'):
             raise ValueError('source_unavailable')

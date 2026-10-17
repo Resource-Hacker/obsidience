@@ -131,16 +131,23 @@ async def execute(args: dict, context: dict) -> dict:
         if not readonly:
             attempts[attempt_key] = {'status': 'failed', 'delivery': 'uncertain',
                                     'must_not_replay': True, 'failure': 'This Discord action was already attempted'}
-        pending = asyncio.create_task(client.command(payload, timeout=22 if action == 'join' else 15))
+        # The transport keeps its normal startup budget, adding only a bounded
+        # availability wait reported by the native YouTube downloader.
+        timeout = 22 if action == 'join' else 15
+        if action == 'play' and payload.get('source', {}).get('provider') == 'youtube':
+            timeout = 75
+        pending = asyncio.create_task(client.command(payload, timeout=timeout))
         try:
             result = await asyncio.shield(pending)
         except asyncio.CancelledError:
-            # Finish the bounded handoff before releasing its descriptor. Cancel
-            # only this playback, never whichever newer item happens to be live.
-            await pending
-            if action == 'play':
-                await client.command({'command': 'cancel_media', 'request_id': uuid.uuid4().hex,
-                                      'playback_request_id': payload['request_id']}, timeout=3)
+            # Cancel this exact playback before waiting for its handoff to drain;
+            # a site-required preparation wait must never delay STOP.
+            try:
+                if action == 'play':
+                    await client.command({'command': 'cancel_media', 'request_id': uuid.uuid4().hex,
+                                          'playback_request_id': payload['request_id']}, timeout=3)
+            finally:
+                await pending
             raise
         if not result.get('ok'):
             if action == 'play' and result.get('delivery') in {'uncertain', 'not_confirmed'}:

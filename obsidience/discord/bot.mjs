@@ -19,7 +19,8 @@ const ALLOWED_MENTIONS = { parse: [], repliedUser: false };
 const TEXT_LIMIT = 8000;
 const SPEECH_LIMIT = 4000;
 const MUSIC_ERROR_CODES = new Set(['source_unavailable', 'source_http_429', 'source_http_403',
-  'source_auth_required', 'source_challenge_failed', 'source_format_unavailable', 'source_timeout']);
+  'source_auth_required', 'source_challenge_failed', 'source_format_unavailable', 'source_timeout',
+  'source_wait_exceeds_budget']);
 const TTS_FRAME_BYTES = 24_000 * 2 * 0.020; // 480 mono S16 samples, exactly 20 ms.
 const TTS_PREBUFFER_FRAMES = 20; // Two 200 ms speech-owner chunks.
 const TTS_MAX_BUFFER_FRAMES = 100; // Two seconds, matching the former PCM bound.
@@ -190,6 +191,7 @@ export class DiscordTransport {
       playback: this.mediaPlayer.state.status, speech_playback: this.speechPlayer.state.status,
       playback_request_id: this.media?.requestId ?? null,
       playback_position_ms: this.media?.resource?.playbackDuration ?? null,
+      provider_wait_ms: this.media?.providerWaitMs ?? null,
       media_paused: this.media?.paused ?? false,
       voice_cues: [...this.cueAssets.keys()], active_cue: this.cue?.name ?? null,
       voice_awake: this.voiceAwake(),
@@ -1119,12 +1121,13 @@ export class DiscordTransport {
       if (typeof filename !== 'string' || !/^\/proc\/\d+\/fd\/\d+$/.test(filename)) fail('admitted_media_descriptor_required');
     }
     if (!Number.isSafeInteger(expiresAt) || expiresAt > Date.now() + 15000) fail('invalid_media_deadline');
+    let playbackDeadline = expiresAt;
     const generation = this.generation;
     const channel = this.channel;
     const connection = this.connection;
     const current = () => generation === this.generation && channel === this.channel && connection === this.connection
       && connection.state.status === VoiceConnectionStatus.Ready && !this.closing
-      && !this.cancelledMediaRequests.has(requestId) && Date.now() < expiresAt
+      && !this.cancelledMediaRequests.has(requestId) && Date.now() < playbackDeadline
       && (!message.member_id || this.currentSpeaker({ generation, guild_id: this.config.guild_id,
         channel_id: channel.id, member_id: message.member_id }));
     if (!current()) fail('media_request_expired_or_cancelled');
@@ -1136,7 +1139,7 @@ export class DiscordTransport {
       announcementPending: !!origin, ready: false, started: false, paused: false };
     this.mediaDiagnostic = null;
     this.pendingMedia = media;
-    media.startTimer = setTimeout(() => this.stopMedia(media), Math.max(1, expiresAt - Date.now()));
+    media.startTimer = setTimeout(() => this.stopMedia(media), Math.max(1, playbackDeadline - Date.now()));
     const ownedChild = (stage, executable, args, options) => {
       const child = spawn(executable, args, { ...options, detached: true });
       const diagnostic = (fields) => {
@@ -1147,9 +1150,12 @@ export class DiscordTransport {
       // Drain stderr without forwarding raw provider URLs or decoder text.
       // Parse our provider's bounded JSON, classify decoder text in memory.
       let stderr = '';
+      let stderrBytes = 0;
       child.stderr?.on('data', (chunk) => {
-        if (stderr.length >= 1024) return;
-        stderr += chunk.toString('utf8').slice(0, 1024 - stderr.length);
+        if (stderrBytes >= 4096) return;
+        const textChunk = chunk.toString('utf8').slice(0, 4096 - stderrBytes);
+        stderrBytes += textChunk.length;
+        stderr += textChunk;
         if (stage === 'decoder') {
           const text = stderr.toLowerCase();
           for (const [code, fragments] of [
@@ -1162,14 +1168,30 @@ export class DiscordTransport {
           }
           return;
         }
-        const line = stderr.indexOf('\n');
-        if (line < 0) return;
-        try {
-          const value = JSON.parse(stderr.slice(0, line));
-          if (MUSIC_ERROR_CODES.has(value.code)) diagnostic({ code: value.code,
-            error_class: /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(value.error_class ?? '') ? value.error_class : null,
-            errno: Number.isSafeInteger(value.errno) ? value.errno : null });
-        } catch {}
+        let line;
+        while ((line = stderr.indexOf('\n')) >= 0) {
+          const record = stderr.slice(0, line);
+          stderr = stderr.slice(line + 1);
+          try {
+            const value = JSON.parse(record);
+            if (stage === 'provider' && source?.provider === 'youtube'
+              && value.event === 'source_wait' && Number.isSafeInteger(value.wait_ms)
+              && value.wait_ms > 0 && value.wait_ms <= 60000 && !media.providerWaitMs
+              && !media.startupSettled && !media.startAbort.signal.aborted
+              && (this.media === media || this.pendingMedia === media) && current()) {
+              // Extend only for the native downloader's reported availability
+              // wait, once. Ordinary extraction retains its 14-second budget.
+              media.providerWaitMs = value.wait_ms;
+              playbackDeadline += value.wait_ms;
+              clearTimeout(media.startTimer);
+              media.startTimer = setTimeout(() => this.stopMedia(media),
+                Math.max(1, playbackDeadline - Date.now()));
+            }
+            if (MUSIC_ERROR_CODES.has(value.code)) diagnostic({ code: value.code,
+              error_class: /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(value.error_class ?? '') ? value.error_class : null,
+              errno: Number.isSafeInteger(value.errno) ? value.errno : null });
+          } catch {}
+        }
       });
       media.children.push(child);
       media.cleanup.push(new Promise((resolve) => child.once('close', resolve)));
@@ -1262,6 +1284,7 @@ export class DiscordTransport {
         catch { fail('audio_playback_not_started'); }
         if (this.media !== media || !current()) fail('play_cancelled');
       }
+      media.startupSettled = true;
       clearTimeout(media.startTimer);
       return { delivery: media.announcementPending ? 'audio_playback_ready' : 'audio_playback_started',
         awaiting_announcement: media.announcementPending,
@@ -1502,6 +1525,7 @@ export class DiscordTransport {
       readFrames(socket, (message) => {
         if (used) { socket.destroy(); return; }
         used = true;
+        if (message.command === 'play' && message.source?.provider === 'youtube') socket.setTimeout(75000);
         void this.command(message).then((result) => { if (!socket.destroyed) { sendFrame(socket, result); socket.end(); } })
           .catch(() => { if (!socket.destroyed) socket.end(`${JSON.stringify({ ok: false, error: 'invalid_request' })}\n`); });
       });
