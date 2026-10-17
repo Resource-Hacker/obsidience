@@ -752,7 +752,15 @@ export class DiscordTransport {
     if (message.type === 'cue') {
       if (this.voiceRequest?.requestId === message.request_id && this.samePrincipal(this.voiceRequest.principal, principal)
         && ['complete', 'cancel'].includes(message.name)) {
-        this.queueCue(message.name, principal, message.request_id);
+        const media = this.media;
+        const handoff = message.name === 'complete' && media?.ready && media.announcementPending && !media.paused
+          && media.generation === principal.generation
+          && media.announcementRequestId === message.request_id
+          && media.announcementMemberId === message.member_id
+          && this.currentSpeaker(principal) && (!media.started || media.resumePending);
+        // This completion arrives after the final played speech acknowledgment.
+        // The prepared media is the feedback now; do not insert another clip.
+        if (!handoff) this.queueCue(message.name, principal, message.request_id);
         this.voiceRequest = null;
         this.syncSpeaking();
         if (message.name === 'complete') this.releaseMediaAnnouncement(message.request_id);
@@ -789,7 +797,19 @@ export class DiscordTransport {
         }
         const memberNow = this.channel?.members.get(message.member_id);
         if (!memberNow || memberNow.voice.channelId !== principal.channel_id || !this.samePrincipal(principal, this.principal(message.member_id))) fail('speaker_not_current');
-        this.requestSpeech(principal, message.request_id, result.reply, 'voice');
+        const media = this.media;
+        const handoff = media?.ready && media.announcementPending && !media.paused
+          && media.generation === principal.generation
+          && media.announcementRequestId === message.request_id
+          && media.announcementMemberId === message.member_id
+          && this.voiceRequest?.requestId === message.request_id
+          && this.samePrincipal(this.voiceRequest.principal, principal)
+          && (!media.started || media.resumePending);
+        // The full Agent reply stays in text/history. Only the exact decoded
+        // media waiting behind this voice turn gets a brief spoken handoff.
+        // Native speech completion still releases it after the final frame.
+        const spokenReply = handoff ? (media.resumePending ? 'Resuming.' : 'Starting.') : result.reply;
+        this.requestSpeech(principal, message.request_id, spokenReply, 'voice');
       } catch {
         const cancelled = this.cancelledRequests.has(message.request_id);
         this.cancelRequest(message.request_id, principal, 'voice'); this.lastError = 'voice_turn_failed';
