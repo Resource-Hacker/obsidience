@@ -24,6 +24,10 @@ const MUSIC_ERROR_CODES = new Set(['source_unavailable', 'source_http_429', 'sou
   'source_resume_range_invalid']);
 const TTS_FRAME_BYTES = 24_000 * 2 * 0.020; // 480 mono S16 samples, exactly 20 ms.
 const TTS_PREBUFFER_FRAMES = 20; // Two 200 ms speech-owner chunks.
+// Music can wait on the native downloader's initial 5 s socket timeout and two
+// same-source retries. Keep its player alive through that existing 15 s budget
+// plus 1 s scheduling margin, instead of destroying it after 100 ms of starvation.
+const MUSIC_MAX_MISSED_FRAMES = 800; // Native player clock is 20 ms.
 const TTS_MAX_BUFFER_FRAMES = 100; // Two seconds, matching the former PCM bound.
 const TTS_GAIN = 2; // +6.02 dB; preserve dynamics, protect peaks before Opus.
 const TTS_PEAK_KNEE = 0.85;
@@ -133,7 +137,8 @@ export class DiscordTransport {
     const intents = [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.GuildMessages];
     if (config.message_content_intent) intents.push(GatewayIntentBits.MessageContent);
     this.client = new Client({ intents, allowedMentions: ALLOWED_MENTIONS });
-    this.mediaPlayer = createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Pause } });
+    this.mediaPlayer = createAudioPlayer({ behaviors: {
+      noSubscriber: NoSubscriberBehavior.Pause, maxMissedFrames: MUSIC_MAX_MISSED_FRAMES } });
     this.speechPlayer = createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Pause } });
     this.mediaPlayer.on('stateChange', () => this.syncSpeaking());
     this.speechPlayer.on('stateChange', () => this.syncSpeaking());
@@ -200,6 +205,7 @@ export class DiscordTransport {
       playback: this.mediaPlayer.state.status, speech_playback: this.speechPlayer.state.status,
       playback_request_id: this.media?.requestId ?? null,
       playback_position_ms: this.media?.resource?.playbackDuration ?? null,
+      media_missed_frames: this.mediaPlayer.state.missedFrames ?? 0,
       media_title: this.media?.title ?? '', media_artist: this.media?.artist ?? '',
       provider_wait_ms: this.media?.providerWaitMs ?? null,
       media_paused: this.media?.paused ?? false,
@@ -1290,9 +1296,22 @@ export class DiscordTransport {
   async mediaEnded(media) {
     if (media.ending) return;
     media.ending = true;
+    if (!media.decoderEnded) {
+      // Idle before decoded EOF is starvation/failure, never a finished song.
+      this.lastError = 'media_stream_starved';
+      this.mediaDiagnostic = { playback_request_id: media.requestId,
+        readiness: { code: 'stream_starved_before_eof' } };
+      log('media_stream_starved');
+      this.stopMedia(media);
+      return;
+    }
     // Idle alone can also follow failure. Advance only after the exact owned
     // decoder/provider both closed successfully and decoded output reached EOF.
-    await Promise.allSettled(media.cleanup);
+    let timer;
+    try {
+      await Promise.race([Promise.allSettled(media.cleanup),
+        new Promise((resolve) => { timer = setTimeout(resolve, 1000); })]);
+    } finally { clearTimeout(timer); }
     if (this.media !== media) return;
     const state = this.continuous;
     const clean = media.started && media.decoderEnded && media.children.every((child) => child.exitCode === 0);
