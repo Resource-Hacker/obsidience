@@ -399,7 +399,7 @@ class _Session:
                                 last_onset, beat = stamp, beat + 1
                         rises.append(rise)
                         # A two-frame peak gives slow physical lamps time to respond;
-                        # between real onsets they return to deep, adaptive 8–20% dips.
+                        # between real onsets they return to deep, adaptive 10–20% dips.
                         pulse = stamp - last_onset < .18
                         self.frames += 1
                         history.append((stamp, self.frames, contrast, pulse, beat))
@@ -446,7 +446,7 @@ class _Session:
                     _stamp, _seq, contrast, pulse, beat = feature
                     group = index % 2
                     active = group == beat % 2
-                    dim = 100 if pulse and active else round(8 + 12 * (contrast if active else 1 - contrast))
+                    dim = 100 if pulse and active else round(10 + 10 * (contrast if active else 1 - contrast))
                     rgb = palette[(beat + 3 * group) % len(palette)]
                     params = {"state": True, "dimming": dim,
                               **dict(zip(("r", "g", "b"), rgb))}
