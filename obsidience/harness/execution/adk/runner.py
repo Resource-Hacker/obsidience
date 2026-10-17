@@ -386,6 +386,30 @@ async def run_adk_session(task, model, messages, allowed, ctx, agent_name, effor
             store = InMemorySessionService()
             session = await store.create_session(app_name=sessions.APP, user_id=sessions.USER,
                                                  session_id=session_id)
+        if command is not None and command.get('operation') == 'discord_continue':
+            blocks = await plugin.operate('discord.control', {'action': 'status'}, raw_observation=True)
+            status = json.loads(next(block['text'] for block in blocks if block.get('type') == 'text'))
+            if status.get('ok') is not True or status.get('status') != 'completed':
+                command = {'name': 'task.complete', 'args': {'status': 'failed',
+                    'summary': 'I could not verify the current Discord player; no music was restarted.'}}
+            elif status.get('playback') == 'playing' and status.get('media_paused') is not True:
+                command = {'name': 'task.complete', 'args': {'status': 'completed',
+                    'summary': 'Keeping the current music playing.'}}
+            elif status.get('playback') == 'paused' or status.get('media_paused') is True:
+                command = {'name': 'discord.control', 'args': {'action': 'resume'}}
+            elif status.get('media_handoff') in {'awaiting_announcement', 'ready_held'}:
+                command = {'name': 'task.complete', 'args': {'status': 'completed',
+                    'summary': 'The current music is still preparing.'}}
+            elif status.get('playback') == 'idle':
+                artist = sessions.previous_discord_music_artist(session)
+                if artist and 'media.library' in allowed:
+                    command, music_request = None, {'query': artist}
+                else:
+                    command = {'name': 'task.complete', 'args': {'status': 'completed',
+                        'summary': 'Which artist would you like me to keep playing?'}}
+            else:
+                command = {'name': 'task.complete', 'args': {'status': 'completed',
+                    'summary': 'The current player is still busy; I have not restarted its music.'}}
         if music_request is not None:
             from ..commands import exact_discord_music
             query = (music_request['title'] + ' by ' + music_request['artist']

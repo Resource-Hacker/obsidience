@@ -100,9 +100,12 @@ def _discord_media_intents():
     return Intents.from_dict({
         'language': 'en',
         'intents': {
-            name: {'data': [{'sentences': [f'[please] ({verbs}) {target} [please]']}]}
-            for name, verbs in (('DiscordPause', 'pause'), ('DiscordResume', 'resume|unpause'),
-                                ('DiscordStop', 'stop|stop playing'))
+            **{name: {'data': [{'sentences': [f'[please] ({verbs}) {target} [please]']}]}
+               for name, verbs in (('DiscordPause', 'pause'), ('DiscordResume', 'resume|unpause'),
+                                   ('DiscordStop', 'stop|stop playing'))},
+            'DiscordContinue': {'data': [{'sentences': [
+                '[please] (keep|continue) playing [[the] music] [please]',
+            ]}]},
         },
     })
 
@@ -115,9 +118,14 @@ def recognize_discord_command(objective, allowed):
     text = ' '.join(objective.casefold().split()).rstrip('.!')
     if not re.fullmatch(r'[a-z ]+', text):
         return None
-    actions = {'DiscordPause': 'pause', 'DiscordResume': 'resume', 'DiscordStop': 'stop'}
+    actions = {'DiscordPause': 'pause', 'DiscordResume': 'resume', 'DiscordStop': 'stop',
+               'DiscordContinue': 'continue'}
     choices = {actions[result.intent.name] for result in recognize_all(text, _discord_media_intents())}
-    return {'name': 'discord.control', 'args': {'action': choices.pop()}} if len(choices) == 1 else None
+    if len(choices) != 1:
+        return None
+    action = choices.pop()
+    return ({'operation': 'discord_continue'} if action == 'continue' else
+            {'name': 'discord.control', 'args': {'action': action}})
 
 
 @lru_cache(maxsize=1)

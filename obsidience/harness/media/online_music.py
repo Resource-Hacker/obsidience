@@ -7,10 +7,13 @@ receive them. The destination owns the streaming child and its lifetime.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import io
 import json
 import os
 import re
 import signal
+import stat
 import sys
 from pathlib import Path
 
@@ -62,7 +65,7 @@ def _search(query: str) -> list[dict]:
     requested_versions = {word.casefold() for word in versions.findall(query)}
     rows = []
     with YoutubeDL({**_options(), 'extract_flat': 'in_playlist', 'playlistend': 5}) as client:
-        result = client.extract_info('ytsearch5:' + query + ' official music', download=False)
+        result = client.extract_info('ytsearch5:' + query + ' official audio', download=False)
         for entry in (result or {}).get('entries') or []:
             video = entry.get('id', '')
             title = _text(entry.get('title'))
@@ -78,7 +81,8 @@ def _search(query: str) -> list[dict]:
                          'duration_seconds': round(duration) if type(duration) in (int, float) else None})
     # Provider metadata is not acoustic verification. Prefer verified channels,
     # keep the exact video identity, and never substitute another music service.
-    return sorted(rows, key=lambda row: not row['verified_channel'])[:3]
+    return sorted(rows, key=lambda row: (not row['verified_channel'],
+                  not bool(re.search(r'\bofficial audio\b', row['title'], re.I))))[:3]
 
 
 async def search(query: str) -> list[dict]:
@@ -124,8 +128,53 @@ def revalidate(candidate: dict) -> dict:
     return dict(candidate)
 
 
+def _youtube_cookie_stream():
+    """Optional systemd cookie credential; native parsing and updates stay in RAM."""
+    from yt_dlp.cookies import YoutubeDLCookieJar
+    filename = os.environ.get('OBSIDIENCE_YOUTUBE_COOKIES_CREDENTIAL')
+    if not filename:
+        return None
+    if not Path(filename).is_absolute():
+        raise ValueError('invalid_youtube_cookie_credential')
+    try:
+        fd = os.open(filename, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        return None  # The optional credential is not installed: remain anonymous.
+    with os.fdopen(fd, 'r', encoding='utf-8') as credential:
+        info = os.fstat(credential.fileno())
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                or info.st_mode & 0o077 or not 0 < info.st_size <= 524288):
+            raise ValueError('invalid_youtube_cookie_credential')
+        material = credential.read(524289)
+        if len(material.encode('utf-8')) > 524288:
+            raise ValueError('invalid_youtube_cookie_credential')
+    stream = io.StringIO(material)
+    try:
+        jar = YoutubeDLCookieJar()
+        # Upstream malformed-cookie warnings can contain the original line.
+        # Suppress those only while parsing this bounded private credential.
+        with contextlib.redirect_stderr(io.StringIO()):
+            jar.load(stream)
+        for cookie in list(jar):
+            domain = cookie.domain.lstrip('.').lower()
+            if domain != 'youtube.com' and not domain.endswith('.youtube.com'):
+                jar.clear(cookie.domain, cookie.path, cookie.name)
+        if not len(jar):
+            raise ValueError('invalid_youtube_cookie_credential')
+        # Normalize through upstream before YoutubeDL loads it, so later loads
+        # cannot repeat malformed-line warnings. Never save to the credential.
+        stream.seek(0)
+        jar.save(stream)
+        stream.seek(0)
+        return stream
+    except BaseException:
+        stream.close()
+        raise
+
+
 def _stream(provider: str, identity: str) -> None:
     from yt_dlp import YoutubeDL
+    from yt_dlp.utils import DownloadError
     from tempfile import TemporaryDirectory
     if provider == 'youtube' and VIDEO_ID.fullmatch(identity):
         url = 'https://www.youtube.com/watch?v=' + identity
@@ -143,12 +192,40 @@ def _stream(provider: str, identity: str) -> None:
     # Native HLS can otherwise fall back to FFmpeg and expose its signed URL
     # in argv. Give upstream an explicitly empty executable directory. Only
     # Node's independent /usr/bin/ffmpeg decoder receives our pipe bytes.
-    with TemporaryDirectory(dir='.', prefix='native-') as no_external:
-        with YoutubeDL({**_options(), 'format': 'bestaudio/best', 'outtmpl': '-',
-                        'ffmpeg_location': no_external,
-                        'match_filter': full_track, 'logtostderr': True}) as client:
+    with contextlib.ExitStack() as cleanup:
+        no_external = cleanup.enter_context(TemporaryDirectory(dir='.', prefix='native-'))
+        options = {**_options(), 'format': 'bestaudio/best', 'outtmpl': '-',
+                   'ffmpeg_location': no_external,
+                   'match_filter': full_track, 'logtostderr': True}
+        client = cleanup.enter_context(YoutubeDL(options))
+        if provider != 'youtube':
             if client.download([url]):
                 raise ValueError('source_unavailable')
+            return
+        # Public sources keep anonymous extraction's faster client selection.
+        # Metadata-only extraction cannot have emitted media to stdout yet.
+        _LOGGER.code = 'source_unavailable'
+        try:
+            info = client.extract_info(url, download=False)
+        except DownloadError:
+            if _LOGGER.code != 'source_auth_required':
+                raise
+            cookies = _youtube_cookie_stream()
+            if cookies is None:
+                raise
+            cleanup.enter_context(cookies)
+            client = cleanup.enter_context(YoutubeDL({**options, 'cookiefile': cookies}))
+            _LOGGER.code = 'source_unavailable'
+            info = client.extract_info(url, download=False)
+        if (not isinstance(info, dict) or info.get('_type', 'video') != 'video'
+                or info.get('id') != identity or not isinstance(info.get('url'), str)):
+            raise ValueError('source_unavailable')
+        # Native extraction has already merged the selected bestaudio/best
+        # format into this resolved result. Download it exactly once. Errors
+        # from here onward never enter the authentication fallback above.
+        client.process_info(info)
+        if info.get('__pending_error'):
+            raise ValueError('source_unavailable')
 
 
 if __name__ == '__main__':

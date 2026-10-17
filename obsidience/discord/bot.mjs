@@ -1217,7 +1217,11 @@ export class DiscordTransport {
         const provider = ownedChild('provider', fileURLToPath(new URL('../../.venv/bin/python', import.meta.url)),
           torbox ? ['-m', 'harness.media.web_music', 'stream']
             : ['-m', 'harness.media.online_music', 'stream', source.provider, soundcloud ? source.track_id : source.video_id],
-          { cwd: media.directory, stdio: [torbox ? 'pipe' : 'ignore', 'pipe', 'pipe'], env: { PATH: '/usr/bin', LANG: 'C', PYTHONPATH: runtime } });
+          { cwd: media.directory, stdio: [torbox ? 'pipe' : 'ignore', 'pipe', 'pipe'],
+            env: { PATH: '/usr/bin', LANG: 'C', PYTHONPATH: runtime,
+              ...(source.provider === 'youtube' && process.env.CREDENTIALS_DIRECTORY ? {
+                OBSIDIENCE_YOUTUBE_COOKIES_CREDENTIAL: join(process.env.CREDENTIALS_DIRECTORY, 'youtube-cookies'),
+              } : {}) } });
         // The private CDN URL never enters argv, environment or logs.
         if (torbox) provider.stdin.end(JSON.stringify({ url: source.url }));
         // Native pipe backpressure bounds both the compressed and decoded queues.
@@ -1370,6 +1374,26 @@ export class DiscordTransport {
       // Keep transport-generated codes only; never log Discord/HTTP exception objects or credentials.
       const code = /^[a-z_]{3,80}$/.test(error.message) ? error.message : 'transport_command_failed';
       result = { ok: false, request_id: message.request_id ?? null, error: code, delivery: 'not_confirmed' };
+      const diagnostic = this.mediaDiagnostic;
+      if (message.command === 'play' && diagnostic?.playback_request_id === message.request_id) {
+        // Snapshot this attempt into its retained receipt before another play
+        // resets status. Never attach another request's or raw child errors.
+        const codes = new Set([...MUSIC_ERROR_CODES, 'child_spawn_failed',
+          'decoder_protocol_rejected', 'decoder_invalid_input', 'decoder_permission_denied',
+          'decoder_io_failed', 'stream_closed_before_packet']);
+        const snapshot = { playback_request_id: message.request_id };
+        for (const stage of ['provider', 'decoder', 'readiness']) {
+          const row = diagnostic[stage];
+          if (!row) continue;
+          const detail = {};
+          if (codes.has(row.code)) detail.code = row.code;
+          if (/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(row.error_class ?? '')) detail.error_class = row.error_class;
+          if (Number.isSafeInteger(row.errno) && Math.abs(row.errno) <= 65535) detail.errno = row.errno;
+          if (Number.isSafeInteger(row.exit_code) && row.exit_code >= 0 && row.exit_code <= 255) detail.exit_code = row.exit_code;
+          if (Object.keys(detail).length) snapshot[stage] = detail;
+        }
+        result.media_diagnostic = snapshot;
+      }
     } finally { if (ownsMutation) this.mutating = false; }
     if (!readOnly) this.recent.set(message.request_id, { fingerprint, result });
     return result;

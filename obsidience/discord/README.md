@@ -117,12 +117,50 @@ The Harness independently checks ingress identities and channel policy. The bot
 never joins automatically at startup or follows a moderator move. It joins only
 through an explicit current slash command or owner control request.
 
-The service reads only `discord-bot-token` and `discord-ingress-token` from
+The service reads `discord-bot-token` and `discord-ingress-token` from
 systemd's `CREDENTIALS_DIRECTORY`. Keep their encrypted files under
 `~/.config/credentials/`; never put tokens in JSON, argv, environment, README,
 Gateway exception output or logs. The unit template names the encrypted files
 `obsidience-discord-bot-token.cred` and `obsidience-discord-ingress-token.cred`.
 Its journal contains fixed event/error codes, no user text or raw API exceptions.
+
+YouTube streams may optionally use a signed-in account through the systemd
+credential `youtube-cookies`. Provision an owner-authorized, YouTube-only
+Netscape cookie jar as the user-encrypted file
+`~/.config/credentials/obsidience-youtube-cookies.cred`, encrypted with the name
+`youtube-cookies`. Keep cookie values out of persistent plaintext files, argv, environment,
+logs and tracked config. The optional user-unit drop-in is:
+
+```ini
+[Service]
+LoadCredentialEncrypted=youtube-cookies:%h/.config/credentials/obsidience-youtube-cookies.cred
+```
+
+The Node owner passes only that credential's pathname to its YouTube provider
+child as `OBSIDIENCE_YOUTUBE_COOKIES_CREDENTIAL`; it does not forward the whole
+credential-directory environment. FFmpeg and other providers receive no cookie
+configuration. The provider validates ownership, private mode and a 512 KiB
+bound, reads once, and uses yt-dlp's native Netscape parser and text-stream
+`cookiefile` support. Only `youtube.com` cookies survive normalization. Cookie
+updates remain in RAM until that stream ends; the immutable credential is never
+rewritten. Missing optional credentials retain anonymous streaming. Invalid
+configured material fails without printing cookie lines or browser errors.
+Music search remains anonymous and supplies only public source metadata.
+Playback also extracts metadata anonymously first. Only a classified
+`source_auth_required` metadata failure may load the optional credential and
+perform one authenticated extraction for the same video. Once metadata succeeds,
+the selected `bestaudio/best` format downloads once. A source/network/decoder
+failure after that point cannot retry with cookies or duplicate partial audio.
+There is no authentication cache, forced lower-quality client or generic retry.
+
+yt-dlp also supports native browser-cookie extraction, including Edge/KWallet.
+This service uses the scoped credential instead of reading the desktop browser
+database/keyring on every play. Follow the upstream
+[YouTube cookie export guidance](https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies)
+when acquiring the jar: live YouTube browser tabs can rotate session cookies.
+Credential renewal is an explicit owner operation, not an automatic login or
+retry. The signed-in account must itself be permitted to view age-restricted
+content; cookies do not guarantee every format is available.
 
 The provided user unit is deliberately opt-in and has no automatic restart.
 Install it only after the existing speech owner enables its Discord socket.

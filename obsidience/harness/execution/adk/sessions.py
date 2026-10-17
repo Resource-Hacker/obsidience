@@ -407,6 +407,90 @@ async def open_session(conversation_id: str, turn_id: str | None):
     return session
 
 
+def _receipt_object(value):
+    """Decode only structured native Tool/controller result text."""
+    if isinstance(value, dict) and isinstance(value.get('content'), list):
+        value = value['content']
+    if isinstance(value, list):
+        value = next((row.get('text') for row in value if isinstance(row, dict)
+                      and row.get('type') == 'text'), None)
+    if isinstance(value, str):
+        value = value.removeprefix('Observation:\\n').removeprefix('Observation:\n')
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return None
+    return value if isinstance(value, dict) else None
+
+
+def previous_discord_music_artist(session):
+    """Last successfully admitted artist in this bound session, never dialogue.
+
+    This is historical selection evidence for an explicit continuation request,
+    not a preference, permission or claim of current playback. Read only the
+    bounded native window; an older/missing receipt requires clarification.
+    """
+    current = binding(session.id)
+    if current is None or session.user_id != current.user_id:
+        return None
+    calls, candidates, artist = {}, {}, None
+
+    def successful(receipt):
+        return (isinstance(receipt, dict) and receipt.get('ok') is True
+                and receipt.get('status') == 'completed' and not receipt.get('must_not_replay')
+                and receipt.get('delivery') in {'audio_playback_ready', 'audio_playback_started'})
+
+    def named(value):
+        return (isinstance(value, str) and 0 < len(value.strip()) <= 80
+                and not any(ord(char) < 32 for char in value))
+
+    for event in session.events[-256:]:
+        parts = event.content.parts if event.content and event.content.parts else []
+        for value in parts:
+            if event.author == current.agent_name:
+                if (call := value.function_call) is not None:
+                    calls[call.id] = (call.name, call.args or {})
+                response = value.function_response
+                if response is not None and response.id in calls:
+                    name, args = calls[response.id]
+                    if response.name != name or (receipt := _receipt_object(response.response)) is None:
+                        continue
+                    if (name == 'media.library' and args.get('action') == 'search'
+                            and args.get('type') == 'music' and receipt.get('status') == 'completed'):
+                        candidates.update({(event.invocation_id, row['id']): row for row in receipt.get('candidates', [])
+                                           if isinstance(row, dict) and isinstance(row.get('id'), str)})
+                    elif name == 'discord.control' and args.get('action') == 'play' and successful(receipt):
+                        artist = None
+                        row = candidates.get((event.invocation_id, args.get('id')), {})
+                        if (row.get('provider') == 'youtube' and named(row.get('artist'))
+                                and isinstance(row.get('video_id'), str)
+                                and receipt.get('item_id') == 'youtube:' + row['video_id']
+                                and receipt.get('title') == row.get('title')):
+                            artist = row['artist'].strip()
+            elif event.author == 'user' and _meta(value).get('source') == 'plugin:obsidience.command-outcome':
+                try:
+                    outcome = json.loads(value.text or '')
+                except ValueError:
+                    continue
+                if not isinstance(outcome, dict) or outcome.get('run_id') != _meta(value).get('run'):
+                    continue
+                command = outcome.get('command') or {}
+                if not isinstance(command, dict):
+                    continue
+                identity = command.get('music_identity') or {}
+                if not isinstance(identity, dict) or not isinstance(command.get('args'), dict):
+                    continue
+                receipt = _receipt_object(outcome.get('result'))
+                if (outcome.get('status') == 'completed' and command.get('name') == 'discord.control'
+                        and command['args'].get('action') == 'play' and successful(receipt)):
+                    artist = None
+                    if (named(identity.get('artist')) and receipt.get('title') == identity.get('title')
+                            and isinstance(receipt.get('item_id'), str)
+                            and receipt['item_id'].startswith('youtube:')):
+                        artist = identity['artist'].strip()
+    return artist
+
+
 async def close_interrupted_calls(conversation_id: str, invocation_id: str) -> None:
     """Record every unanswered native call as outcome unknown; it is never replayed."""
     from ..capability_core import INTERRUPTED, observation_text
