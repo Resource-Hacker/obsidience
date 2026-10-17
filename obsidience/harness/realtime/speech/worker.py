@@ -118,8 +118,9 @@ WAKE_PAUSE_SECS = 0.4
 # ASR delta normally arrives within one or two 80-160 ms steps.
 WAKE_CONFIRM_SECS = 0.35
 WAKE_STRIP = " ,.!?:;—-'’\t\n"
-_WAKE_LEAD = re.compile(r"[\W_]*(?:(?:hey|ok|okay)\b[\W_]*)?", re.IGNORECASE)
-_WAKE_EXPLICIT_LEAD = re.compile(r"(?<!\w)hey\b[\W_]*$", re.IGNORECASE)
+_WAKE_LEAD = re.compile(r"[\W_]*(?:(?:hey|hay|ok|okay)\b[\W_]*)?", re.IGNORECASE)
+# Streaming ASR can spell the spoken greeting "hey" as its homophone "hay".
+_WAKE_EXPLICIT_LEAD = re.compile(r"(?<!\w)(?:hey|hay)\b[\W_]*$", re.IGNORECASE)
 # Short acknowledgements that must not interrupt a playing Realtime reply.
 BACKCHANNEL_PHRASES = ("okay", "uh-huh", "mm-hmm", "yeah", "right")
 # Speech PCM needs level correction independently of the selected device volume.
@@ -757,7 +758,7 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
         if segment_start or self._wake_heard_at is None:
             self._wake_address, self._wake_heard_at = 0, None
         else:
-            # Ongoing speech: only a later pause can start an address.
+            # Ongoing speech needs a later pause or an explicit greeting.
             self._wake_address = None
 
     def _classify_wake(self, *, final: bool = False) -> str | None:
