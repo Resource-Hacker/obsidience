@@ -102,10 +102,13 @@ def _atomic_json(path: Path, payload):
         Path(temporary).unlink(missing_ok=True)
 
 
-def measure(request_cancel=None):
+def measure(request_cancel=None, fixtures=None):
     """Measure five low-to-high colour flashes per fixture, restoring on every exit."""
     from . import visualize
     global _STATUS
+    names = tuple(power.FIXTURES if fixtures is None else fixtures)
+    if not names or len(set(names)) != len(names) or any(name not in power.FIXTURES for name in names):
+        raise ValueError("Choose registered fixtures once each")
     if not _RUN.acquire(blocking=False):
         raise RuntimeError("Light calibration is already active")
     # Register before waiting for arbitration; an intervening STOP is never erased.
@@ -125,7 +128,7 @@ def measure(request_cancel=None):
                         break
                     previous = pose
                     _CANCEL.wait(.25)
-                return _measure(request_cancel)
+                return _measure(request_cancel, names)
             finally:
                 tracking.end_measurement_hold(lease)
     except BaseException:
@@ -135,7 +138,7 @@ def measure(request_cancel=None):
         _RUN.release()
 
 
-def _measure(request_cancel):
+def _measure(request_cancel, names):
     global _STATUS
     deadline = time.monotonic() + 150
     _STATUS = {"state": "measuring", "fixture": None, "completed": 0}
@@ -150,7 +153,7 @@ def _measure(request_cancel):
     camera_identity = baseline[0][2]
     results, modified, restore_errors = {}, set(), []
     try:
-        for name in power.FIXTURES:
+        for name in names:
             _check(deadline, request_cancel)
             _STATUS = {"state": "measuring", "fixture": name, "completed": len(results)}
             pose = _pose()
@@ -159,9 +162,9 @@ def _measure(request_cancel):
             high = {**low, "dimming": 85}
             modified.add(name)
             _write(inventory, name, low, deadline, request_cancel)
-            dark = _collect(.85, deadline, request_cancel, pose)
+            dark = _collect(1.2, deadline, request_cancel, pose)
             _write(inventory, name, high, deadline, request_cancel)
-            bright = _collect(.85, deadline, request_cancel, pose)
+            bright = _collect(1.2, deadline, request_cancel, pose)
             a = np.median([item[1] for item in dark[-3:]], axis=0)
             b = np.median([item[1] for item in bright[-3:]], axis=0)
             delta = b - a
@@ -185,10 +188,10 @@ def _measure(request_cancel):
                 # into accumulated ROI brightness error over all five trials.
                 pose = _pose()
                 _write(inventory, name, low, deadline, request_cancel)
-                quiet = _collect(.55, deadline, request_cancel, pose)
+                quiet = _collect(1.0, deadline, request_cancel, pose)
                 reference = np.median([item[1] for item in quiet[-3:]], axis=0)[mask]
                 sent = _write(inventory, name, high, deadline, request_cancel)
-                flash = _collect(.65, deadline, request_cancel, pose)
+                flash = _collect(1.2, deadline, request_cancel, pose)
                 frames = quiet[-2:] + flash
                 if any(item[2] != camera_identity for item in frames):
                     raise RuntimeError("Camera identity changed during calibration")
@@ -205,7 +208,7 @@ def _measure(request_cancel):
                     continue
                 left, right = crossings[.5]
                 latency = (left + right) / 2 - sent
-                if not 0 <= latency <= 1 or right - left > .16:
+                if not 0 <= latency <= 1.5 or right - left > .16:
                     continue
                 delays.append(latency * 1000)
                 intervals.append((right - left) * 500)

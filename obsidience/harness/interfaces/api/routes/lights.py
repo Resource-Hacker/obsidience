@@ -32,9 +32,12 @@ def calibration_status():
 
 
 @router.post("/api/lights/visualizer/calibration")
-async def measure_flashes():
+async def measure_flashes(payload: dict | None = None):
+    payload = payload or {}
+    if set(payload) - {"fixtures"} or ("fixtures" in payload and (not isinstance(payload["fixtures"], list) or not all(isinstance(name, str) for name in payload["fixtures"]))):
+        raise HTTPException(400, "Choose registered fixture names")
     cancel = threading.Event()
-    pending = asyncio.create_task(asyncio.to_thread(calibration.measure, cancel))
+    pending = asyncio.create_task(asyncio.to_thread(calibration.measure, cancel, payload.get("fixtures")))
     try:
         return await asyncio.shield(pending)
     except asyncio.CancelledError:

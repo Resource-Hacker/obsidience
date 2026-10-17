@@ -297,7 +297,7 @@ class _Session:
     def _write(self, name, params):
         self._check_stop()
         self.mutated.add(name)
-        result = power._request(self.inventory[name]["ip"], "setPilot", params, self.stop_event, timeout=.085)
+        result = power._request(self.inventory[name]["ip"], "setPilot", params, self.stop_event, timeout=.45)
         if result.get("success") is not True:
             raise RuntimeError("light_update_not_acknowledged")
         return True
@@ -358,7 +358,7 @@ class _Session:
                     next_audit = now + 1
                 if now < next_render:
                     continue
-                next_render = now + .1
+                next_render = now + .02
                 for index, name in enumerate(power.FIXTURES):
                     prior = pending.get(name)
                     if prior is not None and not prior.done():
@@ -379,7 +379,7 @@ class _Session:
                     capture_latency = profile["capture_latency_ms"] if profile else 0
                     output_latency = profile["output_latency_ms"] if profile else 0
                     reference = now - (self.effective_delay + output_latency - latency - capture_latency) / 1000
-                    feature = next((item for item in reversed(history) if item[0] <= reference), None)
+                    feature = min(history, key=lambda item: abs(item[0] - reference), default=None)
                     if feature is None or feature[1] == last.get(name):
                         continue
                     if now - feature[0] > self.effective_delay / 1000 + 1:
