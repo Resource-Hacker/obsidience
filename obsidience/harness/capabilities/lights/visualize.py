@@ -351,6 +351,13 @@ class _Session:
         window = np.hanning(BLOCK)
         bins = np.fft.rfftfreq(BLOCK, 1 / RATE)
         bands = [(bins >= low) & (bins < high) for low, high in ((40, 220), (220, 1800), (1800, 8000))]
+        levels, rises = deque(maxlen=80), deque(maxlen=40)
+        previous_energy = None
+        previous_level = None
+        last_onset, beat = -math.inf, 0
+        # Saturated complementary pairs, changed only by a detected musical onset.
+        palette = ((255, 0, 20), (10, 30, 255), (255, 0, 180),
+                   (0, 255, 235), (245, 225, 0), (0, 255, 75))
         next_render = next_audit = time.monotonic()
         audit = None
         os.set_blocking(capture.stdout.fileno(), False)
@@ -374,9 +381,28 @@ class _Session:
                         rms = float(np.sqrt(np.mean(samples * samples)))
                         spectrum = np.abs(np.fft.rfft(samples * window))
                         energy = np.array([float(np.sqrt(np.mean(spectrum[mask] ** 2))) for mask in bands])
-                        weights = energy / (float(energy.max()) + 1e-9)
+                        stamp = received - len(remainder) / (RATE * 4) - .05
+                        level = math.log(max(rms, 1e-6))
+                        log_energy = np.log(np.maximum(energy, 1e-6))
+                        rise = (0. if previous_level is None else
+                                max(0., level - previous_level) + .35 * float(
+                                    np.maximum(0., log_energy - previous_energy).mean()))
+                        previous_level, previous_energy = level, log_energy
+                        levels.append(level)
+                        low, high = np.percentile(levels, (20, 85))
+                        contrast = float(np.clip((level - low) / max(.15, high - low), 0., 1.))
+                        if len(rises) >= 5:
+                            middle, upper = np.percentile(rises, (60, 90))
+                            threshold = max(.045, middle + .35 * (upper - middle))
+                            if (rms > .002 and level >= low and rise > threshold
+                                    and stamp - last_onset >= .22):
+                                last_onset, beat = stamp, beat + 1
+                        rises.append(rise)
+                        # A two-frame peak gives slow physical lamps time to respond;
+                        # between real onsets they return to deep, adaptive 8–20% dips.
+                        pulse = stamp - last_onset < .18
                         self.frames += 1
-                        history.append((received - len(remainder) / (RATE * 4) - .05, self.frames, rms, weights))
+                        history.append((stamp, self.frames, contrast, pulse, beat))
                         if not self.ready.is_set():
                             self.state = "running"
                             self.ready.set()
@@ -417,13 +443,13 @@ class _Session:
                         self.dropped += 1
                         continue
                     last[name] = feature[1]
-                    _stamp, _seq, rms, weights = feature
-                    # A restrained envelope avoids per-sample flicker; each fixture
-                    # rotates the same three current musical bands.
-                    dim = max(5, min(100, round(math.sqrt(min(1, rms * 8)) * 100)))
-                    rgb = np.roll(weights, index % 3)
+                    _stamp, _seq, contrast, pulse, beat = feature
+                    group = index % 2
+                    active = group == beat % 2
+                    dim = 100 if pulse and active else round(8 + 12 * (contrast if active else 1 - contrast))
+                    rgb = palette[(beat + 3 * group) % len(palette)]
                     params = {"state": True, "dimming": dim,
-                              **dict(zip(("r", "g", "b"), (max(1, round(float(v) * 255)) for v in rgb)))}
+                              **dict(zip(("r", "g", "b"), rgb))}
                     pending[name] = pool.submit(self._write, name, params)
 
     def _restore(self):
