@@ -26,6 +26,10 @@ from pathlib import Path
 
 from nemo.agents.voice_agent.pipecat.services.nemo.streaming_asr import NemoStreamingASRService
 from nemo.agents.voice_agent.pipecat.services.nemo.utils import CacheFeatureBufferer
+from nemo.collections.asr.parts.context_biasing.boosting_graph_batched import BoostingTreeModelConfig
+from nemo.collections.asr.parts.submodules.rnnt_decoding import RNNTBPEDecoding
+from nemo.collections.asr.parts.utils.rnnt_utils import Hypothesis
+from omegaconf import OmegaConf, open_dict
 from pipecat.transports.base_input import BaseInputTransport
 
 from . import worker as speech
@@ -41,6 +45,7 @@ PLAYBACK_LEAD_SECS = 0.4  # Fill the transport's unchanged 400 ms Opus prebuffer
 _PRINCIPAL_FIELDS = ("guild_id", "channel_id", "member_id")
 _ID = re.compile(r"[0-9]{1,20}\Z")
 _TOKEN = re.compile(r"[A-Za-z0-9_-]{1,96}\Z")
+WAKE_WORD = "Bard"
 
 
 def _principal(message: dict) -> tuple[str, str, str]:
@@ -56,7 +61,36 @@ def _token(value) -> str:
     return value
 
 
-def _decoder_context(source):
+def _name_decoder(source):
+    """Use native phrase boosting without changing the desktop model's decoder."""
+    model = source.asr_model
+    config = copy.deepcopy(model.decoding.cfg)
+    with open_dict(config):
+        config.strategy = "greedy_batch"
+        config.greedy.loop_labels = True
+        config.greedy.use_cuda_graph_decoder = False
+        config.greedy.enable_per_stream_biasing = False
+        config.greedy.boosting_tree = OmegaConf.structured(BoostingTreeModelConfig(
+            key_phrases_list=[WAKE_WORD, WAKE_WORD.lower()], use_triton=False,
+        ))
+        config.greedy.boosting_tree_alpha = 1.0
+    return RNNTBPEDecoding(config, model.decoder, model.joint, source.tokenizer)
+
+
+class _DiscordDecoder(NemoStreamingASRService):
+    def _get_best_hypothesis(self, encoded, encoded_len, partial_hypotheses=None):
+        # Batched NeMo merges continuation text, whereas the streaming adapter
+        # consumes per-chunk alignments. Keep only recurrent predictor/boosting
+        # state between chunks so neither words nor alignment history repeat.
+        previous = [Hypothesis(score=0.0, y_sequence=[], timestamp=[],
+                               dec_state=hyp.dec_state)
+                    for hyp in partial_hypotheses] if partial_hypotheses else None
+        return self._name_decoding.rnnt_decoder_predictions_tensor(
+            encoded, encoded_len, return_hypotheses=True, partial_hypotheses=previous,
+        )
+
+
+def _decoder_context(source, decoding):
     """Fork only the pinned legacy decoder's explicit stream state.
 
     The upstream ``stream_id`` argument is unused. Its transcribe/reset methods
@@ -75,7 +109,9 @@ def _decoder_context(source):
     if type(source) is not NemoStreamingASRService or set(vars(source)) != shared | isolated:
         # An upstream decoder adding stream state needs review before sharing.
         raise RuntimeError("unsupported_discord_asr_backend")
-    result = copy.copy(source)
+    result = object.__new__(_DiscordDecoder)
+    result.__dict__.update(vars(source))
+    result._name_decoding = decoding
     result._audio_buffer = CacheFeatureBufferer(
         sample_rate=speech.SAMPLE_RATE,
         buffer_size_in_secs=source.buffer_size_in_secs,
@@ -266,7 +302,7 @@ class _Member:
             turn_analyzer=turn_analyzer,
         ))
         self.turn = _MemberTurn(self, timing=speech.SpeechInputTiming(), mode="wake",
-                                wake_word="Bard", smart_turn=turn_analyzer is not None,
+                                wake_word=WAKE_WORD, smart_turn=turn_analyzer is not None,
                                 semantic_turns=False, use_vad=True, use_diar=False,
                                 max_buffer_size=2, bot_stop_delay=0.5)
         self.task = speech.PipelineTask(
@@ -435,6 +471,7 @@ class DiscordSpeechServer:
         self._inode = None
         self._closed = False
         self._ownership_active = False
+        self._name_decoding = None
 
     async def start(self):
         if not self.path.is_absolute() or self.path.parent.stat().st_uid != os.getuid():
@@ -457,6 +494,8 @@ class DiscordSpeechServer:
             if result != errno.ECONNREFUSED:
                 raise RuntimeError("Discord speech socket already has an owner")
             self.path.unlink()
+        async with self.stt._model_lock:
+            self._name_decoding = _name_decoder(self.stt._model)
         self.server = await asyncio.start_unix_server(self._accept, path=str(self.path), limit=MAX_LINE)
         self.path.chmod(0o600)
         self._inode = self.path.lstat().st_ino
@@ -648,7 +687,7 @@ class DiscordSpeechServer:
                     self.emit("error", principal, code="stream_capacity")
                     return
                 async with self.stt._model_lock:
-                    decoder = _decoder_context(self.stt._model)
+                    decoder = _decoder_context(self.stt._model, self._name_decoding)
                 member = _Member(self, principal, decoder, synthetic_probe=synthetic_probe,
                                  calibration_probe=calibration_probe)
                 self.members[principal] = member

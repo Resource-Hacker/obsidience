@@ -370,7 +370,7 @@
       "revision": "b17490a705707c09700166d764b3842ab7c1fd4d",
       "license": "Apache-2.0",
       "source_path": "/var/lib/ai/src/obsidience-nemo-speech",
-      "integration": "Existing Pipecat ASR and turn-taking dependency. Local patch moves blocking transcription off the audio event loop; one lock retains streaming-cache, VAD-reset and model-replacement serialization, and cancellation drains in-flight native work. No additional recognizer or audio owner.",
+      "integration": "Existing Pipecat ASR and turn-taking dependency. Local patch moves blocking transcription off the audio event loop; one lock retains streaming-cache, VAD-reset and model-replacement serialization, and cancellation drains in-flight native work. Discord uses upstream RNNTBPEDecoding greedy_batch and GPUBoostingTreeModel for its configured wake name, with per-member recurrent state and per-chunk alignments; the same lock and neural weights are shared, while desktop decoding remains unchanged. No additional recognizer or audio owner.",
       "local_patch": "obsidience/harness/realtime/speech/nemo-stt-playback.patch",
       "local_patch_sha256": "39b69bf7dfe698e5e4fb6942c508e5c3a61e15eaa97ad7112866aefd2a3f4355",
       "patched_stt_sha256": "7364f7e01026e23c33c8551c5206a0d0d686ed08cd68ea3fc2f9c55fafd9cbce"
