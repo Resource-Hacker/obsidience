@@ -18,6 +18,7 @@ import logging
 import math
 from multiprocessing.connection import Connection
 import os
+import re
 import select
 from pathlib import Path
 import socket
@@ -40,7 +41,7 @@ MODEL_HASHES = {
 PERSON_HASH = "a77dd863933f184a19e84361c64b788228a7c7dacc2c78939239a96ad3efca3b"
 WIDTH, HEIGHT = 1280, 720
 VISION_KEYS = ("detector_model", "recognizer_model", "person_model", "person_module",
-               "template_path", "frame_max_age_s")
+               "template_path", "frame_max_age_s", "native_capture_timestamps")
 VISION_FAILURES = {"camera_capture_ended", "camera_capture_error",
                    "camera_frame_stalled", "camera_inference_error"}
 MESSAGE_BYTES = 65536
@@ -130,10 +131,18 @@ class Tracker:
                             "framing_anchor": None, "look": None,
                             "motion_reason": "holding", "motor_state": "idle",
                             "target": "unknown", "enrollment": {"state": "idle", "samples": 0}}
+        # Optional measurement metadata only; receipt/freshness clocks below
+        # remain authoritative for the existing camera lifecycle and steering.
+        # Opt-in: camera-owner/settings.json -> native_capture_timestamps: true.
+        native_timestamps = config.get("native_capture_timestamps") is True
         command = [str(config.get("ffmpeg_path", "ffmpeg")), "-nostdin", "-hide_banner",
-                   "-loglevel", "error", "-fflags", "+discardcorrupt", "-err_detect", "explode", "-f", "v4l2",
+                   "-loglevel", "info" if native_timestamps else "error",
+                   *(["-nostats", "-xerror"] if native_timestamps else []), "-fflags", "+discardcorrupt", "-err_detect", "explode", "-f", "v4l2",
                    "-input_format", "mjpeg", "-video_size", "1280x720", "-framerate", "15",
-                   "-threads", "1", "-i", str(device), "-an", "-sn", "-vf", "scale=1280:720",
+                   "-threads", "1", *(["-copyts", "-timestamps", "default"] if native_timestamps else []),
+                   "-i", str(device), "-an", "-sn", "-vf",
+                   "scale=1280:720,showinfo=checksum=0" if native_timestamps else "scale=1280:720",
+                   *(["-fps_mode", "passthrough"] if native_timestamps else []),
                    "-threads", "1", "-pix_fmt", "bgr24", "-f", "rawvideo", "pipe:1"]
         try:
             with self._lock:
@@ -320,7 +329,7 @@ class Tracker:
                 self._desired_motion = None
             self._status["motion_reason"] = "holding" if self._desired_motion is None else self._desired_motion["reason"]
 
-    def frame(self):
+    def frame(self, *, latest=False):
         """Fetch one bounded frame from the child on demand."""
         with self._frame_lock:
             with self._lock:
@@ -331,7 +340,7 @@ class Tracker:
                 request = self._frame_request
                 self._frame_reply = None
             try:
-                self._send({"op": "frame", "id": request})
+                self._send({"op": "frame", "id": request, "latest": latest})
             except (OSError, ValueError):
                 return None
             deadline = time.monotonic()+1
@@ -720,6 +729,13 @@ class _Vision:
         self._send = send
         self._capture = None
         self._threads = []
+        self._timestamp_condition = threading.Condition(self._lock)
+        self._timestamp_pts = {}
+        self._timestamp_base = None
+        self._timestamp_next = self._timestamp_floor = 0
+        self._timestamp_last = None
+        self._timestamps_enabled = config.get("native_capture_timestamps") is True
+        self._timestamps_invalid = False
         for key, expected in MODEL_HASHES.items():
             if hashlib.sha256(Path(config[key]).read_bytes()).hexdigest() != expected:
                 raise ValueError("camera_model_checksum_mismatch")
@@ -821,16 +837,93 @@ class _Vision:
         except (OSError, ValueError):
             pass
 
+    def _timestamp_line(self, line):
+        # Our graph has one scale followed by one showinfo filter. Never parse
+        # paths, SEI payloads or unrelated stderr as timing metadata.
+        match = re.match(rb"^\[Parsed_showinfo_[0-9]+ @ [^\]]{1,64}\] (.*)$", line)
+        if not match:
+            return
+        content = match[1]
+        with self._timestamp_condition:
+            if self._timestamps_invalid:
+                return
+            base = re.match(rb"config in time_base: ([0-9]{1,10})/([0-9]{1,10}),", content)
+            if base:
+                value = tuple(map(int, base.groups()))
+                if self._timestamp_base is not None or not all(0 < part <= 1_000_000_000 for part in value):
+                    self._timestamps_invalid = True  # Reinitialization can reset n.
+                else:
+                    self._timestamp_base = value
+            elif content.startswith(b"n:"):
+                frame = re.match(rb"n:\s*([0-9]{1,20})\s+pts:\s*(-?[0-9]{1,20})\s+pts_time:", content)
+                if frame is None or self._timestamp_base is None:
+                    self._timestamps_invalid = True
+                else:
+                    index, pts = map(int, frame.groups())
+                    numerator, denominator = self._timestamp_base
+                    stamp = pts * numerator * 1_000_000_000 // denominator
+                    if (index != self._timestamp_next or not 0 < stamp < 2**63
+                            or (self._timestamp_last is not None and stamp <= self._timestamp_last)):
+                        self._timestamps_invalid = True
+                    else:
+                        self._timestamp_next += 1
+                        self._timestamp_last = stamp
+                        if index >= self._timestamp_floor:
+                            self._timestamp_pts[index] = stamp
+                        if len(self._timestamp_pts) > 32:
+                            self._timestamps_invalid = True
+            if self._timestamps_invalid:
+                self._timestamp_pts.clear()
+            self._timestamp_condition.notify_all()
+
+    def _capture_metadata(self, index, receipt_ns):
+        if not self._timestamps_enabled:
+            return {}
+        result = {"capture_mono_ns": None, "capture_timestamp_source": "unavailable",
+                  "capture_frame_index": index}
+        deadline = time.monotonic() + .010
+        with self._timestamp_condition:
+            while (index not in self._timestamp_pts and not self._timestamps_invalid
+                   and self._current() and self._timestamp_next <= index):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                self._timestamp_condition.wait(remaining)
+            stamp = self._timestamp_pts.pop(index, None)
+            self._timestamp_floor = index + 1
+        # Default V4L2 PTS may use realtime or monotonic. Do not map epochs or
+        # synthesize capture time from receipt. Label only recent monotonic-
+        # compatible kernel values; FFmpeg does not expose SOE/EOF flags here.
+        if stamp is not None and 0 <= receipt_ns - stamp <= 2_000_000_000:
+            result.update(capture_mono_ns=stamp,
+                          capture_timestamp_source="v4l2_kernel_pts_monotonic_compatible")
+        return result
+
     def _read_errors(self, process):
-        # Drain always; keep no hardware paths or raw ffmpeg diagnostics publicly.
+        # Drain always; keep neither raw diagnostics nor hardware paths.
+        pending = b""
+        oversized = False
         try:
-            while process.stderr.read(4096):
-                pass
+            while chunk := process.stderr.read(4096):
+                if not self._timestamps_enabled:
+                    continue
+                for piece in chunk.splitlines(keepends=True):
+                    pending += piece
+                    if len(pending) > 4096:
+                        pending = b""
+                        oversized = True
+                    if piece.endswith((b"\n", b"\r")):
+                        if not oversized:
+                            self._timestamp_line(pending.rstrip(b"\r\n"))
+                        pending = b""
+                        oversized = False
         except (OSError, ValueError):
             pass
 
     def _read_frames(self, process):
         size = WIDTH * HEIGHT * 3
+        # showinfo n is zero-based; public status frame sequence stays one-based.
+        index = 0
         try:
             while self._current():
                 payload = bytearray()
@@ -842,24 +935,26 @@ class _Vision:
                     payload.extend(chunk)
                 image = np.frombuffer(payload, dtype=np.uint8).reshape(HEIGHT, WIDTH, 3)
                 now, unix_ns = time.monotonic(), time.time_ns()
+                capture_metadata = self._capture_metadata(index, time.monotonic_ns())
+                index += 1
                 with self._lock:
                     if not self._current():
                         return
                     self._status["frames"] += 1
                     sequence = self._status["frames"]
-                    self._latest = (image, unix_ns, now, sequence)
+                    self._latest = (image, unix_ns, now, sequence, capture_metadata)
                     self._running = True
         except (OSError, ValueError):
             self._fail("camera_capture_error")
 
-    def send_frame(self, request):
+    def send_frame(self, request, *, latest=False):
         with self._lock:
-            item = self._observed
+            item = None if latest else self._observed
             if item is None or time.monotonic()-item[2] > self._max_age:
                 raw = self._latest
                 item = None if raw is None else (*raw[:3], {
                     "analyzed": False, "target": "unknown", "cosine": None,
-                    "face_box": None, "checked_unix_ns": None})
+                    "face_box": None, "checked_unix_ns": None, **raw[4]})
             if self._stop.is_set() or item is None or time.monotonic() - item[2] > self._max_age:
                 item = None
         if item is None:
@@ -1026,7 +1121,7 @@ class _Vision:
                     self._stop.wait(.05)
                     continue
                 self._last_sequence = item[3]
-                image, _, observed, _ = item
+                image, _, observed, _, capture_metadata = item
                 _, detected = self._detector.detect(image)
                 faces = [] if detected is None else list(detected)
                 self._enroll(image, faces, observed)
@@ -1144,7 +1239,7 @@ class _Vision:
                     self._status["framing_anchor"] = None if anchor is None else {
                         "body_id": int(anchor[0]), "x_fraction": round(float(anchor[1][0]),4), "y_fraction": round(float(anchor[1][1]),4)}
                     self._status["inferences"] += 1
-                    metadata = {"analyzed": True, "target": label,
+                    metadata = {**capture_metadata, "analyzed": True, "target": label,
                                 "cosine": None if best is None else round(best, 3),
                                 "face_box": [round(float(v), 1) for v in matches[0][:4]] if len(matches)==1 else None,
                                 "checked_unix_ns": time.time_ns()}
@@ -1224,7 +1319,7 @@ def _child_main(descriptor):
             elif operation == "enroll":
                 vision.begin_enrollment()
             elif operation == "frame":
-                vision.send_frame(int(message["id"]))
+                vision.send_frame(int(message["id"]), latest=message.get("latest") is True)
     except (EOFError, OSError):
         pass
     finally:

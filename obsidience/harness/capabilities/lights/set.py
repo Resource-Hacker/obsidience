@@ -196,6 +196,20 @@ def _save_appearances(saved: dict) -> None:
 
 
 def execute(args: dict, context: dict) -> dict:
+    # Reject before preemption: an unauthorized/invalid caller cannot stop effects.
+    if (not isinstance(args, dict) or set(args) != {"target", "state"}
+            or args.get("target") not in TARGETS or args.get("state") not in ("on", "off")):
+        raise ValueError("lights.set requires an exact target and state on/off")
+    if (context.get("_agent_ref") != "Agents/Executive/Executive"
+            or context.get("task") != "Agents/Executive/Executive"):
+        raise PermissionError("Light control belongs to the Executive conversation")
+    # Visual effects restore and drain under the same light lock before power changes.
+    from .visualize import power_operation
+    with power_operation():
+        return _power_execute(args, context)
+
+
+def _power_execute(args: dict, context: dict) -> dict:
     cancel = context.get("_capability_cancel_event")
     while not _LOCK.acquire(timeout=.1):
         if cancel is not None and cancel.is_set():

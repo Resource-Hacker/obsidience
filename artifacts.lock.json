@@ -375,6 +375,12 @@
       "local_patch_sha256": "39b69bf7dfe698e5e4fb6942c508e5c3a61e15eaa97ad7112866aefd2a3f4355",
       "patched_stt_sha256": "7364f7e01026e23c33c8551c5206a0d0d686ed08cd68ea3fc2f9c55fafd9cbce"
     },
+    "pipewire_music_lights": {
+      "repository": "https://gitlab.freedesktop.org/pipewire/pipewire",
+      "system_package": "pipewire 1:1.6.9-1",
+      "license": "MIT",
+      "integration": "Unmodified installed pw-cli, pw-loopback --delay, pw-record and pw-metadata. One optional visualizer owns an ephemeral sink, selected-stream target metadata, delayed forwarding and bounded RAM analysis. No copied upstream code or replacement audio server; exact routing and light appearance restore on stop."
+    },
     "ffmpeg_camera_capture": {
       "repository": "https://git.ffmpeg.org/ffmpeg.git",
       "version": "9.0.1",
@@ -382,7 +388,7 @@
       "license": "GPL-3.0-or-later",
       "path": "/usr/bin/ffmpeg",
       "sha256": "bd8d09b44ae1c4a42e3295ae015e30fcb7d2b72c5abf0633b052bbfbb009dc18",
-      "integration": "Installed native executable through a bounded V4L2 video-only adapter. One selected physical camera frame in memory, CPU PNG conversion, joined child cancellation, no daemon, audio capture, power control or copied upstream source."
+      "integration": "Installed native executable through a bounded V4L2 video-only adapter. One selected physical camera frame in memory, CPU PNG conversion, joined child cancellation, no daemon, audio capture, power control or copied upstream source. Existing camera owner optionally pairs showinfo PTS with its raw frame for finite light-flash timing; timestamps are driver-monotonic compatible, not attested sensor exposure. No second camera capture."
     },
     "opencv_owner_recognition": {
       "repository": "https://github.com/opencv/opencv_zoo",

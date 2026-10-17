@@ -320,9 +320,9 @@ def snapshot() -> dict:
                 "desired_active": _wanted, "recovery": dict(_recovery_state)}
 
 
-def frame():
+def frame(*, latest=False):
     with _LOCK:
-        return _tracker.frame() if _tracker is not None else None
+        return _tracker.frame(latest=latest) if _tracker is not None else None
 
 
 def begin_look(direction: str) -> int:
