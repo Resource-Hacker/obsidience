@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "node bot.mjs",
-    "check": "node --check bot.mjs && node --check protocol.mjs && node --check samples.mjs"
+    "check": "node --check bot.mjs && node --check protocol.mjs && node --check samples.mjs && node --check admin.mjs"
   },
   "dependencies": {
     "@discordjs/opus": "0.10.0",

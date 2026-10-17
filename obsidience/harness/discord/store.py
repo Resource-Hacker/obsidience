@@ -1,7 +1,7 @@
 """Discord's private ingress ledger; never an Executive Chat projection."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 import hashlib
 import json
@@ -26,6 +26,8 @@ class DiscordTurn:
     turn_id: str
     text: str
     metadata: dict
+    # Current-turn advisory data; never durable admission or permission authority.
+    speaker_context: dict = field(default_factory=dict, compare=False)
 
     @property
     def agent_ref(self):

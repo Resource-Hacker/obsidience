@@ -530,6 +530,13 @@ async def run_capability(ex, name: str, args: dict, *, execute, execute_async, s
         # pre-dispatch non-effect may still correct its missing prerequisite.
         ex.ctx["_discord_control_failed"] = args["action"]
         ex.allowed = ["task.complete"]
+    if (name == "discord.admin" and args.get("action") == "kick"
+            and "_discord_admin_attempt" in ex.ctx):
+        # One kick attempt ends this activation's effects, including a native
+        # rejection or uncertain transport result. Never retry another target.
+        if not isinstance(result_object, dict) or result_object.get("status") != "completed":
+            ex.ctx["_discord_admin_failed"] = True
+        ex.allowed = ["task.complete"]
     if name == "media.acquire" and (not isinstance(result_object, dict)
                                     or result_object.get("status") != "completed"
                                     or result_object.get("delivery") != "verified"):

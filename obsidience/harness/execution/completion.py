@@ -244,7 +244,7 @@ def native_text_arguments(text: str, context: dict) -> dict:
            for item in _latest_computer_results(context).values()):
         status = "failed"
     if (context.get("_tv_control_failed") or context.get("_media_acquire_failed")
-            or context.get("_discord_control_failed")):
+            or context.get("_discord_control_failed") or context.get("_discord_admin_failed")):
         status = "failed"
     if _pending_staged_proposals(context):
         status = "review"
@@ -412,6 +412,10 @@ def public_claim_error(summary: str, context: dict) -> str | None:
             r"\b(?:successfully|started playing|is (?:now )?playing)\b", summary, re.I) and not re.search(
             r"\b(?:cannot|can't|couldn't|unable|unverified|uncertain|not verified)\b", summary, re.I):
         return "TV verification failed. State that the requested outcome could not be verified; do not report unqualified playback success."
+    if context.get("_discord_admin_failed") and re.search(
+            r"(?:^|[.!?]\s+)(?:I(?:['’]ve| have)?(?: now| just| successfully)? (?:kicked|removed)\b|"
+            r"[^.!?]{1,100} (?:was|has been|is now) (?:kicked|removed)\b)", summary, re.I):
+        return "The server kick failed or is uncertain. Report the actual receipt without claiming removal."
     return (_discord_playback_claim_error(summary, context)
             or _unlock_claim_error(summary, context) or _effect_claim_error(summary, context)
             or _camera_turn_claim_error(summary, context))
@@ -428,6 +432,8 @@ def _computer_completion_error(task, status: str, context: dict, verification=No
         return "TV control failed in this run; finish with status failed and the actual blocker."
     if context.get("_discord_control_failed") and status != "failed":
         return "Discord control failed or is uncertain in this run; finish failed with its actual receipt and do not replay."
+    if context.get("_discord_admin_failed") and status != "failed":
+        return "The server kick failed or is uncertain; finish failed with its actual receipt and do not replay."
     if context.get("_media_acquire_failed") and status != "failed":
         return "Media registration failed or is uncertain; finish failed with its receipt and do not replay."
     if status != "completed":

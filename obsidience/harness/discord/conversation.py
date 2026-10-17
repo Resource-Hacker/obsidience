@@ -6,6 +6,7 @@ members as the workstation owner or writes to Executive Chat or Memory.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from pathlib import Path
 
 from .store import AGENT_REF, DiscordStore, snowflake
@@ -154,6 +155,23 @@ class DiscordConversations:
                     raise ValueError(str(dependency['error']))
                 if not self.store.turn(turn.turn_id)['memory_writeback']:
                     self._memory(turn, self.store.turn(turn.turn_id))
+                # One fresh snapshot per admitted turn, outside prompt compilation.
+                # Unavailable roles do not prevent ordinary conversation; effects
+                # independently require fresh native permission checks.
+                from . import client
+                pending = asyncio.create_task(client.command({
+                    'command': 'speaker_context', 'guild_id': turn.metadata['guild_id'],
+                    'member_id': turn.metadata['member_id']}, timeout=3))
+                try:
+                    snapshot = await asyncio.shield(pending)
+                except asyncio.CancelledError:
+                    await asyncio.gather(pending, return_exceptions=True)
+                    raise
+                speaker = snapshot.get('speaker') if snapshot.get('ok') is True else None
+                advisory = ({'speaker': speaker, 'advisory': True, 'labels_untrusted': True}
+                            if isinstance(speaker, dict) and speaker.get('member_id') == turn.metadata['member_id']
+                            else {'available': False, 'advisory': True})
+                turn = replace(turn, speaker_context=advisory)
                 result = await run_conversation(agent, conversation_binding=turn,
                     runtime_params={'event': 'chat.request' if turn.metadata['source'] == 'text' else 'voice.activation',
                         'request': turn.text, 'conversation_id': turn.conversation_id,

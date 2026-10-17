@@ -606,6 +606,7 @@ async def compile_activation(
             **({"shell_scene": shell_scene.SCENE.activation_binding()}
                if conversation_binding is None and "required_source" not in activation.bindings else {}),
             **({"discord": {**conversation_binding.metadata, "public_name": discord_name,
+                            "speaker_context": conversation_binding.speaker_context,
                             "history_window": "Earlier dialogue may be omitted and not yet available in memory."
                             if conversation_binding.anchor() else "Complete current conversation"}}
                if conversation_binding is not None else {}),

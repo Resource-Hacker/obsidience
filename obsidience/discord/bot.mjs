@@ -12,6 +12,7 @@ import { AudioPlayerStatus, VoiceConnectionStatus, EndBehaviorType, NoSubscriber
 import opusBinding from '@discordjs/opus';
 import { credential, loadConfig, readFrames, sendFrame, removeStaleSocket, SNOWFLAKE } from './protocol.mjs';
 import { VoiceSamples } from './samples.mjs';
+import { ADMIN_COMMANDS, adminCommand } from './admin.mjs';
 
 const REQUEST_ID = /^[A-Za-z0-9_-]{8,128}$/;
 const { OpusEncoder } = opusBinding;
@@ -1605,7 +1606,7 @@ export class DiscordTransport {
   }
 
   async command(message) {
-    const readOnly = ['status', 'channels', 'speech_diagnostics', 'read_wake_calibration'].includes(message.command)
+    const readOnly = ['status', 'channels', 'speech_diagnostics', 'read_wake_calibration', 'speaker_context', 'admin_members'].includes(message.command)
       || (message.command === 'samples' && (message.action ?? 'status') === 'status');
     if (!readOnly && !REQUEST_ID.test(message.request_id ?? '')) fail('request_id_required');
     const fingerprint = createHash('sha256').update(JSON.stringify(message)).digest('hex');
@@ -1631,7 +1632,7 @@ export class DiscordTransport {
       if (message.command === 'leave' && (message.owner_disconnect !== true || message.member_id !== undefined)) {
         fail('leave_requires_local_owner');
       }
-      if (message.member_id !== undefined && !['cancel_media', 'wake_calibration', 'read_wake_calibration'].includes(message.command)) {
+      if (message.member_id !== undefined && !['cancel_media', 'wake_calibration', 'read_wake_calibration', ...ADMIN_COMMANDS].includes(message.command)) {
         if (!SNOWFLAKE.test(message.member_id)) fail('invalid_member_id');
         const guild = await this.guild();
         const member = await guild.members.fetch(message.member_id);
@@ -1647,6 +1648,9 @@ export class DiscordTransport {
       }
       let value;
       switch (message.command) {
+        case 'speaker_context':
+        case 'admin_members':
+        case 'admin_kick': value = await adminCommand(this, message); break;
         case 'status': value = this.status(); break;
         case 'samples':
           if (Object.keys(message).some((key) => !['command', 'request_id', 'guild_id', 'member_id', 'action'].includes(key))) fail('invalid_samples_request');
@@ -1713,6 +1717,8 @@ export class DiscordTransport {
       // Keep transport-generated codes only; never log Discord/HTTP exception objects or credentials.
       const code = /^[a-z_]{3,80}$/.test(error.message) ? error.message : 'transport_command_failed';
       result = { ok: false, request_id: message.request_id ?? null, error: code, delivery: 'not_confirmed' };
+      if (message.command === 'admin_kick') Object.assign(result, {
+        delivery: 'not_dispatched', effect_applied: false, correction_allowed: false });
       if (['leave_requires_local_owner', 'move_requires_local_owner'].includes(code)) {
         Object.assign(result, { delivery: 'not_dispatched', effect_applied: false, correction_allowed: false,
           failure: 'Only the owner through local operator control can disconnect or move me; Discord requests cannot authorize it.' });
