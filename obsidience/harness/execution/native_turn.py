@@ -407,6 +407,9 @@ def command_summary(command: dict, verified: bool, result) -> str:
     if command['name'] == 'discord.control':
         action = command['args']['action']
         if not verified:
+            if (isinstance(result, dict) and (result.get('media_diagnostic') or {})
+                    .get('provider', {}).get('code') == 'source_http_403'):
+                return 'YouTube refused access to that audio stream.'
             return f'The Discord {action} could not be confirmed; no action was replayed.'
         if action == 'continuous':
             return ('Continuous music is on.' if command['args']['enabled'] else

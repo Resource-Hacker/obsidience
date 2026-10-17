@@ -283,6 +283,24 @@ def _stream(provider: str, identity: str) -> None:
 
     _LOGGER.phase, _LOGGER.downloaded_bytes, _LOGGER.expected_bytes = 'metadata', 0, None
 
+    class StreamOutput:
+        # yt-dlp opens '-' through sys.stdout.buffer. Count actual successful
+        # writes and forbid retry after even an uncertain/partial write attempt.
+        def __init__(self, stream):
+            self.stream, self.written, self.attempted = stream, 0, False
+
+        @property
+        def buffer(self): return self
+
+        def write(self, data):
+            self.attempted = True
+            target = self.stream.buffer if isinstance(data, bytes) else self.stream
+            count = target.write(data)
+            self.written += count
+            return count
+
+        def __getattr__(self, name): return getattr(self.stream, name)
+
     class StreamingYoutubeDL(YoutubeDL):
         stream_url = None
 
@@ -334,6 +352,8 @@ def _stream(provider: str, identity: str) -> None:
     # in argv. Give upstream an explicitly empty executable directory. Only
     # Node's independent /usr/bin/ffmpeg decoder receives our pipe bytes.
     with contextlib.ExitStack() as cleanup:
+        output = StreamOutput(sys.stdout)
+        cleanup.enter_context(contextlib.redirect_stdout(output))
         no_external = cleanup.enter_context(TemporaryDirectory(dir='.', prefix='native-'))
         options = {**_options(), 'format': 'bestaudio/best', 'outtmpl': '-',
                    'ffmpeg_location': no_external,
@@ -345,45 +365,54 @@ def _stream(provider: str, identity: str) -> None:
             if client.download([url]):
                 raise ValueError('source_unavailable')
             return
-        # Public sources keep anonymous extraction's faster client selection.
-        # Metadata-only extraction cannot have emitted media to stdout yet.
-        _LOGGER.code = 'source_unavailable'
-        try:
-            info = client.extract_info(url, download=False)
-        except DownloadError:
-            if _LOGGER.code != 'source_auth_required':
-                raise
-            cookies = _youtube_cookie_stream()
-            if cookies is None:
-                raise
-            cleanup.enter_context(cookies)
-            client = cleanup.enter_context(StreamingYoutubeDL({**options, 'cookiefile': cookies}))
+        # At most one authenticated extraction may replace an anonymous
+        # failure. A download 403 qualifies only before any stdout write was
+        # attempted; progress callbacks alone lag writes and cannot prove that.
+        authenticated, reported_wait_ms = False, 0
+        while True:
             _LOGGER.code = 'source_unavailable'
-            info = client.extract_info(url, download=False)
-        if (not isinstance(info, dict) or info.get('_type', 'video') != 'video'
-                or info.get('id') != identity or not isinstance(info.get('url'), str)):
-            raise ValueError('source_unavailable')
-        # Native extraction has already merged the selected bestaudio/best
-        # format into this resolved result. Download it exactly once. Errors
-        # from here onward never enter the authentication fallback above.
-        available_at = info.get('available_at')
-        if type(available_at) in (int, float) and math.isfinite(available_at):
-            # yt-dlp enforces this server-provided preroll wait. Tell the owner
-            # its numeric duration before the native downloader sleeps; no URL,
-            # account data or media bytes cross this diagnostic boundary.
-            wait_ms = math.ceil(max(0, available_at - int(time.time())) * 1000)
-            if wait_ms > 60000:
-                _LOGGER.code = 'source_wait_exceeds_budget'
-                raise ValueError('source_wait_exceeds_budget')
-            if wait_ms:
-                print(json.dumps({'event': 'source_wait', 'wait_ms': wait_ms}),
+            _LOGGER.phase = 'metadata'
+            try:
+                info = client.extract_info(url, download=False)
+                if (not isinstance(info, dict) or info.get('_type', 'video') != 'video'
+                        or info.get('id') != identity or not isinstance(info.get('url'), str)):
+                    raise ValueError('source_unavailable')
+                # Fresh extraction keeps native bestaudio/best and site availability.
+                available_at = info.get('available_at')
+                if type(available_at) in (int, float) and math.isfinite(available_at):
+                    # yt-dlp enforces this server-provided preroll wait. Tell the owner
+                    # its numeric duration before the native downloader sleeps; no URL,
+                    # account data or media bytes cross this diagnostic boundary.
+                    wait_ms = math.ceil(max(0, available_at - int(time.time())) * 1000)
+                    if reported_wait_ms + wait_ms > 60000:
+                        _LOGGER.code = 'source_wait_exceeds_budget'
+                        raise ValueError('source_wait_exceeds_budget')
+                    if wait_ms:
+                        reported_wait_ms += wait_ms
+                        print(json.dumps({'event': 'source_wait', 'wait_ms': wait_ms}),
+                              file=sys.stderr, flush=True)
+                _LOGGER.phase = 'download'
+                if info.get('protocol') in {'http', 'https'}:
+                    client.stream_url = Request(info['url']).url
+                client.process_info(info)
+                if info.get('__pending_error'):
+                    raise ValueError('source_unavailable')
+                break
+            except DownloadError:
+                auth_metadata = _LOGGER.phase == 'metadata' and _LOGGER.code == 'source_auth_required'
+                empty_download_403 = (_LOGGER.phase == 'download' and _LOGGER.code == 'source_http_403'
+                                      and not output.attempted and output.written == 0)
+                if authenticated or not (auth_metadata or empty_download_403):
+                    raise
+                cookies = _youtube_cookie_stream()
+                if cookies is None:
+                    raise
+                cleanup.enter_context(cookies)
+                client = cleanup.enter_context(StreamingYoutubeDL({**options, 'cookiefile': cookies}))
+                authenticated = True
+                print(json.dumps({'event': 'source_auth_retry', 'phase': _LOGGER.phase}),
                       file=sys.stderr, flush=True)
-        _LOGGER.phase = 'download'
-        if info.get('protocol') in {'http', 'https'}:
-            client.stream_url = Request(info['url']).url
-        client.process_info(info)
-        if info.get('__pending_error'):
-            raise ValueError('source_unavailable')
+
 
 
 if __name__ == '__main__':

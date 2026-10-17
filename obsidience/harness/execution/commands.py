@@ -160,6 +160,11 @@ def recognize_discord_music(objective, allowed, *, voice=False):
     if not choices:
         plain = re.fullmatch(r'(?:please )?play (?:some )?(.+?)(?: please)?', text, re.I)
         if plain and 0 < len(query := plain[1].strip()) <= 115:
+            # ASR spells this artist's spoken name as the ordinary homophone.
+            # This exact voice-only alias still requires fresh verified artist
+            # metadata; it never changes a title or admits general fuzzy matches.
+            if voice and query.casefold() == 'the weekend':
+                query = 'The Weeknd'
             return {'query': query, **({'requires_exact': True} if corrected else {})}
         return None
     if len(choices) != 1:
@@ -167,6 +172,8 @@ def recognize_discord_music(objective, allowed, *, voice=False):
     title, artist = choices.pop()
     if not title or not artist or len(title + artist) > 115:
         return None
+    if voice and artist.casefold() == 'the weekend':
+        artist = 'The Weeknd'
     return {'title': title, 'artist': artist, **({'requires_exact': True} if corrected else {})}
 
 

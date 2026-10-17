@@ -923,7 +923,9 @@ results; they do not search twice. Successful voice playback uses a brief handof
 while retaining the full title in history; the final speech frame releases music.
 The observed spoken play/plate confusion is corrected only for addressed voice
 and requires a unique fresh recording match; unmatched corrections ask for
-clarification. Artist-owned collaboration credits and lyric-video presentation
+clarification. The exact spoken artist homophone "the weekend" maps to
+"The Weeknd" in voice music slots and still requires fresh verified artist
+metadata; general spelling hints are not automatic matches. Artist-owned collaboration credits and lyric-video presentation
 labels may be removed for exact title matching, without accepting cover/version
 substitutions or deriving performer identity from unrelated lyric publishers.
 Follow-up choices reuse only the latest native search receipt in that member's
@@ -962,10 +964,21 @@ is read-only; an explicit play can prepare its exact public source once, with pe
 and uncertain receipts distinct from playback. Expiring CDN URLs stay inside the
 private owner handoff and provider child stdin, never model context, argv or logs.
 The destination owns provider/decoder lifetimes and bounded streaming backpressure.
+Replacement sources remain pending until an actual encoded audio packet is ready;
+failed preparation preserves the previous player, paused position and continuous
+mode. The music player's starvation bound covers the native downloader's existing
+five-second timeout and two retries, with one second of scheduling margin. An
+idle transition before decoder EOF is reported as a stream failure, not a song ending.
 YouTube HTTP transport gets at most two native retries of the same source. After
 output begins, resumed byte ranges must match before their response body is read;
 missing/backward ranges and native restart-from-zero fallbacks fail closed. No
-player restart or fresh source extraction is implied. Failures retain only fixed
+player restart or fresh source extraction is implied. Before any stdout write
+has even been attempted, an anonymous download-time 403 may use the existing
+YouTube account for one fresh extraction of the same recording. Metadata requiring
+sign-in uses that same single account attempt. Best-audio selection and native
+availability waits remain intact, with at most two reported waits totaling sixty
+seconds. No account fallback is allowed after partial or uncertain output.
+Failures retain only fixed
 categories, phase and numeric byte counts, never upstream messages or CDN URLs.
 A failed or uncertain dispatched Discord effect ends that activation's effects
 and requires failed completion; failed play/resume receipts cannot support an

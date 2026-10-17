@@ -1422,10 +1422,9 @@ export class DiscordTransport {
       if (message[key] !== undefined && (typeof message[key] !== 'string' || message[key].length > limit
         || /[\x00-\x1f\x7f]/.test(message[key]))) fail('invalid_media_metadata');
     }
-    if (!continuous) this.disableContinuous();
     // Auto-next never captures an unrelated voice turn's announcement owner.
-    const origin = (!continuous || initial) && [...this.turns].find(([, turn]) => turn.source === 'voice'
-      && message.member_id === turn.principal.member_id && this.currentSpeaker(turn.principal));
+    const origin = (!continuous || initial) ? [...this.turns].find(([, turn]) => turn.source === 'voice'
+      && message.member_id === turn.principal.member_id && this.currentSpeaker(turn.principal)) : null;
     const media = { generation, requestId, children: [], cleanup: [], startAbort: new AbortController(),
       announcementRequestId: origin?.[0] ?? null, announcementMemberId: origin?.[1].principal.member_id ?? null,
       announcementPending: !!origin, ready: false, started: false, paused: false,
@@ -1439,6 +1438,7 @@ export class DiscordTransport {
       const child = spawn(executable, args, { ...options, detached: true });
       const diagnostic = (fields) => {
         if (this.media !== media && this.pendingMedia !== media) return;
+        if (this.pendingMedia && this.pendingMedia !== media) return;
         this.mediaDiagnostic ??= { playback_request_id: requestId };
         this.mediaDiagnostic[stage] = { ...this.mediaDiagnostic[stage], ...fields };
       };
@@ -1471,12 +1471,16 @@ export class DiscordTransport {
             const value = JSON.parse(record);
             if (stage === 'provider' && source?.provider === 'youtube'
               && value.event === 'source_wait' && Number.isSafeInteger(value.wait_ms)
-              && value.wait_ms > 0 && value.wait_ms <= 60000 && !media.providerWaitMs
+              && value.wait_ms > 0 && value.wait_ms <= 60000
+              && (media.providerWaitMs ?? 0) + value.wait_ms <= 60000
+              && (media.providerWaitEvents ?? 0) < 2
               && !media.startupSettled && !media.startAbort.signal.aborted
               && (this.media === media || this.pendingMedia === media) && current()) {
               // Extend only for the native downloader's reported availability
-              // wait, once. Ordinary extraction retains its 14-second budget.
-              media.providerWaitMs = value.wait_ms;
+              // waits, including one authenticated zero-output retry. Their total
+              // remains bounded; ordinary extraction keeps its 14-second budget.
+              media.providerWaitMs = (media.providerWaitMs ?? 0) + value.wait_ms;
+              media.providerWaitEvents = (media.providerWaitEvents ?? 0) + 1;
               playbackDeadline += value.wait_ms;
               clearTimeout(media.startTimer);
               media.startTimer = setTimeout(() => this.stopMedia(media),
@@ -1524,10 +1528,6 @@ export class DiscordTransport {
         await admission;
       }
       if (this.pendingMedia !== media || this.utterance || this.pendingSpeech.size || !current()) fail('play_cancelled');
-      if (!media.announcementRequestId) this.finishCue(false);
-      if (this.media) this.stopMedia(this.media);
-      this.pendingMedia = null;
-      this.media = media;
       const child = ownedChild('decoder', '/usr/bin/ffmpeg', ['-nostdin', '-hide_banner', '-loglevel', 'error', '-threads', '1', '-filter_threads', '1',
         '-protocol_whitelist', streamed ? 'pipe' : 'file,pipe', '-i', streamed ? 'pipe:0' : '/proc/self/fd/3',
         '-vn', '-af', 'volume=-4dB,afade=t=in:st=0:d=0.4', '-f', 's16le', '-ar', '48000', '-ac', '2', 'pipe:1'],
@@ -1552,9 +1552,9 @@ export class DiscordTransport {
       // prism-media exposes a supported encoder control capped at 128 kbps.
       const bitrate = Number.isSafeInteger(channel.bitrate) ? Math.max(16000, Math.min(128000, channel.bitrate)) : null;
       if (bitrate !== null) media.resource.encoder?.setBitrate(bitrate);
-      if (media.announcementRequestId) {
-        // Readiness means a real decoded/encoded packet exists. Do not play it
-        // while the Agent is still forming the announcement after this receipt.
+      {
+        // Prepare every source without replacing the active player. A real
+        // encoded packet is required before committing even owner-only plays.
         await new Promise((resolve, reject) => {
           const stream = media.resource.playStream;
           const done = (error) => {
@@ -1573,10 +1573,18 @@ export class DiscordTransport {
           if (media.startAbort.signal.aborted || stream.destroyed) done(true);
           else readable();
         });
-        if (this.media !== media || !current()) fail('play_cancelled');
-        media.ready = true;
-      } else {
-        media.ready = media.started = true;
+      }
+      if (this.pendingMedia !== media || this.utterance || this.pendingSpeech.size || !current()) fail('play_cancelled');
+      // Commit only now: failed or cancelled preparation leaves the current
+      // resource, its paused position and continuous mode untouched.
+      if (!continuous) this.disableContinuous();
+      if (!media.announcementRequestId) this.finishCue(false);
+      if (this.media) this.stopMedia(this.media);
+      this.pendingMedia = null;
+      this.media = media;
+      media.ready = true;
+      if (!media.announcementRequestId) {
+        media.started = true;
         connection.subscribe(this.mediaPlayer);
         this.mediaPlayer.play(media.resource);
         try { await entersState(this.mediaPlayer, AudioPlayerStatus.Playing, media.startAbort.signal); }
@@ -1659,6 +1667,7 @@ export class DiscordTransport {
         case 'stop': value = this.stop(message.origin_request_id ?? null, message.member_id ?? null); break;
         case 'continuous': value = await this.setContinuous(message); break;
         case 'pause':
+          if (this.pendingMedia) this.stopMedia(this.pendingMedia);
           this.pauseContinuous();
           if (this.media) this.media.paused = true;
           if (this.utterance) this.utterance.resumeMedia = false;
