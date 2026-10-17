@@ -210,6 +210,8 @@ class _Session:
         self.mutated = set()
         self.route_owned = False
         self.virtual_identity = None
+        self.startup_until = 0.
+        self.source_rebinds = 0
         self.name = "obsidience_lights_" + uuid.uuid4().hex[:12]
         self.state = "starting"
         self.error = None
@@ -227,6 +229,8 @@ class _Session:
                     "serial": self.stream_identity[1], "application": _props(self.stream).get("application.name")},
                 "output": self.sink_identity[2], "audio_scope": "selected_stream_mix",
                 "frames": self.frames, "dropped": self.dropped, "updates": self.updates,
+                "source_rebinds": self.source_rebinds,
+                "estimated_fixtures": self.profile["camera_binding"].get("estimated_fixtures", []) if self.profile else list(power.FIXTURES),
                 "error": self.error, "cleanup_errors": list(self.cleanup_errors)}
 
     def _check_stop(self):
@@ -243,6 +247,32 @@ class _Session:
     def _current_nodes(self, *, routed=False):
         rows, nodes, metadata = _graph()
         stream, sink = nodes.get(self.stream_identity[0]), nodes.get(self.sink_identity[0])
+        # Discord may recreate its native playback node when an audio device is
+        # added. Admit one fresh continuation only during this mode's startup,
+        # with the same process incarnation, application and physical output.
+        if (not stream or _identity(stream) != self.stream_identity) and self.virtual_identity and self.source_rebinds == 0 and time.monotonic() < self.startup_until:
+            candidates = [node for node in nodes.values()
+                if _props(node).get("media.class") == "Stream/Output/Audio"
+                and _props(node).get("application.process.id") == _props(self.stream).get("application.process.id")
+                and _props(node).get("application.name") == _props(self.stream).get("application.name")
+                and self.sink_identity[0] in _linked_sinks(rows, nodes, node["id"])]
+            if len(candidates) == 1 and sink and _identity(sink) == self.sink_identity:
+                replacement = candidates[0]
+                target = next((row for row in metadata if row.get("subject") == replacement["id"] and row.get("key") == "target.object"), None)
+                if _process_identity(replacement) == self.process_identity:
+                    _require_unsaved_route(replacement, sink, target)
+                    self._check_stop()
+                    self.stream = replacement
+                    self.stream_identity = _identity(replacement)
+                    self.old_target = target
+                    self.source_rebinds += 1
+                    _metadata(replacement["id"], {"value": self.virtual_identity[2], "type": "Spa:String"})
+                    def relinked():
+                        current_rows, current_nodes, _meta = self._current_nodes(routed=True)
+                        return self.virtual_identity[0] in _linked_sinks(current_rows, current_nodes, self.stream_identity[0])
+                    self._wait(relinked, timeout=2)
+                    rows, nodes, metadata = _graph()
+                    stream = nodes.get(self.stream_identity[0])
         if (not stream or _identity(stream) != self.stream_identity
                 or _process_identity(stream) != self.process_identity
                 or not sink or _identity(sink) != self.sink_identity):
@@ -267,6 +297,7 @@ class _Session:
         raise TimeoutError("audio_route_not_ready")
 
     def _audio_start(self):
+        self.startup_until = time.monotonic() + 5
         self._spawn(["pw-cli", "-m", "create-node", "adapter",
             '{ factory.name=support.null-audio-sink node.name=%s media.class=Audio/Sink '
             'audio.position=[FL FR] object.linger=false priority.session=0 }' % self.name], stdin=True)

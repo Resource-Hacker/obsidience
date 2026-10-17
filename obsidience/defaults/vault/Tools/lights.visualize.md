@@ -38,8 +38,8 @@ owned audio resources, and restores each touched bulb once with fresh readback.
 Restoration failures are reported and never silently retried. Ordinary `lights.set`
 preempts and drains the visualizer before a power operation.
 
-Envelope and three spectral bands drive RGB and brightness at up to 10 updates
-per second per fixture. A bounded feature history supplies audio lookahead; each
+Envelope and three spectral bands drive RGB and brightness from 100 ms analysis blocks, with a 20 ms scheduling cadence and
+at most 10 distinct updates per second per fixture. A bounded feature history supplies audio lookahead; each
 fixture has at most one in-flight UDP update, with no queued obsolete writes.
 Source PCM never reaches disk, conversations, Knowledge or Memory.
 
@@ -70,8 +70,24 @@ Version 1 requires exactly:
   `mac`, measured optical `latency_ms`, and measured `uncertainty_ms`.
 
 The measured digital delay must cover every fixture's optical delay, uncertainty,
-capture delay and a 150 ms analysis/control margin. Profiles bind current runtime
-serials and fail when those identities change. A zero physical output offset is
+capture delay and a 150 ms analysis/control margin. Profiles bind the physical output serial and all fixture identities. The measured
+source serial is provenance; a replacement source on that same output does not
+change the native delay route. Output replacement requires a fresh profile. A zero physical output offset is
 not proof that wireless/headphone latency is zero; the status explicitly retains
 `physical_output_delay_verified:false`. Calibration measurement and recording are
 separate explicitly authorized operations, not started by this Tool.
+
+
+## Owner controls and routing
+
+`obsidience/scripts/music-lights on` uses the saved timing profile; `off` restores
+routing and lamp appearance; `status` and `sources` inspect current state. An
+explicit `on --delay-ms 1000 --uncalibrated` can run without a measured profile.
+`measure-flashes` measures optical response only, using the existing camera owner
+and a finite motor hold. It is not a complete audio calibration.
+
+A reviewed WirePlumber name-valued target avoids persisting the temporary sink.
+The adapter verifies the exact installed linking/persistence scripts and refuses
+to replace a saved stream target. Default and client-selected physical outputs
+are supported when their observed routing agrees. It never edits WirePlumber
+state or changes its global policies. An upstream script change requires review.

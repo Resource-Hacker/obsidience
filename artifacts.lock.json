@@ -379,7 +379,7 @@
       "repository": "https://gitlab.freedesktop.org/pipewire/pipewire",
       "system_package": "pipewire 1:1.6.9-1",
       "license": "MIT",
-      "integration": "Unmodified installed pw-cli, pw-loopback --delay, pw-record and pw-metadata. One optional visualizer owns an ephemeral sink, selected-stream target metadata, delayed forwarding and bounded RAM analysis. No copied upstream code or replacement audio server; exact routing and light appearance restore on stop."
+      "integration": "Unmodified installed pw-cli, pw-loopback --delay, pw-record and pw-metadata. One optional visualizer owns an ephemeral sink, selected-stream target metadata, delayed forwarding and bounded RAM analysis. No copied upstream code or replacement audio server; exact routing and light appearance restore on stop. The name-valued target adapter checks installed WirePlumber linking/state-stream script hashes and an absent saved target before moving; existing explicit client node selection remains intact. No WirePlumber state writer or policy restart."
     },
     "ffmpeg_camera_capture": {
       "repository": "https://git.ffmpeg.org/ffmpeg.git",
