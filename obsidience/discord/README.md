@@ -169,12 +169,18 @@ Stopping the unit kills its FFmpeg children through the same service cgroup.
 
 ## Discord commands
 
-The bot registers guild-scoped `/join`, `/leave`, `/status`, `/ask text`, `/stop`,
+The bot registers guild-scoped `/join`, `/status`, `/ask text`, `/stop`,
 and `/samples action`.
 `/join` joins the invoker's current voice channel when both bot and invoker have
-Connect/Speak; moving an already joined bot to another channel requires Manage
-Server. `/leave` and `/stop` require Manage Server because they affect the whole
-room. `/ask` uses the exact invoking guild/channel/member identity. Replies disable
+Connect/Speak; Discord requests cannot move an already joined bot to another
+channel. `/stop` requires Manage Server because it stops playback for the whole
+room. Voice, text, Agent and slash requests cannot disconnect the bot, including
+requests from guild managers. A stale cached `/leave` receives a refusal.
+Only an explicit local operator request on the private owner socket may issue
+`leave`, with `owner_disconnect: true` and no `member_id`; the Agent capability
+does not expose or forward that flag. Discord kick/disconnect and transport
+shutdown still clean up normally, without automatically rejoining.
+`/ask` uses the exact invoking guild/channel/member identity. Replies disable
 all mention expansion, including `@everyone` and replied-user notifications.
 Mention replies use the same Agent ingress and identity rules. Interactions and
 message IDs are request IDs. Transport never retries an uncertain send.

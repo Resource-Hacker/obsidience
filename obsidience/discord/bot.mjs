@@ -1625,6 +1625,12 @@ export class DiscordTransport {
     let result;
     try {
       if (message.guild_id !== undefined && message.guild_id !== this.config.guild_id) fail('guild_not_allowed');
+      // The private owner socket is the only command route allowed to leave.
+      // Agent payloads never carry this explicit owner intent; Discord identity
+      // always rejects it, even for guild managers or a forged intent flag.
+      if (message.command === 'leave' && (message.owner_disconnect !== true || message.member_id !== undefined)) {
+        fail('leave_requires_local_owner');
+      }
       if (message.member_id !== undefined && !['cancel_media', 'wake_calibration', 'read_wake_calibration'].includes(message.command)) {
         if (!SNOWFLAKE.test(message.member_id)) fail('invalid_member_id');
         const guild = await this.guild();
@@ -1633,11 +1639,11 @@ export class DiscordTransport {
           const target = message.channel_id ?? member.voice.channelId;
           if (!target || target !== member.voice.channelId) fail('join_requires_invoker_channel');
           if (!member.voice.channel?.permissionsFor(member)?.has([PermissionFlagsBits.Connect, PermissionFlagsBits.Speak])) fail('invoker_missing_voice_permissions');
-          if (this.channel && this.channel.id !== target && !member.permissions.has(PermissionFlagsBits.ManageGuild)) fail('manage_guild_required');
+          if (this.channel && this.channel.id !== target) fail('move_requires_local_owner');
           message = { ...message, channel_id: target };
         } else if (['play', 'pause', 'resume', 'stop', 'say', 'continuous'].includes(message.command)) {
           if (!this.channel || member.voice.channelId !== this.channel.id) fail('invoker_not_in_joined_channel');
-        } else if (message.command === 'leave' && !member.permissions.has(PermissionFlagsBits.ManageGuild)) fail('manage_guild_required');
+        }
       }
       let value;
       switch (message.command) {
@@ -1707,6 +1713,10 @@ export class DiscordTransport {
       // Keep transport-generated codes only; never log Discord/HTTP exception objects or credentials.
       const code = /^[a-z_]{3,80}$/.test(error.message) ? error.message : 'transport_command_failed';
       result = { ok: false, request_id: message.request_id ?? null, error: code, delivery: 'not_confirmed' };
+      if (['leave_requires_local_owner', 'move_requires_local_owner'].includes(code)) {
+        Object.assign(result, { delivery: 'not_dispatched', effect_applied: false, correction_allowed: false,
+          failure: 'Only the owner through local operator control can disconnect or move me; Discord requests cannot authorize it.' });
+      }
       const diagnostic = this.mediaDiagnostic;
       if (message.command === 'play' && diagnostic?.playback_request_id === message.request_id) {
         // Snapshot this attempt into its retained receipt before another play
@@ -1741,6 +1751,11 @@ export class DiscordTransport {
     if (!['join', 'leave', 'status', 'ask', 'stop', 'samples'].includes(name)) return;
     try {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      // Reject a stale cached /leave command as well as removing registration.
+      if (name === 'leave') {
+        await interaction.editReply({ content: 'I stay in voice unless the owner disconnects me through local operator control or Discord removes me.', allowedMentions: ALLOWED_MENTIONS });
+        return;
+      }
       const guild = await this.guild();
       const member = await guild.members.fetch(interaction.user.id);
       const manager = member.permissions.has(PermissionFlagsBits.ManageGuild);
@@ -1771,11 +1786,11 @@ export class DiscordTransport {
       if (name === 'join') {
         const channel = member.voice.channel;
         if (!channel || !channel.permissionsFor(member)?.has([PermissionFlagsBits.Connect, PermissionFlagsBits.Speak])) fail('join_your_voice_channel_first');
-        if (this.channel && this.channel.id !== channel.id && !manager) fail('manage_guild_required_to_move_bot');
-        const result = await this.command({ command: 'join', request_id: interaction.id, channel_id: channel.id });
+        if (this.channel && this.channel.id !== channel.id) fail('move_requires_local_owner');
+        const result = await this.command({ command: 'join', request_id: interaction.id, channel_id: channel.id, member_id: member.id });
         await interaction.editReply({ content: JSON.stringify(result).slice(0, 1900), allowedMentions: ALLOWED_MENTIONS });
       } else {
-        if (['leave', 'stop'].includes(name) && !manager) fail('manage_guild_required');
+        if (name === 'stop' && !manager) fail('manage_guild_required');
         const result = await this.command({ command: name, request_id: interaction.id });
         await interaction.editReply({ content: JSON.stringify(result).slice(0, 1900), allowedMentions: ALLOWED_MENTIONS });
       }
@@ -1808,7 +1823,7 @@ export class DiscordTransport {
     if (this.client.application.id !== this.config.application_id || !this.client.user.bot) fail('official_bot_identity_mismatch');
     this.startupPhase = 'command_registration';
     const guild = await this.guild();
-    const commands = ['join', 'leave', 'status', 'stop'].map((name) => new SlashCommandBuilder()
+    const commands = ['join', 'status', 'stop'].map((name) => new SlashCommandBuilder()
       .setName(name).setDescription(`${this.config.bot_name}: ${name}`));
     commands.push(new SlashCommandBuilder().setName('ask').setDescription(`Ask ${this.config.bot_name}`)
       .addStringOption((option) => option.setName('text').setDescription('Your question').setRequired(true).setMaxLength(6000)));
