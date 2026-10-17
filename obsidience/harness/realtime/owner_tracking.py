@@ -87,6 +87,7 @@ class Tracker:
         self._child_enrolling = False
         self._generation = 0
         self._look = None
+        self._measurement_hold = None
         self._status = {"state": "stopped", "enrollment": {"state": "idle", "samples": 0}}
 
     def start(self, device, name, identity, config):
@@ -137,7 +138,7 @@ class Tracker:
         native_timestamps = config.get("native_capture_timestamps") is True
         command = [str(config.get("ffmpeg_path", "ffmpeg")), "-nostdin", "-hide_banner",
                    "-loglevel", "info" if native_timestamps else "error",
-                   *(["-nostats", "-xerror"] if native_timestamps else []), "-fflags", "+discardcorrupt", "-err_detect", "explode", "-f", "v4l2",
+                   *(["-nostats"] if native_timestamps else []), "-fflags", "+discardcorrupt", "-err_detect", "explode", "-f", "v4l2",
                    "-input_format", "mjpeg", "-video_size", "1280x720", "-framerate", "15",
                    "-threads", "1", *(["-copyts", "-timestamps", "default"] if native_timestamps else []),
                    "-i", str(device), "-an", "-sn", "-vf",
@@ -393,6 +394,24 @@ class Tracker:
             raise RuntimeError("camera_tracker_not_running") from error
         return self.snapshot()
 
+    def begin_measurement_hold(self):
+        """Finite motor pause for optical timing, within the existing camera owner."""
+        with self._motor_lock, self._lock:
+            if self._stop.is_set() or self._status["state"] != "running" or self._look is not None or self._enrolling():
+                raise RuntimeError("camera_not_available_for_measurement")
+            if self._measurement_hold is not None:
+                raise RuntimeError("camera_measurement_already_active")
+            token = next(_LOOK_IDS)
+            self._measurement_hold = (token, time.monotonic() + 155)
+            self._desired_motion = None
+            return token
+
+    def end_measurement_hold(self, token):
+        with self._lock:
+            if self._measurement_hold is not None and self._measurement_hold[0] == token:
+                self._measurement_hold = None
+                self._desired_motion = None  # Await a fresh ordinary tracking decision.
+
     def begin_look(self, direction):
         """Turn one step toward a picture direction; the motor loop settles,
         holds and returns it. A look begun during another composes with it."""
@@ -592,7 +611,10 @@ class Tracker:
                             # zero speed submitted. Having reached home once does
                             # not hold it: let return_home bring it back.
                             self._home_verified = False
-                        motion = self._desired_motion
+                        holding = self._measurement_hold is not None and tick < self._measurement_hold[1]
+                        if self._measurement_hold is not None and not holding:
+                            self._measurement_hold = None
+                        motion = None if holding else self._desired_motion
                         fresh = (motion is not None and motion["generation"] == generation
                                  and time.monotonic()-motion["at"] <= self._max_age
                                  and not self._enrolling())
@@ -628,7 +650,7 @@ class Tracker:
                             except Exception:
                                 logging.exception("Camera motion notification failed")
                     wanted = (0.,0.)
-                    reason = "stopped_no_fresh_target"
+                    reason = "optical_measurement_hold" if holding else "stopped_no_fresh_target"
                     if fresh and motion["reason"] == "follow":
                         ex,ey = float(motion["center"][0])-640., float(motion["center"][1])-360.
                         # SDK speed readbacks fluctuate at rest; use actual pose

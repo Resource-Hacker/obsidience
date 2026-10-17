@@ -355,3 +355,15 @@ def enroll() -> dict:
         except RuntimeError as error:
             raise ValueError(str(error)) from error
         return snapshot()
+
+
+def begin_measurement_hold():
+    with _LOCK:
+        if _tracker is None:
+            raise RuntimeError("camera_tracker_not_running")
+        return _tracker, _tracker.begin_measurement_hold()
+
+
+def end_measurement_hold(lease):
+    tracker, token = lease
+    tracker.end_measurement_hold(token)

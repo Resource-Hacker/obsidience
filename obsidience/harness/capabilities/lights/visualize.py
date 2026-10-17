@@ -10,6 +10,8 @@ from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 import json
+import hashlib
+from pathlib import Path
 import math
 import os
 import re
@@ -105,7 +107,45 @@ def _select(stream_id):
     sink = sinks[0]
     old_target = next((dict(row) for row in metadata if row.get("subject") == stream["id"]
                        and row.get("key") == "target.object"), None)
+    _require_default_route(stream, sink, old_target)
     return stream, sink, _process_identity(stream), old_target
+
+
+def _require_default_route(stream, sink, old_target):
+    """Guard the reviewed name-target seam; never overwrite a saved user route.
+
+    WirePlumber supports target names for links, while this pinned save hook
+    resolves serials only. A name preserves an already-absent stored target.
+    Unknown policy versions or explicit saved routes fail before mutation.
+    """
+    expected = {
+        "/usr/share/wireplumber/scripts/node/state-stream.lua": "dd746b0aab8a166ac79481396789bd24ad21afbb20d8e4cb00c06a904577dd00",
+        "/usr/share/wireplumber/scripts/linking/find-defined-target.lua": "758a3d25ec9a8064a080c5caaf895624ff217942b913c5ed1839bb318a398c3f",
+    }
+    if any(hashlib.sha256(Path(path).read_bytes()).hexdigest() != digest for path,digest in expected.items()):
+        raise ValueError("Audio routing policy changed; review the visualizer routing adapter")
+    props = _props(stream)
+    if old_target is not None or props.get("target.object") or props.get("node.target"):
+        raise ValueError("Visualizer currently requires a stream following the default output")
+    _rows, _nodes, metadata = _graph()
+    default = next((row.get("value") for row in metadata if row.get("subject") == 0 and row.get("key") == "default.audio.sink"), {})
+    if not isinstance(default, dict) or default.get("name") != _props(sink)["node.name"]:
+        raise ValueError("Visualizer currently requires the observed default output")
+    if props.get("media.role") == "Notification":
+        raise ValueError("Notification streams cannot drive the music visualizer")
+    key = next(("Output/Audio:" + k + ":" + str(props[k]) for k in
+                ("application.id", "application.name", "media.name", "node.name") if props.get(k)), None)
+    path = Path.home() / ".local/state/wireplumber/stream-properties"
+    if not path.exists():
+        return
+    if path.stat().st_size > 1024 * 1024:
+        raise ValueError("Audio route state exceeds bound")
+    escapes = {"s": " ", "n": "\n", "r": "\r", "t": "\t", "\\": "\\"}
+    for line in path.read_text().splitlines():
+        name, equal, value = line.partition("=")
+        name = re.sub(r"\\([snrt\\])", lambda match: escapes[match[1]], name)
+        if equal and name == key and json.loads(value).get("target") is not None:
+            raise ValueError("Visualizer cannot replace a remembered application output")
 
 
 def _metadata(identifier, entry):
@@ -207,7 +247,7 @@ class _Session:
         if routed:
             target = next((row for row in metadata if row.get("subject") == stream["id"]
                            and row.get("key") == "target.object"), None)
-            if target is None or str(target.get("value")) != self.virtual_identity[1]:
+            if target is None or str(target.get("value")) != self.virtual_identity[2]:
                 raise RuntimeError("audio_route_changed")
         return rows, nodes, metadata
 
@@ -239,9 +279,10 @@ class _Session:
             "--properties", "stream.capture.sink=true node.dont-fallback=true",
             "--raw", "--format", "s16", "--rate", str(RATE), "--channels", "2", "--latency", "20ms", "-"], capture=True)
         self._current_nodes()
+        _require_default_route(self.stream, self.sink, self.old_target)
         # Mark possible dispatch before the exact owner metadata mutation.
         self.route_owned = True
-        _metadata(self.stream_identity[0], {"value": self.virtual_identity[1], "type": "Spa:Id"})
+        _metadata(self.stream_identity[0], {"value": self.virtual_identity[2], "type": "Spa:String"})
         def routed():
             rows, nodes, _meta = self._current_nodes(routed=True)
             forward = next((node for node in nodes.values() if _props(node).get("node.name") == self.name + "_forward"), None)
@@ -360,7 +401,7 @@ class _Session:
                 current = next((row for row in metadata if row.get("subject") == self.stream_identity[0]
                                 and row.get("key") == "target.object"), None)
                 if stream and _identity(stream) == self.stream_identity and _process_identity(stream) == self.process_identity:
-                    if current and str(current.get("value")) == self.virtual_identity[1]:
+                    if current and str(current.get("value")) == self.virtual_identity[2]:
                         _metadata(self.stream_identity[0], self.old_target)
                         deadline = time.monotonic() + 2
                         while True:

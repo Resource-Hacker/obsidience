@@ -112,7 +112,22 @@ def measure(request_cancel=None):
     _CANCEL.clear()
     try:
         with visualize.power_operation(cancel_calibration=False), power._LOCK:
-            return _measure(request_cancel)
+            lease = tracking.begin_measurement_hold()
+            try:
+                # Wait for two stationary motor reports before using fixed pixels.
+                deadline = time.monotonic() + 4
+                previous = None
+                while True:
+                    _check(deadline, request_cancel)
+                    pose = _pose()
+                    speed = tracking.snapshot().get("submitted_speed") or {}
+                    if previous is not None and max(abs(a-b) for a,b in zip(pose, previous)) <= .1 and speed == {"yaw": 0.0, "pitch": 0.0}:
+                        break
+                    previous = pose
+                    _CANCEL.wait(.25)
+                return _measure(request_cancel)
+            finally:
+                tracking.end_measurement_hold(lease)
     except BaseException:
         _STATUS = {**_STATUS, "state": "failed"}
         raise
