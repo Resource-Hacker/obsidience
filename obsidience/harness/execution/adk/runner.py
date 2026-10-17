@@ -230,11 +230,17 @@ async def _run_command(plugin: AgentPlugin, command: dict, session_id: str, turn
                 action = command['args']['action']
                 verified = (receipt.get('ok') is True and receipt.get('status') == 'completed'
                             and not receipt.get('must_not_replay') and (
-                                receipt.get('paused') is True and receipt.get('playback') == 'paused'
+                                receipt.get('paused') is True and (receipt.get('playback') == 'paused'
+                                or receipt.get('playback') == 'idle'
+                                and receipt.get('continuous', {}).get('enabled') is True
+                                and receipt['continuous'].get('paused') is True)
                                 if action == 'pause' else receipt.get('playback') == 'idle'
                                 if action == 'stop' else
                                 receipt.get('delivery') in {'audio_playback_ready', 'audio_playback_started'}
-                                if action == 'play' else (
+                                if action == 'play' else
+                                receipt.get('continuous', {}).get('enabled') is command['args']['enabled']
+                                and (not command['args']['enabled'] or receipt['continuous'].get('paused') is False)
+                                if action == 'continuous' else (
                                     receipt.get('resumed') is True and receipt.get('playback') == 'playing'
                                     or receipt.get('resume_pending') is True
                                     and receipt.get('media_handoff') == 'awaiting_announcement'
@@ -407,18 +413,20 @@ async def run_adk_session(task, model, messages, allowed, ctx, agent_name, effor
             if status.get('ok') is not True or status.get('status') != 'completed':
                 command = {'name': 'task.complete', 'args': {'status': 'failed',
                     'summary': 'I could not verify the current Discord player; no music was restarted.'}}
-            elif status.get('playback') == 'playing' and status.get('media_paused') is not True:
-                command = {'name': 'task.complete', 'args': {'status': 'completed',
-                    'summary': 'Keeping the current music playing.'}}
-            elif status.get('playback') == 'paused' or status.get('media_paused') is True:
-                command = {'name': 'discord.control', 'args': {'action': 'resume'}}
             elif status.get('media_handoff') in {'awaiting_announcement', 'ready_held'}:
                 command = {'name': 'task.complete', 'args': {'status': 'completed',
                     'summary': 'The current music is still preparing.'}}
-            elif status.get('playback') == 'idle':
-                artist = sessions.previous_discord_music_artist(session)
-                if artist and 'media.library' in allowed:
-                    command, music_request = None, {'query': artist}
+            elif status.get('playback') in {'playing', 'paused', 'idle'}:
+                continuous = status.get('continuous') or {}
+                artist = (continuous.get('artist', '') if continuous.get('enabled')
+                          else status.get('media_artist') or '')
+                query = continuous.get('query') if continuous.get('enabled') else artist
+                if not query and status.get('playback') == 'idle':
+                    artist = sessions.previous_discord_music_artist(session) or ''
+                    query = artist
+                if query or status.get('playback') != 'idle':
+                    command = {'name': 'discord.control', 'args': {
+                        'action': 'continuous', 'enabled': True, 'query': query, 'artist': artist}}
                 else:
                     command = {'name': 'task.complete', 'args': {'status': 'completed',
                         'summary': 'Which artist would you like me to keep playing?'}}

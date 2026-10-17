@@ -110,15 +110,16 @@ def _rank_artists(query: str, rows: list[dict]) -> list[dict]:
         not row['verified_channel'], not bool(re.search(r'\bofficial audio\b', row['title'], re.I))))
 
 
-def _search(query: str) -> list[dict]:
+def _search(query: str, *, count: int = 5, limit: int = 3) -> list[dict]:
     from yt_dlp import YoutubeDL
     versions = re.compile(r'\b(cover|remix|bootleg|karaoke|instrumental|extended|rework|sped|slowed|mashup|nightcore|tribute|live|acoustic)\b', re.I)
     requested_versions = {word.casefold() for word in versions.findall(query)}
     rows = []
-    with YoutubeDL({**_options(), 'extract_flat': 'in_playlist', 'playlistend': 5}) as client:
-        result = client.extract_info('ytsearch5:' + query + ' official audio', download=False)
+    with YoutubeDL({**_options(), 'extract_flat': 'in_playlist', 'playlistend': count}) as client:
+        result = client.extract_info(f'ytsearch{count}:' + query + ' official audio', download=False)
         for entry in (result or {}).get('entries') or []:
-            if entry.get('is_live') is True or entry.get('live_status') in {'is_live', 'is_upcoming'}:
+            if (entry.get('is_live') is True or entry.get('live_status') in {'is_live', 'is_upcoming'}
+                    or count == 20 and entry.get('live_status') == 'post_live'):
                 continue  # This byte-source route admits finite recordings only.
             video = entry.get('id', '')
             title = _text(entry.get('title'))
@@ -137,36 +138,82 @@ def _search(query: str) -> list[dict]:
                          'duration_seconds': round(duration)})
     # Provider metadata is not acoustic verification. A relevant whole artist
     # name outranks presentation labels on another artist's recording.
-    return _rank_artists(query, rows)[:3]
+    return _rank_artists(query, rows)[:limit]
 
 
 async def search(query: str) -> list[dict]:
+    return await _search_process(query)
+
+
+async def _search_process(query: str, *, continuous: bool = False) -> list[dict]:
     if not isinstance(query, str) or not query.strip() or len(query) > 120 or any(ord(c) < 32 for c in query):
         raise ValueError('Music search needs 1 to 120 characters')
     root = Path(__file__).resolve().parents[2]
-    child = await asyncio.create_subprocess_exec(
-        sys.executable, '-m', 'harness.media.online_music', 'search', query.strip(),
+    child = None
+    spawning = asyncio.create_task(asyncio.create_subprocess_exec(
+        sys.executable, '-m', 'harness.media.online_music',
+        'search-next' if continuous else 'search', query.strip(),
         cwd=root, env={'PATH': os.defpath, 'LANG': 'C.UTF-8', 'PYTHONPATH': str(root)},
         stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.DEVNULL, start_new_session=True)
+        stderr=asyncio.subprocess.DEVNULL, start_new_session=True))
     try:
-        async with asyncio.timeout(12):
+        # A disconnect during process creation must still leave an owned child
+        # to kill/reap; shielding creation does not shield the search itself.
+        child = await asyncio.shield(spawning)
+        async with asyncio.timeout(9.5 if continuous else 12):
             material, _ = await child.communicate()
         if child.returncode or len(material) > 16384:
             raise MediaUnavailable('online_music_search_unavailable')
         rows = json.loads(material)
-        if not isinstance(rows, list) or len(rows) > 6:
+        if not isinstance(rows, list) or len(rows) > (20 if continuous else 6):
             raise MediaUnavailable('online_music_search_unavailable')
         return rows
     except (TimeoutError, ValueError):
         raise MediaUnavailable('online_music_search_unavailable') from None
     finally:
-        if child.returncode is None:
+        if child is None:
+            with contextlib.suppress(OSError):
+                child = await spawning
+        if child is not None and child.returncode is None:
             try:
                 os.killpg(child.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
-        await child.wait()
+        if child is not None:
+            await child.wait()
+
+
+async def select_next(query: str, artist: str, *, current: dict | None, recent: list[str]) -> dict:
+    """One fresh public catalogue lookup; the transport owns the continuous mode and playback."""
+    from .config import load_config
+    config = load_config()
+    music = config.get('music') or {}
+    if not config.get('enabled') or not music.get('enabled') or music.get('delivery') != 'direct':
+        raise MediaUnavailable('online_music_direct_delivery_unavailable')
+    query, artist = query.strip(), artist.strip()
+    seed = query or artist
+    if not seed and current:
+        seed = (current['artist'].strip() or current['title'].strip())[:120]
+    if not seed:
+        raise MediaUnavailable('online_music_seed_unavailable')
+    excluded = set(recent)
+    if current and current['source']:
+        excluded.add('youtube:' + current['source']['video_id'])
+    wanted_artist = ' '.join(re.findall(r'[^\W_]+', unicodedata.normalize('NFKC', artist).casefold()))
+    for row in await _search_process(seed, continuous=True):
+        if ('youtube:' + row.get('video_id', '')) in excluded:
+            continue
+        observed_artist = ' '.join(re.findall(
+            r'[^\W_]+', unicodedata.normalize('NFKC', row.get('artist', '')).casefold()))
+        if artist and (not wanted_artist or row.get('verified_channel') is not True
+                       or observed_artist != wanted_artist):
+            continue
+        binding = revalidate({'provider': row.get('provider'), 'video_id': row.get('video_id'),
+                              'title': row.get('title'), 'item_id': 'youtube:' + row.get('video_id', '')})
+        return {'status': 'completed',
+                'source': {'provider': binding['provider'], 'video_id': binding['video_id']},
+                'title': binding['title'], 'artist': _text(row.get('artist'), 80)}
+    raise MediaUnavailable('online_music_next_unavailable')
 
 
 def revalidate(candidate: dict) -> dict:
@@ -345,6 +392,8 @@ if __name__ == '__main__':
             raise ValueError('invalid_operation')
         if sys.argv[1] == 'search' and len(sys.argv) == 3:
             print(json.dumps(_search(sys.argv[2]), ensure_ascii=True))
+        elif sys.argv[1] == 'search-next' and len(sys.argv) == 3:
+            print(json.dumps(_search(sys.argv[2], count=20, limit=20), ensure_ascii=True))
         elif sys.argv[1] == 'stream' and len(sys.argv) == 4:
             _stream(sys.argv[2], sys.argv[3])
         else:

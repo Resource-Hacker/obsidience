@@ -1,21 +1,28 @@
 ---
 type: tool
 title: discord.control
-description: 'Control the Obsidience Discord Bot in its configured server. For current Discord
-  audio pause/resume/stop, call this Tool with only action:pause|resume|stop. Resume continues
-  the paused player; it needs no track id, media.library call, memory recall or search. Never
-  replace a failed resume with search/play or restart a track. status reads connection and
-  playback; channels lists current voice channel IDs. join(channel_id) connects to one exact
-  channel; leave disconnects. Discord-origin actions use the admitted member identity and
-  fresh channel permissions. say(text) requests speech, not verified audible delivery; ordinary
-  Discord replies are spoken by their transport automatically, so do not call say for your
-  own answer. play(id,media_kind:audio) starts the exact media.library selection from this
-  activation as audio only. Video/Go Live is not supported: never substitute a show''s soundtrack
-  for requested video without agreement. Ask which series, season and episode when unclear.
-  pause/resume control current Discord media; stop cancels Discord output and pending replies
-  while leaving wake listening armed. Do not claim a listener heard playback from a player-start
-  receipt. Failed or uncertain effects must not be replayed. This Tool grants no desktop control,
-  provider configuration or acquisition authority.'
+description: 'Control the Obsidience Discord Bot in its configured server. For current
+  Discord audio pause/resume/stop, call this Tool with only action:pause|resume|stop.
+  Resume continues the paused player; it needs no track id, media.library call, memory
+  recall or search. Never replace a failed resume with search/play or restart a track.
+  For an explicit keep-playing or continuous-music request use continuous(enabled:true,query,artist).
+  Empty query/artist reuse the current mode or track; use artist only for an exact
+  requested channel artist and empty artist for a genre query. It advances between
+  songs until pause, stop, leave or replacement; continuous(enabled:false,query:"",artist:"")
+  disables future selection without stopping the current song. This mode is opt-in
+  and requires a current Discord member. status reads connection and playback; channels
+  lists current voice channel IDs. join(channel_id) connects to one exact channel;
+  leave disconnects. Discord-origin actions use the admitted member identity and fresh
+  channel permissions. say(text) requests speech, not verified audible delivery; ordinary
+  Discord replies are spoken by their transport automatically, so do not call say
+  for your own answer. play(id,media_kind:audio) starts the exact media.library selection
+  from this activation as audio only. Video/Go Live is not supported: never substitute
+  a show''s soundtrack for requested video without agreement. Ask which series, season
+  and episode when unclear. pause/resume control current Discord media; stop cancels
+  Discord output and pending replies while leaving wake listening armed. Do not claim
+  a listener heard playback from a player-start receipt. Failed or uncertain effects
+  must not be replayed. This Tool grants no desktop control, provider configuration
+  or acquisition authority.'
 obsidience:
   binding: capability:discord.control
   source: obsidience/harness/capabilities/discord/control.py
@@ -58,3 +65,14 @@ means the player actually started. A ready receipt is not audible playback.
 A voice resume with `resume_pending:true` keeps the current stream at its paused
 position until your normal concise reply and completion cue finish. Do not repeat
 resume or issue play. `resumed:true` means the player is already Playing.
+
+For an explicit request to keep playing music across songs, call
+`continuous(enabled:true,query,artist)`. Empty query and artist reuse the current
+mode or track. Use an exact requested channel artist in `artist`; leave it empty
+for a genre or general music query. The player selects one next recording before
+the current track ends and advances only after clean end of playback, without
+another Agent turn. Pause suspends selection; resume continues it. Stop, leave,
+requester departure, manual track replacement or a playback failure clears the
+mode. `continuous(enabled:false,query:"",artist:"")` disables future selection
+while allowing the current song to finish. This mode is explicitly requested,
+never the default. Its receipt confirms mode state, not listener audibility.

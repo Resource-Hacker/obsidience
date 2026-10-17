@@ -298,7 +298,7 @@ def _discord_media_claim_verified(claim: str, context: dict) -> bool:
     """Use this run's complete transport receipt, not truncated trace text."""
     for encoded_args, receipt in reversed(list(context.get("_discord_control_attempts", {}).items())):
         action = json.loads(encoded_args).get("action")
-        if action not in {"play", "pause", "resume", "stop", "leave"}:
+        if action not in {"play", "pause", "resume", "stop", "leave", "continuous"}:
             continue
         # A later playback/resume or failed effect invalidates an earlier stop.
         expected = "stop" if claim == "stopped" else "pause"
@@ -374,7 +374,7 @@ def _camera_turn_claim_error(summary: str, context: dict) -> str | None:
 
 def _discord_playback_claim_error(summary: str, context: dict) -> str | None:
     """A failed play/resume receipt cannot establish current playback."""
-    if context.get("_discord_control_failed") not in {"play", "resume"}:
+    if context.get("_discord_control_failed") not in {"play", "resume", "continuous"}:
         return None
     # Check clauses separately: an honest failure explanation must not mask a
     # later positive claim. Negated, conditional and ordinary explanatory

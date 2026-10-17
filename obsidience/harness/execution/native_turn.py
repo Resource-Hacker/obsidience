@@ -408,6 +408,9 @@ def command_summary(command: dict, verified: bool, result) -> str:
         action = command['args']['action']
         if not verified:
             return f'The Discord {action} could not be confirmed; no action was replayed.'
+        if action == 'continuous':
+            return ('Continuous music is on.' if command['args']['enabled'] else
+                    'Continuous music is off; the current song can finish.')
         if action == 'play':
             identity = command['music_identity']
             verb = 'Starting' if result.get('delivery') == 'audio_playback_ready' else 'Playing'

@@ -106,6 +106,9 @@ export class DiscordTransport {
     this.speechConnecting = null;
     this.media = null;
     this.pendingMedia = null;
+    this.continuous = null;
+    this.continuousError = null;
+    this.recentMusic = [];
     this.mediaCleanups = new Set();
     this.cancelledMediaRequests = new Set();
     this.utterance = null;
@@ -139,7 +142,7 @@ export class DiscordTransport {
       this.lastError = 'media_playback_failed'; this.stopMedia(this.media);
     });
     this.mediaPlayer.on(AudioPlayerStatus.Idle, (oldState) => {
-      if (this.media?.resource && oldState.resource === this.media.resource) this.stopMedia(this.media);
+      if (this.media?.resource && oldState.resource === this.media.resource) void this.mediaEnded(this.media);
     });
     this.speechPlayer.on('error', (error) => {
       if (this.cue && error.resource === this.cue.resource) { this.finishCue(); return; }
@@ -164,6 +167,11 @@ export class DiscordTransport {
       if (state.id === this.client.user?.id && this.channel && state.channelId !== this.channel.id) {
         void this.leave(); // Moderator disconnect/move invalidates every identity; never follow it.
       } else if (oldState.channelId === this.channel?.id && state.channelId !== this.channel?.id) {
+        if (this.continuous?.principal.member_id === state.id) {
+          const media = this.continuous.track;
+          this.disableContinuous('member_left');
+          if (this.media === media) this.stopMedia(media);
+        }
         if (this.pendingMedia?.announcementMemberId === state.id) this.stopMedia(this.pendingMedia);
         if (this.media?.announcementMemberId === state.id && (this.media.announcementPending || this.media.resumePending)) this.cancelMediaAnnouncement(this.media.announcementRequestId);
         if (this.wakeCalibration?.principal.member_id === state.id) this.clearWakeCalibration();
@@ -192,8 +200,14 @@ export class DiscordTransport {
       playback: this.mediaPlayer.state.status, speech_playback: this.speechPlayer.state.status,
       playback_request_id: this.media?.requestId ?? null,
       playback_position_ms: this.media?.resource?.playbackDuration ?? null,
+      media_title: this.media?.title ?? '', media_artist: this.media?.artist ?? '',
       provider_wait_ms: this.media?.providerWaitMs ?? null,
       media_paused: this.media?.paused ?? false,
+      continuous: { enabled: !!this.continuous, id: this.continuous?.id ?? null,
+        member_id: this.continuous?.principal.member_id ?? null, query: this.continuous?.query ?? '',
+        artist: this.continuous?.artist ?? '', paused: this.continuous?.paused ?? false,
+        selecting: !!this.continuous?.fetch, queued: !!this.continuous?.next,
+        starting: !!this.continuous?.startingMedia, last_error: this.continuousError },
       voice_cues: [...this.cueAssets.keys()], active_cue: this.cue?.name ?? null,
       voice_awake: this.voiceAwake(),
       media_handoff: this.media?.announcementPending ? 'awaiting_announcement'
@@ -629,6 +643,7 @@ export class DiscordTransport {
       const origin = this.turns.get(originRequestId);
       if (!REQUEST_ID.test(originRequestId) || !origin || origin.controller.signal.aborted
         || origin.principal.guild_id !== this.config.guild_id || origin.principal.member_id !== memberId) fail('stop_origin_not_current');
+      this.disableContinuous();
       // The Agent can stop current output and still return this exact turn's
       // ordinary reply. Its speech owner/request must survive that receipt.
       this.finishCue(false);
@@ -639,6 +654,7 @@ export class DiscordTransport {
       if (audible) this.queueCue('cancel');
       return { ...this.status(), preserved_origin_turn: true };
     }
+    this.disableContinuous();
     this.finishCue(false);
     this.voiceRequest = null;
     this.syncSpeaking();
@@ -715,6 +731,7 @@ export class DiscordTransport {
     } finally {
       clearTimeout(timeout);
       if (this.turns.get(requestId) === turn) this.turns.delete(requestId);
+      void this.advanceContinuous();
     }
   }
 
@@ -767,6 +784,7 @@ export class DiscordTransport {
         this.voiceRequest = null;
         this.syncSpeaking();
         if (message.name === 'complete') this.releaseMediaAnnouncement(message.request_id);
+        void this.advanceContinuous();
       }
       return;
     }
@@ -781,6 +799,36 @@ export class DiscordTransport {
       if (diagnostic) this.voiceProbe = null; // One exact member turn only.
       const timing = { request_id: message.request_id, diagnostic: !!diagnostic,
         transcript_monotonic_ms: Number(process.hrtime.bigint()) / 1e6 };
+      // Optional source clocks are metadata only; malformed/older workers do not
+      // change admission. Both processes use the host monotonic clock.
+      const input = message.input_timing;
+      const stages = Object.create(null);
+      const stageNames = new Set(['speech_onset', 'first_partial', 'last_voiced', 'end_of_turn', 'speech_final']);
+      const clock = (value) => typeof value === 'number' && Number.isFinite(value) && value > 0
+        && value >= timing.transcript_monotonic_ms - 120000 && value <= timing.transcript_monotonic_ms;
+      if (input && typeof input === 'object' && !Array.isArray(input)
+        && Object.keys(input).every((key) => ['speech_sequence', 'stages', 'wake_monotonic_ms'].includes(key))
+        && Number.isInteger(input.speech_sequence) && input.speech_sequence > 0 && input.speech_sequence <= 1000000000
+        && Array.isArray(input.stages) && input.stages.length > 0 && input.stages.length <= 5
+        && input.stages.every((row) => {
+          if (!row || typeof row !== 'object' || Array.isArray(row) || Object.keys(row).length !== 2
+            || !stageNames.has(row.stage) || !clock(row.monotonic_ms) || row.stage in stages) return false;
+          stages[row.stage] = row.monotonic_ms; return true;
+        }) && 'speech_final' in stages) {
+        timing.speech_sequence = input.speech_sequence;
+        timing.input_stages_monotonic_ms = stages;
+        if (clock(input.wake_monotonic_ms)) timing.wake_monotonic_ms = input.wake_monotonic_ms;
+        for (const [name, before, after] of [
+          ['first_partial_to_final_ms', stages.first_partial, stages.speech_final],
+          ['last_voiced_to_endpoint_ms', stages.last_voiced, stages.end_of_turn],
+          ['last_voiced_to_final_ms', stages.last_voiced, stages.speech_final],
+          ['endpoint_to_final_ms', stages.end_of_turn, stages.speech_final],
+          ['final_to_node_ms', stages.speech_final, timing.transcript_monotonic_ms],
+          ['wake_to_final_ms', timing.wake_monotonic_ms, stages.speech_final],
+        ]) {
+          if (clock(before) && clock(after) && after >= before) timing[name] = Math.round(after - before);
+        }
+      }
       this.voiceTiming = timing;
       try {
         const result = await this.turn(message.text, principal, message.request_id, 'voice', !diagnostic);
@@ -1025,26 +1073,237 @@ export class DiscordTransport {
 
   releaseMediaAnnouncement(requestId) {
     const media = this.media;
-    if (!requestId || !media || media.announcementRequestId !== requestId) return;
+    if (!requestId || !media || media.announcementRequestId !== requestId) { void this.advanceContinuous(); return; }
     media.announcementPending = false;
     this.maybeStartMedia();
   }
 
   maybeStartMedia() {
     const media = this.media;
-    if (!media?.ready || (media.started && !media.resumePending) || media.announcementPending || media.paused
+    if (!media) { void this.advanceContinuous(); return; }
+    if (!media.ready || (media.started && !media.resumePending) || media.announcementPending || media.paused
       || this.cue || this.pendingCue || this.utterance || this.pendingSpeech.size
       || media.generation !== this.generation || this.closing
       || this.connection?.state.status !== VoiceConnectionStatus.Ready) return;
     try {
       this.connection.subscribe(this.mediaPlayer);
       if (media.started) this.mediaPlayer.unpause();
-      else { media.started = true; this.mediaPlayer.play(media.resource); }
+      else { media.started = true; this.mediaPlayer.play(media.resource); this.rememberMusic(media); }
       media.resumePending = false;
     } catch { this.lastError = 'media_playback_failed'; this.stopMedia(media); }
   }
 
-  stopMedia(expected = null) {
+  resumeMedia(memberId) {
+    if (!this.media?.ready) fail('no_media_to_resume');
+    this.media.paused = false;
+    this.media.resumePending = true;
+    const origin = [...this.turns].find(([, turn]) => turn.source === 'voice'
+      && memberId === turn.principal.member_id && this.currentSpeaker(turn.principal));
+    if (origin) {
+      this.media.announcementRequestId = origin[0];
+      this.media.announcementMemberId = origin[1].principal.member_id;
+      this.media.announcementPending = true;
+      this.mediaPlayer.pause();
+    }
+    this.maybeStartMedia();
+    return { resumed: this.mediaPlayer.state.status === AudioPlayerStatus.Playing,
+      resume_pending: this.media.resumePending, ...this.status() };
+  }
+
+  musicId(media) {
+    const source = media?.source;
+    if (source?.provider === 'youtube' || source?.provider === 'torbox_web') return `youtube:${source.video_id}`;
+    if (source?.provider === 'soundcloud') return `soundcloud:${source.track_id}`;
+    return null;
+  }
+
+  rememberMusic(media) {
+    const id = this.musicId(media);
+    if (!id) return;
+    this.recentMusic = [...this.recentMusic.filter((value) => value !== id), id].slice(-20);
+  }
+
+  continuousCurrent(state) {
+    return !!state && this.continuous === state && !this.closing
+      && this.currentSpeaker(state.principal)
+      && !this.channel.members.get(state.principal.member_id)?.user.bot
+      && this.connection?.state.status === VoiceConnectionStatus.Ready;
+  }
+
+  disableContinuous(reason = null, stopStarting = true) {
+    const state = this.continuous;
+    this.continuous = null;
+    if (reason) this.continuousError = reason;
+    if (!state) return;
+    state.fetch?.controller.abort();
+    state.next = null;
+    if (stopStarting && state.startingMedia) this.stopMedia(state.startingMedia);
+  }
+
+  pauseContinuous() {
+    const state = this.continuous;
+    if (!state) return;
+    state.paused = true;
+    state.revision += 1;
+    state.advancing = null;
+    state.fetch?.controller.abort();
+    state.fetch = null;
+    state.next = null;
+    if (state.startingMedia && !state.startingMedia.startupSettled) {
+      const media = state.startingMedia;
+      state.waiting = true;
+      this.stopMedia(media, true);
+      state.startingMedia = null;
+    }
+  }
+
+  async setContinuous(message) {
+    if (Object.keys(message).some((key) => !['command', 'request_id', 'guild_id', 'member_id', 'enabled', 'query', 'artist'].includes(key))
+      || typeof message.enabled !== 'boolean') fail('invalid_continuous_request');
+    if (!message.enabled) { this.disableContinuous(); return { ...this.status(), delivery: 'continuous_disabled' }; }
+    if (this.cancelledMediaRequests.has(message.request_id)) fail('continuous_cancelled');
+    if (!SNOWFLAKE.test(message.member_id ?? '') || !this.currentSpeaker(this.principal(message.member_id))
+      || this.channel.members.get(message.member_id)?.user.bot) fail('continuous_member_not_current');
+    const text = (value, limit) => typeof value === 'string' && value.trim().length > 0
+      && value.length <= limit && !/[\x00-\x1f\x7f]/.test(value);
+    for (const [key, limit] of [['query', 120], ['artist', 80]]) {
+      if (message[key] !== undefined && (typeof message[key] !== 'string' || message[key].length > limit
+        || /[\x00-\x1f\x7f]/.test(message[key]))) fail('invalid_continuous_request');
+    }
+    const requestedQuery = message.query?.trim() ?? '';
+    const requestedArtist = message.artist?.trim() ?? '';
+    const qualified = !!(requestedQuery || requestedArtist);
+    // A new genre query with an explicit empty artist must not inherit an
+    // earlier artist mode. Only an unqualified request retains that intent.
+    const artist = qualified ? requestedArtist : (this.continuous ? this.continuous.artist : this.media?.artist || '');
+    const query = qualified ? requestedQuery || artist : this.continuous?.query || artist || this.media?.title;
+    if (!text(query, 120) || (artist && !text(artist, 80))) fail('continuous_query_required');
+    if (this.pendingMedia) fail('media_start_busy');
+    if (!this.media && (this.utterance || this.pendingSpeech.size)) fail('speech_busy');
+    this.disableContinuous();
+    this.continuousError = null;
+    const state = { id: randomUUID(), requestId: message.request_id, principal: this.principal(message.member_id), query, artist,
+      track: this.media, waiting: !this.media, paused: false,
+      next: null, fetch: null, advancing: null, startingMedia: null, revision: 0 };
+    this.continuous = state;
+    if (state.track) {
+      this.rememberMusic(state.track);
+      const resumed = state.track.paused ? this.resumeMedia(message.member_id) : null;
+      void this.prefetchContinuous(state);
+      return { ...resumed, ...this.status(), title: state.track.title, artist: state.track.artist,
+        item_id: this.musicId(state.track), delivery: resumed ? (resumed.resume_pending ? 'audio_playback_ready' : 'audio_playback_started') : 'continuous_enabled' };
+    }
+    const result = await this.advanceContinuous(state, true);
+    if (!this.continuousCurrent(state)) fail(this.continuousError ?? 'continuous_cancelled');
+    if (!result) fail('continuous_playback_not_confirmed');
+    return { ...result, ...this.status(), title: state.track.title, artist: state.track.artist,
+      item_id: this.musicId(state.track) };
+  }
+
+  async prefetchContinuous(state) {
+    if (!this.continuousCurrent(state) || state.paused || state.next) return;
+    if (state.fetch) return state.fetch.promise;
+    const track = state.track;
+    const controller = new AbortController();
+    const request = { controller, promise: null };
+    state.fetch = request;
+    request.promise = (async () => {
+      const timeout = setTimeout(() => controller.abort(), 14000);
+      try {
+        const response = await fetch('http://127.0.0.1:8765/api/discord/next', {
+          method: 'POST', signal: controller.signal,
+          headers: { Authorization: `Bearer ${this.ingressToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...state.principal, request_id: randomUUID(), continuous_id: state.id,
+            query: state.query, artist: state.artist,
+            current: track ? { playback_request_id: track.requestId,
+              source: this.musicId(track)?.startsWith('youtube:') ? { provider: 'youtube', video_id: track.source.video_id } : null,
+              title: track.title, artist: track.artist } : null,
+            recent: [...new Set([...this.recentMusic, this.musicId(track)].filter(Boolean))].slice(-20) }),
+        });
+        if (!response.ok) { await response.body?.cancel(); fail('continuous_selection_unavailable'); }
+        const chunks = [];
+        let size = 0;
+        for await (const chunk of response.body) {
+          size += chunk.length;
+          if (size > 16384) { controller.abort(); fail('continuous_selection_invalid'); }
+          chunks.push(Buffer.from(chunk));
+        }
+        const result = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        if (!this.continuousCurrent(state) || state.track !== track || state.fetch !== request
+          || state.paused || controller.signal.aborted) return;
+        const source = result.source;
+        if (result.status !== 'completed' || !source || typeof source !== 'object' || Array.isArray(source)
+          || Object.keys(source).length !== 2 || source.provider !== 'youtube'
+          || typeof source.video_id !== 'string' || !/^[A-Za-z0-9_-]{11}$/.test(source.video_id)
+          || typeof result.title !== 'string' || !result.title.trim() || result.title.length > 160
+          || typeof result.artist !== 'string' || result.artist.length > 80
+          || /[\x00-\x1f\x7f]/.test(result.title + result.artist)
+          || this.recentMusic.includes(`youtube:${source.video_id}`)
+          || this.musicId(track) === `youtube:${source.video_id}`) fail('continuous_selection_invalid');
+        state.next = { source: { ...source }, title: result.title, artist: result.artist };
+      } catch {
+        // No retries or raw provider text. Pause/cancellation owns its abort.
+        if (this.continuousCurrent(state) && state.fetch === request && !state.paused) {
+          this.disableContinuous('continuous_selection_unavailable');
+        }
+      } finally {
+        clearTimeout(timeout);
+        if (state.fetch === request) state.fetch = null;
+      }
+    })();
+    await request.promise;
+    if (this.continuousCurrent(state) && state.waiting) void this.advanceContinuous(state);
+  }
+
+  advanceContinuous(state = this.continuous, initial = false) {
+    if (!this.continuousCurrent(state) || state.paused || !state.waiting) return Promise.resolve(null);
+    if (state.advancing) return state.advancing;
+    const revision = state.revision;
+    const advance = (async () => {
+      await this.prefetchContinuous(state);
+      if (state.revision !== revision || !this.continuousCurrent(state) || state.paused || !state.waiting || !state.next) return null;
+      if (this.media || this.pendingMedia || this.utterance || this.pendingSpeech.size
+        || (!initial && (this.cue || this.pendingCue || this.turns.size || this.voiceRequest || this.mutating))) return null;
+      const next = state.next;
+      state.next = null;
+      if (this.recentMusic.includes(`youtube:${next.source.video_id}`)) {
+        this.disableContinuous('continuous_selection_repeated'); return null;
+      }
+      try {
+        const result = await this.play({ command: 'play', request_id: randomUUID(), member_id: state.principal.member_id,
+          source: next.source, title: next.title, artist: next.artist, expires_at_ms: Date.now() + 14000 }, state, initial);
+        if (!this.continuousCurrent(state) || state.revision !== revision) return null;
+        state.waiting = false;
+        state.startingMedia = null;
+        if (!state.paused) void this.prefetchContinuous(state);
+        return result;
+      } catch {
+        if (this.continuousCurrent(state) && state.revision === revision && !state.paused) this.disableContinuous('continuous_playback_failed');
+        return null;
+      }
+    })();
+    state.advancing = advance;
+    void advance.finally(() => { if (state.advancing === advance) state.advancing = null; });
+    return advance;
+  }
+
+  async mediaEnded(media) {
+    if (media.ending) return;
+    media.ending = true;
+    // Idle alone can also follow failure. Advance only after the exact owned
+    // decoder/provider both closed successfully and decoded output reached EOF.
+    await Promise.allSettled(media.cleanup);
+    if (this.media !== media) return;
+    const state = this.continuous;
+    const clean = media.started && media.decoderEnded && media.children.every((child) => child.exitCode === 0);
+    this.stopMedia(media, clean);
+    if (clean && this.continuousCurrent(state) && state.track === media) {
+      state.waiting = true;
+      void this.advanceContinuous(state);
+    }
+  }
+
+  stopMedia(expected = null, completed = false) {
     if (!expected) {
       if (this.pendingMedia) this.stopMedia(this.pendingMedia);
       if (this.media) this.stopMedia(this.media);
@@ -1053,6 +1312,7 @@ export class DiscordTransport {
     const active = this.media === expected;
     if (!active && this.pendingMedia !== expected) return;
     const media = expected;
+    if (!completed && this.continuous?.track === media) this.disableContinuous('continuous_media_stopped', false);
     if (this.pendingMedia === media) this.pendingMedia = null;
     if (active) this.media = null;
     clearTimeout(media.startTimer);
@@ -1081,18 +1341,24 @@ export class DiscordTransport {
     if (!REQUEST_ID.test(requestId ?? '')) fail('playback_request_id_required');
     this.cancelledMediaRequests.add(requestId);
     while (this.cancelledMediaRequests.size > 256) this.cancelledMediaRequests.delete(this.cancelledMediaRequests.values().next().value);
+    const state = this.continuous?.requestId === requestId ? this.continuous : null;
+    const modeMedia = state && state.track?.continuousId === state.id
+      && (this.media === state.track || this.pendingMedia === state.track) ? state.track : null;
+    if (state) this.disableContinuous();
     const active = this.media?.requestId === requestId ? this.media : null;
     const pending = this.pendingMedia?.requestId === requestId ? this.pendingMedia : null;
-    const stopped = !!active || !!pending;
+    const stopped = !!active || !!pending || !!modeMedia;
+    if (modeMedia) this.stopMedia(modeMedia);
     if (active) this.stopMedia(active);
     if (pending) this.stopMedia(pending);
-    return { playback_request_id: requestId, playback_stopped: stopped,
-      delivery: stopped ? 'audio_playback_stopped' : 'media_cancellation_registered', ...this.status() };
+    return { playback_request_id: requestId, playback_stopped: stopped, continuous_cancelled: !!state,
+      delivery: stopped ? 'audio_playback_stopped' : state ? 'continuous_disabled' : 'media_cancellation_registered', ...this.status() };
   }
 
-  async play(message) {
+  async play(message, continuous = null, initial = false) {
     if (!this.connection || !this.channel || this.connection.state.status !== VoiceConnectionStatus.Ready) fail('voice_not_ready');
     if (this.utterance || this.pendingSpeech.size) fail('speech_busy');
+    if (continuous && !this.continuousCurrent(continuous)) fail('continuous_cancelled');
     if (this.pendingMedia) fail('media_start_busy');
     const { path: filename, file_identity: identity, source, expires_at_ms: expiresAt, request_id: requestId } = message;
     const streamed = source !== undefined;
@@ -1129,15 +1395,24 @@ export class DiscordTransport {
     const current = () => generation === this.generation && channel === this.channel && connection === this.connection
       && connection.state.status === VoiceConnectionStatus.Ready && !this.closing
       && !this.cancelledMediaRequests.has(requestId) && Date.now() < playbackDeadline
+      && (!continuous || this.continuousCurrent(continuous) && !continuous.paused)
       && (!message.member_id || this.currentSpeaker({ generation, guild_id: this.config.guild_id,
         channel_id: channel.id, member_id: message.member_id }));
     if (!current()) fail('media_request_expired_or_cancelled');
-    // There is one admitted turn; bind only the exact invoking voice member.
-    const origin = [...this.turns].find(([, turn]) => turn.source === 'voice'
+    for (const [key, limit] of [['title', 160], ['artist', 80]]) {
+      if (message[key] !== undefined && (typeof message[key] !== 'string' || message[key].length > limit
+        || /[\x00-\x1f\x7f]/.test(message[key]))) fail('invalid_media_metadata');
+    }
+    if (!continuous) this.disableContinuous();
+    // Auto-next never captures an unrelated voice turn's announcement owner.
+    const origin = (!continuous || initial) && [...this.turns].find(([, turn]) => turn.source === 'voice'
       && message.member_id === turn.principal.member_id && this.currentSpeaker(turn.principal));
     const media = { generation, requestId, children: [], cleanup: [], startAbort: new AbortController(),
       announcementRequestId: origin?.[0] ?? null, announcementMemberId: origin?.[1].principal.member_id ?? null,
-      announcementPending: !!origin, ready: false, started: false, paused: false };
+      announcementPending: !!origin, ready: false, started: false, paused: false,
+      source: streamed ? { ...source } : null, title: message.title ?? '', artist: message.artist ?? '',
+      continuousId: continuous?.id ?? null };
+    if (continuous) { continuous.track = media; continuous.startingMedia = media; }
     this.mediaDiagnostic = null;
     this.pendingMedia = media;
     media.startTimer = setTimeout(() => this.stopMedia(media), Math.max(1, playbackDeadline - Date.now()));
@@ -1253,6 +1528,7 @@ export class DiscordTransport {
         // Native pipe backpressure bounds both the compressed and decoded queues.
         provider.stdout.pipe(child.stdin);
       }
+      child.stdout.once('end', () => { media.decoderEnded = true; });
       media.resource = createAudioResource(child.stdout, { inputType: StreamType.Raw });
       // prism-media exposes a supported encoder control capped at 128 kbps.
       const bitrate = Number.isSafeInteger(channel.bitrate) ? Math.max(16000, Math.min(128000, channel.bitrate)) : null;
@@ -1289,6 +1565,7 @@ export class DiscordTransport {
         if (this.media !== media || !current()) fail('play_cancelled');
       }
       media.startupSettled = true;
+      if (media.started) this.rememberMusic(media);
       clearTimeout(media.startTimer);
       return { delivery: media.announcementPending ? 'audio_playback_ready' : 'audio_playback_started',
         awaiting_announcement: media.announcementPending,
@@ -1310,7 +1587,8 @@ export class DiscordTransport {
       if (previous.fingerprint !== fingerprint) fail('request_id_reused');
       return previous.result ?? { ok: false, status: 'in_progress', request_id: message.request_id };
     }
-    if (this.mutating && !readOnly && !['stop', 'leave', 'cancel_media'].includes(message.command)) fail('transport_busy');
+    if (this.mutating && !readOnly && !['stop', 'leave', 'cancel_media'].includes(message.command)
+      && !(this.continuous && (message.command === 'pause' || message.command === 'continuous' && message.enabled === false))) fail('transport_busy');
     if (!readOnly) {
       this.recent.set(message.request_id, { fingerprint });
       while (this.recent.size > 256) this.recent.delete(this.recent.keys().next().value);
@@ -1330,7 +1608,7 @@ export class DiscordTransport {
           if (!member.voice.channel?.permissionsFor(member)?.has([PermissionFlagsBits.Connect, PermissionFlagsBits.Speak])) fail('invoker_missing_voice_permissions');
           if (this.channel && this.channel.id !== target && !member.permissions.has(PermissionFlagsBits.ManageGuild)) fail('manage_guild_required');
           message = { ...message, channel_id: target };
-        } else if (['play', 'pause', 'resume', 'stop', 'say'].includes(message.command)) {
+        } else if (['play', 'pause', 'resume', 'stop', 'say', 'continuous'].includes(message.command)) {
           if (!this.channel || member.voice.channelId !== this.channel.id) fail('invoker_not_in_joined_channel');
         } else if (message.command === 'leave' && !member.permissions.has(PermissionFlagsBits.ManageGuild)) fail('manage_guild_required');
       }
@@ -1360,28 +1638,28 @@ export class DiscordTransport {
         case 'join': value = await this.join(message.channel_id); break;
         case 'leave': value = await this.leave(); break;
         case 'stop': value = this.stop(message.origin_request_id ?? null, message.member_id ?? null); break;
+        case 'continuous': value = await this.setContinuous(message); break;
         case 'pause':
+          this.pauseContinuous();
           if (this.media) this.media.paused = true;
           if (this.utterance) this.utterance.resumeMedia = false;
           if (this.cue) this.cue.resumeMedia = false;
-          value = { paused: this.mediaPlayer.pause() || !!this.media?.paused, ...this.status() }; break;
+          value = { paused: this.mediaPlayer.pause() || !!this.media?.paused || !!this.continuous?.paused, ...this.status() }; break;
         case 'resume':
-          if (!this.media?.ready) fail('no_media_to_resume');
-          this.media.paused = false;
-          this.media.resumePending = true;
-          {
-            const origin = [...this.turns].find(([, turn]) => turn.source === 'voice'
-              && message.member_id === turn.principal.member_id && this.currentSpeaker(turn.principal));
-            if (origin) {
-              this.media.announcementRequestId = origin[0];
-              this.media.announcementMemberId = origin[1].principal.member_id;
-              this.media.announcementPending = true;
-              this.mediaPlayer.pause();
+          if (this.continuous?.paused) {
+            if (!this.media?.ready) {
+              // This resume prepares a new resource. Bind its mode, cancellation
+              // origin and announcement to this exact request and invoker.
+              const resumed = await this.setContinuous({ ...message, command: 'continuous',
+                enabled: true, query: '', artist: '' });
+              value = { ...resumed, ...this.status(),
+                resumed: this.mediaPlayer.state.status === AudioPlayerStatus.Playing && !this.media?.announcementPending,
+                resume_pending: !!(this.media?.announcementPending || this.media?.resumePending) }; break;
             }
+            this.continuous.paused = false;
+            void this.prefetchContinuous(this.continuous);
           }
-          this.maybeStartMedia();
-          value = { resumed: this.mediaPlayer.state.status === AudioPlayerStatus.Playing,
-            resume_pending: this.media.resumePending, ...this.status() };
+          value = this.resumeMedia(message.member_id);
           break;
         case 'play': value = await this.play(message); break;
         case 'cancel_media': value = this.cancelMedia(message.playback_request_id); break;
@@ -1421,7 +1699,10 @@ export class DiscordTransport {
         }
         result.media_diagnostic = snapshot;
       }
-    } finally { if (ownsMutation) this.mutating = false; }
+    } finally {
+      if (ownsMutation) this.mutating = false;
+      void this.advanceContinuous();
+    }
     if (!readOnly) this.recent.set(message.request_id, { fingerprint, result });
     return result;
   }
@@ -1530,6 +1811,8 @@ export class DiscordTransport {
         if (used) { socket.destroy(); return; }
         used = true;
         if (message.command === 'play' && message.source?.provider === 'youtube') socket.setTimeout(75000);
+        if (message.command === 'continuous' && message.enabled === true
+          || message.command === 'resume') socket.setTimeout(90000);
         void this.command(message).then((result) => { if (!socket.destroyed) { sendFrame(socket, result); socket.end(); } })
           .catch(() => { if (!socket.destroyed) socket.end(`${JSON.stringify({ ok: false, error: 'invalid_request' })}\n`); });
       });

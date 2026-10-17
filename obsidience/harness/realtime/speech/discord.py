@@ -48,6 +48,31 @@ _TOKEN = re.compile(r"[A-Za-z0-9_-]{1,96}\Z")
 WAKE_WORD = "Bard"
 
 
+def _input_timing(value, wake_ns):
+    """Project existing addressed-turn clocks only; no transcript or analyzer data."""
+    allowed = {"speech_onset", "first_partial", "last_voiced", "end_of_turn", "speech_final"}
+    if (not isinstance(value, dict) or set(value) != {"speech_sequence", "stages"}
+            or type(value["speech_sequence"]) is not int or not 0 < value["speech_sequence"] <= 1_000_000_000
+            or not isinstance(value["stages"], list) or not 1 <= len(value["stages"]) <= 5):
+        return None
+    now = time.monotonic_ns()
+    stages, seen = [], set()
+    for row in value["stages"]:
+        if (not isinstance(row, dict) or set(row) != {"stage", "monotonic_ns"}
+                or not isinstance(row["stage"], str) or row["stage"] not in allowed or row["stage"] in seen
+                or type(row["monotonic_ns"]) is not int
+                or not max(1, now - 120_000_000_000) <= row["monotonic_ns"] <= now):
+            return None
+        seen.add(row["stage"])
+        stages.append({"stage": row["stage"], "monotonic_ms": row["monotonic_ns"] / 1_000_000})
+    if "speech_final" not in seen:
+        return None
+    result = {"speech_sequence": value["speech_sequence"], "stages": stages}
+    if type(wake_ns) is int and max(1, now - 120_000_000_000) <= wake_ns <= now:
+        result["wake_monotonic_ms"] = wake_ns / 1_000_000
+    return result
+
+
 def _principal(message: dict) -> tuple[str, str, str]:
     values = tuple(message.get(key) for key in _PRINCIPAL_FIELDS)
     if not all(isinstance(value, str) and _ID.fullmatch(value) for value in values):
@@ -232,6 +257,20 @@ class _MemberTurn(speech.ObsidienceNeMoTurnTakingService):
             return ""
         return await super()._open_wake(text, cue_name=cue_name)
 
+    def turn_short_reply(self):
+        # Only a whole addressed command can shorten a judged, quiet pause.
+        # Final ASR tail decoding and the sole final-text admission still run.
+        if not self._wake_open:
+            return False
+        if super().turn_short_reply():
+            return True
+        text = " ".join(self._user_speaking_buffer.casefold().split()).rstrip(".!?")
+        if len(text) > 100 or re.fullmatch(r"[a-z ]+", text) is None:
+            return False
+        return re.fullmatch(
+            r"(?:please )?(?:(?:pause|resume|unpause|stop(?: playing)?)(?: (?:it|that|(?:the )?(?:music|audio|playback|song)))?"
+            r"|(?:keep|continue) playing(?: (?:the )?music)?)(?: please)?", text) is not None
+
     async def _handle_transcription(self, frame, direction):
         if self.stream.probe_kind is not None:
             # A fresh explicit synthetic fixture or authorized real-speech
@@ -251,7 +290,7 @@ class _FinalText(speech.FrameProcessor):
     async def process_frame(self, frame, direction):
         await super().process_frame(frame, direction)
         if isinstance(frame, speech.TranscriptionFrame):
-            self.stream.final(frame.text)
+            self.stream.final(frame.text, frame.metadata.get("obsidience_speech_timing"))
         elif isinstance(frame, speech.ErrorFrame):
             self.stream.fail("asr_failed")
         else:
@@ -286,6 +325,7 @@ class _Member:
         self.terminal_pcm_frames = 0
         self.queue_high_water = 0
         self.wake_rejected = {"possessive": 0, "mid_sentence": 0}
+        self.wake_monotonic_ns = None
         self.stt = _MemberSTT(self, server.stt, decoder)
         turn_analyzer = speech.smart_turn_analyzer(
             lambda: self.turn.turn_pending(), lambda: self.turn.turn_short_reply(),
@@ -338,6 +378,7 @@ class _Member:
             if reason in self.wake_rejected:
                 self.wake_rejected[reason] = min(self.wake_rejected[reason] + 1, 1_000_000_000)
         if kind == "wake_detected" and owner is not None and owner.principal == self.principal:
+            self.wake_monotonic_ns = time.monotonic_ns()
             self.server.emit("wake", self.principal, request_id=owner.request_id,
                              cue_name=self.turn._wake_cue_name)
         elif kind == "wake_idle" and owner is not None and owner.phase == "listening":
@@ -367,7 +408,7 @@ class _Member:
             "queue_high_water": self.queue_high_water,
         }
 
-    def final(self, text):
+    def final(self, text, timing=None):
         owner = self.server.owner(self.principal)
         text = " ".join(text.split())
         if (not self.server.current(self) or owner is None or owner.principal != self.principal
@@ -377,7 +418,9 @@ class _Member:
             self.fail("utterance_limit")
             return
         owner.phase, owner.deadline = "waiting", time.monotonic() + 120
-        self.server.emit("transcript", self.principal, request_id=owner.request_id, text=text)
+        clocks = _input_timing(timing, self.wake_monotonic_ns)
+        self.server.emit("transcript", self.principal, request_id=owner.request_id, text=text,
+                         **({"input_timing": clocks} if clocks is not None else {}))
 
     def fail(self, code):
         if self.server.current(self):

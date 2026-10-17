@@ -908,9 +908,15 @@ or worker teardown restores standby eligibility. Outgoing PCM fills the existing
 Opus prebuffer as soon as synthesis supplies it, then paces with that bounded lead.
 The owner socket can exclude one specified member's next voice turn from Memory for
 a 30-second diagnostic window; default requests retain their normal Memory policy.
+Complete addressed control phrases use the existing short-reply endpoint after a
+judged quiet pause. The final transcript carries bounded source timing stages,
+so ASR, endpoint, dispatch and playback delays remain distinguishable; partial
+recognition never dispatches an effect.
 
 Bard uses a direct media-command path for exact pause, resume and stop requests, and
-for unambiguous artist or recording matches from one fresh search. Those requests
+for unambiguous artist or recording matches from one fresh search. Explicit known
+genre requests use the first finite recording whose returned title names that
+genre; artist/title ambiguity still uses the Agent. Those requests
 execute the accepted capabilities and completion checks without model generation or
 Memory recall. Ambiguous requests enter the ordinary Agent with the actual search
 results; they do not search twice. Successful voice playback uses a brief handoff
@@ -928,6 +934,19 @@ the choices; a literal refusal consumes the offer with an acknowledgment and no
 media effect. Successful playback of rebound choices retains its artist evidence
 for explicit continuation. Attempted playback consumes choices. Three identical correctable
 pre-dispatch rejections end the Discord turn; a genuinely corrected call still runs.
+
+An explicit keep-playing request enables a member-bound continuous music mode in
+the existing Discord player. It prefetches one fresh Media identity while the
+current song plays and advances only after clean decoder end-of-file. It keeps
+at most twenty recent identities to avoid immediate repeats. No additional Agent
+turn or Memory write occurs between songs. Pause suspends selection and resume
+continues the same track; stop, leave, requester departure, manual replacement
+and playback failure cancel the mode and its owned work. Disabling only the mode
+lets the current track finish. The authenticated metadata endpoint checks the
+live transport generation, mode and member binding; Node rechecks them after
+awaiting selection. Media remains the source authority, and the existing player
+owns source extraction, decoding and output. Continuous playback is never enabled
+by default.
 
 Media catalogue selection and source admission remain owned by Obsidience Media. The bot
 receives a held descriptor with exact file identity and a finite dispatch deadline, then

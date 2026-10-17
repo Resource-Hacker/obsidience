@@ -366,13 +366,17 @@ def impulse(payload, request_cancel):
                         raised = True  # Possible dispatch is registered before IPC.
                         power._set(name, inventory, {"level":254}, _CANCEL, readback=False)
                         up_ack = time.monotonic()
-                        request_cancel.wait(.2)
+                        request_cancel.wait(max(0, sent + .2 - time.monotonic()))
                     finally:
                         if raised:
                             # Exactly one down command; shared lane makes it follow
                             # a possibly uncertain up command. Original restore follows.
+                            down_request = time.monotonic()
                             power._set(name, inventory, {"level":25}, readback=True, timeout=60)
-                    return {"pulse_request_mono":sent,"pulse_up_ack_mono":up_ack,"pulse_down_ack_mono":time.monotonic()}
+                    return {"pulse_request_mono":sent,"pulse_up_ack_mono":up_ack,
+                            "pulse_down_request_mono":down_request,"pulse_down_ack_mono":time.monotonic(),
+                            "pulse_dispatch_duration_ms":1000 * (down_request - sent),
+                            "pulse_up_ack_after_down_deadline":up_ack > sent + .2}
                 def play():
                     sent = time.monotonic()
                     child = spawn(["pw-play", "--target", bindings[1][1], "--properties", "node.dont-fallback=true",

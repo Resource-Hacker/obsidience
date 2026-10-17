@@ -174,6 +174,13 @@ def _music_identity(value):
     return ' '.join(re.findall(r'[^\W_]+', unicodedata.normalize('NFKC', value).casefold()))
 
 
+_MUSIC_GENRES = frozenset({
+    'synthwave', 'synth wave', 'retrowave', 'vaporwave', 'lofi', 'lo fi',
+    'jazz', 'ambient', 'classical', 'techno', 'trance', 'house', 'disco',
+    'hip hop', 'hiphop', 'rock', 'pop', 'country', 'reggae', 'drum and bass',
+})
+
+
 def exact_discord_music(request, candidates):
     """Select one exact official recording at the best presentation rank.
 
@@ -184,6 +191,21 @@ def exact_discord_music(request, candidates):
     query_only = 'query' in request
     wanted_artist = _music_identity(request['query'] if query_only else request['artist'])
     wanted_title = _music_identity(request['query'] if query_only else request['title'])
+    genre = re.sub(r' music$', '', wanted_title)
+    if query_only and not request.get('requires_exact') and genre in _MUSIC_GENRES:
+        # A literal genre asks for a relevant recording, not one exact artist.
+        # Use fresh search order only when the title explicitly names that genre.
+        aliases = {genre}
+        if genre in {'synthwave', 'synth wave', 'lofi', 'lo fi', 'hiphop', 'hip hop'}:
+            aliases |= {word for word in _MUSIC_GENRES if word.replace(' ', '') == genre.replace(' ', '')}
+        for row in candidates:
+            if (isinstance(row, dict) and row.get('provider') == 'youtube'
+                    and isinstance(row.get('title'), str) and isinstance(row.get('artist'), str)
+                    and isinstance(row.get('id'), str)
+                    and type(row.get('duration_seconds')) in {int, float}
+                    and 45 <= row['duration_seconds'] <= 86400
+                    and any(f' {word} ' in f' {_music_identity(row["title"])} ' for word in aliases)):
+                return row
     valid = []
     for row in candidates:
         if (not isinstance(row, dict) or row.get('provider') != 'youtube'

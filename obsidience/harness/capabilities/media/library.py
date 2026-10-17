@@ -62,6 +62,9 @@ def bind_music(row: dict, context: dict, config: dict) -> dict:
     while candidate_id in selections:
         candidate_id = 'm' + secrets.token_hex(3)
     selections[candidate_id] = binding
+    artist = row.get('artist', '')
+    if isinstance(artist, str) and len(artist) <= 80 and not any(ord(c) < 32 for c in artist):
+        context.setdefault('_media_music_artists', {})[candidate_id] = artist
     return {**row, 'id': candidate_id,
             'delivery': music['delivery'] if row['provider'] == 'youtube' else 'direct'}
 

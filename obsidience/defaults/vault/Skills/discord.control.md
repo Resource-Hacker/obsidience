@@ -53,3 +53,14 @@ means the player actually started. A ready receipt is not audible playback.
 A voice resume with `resume_pending:true` keeps the current stream at its paused
 position until your normal concise reply and completion cue finish. Do not repeat
 resume or issue play. `resumed:true` means the player is already Playing.
+
+For an explicit request to keep playing music across songs, call
+`continuous(enabled:true,query,artist)`. Empty query and artist reuse the current
+mode or track. Use an exact requested channel artist in `artist`; leave it empty
+for a genre or general music query. The player selects one next recording before
+the current track ends and advances only after clean end of playback, without
+another Agent turn. Pause suspends selection; resume continues it. Stop, leave,
+requester departure, manual track replacement or a playback failure clears the
+mode. `continuous(enabled:false,query:"",artist:"")` disables future selection
+while allowing the current song to finish. This mode is explicitly requested,
+never the default. Its receipt confirms mode state, not listener audibility.

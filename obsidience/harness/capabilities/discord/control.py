@@ -24,7 +24,8 @@ async def execute(args: dict, context: dict) -> dict:
     action = args.get('action')
     fields = {'status': set(), 'channels': set(), 'join': {'channel_id'},
               'leave': set(), 'say': {'text'}, 'play': {'id', 'media_kind'},
-              'pause': set(), 'resume': set(), 'stop': set()}
+              'pause': set(), 'resume': set(), 'stop': set(),
+              'continuous': {'enabled', 'query', 'artist'}}
     if action not in fields or set(args) != {'action'} | fields[action]:
         raise ValueError('Invalid discord.control arguments')
     try:
@@ -59,6 +60,17 @@ async def execute(args: dict, context: dict) -> dict:
         if not isinstance(args['text'], str) or not args['text'].strip() or len(args['text']) > 4000:
             raise ValueError('Discord speech must contain 1 to 4000 characters')
         payload['text'] = args['text']
+    elif action == 'continuous':
+        if not principal:
+            return rejected('Continuous music requires an admitted channel member request')
+        if type(args['enabled']) is not bool:
+            raise ValueError('Continuous music enabled must be boolean')
+        for key, limit in (('query', 120), ('artist', 80)):
+            value = args[key]
+            if not isinstance(value, str) or len(value) > limit or any(ord(c) < 32 for c in value):
+                raise ValueError('Continuous music requires bounded query and artist text')
+            payload[key] = value.strip()
+        payload['enabled'] = args['enabled']
     readonly = action in {'status', 'channels'}
     if not readonly:
         payload['request_id'] = uuid.uuid4().hex
@@ -128,6 +140,8 @@ async def execute(args: dict, context: dict) -> dict:
                 else:
                     return rejected('Discord media playback was cancelled')
             payload['expires_at_ms'] = int(time.time() * 1000) + 14000
+            payload['title'] = current['title'][:160]
+            payload['artist'] = context.get('_media_music_artists', {}).get(args['id'], '')
         if not readonly:
             attempts[attempt_key] = {'status': 'failed', 'delivery': 'uncertain',
                                     'must_not_replay': True, 'failure': 'This Discord action was already attempted'}
@@ -136,6 +150,8 @@ async def execute(args: dict, context: dict) -> dict:
         timeout = 22 if action == 'join' else 15
         if action == 'play' and payload.get('source', {}).get('provider') == 'youtube':
             timeout = 75
+        elif action in {'continuous', 'resume'}:
+            timeout = 90
         pending = asyncio.create_task(client.command(payload, timeout=timeout))
         try:
             result = await asyncio.shield(pending)
@@ -143,14 +159,14 @@ async def execute(args: dict, context: dict) -> dict:
             # Cancel this exact playback before waiting for its handoff to drain;
             # a site-required preparation wait must never delay STOP.
             try:
-                if action == 'play':
+                if action in {'play', 'continuous', 'resume'}:
                     await client.command({'command': 'cancel_media', 'request_id': uuid.uuid4().hex,
                                           'playback_request_id': payload['request_id']}, timeout=3)
             finally:
                 await pending
             raise
         if not result.get('ok'):
-            if action == 'play' and result.get('delivery') in {'uncertain', 'not_confirmed'}:
+            if action in {'play', 'continuous', 'resume'} and result.get('delivery') in {'uncertain', 'not_confirmed'}:
                 await client.command({'command': 'cancel_media', 'request_id': uuid.uuid4().hex,
                                       'playback_request_id': payload['request_id']}, timeout=3)
             receipt = {**result, 'status': 'failed', 'must_not_replay': not readonly,
