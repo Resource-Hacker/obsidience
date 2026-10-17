@@ -27,7 +27,7 @@ The owner-local API exposes GET `/api/lights/visualizer`, GET
 start/stop/status actions. Only this local API accepts an explicit `calibration`
 object; model arguments never carry private bulb identities or camera bindings.
 
-The session snapshots all six verified bulb identities and exact power/appearance,
+The session snapshots all six commissioned Matter bulb identities and exact power/appearance,
 then owns their existing control lock. Native PipeWire supplies one temporary
 sink, a delayed `pw-loopback` to the original physical output, and an in-memory
 `pw-record` analysis tap. Defaults and microphone routes never change. The exact
@@ -40,7 +40,8 @@ preempts and drains the visualizer before a power operation.
 
 Envelope and three spectral bands drive RGB and brightness from 100 ms analysis blocks, with a 20 ms scheduling cadence and
 at most 10 distinct updates per second per fixture. A bounded feature history supplies audio lookahead; each
-fixture has at most one in-flight UDP update, with no queued obsolete writes.
+fixture has at most one in-flight Matter update, with no queued obsolete writes.
+Color and level commands explicitly request `transitionTime:0`; actual optical step behavior still requires measurement. WiZ-era timing profiles are rejected.
 Source PCM never reaches disk, conversations, Knowledge or Memory.
 
 Running state proves local resource acquisition and PCM arrival, not that a person
@@ -57,17 +58,17 @@ loads it unless explicit uncalibrated mode is selected. The visualizer never
 creates measured defaults or writes a profile. The local calibration owner writes
 it atomically after real optical/audio measurement.
 
-Version 1 requires exactly:
+Version 2 requires exactly:
 
-- `version:1`, bounded `profile_id`, and Unix-seconds `measured_at`;
+- `version:2`, bounded `profile_id`, and Unix-seconds `measured_at`;
 - exact current `stream_serial`, `output_serial`, and `sink_name`;
-- nonempty bounded `camera_binding` provenance object;
+- bounded `camera_binding` provenance object with `protocol:matter` and `command_method:matter_zero`;
 - `requested_audio_delay_ms` matching the start request;
 - `native_audio_delay_ms`, the measured digital input-monitor to output-monitor lag;
 - `capture_latency_ms` for the analysis tap and `output_latency_ms` for any measured
   monitor-to-physical-output offset;
 - `fixtures`, with exactly all six registered aliases, each carrying the exact
-  `mac`, measured optical `latency_ms`, and measured `uncertainty_ms`.
+  `nodeId` and `endpoint`, measured optical `latency_ms`, and measured `uncertainty_ms`.
 
 The measured digital delay must cover every fixture's optical delay, uncertainty,
 capture delay and a 150 ms analysis/control margin. Profiles bind the physical output serial and all fixture identities. The measured

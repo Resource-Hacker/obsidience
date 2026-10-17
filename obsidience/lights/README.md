@@ -94,4 +94,3 @@ enters the same lane after the previous command drains. There is no asserted
 30-second total transaction bound: commands/read/reconnection use native budgets.
 The caller must retain `cleanup_incomplete` and block new visualization while
 restoration remains pending. A timeout never proves that a bulb did nothing.
-
