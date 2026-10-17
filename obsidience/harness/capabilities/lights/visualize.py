@@ -107,11 +107,11 @@ def _select(stream_id):
     sink = sinks[0]
     old_target = next((dict(row) for row in metadata if row.get("subject") == stream["id"]
                        and row.get("key") == "target.object"), None)
-    _require_default_route(stream, sink, old_target)
+    _require_unsaved_route(stream, sink, old_target)
     return stream, sink, _process_identity(stream), old_target
 
 
-def _require_default_route(stream, sink, old_target):
+def _require_unsaved_route(stream, sink, old_target):
     """Guard the reviewed name-target seam; never overwrite a saved user route.
 
     WirePlumber supports target names for links, while this pinned save hook
@@ -125,12 +125,16 @@ def _require_default_route(stream, sink, old_target):
     if any(hashlib.sha256(Path(path).read_bytes()).hexdigest() != digest for path,digest in expected.items()):
         raise ValueError("Audio routing policy changed; review the visualizer routing adapter")
     props = _props(stream)
-    if old_target is not None or props.get("target.object") or props.get("node.target"):
-        raise ValueError("Visualizer currently requires a stream following the default output")
+    if old_target is not None:
+        raise ValueError("Visualizer cannot replace an explicit remembered stream route")
     _rows, _nodes, metadata = _graph()
     default = next((row.get("value") for row in metadata if row.get("subject") == 0 and row.get("key") == "default.audio.sink"), {})
-    if not isinstance(default, dict) or default.get("name") != _props(sink)["node.name"]:
-        raise ValueError("Visualizer currently requires the observed default output")
+    defined = props.get("target.object") or props.get("node.target")
+    if defined:
+        if str(defined) not in {_props(sink)["node.name"], _identity(sink)[1], str(sink["id"])}:
+            raise ValueError("Client output selection does not match its observed physical route")
+    elif not isinstance(default, dict) or default.get("name") != _props(sink)["node.name"]:
+        raise ValueError("Visualizer requires the observed default or client-selected output")
     if props.get("media.role") == "Notification":
         raise ValueError("Notification streams cannot drive the music visualizer")
     key = next(("Output/Audio:" + k + ":" + str(props[k]) for k in
@@ -167,7 +171,6 @@ def _calibration(value, delay, stream, sink, inventory):
             or not isinstance(value["profile_id"], str) or not 1 <= len(value["profile_id"]) <= 96
             or value["version"] != 1 or type(value["version"]) is not int
             or value["sink_name"] != _props(sink)["node.name"]
-            or str(value["stream_serial"]) != _identity(stream)[1]
             or str(value["output_serial"]) != _identity(sink)[1]
             or not isinstance(value["camera_binding"], dict) or not value["camera_binding"]
             or len(json.dumps(value["camera_binding"])) > 4096
@@ -279,7 +282,7 @@ class _Session:
             "--properties", "stream.capture.sink=true node.dont-fallback=true",
             "--raw", "--format", "s16", "--rate", str(RATE), "--channels", "2", "--latency", "20ms", "-"], capture=True)
         self._current_nodes()
-        _require_default_route(self.stream, self.sink, self.old_target)
+        _require_unsaved_route(self.stream, self.sink, self.old_target)
         # Mark possible dispatch before the exact owner metadata mutation.
         self.route_owned = True
         _metadata(self.stream_identity[0], {"value": self.virtual_identity[2], "type": "Spa:String"})

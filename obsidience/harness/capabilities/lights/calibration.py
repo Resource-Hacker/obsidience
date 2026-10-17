@@ -181,8 +181,12 @@ def _measure(request_cancel):
                 return float(np.sum((frame[mask] - reference) * vector) / scale)
             delays, intervals, ramps = [], [], []
             for trial in range(5):
+                # Rebase between flashes: slow mechanical drift must not turn
+                # into accumulated ROI brightness error over all five trials.
+                pose = _pose()
                 _write(inventory, name, low, deadline, request_cancel)
                 quiet = _collect(.55, deadline, request_cancel, pose)
+                reference = np.median([item[1] for item in quiet[-3:]], axis=0)[mask]
                 sent = _write(inventory, name, high, deadline, request_cancel)
                 flash = _collect(.65, deadline, request_cancel, pose)
                 frames = quiet[-2:] + flash
@@ -235,7 +239,7 @@ def _measure(request_cancel):
                    "measured": sum(row["status"] == "measured" for row in results.values())}
         return payload
     except BaseException:
-        _STATUS = {"state": "failed", "completed": len(results)}
+        _STATUS = {"state": "failed", "completed": len(results), "results": results}
         raise
     finally:
         for name in modified:
