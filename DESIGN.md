@@ -915,6 +915,11 @@ execute the accepted capabilities and completion checks without model generation
 Memory recall. Ambiguous requests enter the ordinary Agent with the actual search
 results; they do not search twice. Successful voice playback uses a brief handoff
 while retaining the full title in history; the final speech frame releases music.
+The observed spoken play/plate confusion is corrected only for addressed voice
+and requires a unique fresh recording match; unmatched corrections ask for
+clarification. Artist-owned collaboration credits and lyric-video presentation
+labels may be removed for exact title matching, without accepting cover/version
+substitutions or deriving performer identity from unrelated lyric publishers.
 
 Media catalogue selection and source admission remain owned by Obsidience Media. The bot
 receives a held descriptor with exact file identity and a finite dispatch deadline, then
@@ -926,6 +931,11 @@ is read-only; an explicit play can prepare its exact public source once, with pe
 and uncertain receipts distinct from playback. Expiring CDN URLs stay inside the
 private owner handoff and provider child stdin, never model context, argv or logs.
 The destination owns provider/decoder lifetimes and bounded streaming backpressure.
+YouTube HTTP transport gets at most two native retries of the same source. After
+output begins, resumed byte ranges must match before their response body is read;
+missing/backward ranges and native restart-from-zero fallbacks fail closed. No
+player restart or fresh source extraction is implied. Failures retain only fixed
+categories, phase and numeric byte counts, never upstream messages or CDN URLs.
 Cancellation addresses the original
 play request, never a newer item. Current bot delivery is audio only; a soundtrack is not
 an acceptable implicit substitute for requested television/video. The implementation does

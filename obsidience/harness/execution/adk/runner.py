@@ -351,7 +351,8 @@ async def run_adk_session(task, model, messages, allowed, ctx, agent_name, effor
             trace.append({'command_route': 'discord_hassil', 'proposal': deepcopy(command),
                           'model_requests': 0, 'memory_recalls': 0})
         else:
-            music_request = recognize_discord_music(ctx['objective'], allowed)
+            music_request = recognize_discord_music(ctx['objective'], allowed,
+                voice=params.get('event') == 'voice.activation')
     elif (prepared_speech is None and task.ref == EXECUTIVE and task.kind == 'agent' and conversation_id
             and params.get('reply_to_turn_id') and not continuation
             and effort == 'none' and initial_lease is None and not trace
@@ -432,7 +433,7 @@ async def run_adk_session(task, model, messages, allowed, ctx, agent_name, effor
                 # Exact titles keep their clarification-only fallback. An
                 # unmatched query may need ordinary judgment; the ordinary
                 # model may select from this real page, without searching twice.
-                query_only = 'query' in music_request
+                query_only = 'query' in music_request and not music_request.get('requires_exact')
                 music_evidence = json.dumps({'request': music_request, 'search_arguments': search_args,
                     'search_result': page, 'instruction': (
                         'This play request was searched once. No unambiguous exact verified artist or recording match was established. '

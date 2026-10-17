@@ -20,7 +20,8 @@ const TEXT_LIMIT = 8000;
 const SPEECH_LIMIT = 4000;
 const MUSIC_ERROR_CODES = new Set(['source_unavailable', 'source_http_429', 'source_http_403',
   'source_auth_required', 'source_challenge_failed', 'source_format_unavailable', 'source_timeout',
-  'source_wait_exceeds_budget']);
+  'source_wait_exceeds_budget', 'source_short_read', 'source_connection_lost', 'source_write_failed',
+  'source_resume_range_invalid']);
 const TTS_FRAME_BYTES = 24_000 * 2 * 0.020; // 480 mono S16 samples, exactly 20 ms.
 const TTS_PREBUFFER_FRAMES = 20; // Two 200 ms speech-owner chunks.
 const TTS_MAX_BUFFER_FRAMES = 100; // Two seconds, matching the former PCM bound.
@@ -1189,7 +1190,10 @@ export class DiscordTransport {
             }
             if (MUSIC_ERROR_CODES.has(value.code)) diagnostic({ code: value.code,
               error_class: /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(value.error_class ?? '') ? value.error_class : null,
-              errno: Number.isSafeInteger(value.errno) ? value.errno : null });
+              errno: Number.isSafeInteger(value.errno) ? value.errno : null,
+              phase: ['metadata', 'download'].includes(value.phase) ? value.phase : null,
+              downloaded_bytes: Number.isSafeInteger(value.downloaded_bytes) && value.downloaded_bytes >= 0 ? value.downloaded_bytes : null,
+              expected_bytes: Number.isSafeInteger(value.expected_bytes) && value.expected_bytes >= 0 ? value.expected_bytes : null });
           } catch {}
         }
       });

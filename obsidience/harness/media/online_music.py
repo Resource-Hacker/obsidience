@@ -27,6 +27,9 @@ TRACK_ID = re.compile(r'[0-9]{1,20}')
 
 class _Quiet:
     code = 'source_unavailable'
+    phase = 'metadata'
+    downloaded_bytes = 0
+    expected_bytes = None
 
     def debug(self, *_args): pass
     def warning(self, *_args): pass
@@ -39,10 +42,22 @@ class _Quiet:
                 ('source_auth_required', ('sign in', 'not a bot')),
                 ('source_challenge_failed', ('challenge', 'signature', 'javascript')),
                 ('source_format_unavailable', ('requested format', 'no video formats')),
-                ('source_timeout', ('timed out', 'timeout'))):
+                ('source_timeout', ('timed out', 'timeout')),
+                ('source_short_read', ('more expected', 'incomplete read', 'incompleteread')),
+                ('source_connection_lost', ('connection reset', 'reset by peer', 'remote end closed')),
+                ('source_write_failed', ('unable to write', 'broken pipe'))):
             if any(fragment in text for fragment in fragments):
                 self.code = code
                 break
+        if re.search(r'downloaded \d+ bytes, expected \d+ bytes', text):
+            self.code = 'source_short_read'
+
+    def progress(self, status):
+        self.phase = 'download'
+        for field, key in (('downloaded_bytes', 'downloaded_bytes'), ('expected_bytes', 'total_bytes')):
+            value = status.get(key)
+            if type(value) is int and 0 <= value <= 2**53 - 1:
+                setattr(self, field, value)
 
 
 _LOGGER = _Quiet()
@@ -176,8 +191,47 @@ def _youtube_cookie_stream():
 
 def _stream(provider: str, identity: str) -> None:
     from yt_dlp import YoutubeDL
-    from yt_dlp.utils import DownloadError
+    from yt_dlp.networking import Request
+    from yt_dlp.networking.exceptions import HTTPError
+    from yt_dlp.utils import DownloadError, parse_http_range
     from tempfile import TemporaryDirectory
+
+    _LOGGER.phase, _LOGGER.downloaded_bytes, _LOGGER.expected_bytes = 'metadata', 0, None
+
+    class StreamingYoutubeDL(YoutubeDL):
+        stream_url = None
+
+        def urlopen(self, request):
+            # Native HTTP retries resume stdout by byte offset. Its ordinary
+            # file fallback may instead restart from zero if Range is ignored;
+            # a pipe cannot be rewound. Reject that fallback before any body is
+            # read, while retaining upstream's bounded transport retries.
+            streaming = self.stream_url is not None and getattr(request, 'url', request) == self.stream_url
+            match = re.fullmatch(r'bytes=(\d+)-(\d*)', getattr(request, 'headers', {}).get('Range', ''))
+            start = int(match[1]) if match else None
+            end = int(match[2]) if match and match[2] else None
+
+            def reject():
+                _LOGGER.code = 'source_resume_range_invalid'
+                raise DownloadError('Source cannot safely resume this audio stream')
+
+            if streaming and _LOGGER.downloaded_bytes and (start is None or start < _LOGGER.downloaded_bytes):
+                reject()
+            try:
+                response = super().urlopen(request)
+            except HTTPError as error:
+                if streaming and start and error.status == 416:
+                    error.response.close()
+                    reject()  # Native 416 recovery can reopen without Range.
+                raise
+            if streaming and start:
+                actual_start, actual_end, total = parse_http_range(response.headers.get('Content-Range'))
+                if (actual_start != start or end is not None and not (
+                        actual_end == end or total is not None and total < end)):
+                    response.close()
+                    reject()
+            return response
+
     if provider == 'youtube' and VIDEO_ID.fullmatch(identity):
         url = 'https://www.youtube.com/watch?v=' + identity
     elif provider == 'soundcloud' and TRACK_ID.fullmatch(identity):
@@ -198,8 +252,10 @@ def _stream(provider: str, identity: str) -> None:
         no_external = cleanup.enter_context(TemporaryDirectory(dir='.', prefix='native-'))
         options = {**_options(), 'format': 'bestaudio/best', 'outtmpl': '-',
                    'ffmpeg_location': no_external,
+                   'progress_hooks': [_LOGGER.progress],
+                   'retries': 2 if provider == 'youtube' else 0,
                    'match_filter': full_track, 'logtostderr': True}
-        client = cleanup.enter_context(YoutubeDL(options))
+        client = cleanup.enter_context((StreamingYoutubeDL if provider == 'youtube' else YoutubeDL)(options))
         if provider != 'youtube':
             if client.download([url]):
                 raise ValueError('source_unavailable')
@@ -216,7 +272,7 @@ def _stream(provider: str, identity: str) -> None:
             if cookies is None:
                 raise
             cleanup.enter_context(cookies)
-            client = cleanup.enter_context(YoutubeDL({**options, 'cookiefile': cookies}))
+            client = cleanup.enter_context(StreamingYoutubeDL({**options, 'cookiefile': cookies}))
             _LOGGER.code = 'source_unavailable'
             info = client.extract_info(url, download=False)
         if (not isinstance(info, dict) or info.get('_type', 'video') != 'video'
@@ -237,6 +293,9 @@ def _stream(provider: str, identity: str) -> None:
             if wait_ms:
                 print(json.dumps({'event': 'source_wait', 'wait_ms': wait_ms}),
                       file=sys.stderr, flush=True)
+        _LOGGER.phase = 'download'
+        if info.get('protocol') in {'http', 'https'}:
+            client.stream_url = Request(info['url']).url
         client.process_info(info)
         if info.get('__pending_error'):
             raise ValueError('source_unavailable')
@@ -255,6 +314,8 @@ if __name__ == '__main__':
     except Exception as error:
         # Upstream exceptions may contain signed delivery URLs: never log them.
         print(json.dumps({'code': _LOGGER.code, 'error_class': type(error).__name__[:64],
-                          'errno': error.errno if isinstance(error, OSError) else None}),
+                          'errno': error.errno if isinstance(error, OSError) else None,
+                          'phase': _LOGGER.phase, 'downloaded_bytes': _LOGGER.downloaded_bytes,
+                          'expected_bytes': _LOGGER.expected_bytes}),
               file=sys.stderr)
         sys.exit(1)
