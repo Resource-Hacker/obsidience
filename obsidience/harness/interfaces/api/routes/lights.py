@@ -32,6 +32,32 @@ def calibration_status():
     return calibration.status()
 
 
+@router.post("/api/lights/visualizer/impulse")
+async def measure_impulse(payload: dict, request: Request):
+    cancel = threading.Event()
+    pending = asyncio.create_task(asyncio.to_thread(calibration.impulse, payload, cancel))
+    async def watch_disconnect():
+        while not pending.done():
+            if await request.is_disconnected():
+                cancel.set()
+                return
+            await asyncio.sleep(.25)
+    watcher = asyncio.create_task(watch_disconnect())
+    try:
+        return await asyncio.shield(pending)
+    except asyncio.CancelledError:
+        cancel.set()
+        with contextlib.suppress(Exception):
+            await asyncio.shield(pending)
+        raise
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+    finally:
+        watcher.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await watcher
+
+
 @router.post("/api/lights/visualizer/observe")
 async def observe_sync(payload: dict, request: Request):
     from ....capabilities.lights import observe
@@ -66,7 +92,7 @@ async def measure_flashes(payload: dict | None = None):
     if set(payload) - {"fixtures", "method"} or ("fixtures" in payload and (not isinstance(payload["fixtures"], list) or not all(isinstance(name, str) for name in payload["fixtures"]))):
         raise HTTPException(400, "Choose registered fixture names")
     cancel = threading.Event()
-    pending = asyncio.create_task(asyncio.to_thread(calibration.measure, cancel, payload.get("fixtures"), payload.get("method", "setPilot")))
+    pending = asyncio.create_task(asyncio.to_thread(calibration.measure, cancel, payload.get("fixtures"), payload.get("method", "matter_zero")))
     try:
         return await asyncio.shield(pending)
     except asyncio.CancelledError:
@@ -106,7 +132,10 @@ async def open_lifecycle(realtime):
             while True:
                 event = await queue.get()
                 if event.get("reason") in {"stop_requested", "stopped"}:
-                    await asyncio.to_thread(visualize.stop)
+                    # A native invocation may outlive the synchronous stop budget;
+                    # keep this subscriber armed while its owner drains restoration.
+                    with contextlib.suppress(RuntimeError):
+                        await asyncio.to_thread(visualize.stop)
         finally:
             realtime.unsubscribe(queue)
 

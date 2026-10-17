@@ -1,19 +1,14 @@
-"""Set verified WiZ bulb power once, without acquiring room-sensing resources."""
-
+"""Verified Matter light control through the sole native controller owner."""
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+import colorsys
 import json
-import ipaddress
 import os
 from pathlib import Path
-import re
 import socket
-import tempfile
 import threading
 import time
-
-from ...config import CONFIG
 
 FIXTURES = ("window_lamp", "woven_pendant", "north_lamp", "tv_floor_lamp",
             "desk_lantern", "room_lantern")
@@ -21,284 +16,172 @@ TARGETS = ("all", *FIXTURES)
 _LOCK = threading.Lock()
 
 
-def _state_path(name: str) -> Path:
-    return CONFIG.runtime_dir / name
+def _inventory():
+    # The controller owns commissioning. These bindings live only for this operation.
+    return {name: {} for name in FIXTURES}
 
 
-def _inventory() -> dict:
-    """Private installation state supplies addresses; source contains aliases only."""
-    path = _state_path("lights.json")
-    try:
-        with path.open("rb") as source:
-            raw = source.read(8193)
-        if len(raw) > 8192:
-            raise ValueError
-        inventory = json.loads(raw)
-        if not isinstance(inventory, dict) or set(inventory) != set(FIXTURES):
-            raise ValueError
-        for record in inventory.values():
-            if not isinstance(record, dict) or set(record) != {"ip", "mac"}:
-                raise ValueError
-            if not isinstance(record["ip"], str):
-                raise ValueError
-            address = ipaddress.IPv4Address(record["ip"])
-            if (not address.is_private or address.is_loopback or address.is_multicast
-                    or address.is_unspecified or address.is_reserved):
-                raise ValueError
-            if not isinstance(record["mac"], str) or not re.fullmatch(r"[0-9a-f]{12}", record["mac"]):
-                raise ValueError
-        if (len({row["ip"] for row in inventory.values()}) != len(FIXTURES)
-                or len({row["mac"] for row in inventory.values()}) != len(FIXTURES)):
-            raise ValueError
-        return inventory
-    except (OSError, ValueError, TypeError) as error:
-        raise ValueError("Private light inventory unavailable or invalid") from error
-
-
-def _request(ip: str, method: str, params: dict, cancel, *, timeout: float = 1.5) -> dict:
-    """One datagram; its socket owns and isolates this response generation."""
-    if cancel is not None and cancel.is_set():
-        raise InterruptedError("Light operation cancelled")
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as peer:
-        peer.connect((ip, 38899))
-        peer.send(json.dumps({"method": method, "params": params}).encode())
-        deadline = time.monotonic() + timeout
-        for _ in range(128):
+def _request(payload, cancel=None, *, timeout=5):
+    path = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "obsidience-lights/control.sock"
+    deadline = time.monotonic() + timeout
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as peer:
+        peer.settimeout(min(timeout, 2))
+        peer.connect(str(path))
+        if cancel is not None and cancel.is_set():
+            raise InterruptedError("Light operation cancelled")
+        peer.sendall(json.dumps(payload, separators=(",", ":")).encode() + b"\n")
+        material = bytearray()
+        while b"\n" not in material:
             if cancel is not None and cancel.is_set():
-                raise InterruptedError("Light operation cancelled")
-            remaining = deadline - time.monotonic()
+                raise InterruptedError("Light operation cancelled after possible dispatch")
+            remaining = deadline-time.monotonic()
             if remaining <= 0:
-                raise TimeoutError("WiZ reply unavailable")
-            peer.settimeout(min(remaining, .1))
+                raise TimeoutError("Matter light receipt unavailable; delivery may be uncertain")
+            peer.settimeout(min(.1, remaining))
             try:
-                packet = peer.recv(16384)
+                chunk = peer.recv(8192)
             except socket.timeout:
                 continue
-            try:
-                reply = json.loads(packet)
-            except (ValueError, UnicodeError):
-                continue
-            if not isinstance(reply, dict) or reply.get("method") != method:
-                continue
-            if "error" in reply or not isinstance(reply.get("result"), dict):
-                raise ValueError("WiZ rejected the request")
-            return reply["result"]
-    raise TimeoutError("WiZ reply unavailable")
+            if not chunk:
+                raise RuntimeError("Matter controller disconnected; delivery may be uncertain")
+            material.extend(chunk)
+            if len(material) > 65536:
+                raise ValueError("Matter light receipt exceeds bound")
+    reply = json.loads(material.split(b"\n", 1)[0])
+    if not isinstance(reply, dict) or reply.get("ok") is not True or not isinstance(reply.get("result"), dict):
+        raise RuntimeError("Matter controller rejected light operation; do not replay")
+    return reply["result"]
 
 
-def _pilot(name: str, inventory: dict, cancel, *, timeout: float = 1.5) -> dict:
-    record = inventory[name]
-    pilot = _request(record["ip"], "getPilot", {}, cancel, timeout=timeout)
-    if pilot.get("mac") != record["mac"] or type(pilot.get("state")) is not bool:
-        raise ValueError("WiZ bulb identity or power state did not match")
-    return pilot
+def _binding(state):
+    node, endpoint = state.get("nodeId"), state.get("endpoint")
+    if (not isinstance(node, str) or not node.isdecimal() or int(node) <= 0
+            or type(endpoint) is not int or not 1 <= endpoint <= 65534):
+        raise ValueError("Matter fixture identity is unavailable")
+    return {"nodeId": node, "endpoint": endpoint}
 
 
-def _settled_pilot(name: str, inventory: dict, cancel, desired: bool, appearance: dict) -> dict:
-    """An ACK precedes bulb state application; wait only through status reads."""
-    deadline = time.monotonic() + 2.0
-    after = None
-    while True:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            if after is not None:
-                return after
-            raise TimeoutError("WiZ reply unavailable")
-        try:
-            after = _pilot(name, inventory, cancel, timeout=min(1.5, remaining))
-        except TimeoutError:
-            if time.monotonic() >= deadline:
-                raise
-        else:
-            matches = after["state"] == desired and (not desired or all(
-                after.get(key) == value for key, value in appearance.items()))
-            if matches or time.monotonic() >= deadline:
-                return after
-        # Poll the asynchronous transition at 10 Hz, interruptibly. No power
-        # write is repeated, and identity/protocol failures still fail at once.
-        pause = min(.1, max(0, deadline - time.monotonic()))
-        if cancel is not None:
-            if cancel.wait(pause):
-                raise InterruptedError("Light operation cancelled")
-        else:
-            time.sleep(pause)
+def _read(name, inventory, cancel=None, *, timeout=5):
+    state = _request({"command": "read", "target": name,
+                      **({"endpoint": inventory[name]["endpoint"]} if inventory[name] else {})}, cancel, timeout=timeout)
+    binding = _binding(state)
+    if inventory[name] and inventory[name] != binding:
+        raise ValueError("Matter fixture identity changed")
+    if state.get("fresh") is not True or type(state.get("onOff")) is not bool:
+        raise ValueError("Matter power state is unavailable")
+    _appearance(state)
+    inventory[name].update(binding)
+    return state
 
 
-def _appearance(pilot: dict) -> dict:
-    """Preserve measured scene or static colour without inventing a setting."""
-    dimming = pilot.get("dimming")
-    if type(dimming) is not int or not 1 <= dimming <= 100:
-        raise ValueError("WiZ brightness is unavailable or invalid")
-    scene = pilot.get("sceneId", 0)
-    if type(scene) is not int or not 0 <= scene <= 35:
-        raise ValueError("WiZ scene is unavailable or unsupported")
-    result = {"dimming": dimming}
-    if scene:
-        result["sceneId"] = scene
-        for key in ("speed", "ratio"):
-            if key in pilot:
-                if type(pilot[key]) is not int or not 0 <= pilot[key] <= 200:
-                    raise ValueError("WiZ scene parameter is invalid")
-                result[key] = pilot[key]
-    elif "temp" in pilot:
-        if type(pilot["temp"]) is not int or not 1000 <= pilot["temp"] <= 12000:
-            raise ValueError("WiZ colour temperature is invalid")
-        result["temp"] = pilot["temp"]
-    elif all(key in pilot for key in ("r", "g", "b")):
-        for key in ("r", "g", "b", "c", "w"):
-            if key in pilot:
-                if type(pilot[key]) is not int or not 0 <= pilot[key] <= 255:
-                    raise ValueError("WiZ colour channel is invalid")
-                result[key] = pilot[key]
+def _appearance(state):
+    level, mode = state.get("currentLevel"), state.get("colorMode")
+    if type(level) is not int or not 0 <= level <= 254 or type(mode) is not int:
+        raise ValueError("Matter native appearance is unavailable")
+    if mode == 0:
+        color = {"mode": "hs", "hue": state.get("currentHue"), "saturation": state.get("currentSaturation")}
+        fields, maximum = ("hue", "saturation"), 254
+    elif mode == 1:
+        color = {"mode": "xy", "x": state.get("currentX"), "y": state.get("currentY")}
+        fields, maximum = ("x", "y"), 65279
+    elif mode == 2:
+        color = {"mode": "temperature", "mireds": state.get("colorTemperatureMireds")}
+        fields, maximum = ("mireds",), 65279
     else:
-        raise ValueError("WiZ lighting appearance is unavailable")
+        raise ValueError("Matter native color mode is unsupported")
+    if any(type(color[k]) is not int or not (1 if k == "mireds" else 0) <= color[k] <= maximum for k in fields):
+        raise ValueError("Matter native color attributes are unavailable")
+    return {"level": level, "color": color}
+
+
+def _set(name, inventory, params, cancel=None, *, readback=True, timeout=5):
+    if not inventory[name]:
+        raise ValueError("Read and bind the Matter fixture before dispatch")
+    result = _request({"command": "set", "target": name, **inventory[name], **params,
+                       "readback": readback}, cancel, timeout=timeout)
+    if result.get("delivery") != "acknowledged" or _binding(result) != inventory[name] or result.get("transitionTime") != 0:
+        raise RuntimeError("Matter command receipt did not match its binding or zero transition")
+    if readback:
+        state = result.get("state")
+        if not isinstance(state, dict) or state.get("fresh") is not True or _binding(state) != inventory[name]:
+            raise RuntimeError("Matter native readback did not match its binding")
+        if "onOff" in params and state.get("onOff") != params["onOff"]:
+            raise RuntimeError("Matter native power readback did not match")
+        if "level" in params and state.get("currentLevel") != params["level"]:
+            raise RuntimeError("Matter native level readback did not match")
+        if "color" in params and _appearance(state)["color"] != params["color"]:
+            raise RuntimeError("Matter native color readback did not match")
     return result
 
 
-def _saved_appearances() -> dict:
-    try:
-        with _state_path("lights-appearance.json").open("rb") as source:
-            raw = source.read(8193)
-        if len(raw) > 8192:
-            raise ValueError
-        saved = json.loads(raw)
-        if not isinstance(saved, dict):
-            raise ValueError
-        for mac, appearance in saved.items():
-            if (not re.fullmatch(r"[0-9a-f]{12}", mac) or not isinstance(appearance, dict)
-                    or _appearance(appearance) != appearance):
-                raise ValueError
-        return saved
-    except FileNotFoundError:
-        return {}
-    except (OSError, TypeError, ValueError) as error:
-        raise ValueError("Saved light appearance is unavailable or invalid") from error
+def _frame(name, inventory, params, cancel=None, *, readback=False):
+    hue, saturation, _value = colorsys.rgb_to_hsv(*(params[k]/255 for k in ("r", "g", "b")))
+    return _set(name, inventory, {"onOff": bool(params.get("state", True)),
+        "level": round(params["dimming"]*254/100),
+        "color": {"mode": "hs", "hue": round(hue*254), "saturation": round(saturation*254)}},
+        cancel, readback=readback)
 
 
-def _save_appearances(saved: dict) -> None:
-    """Commit rollback appearance before OFF; preserve every other bulb's entry."""
-    path = _state_path("lights-appearance.json")
-    fd, temporary = tempfile.mkstemp(prefix=".lights-appearance-", dir=path.parent)
-    try:
-        with os.fdopen(fd, "w") as output:
-            os.fchmod(output.fileno(), 0o600)
-            json.dump(saved, output, sort_keys=True)
-            output.flush()
-            os.fsync(output.fileno())
-        os.replace(temporary, path)
-        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
-    finally:
-        Path(temporary).unlink(missing_ok=True)
+def _restore(name, inventory, before):
+    # Same controller lane: restoration follows any uncertain in-flight frame.
+    return _set(name, inventory, {"onOff": before["onOff"], **_appearance(before)},
+                readback=True, timeout=60)["state"]
 
 
-def execute(args: dict, context: dict) -> dict:
-    # Reject before preemption: an unauthorized/invalid caller cannot stop effects.
+def execute(args, context):
     if (not isinstance(args, dict) or set(args) != {"target", "state"}
             or args.get("target") not in TARGETS or args.get("state") not in ("on", "off")):
         raise ValueError("lights.set requires an exact target and state on/off")
     if (context.get("_agent_ref") != "Agents/Executive/Executive"
             or context.get("task") != "Agents/Executive/Executive"):
         raise PermissionError("Light control belongs to the Executive conversation")
-    # Visual effects restore and drain under the same light lock before power changes.
     from .visualize import power_operation
     with power_operation():
-        return _power_execute(args, context)
+        cancel = context.get("_capability_cancel_event")
+        while not _LOCK.acquire(timeout=.1):
+            if cancel is not None and cancel.is_set():
+                raise InterruptedError("Light operation cancelled")
+        try:
+            return _execute(args, context)
+        finally:
+            _LOCK.release()
 
 
-def _power_execute(args: dict, context: dict) -> dict:
-    cancel = context.get("_capability_cancel_event")
-    while not _LOCK.acquire(timeout=.1):
-        if cancel is not None and cancel.is_set():
-            return {"status": "failed", "delivery": "not_dispatched", "effect_applied": False,
-                    "failure": {"code": "cancelled"}, "must_not_replay": True}
-    try:
-        return _execute(args, context)
-    finally:
-        _LOCK.release()
-
-
-def _execute(args: dict, context: dict) -> dict:
-    if (not isinstance(args, dict) or set(args) != {"target", "state"}
-            or args.get("target") not in TARGETS or args.get("state") not in ("on", "off")):
-        raise ValueError("lights.set requires an exact target and state on/off")
-    if (context.get("_agent_ref") != "Agents/Executive/Executive"
-            or context.get("task") != "Agents/Executive/Executive"):
-        raise PermissionError("Light control belongs to the Executive conversation")
+def _execute(args, context):
     cancel = context.get("_capability_cancel_event")
     names = list(FIXTURES) if args["target"] == "all" else [args["target"]]
     attempted = context.setdefault("_lights_set_attempted_targets", set())
     receipts = context.setdefault("_lights_set_target_receipts", {})
-    blocked = [name for name in names if name in attempted]
-    if blocked:
-        return {"status": "failed", "delivery": "not_dispatched", "effect_applied": False,
-                "blocked_targets": blocked, "previous_results": [receipts[name] for name in blocked],
-                "failure": {"code": "already_attempted", "message":
-                    "These fixtures were already dispatched in this run; use their existing receipts."},
-                "must_not_replay": True}
+    if any(name in attempted for name in names):
+        return {"status":"failed", "delivery":"not_dispatched", "effect_applied":False,
+                "failure":{"code":"already_attempted"}, "must_not_replay":True}
     desired = args["state"] == "on"
-    # A missing or replaced bulb blocks the entire selected group before writes.
     try:
         inventory = _inventory()
-        with ThreadPoolExecutor(max_workers=len(names), thread_name_prefix="lights-precheck") as pool:
-            before = dict(zip(names, pool.map(lambda name: _pilot(name, inventory, cancel), names)))
-        saved = _saved_appearances()
-        appearances = {name: (_appearance(saved[inventory[name]["mac"]])
-                             if desired and not before[name]["state"] and inventory[name]["mac"] in saved
-                             else _appearance(before[name])) for name in names}
-        if not desired:
-            changed = {inventory[name]["mac"]: appearances[name] for name in names if before[name]["state"]}
-            if changed:
-                if cancel is not None and cancel.is_set():
-                    raise InterruptedError("Light operation cancelled")
-                _save_appearances({**saved, **changed})
-    except (OSError, ValueError) as error:
-        return {"status": "failed", "delivery": "not_dispatched", "effect_applied": False,
-                "failure": {"code": "light_precheck_failed", "message": str(error)},
-                "must_not_replay": True}
-    def change(name: str) -> dict:
+        with ThreadPoolExecutor(max_workers=len(names)) as pool:
+            before = dict(zip(names, pool.map(lambda n: _read(n, inventory, cancel), names)))
+    except (OSError, ValueError, RuntimeError) as error:
+        return {"status":"failed", "delivery":"not_dispatched", "effect_applied":False,
+                "failure":{"code":"light_precheck_failed", "message":str(error)}, "must_not_replay":True}
+    def change(name):
+        row = {"target":name,"status":"failed","delivery":"not_dispatched","effect_applied":False}
         if cancel is not None and cancel.is_set():
-            return {"target": name, "status": "failed", "delivery": "not_dispatched",
-                    "effect_applied": False, "failure": "cancelled"}
-        if before[name]["state"] == desired:
-            return {"target": name, "status": "completed", "state": args["state"],
-                    "appearance": appearances[name], "verified_at": time.time(),
-                    "delivery": "not_needed", "effect_applied": False}
-        row = {"target": name, "status": "failed", "delivery": "uncertain", "effect_applied": None}
-        if not desired:
-            row["saved_appearance"] = appearances[name]
-        attempted.add(name)
-        receipts[name] = row
+            row["failure"] = "cancelled"; return row
+        if before[name]["onOff"] == desired:
+            return {**row,"status":"completed","delivery":"not_needed","state":args["state"],"native":before[name]}
+        attempted.add(name); receipts[name] = row
+        row.update(delivery="uncertain",effect_applied=None)
         try:
-            # One write per independent fixture, followed by its own readback.
-            # Potential delivery is marked first; uncertainty never replays it.
-            acknowledgement = _request(inventory[name]["ip"], "setPilot",
-                                       {"state": desired, **(appearances[name] if desired else {})}, cancel)
-            if acknowledgement.get("success") is not True:
-                raise ValueError("WiZ did not acknowledge the power change")
-            row["delivery"] = "acknowledged"
-            after = _settled_pilot(name, inventory, cancel, desired, appearances[name])
-            row.update(state="on" if after["state"] else "off", appearance=_appearance(after),
-                       verified_at=time.time())
-            if after["state"] != desired:
-                raise ValueError("WiZ power readback did not match the requested state")
-            if desired and any(after.get(key) != value for key, value in appearances[name].items()):
-                raise ValueError("WiZ appearance readback did not preserve the previous settings")
-            row.update(status="completed", effect_applied=True)
-        except (OSError, ValueError) as error:
+            after = _set(name, inventory, {"onOff":desired}, cancel)["state"]
+            if _appearance(after) != _appearance(before[name]):
+                raise RuntimeError("Matter power change did not preserve native appearance")
+            row.update(status="completed",delivery="verified",effect_applied=True,state=args["state"],native=after,verified_at=time.time())
+        except (OSError, ValueError, RuntimeError) as error:
             row["failure"] = str(error)
         return row
-
-    # All selected identities and rollback appearances have passed before any
-    # power write. These independent fixtures can change together; join every
-    # one-shot result (including failures) before releasing the operation lock.
-    with ThreadPoolExecutor(max_workers=len(names), thread_name_prefix="lights-change") as pool:
-        rows = list(pool.map(change, names))
-    completed = all(row["status"] == "completed" for row in rows)
-    applied = None if any(row["effect_applied"] is None for row in rows) else any(row["effect_applied"] for row in rows)
-    return {"status": "completed" if completed else "failed", "target": args["target"],
-            "requested_state": args["state"], "lights": rows, "effect_applied": applied,
-            "delivery": "verified" if completed else "partial_or_uncertain", "must_not_replay": True}
+    with ThreadPoolExecutor(max_workers=len(names)) as pool:
+        rows = list(pool.map(change,names))
+    completed = all(r["status"] == "completed" for r in rows)
+    applied = None if any(r["effect_applied"] is None for r in rows) else any(r["effect_applied"] for r in rows)
+    return {"status":"completed" if completed else "failed","target":args["target"],"requested_state":args["state"],
+            "lights":rows,"effect_applied":applied,"delivery":"verified" if completed else "partial_or_uncertain","must_not_replay":True}

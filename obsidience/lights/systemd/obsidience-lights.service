@@ -1,0 +1,29 @@
+[Unit]
+Description=Obsidience native Matter light controller
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Projects/obsidience/obsidience/lights
+ExecStart=/usr/bin/flock --no-fork %t/obsidience-lights/controller.lock /usr/bin/node controller.mjs
+Environment=OBSIDIENCE_MATTER_RUNTIME=%t/obsidience-lights
+Environment=OBSIDIENCE_MATTER_STATE=%h/.local/state/obsidience-lights
+LoadCredentialEncrypted=matter-key:%h/.config/credentials/obsidience-matter-key.cred
+RuntimeDirectory=obsidience-lights
+RuntimeDirectoryMode=0700
+StateDirectory=obsidience-lights
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.local/state/obsidience-lights %t/obsidience-lights
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+LimitCORE=0
+Restart=no
+TimeoutStopSec=20
+
+[Install]
+WantedBy=default.target

@@ -432,9 +432,13 @@ neighbours); (9) history projected from the native conversation (no conversation
   established outcome evidence. Bounded commands,
   cancellation and no uncertain replay. Navigation delivery is not playback proof;
   app results and player evidence determine availability. No arbitrary shell or address.
-- `lights.set`: precheck every fixture, durably save appearance before OFF and restore on
-  ON, one write per fixture with bounded readback (ACK is not status), never replay,
-  per-fixture receipts, group success only when all verify; occupancy schedules nothing.
+- `lights.set`: precheck commissioned fixtures through one native Matter controller,
+  bind node and endpoint, preserve native appearance through power changes, and verify
+  fresh readback. Per-fixture receipts distinguish acknowledgment from verified state;
+  uncertain effects never replay. Color and level commands explicitly request zero
+  transition time. The same controller owns visualization and ordered restoration,
+  with finite camera/audio measurements; optical behavior requires physical evidence.
+  Matter fabric state is encrypted outside the repository. Occupancy schedules nothing.
 
 ## Scheduler, receipts and recovery
 

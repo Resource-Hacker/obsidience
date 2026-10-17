@@ -165,11 +165,16 @@ def _metadata(identifier, entry):
 def _calibration(value, delay, stream, sink, inventory):
     if value is None:
         return None
+    if (not isinstance(value, dict) or value.get("version") != 2
+            or not isinstance(value.get("camera_binding"), dict)
+            or value["camera_binding"].get("protocol") != "matter"
+            or value["camera_binding"].get("command_method") != "matter_zero"):
+        raise ValueError("Matter visualizer requires a fresh Matter timing profile; WiZ profiles are incompatible")
     if (not isinstance(value, dict) or set(value) != {"version", "profile_id", "measured_at", "sink_name",
             "stream_serial", "output_serial", "camera_binding", "requested_audio_delay_ms", "native_audio_delay_ms",
             "capture_latency_ms", "output_latency_ms", "fixtures"}
             or not isinstance(value["profile_id"], str) or not 1 <= len(value["profile_id"]) <= 96
-            or value["version"] != 1 or type(value["version"]) is not int
+            or value["version"] != 2 or type(value["version"]) is not int
             or value["sink_name"] != _props(sink)["node.name"]
             or str(value["output_serial"]) != _identity(sink)[1]
             or not isinstance(value["camera_binding"], dict) or not value["camera_binding"]
@@ -184,8 +189,10 @@ def _calibration(value, delay, stream, sink, inventory):
         if type(value[key]) not in (int, float) or not math.isfinite(value[key]) or not 0 <= value[key] <= (4000 if key == "native_audio_delay_ms" else 2000):
             raise ValueError("Invalid audio calibration latency")
     for name, row in value["fixtures"].items():
-        if not isinstance(row, dict) or set(row) != {"mac", "latency_ms", "uncertainty_ms"} or row["mac"] != inventory[name]["mac"]:
-            raise ValueError("Calibration fixture identity changed")
+        state = power._read(name, inventory)
+        if (not isinstance(row, dict) or set(row) != {"nodeId", "endpoint", "latency_ms", "uncertainty_ms"}
+                or any(row.get(k) != state[k] for k in ("nodeId", "endpoint"))):
+            raise ValueError("Matter calibration fixture identity changed")
         for key in ("latency_ms", "uncertainty_ms"):
             if type(row[key]) not in (int, float) or not math.isfinite(row[key]) or not 0 <= row[key] <= 2000:
                 raise ValueError("Invalid fixture timing")
@@ -201,9 +208,7 @@ class _Session:
         self.process_identity, self.old_target = process, old_target
         self.delay, self.profile, self.inventory = delay, profile, inventory
         self.effective_delay = profile["native_audio_delay_ms"] if profile else delay
-        self.command_method = ("setEffect_preview" if profile and
-                               profile["camera_binding"].get("command_method") == "setEffect_preview"
-                               else "setPilot")
+        self.command_method = "matter_zero"
         self.cancel = cancel
         self.stop_event = threading.Event()
         self.ready = threading.Event()
@@ -335,15 +340,7 @@ class _Session:
     def _write(self, name, params):
         self._check_stop()
         self.mutated.add(name)
-        method = "setPilot"
-        if self.command_method == "setEffect_preview":
-            method = "setEffect"
-            params = {"preview": {"state": 1, "duration": 5,
-                      "color": [params[k] for k in ("r", "g", "b")] + [0, 0],
-                      "dimming": params["dimming"]}}
-        result = power._request(self.inventory[name]["ip"], method, params, self.stop_event, timeout=.45)
-        if result.get("success") is not True:
-            raise RuntimeError("light_update_not_acknowledged")
+        power._frame(name, self.inventory, params, self.stop_event, readback=False)
         return True
 
     def _audit_audio(self):
@@ -359,7 +356,6 @@ class _Session:
         history = deque(maxlen=math.ceil(self.effective_delay / 100) + 25)
         pending = {}
         last = {}
-        failures = {name: 0 for name in power.FIXTURES}
         remainder = bytearray()
         window = np.hanning(BLOCK)
         bins = np.fft.rfftfreq(BLOCK, 1 / RATE)
@@ -436,13 +432,13 @@ class _Session:
                         continue
                     if prior is not None:
                         try:
-                            prior.result(); failures[name] = 0; self.updates += 1
+                            prior.result(); self.updates += 1
                         except InterruptedError:
                             raise
                         except (OSError, ValueError, RuntimeError):
-                            failures[name] += 1
-                            if failures[name] >= 3:
-                                raise RuntimeError("light_update_failed") from None
+                            # An uncertain Matter invocation stays in its controller
+                            # lane; stop immediately and enqueue restoration last.
+                            raise RuntimeError("light_update_failed") from None
                         pending.pop(name)
                     profile = self.profile
                     latency = profile["fixtures"][name]["latency_ms"] if profile else 0
@@ -510,27 +506,7 @@ class _Session:
                     except (OSError, subprocess.SubprocessError):
                         self.cleanup_errors.append("audio_child_cleanup_failed")
         def restore_light(name):
-            preview_stopped = True
-            if self.command_method == "setEffect_preview":
-                # All frame requests have drained before restoration. Even an
-                # uncertain preview stop must not skip the original appearance.
-                try:
-                    reply = power._request(self.inventory[name]["ip"], "setEffect",
-                        {"preview": {"state": 0}}, None)
-                    preview_stopped = reply.get("success") is True
-                except (OSError, ValueError, RuntimeError):
-                    preview_stopped = False
-            before = self.before[name]
-            appearance = power._appearance(before)
-            acknowledgement = power._request(self.inventory[name]["ip"], "setPilot",
-                {"state": before["state"], **appearance}, None)
-            if acknowledgement.get("success") is not True:
-                raise RuntimeError("light_restore_not_acknowledged")
-            after = power._settled_pilot(name, self.inventory, None, before["state"], appearance)
-            if after["state"] != before["state"] or (before["state"] and any(after.get(k) != v for k, v in appearance.items())):
-                raise RuntimeError("light_restore_readback_mismatch")
-            if not preview_stopped:
-                raise RuntimeError("light_preview_stop_not_acknowledged")
+            power._restore(name, self.inventory, self.before[name])
         with ThreadPoolExecutor(max_workers=6, thread_name_prefix="light-restore") as pool:
             jobs = {name: pool.submit(restore_light, name) for name in self.mutated}
             for name, job in jobs.items():
@@ -544,7 +520,7 @@ class _Session:
             with power._LOCK:
                 try:
                     with ThreadPoolExecutor(max_workers=6) as pool:
-                        values = pool.map(lambda name: power._pilot(name, self.inventory, self.stop_event), power.FIXTURES)
+                        values = pool.map(lambda name: power._read(name, self.inventory, self.stop_event), power.FIXTURES)
                         self.before = dict(zip(power.FIXTURES, values))
                     for value in self.before.values():
                         power._appearance(value)  # Snapshot must be restorable before any effect.

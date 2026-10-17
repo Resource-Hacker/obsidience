@@ -125,7 +125,7 @@ def capture(payload, cancel):
             raise RuntimeError('Microphone identity changed during observation')
         session._audit_audio()
         result['metadata'] = json.dumps({'microphone_id': mic_identity[0], 'microphone_serial': mic_identity[1],
-            'audio_clock': 'receipt_clock_estimate', 'camera_clock': 'v4l2_driver_monotonic',
+            'light_protocol': 'matter', 'audio_clock': 'receipt_clock_estimate', 'camera_clock': 'v4l2_driver_monotonic',
             'camera_pixel_format': 'bgr24',
             'sensor_exposure_offset_verified': False, 'microphone_processing_delay_verified': False,
             'visualizer': session.snapshot()})

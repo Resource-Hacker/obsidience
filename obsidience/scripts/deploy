@@ -53,7 +53,7 @@ RESTART_SHELL = ROOT / "obsidience" / "shell" / "session" / "restart-shell"
 HARNESS_UNITS = "obsidience/harness/systemd/"
 SHELL_UNITS = ROOT / "obsidience" / "shell" / "systemd"
 # Unit templates whose installed copies are what runs; an identical move changes none of them.
-UNIT_SOURCES = ("obsidience/tv/systemd/", "obsidience/shell/systemd/", "obsidience/discord/systemd/", HARNESS_UNITS)
+UNIT_SOURCES = ("obsidience/tv/systemd/", "obsidience/shell/systemd/", "obsidience/discord/systemd/", "obsidience/lights/systemd/", HARNESS_UNITS)
 
 
 def git(*args: str) -> str:
@@ -91,6 +91,8 @@ def targets(changed: list[str]) -> list[str]:
         owners.append("shell")
     if any(p.startswith("obsidience/ui/") for p in changed):
         owners.append("ui")
+    if any(p.startswith("obsidience/lights/") for p in changed):
+        owners.append("lights")
     camera_unit = "obsidience/discord/systemd/obsidience-discord-camera.service"
     if any(p.startswith("obsidience/discord/") and not p.startswith("obsidience/discord/camera/")
            and p != camera_unit for p in changed):
@@ -328,7 +330,35 @@ def check_voice(limit: float = 90) -> str | None:
 
 
 def restart(owner: str) -> None:
-    if owner == "discord-camera":
+    if owner == "lights":
+        name = "obsidience-lights.service"
+        destination = pathlib.Path.home() / ".config/systemd/user" / name
+        if not destination.exists():
+            print("Matter lights are not installed; installation remains explicit.")
+            return
+        if get("/api/lights/visualizer").get("state") in {"starting", "running", "restoring"}:
+            sys.exit("Stop and drain light effects before restarting the Matter owner.")
+        subprocess.run(["npm", "ci", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund"],
+                       cwd=ROOT / "obsidience/lights", check=True)
+        shutil.copy2(ROOT / "obsidience/lights/systemd" / name, destination)
+        subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
+        subprocess.run(["systemctl", "--user", "restart", name], check=True)
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            try:
+                with socket.socket(socket.AF_UNIX) as peer:
+                    peer.settimeout(2)
+                    peer.connect(f"/run/user/{os.getuid()}/obsidience-lights/control.sock")
+                    peer.sendall(b'{"command":"status"}\n')
+                    with peer.makefile() as response:
+                        state = json.loads(response.readline(16384))
+                    if state.get("ok") is True and state.get("result", {}).get("protocol") == "matter":
+                        return
+            except (OSError, ValueError):
+                pass
+            time.sleep(.5)
+        sys.exit("Matter controller did not become ready; inspect obsidience-lights.service.")
+    elif owner == "discord-camera":
         name = "obsidience-discord-camera.service"
         destination = pathlib.Path.home() / ".config/systemd/user" / name
         if not destination.exists():
@@ -463,10 +493,10 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--rollback", action="store_true")
     parser.add_argument("--restart", action="append", default=[],
-                        choices=("harness", "discord", "discord-camera", "tv-player", "tv-tuner", "media-catalogue", "media-tiramisu", "media-prowlarr", "media-torbox"),
+                        choices=("harness", "lights", "discord", "discord-camera", "tv-player", "tv-tuner", "media-catalogue", "media-tiramisu", "media-prowlarr", "media-torbox"),
                         help="Include an affected owner after a private configuration change")
     parser.add_argument("--only", action="append", default=[],
-                        choices=("harness", "shell", "ui", "discord", "discord-camera", "tv-player", "tv-tuner",
+                        choices=("harness", "shell", "ui", "lights", "discord", "discord-camera", "tv-player", "tv-tuner",
                                  "media-catalogue", "media-tiramisu", "media-prowlarr", "media-torbox"),
                         help="Deploy only selected affected owners; keep the full checkpoint unchanged")
     parser.add_argument("--recover-realtime", action="store_true",

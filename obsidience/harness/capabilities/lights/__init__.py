@@ -1,1 +1,1 @@
-"""Executive control of the installation's WiZ lights."""
+"""Executive control of the installation's commissioned Matter lights."""
