@@ -69,7 +69,7 @@ async function freshMembers(bot, memberIds) {
   return { guild, members, botMember: members.get(bot.client.user.id) };
 }
 
-async function freshVoice(guild, memberIds) {
+export async function freshVoice(guild, memberIds) {
   await Promise.all([...new Set(memberIds)].map(async (id) => {
     try { await guild.voiceStates.fetch(id, { force: true }); }
     catch (error) {

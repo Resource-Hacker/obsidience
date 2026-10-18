@@ -13,6 +13,7 @@ import opusBinding from '@discordjs/opus';
 import { credential, loadConfig, readFrames, sendFrame, removeStaleSocket, SNOWFLAKE } from './protocol.mjs';
 import { VoiceSamples } from './samples.mjs';
 import { ADMIN_COMMANDS, adminCommand } from './admin.mjs';
+import { cameraContext } from './camera.mjs';
 
 const REQUEST_ID = /^[A-Za-z0-9_-]{8,128}$/;
 const { OpusEncoder } = opusBinding;
@@ -1606,7 +1607,7 @@ export class DiscordTransport {
   }
 
   async command(message) {
-    const readOnly = ['status', 'channels', 'speech_diagnostics', 'read_wake_calibration', 'speaker_context', 'admin_members'].includes(message.command)
+    const readOnly = ['status', 'channels', 'speech_diagnostics', 'read_wake_calibration', 'speaker_context', 'admin_members', 'camera_context'].includes(message.command)
       || (message.command === 'samples' && (message.action ?? 'status') === 'status');
     if (!readOnly && !REQUEST_ID.test(message.request_id ?? '')) fail('request_id_required');
     const fingerprint = createHash('sha256').update(JSON.stringify(message)).digest('hex');
@@ -1632,7 +1633,7 @@ export class DiscordTransport {
       if (message.command === 'leave' && (message.owner_disconnect !== true || message.member_id !== undefined)) {
         fail('leave_requires_local_owner');
       }
-      if (message.member_id !== undefined && !['cancel_media', 'wake_calibration', 'read_wake_calibration', ...ADMIN_COMMANDS].includes(message.command)) {
+      if (message.member_id !== undefined && !['cancel_media', 'wake_calibration', 'read_wake_calibration', 'camera_context', ...ADMIN_COMMANDS].includes(message.command)) {
         if (!SNOWFLAKE.test(message.member_id)) fail('invalid_member_id');
         const guild = await this.guild();
         const member = await guild.members.fetch(message.member_id);
@@ -1648,6 +1649,7 @@ export class DiscordTransport {
       }
       let value;
       switch (message.command) {
+        case 'camera_context': value = await cameraContext(this, message); break;
         case 'speaker_context':
         case 'admin_members':
         case 'admin_kick': value = await adminCommand(this, message); break;
@@ -1745,7 +1747,7 @@ export class DiscordTransport {
       }
     } finally {
       if (ownsMutation) this.mutating = false;
-      void this.advanceContinuous();
+      if (message.command !== 'camera_context') void this.advanceContinuous();
     }
     if (!readOnly) this.recent.set(message.request_id, { fingerprint, result });
     return result;
