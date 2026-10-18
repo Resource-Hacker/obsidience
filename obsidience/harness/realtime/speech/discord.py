@@ -24,6 +24,8 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
+import torch
+
 from nemo.agents.voice_agent.pipecat.services.nemo.streaming_asr import NemoStreamingASRService
 from nemo.agents.voice_agent.pipecat.services.nemo.utils import CacheFeatureBufferer
 from nemo.collections.asr.parts.context_biasing.boosting_graph_batched import BoostingTreeModelConfig
@@ -93,10 +95,10 @@ def _name_decoder(source):
     with open_dict(config):
         config.strategy = "greedy_batch"
         config.greedy.loop_labels = True
-        config.greedy.use_cuda_graph_decoder = False
+        config.greedy.use_cuda_graph_decoder = True
         config.greedy.enable_per_stream_biasing = False
         config.greedy.boosting_tree = OmegaConf.structured(BoostingTreeModelConfig(
-            key_phrases_list=[WAKE_WORD, WAKE_WORD.lower()], use_triton=False,
+            key_phrases_list=[WAKE_WORD, WAKE_WORD.lower()], use_triton=True,
         ))
         config.greedy.boosting_tree_alpha = 1.0
     return RNNTBPEDecoding(config, model.decoder, model.joint, source.tokenizer)
@@ -148,6 +150,25 @@ def _decoder_context(source, decoding):
     result._previous_hypotheses = result._get_blank_hypothesis()
     result._last_transcript_timestamp = time.time()
     return result
+
+
+def _warm_name_decoder(source):
+    """Compile one shared decoder before ingress, discarding warm stream state."""
+    decoding = _name_decoder(source)
+    context = _decoder_context(source, decoding)
+    with torch.inference_mode():
+        encoded = torch.zeros(
+            (1, source.asr_model.joint.encoder_hidden, source.tokens_per_frame),
+            device=source.device, dtype=next(source.asr_model.joint.parameters()).dtype,
+        )
+        encoded_len = torch.tensor([source.tokens_per_frame], device=source.device)
+        previous = context._get_blank_hypothesis()
+        # Exercise first-chunk and continuation decoding directly: synthetic
+        # silence must not let an EOU reset skip the continuation warmup.
+        for _ in range(2):
+            previous = context._get_best_hypothesis(encoded, encoded_len, previous)
+        torch.cuda.synchronize(source.device)
+    return decoding
 
 
 class _MemberSTT(speech.UtteranceNeMoSTTService):
@@ -537,7 +558,22 @@ class DiscordSpeechServer:
                 raise RuntimeError("Discord speech socket already has an owner")
             self.path.unlink()
         async with self.stt._model_lock:
-            self._name_decoding = _name_decoder(self.stt._model)
+            warmup = asyncio.create_task(asyncio.to_thread(_warm_name_decoder, self.stt._model))
+            try:
+                self._name_decoding = await asyncio.shield(warmup)
+            except asyncio.CancelledError:
+                # Match STT's native-work drain: cancellation cannot release
+                # the shared weights while warmup still owns CUDA work.
+                while not warmup.done():
+                    try:
+                        await asyncio.shield(warmup)
+                    except asyncio.CancelledError:
+                        continue
+                    except Exception:
+                        break
+                if not warmup.cancelled():
+                    warmup.exception()
+                raise
         self.server = await asyncio.start_unix_server(self._accept, path=str(self.path), limit=MAX_LINE)
         self.path.chmod(0o600)
         self._inode = self.path.lstat().st_ino
