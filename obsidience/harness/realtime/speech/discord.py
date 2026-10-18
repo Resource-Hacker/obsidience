@@ -158,7 +158,9 @@ class _MemberSTT(speech.UtteranceNeMoSTTService):
                          sample_rate=speech.SAMPLE_RATE, params=source._params,
                          has_turn_taking=False, backend="legacy",
                          decoder_type=source._decoder_type, audio_passthrough=True,
-                         enable_direct_mode=True)
+                         # Member decoders are fresh/bounded by packet lifetime.
+                         # Preserve words decoded before a late VAD onset.
+                         reset_on_vad_onset=False, enable_direct_mode=True)
         self._model_lock = source._model_lock
         self.utterance_pcm_bytes = 0
         self.audio_frames = 0
@@ -198,9 +200,6 @@ class _MemberSTT(speech.UtteranceNeMoSTTService):
         if direction is speech.FrameDirection.DOWNSTREAM:
             if isinstance(frame, speech.VADUserStartedSpeakingFrame):
                 self.vad_starts = min(self.vad_starts + 1, 1_000_000_000)
-                if not self._is_vad_active and not self._recognized_since_stop:
-                    # The shared onset policy resets this decoder on this edge.
-                    self.utterance_pcm_bytes = 0
             elif isinstance(frame, speech.VADUserStoppedSpeakingFrame):
                 self.vad_stops = min(self.vad_stops + 1, 1_000_000_000)
                 if not self.stream.server.listening(self.stream):

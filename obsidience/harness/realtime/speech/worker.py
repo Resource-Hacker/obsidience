@@ -610,8 +610,9 @@ def emit(kind: str, **payload: Any) -> None:
 class UtteranceNeMoSTTService(NemoSTTService):
     """Start voiced utterances with fresh ASR context and their onset audio."""
 
-    def __init__(self, **kwargs: Any) -> None:
+    def __init__(self, *, reset_on_vad_onset: bool = True, **kwargs: Any) -> None:
         super().__init__(**kwargs)
+        self._reset_on_vad_onset = reset_on_vad_onset
         self._preroll = bytearray()
         self._recognized_since_stop = False
 
@@ -621,7 +622,7 @@ class UtteranceNeMoSTTService(NemoSTTService):
         await super()._handle_transcription(transcript, is_final, language)
 
     async def process_audio_frame(self, frame, direction) -> None:
-        if not self._is_vad_active:
+        if self._reset_on_vad_onset and not self._is_vad_active:
             # 320 ms of mono s16/16 kHz, including the first 100 ms before
             # Silero confirms onset. Never retain an unbounded idle recording.
             self._preroll.extend(frame.audio)
@@ -636,7 +637,8 @@ class UtteranceNeMoSTTService(NemoSTTService):
             # Long silence suppresses short words in this streaming model.
             # Reset at actual onset, but never replay text already recognized
             # before VAD: that existing unvoiced path owns the utterance.
-            reset = not self._is_vad_active and not self._recognized_since_stop
+            reset = (self._reset_on_vad_onset and not self._is_vad_active
+                     and not self._recognized_since_stop)
             if reset:
                 async with self._model_lock:
                     self._model.reset_state()
