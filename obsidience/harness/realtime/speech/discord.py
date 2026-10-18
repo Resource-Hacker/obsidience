@@ -181,6 +181,8 @@ def _warm_name_decoder(source):
         for _ in range(encoder_graphs.warmup_steps + 2):
             context.transcribe(pcm)
         torch.cuda.synchronize(source.device)
+    # Isolate encoder replay from the retained native name-decoder graphs.
+    source.asr_model.encoder.set_streaming_cuda_graphs(enabled=False)
     return decoding
 
 
