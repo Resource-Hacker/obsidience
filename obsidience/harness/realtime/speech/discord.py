@@ -640,6 +640,10 @@ class DiscordSpeechServer:
                 if not isinstance(message, dict):
                     raise ValueError("Discord speech input must be an object")
                 await self._message(message)
+                if message.get("type") == "audio":
+                    # Buffered socket reads can otherwise monopolize the loop
+                    # and fill a member queue before its audio task can run.
+                    await asyncio.sleep(0)
         except (ValueError, RuntimeError, OSError, TimeoutError, binascii.Error):
             pass  # No raw input, text or exception payload enters diagnostics.
         finally:
@@ -702,11 +706,11 @@ class DiscordSpeechServer:
             if not pcm or len(pcm) > MAX_PCM or len(pcm) % 2:
                 raise ValueError("Invalid Discord PCM")
             blocked_at = self.blocked.get(principal)
-            if blocked_at is not None:
-                if time.monotonic() - blocked_at < speech.TRANSCRIPT_IDLE_SECS:
-                    self.blocked[principal] = time.monotonic()
-                    return
-                self.blocked.pop(principal, None)
+            if (blocked_at is not None
+                    and time.monotonic() - blocked_at < speech.TRANSCRIPT_IDLE_SECS):
+                # Cooldown is anchored to the failure, not refreshed forever
+                # by an always-open microphone's discarded packets.
+                return
             owner = self.owner(principal)
             if owner is not None and owner.phase != "listening":
                 return
@@ -732,6 +736,11 @@ class DiscordSpeechServer:
                     decoder = _decoder_context(self.stt._model, self._name_decoding)
                 member = _Member(self, principal, decoder, synthetic_probe=synthetic_probe,
                                  calibration_probe=calibration_probe)
+                if blocked_at is not None:
+                    # Recovery can begin mid-sentence. Require an explicit
+                    # greeting or a later speech boundary before a bare name.
+                    member.turn._wake_address = None
+                    self.blocked.pop(principal, None)
                 self.members[principal] = member
                 await asyncio.wait_for(member.ready.wait(), timeout=5)
             await member.audio(pcm)
