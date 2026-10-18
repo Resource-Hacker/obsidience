@@ -153,8 +153,9 @@ def _decoder_context(source, decoding):
 
 
 def _warm_name_decoder(source):
-    """Compile one shared decoder before ingress, discarding warm stream state."""
+    """Warm shared encoder/decoder graphs before ingress; discard stream state."""
     decoding = _name_decoder(source)
+    encoder_graphs = source.asr_model.encoder.set_streaming_cuda_graphs()
     context = _decoder_context(source, decoding)
     with torch.inference_mode():
         encoded = torch.zeros(
@@ -167,6 +168,11 @@ def _warm_name_decoder(source):
         # silence must not let an EOU reset skip the continuation warmup.
         for _ in range(2):
             previous = context._get_best_hypothesis(encoded, encoded_len, previous)
+        # Warm actual feature extraction and cache-aware encoder steps too.
+        # Native capture follows three eager steps; include a later replay.
+        pcm = bytes(round(speech.SAMPLE_RATE * source.chunk_size_in_secs) * 2)
+        for _ in range(encoder_graphs.warmup_steps + 2):
+            context.transcribe(pcm)
         torch.cuda.synchronize(source.device)
     return decoding
 
@@ -535,6 +541,7 @@ class DiscordSpeechServer:
         self._closed = False
         self._ownership_active = False
         self._name_decoding = None
+        self.encoder_cuda_graphs = 0
 
     async def start(self):
         if not self.path.is_absolute() or self.path.parent.stat().st_uid != os.getuid():
@@ -574,6 +581,8 @@ class DiscordSpeechServer:
                 if not warmup.cancelled():
                     warmup.exception()
                 raise
+        helper = self.stt._model.asr_model.encoder._stream_step_cuda_graphs
+        self.encoder_cuda_graphs = len(helper._graphs) if helper is not None else 0
         self.server = await asyncio.start_unix_server(self._accept, path=str(self.path), limit=MAX_LINE)
         self.path.chmod(0o600)
         self._inode = self.path.lstat().st_ino

@@ -212,6 +212,7 @@ class RealtimeSessionManager:
         self._transport_ready = False
         self._desktop_disabled = False
         self._discord_ready = False
+        self._discord_encoder_graphs: int | None = None
         self._discord_owned = False
         self._discord_stopping = False
         self._discord_error: str | None = None
@@ -315,6 +316,7 @@ class RealtimeSessionManager:
             "ready": self._phase in READY_PHASES,
             "transport_ready": self._transport_ready,
             "discord_speech": {"ready": self._discord_ready,
+                               "encoder_cuda_graphs": self._discord_encoder_graphs if self._discord_ready else None,
                                "active": self._discord_owned,
                                "desktop_disabled": self._desktop_disabled,
                                "last_error": self._discord_error},
@@ -1169,6 +1171,8 @@ class RealtimeSessionManager:
                     continue
                 if isinstance(event, dict) and event.get("type") == "discord_ready" and not self._discord_stopping:
                     self._discord_ready = True
+                    count = event.get("encoder_cuda_graphs")
+                    self._discord_encoder_graphs = count if type(count) is int and 0 <= count <= 8 else None
                     await self._publish("state", reason="discord_speech_ready")
             returncode = await process.wait()
             async with self._lock:
@@ -1660,6 +1664,8 @@ class RealtimeSessionManager:
                     continue
                 if event_type == "discord_ready":
                     self._discord_ready = True
+                    count = worker_event.get("encoder_cuda_graphs")
+                    self._discord_encoder_graphs = count if type(count) is int and 0 <= count <= 8 else None
                     await self._publish("state", reason="discord_speech_ready")
                     continue
                 if event_type in {"speech_candidate", "speech_candidate_invalidated",

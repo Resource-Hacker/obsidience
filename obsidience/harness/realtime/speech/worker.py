@@ -1813,7 +1813,7 @@ async def run_discord_only(args: argparse.Namespace) -> None:
         pipe, _ = await loop.connect_read_pipe(lambda: protocol, sys.stdin.buffer)
         command_task = asyncio.create_task(commands(), name="discord-shared-control")
         command_task.add_done_callback(lambda _task: stopping.set())
-        emit("discord_ready", desktop_disabled=True)
+        emit("discord_ready", desktop_disabled=True, encoder_cuda_graphs=server.encoder_cuda_graphs)
         await stopping.wait()
     finally:
         if command_task is not None:
@@ -1960,7 +1960,7 @@ async def run(args: argparse.Namespace) -> None:
         from .discord import DiscordSpeechServer
         discord = DiscordSpeechServer(Path(args.discord_socket), stt, tts)
         await discord.start()
-        emit("discord_ready", desktop_disabled=False)
+        emit("discord_ready", desktop_disabled=False, encoder_cuda_graphs=discord.encoder_cuda_graphs)
 
     commands = asyncio.create_task(
         command_loop(task, playback), name="speech-commands",
