@@ -321,6 +321,17 @@ placement revision.
 
 ## Package policy
 
+The Snipping Tool uses `slurp` for region selection, `grim` for capture, and
+`satty` for annotation, clipboard copy and saving. `Print` and `Super+Shift+S`
+open the same launcher entry. Install `session/snipping` as
+`~/.local/bin/obsidience-snip` and `session/org.kde.spectacle.desktop` under
+`~/.local/share/applications/`; this user override preserves the existing
+Spectacle button identity while replacing its KWin-only command. UWSM owns the
+capture/editor process scope. Escape cancels selection; in the editor, Enter or
+Ctrl+C copies, Ctrl+S saves under Pictures/Screenshots, and Ctrl+Shift+S opens
+Save As. The temporary raw capture stays in the private runtime directory and is
+removed when the editor closes.
+
 The Shell's Arch package policy is names-only and additive: a missing name
 means "not managed here," never "remove it." It installs, updates and removes
 nothing by itself, and is separate from the Applications pane.
@@ -328,7 +339,7 @@ nothing by itself, and is separate from the Applications pane.
 - Required host: bash, coreutils, curl, dbus, jq, polkit, procps-ng, sed, sudo,
   systemd, tmux.
 - Required session: aquamarine, greetd, greetd-agreety, grim, hypridle,
-  hyprland, hyprpolkitagent, kitty, mako, uwsm, wl-clipboard,
+  hyprland, hyprpolkitagent, kitty, mako, satty, slurp, uwsm, wl-clipboard,
   xdg-desktop-portal, xdg-desktop-portal-gtk, xdg-desktop-portal-hyprland,
   xorg-xwayland.
 - Required shell: packagekit, python-cairo, python-gobject, python-websockets,

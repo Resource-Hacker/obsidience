@@ -213,6 +213,8 @@ end)
 
 hl.bind("SUPER + RETURN", hl.dsp.window.fullscreen({ mode = "fullscreen", action = "toggle" }))
 hl.bind("SUPER + SHIFT + RETURN", hl.dsp.exec_cmd("uwsm app -- kitty"))
+hl.bind("PRINT", hl.dsp.exec_cmd("gtk-launch org.kde.spectacle.desktop"))
+hl.bind("SUPER + SHIFT + S", hl.dsp.exec_cmd("gtk-launch org.kde.spectacle.desktop"))
 hl.bind("SUPER + Q", hl.dsp.exec_cmd("/usr/bin/python /home/wissenschafter/Projects/obsidience/obsidience/shell/input/move_pane.py focused close"))
 hl.bind("ALT + TAB", hl.dsp.window.cycle_next())
 hl.bind("ALT + SHIFT + TAB", hl.dsp.window.cycle_next({ next = false }))

@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Native Wayland region capture; each invocation owns and removes its raw image.
+set -euo pipefail
+umask 077
+
+geometry=$(slurp -d) || exit 0
+[[ -n "$geometry" ]] || exit 0
+
+capture=$(mktemp "${XDG_RUNTIME_DIR:?}/obsidience-snip-XXXXXX.png")
+trap 'rm -f -- "$capture"' EXIT
+grim -g "$geometry" "$capture"
+
+pictures=$(xdg-user-dir PICTURES)
+destination="${pictures:-$HOME/Pictures}/Screenshots"
+mkdir -p -- "$destination"
+satty --filename "$capture" \
+    --title 'Snipping Tool' \
+    --initial-tool pointer \
+    --copy-command 'wl-copy --type image/png' \
+    --output-filename "$destination/Screenshot-%Y-%m-%d_%H-%M-%S.png" \
+    --early-exit all

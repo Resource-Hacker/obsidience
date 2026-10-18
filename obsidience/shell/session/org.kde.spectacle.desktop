@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Snipping Tool
+GenericName=Screenshot Capture Utility
+Comment=Select a screen region, then copy, save or annotate it
+Keywords=screenshot;snipping;snip;capture;spectacle;
+Exec=uwsm app -- obsidience-snip
+TryExec=obsidience-snip
+Icon=spectacle
+Terminal=false
+Categories=Utility;
+StartupNotify=false

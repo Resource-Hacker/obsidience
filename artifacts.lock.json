@@ -1013,6 +1013,29 @@
       "license": "Apache-2.0",
       "lockfile": "obsidience/lights/package-lock.json",
       "integration": "Native ServerNode ControllerBehavior owns local commissioned light peers. Thin Unix socket adapter uses OnOff, LevelControl and ColorControl commands with transitionTime zero. Native storage namespaces are encrypted at rest with a systemd-credential key; no WiZ API fallback."
+    },
+    "slurp": {
+      "repository": "https://github.com/emersion/slurp",
+      "version": "1.5.0",
+      "license": "MIT",
+      "package_version": "1.5.0-2.1",
+      "integration": "Unmodified distribution dependency for native Wayland snipping-region selection in shell/session/snipping. No daemon."
+    },
+    "satty": {
+      "repository": "https://github.com/Satty-org/Satty",
+      "version": "0.22.0",
+      "license": "MPL-2.0",
+      "package_version": "0.22.0-1.1",
+      "integration": "Unmodified distribution dependency for the native Snipping Tool editor, clipboard and save actions; launched with supported CLI options after grim capture."
+    },
+    "snipping_upstream_reference": {
+      "repository": "https://github.com/basecamp/omarchy",
+      "revision": "4e059acff2f4e4c4e5a303ce9bc97223097e45eb",
+      "files": [
+        "bin/omarchy-capture-screenshot",
+        "default/hypr/apps/screenshot-selection.lua"
+      ],
+      "integration": "Architecture reference only, no copied code. Reviewed native capture dispatch; current Omarchy uses Omasnap. Obsidience keeps its installed grim and wl-clipboard, adds distribution slurp and Satty, and preserves the existing desktop-entry identity through a small local adapter."
     }
   }
 }
