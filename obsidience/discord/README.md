@@ -63,7 +63,25 @@ this state alone does not prove a listener sees a persistent ring during silence
 
 Discord's supported bot voice API carries audio. Local video files can supply their
 audio track, but this implementation does not transmit video or Go Live streams.
-It uses no user account, user token, selfbot, screen capture or hidden client API.
+The transport uses only the official bot account and receives no user token.
+
+Bard's separate `discord.observe` Tool can inspect participant cameras through the
+normal local Discord desktop client's already-decoded video. This is an on-demand
+image reader, not inbound video support in `@discordjs/voice` or outbound bot video.
+The client must be connected to and showing the same voice room, with the requested
+camera rendered. It exposes its DevTools listener only on `127.0.0.1:9238`; the
+reader verifies the native Discord process before connecting. Changing that port
+requires changing the installation launcher and `harness/discord/vision.py` together.
+
+The private `camera_context` command freshly binds the speaker, target camera,
+room and active request to the bot connection. `cameras` discovers member IDs;
+`observe` selects the speaker by default or an exact participant discovered in the
+same activation. Capture reads only that participant's video element, waits for a
+new decoded frame, and rechecks the native room before releasing private image
+bytes to the Agent. Missing, paused or ambiguous video fails explicitly. It never
+reads desktop pixels, messages, account tokens or client authentication state,
+and it stores no video recording or camera history. The Agent receives no general
+computer input, desktop observation or physical-camera capability from this Tool.
 
 ## Dependencies
 

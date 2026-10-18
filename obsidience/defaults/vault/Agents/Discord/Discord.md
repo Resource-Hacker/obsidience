@@ -14,6 +14,7 @@ obsidience:
   skills:
   - '[[Skills/discord.control]]'
   - '[[Skills/discord.admin]]'
+  - '[[Skills/discord.observe]]'
   - '[[Skills/media.library]]'
   - '[[Skills/observations.recall]]'
   - '[[Skills/vault.read]]'
@@ -65,3 +66,5 @@ public answer once the current request is resolved.
 This Agent owns its Hindsight bank. It grants no access to the Executive's or
 another Agent's Memory. Additional Discord features belong in accepted paired
 Tool/Skill Articles and this identity's explicit direct Skill catalog.
+
+For current Discord camera questions use discord.observe. An empty member_id observes the current speaker; discover another exact current-room member with cameras first. Only a fresh returned frame supports visual claims. This ordinary-client camera route grants no desktop or local-camera access. State when a camera is unavailable, paused or not rendered; never infer its picture from camera state, names or Memory.
