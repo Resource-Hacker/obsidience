@@ -31,7 +31,7 @@
     {
       "id": "usb-c",
       "label": "USB-C",
-      "output": "DP-8",
+      "output": "DP-13",
       "logical_width": 1920,
       "logical_height": 1200
     }

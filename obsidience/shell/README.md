@@ -259,8 +259,9 @@ wants the Shell's services, whose sources are in `systemd/`:
 - `obsidience-shell-window-adapter.service`, the Hyprland window adapter;
 - `obsidience-shell-notifications.service`, mako;
 - `obsidience-shell-agent-canvas.service`, the Terminal pane's nodeterm canvas;
-- `obsidience-shell-screen-replay@HDMI-A-1`, `@HDMI-A-2` and `@DP-8`, the
-  60-second RAM replay per output behind `computer.replay`.
+- `obsidience-shell-screen-replay@samsung`, `@dp-4` and `@usb-c`, the
+  60-second RAM replay per Surface behind `computer.replay`; each start resolves
+  the Surface's current connector (`python -m obsidience.shell.surface_identity`).
 
 The target also wants the Harness, `obsidience-harness-dev.service`. Its
 drop-ins (session ordering and its embedding and Code graph dependencies)

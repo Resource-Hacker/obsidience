@@ -257,8 +257,9 @@ that program while playback is idle and for as long as each break lasts, with ti
 `idle`/`break` arguments, and kills it when content loads or the programme returns.
 Stopping content or reaching file EOF returns to the idle view. Paused content retains its
 picture. `break-view` shows the workstation screen that holds the Executive graph
-(owner request, 2026-10-12): the screen recorder already used for screen replay captures desktop
-output `DP-8` at 30 frames a second, encoded on the GPU that drives that output, and a second
+(owner request, 2026-10-12): the screen recorder already used for screen replay captures the
+desktop USB-C Surface (its current connector, resolved by `shell/surface_identity.py`) at 30
+frames a second, encoded on the GPU that drives that output, and a second
 mpv (`app_id` `obsidience-tv-break`) plays it in the TV session, where the window rule puts it
 full screen above the channel's player until it exits; a caption names the channel and the
 break; idle mode shows the graph without that caption. The same presenter owns both modes,
@@ -266,8 +267,8 @@ and the mirror does not run while content is loading, playing or paused. Moonlig
 this idle screen through the existing TV stream. The card still shows first
 (the view needs a second or two to its first picture) and stays when the graph stage
 (`obsidience-shell-knowledge.service`) is not running. This is the one place where desktop
-content reaches the TV: whatever `DP-8` shows is what a break shows. The view is killed rather
-than asked to quit because a quitting player kept its window for a second.
+content reaches the TV: whatever the USB-C Surface shows is what a break shows. The view is
+killed rather than asked to quit because a quitting player kept its window for a second.
 
 After a streamlink update, check what the tuner relies on beyond its public session,
 plugin and stream calls: the Pluto plugin taking a channel id in the page address,

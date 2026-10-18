@@ -1,7 +1,7 @@
 """Look back over the last seconds of the screens through their rolling replay buffers.
 
-Each Shell output has one gpu-screen-recorder replay buffer in RAM
-(``obsidience-shell-screen-replay@<output>.service``), encoded by that output's GPU
+Each Shell Surface has one gpu-screen-recorder replay buffer in RAM
+(``obsidience-shell-screen-replay@<surface>.service``), encoded by that screen's GPU
 with a keyframe every half second. SIGUSR1 writes the buffer to a clip while
 recording continues. All screens are read in parallel: keyframe times come from
 packet flags (no decoding), only the window's keyframes are decoded (about 24 ms
@@ -25,7 +25,7 @@ from obsidience.harness.shell_port.scene import SCENE, SceneLocked, SceneUnavail
 PRIVATE_IMAGE_FIELD = "_private_image_png"
 REPLAY_DIR = Path(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}") / "obsidience-screen-replay"
 UNIT = "obsidience-shell-screen-replay@{}.service"
-SURFACES = {"HDMI-A-1": "samsung", "HDMI-A-2": "dp-4", "DP-8": "usb-c"}
+SURFACES = ("samsung", "dp-4", "usb-c")
 SAMPLE_WIDTH = 160
 # Frames are scaled to one pixel area, not one width: image cost is linear in
 # tokens (measured 1.35 ms each), and at a fixed 1280 width a 16:10 USB-C frame cost
@@ -55,7 +55,7 @@ def _run(argv: list[str], *, timeout: float = 60.0) -> bytes:
 
 
 def _recorders() -> list[str]:
-    """Outputs whose replay buffer is running now."""
+    """Surfaces whose replay buffer is running now."""
     out = _run(["systemctl", "--user", "list-units", "--type=service", "--state=active",
                 "--plain", "--no-legend", UNIT.format("*")], timeout=10).decode()
     names = [line.split()[0] for line in out.splitlines() if line.strip()]
@@ -81,7 +81,7 @@ def _save(output: str, cancel) -> Path:
                 return path  # Size held for one poll: the recorder finished writing.
             sizes[path] = size
         time.sleep(0.05)
-    raise TimeoutError(f"the {SURFACES.get(output, output)} replay buffer wrote no clip")
+    raise TimeoutError(f"the {output} replay buffer wrote no clip")
 
 
 def _probe(clip: Path) -> tuple[int, int, float, list[str]]:
@@ -139,7 +139,7 @@ def execute(args: dict, context: dict) -> dict[str, object]:
     if (not isinstance(args, dict) or set(args) - {"query", "seconds", "surface"}
             or not isinstance(query, str) or not 1 <= len(query.strip()) <= 500 or not query.isprintable()
             or type(seconds) is not int or not 5 <= seconds <= 60
-            or (surface is not None and surface not in SURFACES.values())):
+            or (surface is not None and surface not in SURFACES)):
         return _unavailable("invalid_arguments", "computer.replay requires query (1-500 printable characters), "
                             "optional integer seconds 5-60 and optional surface samsung, dp-4 or usb-c.")
     try:
@@ -149,7 +149,7 @@ def execute(args: dict, context: dict) -> dict[str, object]:
     except SceneUnavailable:
         pass  # The buffers do not depend on the Shell scene.
     _sweep_stale()
-    outputs = [output for output in _recorders() if surface is None or SURFACES.get(output) == surface]
+    outputs = [output for output in _recorders() if surface is None or output == surface]
     if not outputs:
         return _unavailable("replay_unavailable", "No screen replay buffer is running for that screen.", True)
     clips: dict[str, Path] = {}
@@ -159,7 +159,7 @@ def execute(args: dict, context: dict) -> dict[str, object]:
         width, height, duration, keys = _probe(clip)
         window = [key for key in keys if float(key) >= duration - seconds] or keys[-1:]
         if not window:
-            raise ValueError(f"the {SURFACES.get(output, output)} clip has no keyframes")
+            raise ValueError(f"the {output} clip has no keyframes")
         sample_height = max(2, round(SAMPLE_WIDTH * height / width / 2) * 2)
         # Passthrough keeps one output frame per decoded keyframe (rawvideo would
         # otherwise repeat them to the stream's 30 fps).
@@ -183,9 +183,8 @@ def execute(args: dict, context: dict) -> dict[str, object]:
             changed = [w for w in windows if len(w[4]) and w[4].max() >= CHANGE]
             budget = max(2, MAX_FRAMES // max(1, len(changed)))
             wanted, screens = [], []
-            for output, clip, duration, window, diffs, frame_width in windows:
+            for name, clip, duration, window, diffs, frame_width in windows:
                 peak = float(diffs.max()) if len(diffs) else 0.0
-                name = SURFACES.get(output, output)
                 picks = _choose(diffs, len(window), budget)
                 if not picks or changed and peak < CHANGE:
                     screens.append({"surface": name, "visible_change": False, "frames_attached": []})

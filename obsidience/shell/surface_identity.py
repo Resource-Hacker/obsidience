@@ -15,6 +15,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -122,3 +124,37 @@ def surface_outputs(monitors: object) -> dict[str, str]:
     """Return connector -> Surface for ``hyprctl -j monitors`` output."""
 
     return resolve(load_identities(), monitors)
+
+
+def present_output(surface_id: str) -> str:
+    """The connector ``surface_id`` is on now, or "" when its monitor is absent.
+
+    Live monitors decide when Hyprland answers. A caller outside the session's
+    environment (no or a stale Hyprland signature) gets the connector the Shell
+    last recorded for that Surface in ``output``.
+    """
+
+    try:
+        done = subprocess.run(["hyprctl", "-j", "monitors"], capture_output=True,
+                              timeout=5, check=True, stdin=subprocess.DEVNULL)
+        monitors = json.loads(done.stdout)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        for identity in load_identities():
+            if identity.surface_id == surface_id:
+                return identity.output
+        return ""
+    for output, resolved in surface_outputs(monitors).items():
+        if resolved == surface_id:
+            return output
+    return ""
+
+
+if __name__ == "__main__":
+    # `python -m obsidience.shell.surface_identity SURFACE` prints that Surface's
+    # connector for programs that address a screen by connector name.
+    if len(sys.argv) != 2 or sys.argv[1] not in SURFACE_IDS:
+        sys.exit("usage: python -m obsidience.shell.surface_identity " + "|".join(SURFACE_IDS))
+    connector = present_output(sys.argv[1])
+    if not connector:
+        sys.exit(f"the {sys.argv[1]} Surface has no present monitor")
+    print(connector)

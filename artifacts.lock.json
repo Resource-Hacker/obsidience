@@ -505,7 +505,7 @@
       "license": "GPL-3.0-only",
       "path": "/var/lib/ai/opt/gpu-screen-recorder-6.1.2-static",
       "binary_sha256": "6418d2c2f57aaa4bf475b2fe5caf04e5dd5cab966bd57f8107712b32b21f3ee3",
-      "integration": "Selected 2026-10-12 for obsidience-shell-screen-replay@<output>.service (rolling replay buffers read by computer.replay); run as a separate program, not linked into Obsidience. The upstream static build links the FFmpeg that negotiates the NVENC API at runtime: the system FFmpeg 9.0.1 requires NVENC API 13.1 (driver 610+) and the pinned 580 driver has 13.0. bin/gsr-kms-server is a symlink to the packaged /usr/bin/gsr-kms-server 6.1.2 (cap_sys_admin=ep; capabilities apply through the symlink). Measured on the Samsung: HEVC 30 fps, one NVENC session on the RTX 4080 at ~14% encoder load, ~3% CPU, HDR tone-mapped to SDR bt709."
+      "integration": "Selected 2026-10-12 for obsidience-shell-screen-replay@<surface>.service (rolling replay buffers read by computer.replay); run as a separate program, not linked into Obsidience. The upstream static build links the FFmpeg that negotiates the NVENC API at runtime: the system FFmpeg 9.0.1 requires NVENC API 13.1 (driver 610+) and the pinned 580 driver has 13.0. bin/gsr-kms-server is a symlink to the packaged /usr/bin/gsr-kms-server 6.1.2 (cap_sys_admin=ep; capabilities apply through the symlink). Measured on the Samsung: HEVC 30 fps, one NVENC session on the RTX 4080 at ~14% encoder load, ~3% CPU, HDR tone-mapped to SDR bt709."
     },
     "sunshine": {
       "repository": "https://github.com/LizardByte/Sunshine",

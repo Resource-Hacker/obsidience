@@ -9,11 +9,12 @@
 # session (on the TV mode's GPU, from the tuner unit's environment), whose window rule makes it
 # full screen above the channel's player until it exits.
 # Whatever that desktop screen shows is what the TV shows during a break.
-SCREEN=DP-8
 RECORDER=/var/lib/ai/opt/gpu-screen-recorder-6.1.2-static/bin/gpu-screen-recorder
 
 # No graph to show (its stage is stopped, for example during a game): the break card stays.
 systemctl --user is-active --quiet obsidience-shell-knowledge.service || exit 0
+# The graph is on the USB-C Surface; its connector name changes when GPUs are added or removed.
+SCREEN=$(cd "$(dirname "$0")/../../.." && PYTHONPATH=$PWD /usr/bin/python -m obsidience.shell.surface_identity usb-c) || exit 1
 display=$(cat "$XDG_RUNTIME_DIR/obsidience-tv/wayland") || exit 1
 # A title is listing text: no control characters, and no property expansion by the player.
 title=$(printf %s "$1" | tr -d '\000-\037' | sed 's/\$/$$/g')
