@@ -14,6 +14,7 @@ import binascii
 import contextlib
 import copy
 import json
+import math
 import os
 import re
 import socket
@@ -48,6 +49,12 @@ _PRINCIPAL_FIELDS = ("guild_id", "channel_id", "member_id")
 _ID = re.compile(r"[0-9]{1,20}\Z")
 _TOKEN = re.compile(r"[A-Za-z0-9_-]{1,96}\Z")
 WAKE_WORD = "Bard"
+_TIMING_FIELDS = ("asr_timing_count", "asr_native_last_ms", "asr_native_max_ms",
+                  "asr_wait_last_ms", "asr_wait_max_ms", "decoder_lock_wait_ms", "decoder_context_ms")
+
+
+def _timing_ms(seconds):
+    return round(min(max(0.0, seconds), 1_000_000) * 1000)
 
 
 def _input_timing(value, wake_ns):
@@ -196,6 +203,25 @@ class _MemberSTT(speech.UtteranceNeMoSTTService):
         self.vad_stops = 0
         self._terminal_frames = 0
         self.skipped_terminal_frames = 0
+        self.asr_timing_count = 0
+        self.asr_native_last_ms = self.asr_native_max_ms = 0
+        self.asr_wait_last_ms = self.asr_wait_max_ms = 0
+
+    async def _transcribe(self, audio):
+        started = time.perf_counter()
+        # Keep the upstream lock and cancellation/native-work drain unchanged.
+        result = await super()._transcribe(audio)
+        elapsed = time.perf_counter() - started
+        native = result.processing_time
+        if isinstance(native, (int, float)) and math.isfinite(native) and native >= 0:
+            self.asr_timing_count = min(self.asr_timing_count + 1, 1_000_000_000)
+            self.asr_native_last_ms = _timing_ms(native)
+            self.asr_native_max_ms = max(self.asr_native_max_ms, self.asr_native_last_ms)
+            # Includes lock, thread dispatch and event-loop scheduling, not only
+            # lock contention. Native ASR supplies its own processing duration.
+            self.asr_wait_last_ms = _timing_ms(elapsed - native)
+            self.asr_wait_max_ms = max(self.asr_wait_max_ms, self.asr_wait_last_ms)
+        return result
 
     async def process_audio_frame(self, frame, direction):
         if not self.stream.server.listening(self.stream):
@@ -350,6 +376,7 @@ class _Member:
         self.received_pcm_frames = 0
         self.terminal_pcm_frames = 0
         self.queue_high_water = 0
+        self.decoder_lock_wait_ms = self.decoder_context_ms = 0
         self.wake_rejected = {"possessive": 0, "mid_sentence": 0}
         self.wake_monotonic_ns = None
         self.stt = _MemberSTT(self, server.stt, decoder)
@@ -412,6 +439,10 @@ class _Member:
             self.server.release(self.principal)
         # Ambient words and partial transcripts never leave the speech owner.
 
+    def timing_diagnostics(self):
+        return {key: getattr(self.stt, key) if key.startswith("asr_") else getattr(self, key)
+                for key in _TIMING_FIELDS}
+
     def diagnostics(self):
         # Default diagnostics never includes transcript, PCM, analyzer output
         # or exception text. Probe inspection is a separate one-shot opt-in.
@@ -432,6 +463,7 @@ class _Member:
             "runner_done": self.runner.done(),
             "queue_depth": self.input._audio_in_queue.qsize() if audio_task is not None else 0,
             "queue_high_water": self.queue_high_water,
+            **self.timing_diagnostics(),
         }
 
     def final(self, text, timing=None):
@@ -457,6 +489,7 @@ class _Member:
                 "last_error": code,
                 "error_count": min(prior.get("error_count", 0) + 1, 1_000_000_000),
                 "failed_queue_depth": self.input._audio_in_queue.qsize(),
+                **{"failed_" + key: value for key, value in self.timing_diagnostics().items()},
             }
             owner = self.server.owner(self.principal)
             self.server.emit("error", self.principal, code=code,
@@ -777,10 +810,15 @@ class DiscordSpeechServer:
                 if len(self.members) >= MAX_STREAMS:
                     self.emit("error", principal, code="stream_capacity")
                     return
+                decoder_wait_started = time.perf_counter()
                 async with self.stt._model_lock:
+                    decoder_started = time.perf_counter()
                     decoder = _decoder_context(self.stt._model, self._name_decoding)
+                    decoder_finished = time.perf_counter()
                 member = _Member(self, principal, decoder, synthetic_probe=synthetic_probe,
                                  calibration_probe=calibration_probe)
+                member.decoder_lock_wait_ms = _timing_ms(decoder_started - decoder_wait_started)
+                member.decoder_context_ms = _timing_ms(decoder_finished - decoder_started)
                 if blocked_at is not None:
                     # Recovery can begin mid-sentence. Require an explicit
                     # greeting or a later speech boundary before a bare name.
@@ -931,7 +969,8 @@ class DiscordSpeechServer:
                 # Discord sends no packets between utterances. Supply only the
                 # bounded terminal silence needed by the existing turn policy.
                 gap = now - member.last_input
-                if (self.current(member) and owner is None and member.probe_kind is None
+                if (self.current(member) and (owner is None or owner.principal != principal)
+                        and member.probe_kind is None
                         and member.ready.is_set() and not member.turn._wake_pending
                         and (member.turn._wake_confirm is None or member.turn._wake_confirm.done())
                         and gap > TERMINAL_SILENCE_SECS

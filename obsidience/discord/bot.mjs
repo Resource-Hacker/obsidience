@@ -38,7 +38,11 @@ const SPEECH_ERROR_CODES = new Set(['asr_failed', 'utterance_limit', 'audio_back
   'reply_not_current', 'speech_delivery_failed', 'audio_pipeline_stopped', 'utterance_timeout', 'reply_timeout']);
 const DIAGNOSTIC_COUNTS = ['received_pcm_frames', 'terminal_pcm_frames', 'stt_audio_frames',
   'stt_transcription_frames', 'vad_starts', 'vad_stops', 'queue_depth', 'queue_high_water',
-  'skipped_terminal_frames', 'error_count', 'failed_queue_depth'];
+  'skipped_terminal_frames', 'error_count', 'failed_queue_depth',
+  'asr_timing_count', 'asr_native_last_ms', 'asr_native_max_ms', 'asr_wait_last_ms', 'asr_wait_max_ms',
+  'decoder_lock_wait_ms', 'decoder_context_ms',
+  'failed_asr_timing_count', 'failed_asr_native_last_ms', 'failed_asr_native_max_ms',
+  'failed_asr_wait_last_ms', 'failed_asr_wait_max_ms', 'failed_decoder_lock_wait_ms', 'failed_decoder_context_ms'];
 const DIAGNOSTIC_FLAGS = ['available', 'input_task_done', 'input_task_failed', 'runner_done', 'blocked'];
 const diagnosticCount = (value) => Number.isSafeInteger(value) && value >= 0 ? Math.min(value, 1_000_000_000) : null;
 const log = (event) => console.log(JSON.stringify({ component: 'discord_transport', event }));
