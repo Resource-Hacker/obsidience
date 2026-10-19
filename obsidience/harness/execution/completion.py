@@ -100,6 +100,7 @@ def computer_completion_evidence(
     target = _computer_target(result.get("target"))
     verified = False
     effect = None
+    playback_verified = False
     if name == "media.pause":
         target = {"kind": "application", "name": "microsoft_edge"}
         verified = (result.get("status") == "completed" and result.get("delivery") == "verified"
@@ -139,6 +140,12 @@ def computer_completion_evidence(
             and isinstance(result.get("window"), dict)
             and bool(result["window"])
         )
+        # The controller's own read of the new page's Edge media session (never
+        # model text) verifies requested playback without a post-URL image.
+        playback = result.get("playback")
+        playback_verified = (verified and isinstance(playback, dict)
+                             and playback.get("state") == "Playing"
+                             and playback.get("source") == "edge_media_session")
     elif name == "computer.observe":
         observation = result.get("observation") or {}
         target = _computer_target(observation.get("target")) if isinstance(observation, dict) else None
@@ -193,6 +200,7 @@ def computer_completion_evidence(
                "terminated_before_ready", "timeout", "launcher_timeout",
            } else {}),
         **({"verified_scope": "click", "semantic_postcondition_verified": False} if effect else {}),
+        **({"playback_verified": True} if playback_verified else {}),
     }
 
 
@@ -458,7 +466,8 @@ def _computer_completion_error(task, status: str, context: dict, verification=No
         application = params.get("application")
         if application and witness["target"] != _computer_target({"kind": "application", "name": application}):
             return "The verified result does not match the explicitly bound application; do not claim completion."
-        if name == "application.launch" and (item.get("args") or {}).get("url"):
+        if (name == "application.launch" and (item.get("args") or {}).get("url")
+                and witness.get("playback_verified") is not True):
             current = context.get("_computer_response_observation")
             if not (isinstance(current, dict) and current.get("verified") is True
                     and _computer_target(current.get("target")) == witness["target"]):
