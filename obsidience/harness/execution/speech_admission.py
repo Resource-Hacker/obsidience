@@ -9,7 +9,7 @@ import asyncio
 import hashlib
 import json
 import time
-from contextlib import aclosing
+from contextlib import aclosing, asynccontextmanager
 from copy import deepcopy
 from dataclasses import dataclass, field
 
@@ -19,11 +19,12 @@ from google.adk.models.llm_response import LlmResponse
 from google.genai import types
 
 from . import native
+from . import trace as action_trace
 from .adk import sessions
 from .adk.plugin import request_contents
 from .executor import activation_messages, compile_activation
 from .native_turn import memory_message, recall_query, recall_reply, tool_schemas
-from .prefill import report_reuse, speech_recall
+from .prefill import report_reuse, speech_key, speech_recall
 from ..conversation.evidence import historical_evidence
 from ..conversation.selection import admit_executive
 from ..knowledge.scope import revision as scope_revision
@@ -75,6 +76,10 @@ class SpeechPreparationError(ValueError):
     """A buffered response cannot be admitted; no model retry or effect follows."""
 
 
+class SpeechOutputError(SpeechPreparationError):
+    """The model's own first response broke the admission protocol."""
+
+
 class _ControlPrefix:
     """Observe chronology before LiteLLM groups text and calls into final parts."""
 
@@ -91,9 +96,9 @@ class _ControlPrefix:
                 self.prefix += part.text[:2 - len(self.prefix)]
                 if (self.prefix and self.prefix[0] not in {'C', 'I', 'W'}
                         or len(self.prefix) == 2 and self.prefix[1] != '\n'):
-                    raise SpeechPreparationError('Speech admission began without its exact control line')
+                    raise SpeechOutputError('Speech admission began without its exact control line')
             if part.function_call is not None and self.prefix != 'C\n':
-                raise SpeechPreparationError('Native Tool streamed before a complete-turn control line')
+                raise SpeechOutputError('Native Tool streamed before a complete-turn control line')
 
 
 class _ResponseOwner(LiteLLMClient):
@@ -148,11 +153,11 @@ def _history(view: dict | None, *, before_turn: str | None = None) -> str | None
 def _sanitize(responses: list[LlmResponse]) -> tuple[str, LlmResponse | None]:
     """Parse the buffered visible prefix across parts; drop all private reasoning."""
     if not responses:
-        raise SpeechPreparationError('Speech admission returned no final response')
+        raise SpeechOutputError('Speech admission returned no final response')
     if any(response.error_code or response.interrupted
            or response.finish_reason not in {None, types.FinishReason.STOP}
            for response in responses):
-        raise SpeechPreparationError('Speech admission did not finish cleanly')
+        raise SpeechOutputError('Speech admission did not finish cleanly')
     parts = [part.model_copy(deep=True) for response in responses
              for part in (response.content.parts if response.content else []) if not part.thought]
     text = ''.join(part.text for part in parts if part.text is not None)
@@ -160,14 +165,14 @@ def _sanitize(responses: list[LlmResponse]) -> tuple[str, LlmResponse | None]:
     # replies require the line boundary before their answer or native call.
     marker, separator, remainder = text.partition('\n')
     if marker not in {'C', 'I', 'W'} or (marker == 'C' and not separator):
-        raise SpeechPreparationError('Speech admission omitted its exact control line')
+        raise SpeechOutputError('Speech admission omitted its exact control line')
     calls = [part.function_call for part in parts if part.function_call is not None]
     if marker != 'C':
         if calls or remainder.strip():
-            raise SpeechPreparationError('An unfinished speech response contained content or native Tools')
+            raise SpeechOutputError('An unfinished speech response contained content or native Tools')
         return ('incomplete_short' if marker == 'I' else 'incomplete_long'), None
     if not remainder.strip() and not calls:
-        raise SpeechPreparationError('Complete speech response contained no answer or native Tool')
+        raise SpeechOutputError('Complete speech response contained no answer or native Tool')
     remove = 2  # C and newline; split text parts never leak the marker.
     kept = []
     for part in parts:
@@ -180,7 +185,7 @@ def _sanitize(responses: list[LlmResponse]) -> tuple[str, LlmResponse | None]:
                 kept.append(part.model_copy(update={'text': value}))
         else:
             if remove and part.function_call is not None:
-                raise SpeechPreparationError('Native Tool preceded the speech admission marker')
+                raise SpeechOutputError('Native Tool preceded the speech admission marker')
             kept.append(part)
     return 'complete', responses[-1].model_copy(update={
         'content': types.Content(role='model', parts=kept), 'partial': False})
@@ -212,6 +217,19 @@ class PreparedSpeechTurn:
     _bound_sequence: int | None = field(repr=False, default=None)
     _bound_generation: int | None = field(repr=False, default=None)
     _consumed: bool = field(repr=False, default=False)
+
+    async def current(self, runtime) -> bool:
+        """Whether this unbound response still matches the live conversation.
+
+        Submission repeats these checks with the contract under the lock; a
+        stale speculative response is only discarded, never an error.
+        """
+        return (self._runtime is runtime and not self._consumed and self._bound_turn is None
+                and runtime._generation == self.generation
+                and runtime._conversation.conversation_id == self.conversation_id
+                and _tip(runtime._conversation, self.conversation_id) == self.history
+                and native.window_anchor(self.conversation_id) == self.anchor
+                and _history(await sessions.refresh(self.conversation_id)) == self.native_history)
 
     async def validate_submission(self, runtime, text: str) -> None:
         if (self.decision != 'complete' or self.response is None or self._consumed
@@ -307,8 +325,26 @@ class PreparedSpeechTurn:
         return response
 
 
-async def prepare(runtime, text: str, response_contract: str) -> PreparedSpeechTurn:
-    """Generate the real first response without starting an Agent activation."""
+@asynccontextmanager
+async def _model(spec, speculative: bool):
+    if not speculative:
+        async with model_runtime.lease(spec) as active_spec:
+            yield active_spec
+        return
+    # Like a speech warm, speculation borrows idle resident capacity: any
+    # lease (the final admission's included) cancels it; busy hardware skips it.
+    async with model_runtime.resident_prefill(spec) as available:
+        if not available:
+            raise SpeechPreparationError('Speculative admission skipped: the model is busy or not resident')
+        yield spec
+
+
+async def prepare(runtime, text: str, response_contract: str, *,
+                  speculative: bool = False) -> PreparedSpeechTurn:
+    """Generate the real first response without starting an Agent activation.
+
+    speculative=True runs it on a speech partial (see speculate).
+    """
     clean = ' '.join(text.split())
     agent, params, _ = admit_executive(clean, 'voice')
     conversation = runtime._conversation
@@ -322,9 +358,9 @@ async def prepare(runtime, text: str, response_contract: str) -> PreparedSpeechT
     before_sequence = max((row[1] for row in history), default=0) + 1
     if interruption := runtime._interruption_cue(before_sequence):
         params['speech_interruption'] = interruption
-    metrics = {}
+    metrics = {'speculative': True} if speculative else {}
     async with asyncio.timeout(PREPARE_TIMEOUT_SECONDS):
-        async with model_runtime.lease(spec) as active_spec:
+        async with _model(spec, speculative) as active_spec:
             if _model_binding(active_spec, effort) != _model_binding(spec, effort):
                 raise SpeechPreparationError("The model configuration changed while awaiting its lease")
             spec = active_spec
@@ -334,8 +370,9 @@ async def prepare(runtime, text: str, response_contract: str) -> PreparedSpeechT
             # The last speech partial usually recalled these words already, or
             # all but a short final word; adopt its running or finished recall
             # instead of repeating it (prefill.speech_recall's cover policy).
+            # Speculation leaves it registered for the next partial or final.
             recall, reuse = await speech_recall(
-                agent.ref, recall_query(clean, conversation_id), adopt=True, cover=True)
+                agent.ref, recall_query(clean, conversation_id), adopt=not speculative, cover=True)
             metrics['recall_adopted'] = bool(reuse)
             if reuse:
                 metrics['recall_reuse'] = reuse
@@ -343,11 +380,13 @@ async def prepare(runtime, text: str, response_contract: str) -> PreparedSpeechT
                 activation = await compile_activation(
                     agent, params=params, interactive=True, emit_activity=False,
                     conversation_evidence=evidence)
-                memory = memory_message(recall_reply(await recall))
+                memory = memory_message(recall_reply(
+                    await (asyncio.shield(recall) if speculative else recall)))
             finally:
-                if not recall.done():
-                    recall.cancel()
-                await asyncio.gather(recall, return_exceptions=True)
+                if not speculative:
+                    if not recall.done():
+                        recall.cancel()
+                    await asyncio.gather(recall, return_exceptions=True)
             metrics['context_recall_ms'] = round((time.monotonic() - context_started) * 1000, 3)
             messages = activation_messages(agent, activation, agent_name=agent.title,
                                            response_contract=response_contract)
@@ -434,4 +473,118 @@ async def prepare(runtime, text: str, response_contract: str) -> PreparedSpeechT
             or native.window_anchor(conversation_id) != anchor
             or _history(await sessions.refresh(conversation_id)) != native_history):
         raise SpeechPreparationError('Speech preparation was superseded')
+    return prepared
+
+
+# The latest speculative admission of a speech partial:
+# (runtime, speech_key of its text, monotonic start, task).
+_SPECULATION: tuple | None = None
+# The realtime candidate's exact-command check: those take the reflex route.
+_REFLEX_COMMANDS = ['lights.set', 'tv.control', 'media.pause', 'task.complete']
+
+
+def _failed(task: asyncio.Task) -> bool:
+    return task.done() and (task.cancelled() or task.exception() is not None)
+
+
+def _retrieved(task: asyncio.Task) -> None:
+    if not task.cancelled():
+        task.exception()
+
+
+async def _speculative_prepare(runtime, text: str, response_contract: str, previous):
+    if previous is not None:
+        # Resident capacity admits one owner; join the superseded stream first.
+        await asyncio.gather(previous, return_exceptions=True)
+    from .commands import recognize_command
+    if recognize_command(text, _REFLEX_COMMANDS) is not None:
+        return None
+    # A standby warm holds the same idle capacity; speculation supersedes it.
+    await runtime._cancel_speech_prefill()
+    return await prepare(runtime, text, response_contract, speculative=True)
+
+
+def speculate(runtime, text: str, response_contract: str) -> None:
+    """Run the real admission on a speech partial while the owner may still speak.
+
+    The same words (speech_key) keep the running or finished run; other words
+    cancel and replace it. Nothing is published, dispatched or written: adopt()
+    hands the buffered response to final admission only for the same words.
+    """
+    global _SPECULATION
+    key = speech_key(text)
+    current = _SPECULATION
+    if current is not None and current[0] is runtime and current[1] == key and not _failed(current[3]):
+        return
+    previous = current[3] if current is not None else None
+    if previous is not None:
+        previous.cancel()
+    task = asyncio.create_task(_speculative_prepare(runtime, text, response_contract, previous),
+                               name='obsidience-speech-speculation')
+    task.add_done_callback(_retrieved)
+    _SPECULATION = (runtime, key, time.monotonic(), task)
+
+
+def pending() -> bool:
+    """A speculative admission is running or holds a response not yet adopted."""
+    current = _SPECULATION
+    if current is None:
+        return False
+    task = current[3]
+    return not task.done() or (not _failed(task) and task.result() is not None)
+
+
+async def discard() -> None:
+    """Cancel and join the speculative admission (STOP, new turn, teardown)."""
+    global _SPECULATION
+    current, _SPECULATION = _SPECULATION, None
+    if current is not None and not current[3].done():
+        current[3].cancel()
+        await asyncio.gather(current[3], return_exceptions=True)
+
+
+def _report(outcome: str, started: float, arrived: float) -> None:
+    action_trace.emit('measurement', 'Speech admission speculation ' + outcome, [
+        f'lead_ms: {round((arrived - started) * 1000, 3)}',
+        f'wait_ms: {round((time.monotonic() - arrived) * 1000, 3)}',
+    ])
+
+
+async def adopt(runtime, text: str) -> PreparedSpeechTurn | None:
+    """The speculative admission for this final transcript's words, else None.
+
+    A run for other words is cancelled and joined, so a miss waits only for
+    its cancellation; the caller then admits the final text afresh. A model
+    response that broke the protocol for these same words fails closed here
+    (SpeechOutputError), with no second model attempt.
+    """
+    global _SPECULATION
+    current, _SPECULATION = _SPECULATION, None
+    if current is None:
+        return None
+    owner, key, started, task = current
+    arrived = time.monotonic()
+    if owner is not runtime or key != speech_key(text):
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        _report('missed', started, arrived)
+        return None
+    try:
+        await asyncio.wait({task})
+    except asyncio.CancelledError:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        raise
+    error = None if task.cancelled() else task.exception()
+    if isinstance(error, SpeechOutputError):
+        _report('failed', started, arrived)
+        raise error
+    prepared = None if task.cancelled() or error is not None else task.result()
+    if prepared is None or not await prepared.current(runtime):
+        _report('unusable', started, arrived)
+        return None
+    prepared.metrics.update(speculation_lead_ms=round((arrived - started) * 1000, 3),
+                            speculation_wait_ms=round((time.monotonic() - arrived) * 1000, 3))
+    _report('adopted', started, arrived)
     return prepared

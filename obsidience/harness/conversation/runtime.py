@@ -120,9 +120,13 @@ class ConversationRuntime:
 
     def prepare_idle(self) -> None:
         """Prepare the selected Executive conversation when model work releases."""
+        from ..execution import speech_admission
         if (self._idle_preparation_blocked or self._lock.locked()
                 or not self.continuation_resume_available()
-                or model_runtime.RUNTIME.work_requested):
+                or model_runtime.RUNTIME.work_requested
+                # Standby would replace a speculative admission's cached tail,
+                # which the adopted turn's next step reuses.
+                or speech_admission.pending()):
             return
         self._rebase_window()
         if self.speech is None or not self.speech.snapshot()["ready"]:
@@ -160,6 +164,12 @@ class ConversationRuntime:
                 or self._lock.locked()
                 or self.speech is None or not self.speech.snapshot()["ready"]
                 or (self._turn_task is not None and not self._turn_task.done())):
+            return
+        if getattr(self.speech, "_semantic_enabled", False):
+            # Contextual admission runs on the partial itself; it covers this
+            # warm's recall and prefix and also generates the verdict.
+            from ..execution.speech_admission import speculate
+            speculate(self, " ".join(text.split()), SPEECH_RESPONSE_CONTRACT)
             return
         # The same normalization as the final realtime transcript in submit().
         latest = (sequence, " ".join(text.split()))
@@ -212,8 +222,14 @@ class ConversationRuntime:
                 await self.speech.publish_readiness()
 
     async def prepare_speech_turn(self, text: str):
-        """Buffer the Executive's own first response before a public voice turn."""
-        from ..execution.speech_admission import prepare
+        """Buffer the Executive's own first response before a public voice turn.
+
+        A partial's speculative admission of the same words is adopted as is.
+        """
+        from ..execution.speech_admission import adopt, prepare
+        prepared = await adopt(self, text)
+        if prepared is not None:
+            return prepared
         await self._cancel_speech_prefill()
         return await prepare(self, text, SPEECH_RESPONSE_CONTRACT)
 
@@ -327,8 +343,10 @@ class ConversationRuntime:
                 'and did not hear the rest of your previous reply. Their message may respond to what they heard.]')
 
     async def cancel(self, *, stop_playback: bool = True, reason: str = "requested") -> None:
+        from ..execution.speech_admission import discard
         await self._cancel_context_refresh()
         await self._cancel_speech_prefill()
+        await discard()
         self._generation += 1
         if self._steering is not None:
             self._steering.close()
@@ -420,6 +438,11 @@ class ConversationRuntime:
                 if self._turn_task is not None and not self._turn_task.done():
                     raise RuntimeError("The owner conversation is active; wait before submitting a media command")
             if prepared_speech is not None:
+                from ..execution.prefill import speech_key
+                if speech_key(clean) == speech_key(prepared_speech.text):
+                    # A speculative admission answered the same words from a
+                    # partial; the turn records the exact text it answered.
+                    clean = prepared_speech.text
                 # Validate the original generation before cancel advances it.
                 await prepared_speech.validate_submission(self, clean)
             await self.cancel(stop_playback=source == "text", reason=f"{source}.final")

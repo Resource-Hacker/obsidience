@@ -292,7 +292,8 @@ neighbours); (9) history projected from the native conversation (no conversation
   discarding its single token. It never runs, dispatches, publishes or writes
   conversation; final speech, Chat, STOP and teardown cancel it; leases preempt it; busy
   hardware skips it. Final admission recompiles the complete request. Standby readiness is
-  reported only after preparation succeeds.
+  reported only after preparation succeeds. With contextual speech admission, partials
+  run speculative admission (below) instead of this warmup.
 - **Contextual speech admission** (optional `realtime_semantic_turns`, off by default):
   an acoustic endpoint offers a provisional utterance to the same Executive and native
   Tool schema. Its actual first response begins with a private completion marker;
@@ -318,6 +319,16 @@ neighbours); (9) history projected from the native conversation (no conversation
   final text. Standby
   preparation waits until the candidate's turn starts or the candidate ends, so it
   cannot replace the admitted request's cached tail before the turn's next step.
+  **Speculative admission**: each speech partial runs this same admission (recall, verdict
+  and buffered first response) on idle resident capacity, like the speech warmup: leases
+  preempt it, busy hardware skips it, exact HassIL commands skip it, and a partial with
+  other words cancels and joins it. It publishes, dispatches and writes nothing. When the
+  candidate arrives, a finished or running speculation for the same words (case,
+  punctuation and spacing aside) is adopted after the live binding checks and the
+  submission's full validation; the turn records the exact text the model answered.
+  Otherwise it is cancelled and the final text is admitted afresh. A speculative response
+  that broke the marker protocol for the same words fails closed (no second attempt).
+  Standby waits while a speculation is running or unadopted.
 
 ### Specialist Task loop
 
