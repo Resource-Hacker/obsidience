@@ -176,6 +176,14 @@ async def run_capability(ex, name: str, args: dict, *, execute, execute_async, s
     """
     from .completion import computer_completion_evidence, computer_request_target_error
     scope_checkpoint(ex.ctx, name)
+    paired = ex.response_observation_lease
+    window = getattr(paired.get("target"), "window", None) if isinstance(paired, dict) else None
+    if (name == "computer.act" and isinstance(args, dict) and not {"application", "handle"} & args.keys()
+            and getattr(window, "window_kind", None) == "application"):
+        # The click goes to the window of the immediately paired observation.
+        # Name it, so the controller binding, the adapter's exact-match check,
+        # the receipt and the evidence all carry the identity actually used.
+        args = {**args, "application": window.semantic_name}
     reflex_proposal = ex.ctx.pop("_reflex_proposal", None)
     if name != "task.complete":
         ex.ctx.pop("_reflex_command_verified", None)

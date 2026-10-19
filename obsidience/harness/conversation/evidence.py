@@ -159,7 +159,8 @@ def public_failure_notice(result: dict, run: dict | None = None, *, fallback: st
         if isinstance(code, str) and code in reasons:
             notice = reasons[code]
             if (code == "click_precondition_failed" and isinstance(failure, dict)
-                    and failure.get("message") == "computer.act requires the observed window's application or handle."):
+                    and str(failure.get("message", "")).startswith(
+                        "computer.act requires the observed window's application or handle.")):
                 notice = "I supplied an invalid window target for the desktop action."
             if observation.get("delivery") == "not_dispatched":
                 notice += " That action was not sent."

@@ -252,7 +252,8 @@ def argument_schemas() -> dict[str, dict]:
         "computer.observe": obj({"target":observe_target,"query":text(500)},("query",)),
         "computer.replay": obj({"query":text(500),"seconds":{"type":"integer","minimum":5,"maximum":60},
             "surface":surface},("query",)),
-        # The adapter requires application or handle and checks both against the observation.
+        # The adapter checks application or handle against the observation; without either,
+        # the executor names the immediately paired observation's window as application.
         "computer.act": obj({"scope":{"enum":["input","state"]},"application":text(256),"handle":handle,
             "action":{"const":"click"},
             "target":{**text(128),"description":"Short clicked-control label, 1-128 characters, e.g. Play/Pause button. Do not copy the browser window title."},

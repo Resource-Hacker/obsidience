@@ -22,6 +22,10 @@ class ComputerError(ValueError):
     pass
 
 
+class ComputerArgumentError(ComputerError):
+    """Malformed arguments, refused before the action attempt is consumed."""
+
+
 def _text(value: object, field: str, limit: int) -> str:
     if not isinstance(value, str) or not value.strip() or len(value) > limit or any(ord(c) < 32 for c in value):
         raise ComputerError(f"{field} must contain 1-{limit} characters.")
@@ -68,24 +72,8 @@ def _geometry_correction(target, resolved, start: int, context: dict, attempts: 
     return None
 
 
-def act_computer(args: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
-    # Only the executor can supply the observation paired with the immediately
-    # preceding model input. Consume it even if argument validation fails.
-    lease = context.pop("_computer_observation_lease", None)
-    scope = args.get("scope", context.get("params", {}).get("computer_scope"))
-    if scope not in {"input", "state"}:
-        raise ComputerError("scope must be input for a requested click or state for an application result.")
-    previous_scope = context.setdefault("_computer_act_scope", scope)
-    if scope != previous_scope:
-        raise ComputerError("The action scope cannot change after the first attempt.")
-    state_scope = scope == "state"
-    attempts = context.get("_computer_act_attempts", 0)
-    if attempts and (not state_scope or not context.get("_computer_act_step_observed")):
-        raise ComputerError("This Task cannot send another action after consumed or unverified input; do not replay it.")
-    if attempts >= (MAX_STATE_ACTIONS if state_scope else 1):
-        raise ComputerError("This Task reached its bounded computer action limit.")
-    context["_computer_act_attempts"] = attempts + 1
-    context["_computer_act_step_observed"] = False
+def _arguments(args: dict[str, Any]) -> tuple[str | None, str, str, str, dict]:
+    """The click's handle, canonical application, label, postcondition and image point."""
     if set(args) - {"scope", "application", "handle", "action", "target", "point", "postcondition"} or args.get("action", "click") != "click":
         raise ComputerError("computer.act accepts one click with scope, application or handle, target, image point and optional postcondition.")
     handle = args.get("handle")
@@ -103,6 +91,39 @@ def act_computer(args: dict[str, Any], context: dict[str, Any]) -> dict[str, Any
     if (not isinstance(point, dict) or set(point) != {"x", "y"}
             or any(type(point[axis]) is not int or not 0 <= point[axis] <= 999 for axis in ("x", "y"))):
         raise ComputerError("point requires integer x and y in 0-999 on the immediately observed image.")
+    return handle, application, label, postcondition, point
+
+
+def act_computer(args: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    # Only the executor can supply the observation paired with the immediately
+    # preceding model input. Consume it even if argument validation fails.
+    lease = context.pop("_computer_observation_lease", None)
+    scope = args.get("scope", context.get("params", {}).get("computer_scope"))
+    if scope not in {"input", "state"}:
+        raise ComputerError("scope must be input for a requested click or state for an application result.")
+    previous_scope = context.setdefault("_computer_act_scope", scope)
+    if scope != previous_scope:
+        raise ComputerError("The action scope cannot change after the first attempt.")
+    state_scope = scope == "state"
+    attempts = context.get("_computer_act_attempts", 0)
+    if attempts and (not state_scope or not context.get("_computer_act_step_observed")):
+        raise ComputerError("This Task cannot send another action after consumed or unverified input; do not replay it.")
+    if attempts >= (MAX_STATE_ACTIONS if state_scope else 1):
+        raise ComputerError("This Task reached its bounded computer action limit.")
+    try:
+        handle, application, label, postcondition, point = _arguments(args)
+    except ComputerError as exc:
+        # Nothing was sent and the attempt is not consumed. The lease is, so a
+        # single corrected call needs a fresh observation; a second malformed
+        # call is terminal.
+        if context.get("_computer_argument_corrections"):
+            raise
+        context["_computer_argument_corrections"] = 1
+        raise ComputerArgumentError(
+            f"{exc} Nothing was sent. Observe the target again and send one corrected call "
+            "with a point from that fresh image.") from None
+    context["_computer_act_attempts"] = attempts + 1
+    context["_computer_act_step_observed"] = False
     if not isinstance(lease, dict):
         raise ComputerError("A fresh computer.observe image must immediately precede this action.")
     target, capture, start = (lease.get(key) for key in ("target", "capture", "process_start_time"))
