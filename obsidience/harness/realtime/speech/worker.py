@@ -108,6 +108,13 @@ SMART_TURN_PENDING_SECS = 3.0
 # latest word came 10 steps (0.8 s) into the tail. In one call the length is
 # nearly free (0.9 s: 17 ms, 1.2 s: 16 ms; stepwise 0.7 s took ~105 ms).
 ASR_TAIL_SECS = 1.2
+# Early final (realtime_asr_early_final, default off until the Harness consumes
+# it): at Silero's 200 ms stop edge, before Smart Turn's verdict, a copy of the
+# ASR stream decodes the same tail and the worker emits
+# {"type": "speech_early_final", "text", "speech_sequence", "candidate_revision",
+#  "mode_revision", "flush_ms"} with the addressed words a final would carry
+# now. The real stream, its final and turn-taking are unchanged; later partials
+# or the final supersede it (adopt only identical words, as with partials).
 # Desktop ASR skips its GPU steps in sustained silence (2026-10-18: 12.5 steps/s
 # kept the shared RTX 4000 ~11% busy and cost tensor-split Gemma ~13%, also while
 # it answered). A voiced onset after silence already resets NeMo and replays the
@@ -325,6 +332,19 @@ class SpeechResetFrame(SystemFrame):
     pass
 
 
+@dataclass
+class SpeechPauseFrame(SystemFrame):
+    """Silero's stop edge, held while the turn analyzer decides."""
+    last_voiced_ns: int | None
+
+
+@dataclass
+class SpeechEarlyFinalFrame(SystemFrame):
+    """Words a flushed copy of the ASR stream added at a pause."""
+    text: str
+    flush_ms: float
+
+
 class SpeechInputTiming:
     """Bounded boundary timestamps; NeMo remains the sole turn owner."""
 
@@ -436,6 +456,8 @@ class NeMoLocalAudioInputTransport(LocalAudioInputTransport):
             if self._params.turn_analyzer is not None and frame is not self._held_stop:
                 frame.metadata["obsidience_last_voiced_ns"] = self._last_voiced_ns
                 self._held_stop = frame
+                # ASR may flush an early final while the verdict is pending.
+                await super().push_frame(SpeechPauseFrame(self._last_voiced_ns), direction)
                 return
             self._held_stop = None
             endpoint_ns = frame.metadata["obsidience_endpoint_ns"] = time.monotonic_ns()
@@ -776,6 +798,24 @@ class StreamingASR(NemoStreamingASRService):
                          processing_time=time.time() - started)
 
 
+def fork_stream(source: StreamingASR) -> StreamingASR:
+    """Copy one stream's mutable decoding state; weights and decoders stay shared."""
+    result = copy.copy(source)
+    buffer = result._audio_buffer = copy.copy(source._audio_buffer)
+    buffer.sample_buffer = copy.copy(source._audio_buffer.sample_buffer)
+    buffer.sample_buffer.sample_buffer = source._audio_buffer.sample_buffer.sample_buffer.clone()
+    buffer.feature_buffer = source._audio_buffer.feature_buffer.clone()
+    result._cache_last_channel = source._cache_last_channel.clone()
+    result._cache_last_time = source._cache_last_time.clone()
+    result._cache_last_channel_len = source._cache_last_channel_len.clone()
+    # NeMo's legacy greedy decoder appends to a partial hypothesis's token list.
+    result._previous_hypotheses = [
+        Hypothesis(score=hyp.score, y_sequence=list(hyp.y_sequence), timestamp=list(hyp.timestamp),
+                   dec_state=hyp.dec_state, last_token=hyp.last_token)
+        for hyp in source._previous_hypotheses]
+    return result
+
+
 def final_batches(service: StreamingASR) -> int:
     """Batches in the longest end-of-turn remainder: pending frames plus the tail."""
     return int(ASR_TAIL_SECS / service.chunk_size_in_secs) + 2
@@ -821,11 +861,12 @@ class UtteranceNeMoSTTService(NemoSTTService):
 
     def __init__(self, *, reset_on_vad_onset: bool = True, silence_gate: bool = False,
                  asr_dtype: str = "bfloat16", boost_phrases: list[str] | None = None,
-                 **kwargs: Any) -> None:
+                 early_final: bool = False, **kwargs: Any) -> None:
         # Read by _load_model during NeMo's constructor.
         self._asr_dtype, self._boost_phrases = asr_dtype, boost_phrases
         super().__init__(**kwargs)
         self._reset_on_vad_onset = reset_on_vad_onset
+        self._early_final = early_final
         # The gate relies on the onset reset and pre-roll replay below.
         self._silence_gate = silence_gate and reset_on_vad_onset
         self._asr_hold_until = 0.0
@@ -883,7 +924,22 @@ class UtteranceNeMoSTTService(NemoSTTService):
         self._asr_gated = False
         await super().process_audio_frame(frame, direction)
 
+    async def _flush_early(self, last_voiced_ns: int, direction: FrameDirection) -> None:
+        # The end-of-turn tail on a copy: the live stream keeps its audio and state.
+        elapsed = (time.monotonic_ns() - last_voiced_ns) / 1e9
+        tail = max(0, round((ASR_TAIL_SECS - elapsed) / 0.02))
+        tail += -(len(self.audio_buffer) + tail) % self._params.buffer_size
+        remainder = b"".join(self.audio_buffer) + b"\0" * (640 * tail)
+        started = time.perf_counter()
+        result = await self._run_model(lambda: fork_stream(self._model).transcribe_final(remainder))
+        await self.push_frame(SpeechEarlyFinalFrame(
+            result.text, round((time.perf_counter() - started) * 1000, 1)), direction)
+
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        if isinstance(frame, SpeechPauseFrame):
+            if self._early_final and self._is_vad_active and type(frame.last_voiced_ns) is int:
+                await self._flush_early(frame.last_voiced_ns, direction)
+            return
         if isinstance(frame, VADUserStartedSpeakingFrame):
             preroll = bytes(self._preroll)
             self._preroll.clear()
@@ -1298,9 +1354,38 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
             if self._transcript_timeout is asyncio.current_task():
                 self._transcript_timeout = None
 
+    def _early_final(self, frame: SpeechEarlyFinalFrame) -> None:
+        """Offer the words a final would carry now; no turn state changes."""
+        if self._mode_waiting_for_stop:
+            return
+        if self.mode == "wake" and not self._wake_open:
+            # As the VAD stop does: silence after a trailing name addresses it.
+            heard = self._wake_prefix + frame.text
+            decision, end, _, _ = classify_wake(heard, self._wake_address, self._wake_scanned,
+                                                self._wake_pattern, final=True)
+            if decision != "accept":
+                return
+            command = heard[end:]
+        else:
+            command = self._user_speaking_buffer + frame.text
+            if (self.mode == "realtime" and not self._have_sent_user_started_speaking
+                    and self._reply_playing() and self._backchannel_prefix(" ".join(command.split()))):
+                return  # As partials: an acknowledgement over a reply is not a turn.
+        command = command.lstrip(WAKE_STRIP)
+        if not any(character.isalnum() for character in command):
+            return
+        text = (self._semantic_text + " " + command) if self._semantic_turns else command
+        self._emit("speech_early_final", text=" ".join(text.split())[:SEMANTIC_TEXT_MAX_CHARS],
+                   speech_sequence=self._timing.sequence if self._timing else 0,
+                   candidate_revision=self._candidate_revision, mode_revision=self.mode_revision,
+                   flush_ms=frame.flush_ms)
+
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         if isinstance(frame, SpeechAdmissionFrame):
             await self._admit_speech(frame)
+            return
+        if isinstance(frame, SpeechEarlyFinalFrame):
+            self._early_final(frame)
             return
         if isinstance(frame, SpeechResetFrame):
             if not self._semantic_turns:
@@ -2112,6 +2197,7 @@ def create_stt(args: argparse.Namespace):
         silence_gate=CONFIG.extras.get("realtime_asr_silence_gate", True) is not False,
         asr_dtype=dtype,
         boost_phrases=None if phrases is False else load_boost_phrases(phrases, args.wake_word),
+        early_final=CONFIG.extras.get("realtime_asr_early_final", False) is True,
         model=args.asr_model,
         device="cuda:0",
         sample_rate=SAMPLE_RATE,
