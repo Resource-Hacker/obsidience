@@ -120,6 +120,8 @@ def _slowdowns(before, after, *, check_latency: bool) -> list[str]:
 # seed's controls, three training rounds and one accepted candidate's controls.
 TRIAL_SECONDS = 240
 JOB_SECONDS = 2400
+MAX_TRAJECTORY_BYTES = 160_000
+MAX_TRIAL_SUMMARY_CHARS = 32_000
 
 # Repetitions of one case are independent samples of one model: the unchanged
 # baseline's training passes varied by up to two of five between measurements
@@ -272,7 +274,7 @@ class NativeEvaluator:
                 started = time.monotonic()
                 trace, status, summary, error = [], 'failed', '', None
                 try:
-                    action_trace.emit('status', 'AutoSaddler native Executive trial started')
+                    action_trace.emit('status', 'Instruction optimizer native Executive trial started')
                     try:
                         async with asyncio.timeout(TRIAL_SECONDS):
                             trace, status, summary = await run_adk_session(
@@ -290,12 +292,22 @@ class NativeEvaluator:
                     except Exception as exc:
                         error = type(exc).__name__ + ': ' + str(exc)[:300]
                     metrics = [row['provider_metrics'] for row in trace if 'provider_metrics' in row]
+                    # Keep only the trial's public Tool-call/result and error events;
+                    # no provider prompts, reasoning or controller context projections.
+                    trajectory = [row for row in trace if any(key in row for key in
+                        ('tool', 'invalid_tool', 'invalid_native_response', 'native_tool_error'))]
+                    complete = (len(canonical_json(trajectory).encode()) <= MAX_TRAJECTORY_BYTES
+                                and len(summary) <= MAX_TRIAL_SUMMARY_CHARS)
+                    if not complete:
+                        error = 'Native trial exceeds its complete trajectory bound'
+                        trajectory, summary = [], 'Complete trajectory unavailable: exceeded the artifact bound'
                     result = {'case_id': case.case_id, 'split': specification['split'], 'repetition': repetition + 1,
                         'passed': trial.passed and error is None, 'error': error, 'status': status,
-                        'summary': summary[:2000], 'tool_count': trial.tool_count,
+                        'summary': summary, 'tool_count': trial.tool_count,
                         'duration_ms': round((time.monotonic() - started) * 1000, 3),
                         'first_public_ms': metrics[0].get('first_public_delta_ms') if metrics else None,
-                        'prompt_tokens': trial_context.get('prompt_tokens'), 'actions': trial.calls}
+                        'prompt_tokens': trial_context.get('prompt_tokens'), 'actions': trial.calls,
+                        'trajectory': trajectory, 'trajectory_complete': complete}
                     prefix = 'quarantine/dev' if case.split == 'development' else 'evaluations'
                     output = self.store.write_json(f'{prefix}/{attempt_id}.json', result, kind='native-executive-trial')
                     cost = Cost(rollouts=1, wall_seconds=time.monotonic() - started,
@@ -309,7 +321,7 @@ class NativeEvaluator:
                         output=output, trace=output, cost=cost, metadata={'result': result, 'engine': 'adk'})
                     context.attempt_sink.complete(attempt_id, observation, cost)
                     observations.append(observation)
-                    action_trace.emit('status', 'AutoSaddler trial ' + ('passed' if result['passed'] else 'did not pass'))
+                    action_trace.emit('status', 'Instruction optimizer trial ' + ('passed' if result['passed'] else 'did not pass'))
                 finally:
                     action_trace.reset(token)
         return Evaluation(evaluation_id=sha256_digest(context.operation_id), candidate_id=candidate.candidate_id,
@@ -556,7 +568,7 @@ class ReservedModelProvider:
                       'component_sources': {}, 'rationale': 'Only one accepted parent is available.'}
             return SessionResult(status='completed', structured_output=output, raw_response=canonical_json(output),
                                  tool_calls=(), usage=(), cost=Cost())
-        action_trace.emit('status', 'AutoSaddler ' + request.spec.kind.replace('_', ' '))
+        action_trace.emit('status', 'Instruction optimizer ' + request.spec.kind.replace('_', ' '))
         started = time.monotonic()
         async with asyncio.timeout(request.timeout_seconds):
             async with runtime.lease(self.spec) as model:
@@ -619,7 +631,7 @@ def comparison(document, rows, seed_id, selected_id):
     return result
 
 
-async def run(case_id, document, audit, context):
+async def run_autosaddler(case_id, document, audit, context):
     run_dir = evaluation_store.root() / 'executive/jobs' / case_id
     if any(path.is_symlink() for path in (run_dir, *run_dir.parents)):
         raise ValueError('Optimization artifacts cannot follow symlinks')
@@ -680,7 +692,19 @@ async def run(case_id, document, audit, context):
         compared['verdict'] = 'incomplete'
     return {'schema_version': 1, 'case_id': case_id, 'audit_run_id': context['run_id'],
             'upstream_revision': admission.UPSTREAM_REVISION, 'evaluator_revision': document['evaluator_revision'],
-            'model_contract': document['model_contract'], 'candidate_body': selected['identity'],
+            'model_contract': document['model_contract'], 'backend_contract': document['backend_contract'],
+            'candidate_body': selected['identity'],
             'seed_id': seed_id, 'selected_id': selected_id, 'observations': rows, 'optimizer_failures': failures,
             'verdict': compared['verdict'], 'comparison': compared, 'scope': document['scope'],
             'job_path': str(run_dir.relative_to(CONFIG.project_root))}
+
+
+async def run(case_id, document, audit, context):
+    """One active engine; failures never select the rollback backend implicitly."""
+    from ..optimization.backend import contract
+    if document.get('backend_contract') != contract():
+        raise ValueError('Optimizer backend changed; prepare a fresh case')
+    if document['backend_contract']['name'] == 'autosaddler':
+        return await run_autosaddler(case_id, document, audit, context)
+    from ..optimization.harness2 import run as run_harness2
+    return await run_harness2(case_id, document, audit, context)

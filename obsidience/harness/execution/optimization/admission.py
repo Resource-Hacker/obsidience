@@ -1,8 +1,8 @@
-"""AutoSaddler optimization owned by Heimdall's existing Audit activation.
+"""Instruction optimizer optimization owned by Heimdall's existing Audit activation.
 
 Cases use independent registration or committed decision contracts. Models
 receive training evidence only; candidate publication stays in the Article/Review authority.
-AutoSaddler's journal is an internal job artifact, never another work queue.
+Instruction optimizer's journal is an internal job artifact, never another work queue.
 """
 from __future__ import annotations
 
@@ -15,9 +15,9 @@ from ...config import CONFIG
 from ...knowledge.index import INDEX
 from ...knowledge.vault import Resolver, load_note, resolver
 from .. import revision
-from . import AUDITOR, EXECUTIVE, HEIMDALL, cases, store
+from . import AUDITOR, EXECUTIVE, HEIMDALL, backend, cases, store
 
-UPSTREAM_REVISION = '6a2b7a9ab2412a8fe384fd5471d2a49b03a60013'
+UPSTREAM_REVISION = backend.upstream_revision()
 DECISION_CASE_COUNT = 5
 EVALUATION_REPETITIONS = 5
 _ACTIVE: set[str] = set()
@@ -40,7 +40,7 @@ def reconcile_rejections(notes: list) -> None:
     """Send receipt-proven rejected steps to Audit, even when the Task recovered.
 
     This uses existing terminal runs and the ordinary event FIFO. It does not
-    replay an action or manufacture AutoSaddler's independent evaluation cases.
+    replay an action or manufacture Instruction optimizer's independent evaluation cases.
     """
     from ..scheduler import enqueue_named_event
     from ...knowledge.tasks import task_triggers
@@ -184,7 +184,7 @@ def reconcile_rejections(notes: list) -> None:
                   'subject_definition': subject.ref, 'definition_sha256': definition,
                   'request': 'Improve ' + subject.ref + ': ' + rejected['reason'],
                   'rejected_step': rejected, 'queue_after_review': True}
-        # All instruction improvement uses AutoSaddler, without an ordinary
+        # All instruction improvement uses Instruction optimizer, without an ordinary
         # model-authored inspection/proposal fallback.
         case_dir = store.root() / 'executive/cases'
         for path in sorted(case_dir.glob('*.json')) if run['task_ref'] == EXECUTIVE else []:
@@ -216,8 +216,8 @@ def reconcile_rejections(notes: list) -> None:
             continue
         now = time.time()
         INDEX.record_run(overwrite=False, id=receipt_id, task_ref=AUDITOR, agent='scheduler',
-            started=now, finished=now, status='dispatched', objective='AutoSaddler improvement for an agent incident',
-            summary='Receipt-bound incident admitted one AutoSaddler job for this definition and failure.',
+            started=now, finished=now, status='dispatched', objective='Instruction optimizer improvement for an agent incident',
+            summary='Receipt-bound incident admitted one Instruction optimizer job for this definition and failure.',
             trace=json.dumps([params], sort_keys=True))
         INSPECTED_RUNS.add(run_id)
 
@@ -238,7 +238,7 @@ def _validate_suite_size(suite: dict) -> None:
     if (not isinstance(suite, dict) or not isinstance(suite.get('cases'), list)
             or len(suite['cases']) != DECISION_CASE_COUNT
             or suite.get('repetitions') != EVALUATION_REPETITIONS):
-        raise ValueError('AutoSaddler requires five distinct decision cases repeated five times')
+        raise ValueError('Instruction optimizer requires five distinct decision cases repeated five times')
 
 
 def prepare(specification: dict) -> dict:
@@ -282,8 +282,11 @@ def prepare(specification: dict) -> dict:
                 'model_contract': model_contract(agent, agent.ref),
                 'optimizer_contract': model_contract(audit, HEIMDALL),
                 'evaluator_revision': implementation_revision(), 'upstream_revision': UPSTREAM_REVISION,
+                'backend_contract': backend.contract(),
                 'origin': {key: origin.get(key) for key in ('id', 'task_ref', 'status', 'summary')},
                 'scope': 'Frozen Tool reconstruction through the ADK Executive loop; no live effects.'}
+    from .experience import freeze
+    document['experience'] = freeze(document)
     case_id = store.save('executive/cases', document)
     return {'case_id': case_id, 'source_path': _source_path('cases', case_id), 'scope': document['scope']}
 
@@ -296,7 +299,10 @@ def adopt_runbook_case(document: dict) -> dict:
                 'model_contract': model_contract(res.resolve(document['task']), document['agent']),
                 'optimizer_contract': model_contract(res.resolve(AUDITOR), HEIMDALL),
                 'evaluator_revision': implementation_revision(), 'upstream_revision': UPSTREAM_REVISION,
+                'backend_contract': backend.contract(),
                 'scope': 'Specialist execution with frozen Tool results; no live effects.'}
+    from .experience import freeze
+    document['experience'] = freeze(document)
     case_id = store.save('executive/cases', document)
     return {'case_id': case_id, 'source_path': _source_path('cases', case_id), 'scope': document['scope']}
 
@@ -331,8 +337,11 @@ def prepare_decisions(sample: dict, decision_cases: list[dict]) -> dict:
                 'model_contract': model_contract(task, agent.ref),
                 'optimizer_contract': model_contract(res.resolve(AUDITOR), HEIMDALL),
                 'evaluator_revision': implementation_revision(), 'upstream_revision': UPSTREAM_REVISION,
+                'backend_contract': backend.contract(),
                 'origin': {'id': sample['run_id'], 'task_ref': task.ref},
                 'scope': 'Captured decision contracts and independent accepted controls; no live action replay.'}
+    from .experience import freeze
+    document['experience'] = freeze(document)
     case_id = store.save('executive/cases', document)
     return {'case_id': case_id, 'source_path': _source_path('cases', case_id), 'scope': document['scope']}
 
@@ -341,7 +350,9 @@ def current(case_id: str, accepted_resolver=None) -> dict:
     document = store.load('executive/cases', case_id)
     if implementation_revision() != IMPLEMENTATION_AT_IMPORT:
         raise ValueError('Reload the changed Harness before preparing or running optimization')
-    if document['evaluator_revision'] != implementation_revision() or document['upstream_revision'] != UPSTREAM_REVISION:
+    if (document['evaluator_revision'] != implementation_revision()
+            or document['upstream_revision'] != UPSTREAM_REVISION
+            or document.get('backend_contract') != backend.contract()):
         raise ValueError('Executive optimizer implementation changed; prepare a fresh case')
     _validate_suite_size(document['suite'])
     res = accepted_resolver or resolver(include_system=False)
@@ -386,7 +397,9 @@ def report_result(report_id: str, report: dict) -> dict:
     return {'case_id': report['case_id'], 'report_id': report_id, 'verdict': report['verdict'],
             'comparison': report['comparison'], 'source_path': _source_path('reports', report_id),
             'optimizer_failures': report.get('optimizer_failures', []),
-            'upstream_revision': UPSTREAM_REVISION, 'scope': report['scope']}
+            'upstream_revision': report['upstream_revision'],
+            **({'backend_contract': report['backend_contract']} if 'backend_contract' in report else {}),
+            'scope': report['scope']}
 
 
 async def optimize(case_id: str, context: dict) -> dict:
@@ -397,10 +410,7 @@ async def optimize(case_id: str, context: dict) -> dict:
     if not audit or audit.meta.get('assignee') != f'[[{HEIMDALL}]]':
         raise ValueError('Heimdall must own Executive optimization')
     document = current(case_id)
-    from importlib.metadata import distribution
-    provenance = json.loads(distribution('autosaddler').read_text('direct_url.json') or '{}')
-    if provenance.get('vcs_info', {}).get('commit_id') != UPSTREAM_REVISION:
-        raise ValueError('Install the pinned AutoSaddler revision from obsidience/harness/requirements-optimization.txt')
+    backend.contract()
     if case_id in _ACTIVE:
         raise ValueError('This optimization case already has an active owner')
     _ACTIVE.add(case_id)
@@ -435,7 +445,7 @@ async def optimize(case_id: str, context: dict) -> dict:
             try:
                 staged = stage_proposal({'target': agent.path, 'action': 'update', 'title': agent.title,
                                          'body': report['candidate_body'],
-                                         'reason': 'AutoSaddler validated instruction improvement: ' + result['source_path']}, context)
+                                         'reason': 'Instruction optimizer validated instruction improvement: ' + result['source_path']}, context)
                 result['proposal'] = Path(staged['staged']).name
             finally:
                 context.pop('_executive_optimization', None)
@@ -447,7 +457,7 @@ async def optimize(case_id: str, context: dict) -> dict:
                     if row.get('split') == 'train']
         if report['verdict'] != 'passed' and (not baseline or not all(row.get('passed') for row in baseline)):
             attention(case_id, context['run_id'], document.get('task', EXECUTIVE),
-                      'AutoSaddler exhausted its bounded improvement attempt: ' + report['verdict'],
+                      'Instruction optimizer exhausted its bounded improvement attempt: ' + report['verdict'],
                       'Evidence and candidate history: ' + result['source_path'],
                       origin=str((document.get('origin') or {}).get('id') or ''))
         from ...knowledge.vault import _atomic_write
@@ -475,6 +485,14 @@ def status(case_id: str) -> dict:
     return result
 
 
+def validate_report_backend(document: dict, report: dict) -> None:
+    if (report.get('backend_contract') != document['backend_contract']
+            or report.get('upstream_revision') != document['upstream_revision']
+            or report.get('evaluator_revision') != document['evaluator_revision']
+            or report.get('model_contract') != document['model_contract']):
+        raise ValueError('Optimizer report differs from the frozen backend, model or implementation')
+
+
 def proposal_binding(context: dict, target: str, action: str, title: str, body: str, metadata: dict) -> dict | None:
     """Called by the existing proposal writer before its atomic staging write."""
     case_id = (context.get('params') or {}).get('optimization_case')
@@ -485,6 +503,7 @@ def proposal_binding(context: dict, target: str, action: str, title: str, body: 
         raise ValueError('This Audit may stage only the controller-selected optimization candidate')
     report = store.load('executive/reports', marker['report_id'])
     document = current(case_id)
+    validate_report_backend(document, report)
     agent = Resolver(cases.frozen_notes(document)).resolve(subject_ref(document))
     if (report['verdict'] != 'passed' or report['audit_run_id'] != context['run_id']
             or target != agent.path or action != 'update' or title != agent.title or metadata
@@ -504,6 +523,7 @@ def review_blocker(note, accepted_resolver=None) -> str | None:
             raise ValueError('Executive candidate lost its optimization binding')
         document = current(marker['case_id'], accepted_resolver)
         report = store.load('executive/reports', marker['report_id'])
+        validate_report_backend(document, report)
         agent = Resolver(cases.frozen_notes(document)).resolve(subject_ref(document))
         if (report['verdict'] != 'passed' or report['case_id'] != marker['case_id']
                 or note.meta.get('task') != AUDITOR or note.meta.get('run_id') != report['audit_run_id']
@@ -555,7 +575,7 @@ def publish_validated() -> None:
             review.approve(path.name)
             attention(marker['case_id'], run['id'], document.get('task', EXECUTIVE), '')
             from .. import trace as action_trace
-            action_trace.emit('status', 'AutoSaddler instruction improvement applied', [subject.ref],
+            action_trace.emit('status', 'Instruction optimizer instruction improvement applied', [subject.ref],
                               {'task_ref': AUDITOR, 'agent_ref': HEIMDALL})
         except (ValueError, OSError, KeyError) as exc:
             attention(marker.get('case_id', path.stem), run['id'], AUDITOR,

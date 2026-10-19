@@ -1,4 +1,6 @@
-# The embedded V2 core uses the Harness's existing PyYAML and jsonschema.
-# Install with --no-deps to omit optional Claude/Copilot/legacy benchmark SDKs:
-# uv pip install --python .venv/bin/python --no-deps -r <this file>
+# Build/install with obsidience/scripts/install-optimization from the project root.
+# Harness2's patched, attested wheel is produced from pinned source by that script.
+# AutoSaddler retains durable candidates, attempts and the rollback search backend.
+# Neither dependency installs optional provider SDKs or benchmark environments.
 autosaddler @ git+https://github.com/microsoft/AutoSaddler@6a2b7a9ab2412a8fe384fd5471d2a49b03a60013
+.artifacts/wheels/harness2-0.1.0+obsidience.1-py3-none-any.whl

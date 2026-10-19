@@ -184,7 +184,7 @@
       "revision": "6a2b7a9ab2412a8fe384fd5471d2a49b03a60013",
       "version": "0.2.0",
       "license": "MIT",
-      "integration": "Pinned upstream AutoSaddler V2 engine, component-map candidates and durable optimization journal. Obsidience supplies Executive and specialist evaluators, receipt-bound contract cases, training-only prompts and the existing model reservation provider. Heimdall Audit is the sole improvement Task. Native session retries and bounded candidate budgets apply to isolated evaluations. Owner-authorized validated instruction bodies publish through the existing Review writer after completed Audit receipt checks. Code and unsupported cases require Review; no live action replay, extra scheduler or provider SDK is installed.",
+      "integration": "Pinned AutoSaddler V2 immutable candidates, causal lineage, durable attempt journal and isolated ADK evaluator remain shared by instruction improvement. Harness2 supplies the default refinement search; the original AutoSaddler engine remains an explicit rollback backend. Obsidience retains training-only model context, repeated baseline/control checks, model leases, cancellation, budgets and receipt-bound Article Review publication. No extra provider SDK or scheduler is installed.",
       "dependency_lock": "obsidience/harness/requirements-optimization.txt"
     },
     "gemma4_template_scan_correction": {
@@ -1036,6 +1036,18 @@
         "default/hypr/apps/screenshot-selection.lua"
       ],
       "integration": "Architecture reference only, no copied code. Reviewed native capture dispatch; current Omarchy uses Omasnap. Obsidience keeps its installed grim and wl-clipboard, adds distribution slurp and Satty, and preserves the existing desktop-entry identity through a small local adapter."
+    },
+    "harness2": {
+      "repository": "https://github.com/google-research/harness2",
+      "revision": "1cfe254e8d25b15f37048c3730134686abe60335",
+      "version": "0.1.0+obsidience.1",
+      "license": "Apache-2.0",
+      "source_archive_sha256": "2337f91b71a130e055d8dfb99ead2667a46087c29df939d4d4f0a3c357b5748f",
+      "package_manifest_sha256": "f1e859bf8fa018b866d0bea8c2664e82839986a702e1905d2eae3e3a37e32e02",
+      "patch": "obsidience/scripts/patches/harness2/0001-embedded-python314.patch",
+      "installer": "obsidience/scripts/install-optimization",
+      "dependency_lock": "obsidience/harness/requirements-optimization.txt",
+      "integration": "Pinned upstream Propose-Probe-Compose recursion and evidence/prompt/tree functions behind the existing Heimdall Audit capability. Obsidience supplies a reserved-model proposer, isolated ADK trials and independent acceptance. The local patch admits Python 3.14, adds source provenance to the wheel and disables implicit working-directory dotenv loading. Upstream CLI executors, provider caches, domain scheduler, grader and mutable experience-library writer are not used. AutoSaddler durable candidates, trials and rollback engine are retained. See docs/harness2.md for boundaries and upstream issue research."
     }
   }
 }

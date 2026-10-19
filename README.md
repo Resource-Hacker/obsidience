@@ -114,12 +114,12 @@ capability library, project architecture and ordinary knowledge subjects. It
 contains no previous owner's computer inventory or personal knowledge.
 
 From the repository root, prepare the Python dependencies (the Executive's Google
-ADK loop is a pinned Python requirement) and the AutoSaddler pin:
+ADK loop is a pinned Python requirement) and the pinned optimizer components:
 
 ```sh
 python -m venv .venv
 .venv/bin/python -m pip install -r obsidience/harness/requirements.txt -c obsidience/harness/requirements.lock.txt
-.venv/bin/python -m pip install --no-deps -r obsidience/harness/requirements-optimization.txt
+python3 obsidience/scripts/install-optimization
 ./obsidience/scripts/obsidience init
 ```
 

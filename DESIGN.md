@@ -621,8 +621,10 @@ full current reads, unrelated hits do not.
 
 ## Instruction improvement
 
-- Heimdall Audit uses pinned Microsoft AutoSaddler V2 as the single improvement path
-  (`harness.optimize`), sharing the existing loop, reservations, scheduler, writer and
+- Heimdall Audit uses pinned Google Research Harness2 for the single improvement path
+  (`harness.optimize`): one sequential Propose–Probe–Compose step, width one. AutoSaddler
+  V2 retains immutable candidates, parent lineage, durable attempts and an explicit
+  rollback backend. Both share the existing loop, reservations, scheduler, writer and
   Review. Trials dispatch no effect and prove decision behaviour only: each call is
   answered by frozen results or the contract validator. A captured decision may first take
   up to four read-only steps (Source and Article reads, search, `vault.validate`); they are
@@ -649,8 +651,13 @@ full current reads, unrelated hits do not.
   not pass less often in total, nor any one of them by two or more repetitions, nor average
   over half a Tool call more. Controls the baseline mostly fails cannot show a regression,
   so the candidate must itself pass at least three quarters of the control trials. The
-  first accepted candidate ends the search. The latency bound applies only to Executive at
-  reasoning `none`.
+  final composed candidate receives independent full baseline/candidate measurements;
+  Harness2 selection never proves improvement. The latency bound applies only to Executive
+  at reasoning `none`. Only training evidence enters search or reflection. Lessons are
+  bounded private optimizer artifacts retained after committed publication and its exact
+  Audit receipt; cases freeze compatible lessons, dependency Articles, model, backend and
+  implementation identity. Session, trial and job budgets survive resumption. The retained
+  AutoSaddler backend ends its search at the first accepted candidate.
   Publication revalidates inputs, code, model and the returned receipt; owner-set
   `Tasks/audit` `optimization_auto_apply` (default off) may publish instruction bodies
   automatically; metadata, grants, model configuration and code always keep Review. Never

@@ -1,4 +1,4 @@
-"""Register, queue and inspect bounded AutoSaddler jobs through the Harness owner."""
+"""Register, queue and inspect bounded instruction optimization jobs through the Harness owner."""
 import argparse
 import json
 from pathlib import Path

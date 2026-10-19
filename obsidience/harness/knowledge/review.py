@@ -828,6 +828,15 @@ def _approve(name: str) -> dict:
     git_commit(f"[review] approve: {target} (from {meta.get('agent', '?')})", [target])
     from .index import INDEX
     INDEX.sync()
+    if meta.get("optimization"):
+        # Publication has committed. Failure to retain optional optimizer
+        # evidence must never turn this approval into a replayable failure.
+        try:
+            from ..execution.optimization.experience import published
+            published(meta["optimization"], path.name)
+        except Exception as exc:
+            evidence_warning = (evidence_warning + "; " if evidence_warning else "") + (
+                "Instructions approved; optimizer lesson was not retained: " + str(exc)[:300])
     notify_link_review(path.name, {**meta, "review_class": review_class}, "approved", links=approved_links)
     return {
         "approved": target,

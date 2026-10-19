@@ -1,7 +1,7 @@
 ---
 type: skill
 title: Using harness.optimize
-description: Use AutoSaddler to validate Agent and Runbook instruction improvements
+description: Use the bound optimizer to validate Agent and Runbook instruction improvements
   against independent cases.
 obsidience:
   tool: '[[Tools/harness.optimize]]'
@@ -13,4 +13,4 @@ For Audit with `optimization_case`, call [harness.optimize](/Tools/harness.optim
 
 ## Reference
 
-AutoSaddler is Heimdall's single instruction-improvement mechanism. The controller captures incidents, supplies independent executable criteria and publishes eligible changes after the Audit receipt. Do not perform a parallel inspection/proposal loop, invent a case, change expectations, repeat the optimizer or claim deployment merely because a candidate was staged. The existing Repair Task separately owns recovery of interrupted work and failed services.
+Harness2 is Heimdall's default instruction-improvement method, with retained AutoSaddler artifacts and an explicit rollback backend. Only one search backend owns an activation. The controller captures incidents, supplies independent executable criteria and publishes eligible changes after the Audit receipt. Do not perform a parallel inspection/proposal loop, invent a case, change expectations, repeat the optimizer or claim deployment merely because a candidate was staged. The existing Repair Task separately owns recovery of interrupted work and failed services.

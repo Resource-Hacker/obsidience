@@ -22,9 +22,11 @@ REFINEMENT = (
     "knowledge/dependencies.py",
 )
 
-# AutoSaddler optimization (optimization.admission.implementation_revision): a sorted {path: sha256} map.
+# Selected instruction optimizer (optimization.admission.implementation_revision): a sorted {path: sha256} map.
 OPTIMIZATION = (
     "execution/optimization/__init__.py", "execution/optimization/admission.py", "execution/adk/optimization.py",
+    "execution/optimization/backend.py", "execution/optimization/harness2.py",
+    "execution/optimization/experience.py",
     "execution/adk/runner.py", "execution/native.py", "execution/native_turn.py",
     "execution/capability_core.py",
     "execution/adk/plugin.py", "execution/availability.py", "execution/adk/tools.py", "requirements.lock.txt",

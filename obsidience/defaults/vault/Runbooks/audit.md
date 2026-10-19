@@ -9,9 +9,9 @@ obsidience:
   - '[[Skills/harness.optimize]]'
 ---
 
-Use [AutoSaddler](/Skills/harness.optimize.md) for Harness and Agent instruction improvement.
+Use [Harness2 instruction improvement](/Skills/harness.optimize.md) for Harness and Agent instruction improvement.
 
-1. The controller binds `optimization_case` from an independently registered case or a receipt-proven incident. Call `harness.optimize` exactly once with that value as `case_id`. The upstream engine owns diagnosis, candidate edits, retries, comparison and selection.
+1. The controller binds `optimization_case` from an independently registered case or a receipt-proven incident. Call `harness.optimize` exactly once with that value as `case_id`. The bound optimizer owns diagnosis, candidate edits and retries; the Harness independently measures improvement and controls publication.
 2. Report the returned verdict, comparison and Source report. A returned `proposal` is a measured instruction candidate: finish `review` with its filename so the controller can verify the completed Audit receipt. The installation's `optimization_auto_apply` setting controls automatic publication after that verification.
 3. Without a proposal, finish `completed` for a real report, including a negative finding. If the Tool returns an error without a report, finish `failed` with that error. Never repeat the optimizer in the same activation or manufacture a case ID.
 

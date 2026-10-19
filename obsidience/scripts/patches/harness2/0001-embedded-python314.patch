@@ -1,0 +1,40 @@
+diff --git a/pyproject.toml b/pyproject.toml
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
+ 
+ [project]
+ name = "harness2"
+-version = "0.1.0"
++version = "0.1.0+obsidience.1"
+ description = "Harness²: Recursive Agent Harnessing for an Open World"
+ readme = "README.md"
+ license = "Apache-2.0"
+-requires-python = ">=3.12,<3.14"
++requires-python = ">=3.12,<3.15"
+ classifiers = [
+     "Programming Language :: Python :: 3.12",
+     "Programming Language :: Python :: 3.13",
+@@ -35,6 +35,9 @@ harness2-bridge = "harness2.cli.bridge:main"
+ [tool.setuptools.packages.find]
+ include = ["harness2*"]
+ 
++[tool.setuptools.package-data]
++harness2 = ["obsidience-build.json"]
++
+ [tool.ruff]
+ target-version = "py312"
+ line-length = 100
+diff --git a/harness2/config.py b/harness2/config.py
+--- a/harness2/config.py
++++ b/harness2/config.py
+@@ -62,7 +62,8 @@ def load_dotenv(path: Path = ROOT / ".env") -> None:
+         os.environ.setdefault(key, value)
+ 
+ 
+-load_dotenv()
++# The embedding application owns configuration. Importing its refinement engine
++# must not load an unrelated working-directory .env into the live process.
+ 
+ 
+ def env(name: str, default=None):
