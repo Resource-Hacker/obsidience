@@ -306,10 +306,14 @@ neighbours); (9) history projected from the native conversation (no conversation
   then enters ADK once through its normal completion and capability authority without
   regenerating that first response. Fresh audio, STOP, mode/session changes and teardown
   invalidate owned inference. Missing/invalid markers fail closed. A 30-second abandoned
-  continuation expires without execution; it is not a sentence-completion timer. The
-  first response is buffered, so early speech starts only after this admission: when the
-  turn consumes an admitted answer without native calls, its claim-checked sentences go
-  to early speech at once, before completion acceptance, as an ordinary step's would. The
+  continuation expires without execution; it is not a sentence-completion timer. A
+  direct answer is handed over at its control line while it still generates: the turn
+  binds, and when it consumes the answer its claim-checked sentences go to early speech
+  as they arrive, before completion acceptance, as an ordinary step's would. A protocol
+  break, provider failure or cancellation after that hand-off stops generation, retracts
+  the early speech and fails the already recorded turn; an answer no submission takes is
+  stopped by the next admission or cancellation. Native Tool calls and unfinished
+  verdicts are buffered whole. The
   completion protocol lives only in the request's trailing private control message, so
   admission, speech warms and later ADK steps share one system/Tool/history prefix (a
   control appended to the owner's own message was reverted 2026-10-19: a bare "Yes" was
@@ -328,7 +332,7 @@ neighbours); (9) history projected from the native conversation (no conversation
   preparation waits until the candidate's turn starts or the candidate ends, so it
   cannot replace the admitted request's cached tail before the turn's next step.
   **Speculative admission**: each speech partial runs this same admission (recall, verdict
-  and buffered first response) on idle resident capacity, like the speech warmup: leases
+  and first response) on idle resident capacity, like the speech warmup: leases
   preempt it, busy hardware skips it, exact HassIL commands skip it, and a partial with
   other words cancels and joins it. It publishes, dispatches and writes nothing. When the
   candidate arrives, a finished or running speculation for the same words (case,

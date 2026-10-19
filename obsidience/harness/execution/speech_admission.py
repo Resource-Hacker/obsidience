@@ -1,5 +1,7 @@
-"""One buffered Executive first step, admitted only after semantic endpointing.
+"""One Executive first step, admitted only after semantic endpointing.
 
+A direct answer is handed over at its control line while the model still
+generates it; a native Tool call or an unfinished verdict is buffered whole.
 This module has no Tool dispatch or conversation/memory write port. Its Python
 carry is single-use; the ordinary ADK plugin owns completion and native Tools.
 """
@@ -219,6 +221,52 @@ class PreparedSpeechTurn:
     _consumed: bool = field(repr=False, default=False)
     # (Agent ref, recall query) when memory came from a shorter partial's recall.
     _recall_audit: tuple | None = field(repr=False, default=None)
+    # A direct answer handed over at its control line while it generates
+    # (prepare): the generating task, which sets response when it ends, and
+    # the answer's stream events in order (None ends them).
+    _stream: asyncio.Task | None = field(repr=False, default=None)
+    _events: asyncio.Queue | None = field(repr=False, default=None)
+    # Set by a validated submission, which then owns a generating answer.
+    _claimed: bool = field(repr=False, default=False)
+
+    def _answer(self) -> bool:
+        """A complete response exists, or is still generating without a failure."""
+        stream = self._stream
+        if stream is None:
+            return self.response is not None
+        return not stream.done() or (not stream.cancelled() and stream.exception() is None
+                                     and self.response is not None)
+
+    async def close(self) -> None:
+        """Stop an answer still generating; it holds the model lease or idle capacity."""
+        stream = self._stream
+        if stream is not None and not stream.done() and stream is not asyncio.current_task():
+            stream.cancel()
+            await asyncio.gather(stream, return_exceptions=True)
+
+    async def _drain(self, feed) -> LlmResponse:
+        """Feed the answer's stream events as they arrive; return its complete response.
+
+        Any failure after the control line (protocol, provider error,
+        cancellation) stops generation and raises; the caller retracts what
+        early speech already voiced.
+        """
+        stream = self._stream
+        try:
+            while (event := await self._events.get()) is not None:
+                if feed is not None:
+                    await feed(event)
+            await asyncio.wait({stream})
+        except BaseException:
+            await self.close()
+            raise
+        if stream.cancelled():
+            raise SpeechPreparationError('The admitted spoken answer was cancelled while generating')
+        if isinstance(error := stream.exception(), SpeechPreparationError):
+            raise error
+        if error is not None or self.response is None:
+            raise SpeechPreparationError('The admitted spoken answer failed while generating') from error
+        return self.response
 
     def audit_recall(self) -> None:
         """Measure what memory from a shorter partial cost this admitted text.
@@ -250,14 +298,14 @@ class PreparedSpeechTurn:
         stale speculative response is only discarded, never an error.
         """
         return (self._runtime is runtime and not self._consumed and self._bound_turn is None
-                and runtime._generation == self.generation
+                and self._answer() and runtime._generation == self.generation
                 and runtime._conversation.conversation_id == self.conversation_id
                 and _tip(runtime._conversation, self.conversation_id) == self.history
                 and native.window_anchor(self.conversation_id) == self.anchor
                 and _history(await sessions.refresh(self.conversation_id)) == self.native_history)
 
     async def validate_submission(self, runtime, text: str) -> None:
-        if (self.decision != 'complete' or self.response is None or self._consumed
+        if (self.decision != 'complete' or not self._answer() or self._consumed
                 or self._bound_turn is not None or self._runtime is not runtime
                 or text != self.text or runtime._generation != self.generation
                 or runtime._conversation.conversation_id != self.conversation_id
@@ -275,6 +323,7 @@ class PreparedSpeechTurn:
                 or _tip(runtime._conversation, self.conversation_id) != self.history
                 or native.window_anchor(self.conversation_id) != self.anchor):
             raise SpeechPreparationError('Speech admission changed while validating its submission')
+        self._claimed = True
 
     def bind(self, turn: dict, generation: int) -> None:
         if (self._bound_turn is not None or turn['conversation_id'] != self.conversation_id
@@ -283,10 +332,15 @@ class PreparedSpeechTurn:
         self._bound_turn, self._bound_sequence = str(turn['id']), int(turn['sequence'])
         self._bound_generation = generation
 
-    async def consume(self, plugin) -> LlmResponse:
+    async def consume(self, plugin, feed=None) -> LlmResponse:
+        """The admitted response for the bound turn's first step, after its contract checks.
+
+        feed (early speech) receives a direct answer's native stream events: as
+        they generate when it was handed over at its control line, else at once.
+        """
         runtime = self._runtime
         params = plugin.ctx.get('params') or {}
-        if (self._consumed or self.response is None or self._bound_turn is None
+        if (self._consumed or not self._answer() or self._bound_turn is None
                 or params.get('reply_to_turn_id') != self._bound_turn
                 or params.get('conversation_id') != self.conversation_id
                 or plugin.ctx['objective'] != self.text
@@ -333,7 +387,17 @@ class PreparedSpeechTurn:
                 or not (latest := runtime._conversation.history(self.conversation_id, limit=1))
                 or latest[0]['id'] != self._bound_turn):
             raise SpeechPreparationError('Prepared speech changed while validating its first step')
-        response, self.response = self.response, None
+        if self._stream is not None:
+            response = await self._drain(feed)
+            if runtime._generation != self._bound_generation:
+                raise SpeechPreparationError('Prepared speech was cancelled while its answer generated')
+        else:
+            response = self.response
+            parts = response.content.parts if response.content and response.content.parts else []
+            if feed is not None and not any(part.function_call for part in parts):
+                if text := ''.join(part.text for part in parts if part.text and not part.thought):
+                    await feed({'type': 'text-delta', 'text': text})
+        self.response = None
         return response
 
 
@@ -351,12 +415,15 @@ async def _model(spec, speculative: bool):
         yield spec
 
 
-async def prepare(runtime, text: str, response_contract: str, *,
-                  speculative: bool = False) -> PreparedSpeechTurn:
-    """Generate the real first response without starting an Agent activation.
+async def _generate(runtime, text: str, response_contract: str, speculative: bool,
+                    handover: asyncio.Future) -> PreparedSpeechTurn:
+    """The admission request itself (prepare's generating task).
 
-    speculative=True runs it on a speech partial (see speculate).
+    A direct answer resolves ``handover`` at its control line and keeps
+    generating: the visible text after its marker and any later native call go to
+    the returned turn's events, and its response is set when the stream ends.
     """
+    global _HANDED
     clean = ' '.join(text.split())
     agent, params, _ = admit_executive(clean, 'voice')
     conversation = runtime._conversation
@@ -452,6 +519,20 @@ async def prepare(runtime, text: str, response_contract: str, *,
                 raise SpeechPreparationError('The cached ADK model route has outdated token settings')
             owner = _ResponseOwner(route.llm_client)
             route = route.model_copy(update={'llm_client': owner})
+
+            def turn(decision, response):
+                return PreparedSpeechTurn(
+                    _recall_audit=(agent.ref, query) if reuse == 'prefix' else None,
+                    decision=decision, text=clean, conversation_id=conversation_id, generation=generation,
+                    history=history, anchor=anchor, native_history=native_history,
+                    model_binding=_model_binding(spec, effort), scope=scope_revision(agent), system=system,
+                    schema_binding=schema_binding, response=response,
+                    wire=deepcopy(payload['messages']), context=compiled_context,
+                    packet=deepcopy(activation['activity_packet']), refs=list(activation['refs']),
+                    retrieval_ms=float(activation['retrieval_ms']), metrics=metrics, memory=memory,
+                    _runtime=runtime)
+
+            handed, said = None, ''
             token = sessions.ADMISSION.set(metrics)
             try:
                 async with aclosing(route.generate_content_async(request, stream=True)) as stream:
@@ -459,14 +540,39 @@ async def prepare(runtime, text: str, response_contract: str, *,
                         prefix.observe(response)
                         if not response.partial:
                             responses.append(response)
-                        elif response.content and any(part.text and not part.thought or part.function_call
-                                                       for part in response.content.parts):
+                            continue
+                        parts = response.content.parts if response.content else []
+                        visible = ''.join(part.text for part in parts if part.text is not None and not part.thought)
+                        called = any(part.function_call for part in parts)
+                        if visible or called:
                             metrics.setdefault('first_public_delta_ms', round((time.monotonic() - started) * 1000, 3))
+                        if handed is not None:
+                            if visible:
+                                handed._events.put_nowait({'type': 'text-delta', 'text': visible})
+                            if called:
+                                handed._events.put_nowait({'type': 'tool-call-delta'})
+                            continue
+                        said += visible
+                        if called or prefix.prefix != 'C\n' or not said[2:].strip():
+                            continue
+                        # A complete verdict with answer text and no native call
+                        # so far: hand the answer over now; it keeps generating
+                        # here, and its turn binds while it does (owner
+                        # 2026-10-19: speak from the verdict marker, not after
+                        # the whole first response).
+                        metrics['handover_ms'] = round((time.monotonic() - started) * 1000, 3)
+                        handed = turn('complete', None)
+                        handed._stream, handed._events = asyncio.current_task(), asyncio.Queue()
+                        handed._events.put_nowait({'type': 'text-delta', 'text': said[2:]})
+                        _HANDED = handed
+                        handover.set_result(handed)
             finally:
                 try:
                     await owner.close()
                 finally:
                     sessions.ADMISSION.reset(token)
+                    if handed is not None:
+                        handed._events.put_nowait(None)
             metrics['generation_ms'] = round((time.monotonic() - started) * 1000, 3)
             if responses and (usage := next((r.usage_metadata for r in reversed(responses)
                                              if r.usage_metadata is not None), None)) is not None:
@@ -474,22 +580,44 @@ async def prepare(runtime, text: str, response_contract: str, *,
                                cached_input_tokens=usage.cached_content_token_count or 0,
                                output_tokens=usage.candidates_token_count or 0)
     decision, response = _sanitize(responses)
-    prepared = PreparedSpeechTurn(
-        _recall_audit=(agent.ref, query) if reuse == 'prefix' else None,
-        decision=decision, text=clean, conversation_id=conversation_id, generation=generation,
-        history=history, anchor=anchor, native_history=native_history,
-        model_binding=_model_binding(spec, effort), scope=scope_revision(agent), system=system,
-        schema_binding=schema_binding, response=response,
-        wire=deepcopy(payload['messages']), context=compiled_context,
-        packet=deepcopy(activation['activity_packet']), refs=list(activation['refs']),
-        retrieval_ms=float(activation['retrieval_ms']), metrics=metrics, memory=memory, _runtime=runtime)
+    if handed is None:
+        return turn(decision, response)
+    handed.response = response
+    return handed
+
+
+async def prepare(runtime, text: str, response_contract: str, *,
+                  speculative: bool = False) -> PreparedSpeechTurn:
+    """Generate the real first response without starting an Agent activation.
+
+    Returns at a direct answer's control line while the answer still
+    generates (consume() feeds it to early speech), else after the whole
+    response. speculative=True runs it on a speech partial (see speculate).
+    """
+    if not speculative:
+        # A handed-over answer no submission took (refused verdict, newer
+        # capture) would hold the model this admission needs.
+        await _stop_handed(bound=False)
+    handover = asyncio.get_running_loop().create_future()
+    task = asyncio.create_task(_generate(runtime, text, response_contract, speculative, handover),
+                               name='obsidience-speech-admission')
+    task.add_done_callback(_retrieved)
+    try:
+        await asyncio.wait({task, handover}, return_when=asyncio.FIRST_COMPLETED)
+    except asyncio.CancelledError:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        raise
+    prepared = handover.result() if handover.done() else task.result()
+    conversation, conversation_id = runtime._conversation, prepared.conversation_id
     # adopt() repeats these checks for a speculative response (current());
     # here they only delayed a speculation that ended after the final.
     if not speculative and (
-            runtime._generation != generation or conversation.conversation_id != conversation_id
-            or _tip(conversation, conversation_id) != history
-            or native.window_anchor(conversation_id) != anchor
-            or _history(await sessions.refresh(conversation_id)) != native_history):
+            runtime._generation != prepared.generation or conversation.conversation_id != conversation_id
+            or _tip(conversation, conversation_id) != prepared.history
+            or native.window_anchor(conversation_id) != prepared.anchor
+            or _history(await sessions.refresh(conversation_id)) != prepared.native_history):
+        await prepared.close()
         raise SpeechPreparationError('Speech preparation was superseded')
     if not speculative:
         prepared.audit_recall()
@@ -499,8 +627,41 @@ async def prepare(runtime, text: str, response_contract: str, *,
 # The latest speculative admission of a speech partial:
 # (runtime, speech_key of its text, monotonic start, task).
 _SPECULATION: tuple | None = None
+# The latest direct answer handed over while generating, until its stream
+# ends. One that no submission took still holds the model; the next final
+# admission or a cancellation stops it.
+_HANDED: PreparedSpeechTurn | None = None
 # The realtime candidate's exact-command check: those take the reflex route.
 _REFLEX_COMMANDS = ['lights.set', 'tv.control', 'media.pause', 'task.complete']
+
+
+async def _stop_handed(*, bound: bool) -> None:
+    """Stop the handed-over answer unless a submission owns it.
+
+    bound=True (turn cancellation) also stops one bound to its turn. A
+    submission validated but not yet bound keeps it: that submission's own
+    cancel() of the previous turn runs between the two.
+    """
+    global _HANDED
+    handed = _HANDED
+    if handed is None or handed._stream.done():
+        _HANDED = None
+        return
+    if handed._claimed and (handed._bound_turn is None or not bound):
+        return
+    _HANDED = None
+    await handed.close()
+
+
+async def _close(task: asyncio.Task | None) -> None:
+    """Cancel and join a speculative admission, and stop the answer it handed over."""
+    if task is None:
+        return
+    if not task.done():
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+    if not _failed(task) and task.result() is not None:
+        await task.result().close()
 
 
 def _failed(task: asyncio.Task) -> bool:
@@ -513,9 +674,8 @@ def _retrieved(task: asyncio.Task) -> None:
 
 
 async def _speculative_prepare(runtime, text: str, response_contract: str, previous):
-    if previous is not None:
-        # Resident capacity admits one owner; join the superseded stream first.
-        await asyncio.gather(previous, return_exceptions=True)
+    # Resident capacity admits one owner; join the superseded stream first.
+    await _close(previous)
     from .commands import recognize_command
     if recognize_command(text, _REFLEX_COMMANDS) is not None:
         return None
@@ -529,7 +689,7 @@ def speculate(runtime, text: str, response_contract: str) -> None:
 
     The same words (speech_key) keep the running or finished run; other words
     cancel and replace it. Nothing is published, dispatched or written: adopt()
-    hands the buffered response to final admission only for the same words.
+    hands the response to final admission only for the same words.
     """
     global _SPECULATION
     key = speech_key(text)
@@ -555,12 +715,12 @@ def pending() -> bool:
 
 
 async def discard() -> None:
-    """Cancel and join the speculative admission (STOP, new turn, teardown)."""
+    """Cancel and join the speculative admission and stop a handed-over answer
+    still generating (STOP, new turn, teardown)."""
     global _SPECULATION
     current, _SPECULATION = _SPECULATION, None
-    if current is not None and not current[3].done():
-        current[3].cancel()
-        await asyncio.gather(current[3], return_exceptions=True)
+    await _close(current[3] if current is not None else None)
+    await _stop_handed(bound=True)
 
 
 def _report(outcome: str, started: float, arrived: float) -> None:
@@ -585,16 +745,14 @@ async def adopt(runtime, text: str) -> PreparedSpeechTurn | None:
     owner, key, started, task = current
     arrived = time.monotonic()
     if owner is not runtime or key != speech_key(text):
-        if not task.done():
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
+        await _close(task)
         _report('missed', started, arrived)
         return None
     try:
+        # A direct answer is adopted at its control line, still generating.
         await asyncio.wait({task})
     except asyncio.CancelledError:
-        task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
+        await _close(task)
         raise
     error = None if task.cancelled() else task.exception()
     if isinstance(error, SpeechOutputError):
@@ -602,6 +760,8 @@ async def adopt(runtime, text: str) -> PreparedSpeechTurn | None:
         raise error
     prepared = None if task.cancelled() or error is not None else task.result()
     if prepared is None or not await prepared.current(runtime):
+        if prepared is not None:
+            await prepared.close()
         _report('unusable', started, arrived)
         return None
     prepared.metrics.update(speculation_lead_ms=round((arrived - started) * 1000, 3),
