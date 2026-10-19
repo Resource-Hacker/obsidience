@@ -14,7 +14,7 @@ import uuid
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from ....config import CONFIG
 from ....memory.hindsight import MEMORY, hindsight_auth_headers, memory_ref
@@ -37,7 +37,9 @@ class MemoryView:
     memory is added, so a change still re-reads the provider once. The display
     then receives only changed records and their changed edges. Each revision
     is exactly what a client holding it shows; a few are kept so an aborted
-    client fetch can still continue by delta.
+    client fetch can still continue by delta. The latest revision also keeps
+    its records, so other clients of the same bank continue from it without
+    another provider read.
     """
 
     def __init__(self):
@@ -53,15 +55,15 @@ class MemoryView:
 
     def edge_keys(self, edges) -> array:
         keys = array("Q")
-        for edge in edges:
+        for source, target, kind, weight, color in edges:
             ends = []
-            for name in (edge["source"], edge["target"]):
+            for name in (source, target):
                 index = self.ids.get(name)
                 if index is None:
                     index = self.ids[name] = len(self.names)
                     self.names.append(name)
                 ends.append(index)
-            style = (edge["kind"], edge["weight"], edge["color"])
+            style = (kind, weight, color)
             code = self.styles.get(style)
             if code is None:
                 code = self.styles[style] = len(self.style_list)
@@ -77,6 +79,51 @@ class MemoryView:
         kind, weight, color = self.style_list[key & 0xFFFF]
         return {"source": self.names[key >> 36], "target": self.names[key >> 16 & 0xFFFFF],
                 "kind": kind, "weight": weight, "color": color}
+
+    def latest(self, entry: dict, nodes: list[dict]) -> None:
+        """Make `entry` the newest revision; only it keeps the displayed records."""
+        for index, revision in enumerate(self.revisions):
+            if revision is entry:
+                del self.revisions[index]
+                break
+        for revision in self.revisions:
+            revision.pop("shown", None)
+        entry["shown"] = {node["id"]: node for node in nodes}
+        self.revisions.append(entry)
+
+    def since(self, base: dict, latest: dict) -> dict | None:
+        """The exact change from a retained revision to the latest, without a provider read."""
+        if base is latest:
+            return {"nodes": [], "removed": [], "edges": [], "removed_edges": []}
+        shown = latest.get("shown")
+        touched = (base["nodes"].keys() - latest["nodes"].keys()) | {
+            name for name, value in latest["nodes"].items() if base["nodes"].get(name) != value}
+        if shown is None or len(touched) > len(shown) // 2:
+            return None
+        before, after = Counter(base["edges"]), Counter(latest["edges"])
+        return {"nodes": [shown[name] for name in latest["nodes"] if name in touched],
+                "removed": [name for name in base["nodes"] if name not in latest["nodes"]],
+                "edges": [self.edge(key) for key in (after - before).elements()],
+                "removed_edges": [self.edge(key) for key in (before - after).elements()]}
+
+
+def _edge_dicts(edges) -> list[dict]:
+    return [{"source": source, "target": target, "kind": kind, "weight": weight, "color": color}
+            for source, target, kind, weight, color in edges]
+
+
+def _graph_response(content: dict) -> Response:
+    """JSONResponse's exact bytes for a graph whose last keys are nodes and edges.
+
+    One json.dumps of a complete memory graph (tens of MB) holds the GIL for
+    a quarter second, stalling the event loop; slices let it run in between.
+    """
+    encode = json.JSONEncoder(ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode
+    parts = [encode({key: value for key, value in content.items() if key not in ("nodes", "edges")})[:-1]]
+    for key in ("nodes", "edges"):
+        items = content[key]
+        parts += [f',"{key}":[', ",".join(encode(items[i:i + 2000])[1:-1] for i in range(0, len(items), 2000)), "]"]
+    return Response("".join(parts + ["}"]).encode(), media_type="application/json")
 
 
 MEMORY_VIEWS: dict[str, MemoryView] = {}
@@ -155,15 +202,22 @@ def _memory_graph(bank: str, q: str, limit: int | None, since: str, view: Memory
         count = limit
         if count is None:
             stats = read("/stats")
-            count = stats["total_nodes"]
+            # Hindsight caches its stats briefly, so right after a write they
+            # trail the synchronized record list; size from the larger count.
+            count = max(stats["total_nodes"], len(MEMORY.records.get(bank, {})))
             # Read before the graph: a write between them only causes a re-read.
             probe = (tuple(stats.get(key) for key in MEMORY_PROBE), MEMORY.updated_at)
             latest = view.revisions[-1] if view and view.revisions else None
-            if latest and since == latest["revision"] and probe == latest["probe"]:
+            base = next((entry for entry in view.revisions if since and entry["revision"] == since), None) \
+                if latest and probe == latest["probe"] else None
+            change = view.since(base, latest) if base else None
+            if change is not None:
+                # Unchanged provider: a client at an older retained revision
+                # continues from the latest one another client already read.
                 return JSONResponse({"provider": "hindsight", "graph_id": "memory:" + bank, "delta": True,
-                                     "since": since, "revision": since, "nodes": [], "removed": [],
-                                     "edges": [], "removed_edges": [], "total": latest["total"],
-                                     "limited": latest["limited"], "updated_at": MEMORY.updated_at})
+                                     "since": since, "revision": latest["revision"], **change,
+                                     "total": latest["total"], "limited": latest["limited"],
+                                     "updated_at": MEMORY.updated_at})
         doc = read("/graph", limit=count, q=q[:300])
         if limit is None and len(doc.get("nodes", [])) < doc.get("total_units", 0):
             doc = read("/graph", limit=doc["total_units"], q=q[:300])
@@ -184,15 +238,16 @@ def _memory_graph(bank: str, q: str, limit: int | None, since: str, view: Memory
             if not page["items"] or offset >= page["total"]:
                 break
     rows = {str(row["id"]): row for row in doc.get("table_rows", [])}
-    nodes = []
+    nodes, refs = [], {}
     for entry in doc.get("nodes", []):
         item = entry["data"]
         identifier = str(item["id"])
+        refs[identifier] = memory_ref(bank, identifier)
         record = records.get(identifier, {})
         row = rows.get(identifier, record)
         kind = row.get("fact_type", "memory")
         text = str(item.get("text", item.get("label", "")))
-        nodes.append({"id": memory_ref(bank, identifier), "name": text[:100],
+        nodes.append({"id": refs[identifier], "name": text[:100],
                       "text": text, "kind": kind,
                       "color": {"observation": "#c4b5fd", "experience": "#38bdf8", "world": "#5eead4"}.get(kind, "#94a3b8"),
                       # Operational history follows when a fact was mentioned.
@@ -204,32 +259,33 @@ def _memory_graph(bank: str, q: str, limit: int | None, since: str, view: Memory
                       "entities": item.get("entities", ""),
                       "tags": row.get("tags", []), "proof_count": row.get("proof_count", 0),
                       "support": [memory_ref(bank, str(s)) for s in record.get("source_memory_ids") or []],
-                      "ref": memory_ref(bank, identifier)})
-    ids = {node["id"] for node in nodes}
+                      "ref": refs[identifier]})
+    ids = set(refs.values())
+    # Edges stay (source, target, kind, weight, color) tuples: a delta needs
+    # only their keys, and only a complete response builds their dicts.
     edges = []
     for entry in doc.get("edges", []):
         item = entry["data"]
-        source, target = (memory_ref(bank, str(item[k])) for k in ("source", "target"))
-        if source in ids and target in ids:
-            edges.append({"source": source, "target": target, "kind": item.get("linkType", "related"),
-                          "weight": item.get("weight", 1), "color": item.get("color", "#6d8baa")})
+        source, target = refs.get(str(item["source"])), refs.get(str(item["target"]))
+        if source is not None and target is not None:
+            edges.append((source, target, item.get("linkType", "related"),
+                          item.get("weight", 1), item.get("color", "#6d8baa")))
     # Native observation support IDs are provenance edges owned by Hindsight.
     # Its graph endpoint currently omits them; list records supply exact pairs.
     for node in nodes:
         for support in node["support"]:
             if support in ids and support != node["id"]:
-                edges.append({"source": support, "target": node["id"], "kind": "supports",
-                              "weight": 1, "color": "#a78bfa"})
+                edges.append((support, node["id"], "supports", 1, "#a78bfa"))
     result = {"provider": "hindsight", "graph_id": "memory:" + bank,
               "total": doc.get("total_units", len(nodes)),
               "limited": len(nodes) < doc.get("total_units", len(nodes)),
               "updated_at": MEMORY.updated_at}
     if view is None:
-        return JSONResponse({**result, "nodes": nodes, "edges": edges})
+        return _graph_response({**result, "nodes": nodes, "edges": _edge_dicts(edges)})
     try:
         keys = view.edge_keys(edges)
     except OverflowError:
-        return JSONResponse({**result, "nodes": nodes, "edges": edges})
+        return _graph_response({**result, "nodes": nodes, "edges": _edge_dicts(edges)})
     hashes = {node["id"]: hash(json.dumps(node, sort_keys=True, separators=(",", ":"))) for node in nodes}
     base = next((entry for entry in view.revisions if since and entry["revision"] == since), None)
     touched = set() if base is None else (base["nodes"].keys() - hashes.keys()) | {
@@ -238,8 +294,7 @@ def _memory_graph(bank: str, q: str, limit: int | None, since: str, view: Memory
         # Same records. Hindsight re-samples its capped direct links (equal
         # weights, LIMIT 10000) and tied entity windows on every read; that
         # churn is not a change, so the shown sample stays.
-        view.revisions.remove(base)
-        view.revisions.append(base)
+        view.latest(base, nodes)
         base["probe"] = probe
         return JSONResponse({**result, "delta": True, "since": since, "revision": since,
                              "nodes": [], "removed": [], "edges": [], "removed_edges": []})
@@ -255,17 +310,18 @@ def _memory_graph(bank: str, q: str, limit: int | None, since: str, view: Memory
         after = Counter(key for key in keys if at(key))
         state = array("Q", [key for key in base["edges"] if not at(key)])
         state.extend(after.elements())
-        view.revisions.append({"revision": uuid.uuid4().hex, "probe": probe, "nodes": hashes, "edges": state,
-                               "total": result["total"], "limited": result["limited"]})
+        view.latest({"revision": uuid.uuid4().hex, "probe": probe, "nodes": hashes, "edges": state,
+                     "total": result["total"], "limited": result["limited"]}, nodes)
         return JSONResponse({**result, "delta": True, "since": since, "revision": view.revisions[-1]["revision"],
                              "nodes": [node for node in nodes if node["id"] in touched],
                              "removed": [name for name in base["nodes"] if name not in hashes],
                              "edges": [view.edge(key) for key in (after - before).elements()],
                              "removed_edges": [view.edge(key) for key in (before - after).elements()]})
     # First load, Harness restart, expired cursor or a reset bank: complete graph.
-    view.revisions.append({"revision": uuid.uuid4().hex, "probe": probe, "nodes": hashes, "edges": keys,
-                           "total": result["total"], "limited": result["limited"]})
-    return JSONResponse({**result, "revision": view.revisions[-1]["revision"], "nodes": nodes, "edges": edges})
+    view.latest({"revision": uuid.uuid4().hex, "probe": probe, "nodes": hashes, "edges": keys,
+                 "total": result["total"], "limited": result["limited"]}, nodes)
+    return _graph_response({**result, "revision": view.revisions[-1]["revision"], "nodes": nodes,
+                            "edges": _edge_dicts(edges)})
 
 
 @router.get("/memory/record")
