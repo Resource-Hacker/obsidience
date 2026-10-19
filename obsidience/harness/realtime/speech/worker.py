@@ -348,9 +348,10 @@ class SpeechInputTiming:
 class NeMoLocalAudioInputTransport(LocalAudioInputTransport):
     """Leave turn interruption to NeMo without replacing Pipecat capture."""
 
-    def __init__(self, *args: Any, input_channel: str = "mono", **kwargs: Any) -> None:
+    def __init__(self, *args: Any, input_channel: str = "mono", playback=None, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._input_channel = input_channel
+        self._playback = playback
         self._last_level_at = 0.0
         self._last_frame_at = 0.0
         self._stall_watch: asyncio.Task | None = None
@@ -391,6 +392,11 @@ class NeMoLocalAudioInputTransport(LocalAudioInputTransport):
         return state
 
     async def push_frame(self, frame: Frame, direction=FrameDirection.DOWNSTREAM) -> None:
+        if (direction is FrameDirection.DOWNSTREAM and self._playback is not None
+                and isinstance(frame, (VADUserStartedSpeakingFrame, VADUserStoppedSpeakingFrame))
+                and frame is not self._held_stop):
+            # Raw Silero edges, before the turn analyzer holds a stop: barge-in ducking.
+            self._playback.owner_voice(isinstance(frame, VADUserStartedSpeakingFrame))
         if direction is FrameDirection.DOWNSTREAM and isinstance(frame, VADUserStartedSpeakingFrame):
             if self._held_stop is not None:
                 # Speech resumed inside the turn: NeMo never saw the pause.
@@ -458,7 +464,7 @@ class NeMoLocalAudioTransport(LocalAudioTransport):
     def input(self) -> FrameProcessor:
         if self._input is None:
             self._input = NeMoLocalAudioInputTransport(
-                self._pyaudio, self._params, input_channel=self._input_channel,
+                self._pyaudio, self._params, input_channel=self._input_channel, playback=self._playback,
             )
         return self._input
 
@@ -567,6 +573,11 @@ class SpeechTimingAudioOutput(LocalAudioOutputTransport):
             # An opening chirp may outlive natural interruption. Any old TTS
             # already queued behind it must still be discarded.
             return False
+        if isinstance(frame, TTSAudioRawFrame) and self._playback is not None:
+            # Owner barge-in: duck at once, hold after sustained speech, resume on quiet.
+            await self._playback.barge_in_audio(frame, lambda: self._output_level("idle", 0.0))
+            if not current_reply():
+                return False
         try:
             written = await super().write_audio_frame(frame)
         except Exception:
@@ -1409,6 +1420,19 @@ class PocketTTSService(TTSService):
             yield ReplyFinished(output_binding, successful and pcm_bytes > 0)
 
 
+# Barge-in (owner decision 2026-10-19), Realtime mode: a Silero onset over a
+# reply ducks it at once, sustained speech holds it, recognized words commit the
+# existing interruption, and quiet without them resumes it where it was held.
+# LiveKit Agents pauses after 0.5 s and resumes false alarms; Voice-Light ducks -15 dB.
+BARGE_IN_DUCK_GAIN = 10.0 ** (-15.0 / 20.0)
+BARGE_IN_PAUSE_SECS = 0.5  # Owner speech this long holds the reply.
+# Quiet this long without committed words resumes it. The first partial comes
+# 0.7-0.95 s after onset, so up to ~0.5 s after a short burst's quiet edge.
+BARGE_IN_RESUME_SECS = 1.5
+BARGE_IN_MAX_HOLD_SECS = 4.0  # Word-less noise never holds a reply longer.
+BARGE_IN_POLL_SECS = 0.02
+
+
 class PlaybackCommands:
     """One pending Task reply, invalidated before preparation or synthesis.
 
@@ -1416,6 +1440,7 @@ class PlaybackCommands:
     generation and epoch: they queue behind it for the one serialized Pocket
     producer, so playback continues without a gap or an interruption. Its
     outcome cue follows only the final chunk (see ``close_reply``).
+    Owner speech over a reply ducks or holds its audio (``owner_voice``).
     """
 
     def __init__(self) -> None:
@@ -1443,6 +1468,72 @@ class PlaybackCommands:
         # audible output; owner barge-in reports them before invalidation.
         self._playing: str | None = None
         self._audible = 0
+        # Barge-in: enabled by run(); the owner-speech episode over a reply and
+        # the gain last written, so every change ramps within one chunk.
+        self.barge_in = False
+        self._barge: dict | None = None
+        self._duck = 1.0
+
+    def owner_voice(self, speaking: bool) -> None:
+        """One raw Silero edge from capture: start, extend or end a barge-in."""
+        now = time.monotonic()
+        barge = self._barge
+        if barge is not None and barge["quiet"] is not None and now - barge["quiet"] >= BARGE_IN_RESUME_SECS:
+            self.end_barge_in("released", barge["quiet"])
+            barge = None
+        if not speaking:
+            if barge is not None and barge["quiet"] is None:
+                barge["quiet"] = now
+            return
+        if barge is not None:
+            barge["quiet"] = None  # Speech resumed within the window: the same barge-in.
+            return
+        turn = self._turn_taking
+        if self.barge_in and turn is not None and turn.mode == "realtime" and turn._reply_playing():
+            self._barge = {"onset": now, "quiet": None, "paused": False, "ducked": False}
+
+    def end_barge_in(self, outcome: str, at: float | None = None) -> None:
+        """Close the barge-in: ``committed`` by words, ``released`` without them."""
+        barge, self._barge = self._barge, None
+        if barge is not None and barge["ducked"]:
+            # Counts and durations only, to tune false alarms (residual echo, coughs).
+            emit("barge_in", outcome=outcome, generation=self.generation, paused=barge["paused"],
+                 speech_ms=round(max(0.0, (time.monotonic() if at is None else at) - barge["onset"]) * 1000))
+
+    def _barge_in_level(self, now: float) -> tuple[float, bool]:
+        """The reply gain and whether its audio is held, at ``now``."""
+        barge = self._barge
+        if barge is None:
+            return 1.0, False
+        quiet = barge["quiet"]
+        if quiet is not None and now - quiet >= BARGE_IN_RESUME_SECS:
+            self.end_barge_in("released", quiet)
+            return 1.0, False
+        spoken = (now if quiet is None else quiet) - barge["onset"]
+        return BARGE_IN_DUCK_GAIN, (BARGE_IN_PAUSE_SECS <= spoken
+                                    and now - barge["onset"] < BARGE_IN_MAX_HOLD_SECS)
+
+    async def barge_in_audio(self, frame: TTSAudioRawFrame, on_hold) -> None:
+        """Hold one reply chunk while the owner keeps speaking, then scale it.
+
+        Holding stops writing, so the reply resumes at this exact sample; an
+        interruption cancels the output task and with it this wait.
+        """
+        gain, hold = self._barge_in_level(time.monotonic())
+        while hold:
+            if not self._barge["paused"]:
+                self._barge["paused"] = True
+                on_hold()
+            await asyncio.sleep(BARGE_IN_POLL_SECS)
+            gain, hold = self._barge_in_level(time.monotonic())
+        if gain < 1.0:
+            self._barge["ducked"] = True
+        start, self._duck = self._duck, gain
+        if start == gain == 1.0 or not frame.audio:
+            return
+        samples = np.frombuffer(frame.audio, dtype="<i2").astype(np.float32)
+        ramp = np.linspace(start, gain, samples.size, dtype=np.float32) if start != gain else gain
+        frame.audio = np.clip(samples * ramp, -32768, 32767).astype("<i2").tobytes()
 
     def cancel_cues(self) -> None:
         self._ready_cue_binding = None
@@ -1495,6 +1586,7 @@ class PlaybackCommands:
         self._queued = []
         self._reply, self._chunks, self._closing = None, 0, None
         self._playing, self._audible = None, 0
+        self._barge, self._duck = None, 1.0  # The audio it governed is discarded.
         if generation is not None:
             self._controller_ready.set()
         return True
@@ -1699,6 +1791,7 @@ class ObsidienceTaskBridge(FrameProcessor):
         if isinstance(frame, StartInterruptionFrame) and not frame.metadata.get("obsidience_playback_cancel"):
             # What owner speech cut off; invalidation forgets the reply.
             interrupted = self.playback.interrupted_reply()
+            self.playback.end_barge_in("committed")
             self.playback.invalidate(preserve_ready=True)
         await super().process_frame(frame, direction)
         sequence = frame.metadata.get("obsidience_speech_sequence")
@@ -1877,6 +1970,7 @@ async def run(args: argparse.Namespace) -> None:
     input_timing = SpeechInputTiming()
     from obsidience.harness.config import CONFIG
 
+    playback.barge_in = CONFIG.extras.get("realtime_barge_in_ducking", True) is not False
     short_replies = CONFIG.extras.get("realtime_short_replies", True) is not False
     # Read at each Silero pause, after the pipeline (and turn_taking) exists.
     model = str(CONFIG.extras.get("realtime_smart_turn_model", SMART_TURN_MODEL))

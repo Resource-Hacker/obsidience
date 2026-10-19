@@ -726,7 +726,11 @@ full current reads, unrelated hits do not.
   admission, not acoustic endpointing or semantic completion. A trailing bare name
   waits up to 0.35 seconds for continuation; possessives remain rejected.
 - NeMo owns acoustic turns and interruptions; confirmed speech interrupts before
-  endpointing. With contextual admission enabled, its endpoint supplies a candidate,
+  endpointing. In Realtime mode a Silero onset over a reply only ducks it (-15 dB) at
+  once and holds it after 0.5 s of speech; recognized words commit the interruption as
+  before, and 1.5 s of quiet without them resumes the reply where it was held, at most
+  4 s of hold (owner decision 2026-10-19; off switch `realtime_barge_in_ducking`).
+  With contextual admission enabled, its endpoint supplies a candidate,
   and the Executive's completion verdict plus an exact worker acknowledgement admits
   the final turn. VAD also invalidates pending semantic verdicts immediately. Otherwise,
   only final transcripts start work. Never end a turn on missing ASR words while VAD

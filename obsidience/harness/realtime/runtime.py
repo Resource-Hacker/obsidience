@@ -1794,6 +1794,17 @@ class RealtimeSessionManager:
                         ])
                         await self._publish("runtime", reason=event_type, cue=name)
                     continue
+                if event_type == "barge_in":
+                    outcome, speech_ms = worker_event.get("outcome"), worker_event.get("speech_ms")
+                    if (outcome in {"committed", "released"} and type(speech_ms) is int
+                            and 0 <= speech_ms <= 600_000 and type(worker_event.get("paused")) is bool):
+                        # Owner speech ducked or held a reply; committed by words or
+                        # released without them. Counts and durations only.
+                        trace.emit("speech", f"Barge-in {outcome}", [json.dumps({
+                            "event": "speech.barge_in", "outcome": outcome, "speech_ms": speech_ms,
+                            "paused": worker_event["paused"],
+                        }, sort_keys=True)])
+                    continue
                 if event_type in {"speech_detected", "speech_ended", "interruption",
                                   "transcript_partial", "transcript_final"}:
                     if worker_event.get("mode_revision", 0) != self._mode_revision:
