@@ -165,12 +165,15 @@ def main():
     # The native projection keeps trace/activity WebSockets open for its
     # lifetime. Development restarts must cancel those stale subscribers after
     # a short drain instead of waiting forever for the old renderer connection.
+    # Every client is on this machine (LocalClientsOnly): per-message deflate
+    # only spends event-loop time compressing frames for loopback.
     HarnessServer(uvicorn.Config(
         app,
         host=CONFIG.host,
         port=CONFIG.port,
         log_level="warning",
         timeout_graceful_shutdown=5,
+        ws_per_message_deflate=False,
     )).run()
 
 
