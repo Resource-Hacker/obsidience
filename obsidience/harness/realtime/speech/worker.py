@@ -96,6 +96,15 @@ SMART_TURN_PENDING_SECS = 3.0
 # frame (the old fixed pause covered it). An earlier end of turn decodes the
 # rest of that tail from silence before NeMo resets, instead of waiting for it.
 ASR_TAIL_SECS = 0.7
+# Desktop ASR skips its GPU steps in sustained silence (2026-10-18: 12.5 steps/s
+# kept the shared RTX 4000 ~11% busy and cost tensor-split Gemma ~13%, also while
+# it answered). A voiced onset after silence already resets NeMo and replays the
+# 320 ms pre-roll, so skipped silence cannot change what that utterance decodes;
+# the stop edge decodes its own ASR tail. Recognition continues for the unvoiced
+# transcript pause after a VAD stop or recognized word, so speech that never
+# reaches Silero's onset still finishes an utterance already being recognized.
+# realtime_asr_silence_gate = false restores continuous ASR.
+ASR_SILENCE_HOLD_SECS = TRANSCRIPT_IDLE_SECS
 # A trailing filled pause signals that the speaker is still formulating the
 # request. Reuse the existing pending-text grace, including after ASR tail
 # decoding, instead of accepting Smart Turn's early COMPLETE or delaying every turn.
@@ -610,15 +619,21 @@ def emit(kind: str, **payload: Any) -> None:
 class UtteranceNeMoSTTService(NemoSTTService):
     """Start voiced utterances with fresh ASR context and their onset audio."""
 
-    def __init__(self, *, reset_on_vad_onset: bool = True, **kwargs: Any) -> None:
+    def __init__(self, *, reset_on_vad_onset: bool = True, silence_gate: bool = False,
+                 **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._reset_on_vad_onset = reset_on_vad_onset
+        # The gate relies on the onset reset and pre-roll replay below.
+        self._silence_gate = silence_gate and reset_on_vad_onset
+        self._asr_hold_until = 0.0
+        self._asr_gated = False
         self._preroll = bytearray()
         self._recognized_since_stop = False
 
     async def _handle_transcription(self, transcript, is_final, language=None):
         if transcript.strip():
             self._recognized_since_stop = True
+            self._asr_hold_until = time.monotonic() + ASR_SILENCE_HOLD_SECS
         await super()._handle_transcription(transcript, is_final, language)
 
     async def process_audio_frame(self, frame, direction) -> None:
@@ -627,7 +642,12 @@ class UtteranceNeMoSTTService(NemoSTTService):
             # Silero confirms onset. Never retain an unbounded idle recording.
             self._preroll.extend(frame.audio)
             del self._preroll[:-10_240]
+            if self._silence_gate and time.monotonic() >= self._asr_hold_until:
+                # Sustained silence: the pre-roll alone feeds the next onset.
+                self._asr_gated = True
+                return
         # Preserve recognition when quiet speech falls below VAD confidence.
+        self._asr_gated = False
         await super().process_audio_frame(frame, direction)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
@@ -636,13 +656,16 @@ class UtteranceNeMoSTTService(NemoSTTService):
             self._preroll.clear()
             # Long silence suppresses short words in this streaming model.
             # Reset at actual onset, but never replay text already recognized
-            # before VAD: that existing unvoiced path owns the utterance.
+            # before VAD: that existing unvoiced path owns the utterance. Gated
+            # silence broke the decoder's audio continuity and outlasted the
+            # pre-roll, so it always starts fresh.
             reset = (self._reset_on_vad_onset and not self._is_vad_active
-                     and not self._recognized_since_stop)
+                     and (not self._recognized_since_stop or self._asr_gated))
             if reset:
                 async with self._model_lock:
                     self._model.reset_state()
                 self.audio_buffer.clear()
+                self._recognized_since_stop = False
             await super().process_frame(frame, direction)
             if reset:
                 # Keep NeMo's existing 4 x 20 ms batching and encoder shift.
@@ -667,6 +690,7 @@ class UtteranceNeMoSTTService(NemoSTTService):
             # to that finished utterance, never to the next one.
             self.audio_buffer.clear()
             self._recognized_since_stop = False
+            self._asr_hold_until = time.monotonic() + ASR_SILENCE_HOLD_SECS
         if isinstance(frame, (VADUserStoppedSpeakingFrame, ListeningModeFrame,
                               EndFrame, CancelFrame)):
             self._preroll.clear()
@@ -1758,7 +1782,10 @@ async def command_loop(
 
 
 def create_stt(args: argparse.Namespace):
+    from obsidience.harness.config import CONFIG
+
     return UtteranceNeMoSTTService(
+        silence_gate=CONFIG.extras.get("realtime_asr_silence_gate", True) is not False,
         model=args.asr_model,
         device="cuda:0",
         sample_rate=SAMPLE_RATE,

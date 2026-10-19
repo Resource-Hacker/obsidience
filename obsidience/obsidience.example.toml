@@ -16,6 +16,9 @@ git_commit = true  # Local Vault audit only; never the application repository.
 # acceptance, appended to one worker reply with a short pause between sentences;
 # false speaks only the accepted reply.
 # realtime_early_speech = true
+# Desktop ASR skips GPU steps 0.7 s after VAD speech or the last recognized word;
+# each VAD onset replays its 320 ms pre-roll. false runs ASR continuously.
+# realtime_asr_silence_gate = true
 # Optional providers (TOML tables; keep them after the top-level keys above).
 # Hindsight historical memory: leave unset until its service is configured
 # (obsidience/harness/memory/README.md).
