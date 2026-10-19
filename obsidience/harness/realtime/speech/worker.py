@@ -828,7 +828,9 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
         # it, so immediate follow-ups chirp and true speech barge-in stays quiet.
         reply_active = (self._playback._reply_active if self._playback is not None
                         else self._bot_speaking)
-        self._wake_cue_eligible = not any(c.isalnum() for c in text) and not reply_active
+        # Owner choice (2026-10-19): the wake word always chirps, also when the
+        # command follows in one breath; true speech barge-in during a reply stays quiet.
+        self._wake_cue_eligible = not reply_active
         if not self._have_sent_user_started_speaking:
             await self._handle_user_interruption(UserStartedSpeakingFrame())
             self._have_sent_user_started_speaking = True
@@ -965,7 +967,6 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
             # NeMo may return punctuation after the name in a later delta.
             frame.text = frame.text.lstrip(WAKE_STRIP)
         if self._wake_open and any(character.isalnum() for character in frame.text):
-            self._wake_cue_eligible = False
             timeout, self._wake_timeout = self._wake_timeout, None
             if timeout is not None:
                 await self.cancel_task(timeout)
@@ -1458,7 +1459,7 @@ class PlaybackCommands:
         pending_ready = (marker.cue_name in OPENING_CUES
                          and self._pending_ready_cue_binding == (marker.generation, marker.epoch))
         return (((marker.generation, marker.epoch) == (self.generation, self.epoch) or pending_ready)
-                and not (turn and turn._user_speaking_buffer.strip())
+                and (marker.cue_name in OPENING_CUES or not (turn and turn._user_speaking_buffer.strip()))
                 and (marker.cue_name not in OPENING_CUES or (not self._reply_active and turn and turn._wake_open and turn._wake_cue_eligible)))
 
     async def queue_cue(self, name: str, generation: int) -> None:
