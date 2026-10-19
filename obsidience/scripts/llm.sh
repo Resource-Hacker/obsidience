@@ -6,10 +6,11 @@ PRODUCT_ROOT=$(dirname -- "$SCRIPT_DIR")
 # Pinned b11509 with exact input-budget admission plus Gemma 4 schema-constrained
 # Tool arguments (2026-10-09; artifacts.lock.json llama_cpp_executive_g4grammar), plus
 # five tensor-split patches (2026-10-18; even expert split, vocab-split tied head,
-# draft sampling, all-reduce pool, masked NextN) and a size-selected hybrid all-reduce:
-# warm decode 25.6 -> 21.6 ms/step. Patches: /var/lib/ai/src/gpu-tuning-20261018/llama-tp/patches.
-# Rollback: LLAMA=/var/lib/ai/opt/llama.cpp-b11509-obsidience-admission-g4grammar-tp3-20261018
-LLAMA=/var/lib/ai/opt/llama.cpp-b11509-obsidience-admission-g4grammar-tp5-20261018
+# draft sampling, all-reduce pool, masked NextN), a size-selected hybrid all-reduce, device
+# top-64 sampling candidates and one merged dense+MoE all-reduce per layer (patches 01-08,
+# /var/lib/ai/src/gpu-tuning-20261018/llama-tp/patches; outputs identical to tp5, decode -5..9%).
+# Rollback: LLAMA=/var/lib/ai/opt/llama.cpp-b11509-obsidience-admission-g4grammar-tp5-20261018
+LLAMA=/var/lib/ai/opt/llama.cpp-b11509-obsidience-admission-g4grammar-tp6-20261018
 MODEL=${OBSIDIENCE_MODEL:-"$PRODUCT_ROOT/state/models/executive.gguf"}
 LAUNCH="$PRODUCT_ROOT/state/model-launch/obsidience-gemma.json"
 GPU_UUIDS=$(jq -er '.gpu_uuids | join(",")' "$LAUNCH") || exit 64
