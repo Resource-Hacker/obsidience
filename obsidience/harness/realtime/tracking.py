@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
 import threading
+import time
 from pathlib import Path
 
 from ..config import CONFIG
@@ -39,6 +41,41 @@ def _physical_identity():
                    (parent / "idProduct").read_text().strip(), serial)
             return device, name, identity, usb
     raise RuntimeError("The selected camera has no attestable USB identity")
+
+
+def _identity_check(device):
+    """The selected camera's identity for every moving motor command.
+
+    _selected() re-reads the media settings and resolves the deep sysfs link
+    one component at a time, five times a second while steering. Whatever it
+    reads changes one of these stat keys when the camera changes: the settings
+    file, the device node, the sysfs entry and its target. Reuse its identity
+    while they hold, and attest it in full again at least every two seconds.
+    """
+    from .camera import _selected
+    from .devices import MEDIA_SETTINGS_PATH
+    entry = "/sys/class/video4linux/" + os.path.basename(device)
+    last = None
+
+    def keys():
+        try:
+            return tuple((info.st_dev, info.st_ino, info.st_rdev, info.st_mode, info.st_size,
+                          info.st_mtime_ns, info.st_ctime_ns)
+                         for info in (os.stat(path, follow_symlinks=follow) for path, follow in (
+                             (MEDIA_SETTINGS_PATH, True), (device, False), (entry, False), (entry, True))))
+        except OSError:
+            return None
+
+    def check():
+        nonlocal last
+        # Taken before _selected(), so a change after this read moves the next keys.
+        current = keys()
+        if current is not None and last is not None and last[0] == current and time.monotonic() < last[1]:
+            return last[2]
+        identity = _selected()[2]
+        last = (current, time.monotonic() + 2, identity)
+        return identity
+    return check
 
 
 def set_intent(active: bool) -> None:
@@ -271,7 +308,6 @@ def start() -> dict:
         if config.get("enabled") is not True:
             return {"enabled": False, "state": "disabled"}
         try:
-            from .camera import _selected
             from .devices import _obsbot_control
             from .owner_tracking import Tracker
 
@@ -279,7 +315,7 @@ def start() -> dict:
             if _usb is not None and usb != _usb:
                 raise RuntimeError("The selected physical camera identity changed")
             _endpoint, _usb = identity, usb
-            config["identity_check"] = lambda: _selected()[2]
+            config["identity_check"] = _identity_check(device)
             # Native tracking and software PTZ must never compete for the motor.
             _obsbot_control("tracking-zone", "off")
             _obsbot_control("off")
