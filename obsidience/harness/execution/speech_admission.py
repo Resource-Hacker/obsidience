@@ -331,10 +331,14 @@ async def prepare(runtime, text: str, response_contract: str) -> PreparedSpeechT
             evidence = historical_evidence(conversation, conversation_id=conversation_id,
                                            before_sequence=before_sequence)
             context_started = time.monotonic()
-            # The last speech partial usually recalled this exact query already;
-            # adopt its running or finished recall instead of repeating it.
-            recall, metrics['recall_adopted'] = await speech_recall(
-                agent.ref, recall_query(clean, conversation_id), adopt=True)
+            # The last speech partial usually recalled these words already, or
+            # all but a short final word; adopt its running or finished recall
+            # instead of repeating it (prefill.speech_recall's cover policy).
+            recall, reuse = await speech_recall(
+                agent.ref, recall_query(clean, conversation_id), adopt=True, cover=True)
+            metrics['recall_adopted'] = bool(reuse)
+            if reuse:
+                metrics['recall_reuse'] = reuse
             try:
                 activation = await compile_activation(
                     agent, params=params, interactive=True, emit_activity=False,

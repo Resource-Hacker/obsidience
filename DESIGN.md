@@ -311,7 +311,11 @@ neighbours); (9) history projected from the native conversation (no conversation
   admission, speech warms and later ADK steps share one system/Tool/history prefix. An
   exact HassIL command is complete by its full-grammar match and takes the reflex route
   without a model admission. Admission adopts the last speech partial's running or
-  finished Hindsight recall only for the identical Agent and query, and standby
+  finished Hindsight recall for the same Agent and previous request when the request
+  has the same words (case, punctuation and spacing aside) or extends the partial's
+  words by a short tail (the partial holds at least 80% of the final words'
+  characters); memory then comes from that partial's text, while the model reads the
+  final text. Standby
   preparation waits until the candidate's turn starts or the candidate ends, so it
   cannot replace the admitted request's cached tail before the turn's next step.
 

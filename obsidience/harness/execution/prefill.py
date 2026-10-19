@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 
 from .native import admitted_events, request_payload
 from .native_turn import memory_message, recall_query, recall_reply, tool_schemas
@@ -18,15 +19,40 @@ from ..models.context import ContextBudgetExceeded, PROMPT_SAFETY_TOKENS, TaskCo
 # Digests of the latest speech-partial warm sent for the selected conversation:
 # its whole request, runtime context and recalled memory. Never prompt content.
 _PREPARED: dict[str, dict] = {}
-# The latest speech-partial recall: (Agent ref, exact query, task). Cancelling
-# its warm leaves it running, bounded by the recall's own timeout; final speech
-# admission adopts it only for the identical Agent and query (as the memory
-# hook adopts the admission prefetch), and any other recall discards it.
+# The latest speech-partial recall: (Agent ref, query, task). Cancelling its
+# warm leaves it running, bounded by the recall's own timeout; a later partial
+# or final speech admission reuses it under speech_recall's policy, and any
+# other recall discards it.
 _RECALL: tuple | None = None
+# Streaming ASR's final usually differs from the last partial only by casing,
+# punctuation or one short trailing word. A partial's recall stands in for the
+# final's when its words are a prefix holding at least this share of the final
+# words' characters.
+RECALL_PREFIX_COVERAGE = 0.8
+_NOT_WORD = re.compile(r"[^\w']+")
 
 
 def _digest(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
+
+
+def speech_key(text: str) -> str:
+    """A transcript's words, ignoring case, punctuation and spacing."""
+    words = _NOT_WORD.sub(" ", text.replace("’", "'").casefold()).split()
+    return " ".join(word for word in (word.strip("'") for word in words) if word)
+
+
+def _covers(registered: tuple, query: tuple) -> bool:
+    """Whether a registered speech recall query stands in for this one.
+
+    The previous-request half must be identical; the request half must have
+    the same words or be a word prefix covering RECALL_PREFIX_COVERAGE.
+    """
+    if registered[1] != query[1]:
+        return False
+    partial, final = speech_key(registered[0]), speech_key(query[0])
+    return bool(partial) and (partial == final or (
+        final.startswith(partial + " ") and len(partial) >= RECALL_PREFIX_COVERAGE * len(final)))
 
 
 def _start_recall(agent_ref, query: tuple) -> tuple:
@@ -35,17 +61,26 @@ def _start_recall(agent_ref, query: tuple) -> tuple:
         MEMORY.recall(agent_ref, *query, speculative=True), name="obsidience-speech-recall")
 
 
-async def speech_recall(agent_ref, query: tuple, *, adopt: bool = False) -> tuple[asyncio.Task, bool]:
-    """The provisional speech recall for one Agent and query, and whether it was already running.
+async def speech_recall(agent_ref, query: tuple, *, adopt: bool = False,
+                        cover: bool = False) -> tuple[asyncio.Task, str]:
+    """The provisional speech recall for one Agent and query, and how it was reused.
 
     A speech partial keeps it registered for the next partial or final
     admission; adopt=True (final admission) takes ownership of it instead.
-    The identical Agent and query reuses the registered task; any other
-    replaces it, and the replaced task is cancelled and joined.
+    The identical Agent and query reuses the registered task ("exact"); with
+    cover=True (speech admission) the same words ("words") or a covering
+    word prefix ("prefix") also reuse it, so memory comes from the earlier
+    partial's text. Any other query ("") replaces it, and the replaced task
+    is cancelled and joined.
     """
     global _RECALL
     previous = _RECALL
-    reused = previous is not None and previous[:2] == (agent_ref, query)
+    reused = ""
+    if previous is not None and previous[0] == agent_ref:
+        if previous[1] == query:
+            reused = "exact"
+        elif cover and _covers(previous[1], query):
+            reused = "words" if speech_key(previous[1][0]) == speech_key(query[0]) else "prefix"
     current = previous if reused else _start_recall(agent_ref, query)
     _RECALL = None if adopt else current
     if previous is not None and not reused:
