@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import time
 from pathlib import Path
 
 from ...config import CONFIG
@@ -36,6 +37,17 @@ def _incident(task_ref: str, definition: str, tool: str, text: str) -> str:
     return store.sha256(store.canonical_json([task_ref, definition, tool, reason]).encode())
 
 
+# {case_id: origin run id}. A case file is named by the SHA256 of its bytes and
+# store.load rejects any other bytes, so a loaded case's origin never changes.
+_CASE_ORIGINS: dict[str, object] = {}
+
+
+def _case_origin(case_id: str):
+    if case_id not in _CASE_ORIGINS:
+        _CASE_ORIGINS[case_id] = store.load('executive/cases', case_id).get('origin', {}).get('id')
+    return _CASE_ORIGINS[case_id]
+
+
 def reconcile_rejections(notes: list) -> None:
     """Send receipt-proven rejected steps to Audit, even when the Task recovered.
 
@@ -45,7 +57,6 @@ def reconcile_rejections(notes: list) -> None:
     from ..scheduler import enqueue_named_event
     from ...knowledge.tasks import task_triggers
     import hashlib
-    import time
 
     by_ref = {note.ref: note for note in notes}
     auditor = by_ref.get(AUDITOR)
@@ -189,8 +200,7 @@ def reconcile_rejections(notes: list) -> None:
         case_dir = store.root() / 'executive/cases'
         for path in sorted(case_dir.glob('*.json')) if run['task_ref'] == EXECUTIVE else []:
             try:
-                document = store.load('executive/cases', path.stem)
-                if document.get('origin', {}).get('id') == run_id:
+                if _case_origin(path.stem) == run_id:
                     current(path.stem)
                     params['optimization_case'] = path.stem
                     break
@@ -229,8 +239,28 @@ def model_contract(note, agent_ref: str) -> dict:
     return {**contract, 'source_identity': runtime._model_source_identity(spec)}
 
 
+# {name: (stat key, sha256)}: the scheduler checks the revision several times a tick.
+_FILE_DIGESTS: dict[str, tuple[tuple, str]] = {}
+
+
+def _file_digest(name: str) -> str:
+    """Rehash a member only when its inode, size, mtime or ctime moved."""
+    path = revision.ROOT / name
+    info = path.stat()
+    key = (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+    cached = _FILE_DIGESTS.get(name)
+    if cached is not None and cached[0] == key:
+        return cached[1]
+    digest = store.sha256(path.read_bytes())
+    # Like Git's racy-clean rule: a write within timestamp granularity of this
+    # read could keep the same key, so only a settled file's digest is reused.
+    if time.time_ns() - max(info.st_mtime_ns, info.st_ctime_ns) > 2_000_000_000:
+        _FILE_DIGESTS[name] = (key, digest)
+    return digest
+
+
 def implementation_revision() -> str:
-    return store.sha256(store.canonical_json({name: store.sha256((revision.ROOT / name).read_bytes())
+    return store.sha256(store.canonical_json({name: _file_digest(name)
                                              for name in revision.OPTIMIZATION}).encode())
 
 
@@ -348,9 +378,10 @@ def prepare_decisions(sample: dict, decision_cases: list[dict]) -> dict:
 
 def current(case_id: str, accepted_resolver=None) -> dict:
     document = store.load('executive/cases', case_id)
-    if implementation_revision() != IMPLEMENTATION_AT_IMPORT:
+    implementation = implementation_revision()
+    if implementation != IMPLEMENTATION_AT_IMPORT:
         raise ValueError('Reload the changed Harness before preparing or running optimization')
-    if (document['evaluator_revision'] != implementation_revision()
+    if (document['evaluator_revision'] != implementation
             or document['upstream_revision'] != UPSTREAM_REVISION
             or document.get('backend_contract') != backend.contract()):
         raise ValueError('Executive optimizer implementation changed; prepare a fresh case')
