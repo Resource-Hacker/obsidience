@@ -1581,22 +1581,14 @@ class PocketTTSService(TTSService):
                 try:
                     if cancelled.is_set():
                         return
-                    owner_thread = threading.get_ident()
-
-                    def cancel_generation(_module, _inputs) -> None:
-                        if cancelled.is_set() and threading.get_ident() != owner_thread:
-                            raise InterruptedError("Speech synthesis cancelled")
-
-                    hook = self._model.flow_lm.conditioner.register_forward_pre_hook(cancel_generation)
-                    try:
-                        for chunk in self._model.generate_audio_stream(self._voice_state, clean):
-                            if not cancelled.is_set():
-                                samples = chunk.detach().float().cpu().numpy().reshape(-1)
-                                # Discord has its own playback volume. Preserve Pocket's
-                                # dynamics instead of applying the desk speaker's +9 dB.
-                                put(_speech_pcm(samples, gain=1.0))
-                    finally:
-                        hook.remove()
+                    # Pocket's own stop event ends the latent producer at its next frame;
+                    # the generator still joins its decoder before the lock is released.
+                    for chunk in self._model.generate_audio_stream(self._voice_state, clean, stop=cancelled):
+                        if not cancelled.is_set():
+                            samples = chunk.detach().float().cpu().numpy().reshape(-1)
+                            # Discord has its own playback volume. Preserve Pocket's
+                            # dynamics instead of applying the desk speaker's +9 dB.
+                            put(_speech_pcm(samples, gain=1.0))
                 finally:
                     self._synthesis_lock.release()
             except BaseException:
@@ -1660,29 +1652,17 @@ class PocketTTSService(TTSService):
         def synthesize() -> None:
             try:
                 # Pocket's generator is not thread-safe and only joins its
-                # native workers when consumed to completion. Cancel its latent
-                # producer cooperatively, then drain its ordinary cleanup path.
+                # native workers when consumed to completion. Its stop event ends
+                # the latent producer at the next frame (and skips later text
+                # chunks); drain the generator's ordinary decoder join here.
                 with self._synthesis_lock:
                     if cancelled.is_set():
                         return
-                    owner_thread = threading.get_ident()
-
-                    def cancel_generation(_module, _inputs) -> None:
-                        # Pocket catches producer errors, stops the decoder and
-                        # joins it. Stop at a Python boundary in that producer,
-                        # never during the caller's initial prompt preparation.
-                        if cancelled.is_set() and threading.get_ident() != owner_thread:
-                            raise InterruptedError("Speech synthesis cancelled")
-
-                    hook = self._model.flow_lm.conditioner.register_forward_pre_hook(cancel_generation)
-                    try:
-                        for chunk in self._model.generate_audio_stream(self._voice_state, clean):
-                            if cancelled.is_set():
-                                continue
-                            samples = chunk.detach().float().cpu().numpy().reshape(-1)
-                            loop.call_soon_threadsafe(queue.put_nowait, _speech_pcm(samples))
-                    finally:
-                        hook.remove()
+                    for chunk in self._model.generate_audio_stream(self._voice_state, clean, stop=cancelled):
+                        if cancelled.is_set():
+                            continue
+                        samples = chunk.detach().float().cpu().numpy().reshape(-1)
+                        loop.call_soon_threadsafe(queue.put_nowait, _speech_pcm(samples))
             except BaseException as exc:
                 if not cancelled.is_set():
                     loop.call_soon_threadsafe(queue.put_nowait, exc)
@@ -2386,7 +2366,7 @@ async def run(args: argparse.Namespace) -> None:
             semantic_turns=turn_taking._semantic_turns,
             asr="nvidia/nemotron-speech-streaming-en-0.6b",
             asr_chunk_ms=160,
-            tts="pocket-tts-3.0.2-cpu",
+            tts="pocket-tts-3.3.0+9aa7a7f-cpu",
             voice=args.voice,
             cues=sorted(playback._cue_assets),
         )

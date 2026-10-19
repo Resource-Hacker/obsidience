@@ -73,11 +73,11 @@ irrevocably locked instructions. The normal 700 ms pause allowance remains.
 An ASR word-update gap cannot end an utterance while VAD still detects speech;
 the transcript-idle fallback applies only to late text without voiced activity.
 
-Pocket synthesis remains serialized on its shared model. Cancellation stops the
-native latent producer cooperatively through a temporary PyTorch hook, discards
-cancelled PCM and drains Pocket's ordinary error/sentinel/decoder-join cleanup.
-The hook is removed before the next synthesis. The non-daemon synthesis owner
-cannot leave native inference running during interpreter shutdown. Early stream
+Pocket synthesis remains serialized on its shared model. Cancellation sets
+Pocket's own stop event, which ends the native latent producer at its next frame
+and skips later text chunks; the worker discards cancelled PCM and drains Pocket's
+ordinary sentinel/decoder-join cleanup before releasing the model. The non-daemon
+synthesis owner cannot leave native inference running during interpreter shutdown. Early stream
 closure must not abandon those workers or allow overlapping model calls.
 
 At start, Realtime freezes the locally selected microphone, speaker and voice. Optional device lifecycle adapters own any required wake and sleep operations.

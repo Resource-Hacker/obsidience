@@ -361,7 +361,7 @@ class RealtimeSessionManager:
                 "asr": "Nemotron Speech Streaming EN 0.6B",
                 "asr_device": model_runtime.DEVICE_LABELS[media_runtime.ASR_DEVICE],
                 "asr_chunk_ms": 160,
-                "tts": "Pocket TTS 3.0.2",
+                "tts": "Pocket TTS 3.3.0+9aa7a7f",
                 "tts_device": "CPU",
                 "voice": self._tts_voice,
                 "cues": list(self._cue_names),

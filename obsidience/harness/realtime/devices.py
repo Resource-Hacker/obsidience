@@ -685,7 +685,7 @@ def speech_runtime() -> dict[str, Any]:
         "asr": "Nemotron Speech Streaming EN 0.6B",
         "asr_device": DEVICE_LABELS[ASR_DEVICE],
         "asr_chunk_ms": 160,
-        "tts": "Pocket TTS 3.0.2",
+        "tts": "Pocket TTS 3.3.0+9aa7a7f",
         "tts_device": "CPU",
         "voice": current["tts_voice"],
         "voices": [

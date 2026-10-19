@@ -46,10 +46,10 @@
     },
     "pocket_tts": {
       "repository": "https://github.com/kyutai-labs/pocket-tts",
-      "version": "3.0.2",
-      "revision": "f5fa841aa8702d7f15ea9e344bec5290bf42a446",
+      "version": "3.3.0+9aa7a7f",
+      "revision": "9aa7a7f0e52a4cd81bcf8a0fc7c981cdc6d11e53",
       "license": "MIT",
-      "source_path": "/var/lib/ai/src/obsidience-pocket-tts",
+      "source_path": "/var/lib/ai/src/obsidience-pocket-tts-9aa7a7f",
       "integration": "Fixed local speech synthesis of the speech worker (requirements-speech.txt) on CPU: 24 kHz streaming, temperature 0.3, with the pocket_tts_* model, tokenizer, config and voice artifacts. No raw training audio imported; network disabled at runtime."
     },
     "smart_turn_v3_2_cpu": {
