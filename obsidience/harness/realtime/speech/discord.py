@@ -27,8 +27,6 @@ from pathlib import Path
 
 import torch
 
-from nemo.agents.voice_agent.pipecat.services.nemo.streaming_asr import NemoStreamingASRService
-from nemo.agents.voice_agent.pipecat.services.nemo.utils import CacheFeatureBufferer
 from nemo.collections.asr.parts.context_biasing.boosting_graph_batched import BoostingTreeModelConfig
 from nemo.collections.asr.parts.submodules.rnnt_decoding import RNNTBPEDecoding
 from nemo.collections.asr.parts.utils.rnnt_utils import Hypothesis
@@ -111,7 +109,7 @@ def _name_decoder(source):
     return RNNTBPEDecoding(config, model.decoder, model.joint, source.tokenizer)
 
 
-class _DiscordDecoder(NemoStreamingASRService):
+class _DiscordDecoder(speech.StreamingASR):
     def _get_best_hypothesis(self, encoded, encoded_len, partial_hypotheses=None):
         # Batched NeMo merges continuation text, whereas the streaming adapter
         # consumes per-chunk alignments. Keep only recurrent predictor/boosting
@@ -119,6 +117,7 @@ class _DiscordDecoder(NemoStreamingASRService):
         previous = [Hypothesis(score=0.0, y_sequence=[], timestamp=[],
                                dec_state=hyp.dec_state)
                     for hyp in partial_hypotheses] if partial_hypotheses else None
+        encoded = encoded.to(next(self.asr_model.joint.parameters()).dtype)
         return self._name_decoding.rnnt_decoder_predictions_tensor(
             encoded, encoded_len, return_hypotheses=True, partial_hypotheses=previous,
         )
@@ -140,19 +139,13 @@ def _decoder_context(source, decoding):
     }
     isolated = {"_audio_buffer", "_cache_last_channel", "_cache_last_time",
                 "_cache_last_channel_len", "_previous_hypotheses", "_last_transcript_timestamp"}
-    if type(source) is not NemoStreamingASRService or set(vars(source)) != shared | isolated:
+    if type(source) is not speech.StreamingASR or set(vars(source)) != shared | isolated:
         # An upstream decoder adding stream state needs review before sharing.
         raise RuntimeError("unsupported_discord_asr_backend")
     result = object.__new__(_DiscordDecoder)
     result.__dict__.update(vars(source))
     result._name_decoding = decoding
-    result._audio_buffer = CacheFeatureBufferer(
-        sample_rate=speech.SAMPLE_RATE,
-        buffer_size_in_secs=source.buffer_size_in_secs,
-        chunk_size_in_secs=source.chunk_size_in_secs,
-        preprocessor_cfg=source.asr_model.cfg.preprocessor,
-        device=source.device,
-    )
+    result._audio_buffer = source.new_feature_buffer()
     result._reset_cache()
     result._previous_hypotheses = result._get_blank_hypothesis()
     result._last_transcript_timestamp = time.time()
@@ -161,10 +154,10 @@ def _decoder_context(source, decoding):
 
 def _warm_name_decoder(source):
     """Warm shared encoder/decoder graphs before ingress; discard stream state."""
-    # Keep FP32 state while using Ada tensor cores before graph capture.
-    torch.backends.cuda.matmul.fp32_precision = "tf32"
     decoding = _name_decoder(source)
-    encoder_graphs = source.asr_model.encoder.set_streaming_cuda_graphs()
+    # desktop_asr() attached and captured the shared encoder's graphs.
+    encoder = source.asr_model.encoder
+    encoder_graphs = encoder._stream_step_cuda_graphs or encoder.set_streaming_cuda_graphs()
     context = _decoder_context(source, decoding)
     with torch.inference_mode():
         encoded = torch.zeros(

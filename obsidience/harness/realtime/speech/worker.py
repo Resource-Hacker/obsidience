@@ -31,10 +31,12 @@ _nemo_voice_services.__path__ = [
 ]
 sys.modules[_NEMO_SERVICE_PACKAGE] = _nemo_voice_services
 
+from nemo.agents.voice_agent.pipecat.services.nemo.streaming_asr import NemoStreamingASRService
 from nemo.agents.voice_agent.pipecat.services.nemo.stt import (
     NemoSTTService,
     NeMoSTTInputParams,
 )
+from nemo.agents.voice_agent.pipecat.services.nemo.utils import CacheFeatureBufferer
 from nemo.agents.voice_agent.pipecat.services.nemo.turn_taking import (
     NeMoTurnTakingService,
 )
@@ -105,6 +107,12 @@ ASR_TAIL_SECS = 0.7
 # reaches Silero's onset still finishes an utterance already being recognized.
 # realtime_asr_silence_gate = false restores continuous ASR.
 ASR_SILENCE_HOLD_SECS = TRANSCRIPT_IDLE_SECS
+# Encoder precision. bfloat16 weights, caches and features (NVIDIA's streaming
+# pipeline default for this model) cut the encoder step 10.2 -> 6.3 ms and the
+# whole step 14.5 -> 10.0 ms on the idle chipset RTX 4000, with the same replay
+# WER (2026-10-19, asr-v2 replay). The RNNT decoder and joint stay float32.
+# realtime_asr_dtype = "float32" restores full-precision weights.
+ASR_DTYPES = {"bfloat16": torch.bfloat16, "float32": torch.float32}
 # A trailing filled pause signals that the speaker is still formulating the
 # request. Reuse the existing pending-text grace, including after ASR tail
 # decoding, instead of accepting Smart Turn's early COMPLETE or delaying every turn.
@@ -627,11 +635,69 @@ def emit(kind: str, **payload: Any) -> None:
     print(json.dumps({"type": kind, **payload}, ensure_ascii=False), flush=True)
 
 
+class StreamingASR(NemoStreamingASRService):
+    """NeMo's legacy cache-aware stream whose encoder may run in bfloat16.
+
+    Encoder weights, caches and stored log-mel features share the encoder's
+    dtype; the RNNT decoder and joint keep float32, so encoder output is cast
+    at that boundary. Stream state is unchanged otherwise (see discord.py).
+    """
+
+    def _reset_cache(self) -> None:
+        dtype = next(self.asr_model.encoder.parameters()).dtype
+        (self._cache_last_channel, self._cache_last_time,
+         self._cache_last_channel_len) = self.asr_model.encoder.get_initial_cache_state(1, dtype=dtype)
+
+    def new_feature_buffer(self) -> CacheFeatureBufferer:
+        buffer = CacheFeatureBufferer(
+            sample_rate=SAMPLE_RATE, buffer_size_in_secs=self.buffer_size_in_secs,
+            chunk_size_in_secs=self.chunk_size_in_secs,
+            preprocessor_cfg=self.asr_model.cfg.preprocessor, device=self.device,
+        )
+        # Features are computed in float32 and stored at encoder precision.
+        buffer.feature_buffer = buffer.feature_buffer.to(next(self.asr_model.encoder.parameters()).dtype)
+        return buffer
+
+    def _get_best_hypothesis(self, encoded, encoded_len, partial_hypotheses=None):
+        encoded = encoded.to(next(self.asr_model.joint.parameters()).dtype)
+        return super()._get_best_hypothesis(encoded, encoded_len, partial_hypotheses)
+
+
+def desktop_asr(model: str, *, device: str, dtype: str = "bfloat16") -> StreamingASR:
+    """Load, cast, place and warm the one shared ASR model before any capture.
+
+    Restoring straight onto the GPU briefly held a second copy of the weights
+    (4.7 GiB reserved on the RTX 4000 shared with Gemma), so restore on the
+    CPU, cast the encoder, then move once. Encoder CUDA graphs are captured
+    here; they were formerly only a side effect of the Discord adapter.
+    """
+    service = StreamingASR(model, [70, 1], device="cpu", decoder_type="rnnt", frame_len_in_secs=0.08)
+    service.asr_model.encoder.to(ASR_DTYPES[dtype])
+    if device != "cpu":
+        service.asr_model.to(device)
+        service.device = device
+    service._audio_buffer = service.new_feature_buffer()
+    service.reset_state()  # Caches at the placed device and dtype.
+    if device.startswith("cuda"):
+        # Ada tensor cores for the float32 parts before graph capture.
+        torch.backends.cuda.matmul.fp32_precision = "tf32"
+        graphs = service.asr_model.encoder.set_streaming_cuda_graphs()
+        silence = bytes(round(SAMPLE_RATE * service.chunk_size_in_secs) * 2)
+        with torch.inference_mode():
+            # Native capture follows three eager steps; include a later replay.
+            for _ in range(graphs.warmup_steps + 2):
+                service.transcribe(silence)
+        torch.cuda.synchronize(device)
+    service.reset_state()
+    return service
+
+
 class UtteranceNeMoSTTService(NemoSTTService):
     """Start voiced utterances with fresh ASR context and their onset audio."""
 
     def __init__(self, *, reset_on_vad_onset: bool = True, silence_gate: bool = False,
-                 **kwargs: Any) -> None:
+                 asr_dtype: str = "bfloat16", **kwargs: Any) -> None:
+        self._asr_dtype = asr_dtype  # Read by _load_model during NeMo's constructor.
         super().__init__(**kwargs)
         self._reset_on_vad_onset = reset_on_vad_onset
         # The gate relies on the onset reset and pre-roll replay below.
@@ -640,6 +706,9 @@ class UtteranceNeMoSTTService(NemoSTTService):
         self._asr_gated = False
         self._preroll = bytearray()
         self._recognized_since_stop = False
+
+    def _load_model(self) -> None:
+        self._model = desktop_asr(self._model_name, device=self._device, dtype=self._asr_dtype)
 
     async def _handle_transcription(self, transcript, is_final, language=None):
         if transcript.strip():
@@ -1881,8 +1950,12 @@ async def command_loop(
 def create_stt(args: argparse.Namespace):
     from obsidience.harness.config import CONFIG
 
+    dtype = CONFIG.extras.get("realtime_asr_dtype", "bfloat16")
+    if dtype not in ASR_DTYPES:
+        raise ValueError("realtime_asr_dtype must be one of: " + ", ".join(ASR_DTYPES))
     return UtteranceNeMoSTTService(
         silence_gate=CONFIG.extras.get("realtime_asr_silence_gate", True) is not False,
+        asr_dtype=dtype,
         model=args.asr_model,
         device="cuda:0",
         sample_rate=SAMPLE_RATE,
