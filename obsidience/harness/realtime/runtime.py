@@ -101,6 +101,7 @@ def speakable_text(text: str) -> str:
 _SPOKEN_BOUNDARY = re.compile(r"[.!?…][\"'”’)\]*_]*(?=\s)|\n")
 _TOOL_TEXT = re.compile(r"\s*(?:\{|[\w.]+\{)")
 MAX_PROVISIONAL_CHARS = 2000  # The completion authority's public summary bound.
+ACKNOWLEDGEMENT = "On it."  # Spoken once while a slow Tool runs (owner, 2026-10-19).
 
 
 class ProvisionalReply:
@@ -113,6 +114,8 @@ class ProvisionalReply:
     cancellation; acceptance then voices only the unspoken remainder.
     The first sentence opens one worker reply; later sentences and the
     remainder are appended to it, so playback continues without a gap.
+    A slow Tool may first open that reply with a short acknowledgement
+    (``acknowledge``); everything after it queues behind those words.
     Nothing here is persisted, published as Chat text or used as evidence.
     """
 
@@ -129,10 +132,25 @@ class ProvisionalReply:
         # Raw text handed to the worker and the open worker reply's playback.
         self.sent = ""
         self.playback_id: str | None = None
+        # The acknowledgement is spoken at most once per run; the first words
+        # after it, not the acknowledgement, carry the turn's speech timing.
+        self.acknowledged = False
+        self.timed = False
 
     def begin_step(self, *, eligible: bool) -> None:
         self._live = eligible and not self.halted
         self._text, self._offered = "", 0
+
+    async def acknowledge(self) -> bool:
+        """Say "On it." while a slow Tool runs: once per run, before any reply audio.
+
+        Owner decision 2026-10-19. It is never part of the reply text, Chat,
+        memory or evidence; the Tool's caller decides when a Tool is slow.
+        """
+        if self.acknowledged or self.halted or self.playback_id is not None:
+            return False
+        self.acknowledged = True
+        return await self._speech._provisional_acknowledge(self)
 
     async def feed(self, event: dict) -> None:
         """Observe one native model stream event of the current step."""
@@ -619,7 +637,7 @@ class RealtimeSessionManager:
 
     async def speak(self, payload: dict) -> None:
         reply, self._provisional = self._provisional, None
-        if reply is not None and reply.sent and reply.playback_id is not None:
+        if reply is not None and reply.playback_id is not None:
             text, heard = str(payload.get("text", "")), reply.sent
             if (payload.get("generation") == reply.generation == self.conversation._generation
                     and payload.get("run_id") == reply.timing["run_id"]
@@ -641,6 +659,13 @@ class RealtimeSessionManager:
 
     async def cue(self, name: str) -> None:
         """Nonverbal feedback uses the same generation-bound speech transport."""
+        reply = self._provisional
+        if (name == "complete" and reply is not None and reply.playback_id is not None
+                and reply.generation == self.conversation._generation and self._phase in READY_PHASES):
+            # A cue-only command closes the reply its acknowledgement opened, so
+            # the chirp follows those words instead of interleaving with them.
+            await self._provisional_send(reply, "", outcome="completed")
+            return
         if self._phase in READY_PHASES and name in self._cue_names:
             try:
                 await self._send_worker({
@@ -693,10 +718,15 @@ class RealtimeSessionManager:
                 "outcome": outcome or "", **({} if final else {"open": True}), **reply.timing,
             })
             reply.playback_id = payload["playback_id"]
+            reply.timed = True
         else:
             payload = {"type": "speak_append", "generation": reply.generation,
                        "playback_id": reply.playback_id, "text": spoken,
                        "outcome": outcome or "", **({} if final else {"open": True})}
+            if spoken and not reply.timed:
+                # The acknowledgement opened this reply: its first words are timed.
+                payload.update(reply.timing)
+                reply.timed = True
         reply.sent += text
         try:
             await self._send_worker(payload, provisional=True)
@@ -707,9 +737,36 @@ class RealtimeSessionManager:
             self._last_error = message
             trace.emit("error", message, [str(exc)[:MAX_EVENT_TEXT]])
 
+    async def _provisional_acknowledge(self, reply: ProvisionalReply) -> bool:
+        """Open the run's worker reply with the acknowledgement, never over the owner."""
+        if (reply is not self._provisional or reply.generation != self.conversation._generation
+                or self._phase not in READY_PHASES or self._user_speaking or self._capture_active):
+            return False
+        # Untimed: the turn's first-audio latency stays the reply's own words.
+        payload = self._prepare_playback({
+            "type": "speak", "generation": reply.generation, "text": ACKNOWLEDGEMENT,
+            "outcome": "", "open": True, "run_id": reply.timing["run_id"], "acknowledgement": True,
+        })
+        reply.playback_id = payload["playback_id"]
+        try:
+            await self._send_worker(payload, provisional=True)
+        except Exception as exc:
+            if self._provisional is reply:
+                self._provisional = None
+            trace.emit("error", f"Speech acknowledgement failed: {type(exc).__name__}",
+                       [str(exc)[:MAX_EVENT_TEXT]])
+            return False
+        trace.emit("speech", "Spoken acknowledgement while a Tool runs", [json.dumps({
+            "event": "speech.acknowledged", "run_id": reply.timing["run_id"],
+            "generation": reply.generation,
+        }, sort_keys=True)], {"run_id": reply.timing["run_id"]})
+        return True
+
     async def _provisional_retract(self, reply: ProvisionalReply) -> None:
+        if not reply.sent:
+            return  # No reply words to retract; an acknowledgement's reply stays open.
         playing = reply.playback_id is not None
-        reply.sent, reply.playback_id = "", None
+        reply.sent, reply.playback_id, reply.timed = "", None, False
         if playing and reply is self._provisional and reply.generation == self.conversation._generation:
             try:
                 await self._send_worker({"type": "cancel", "generation": reply.generation,
@@ -786,17 +843,19 @@ class RealtimeSessionManager:
         process = self._process
         if process is None or process.returncode is not None or process.stdin is None:
             return
-        # An appended chunk (speak_append) keeps the open reply's playback and timing.
-        if payload.get("type") in {"speak", "cancel", "stop"}:
+        # An appended chunk (speak_append) keeps the open reply's playback and
+        # timing, except the timed first words after a spoken acknowledgement.
+        timed_append = payload.get("type") == "speak_append" and "turn_id" in payload
+        if payload.get("type") in {"speak", "cancel", "stop"} or timed_append:
             if payload["type"] == "speak":
                 if not payload.get("playback_id") or payload["playback_id"] != self._playback_id:
                     payload = self._prepare_playback(payload)
             self._playback_timing_binding = (
                 tuple(payload.get(key) for key in ("generation", "speech_sequence", "turn_id", "run_id"))
-                if payload.get("type") == "speak" else None
+                if payload["type"] in {"speak", "speak_append"} else None
             )
             self._playback_timing_stages.clear()
-            if payload["type"] == "speak":
+            if payload["type"] in {"speak", "speak_append"} and not payload.get("acknowledgement"):
                 # Separates Harness handoff delay from the worker's receipt.
                 trace.latency("speech_sent", **{
                     key: payload[key] for key in ("generation", "speech_sequence", "turn_id", "run_id")

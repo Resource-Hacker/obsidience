@@ -1572,7 +1572,10 @@ class PlaybackCommands:
             self._reply_active = True
             self._chunks += 1
             self._last_text = text
-            self._queued.append((generation, self.epoch, text, None, playback_id, outcome, opened))
+            # Only the first words after a spoken acknowledgement carry timing.
+            timing = self._timing_context(command)
+            self.record_timing("speech_received", timing)
+            self._queued.append((generation, self.epoch, text, timing, playback_id, outcome, opened))
             self._start_preparing(task)
         elif not opened:
             # Nothing left to say: the outcome cue follows the last chunk.

@@ -45,6 +45,14 @@ from ...models.context import PROMPT_SAFETY_TOKENS, TaskContext, discard_consume
 from . import sessions
 
 
+# "On it." (owner decision 2026-10-19): only a voice turn whose Tool is still
+# running after this long hears it; fast Tools and direct answers say nothing.
+ACKNOWLEDGE_AFTER_SECS = 1.5
+# Tools whose receipts are usually slower than that (30 days to 2026-10-19:
+# web.search p50 2.2 s, computer.replay 2.1 s, media.acquire 3.1 s) say it as they start.
+SLOW_TOOLS = frozenset({'web.search', 'computer.replay', 'media.acquire'})
+
+
 def step_budget(evaluation) -> int:
     """The activation's model decisions: the executor limit, or an evaluation trial's own."""
     if evaluation is None:
@@ -159,6 +167,7 @@ class AgentPlugin(BasePlugin):
         # a verified voice command may end with its cue (after_tool_callback).
         self.step_calls = 0
         self._last_call: tuple | None = None
+        self._acknowledgement: asyncio.Task | None = None
 
     # Model reservation -------------------------------------------------
     async def adopt_lease(self):
@@ -327,10 +336,15 @@ class AgentPlugin(BasePlugin):
             queries = ([args.get('query')] if 'query' in args else args.get('queries', [])) if name == 'vault.search' else []
             previous = {query: self.ctx.get('_vault_searches', {}).get(query) for query in queries}
             blocked = self._repeat_blocked(name, args) if self.task_mode and name != 'task.complete' else None
-            outcome = await run_capability(
-                self.ex, name, args, execute=executor.execute_capability,
-                execute_async=executor.execute_capability_async, scope_checkpoint=executor._scope_checkpoint,
-                blocked=blocked)
+            acknowledgement = self._acknowledge_later(name)
+            try:
+                outcome = await run_capability(
+                    self.ex, name, args, execute=executor.execute_capability,
+                    execute_async=executor.execute_capability_async, scope_checkpoint=executor._scope_checkpoint,
+                    blocked=blocked)
+            finally:
+                if acknowledgement is not None:
+                    acknowledgement.cancel()  # Words already on their way are not cut.
             self._last_call = (name, args, outcome)
             if self.ctx.get('_discord') and name != 'task.complete':
                 # A corrected call must actually run: its prerequisite may now
@@ -373,6 +387,26 @@ class AgentPlugin(BasePlugin):
                     'attachmentId': identifier, 'mediaType': 'image/png', 'bytes': len(raw),
                     'width': int.from_bytes(raw[16:20], 'big'), 'height': int.from_bytes(raw[20:24], 'big')}})
             return {'content': blocks}
+
+    def _acknowledge_later(self, name: str) -> asyncio.Task | None:
+        """Say "On it." once in a voice turn whose Tool runs long (owner, 2026-10-19).
+
+        A Tool still running after ACKNOWLEDGE_AFTER_SECS, or one of SLOW_TOOLS
+        as it starts. The provisional reply speaks it at most once per run, never
+        over the owner or after reply audio began; STOP or barge-in cancels the
+        run and with it this timer.
+        """
+        if self.voice is None or name == 'task.complete' or '_discord' in self.ctx:
+            return None
+        delay = 0.0 if name in SLOW_TOOLS else ACKNOWLEDGE_AFTER_SECS
+        voice = self.voice
+
+        async def acknowledge() -> None:
+            await asyncio.sleep(delay)
+            await asyncio.shield(voice.acknowledge())
+
+        self._acknowledgement = asyncio.create_task(acknowledge(), name='obsidience-tool-acknowledgement')
+        return self._acknowledgement
 
     async def _simulate(self, name: str, args: dict) -> dict:
         """An evaluation trial's answer to one admitted call; the model still chose it."""
@@ -698,6 +732,10 @@ class AgentPlugin(BasePlugin):
         """Release what this activation acquired: an unadopted reservation and its lease."""
         self.generating.clear()
         self.images.clear()
+        acknowledgement, self._acknowledgement = self._acknowledgement, None
+        if acknowledgement is not None and not acknowledgement.done():
+            acknowledgement.cancel()
+            await asyncio.wait([acknowledgement])
         if self.lease_prefetch is not None:
             # An unadopted reservation never outlives its activation.
             self.lease_prefetch.cancel()

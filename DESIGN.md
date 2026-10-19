@@ -746,7 +746,10 @@ full current reads, unrelated hits do not.
   failure is a delivery error that never erases the reply. Completion needs the ordered
   terminal marker after the last PCM write.
 - Cues (installation clips; missing clips are silent): no processing clips or timers;
-  command text suppresses an unstarted opening chirp, while a started chirp finishes.
+  the one exception is a spoken "On it." when a voice turn's Tool is still running after
+  1.5 s (or a usually slower Tool starts): once per run, never over the owner or after
+  reply audio began; it opens the reply, so the answer queues behind it (owner decision
+  2026-10-19). Command text suppresses an unstarted opening chirp, while a started chirp finishes.
   STOP, mute, mode change and shutdown cancel. Code, not model
   wording, replaces spoken confirmation with a completion chirp for receipt-verified
   reflex effects, and for a short single voice command whose one effect Tool returns a
