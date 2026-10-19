@@ -433,6 +433,15 @@ class AgentPlugin(BasePlugin):
             metrics['speech_prepared_first_step'] = True
             self._step = {'fields': fields, 'metrics': metrics, 'started': time.monotonic(), 'menu': None}
             self.ex.decision_messages[:] = deepcopy(prepared.wire)
+            parts = response.content.parts if response.content and response.content.parts else []
+            if self.voice is not None and not any(part.function_call for part in parts):
+                # The admitted answer streams to early speech now, as an ordinary
+                # step's text would, instead of waiting for completion and the
+                # turn's end: claim-checked sentences, retracted if completion
+                # rejects it. A Tool-call response voices nothing early.
+                self.voice.begin_step(eligible=self.ctx.get('_reflex_command_verified') is not True)
+                if text := ''.join(part.text for part in parts if part.text and not part.thought):
+                    await self.voice.feed({'type': 'text-delta', 'text': text})
             # The model already generated this exact response. ADK appends its
             # sanitized content and dispatches native calls through normal hooks.
             await self._finish_step(response, from_choice=True)

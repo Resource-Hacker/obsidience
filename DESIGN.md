@@ -307,7 +307,9 @@ neighbours); (9) history projected from the native conversation (no conversation
   regenerating that first response. Fresh audio, STOP, mode/session changes and teardown
   invalidate owned inference. Missing/invalid markers fail closed. A 30-second abandoned
   continuation expires without execution; it is not a sentence-completion timer. The
-  first response is buffered, so early speech starts only after this admission. The
+  first response is buffered, so early speech starts only after this admission: when the
+  turn consumes an admitted answer without native calls, its claim-checked sentences go
+  to early speech at once, before completion acceptance, as an ordinary step's would. The
   completion protocol appears only in admission requests, as a privately marked control
   appended to the owner request's message, so admission, speech warms and later ADK steps
   share one system/Tool/history/context/memory prefix, and llama.cpp's last-user-message
