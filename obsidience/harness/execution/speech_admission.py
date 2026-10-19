@@ -211,6 +211,31 @@ class PreparedSpeechTurn:
     _bound_sequence: int | None = field(repr=False, default=None)
     _bound_generation: int | None = field(repr=False, default=None)
     _consumed: bool = field(repr=False, default=False)
+    # (Agent ref, recall query) when memory came from a shorter partial's recall.
+    _recall_audit: tuple | None = field(repr=False, default=None)
+
+    def audit_recall(self) -> None:
+        """Measure what memory from a shorter partial cost this admitted text.
+
+        Metadata only and after the verdict: the final words' own recall runs
+        in the background and the trace reports how many memories they share.
+        Nothing reaches a prompt.
+        """
+        audit, self._recall_audit = self._recall_audit, None
+        if audit is None:
+            return
+        used = {row['text'] for row in json.loads(self.memory)['memories']} if self.memory else set()
+        coverage = self.metrics.get('recall_coverage')
+
+        async def compare():
+            from ..memory.hindsight import MEMORY
+            value = recall_reply(await MEMORY.recall(audit[0], *audit[1], speculative=True))
+            exact = {row['text'] for row in value['memories']}
+            action_trace.emit('measurement', 'Speech recall prefix agreement', [
+                f'coverage: {coverage}', f'shared: {len(used & exact)}',
+                f'prefix_memories: {len(used)}', f'exact_memories: {len(exact)}',
+                f'status: {value.get("status", "returned")}'])
+        asyncio.create_task(compare(), name='obsidience-speech-recall-audit').add_done_callback(_retrieved)
 
     async def current(self, runtime) -> bool:
         """Whether this unbound response still matches the live conversation.
@@ -361,15 +386,17 @@ async def prepare(runtime, text: str, response_contract: str, *,
             evidence = historical_evidence(conversation, conversation_id=conversation_id,
                                            before_sequence=before_sequence)
             context_started = time.monotonic()
-            # The last speech partial usually recalled these words already, or
-            # all but a short final word; adopt its running or finished recall
-            # instead of repeating it (prefill.speech_recall's cover policy).
-            # Speculation leaves it registered for the next partial or final.
-            recall, reuse = await speech_recall(
-                agent.ref, recall_query(clean, conversation_id), adopt=not speculative, cover=True)
+            # An earlier speech partial usually recalled these words already,
+            # or their first half or more; adopt its finished (else running)
+            # recall instead of waiting for a new one (prefill.speech_recall's
+            # cover policy). Speculation leaves it registered for the next
+            # partial or final.
+            query = recall_query(clean, conversation_id)
+            recall, reuse, coverage = await speech_recall(
+                agent.ref, query, adopt=not speculative, cover=True)
             metrics['recall_adopted'] = bool(reuse)
             if reuse:
-                metrics['recall_reuse'] = reuse
+                metrics.update(recall_reuse=reuse, recall_coverage=coverage)
             try:
                 activation = await compile_activation(
                     agent, params=params, interactive=True, emit_activity=False,
@@ -455,6 +482,7 @@ async def prepare(runtime, text: str, response_contract: str, *,
                                output_tokens=usage.candidates_token_count or 0)
     decision, response = _sanitize(responses)
     prepared = PreparedSpeechTurn(
+        _recall_audit=(agent.ref, query) if reuse == 'prefix' else None,
         decision=decision, text=clean, conversation_id=conversation_id, generation=generation,
         history=history, anchor=anchor, native_history=native_history,
         model_binding=_model_binding(spec, effort), scope=scope_revision(agent), system=system,
@@ -467,6 +495,8 @@ async def prepare(runtime, text: str, response_contract: str, *,
             or native.window_anchor(conversation_id) != anchor
             or _history(await sessions.refresh(conversation_id)) != native_history):
         raise SpeechPreparationError('Speech preparation was superseded')
+    if not speculative:
+        prepared.audit_recall()
     return prepared
 
 
@@ -581,4 +611,5 @@ async def adopt(runtime, text: str) -> PreparedSpeechTurn | None:
     prepared.metrics.update(speculation_lead_ms=round((arrived - started) * 1000, 3),
                             speculation_wait_ms=round((time.monotonic() - arrived) * 1000, 3))
     _report('adopted', started, arrived)
+    prepared.audit_recall()
     return prepared

@@ -19,16 +19,19 @@ from ..models.context import ContextBudgetExceeded, PROMPT_SAFETY_TOKENS, TaskCo
 # Digests of the latest speech-partial warm sent for the selected conversation:
 # its whole request, runtime context and recalled memory. Never prompt content.
 _PREPARED: dict[str, dict] = {}
-# The latest speech-partial recall: (Agent ref, query, task). Cancelling its
-# warm leaves it running, bounded by the recall's own timeout; a later partial
-# or final speech admission reuses it under speech_recall's policy, and any
-# other recall discards it.
-_RECALL: tuple | None = None
-# Streaming ASR's final usually differs from the last partial only by casing,
-# punctuation or one short trailing word. A partial's recall stands in for the
-# final's when its words are a prefix holding at least this share of the final
-# words' characters.
-RECALL_PREFIX_COVERAGE = 0.8
+# Speech-partial recalls of the pending utterance, oldest first: (Agent ref,
+# query, task), at most one running. Cancelling a warm or speculative
+# admission leaves its recall running, bounded by the recall's own timeout;
+# speech_recall keeps those that still stand in for the newest words and
+# discards the rest.
+_RECALLS: list[tuple] = []
+# A partial's recall stands in for later words of the same utterance when its
+# words are a word prefix holding at least this share of their characters.
+# Partials change every 150-250 ms and a recall takes 280-670 ms, so at 0.8
+# nearly every partial restarted recall and its admission waited for it on the
+# verdict's critical path (2026-10-19). Memory then reflects the request's
+# first half or more; trace "Speech recall prefix agreement" measures the cost.
+RECALL_PREFIX_COVERAGE = 0.5
 _NOT_WORD = re.compile(r"[^\w']+")
 
 
@@ -62,31 +65,51 @@ def _start_recall(agent_ref, query: tuple) -> tuple:
 
 
 async def speech_recall(agent_ref, query: tuple, *, adopt: bool = False,
-                        cover: bool = False) -> tuple[asyncio.Task, str]:
-    """The provisional speech recall for one Agent and query, and how it was reused.
+                        cover: bool = False) -> tuple[asyncio.Task, str, float]:
+    """The provisional speech recall for one Agent and query, how it was
+    reused, and the share of the request's characters its query held.
 
-    A speech partial keeps it registered for the next partial or final
-    admission; adopt=True (final admission) takes ownership of it instead.
-    The identical Agent and query reuses the registered task ("exact"); with
-    cover=True (speech admission) the same words ("words") or a covering
-    word prefix ("prefix") also reuse it, so memory comes from the earlier
-    partial's text. Any other query ("") replaces it, and the replaced task
-    is cancelled and joined.
+    The identical Agent and query reuses a registered task ("exact"). With
+    cover=True (speech admission) a registered recall of the same words
+    ("words") or a covering word prefix ("prefix") stands in without waiting
+    for a fresh one: the newest finished, else the earliest started. Only when
+    none covers does a new recall start, and only once the utterance's running
+    recall has finished: Hindsight completes a recall's SQL and rerank even
+    after the client cancels it, so per-partial recalls that were superseded
+    and cancelled competed for its CPU with the one finally used (single
+    recalls then took 620-1340 ms, 2026-10-19). A speech partial keeps its
+    recall registered for later partials and the final admission; adopt=True
+    (final admission) takes ownership instead. Registered recalls that no
+    longer stand in for this query are discarded.
     """
-    global _RECALL
-    previous = _RECALL
-    reused = ""
-    if previous is not None and previous[0] == agent_ref:
-        if previous[1] == query:
-            reused = "exact"
-        elif cover and _covers(previous[1], query):
-            reused = "words" if speech_key(previous[1][0]) == speech_key(query[0]) else "prefix"
-    current = previous if reused else _start_recall(agent_ref, query)
-    _RECALL = None if adopt else current
-    if previous is not None and not reused:
+    global _RECALLS
+    while True:
+        mine = [entry for entry in _RECALLS if entry[0] == agent_ref]
+        chosen = next((entry for entry in mine if entry[1] == query), None)
+        reused = "exact" if chosen is not None else ""
+        covering = [entry for entry in mine if cover and _covers(entry[1], query)]
+        if chosen is None and covering:
+            finished = [entry for entry in covering if entry[2].done()]
+            chosen = finished[-1] if finished else covering[0]
+            reused = "words" if speech_key(chosen[1][0]) == speech_key(query[0]) else "prefix"
+        if chosen is not None:
+            break
+        running = {entry[2] for entry in mine if not entry[2].done() and entry[1][1] == query[1]}
+        if not running:
+            chosen = _start_recall(agent_ref, query)
+            break
+        # Cancelling the waiter leaves the running recall registered.
+        await asyncio.wait(running)
+    keep = [] if adopt else [entry for entry in _RECALLS if entry is chosen or entry in covering]
+    if not adopt and chosen not in keep:
+        keep.append(chosen)
+    dropped = [entry for entry in _RECALLS if entry not in keep and entry is not chosen]
+    _RECALLS = keep
+    if dropped:
         from .native_turn import discard_recall
-        await discard_recall(previous)
-    return current[2], reused
+        await asyncio.gather(*(discard_recall(entry) for entry in dropped))
+    held, words = speech_key(chosen[1][0]), speech_key(query[0])
+    return chosen[2], reused, round(len(held) / len(words), 3) if words else 1.0
 
 
 def report_reuse(conversation_id: str, context: str, memory: str) -> None:
@@ -159,7 +182,7 @@ async def prepare(conversation, text: str, response_contract: str, *, idle: bool
             recall = None
             if native and not idle:
                 # The final transcript's turn follows the same latest exchange.
-                recall, _ = await speech_recall(agent.ref, recall_query(text, conversation_id))
+                recall, _, _ = await speech_recall(agent.ref, recall_query(text, conversation_id))
             if stable_only:
                 # The stable prefix renders neither Bindings nor the text
                 # conversation, so skip their synchronous ledger scans.

@@ -315,12 +315,16 @@ neighbours); (9) history projected from the native conversation (no conversation
   prompt): the next speculative run, the final admission and the step after a Tool
   result re-evaluate only from the owner request. An
   exact HassIL command is complete by its full-grammar match and takes the reflex route
-  without a model admission. Admission adopts the last speech partial's running or
-  finished Hindsight recall for the same Agent and previous request when the request
-  has the same words (case, punctuation and spacing aside) or extends the partial's
-  words by a short tail (the partial holds at least 80% of the final words'
-  characters); memory then comes from that partial's text, while the model reads the
-  final text. Standby
+  without a model admission. Admission adopts an earlier speech partial's Hindsight
+  recall for the same Agent and previous request when the request has the same words
+  (case, punctuation and spacing aside) or extends the partial's words (the partial
+  holds at least half of the request words' characters), without waiting for a new
+  recall: the newest finished one, else a running one. Only when none covers does a
+  new recall start, after the utterance's running one finishes (Hindsight completes a
+  cancelled recall's work anyway, so at most one runs and none is cancelled).
+  Memory then comes from that partial's text, while the model reads the final text; a
+  background recall of the admitted words reports how many memories the two share
+  (trace only). Standby
   preparation waits until the candidate's turn starts or the candidate ends, so it
   cannot replace the admitted request's cached tail before the turn's next step.
   **Speculative admission**: each speech partial runs this same admission (recall, verdict
