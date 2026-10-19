@@ -141,11 +141,14 @@ class DiscordConversations:
     async def _execute(self, turn, lock):
         from ..execution.executor import run_conversation
         from ..execution.adk import sessions
+        from ..execution.native_turn import discard_recall
         from ..knowledge.dependencies import resolve_dependencies
         from ..knowledge.vault import resolver
+        recall = None
         try:
             async with lock:
                 self.store.begin(turn)
+                recall = self._prefetch_recall(turn)
                 res = resolver(include_system=False)
                 agent = res.resolve(AGENT_REF)
                 if agent is None or agent.kind != 'agent':
@@ -175,7 +178,7 @@ class DiscordConversations:
                 result = await run_conversation(agent, conversation_binding=turn,
                     runtime_params={'event': 'chat.request' if turn.metadata['source'] == 'text' else 'voice.activation',
                         'request': turn.text, 'conversation_id': turn.conversation_id,
-                        'reply_to_turn_id': turn.turn_id}, emit_turn_event=False)
+                        'reply_to_turn_id': turn.turn_id}, emit_turn_event=False, memory_recall=recall)
                 reply = str(result.get('summary') or '') if result.get('status') == 'completed' else ''
                 status = result.get('status')
                 status = status if status in {'completed', 'failed', 'blocked', 'review', 'interrupted'} else 'failed'
@@ -215,3 +218,30 @@ class DiscordConversations:
                        'conversation_id': turn.conversation_id, 'turn_id': turn.turn_id}
             self.store.finish(turn, outcome)
             return outcome
+        finally:
+            await discard_recall(recall)
+
+    @staticmethod
+    def _prefetch_recall(turn):
+        """Start Bard's memory-hook recall for this exact request before compile.
+
+        The hook recalls only after the speaker snapshot, packet compile and
+        session open; starting here overlaps them, as the Executive does at
+        admission. The hook adopts it only for the identical Agent and query.
+        Deterministic command and music routes recall nothing, so skip them.
+        """
+        from ..execution.adk import sessions
+        from ..execution.commands import recognize_discord_command, recognize_discord_music
+        from ..execution.native_turn import recall_query
+        from ..memory.hindsight import MEMORY
+        tools = ('discord.control', 'media.library', 'task.complete')
+        if (recognize_discord_command(turn.text, tools) is not None
+                or recognize_discord_music(turn.text, tools, voice=turn.metadata['source'] != 'text') is not None):
+            return None
+        token = sessions.CONVERSATION_BINDING.set(turn)
+        try:
+            query = recall_query(turn.text, turn.conversation_id)
+        finally:
+            sessions.CONVERSATION_BINDING.reset(token)
+        return AGENT_REF, query, asyncio.create_task(MEMORY.recall(AGENT_REF, *query),
+                                                     name='obsidience-discord-recall')
