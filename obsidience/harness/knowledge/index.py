@@ -1273,14 +1273,15 @@ class Index:
                 if size > max_chars:
                     raise ValueError("Public trace event exceeds retained byte budget")
                 self.db.execute("UPDATE trace_events SET entry=?,encoded_bytes=? WHERE seq=?", (payload, size, seq))
-                rows = self.db.execute("SELECT seq,encoded_bytes FROM trace_events ORDER BY seq DESC").fetchall()
-                total, retained = 0, 0
-                for item_seq, item_size in rows:
-                    if retained >= max_events or total + item_size > max_chars:
-                        self.db.execute("DELETE FROM trace_events WHERE seq<=?", (item_seq,))
-                        break
-                    total += item_size
-                    retained += 1
+                # Drop everything at and below the newest event that exceeds the
+                # count or byte budget, in one statement: every fetched row would
+                # release and retake the GIL on the event-loop thread.
+                self.db.execute(
+                    "DELETE FROM trace_events WHERE seq<=(SELECT MAX(seq) FROM (SELECT seq,"
+                    "ROW_NUMBER() OVER newest AS retained,SUM(encoded_bytes) OVER newest AS total "
+                    "FROM trace_events WINDOW newest AS (ORDER BY seq DESC)) WHERE retained>? OR total>?)",
+                    (max_events, max_chars),
+                )
                 self.db.commit()
                 return seq
             except Exception:
