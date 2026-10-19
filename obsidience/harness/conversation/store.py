@@ -126,13 +126,16 @@ class ConversationStore:
         conversation_id: str | None = None,
         before_sequence: int | None = None,
         after_sequence: int = 0,
+        turns: list[dict] | None = None,
     ) -> list[tuple[dict, dict]]:
         """Return exact final user/reply pairs from SQLite in user order.
 
         An interrupted reply is still the accepted reply to its request.
+        ``turns`` is the conversation's complete read when the caller has one.
         """
         target_id = conversation_id or self._conversation_id
-        turns = self.index.conversation_turns(target_id)
+        if turns is None:
+            turns = self.index.conversation_turns(target_id)
         if before_sequence is not None:
             turns = [turn for turn in turns if turn["sequence"] < before_sequence]
         turns = [turn for turn in turns if turn["sequence"] > after_sequence]

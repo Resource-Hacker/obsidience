@@ -490,7 +490,10 @@ async def prepare(runtime, text: str, response_contract: str, *,
         wire=deepcopy(payload['messages']), context=compiled_context,
         packet=deepcopy(activation['activity_packet']), refs=list(activation['refs']),
         retrieval_ms=float(activation['retrieval_ms']), metrics=metrics, memory=memory, _runtime=runtime)
-    if (runtime._generation != generation or conversation.conversation_id != conversation_id
+    # adopt() repeats these checks for a speculative response (current());
+    # here they only delayed a speculation that ended after the final.
+    if not speculative and (
+            runtime._generation != generation or conversation.conversation_id != conversation_id
             or _tip(conversation, conversation_id) != history
             or native.window_anchor(conversation_id) != anchor
             or _history(await sessions.refresh(conversation_id)) != native_history):

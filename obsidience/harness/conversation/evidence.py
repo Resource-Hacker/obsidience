@@ -223,14 +223,17 @@ def historical_evidence(
     if type(before_sequence) is not int or type(limit) is not int or limit <= 0:
         return []
     with conversation.index.lock:
+        # One read of the conversation serves all three projections; each full
+        # read cost ~9 ms at 1,962 turns, on every speech admission's path.
+        turns = conversation.index.conversation_turns(conversation_id)
         pairs = conversation.complete_pairs(
-            conversation_id=conversation_id, before_sequence=before_sequence,
+            conversation_id=conversation_id, before_sequence=before_sequence, turns=turns,
         )
         failures = historical_public_replies(conversation, conversation_id=conversation_id,
-                                            before_sequence=before_sequence)
+                                            before_sequence=before_sequence, turns=turns)
         # These local descriptors join accepted failure runs; they are never
         # written as assistant conversation rows or labelled successful dialogue.
-        for user in conversation.index.conversation_turns(conversation_id):
+        for user in turns:
             failed = failures.get(user["id"])
             if failed is not None and failed["status"] == "failed":
                 pairs.append((user, {"conversation_id": conversation_id, "role": "assistant",
@@ -295,6 +298,7 @@ def historical_evidence(
 
 def historical_public_replies(
     conversation, *, conversation_id: str, before_sequence: int | None,
+    turns: list[dict] | None = None,
 ) -> dict[str, dict[str, str]]:
     """Recover exact accepted public failure/review replies for unanswered turns.
 
@@ -309,7 +313,8 @@ def historical_public_replies(
     ):
         return {}
     with ledger.lock:
-        turns = ledger.conversation_turns(conversation_id)
+        if turns is None:
+            turns = ledger.conversation_turns(conversation_id)
         if before_sequence is None:
             cutoff = time.time()
         else:
