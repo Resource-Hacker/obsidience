@@ -153,7 +153,15 @@ app.mount(
 
 
 def main():
+    import sys
     import uvicorn
+
+    # One event loop serves Realtime speech while worker threads run CPU-bound
+    # projections. Each GIL-releasing call on the loop (SQLite, zlib, file I/O)
+    # waits up to a switch interval to get the GIL back from such a thread;
+    # 1 ms instead of 5 cut the loop's median stall ~8x and its tail ~2x in a
+    # standalone reproduction, for ~10% more CPU in contended worker threads.
+    sys.setswitchinterval(0.001)
 
     class HarnessServer(uvicorn.Server):
         def handle_exit(self, sig, frame):
