@@ -1020,6 +1020,26 @@ def list_source_files(*, scope: str | None = None, after: str | None = None,
     }}
 
 
+def inspect_source_health() -> list[dict]:
+    """The issues that paging list_source_files over all of Source reports.
+
+    Only accepted references and immutable System evidence produce issues, so
+    walk just that evidence instead of building a record for every file.
+    """
+    metadata = _source_metadata()
+    system, project_root = CONFIG.source_dir / "system", CONFIG.project_root.resolve()
+    rows = sorted((row for row in _source_candidates(metadata[1], system.relative_to(project_root).as_posix())
+                   if row[2] == "blob" and row[1].is_relative_to(system)),
+                  key=lambda row: (row[0].casefold(), row[0])) if system.is_relative_to(project_root) else []
+    found = {json.dumps(issue, sort_keys=True): issue for issue in metadata[3]}
+    for row in rows:
+        if _source_record(*row, metadata).get("integrity") == "mismatch":
+            issue = {"path": row[0], "status": "integrity_mismatch",
+                     "detail": "Immutable System evidence could not be attested; Reader content is unavailable."}
+            found[json.dumps(issue, sort_keys=True)] = issue
+    return list(found.values())
+
+
 def get_source_file(key: str) -> dict:
     relative = Path(key)
     if not key or relative.is_absolute() or ".." in relative.parts or relative.as_posix() != key:

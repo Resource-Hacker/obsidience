@@ -1563,24 +1563,10 @@ async def _refresh_source_health() -> None:
     if _source_health_scanned == _source_health_generation:
         return
     generation = _source_health_generation
-
-    def inspect() -> list[dict]:
-        from ..knowledge.source import list_source_files
-
-        found, after = {}, None
-        while True:
-            page = list_source_files(after=after)
-            for issue in page["issues"]:
-                found[json.dumps(issue, sort_keys=True)] = issue
-            cursor = page["coverage"]["next_cursor"]
-            if page["coverage"]["complete"]:
-                return list(found.values())
-            if not cursor or cursor == after:
-                raise ValueError("Source health inspection did not advance")
-            after = cursor
+    from ..knowledge.source import inspect_source_health
 
     try:
-        _source_health_issues = await asyncio.to_thread(inspect)
+        _source_health_issues = await asyncio.to_thread(inspect_source_health)
     except (OSError, ValueError) as exc:
         _source_health_issues = [{"status": "inspection_unavailable", "detail": str(exc)[:1000]}]
     _source_health_scanned = generation
