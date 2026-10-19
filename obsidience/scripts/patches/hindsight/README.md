@@ -28,3 +28,7 @@ incoming wire data at 64 MiB and each line and cumulative generated deltas at
 parsers. Rejection diagnostics contain numeric counters, never generated text.
 The Codex provider does not send the caller's completion-token limit; these are
 local resource ceilings, not claims about the model's token budget.
+
+Patch 0011 applies the semantic arm's similarity floor outside its ORDER BY/LIMIT.
+The floor is monotone in the sort key, so the rows are unchanged, but the planner now
+uses the per-bank partial HNSW index instead of an exact scan (store phase ~100 -> ~47 ms).

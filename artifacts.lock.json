@@ -341,6 +341,18 @@
               "installed_sha256": "ed9c250d2bef2b57508d4b31d814005efb604b20887e2f849acff647b3988e23"
             }
           ]
+        },
+        {
+          "path": "obsidience/scripts/patches/hindsight/0011-semantic-arm-similarity-floor-outside-ann-limit.patch",
+          "purpose": "Apply the semantic arm's similarity floor outside its ORDER BY/LIMIT so the planner uses the per-bank partial HNSW index instead of an exact scan of every bank row; the same row set by monotonicity (store phase ~100 -> ~47 ms, returned top-3 unchanged in 40/40 recalls).",
+          "patch_sha256": "2b1e19fd913de92ef5165d410ee4e7de3a8ad4cd948585728d9a9ecf41605f3a",
+          "files": [
+            {
+              "path": "hindsight_api/engine/sql/postgresql.py",
+              "preimage_sha256": "a887b4642b8f25c0b2d8e9715e197d5c24575e3d4a70d00ae94692b7783e8c16",
+              "installed_sha256": "6065f80feda507084e004ce66c0122b97f98ce38c71a79077a72750d19b6bf5f"
+            }
+          ]
         }
       ]
     },
