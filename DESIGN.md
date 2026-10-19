@@ -310,12 +310,10 @@ neighbours); (9) history projected from the native conversation (no conversation
   first response is buffered, so early speech starts only after this admission: when the
   turn consumes an admitted answer without native calls, its claim-checked sentences go
   to early speech at once, before completion acceptance, as an ordinary step's would. The
-  completion protocol appears only in admission requests, as a privately marked control
-  appended to the owner request's message, so admission, speech warms and later ADK steps
-  share one system/Tool/history/context/memory prefix, and llama.cpp's last-user-message
-  checkpoint sits at the owner request (its n-4 checkpoint falls inside the generation
-  prompt): the next speculative run, the final admission and the step after a Tool
-  result re-evaluate only from the owner request. An
+  completion protocol lives only in the request's trailing private control message, so
+  admission, speech warms and later ADK steps share one system/Tool/history prefix (a
+  control appended to the owner's own message was reverted 2026-10-19: a bare "Yes" was
+  answered as if it addressed the control text). An
   exact HassIL command is complete by its full-grammar match and takes the reflex route
   without a model admission. Admission adopts an earlier speech partial's Hindsight
   recall for the same Agent and previous request when the request has the same words
