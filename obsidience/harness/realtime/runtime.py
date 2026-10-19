@@ -924,7 +924,6 @@ class RealtimeSessionManager:
                 if self._mode == "wake":
                     self._wake_open = self._capture_active = False
                     self._input_level = 0.0
-                await self.cue("accepted")
                 await self._publish("runtime", reason="speech_admitted")
         except asyncio.CancelledError:
             raise
@@ -1001,6 +1000,10 @@ class RealtimeSessionManager:
         }, sort_keys=True)])
         self._semantic_task = asyncio.create_task(
             self._prepare_speech_candidate(binding, text, timing), name="obsidience-speech-admission")
+        # Owner choice (2026-10-19): acknowledge at end of turn, as before semantic
+        # admission. The verdict decides in the background; an unfinished request
+        # keeps listening without another cue.
+        await self.cue("accepted")
         await self._publish("runtime", reason="speech_candidate")
 
     def _heard_reply(self, event: dict[str, Any]) -> list[str] | None:
