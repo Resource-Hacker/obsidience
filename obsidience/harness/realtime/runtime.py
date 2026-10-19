@@ -1806,7 +1806,7 @@ class RealtimeSessionManager:
                         }, sort_keys=True)])
                     continue
                 if event_type in {"speech_detected", "speech_ended", "interruption",
-                                  "transcript_partial", "transcript_final"}:
+                                  "transcript_partial", "transcript_pause", "transcript_final"}:
                     if worker_event.get("mode_revision", 0) != self._mode_revision:
                         continue
                     if self._mode == "wake" and not self._wake_open and event_type != "speech_ended":
@@ -1865,6 +1865,13 @@ class RealtimeSessionManager:
                         if (active and self._live_transcript
                                 and self._live_transcript.get("final") is True):
                             self._live_transcript = None
+                        if (not active and self._semantic_enabled and self._user_speaking
+                                and pending_partial and pending_partial[0] == prepared_sequence
+                                and self._phase in READY_PHASES):
+                            # A VAD pause (0.2 s of silence) is a pause edge: the
+                            # latest words get their speculative admission now.
+                            self.conversation.prepare_speech_prefix(
+                                pending_partial[1], prepared_sequence, edge=True)
                         await self._publish("runtime", reason="capture_active")
                     continue
                 if event_type == "input_stalled":
@@ -1895,7 +1902,7 @@ class RealtimeSessionManager:
                         self._live_transcript = None
                 elif event_type == "speech_ended":
                     self._user_speaking = False
-                elif event_type in {"transcript_partial", "transcript_final"}:
+                elif event_type in {"transcript_partial", "transcript_pause", "transcript_final"}:
                     transcript_text = " ".join(
                         str(worker_event.get("text", "")).split()
                     )[:2000 if self._semantic_enabled else MAX_EVENT_TEXT]
@@ -1915,7 +1922,7 @@ class RealtimeSessionManager:
                     display_line = "[listening: speech detected]"
                 elif event_type == "speech_ended":
                     display_line = "[listening: speech ended]"
-                elif event_type == "transcript_partial":
+                elif event_type in {"transcript_partial", "transcript_pause"}:
                     display_line = f"[partial] {transcript_text}"
                 elif event_type == "transcript_final":
                     display_line = f"[heard] {transcript_text}"
@@ -1978,12 +1985,15 @@ class RealtimeSessionManager:
                             self._capture_active = False
                             self._input_level = 0.0
                     await self._publish("runtime", line=display_line)
-                elif event_type == "transcript_partial":
+                elif event_type in {"transcript_partial", "transcript_pause"}:
+                    # transcript_pause: the ASR worker's early final, its words
+                    # flushed at a VAD pause; a pause edge for speculation.
                     if exact_sequence:
                         pending_partial = (sequence, transcript_text)
                         if (sequence == prepared_sequence and self._user_speaking
                                 and self._phase in READY_PHASES):
-                            self.conversation.prepare_speech_prefix(transcript_text, sequence)
+                            self.conversation.prepare_speech_prefix(
+                                transcript_text, sequence, edge=event_type == "transcript_pause")
                     await self._publish("runtime", line=display_line)
                 elif event_type == "interruption":
                     async with self._lock:

@@ -339,7 +339,8 @@ neighbours); (9) history projected from the native conversation (no conversation
   cannot replace the admitted request's cached tail before the turn's next step.
   **Speculative admission**: each speech partial starts (or reuses) its recall at once;
   this same admission (recall, verdict and first response) runs only at a pause edge,
-  words unchanged for 0.2 s or an explicit pause edge, at most three per utterance, on
+  words unchanged for 0.2 s or an edge from speech (the VAD pause after 0.2 s of
+  silence, or the worker's `transcript_pause` early final), at most three per utterance, on
   idle resident capacity, like the speech warmup: leases preempt it, busy hardware skips
   it, exact HassIL commands skip it, and a partial with other words cancels and joins it.
   A candidate whose words still wait for a pause is admitted afresh; a miss reports

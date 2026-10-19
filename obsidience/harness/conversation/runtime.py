@@ -153,11 +153,12 @@ class ConversationRuntime:
             self.invalidate_readiness()
             self.request_context_refresh()
 
-    def prepare_speech_prefix(self, text: str, sequence: int) -> None:
+    def prepare_speech_prefix(self, text: str, sequence: int, *, edge: bool = False) -> None:
         """Coalesce partials into one cancellable, non-persistent model warmup.
 
         Each warms the runtime context and memory for its own provisional text,
         beyond the standby prefix, so a partial is never skipped as redundant.
+        edge marks a pause edge (VAD pause, ASR early final) for speculation.
         """
         if (not text.strip() or len(text) > MAX_EVENT_TEXT
                 or type(sequence) is not int or sequence <= 0
@@ -170,7 +171,7 @@ class ConversationRuntime:
             # once, its model run at a pause); it covers this warm's recall and
             # prefix and also generates the verdict.
             from ..execution.speech_admission import speculate
-            speculate(self, " ".join(text.split()), SPEECH_RESPONSE_CONTRACT, sequence=sequence)
+            speculate(self, " ".join(text.split()), SPEECH_RESPONSE_CONTRACT, sequence=sequence, edge=edge)
             return
         # The same normalization as the final realtime transcript in submit().
         latest = (sequence, " ".join(text.split()))
