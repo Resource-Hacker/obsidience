@@ -497,10 +497,11 @@ class RealtimeSessionManager:
         await self.stop(preserve_requested=True, audio_lost=True)
         if not uma8:
             return
-        # Only removing power revives the hung UMA-8. Behind the USB-C dock's
-        # switching hub that is one bounded software power cycle; the reconnect
-        # path then restarts voice on the new endpoint generation. A repeat within
-        # UMA8_POWER_CYCLE_SECS is not cycled again: it stays an explicit fault.
+        # Removing power revives the hung UMA-8. Behind the USB-C dock's switching
+        # hub that is one bounded software power cycle; on a root port the helper
+        # resets the port instead. The reconnect path then restarts voice on the
+        # new endpoint generation. A repeat within UMA8_POWER_CYCLE_SECS is not
+        # cycled again: it stays an explicit fault.
         now = time.monotonic()
         recent = now - self._uma8_power_cycled_at < UMA8_POWER_CYCLE_SECS
         if not recent:
@@ -518,8 +519,7 @@ class RealtimeSessionManager:
                 self._last_error = (
                     "The UMA-8 stalled again within minutes of an automatic power cycle. Unplug and reconnect it."
                     if recent else
-                    "The UMA-8 stalled and could not be power-cycled automatically (it needs the USB-C dock). "
-                    "Unplug and reconnect it."
+                    "The UMA-8 stalled and did not recover automatically. Unplug and reconnect it."
                 )
                 await self._publish("state", reason="audio_stalled")
 

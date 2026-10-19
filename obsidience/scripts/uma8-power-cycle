@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# Power-cycle the miniDSP UMA-8 (2752:001c) through its hub port's power switch.
+# Power-cycle the miniDSP UMA-8 (2752:001c) through its hub port's power switch,
+# or reset its port where nothing can switch power.
 #
-# The UMA-8 can hang with its capture PCM RUNNING and no kernel error; a USB reset
-# then drops it and only removing power brings it back. The chipset's root ports
-# have no power switching, so this works only behind a hub that really switches
-# per-port power (the self-powered USB-C dock: VIA VL822 2109:2822, Realtek
-# RTS5411 0bda:5411). The kernel's port `disable` attribute clears PORT_POWER.
+# The UMA-8 can hang with its capture PCM RUNNING and no kernel error, or with
+# every control request failing (-71). Removing power always revives it; that
+# works only behind a hub that really switches per-port power (the self-powered
+# USB-C dock: VIA VL822 2109:2822, Realtek RTS5411 0bda:5411; the kernel's port
+# `disable` attribute clears PORT_POWER). The chipset's root ports have no power
+# switching, so there it gets a USB port reset instead: that revived the -71 hang
+# on root port 8-4 (2026-10-19) but did not revive the 2026-10-09 hang on 10-3.
 # Installed root-owned as /usr/local/libexec/obsidience-uma8-power-cycle and run
 # by Realtime through `sudo -n` after a detected capture stall.
 set -euo pipefail
@@ -23,26 +26,46 @@ done
 [[ -n $dev ]] || { echo 'UMA-8 is not connected' >&2; exit 69; }
 
 name=${dev##*/}
-[[ $name == *.* ]] || { echo "UMA-8 is on root port $name, which cannot switch power" >&2; exit 78; }
-hub=${name%.*}
-port=${name##*.}
-hubdir=/sys/bus/usb/devices/$hub
-case "$(<"$hubdir/idVendor"):$(<"$hubdir/idProduct")" in
-    2109:2822|0bda:5411) ;;
-    *) echo "UMA-8 hub $hub does not switch per-port power" >&2; exit 78 ;;
-esac
-control=$hubdir/$hub:1.0/$hub-port$port/disable
-[[ -w $control ]] || { echo "no port power control at $control" >&2; exit 78; }
+devnum=$(<"$dev/devnum")
 
-echo 1 >"$control"
-sleep 2
-echo 0 >"$control"
-for _ in $(seq 1 30); do
-    sleep 0.5
-    if [[ -f /sys/bus/usb/devices/$name/idVendor && $(<"/sys/bus/usb/devices/$name/idVendor") == 2752 ]]; then
-        echo "UMA-8 power-cycled on $name"
-        exit 0
-    fi
-done
-echo "UMA-8 did not return on $name after its power cycle" >&2
-exit 70
+# A power cycle, or a reset it dropped off in, ends when the UMA-8 is back on the
+# same port as a new device.
+await_return() {
+    for _ in $(seq 1 30); do
+        sleep 0.5
+        if [[ -f /sys/bus/usb/devices/$name/idVendor && $(<"/sys/bus/usb/devices/$name/idVendor") == 2752 &&
+              $(<"/sys/bus/usb/devices/$name/devnum") != "$devnum" ]]; then
+            echo "UMA-8 $1 on $name"
+            exit 0
+        fi
+    done
+    echo "UMA-8 did not return on $name after its $2" >&2
+    exit 70
+}
+
+control=
+if [[ $name == *.* ]]; then
+    hub=${name%.*}
+    port=${name##*.}
+    hubdir=/sys/bus/usb/devices/$hub
+    case "$(<"$hubdir/idVendor"):$(<"$hubdir/idProduct")" in
+        2109:2822|0bda:5411) control=$hubdir/$hub:1.0/$hub-port$port/disable ;;
+    esac
+fi
+
+if [[ -n $control && -w $control ]]; then
+    echo 1 >"$control"
+    sleep 2
+    echo 0 >"$control"
+    await_return power-cycled 'power cycle'
+fi
+
+# A device that answers after the reset keeps its number and gets its drivers
+# rebound (a new sound card generation); a hung one drops off ("failed [No such
+# device]") and enumerates again as a new device.
+result=$(/usr/bin/usbreset "$(printf '%03d/%03d' "$(<"$dev/busnum")" "$devnum")" 2>&1 || true)
+if [[ $result == *' ok' ]]; then
+    echo "UMA-8 reset in place on $name (its port cannot switch power)"
+    exit 0
+fi
+await_return 're-enumerated after a port reset' 'port reset'
