@@ -1728,6 +1728,10 @@ class RealtimeSessionManager:
                     if isinstance(worker_event, dict)
                     else ""
                 )
+                if event_type == "speech_early_final":
+                    # The ASR worker's early final at Silero's pause carries the
+                    # transcript_partial fields; it is the transcript_pause edge.
+                    event_type = "transcript_pause"
                 if self._mode == "wake" and not isinstance(worker_event, dict):
                     # Upstream diagnostic text may include raw ASR tokens.
                     # Ambient recognition is never a retained public log.
