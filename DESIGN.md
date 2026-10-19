@@ -335,7 +335,8 @@ neighbours); (9) history projected from the native conversation (no conversation
   other words cancels and joins it. It publishes, dispatches and writes nothing. When the
   candidate arrives, a finished or running speculation for the same words (case,
   punctuation and spacing aside) is adopted after the live binding checks and the
-  submission's full validation; the turn records the exact text the model answered.
+  submission's validation; its prompt, Tools, model and scope bind against the turn's own
+  compile when the run consumes it. The turn records the exact text the model answered.
   Otherwise it is cancelled and the final text is admitted afresh. A speculative response
   that broke the marker protocol for the same words fails closed (no second attempt).
   Standby waits while a speculation is running or unadopted.

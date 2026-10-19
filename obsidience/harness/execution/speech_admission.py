@@ -261,12 +261,14 @@ class PreparedSpeechTurn:
         view = await sessions.refresh(self.conversation_id)
         if _history(view) != self.native_history:
             raise SpeechPreparationError('The conversation changed during speech admission')
-        await self._validate_contract()
+        # The prompt, Tools, model and scope bind in consume(), against the
+        # run's own fresh compile, before this response can reach ADK; a
+        # recompile here only repeated that work (~40 ms) under the lock.
         if (runtime._generation != self.generation
                 or runtime._conversation.conversation_id != self.conversation_id
                 or _tip(runtime._conversation, self.conversation_id) != self.history
                 or native.window_anchor(self.conversation_id) != self.anchor):
-            raise SpeechPreparationError('Speech admission changed while validating its contract')
+            raise SpeechPreparationError('Speech admission changed while validating its submission')
 
     def bind(self, turn: dict, generation: int) -> None:
         if (self._bound_turn is not None or turn['conversation_id'] != self.conversation_id
@@ -274,20 +276,6 @@ class PreparedSpeechTurn:
             raise SpeechPreparationError('Prepared speech can bind exactly once')
         self._bound_turn, self._bound_sequence = str(turn['id']), int(turn['sequence'])
         self._bound_generation = generation
-
-    async def _validate_contract(self) -> None:
-        agent, params, _ = admit_executive(self.text, 'voice')
-        current = model_runtime.resolve_model(agent.meta.get('model'), agent.ref)
-        current_effort = llm.normalize_reasoning_effort(agent.meta.get('reasoning_effort', 'none'))
-        if scope_revision(agent) != self.scope or _model_binding(current, current_effort) != self.model_binding:
-            raise SpeechPreparationError('The Executive authority or model changed during speech admission')
-        params['conversation_id'] = self.conversation_id
-        activation = await compile_activation(agent, params=params, interactive=True, emit_activity=False)
-        messages = activation_messages(agent, activation, agent_name=agent.title)
-        names = activation['spine']['tools']
-        if (_digest(messages[0]['content']) != self.system
-                or _digest([names, tool_schemas(names)]) != self.schema_binding):
-            raise SpeechPreparationError('The Executive prompt or native Tools changed during speech admission')
 
     async def consume(self, plugin) -> LlmResponse:
         runtime = self._runtime
@@ -324,9 +312,8 @@ class PreparedSpeechTurn:
                 if event.invocation_id != 'seed':
                     raise SpeechPreparationError('A native activation preceded the prepared owner turn')
         # This run compiled its activation fresh just before this step; its
-        # system, schemas, model and scope must bind the admitted digests. A
-        # further compilation here would only repeat that work on the
-        # critical path (validate_submission already recompiled before bind).
+        # system, schemas, model and scope must bind the admitted digests.
+        # This is the response's only contract check after admission.
         if (_digest(plugin.system) != self.system
                 or _digest([plugin.advertised, tool_schemas(plugin.advertised)]) != self.schema_binding
                 or _model_binding(plugin.spec, plugin.effort) != self.model_binding
