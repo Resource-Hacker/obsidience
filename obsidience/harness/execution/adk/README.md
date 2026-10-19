@@ -1,15 +1,22 @@
 # ADK model/Tool loop
 
 Google ADK 2.11.0 runs the model/Tool loop of the Executive and of every
-specialist Task. The model route is ADK's official `LiteLlm` (LiteLLM 1.101.0,
-hash-pinned in `requirements.lock.txt`) to the local llama.cpp server under the
-neutral served model id, so Tool results keep the template's native `tool`
-role. LiteLLM is imported at startup with `LITELLM_LOCAL_MODEL_COST_MAP=True`.
-Reasoning effort maps to the template thinking switch and reasoning budget;
-reasoning stays private. ADK's LiteLLM client is replaced by one that fails
-closed unless llama.cpp acknowledges the exact `input_token_limit`
+specialist Task. The model route (`model.py`, `adk_model_client = "local"`, the
+default) is a thin ADK `BaseLlm` that streams from the local llama.cpp server
+over the API-lifetime httpx pool under the neutral served model id, so Tool
+results keep the template's native `tool` role. It sends the request ADK's
+official `LiteLlm` route sends and yields the same partial and final
+`LlmResponse`s (replay evidence: `/var/lib/ai/src/gpu-tuning-20261018/llm-client`),
+at about a quarter of LiteLLM's CPU per step and per chunk. `adk_model_client =
+"litellm"` restores the `LiteLlm` route (LiteLLM 1.101.0, hash-pinned in
+`requirements.lock.txt`, imported at startup only then, with
+`LITELLM_LOCAL_MODEL_COST_MAP=True`). Reasoning effort maps to the template
+thinking switch and reasoning budget; reasoning stays private. Either route
+fails closed unless llama.cpp acknowledges the exact `input_token_limit`
 (`X-LLAMA-Input-Token-Limit`/`X-LLAMA-Input-Tokens`) on every model step and
-records the admitted count with the step's metrics.
+records the admitted count with the step's metrics. The local route also fails
+closed on a stream without a finish reason, never retries a request, and drops
+the connection as soon as ADK closes its generator.
 
 - `sessions.py` owns the Executive conversation log: one ADK
   `SqliteSessionService` on `state/adk-sessions.sqlite3`. Events carry

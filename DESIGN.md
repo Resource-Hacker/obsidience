@@ -211,8 +211,10 @@ neighbours); (9) history projected from the native conversation (no conversation
 ### Executive native loop
 
 - Chat and final speech enter the Executive's one Google ADK conversation (`execution/adk`,
-  pinned in `artifacts.lock.json`). The model route is ADK's official `LiteLlm` (LiteLLM,
-  hash-pinned) to the local llama.cpp server under the neutral served model id. Its
+  pinned in `artifacts.lock.json`). The model route is a thin ADK model
+  (`execution/adk/model.py`) streaming from the local llama.cpp server under the neutral
+  served model id; ADK's official `LiteLlm` (LiteLLM, hash-pinned) is the
+  `adk_model_client = "litellm"` rollback and sends the same requests. Its
   identity owns standing instructions, `skills`, model and reasoning effort. ADK receives
   accepted native schemas directly: no preliminary model call, router, request
   classification, Executive Task or standing Runbook. Schema availability does not mean
@@ -367,7 +369,7 @@ neighbours); (9) history projected from the native conversation (no conversation
   in full at their current revision. Wikilinks around
   `source://` citations normalize to the Source URI.
 - Model and reasoning effort are per-Task (Article or per-run owner choice, else the
-  installation defaults); the Executive keeps its Agent-owned setting. The LiteLLM route
+  installation defaults); the Executive keeps its Agent-owned setting. The model route
   maps effort to the template thinking switch and reasoning budget. Reasoning stays
   private. Model-family templates own control tokens at the provider boundary.
 - Ledger `task_ref`/`runbook_ref` columns record the actual instruction owner (Executive
@@ -377,7 +379,7 @@ neighbours); (9) history projected from the native conversation (no conversation
 
 - Before every inference the actual templated request (with images) is counted; engines
   that support it enforce an exact input ceiling before queueing and acknowledge it, and
-  the adapter fails closed without that acknowledgement (on the ADK route, ADK's LiteLLM
+  the adapter fails closed without that acknowledgement (on the ADK route, the model
   client checks the acknowledgement headers of every model step and records the admitted
   count). Unavailable multimodal counts fail.
 - Under pressure only older pageable `source.read`, `web.fetch` or version-attested
@@ -385,8 +387,8 @@ neighbours); (9) history projected from the native conversation (no conversation
   and latest observation stay complete. Only a verified pre-enqueue overflow permits one
   projected retry (prefill); on the ADK route the preflight already projected to the exact
   count, so a refusal at the guard fails closed. Irreducible overflow is rejected.
-- Model steps stream through ADK's LiteLlm route; standby preparation and controller
-  replies use pinned `httpx-sse` in one API-lifetime pool. Reasoning is discarded; a
+- Model steps, standby preparation and controller replies stream with pinned `httpx-sse`
+  in one API-lifetime pool. Reasoning is discarded; a
   finish state is required; never reconnect or replay partial output.
 - Provider metrics and phase edges are measurements only, never used for retry or
   completion.

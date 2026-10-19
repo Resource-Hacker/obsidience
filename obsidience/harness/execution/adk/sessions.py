@@ -1,4 +1,4 @@
-"""ADK-owned Executive conversations and the official LiteLLM model route.
+"""ADK-owned Executive conversations and the Executive's ADK model route.
 
 One ``SqliteSessionService`` (aiosqlite, its own file under ``state/``) owns
 every Executive conversation log; SQLite ``conversation_turns`` stays the
@@ -184,13 +184,14 @@ def _windowed_store(path: str):
 
 
 async def start() -> None:
-    """Open the conversation store and load LiteLLM once, before the API accepts turns."""
+    """Open the conversation store (and load LiteLLM once for its route) before the API accepts turns."""
     global _service
     if _service is not None:
         return
     from ...config import CONFIG
     _service = _windowed_store(str(CONFIG.runtime_dir / STORE))
-    await asyncio.to_thread(_import_litellm)
+    if model_client() == 'litellm':
+        await asyncio.to_thread(_import_litellm)
 
 
 async def stop() -> None:
@@ -208,31 +209,47 @@ async def close(conversation_id: str) -> None:
     _views.pop(conversation_id, None)
 
 
+def model_client() -> str:
+    """``adk_model_client`` in obsidience.toml: ``local`` (default) or ``litellm`` (rollback)."""
+    from ...config import CONFIG
+    value = CONFIG.extras.get('adk_model_client', 'local')
+    if value not in {'local', 'litellm'}:
+        raise ValueError('adk_model_client must be "local" or "litellm"')
+    return value
+
+
 def model(spec, effort: str):
-    """The Executive's LiteLlm route for one model and reasoning effort.
+    """The Executive's ADK model route for one model and reasoning effort.
 
     Carries what the native transport sends: the served model id (so tool
     results keep the template's native ``tool`` role), output cap,
     temperature, single Tool call per step, template thinking switch and the
     engine's exact input ceiling, whose acknowledgement every response must carry.
+    ``local`` streams through the API's httpx pool (``adk/model.py``); ``litellm``
+    is ADK's LiteLlm route. Both expose the same ``_additional_args``.
     """
-    key = (spec.id, spec.base_url, effort)
+    kind = model_client()
+    key = (spec.id, spec.base_url, effort, kind)
     if key not in _models:
-        from google.adk.models.lite_llm import LiteLlm
         from ...config import CONFIG
         from ...models import llm, runtime as model_runtime
         from ...models.context import PROMPT_SAFETY_TOKENS
-        token = model_runtime.model_auth_headers().get('Authorization', '').removeprefix('Bearer ').strip()
         extra = {'chat_template_kwargs': {'enable_thinking': effort != 'none'}}
         if effort != 'none':
             extra.update(reasoning_format='auto', reasoning_budget_tokens=spec.reasoning_budgets[effort])
         if spec.supports_input_token_limit:
             extra['input_token_limit'] = spec.context_tokens - spec.max_output_tokens - PROMPT_SAFETY_TOKENS
-        _models[key] = LiteLlm(
-            model='openai/' + spec.id, api_base=spec.base_url, api_key=token or 'none',
-            max_tokens=spec.max_output_tokens, temperature=CONFIG.llm_temperature,
-            parallel_tool_calls=False, timeout=llm.CHAT_TIMEOUT_SECONDS, extra_body=extra,
-            **({'llm_client': _admission_client()} if 'input_token_limit' in extra else {}))
+        args = dict(max_tokens=spec.max_output_tokens, temperature=CONFIG.llm_temperature,
+                    parallel_tool_calls=False, timeout=llm.CHAT_TIMEOUT_SECONDS, extra_body=extra)
+        if kind == 'local':
+            from .model import LocalLlm
+            _models[key] = LocalLlm(spec.id, base_url=spec.base_url, **args)
+        else:
+            from google.adk.models.lite_llm import LiteLlm
+            token = model_runtime.model_auth_headers().get('Authorization', '').removeprefix('Bearer ').strip()
+            _models[key] = LiteLlm(
+                model='openai/' + spec.id, api_base=spec.base_url, api_key=token or 'none', **args,
+                **({'llm_client': _admission_client()} if 'input_token_limit' in extra else {}))
     return _models[key]
 
 
