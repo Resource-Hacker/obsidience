@@ -589,7 +589,12 @@ class RealtimeSessionManager:
                         if model_runtime.RUNTIME.work_requested:
                             self._phase = "suspended"
                             self._last_error = None
-                self.conversation.prepare_idle()
+                # Speech admission releases the model before its turn starts. A
+                # standby warm in that gap only replaced the admitted request's
+                # cached tail, which the turn's next step reuses; the turn (or
+                # this candidate's end) prepares standby afterwards.
+                if self._semantic_task is None or self._semantic_task.done():
+                    self.conversation.prepare_idle()
             await self.publish_readiness()
 
     async def _yield_for_model(self) -> None:
@@ -937,6 +942,8 @@ class RealtimeSessionManager:
         finally:
             if self._semantic_task is asyncio.current_task():
                 self._semantic_task = None
+                # Standby skipped while this candidate was admitted (_standby).
+                self._standby_event.set()
 
     async def _speech_candidate_event(self, event: dict, operation: int) -> None:
         if (not self._semantic_enabled or self._phase not in READY_PHASES
