@@ -8,9 +8,11 @@ PRODUCT_ROOT=$(dirname -- "$SCRIPT_DIR")
 # five tensor-split patches (2026-10-18; even expert split, vocab-split tied head,
 # draft sampling, all-reduce pool, masked NextN), a size-selected hybrid all-reduce, device
 # top-64 sampling candidates and one merged dense+MoE all-reduce per layer (patches 01-08,
-# /var/lib/ai/src/gpu-tuning-20261018/llama-tp/patches; outputs identical to tp5, decode -5..9%).
-# Rollback: LLAMA=/var/lib/ai/opt/llama.cpp-b11509-obsidience-admission-g4grammar-tp5-20261018
-LLAMA=/var/lib/ai/opt/llama.cpp-b11509-obsidience-admission-g4grammar-tp6-20261018
+# /var/lib/ai/src/gpu-tuning-20261018/llama-tp/patches; outputs identical to tp5, decode -5..9%),
+# and patch 09 (2026-10-19): each meta backend owns its KV view slices, so a reused MTP
+# draft graph no longer reads slices the target recycled (fattn.cu:762 aborts).
+# Rollback: LLAMA=/var/lib/ai/opt/llama.cpp-b11509-obsidience-admission-g4grammar-tp6-20261018
+LLAMA=/var/lib/ai/opt/llama.cpp-b11509-obsidience-admission-g4grammar-tp7-20261019
 MODEL=${OBSIDIENCE_MODEL:-"$PRODUCT_ROOT/state/models/executive.gguf"}
 LAUNCH="$PRODUCT_ROOT/state/model-launch/obsidience-gemma.json"
 GPU_UUIDS=$(jq -er '.gpu_uuids | join(",")' "$LAUNCH") || exit 64
