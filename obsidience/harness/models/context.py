@@ -318,19 +318,26 @@ class TaskContext:
                 self.pages[index] = batch
         return True
 
-    async def fit_payload(self, payload: dict, spec: ModelSpec,
-                          client: httpx.AsyncClient, capacity: int) -> PayloadCount:
+    def _eligible(self, messages: list[dict]) -> list[ReadPage | ReadBatch]:
         # The most recent result has not yet informed an action and remains
         # complete, including any unconsumed private image.
-        messages = [dict(message) for message in payload["messages"]]
-        payload["messages"] = messages
-        pages = [
+        return [
             page for index, page in self.pages.items()
             if index < len(messages) - 1
             and index != self.latest_result_index
             and messages[index].get("role") in {"user", "tool"}
             and messages[index].get("content") == page.original
         ]
+
+    def projectable(self, payload: dict) -> bool:
+        """Whether an over-budget request could shrink by projecting an older read page."""
+        return bool(self._eligible(payload["messages"]))
+
+    async def fit_payload(self, payload: dict, spec: ModelSpec,
+                          client: httpx.AsyncClient, capacity: int) -> PayloadCount:
+        messages = [dict(message) for message in payload["messages"]]
+        payload["messages"] = messages
+        pages = self._eligible(messages)
         for page in pages:
             messages[page.index]["content"] = page.render(page.retained)
         before = await measure_payload(payload, spec, client)

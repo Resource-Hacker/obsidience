@@ -364,11 +364,15 @@ async def prepare(runtime, text: str, response_contract: str) -> PreparedSpeechT
             schema_binding = _digest([names, schemas])
             messages = _admission_messages(messages, clean)
             payload = native.request_payload(messages, spec, effort, schemas)
-            async with llm.provider_client() as client:
-                started = time.monotonic()
-                projection = TaskContext()
-                capacity = spec.context_tokens - spec.max_output_tokens - PROMPT_SAFETY_TOKENS
-                count = await projection.fit_payload(payload, spec, client, capacity)
+            started = time.monotonic()
+            capacity = spec.context_tokens - spec.max_output_tokens - PROMPT_SAFETY_TOKENS
+            if sessions.engine_guard(spec, effort) == capacity:
+                # A fresh projection holds no pages, so a client count would only
+                # repeat the engine's exact pre-enqueue guard on this same request.
+                metrics['preflight_ms'] = round((time.monotonic() - started) * 1000, 3)
+            else:
+                async with llm.provider_client() as client:
+                    count = await TaskContext().fit_payload(payload, spec, client, capacity)
                 metrics.update(prompt_tokens=count.tokens,
                                preflight_ms=round((time.monotonic() - started) * 1000, 3))
             request = LlmRequest(contents=request_contents(payload['messages'][1:]), config=types.GenerateContentConfig(

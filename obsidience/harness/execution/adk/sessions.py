@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import sqlite3
 import sys
 from contextvars import ContextVar
@@ -96,8 +97,13 @@ def _admission_client():
                 response = await super().acompletion(model=model, messages=messages, tools=tools, **kwargs)
             except litellm.BadRequestError as exc:
                 if limit is not None and 'input_token_limit' in str(exc):
-                    # The preflight already projected to an exact count; a refusal
-                    # here is a counting mismatch, so nothing is retried.
+                    # Either the request had nothing projectable and skipped the
+                    # duplicate client count, or a projected count mismatched.
+                    # Nothing is retried; nothing was generated.
+                    counted = re.search(r'''["']input_tokens["']\s*:\s*(\d+)''', str(exc))
+                    if counted and int(counted.group(1)) > limit:
+                        from ...models.context import ContextBudgetExceeded, PayloadCount
+                        raise ContextBudgetExceeded(PayloadCount(int(counted.group(1))), limit) from None
                     raise ValueError(f'The model server refused this request at its exact input-token '
                                      f'guard ({limit} tokens); nothing was generated') from None
                 raise
@@ -228,6 +234,13 @@ def model(spec, effort: str):
             parallel_tool_calls=False, timeout=llm.CHAT_TIMEOUT_SECONDS, extra_body=extra,
             **({'llm_client': _admission_client()} if 'input_token_limit' in extra else {}))
     return _models[key]
+
+
+def engine_guard(spec, effort: str) -> int | None:
+    """The exact input_token_limit this route's requests carry, or None without the engine guard."""
+    if not spec.supports_input_token_limit:
+        return None
+    return (model(spec, effort)._additional_args.get('extra_body') or {}).get('input_token_limit')
 
 
 def part(text: str, source: str, **meta) -> types.Part:

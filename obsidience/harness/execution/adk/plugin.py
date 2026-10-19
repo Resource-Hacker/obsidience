@@ -518,10 +518,17 @@ class AgentPlugin(BasePlugin):
                         vault_read_allowed='vault.read' in self.ex.allowed if self.task_mode else True)
             started = time.monotonic()
             capacity = self.spec.context_tokens - self.spec.max_output_tokens - PROMPT_SAFETY_TOKENS
-            count = await projection.fit_payload(payload, self.spec, client, capacity)
-            metrics.update(prompt_tokens=count.tokens, preflight_ms=round((time.monotonic() - started) * 1000, 3))
-            if 'before_input_tokens' in projection.last_projection:
-                self.trace.append({'context_projection': projection.last_projection})
+            if sessions.engine_guard(self.spec, self.effort) == capacity and not projection.projectable(payload):
+                # Nothing could be projected, so a client count would only repeat
+                # the engine's exact pre-enqueue input_token_limit check on this
+                # same rendered request (one more template render and tokenization).
+                # The admission client still requires that check's acknowledgement.
+                metrics['preflight_ms'] = round((time.monotonic() - started) * 1000, 3)
+            else:
+                count = await projection.fit_payload(payload, self.spec, client, capacity)
+                metrics.update(prompt_tokens=count.tokens, preflight_ms=round((time.monotonic() - started) * 1000, 3))
+                if 'before_input_tokens' in projection.last_projection:
+                    self.trace.append({'context_projection': projection.last_projection})
         self.ex.decision_messages[:] = deepcopy(payload['messages'])
         llm_request.config.system_instruction = payload['messages'][0]['content']
         llm_request.contents = request_contents(payload['messages'][1:])
@@ -571,7 +578,8 @@ class AgentPlugin(BasePlugin):
         if not from_choice:
             usage = response.usage_metadata
             if usage is not None:
-                metrics.update(prompt_tokens=usage.prompt_token_count or metrics.get('prompt_tokens', 0),
+                metrics.update(prompt_tokens=usage.prompt_token_count or metrics.get(
+                                   'prompt_tokens', metrics.get('admitted_input_tokens', 0)),
                                cached_input_tokens=usage.cached_content_token_count or 0,
                                output_tokens=usage.candidates_token_count or 0)
             metrics['generation_ms'] = round((time.monotonic() - step['dispatched']) * 1000, 3)
