@@ -72,6 +72,7 @@ CREATE TABLE IF NOT EXISTS runs(
   runbook_ref TEXT, runbook_sha256 TEXT, reasoning_effort TEXT, model TEXT, activation_id TEXT
 );
 CREATE INDEX IF NOT EXISTS runs_started_order ON runs(started DESC,id DESC);
+CREATE INDEX IF NOT EXISTS runs_activation_finished ON runs(activation_id,task_ref,finished);
 CREATE TABLE IF NOT EXISTS review_notifications(
   id TEXT PRIMARY KEY, kind TEXT NOT NULL, payload TEXT NOT NULL,
   state TEXT NOT NULL CHECK(state IN ('pending','acknowledged','resolved')),
