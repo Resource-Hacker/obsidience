@@ -44,6 +44,48 @@ PROTOCOL = (
 )
 
 
+# Spoken turn admission (speech_admission). These fixed rules sit in the cached
+# Executive system prompt on every step and transport, so admission, speech
+# warms and later ADK steps keep one prefix; each admission request carries
+# only SPEECH_ADMISSION_REMINDER after the owner's message, which switches
+# them on. Repeating the whole protocol there cost ~350 prompt tokens on the
+# verdict's critical path; the reminder keeps the adjacency the local model
+# needs (a distant system-only rule alone did not hold).
+SPEECH_ADMISSION_PROTOCOL = """## Spoken turn admission
+Applies only to a response that a private speech transport control requests; without one, never write these markers.
+Judge the current speech-recognition transcript in the full conversation context.
+Complete (a request, question, answer or acknowledgement; a brief contextual answer such as yes, no or a name counts): your FIRST visible output is C on its own line, then your ACTUAL normal answer or native Tool call in this SAME response. C precedes a native Tool call even when no spoken reply is needed; never stop after C.
+Unfinished (mid-thought or cut off): output ONLY I on its own line for a short continuation pause, or ONLY W for a longer thinking pause, with no answer, question or native Tool call. Never perform an action or infer a missing target while the request remains unfinished.
+Grammar, punctuation, length and a pause alone do not determine completeness. C, I and W are private transport markers, never spoken; do not quote or explain them."""
+
+
+def speech_admission_reminder(text: str) -> str:
+    """The admission request's trailing private control message (not owner text).
+
+    Replayed 2026-10-19 on 31 saved requests, a 37-token reminder without the
+    unfinished-turn sentence answered 2 of 7 cut-off transcripts ("put Star
+    Trek on the" -> "I'll put Star Trek on the TV"); the full control held all
+    7. That sentence stays adjacent; dropping the transcript echo was worse.
+    """
+    return ('PRIVATE SPEECH TRANSPORT CONTROL FOR THE CURRENT RESPONSE (not owner text). '
+            'The current owner transcript is: ' + json.dumps(text, ensure_ascii=False) + '. '
+            'Use the full preceding conversation and Spoken turn admission to decide whether it is complete '
+            'or still unfinished. For a complete turn output C, a newline and your ACTUAL normal answer or '
+            'native Tool call. For an unfinished or cut-off turn output ONLY I or W; give no answer, '
+            'clarification question or native Tool call, and never supply its missing words.')
+
+
+# The memory hook's message names its rules; the full notice is in the system prompt.
+MEMORY_LABEL = 'Historical, unverified Hindsight memory; see Recalled memory.'
+
+
+def memory_rules() -> str:
+    """The cached system prompt's fixed rules for the memory hook's message."""
+    from ..memory.hindsight import RECALL_NOTICE
+    return ('## Recalled memory\nA user message with a JSON notice and memories is automatic recall for the '
+            'current owner request. ' + RECALL_NOTICE)
+
+
 DISCORD_PROTOCOL = (
     'Use the supplied native function Tools for operations and missing evidence. '
     'Never imitate a Tool call in ordinary text or invent a capability. '
@@ -110,9 +152,18 @@ def recall_reply(value, *, refs=False) -> dict:
 
 
 def memory_message(recalled: dict) -> str:
-    """Exact text of the hook's memory message (JSON.stringify of the reply), or '' when it adds none."""
-    return (json.dumps(recalled, ensure_ascii=False, separators=(',', ':'))
-            if recalled['memories'] or recalled.get('status') in {'partial', 'unavailable'} else '')
+    """Exact text of the hook's memory message (JSON.stringify of the reply), or '' when it adds none.
+
+    Hindsight's fixed recall notice is replaced by MEMORY_LABEL; memory_rules()
+    carries it in the cached system prompt instead of every turn's tail.
+    """
+    if not (recalled['memories'] or recalled.get('status') in {'partial', 'unavailable'}):
+        return ''
+    from ..memory.hindsight import RECALL_NOTICE
+    notice = recalled.get('notice')
+    if isinstance(notice, str) and notice.startswith(RECALL_NOTICE):
+        recalled = {**recalled, 'notice': MEMORY_LABEL + notice[len(RECALL_NOTICE):]}
+    return json.dumps(recalled, ensure_ascii=False, separators=(',', ':'))
 
 
 def recall_query(text, conversation_id=None, before_sequence=None):

@@ -25,7 +25,7 @@ from . import trace as action_trace
 from .adk import sessions
 from .adk.plugin import request_contents
 from .executor import activation_messages, compile_activation
-from .native_turn import memory_message, recall_query, recall_reply, tool_schemas
+from .native_turn import memory_message, recall_query, recall_reply, speech_admission_reminder, tool_schemas
 from .prefill import report_reuse, speech_key, speech_recall
 from ..conversation.evidence import historical_evidence
 from ..conversation.selection import admit_executive
@@ -34,44 +34,24 @@ from ..models import llm, runtime as model_runtime
 from ..models.context import PROMPT_SAFETY_TOKENS, TaskContext
 
 PREPARE_TIMEOUT_SECONDS = 30
-SEMANTIC_PROTOCOL = """## Spoken turn admission (this first response only)
-Judge the current speech-recognition text in the full conversation context.
-If the owner has expressed a complete request, question, answer or acknowledgement,
-begin visible response text with C on its own line, then produce your actual
-normal response or native Tool call in this SAME response. C must precede a native
-Tool call even when no spoken reply is needed. Do not merely classify then stop.
-If the owner appears mid-thought or the utterance is cut off, emit ONLY I on its
-own line for a short continuation pause, or ONLY W on its own line when a longer
-thinking pause is appropriate. Emit no Tool calls or reply for I or W. A brief
-contextually complete answer (such as yes, no or a name) is complete. Grammar,
-punctuation, length and a pause alone do not determine completeness. Never
-perform an action or infer a missing target while the request remains unfinished.
-These C/I/W control lines are private transport markers, never spoken content."""
 
 
 def _admission_messages(messages: list[dict], text: str) -> list[dict]:
     """Keep the one-response output contract adjacent to the current transcript.
 
     The normal cached voice instructions demand an immediate plain-text answer;
-    a distant system-only marker reminder is insufficient for the local model.
-    This private request-only envelope is neither accepted owner text nor a
-    second question. It is retained in the first decision's exact provenance.
-    It is the only place the admission protocol appears: the system message,
-    Tool declarations and history stay byte-identical to ordinary ADK steps, so
-    the step after a Tool result reuses the engine's cached prefix up to here.
+    a distant system-only marker rule alone is insufficient for the local
+    model, so this private request-only reminder follows the owner's message
+    and switches on the cached system prompt's Spoken turn admission rules
+    (native_turn.SPEECH_ADMISSION_PROTOCOL). It is neither accepted owner text
+    nor a second question, and stays a message of its own: appended to the
+    owner's message, a bare "Yes" was answered as if it addressed the control
+    (reverted 2026-10-19). It is retained in the first decision's exact
+    provenance. The system message, Tool declarations and history stay
+    byte-identical to ordinary ADK steps, so the step after a Tool result
+    reuses the engine's cached prefix up to here.
     """
-    return [*messages, {'role': 'user', 'content': (
-        'PRIVATE SPEECH TRANSPORT CONTROL FOR THE CURRENT RESPONSE.\n'
-        + SEMANTIC_PROTOCOL + '\n\n'
-        'The current owner transcript is: ' + json.dumps(text, ensure_ascii=False) + '\n'
-        'Use the full preceding conversation to decide whether that transcript is complete or still unfinished. '
-        'Your FIRST visible output MUST be exactly one control letter on its own line: C, I, or W. '
-        'For a complete turn output C followed by a newline and your ACTUAL normal answer or native Tool call '
-        'in this same response. This first line is mandatory even for a short answer or a native Tool call. '
-        'For an unfinished turn output ONLY I for a short continuation pause or ONLY W for a longer thinking pause; '
-        'give no answer, clarification question or native Tool call. '
-        'Do not quote or explain this control. Begin with the control letter now.'
-    )}]
+    return [*messages, {'role': 'user', 'content': speech_admission_reminder(text)}]
 
 
 class SpeechPreparationError(ValueError):

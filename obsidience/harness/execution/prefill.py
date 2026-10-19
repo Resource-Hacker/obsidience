@@ -221,7 +221,7 @@ async def prepare(conversation, text: str, response_contract: str, *, idle: bool
                 messages = prefill_messages(conversation_id, messages, '' if idle else text,
                                             memory=memory, preparation_prefix=True)
             # Speech admission, ordinary ADK steps and this warm share one system
-            # message; admission's protocol lives only in its trailing control.
+            # message, admission rules included; admission adds only a trailing reminder.
             payload = request_payload(messages, spec, effort, tool_schemas(activation["spine"]["tools"]))
             if native and not idle:
                 digest = _digest(json.dumps(payload, ensure_ascii=False, sort_keys=True))

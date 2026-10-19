@@ -314,10 +314,14 @@ neighbours); (9) history projected from the native conversation (no conversation
   the early speech and fails the already recorded turn; an answer no submission takes is
   stopped by the next admission or cancellation. Native Tool calls and unfinished
   verdicts are buffered whole. The
-  completion protocol lives only in the request's trailing private control message, so
-  admission, speech warms and later ADK steps share one system/Tool/history prefix (a
-  control appended to the owner's own message was reverted 2026-10-19: a bare "Yes" was
-  answered as if it addressed the control text). An
+  completion protocol's rules live in the cached Executive system prompt on every step
+  and transport (no marker without a private control), and each admission request adds
+  only a short trailing private control message that names the transcript and keeps the
+  unfinished-turn rule adjacent, so admission, speech warms and later ADK steps share one
+  system/Tool/history prefix and the verdict's uncached tail no longer re-reads the rules
+  (a control appended to the owner's own message was reverted 2026-10-19: a bare "Yes"
+  was answered as if it addressed the control text). Hindsight's fixed recall notice is
+  in the system prompt as well; the memory message carries a short label. An
   exact HassIL command is complete by its full-grammar match and takes the reflex route
   without a model admission. Admission adopts an earlier speech partial's Hindsight
   recall for the same Agent and previous request when the request has the same words

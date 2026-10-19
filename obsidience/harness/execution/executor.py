@@ -728,14 +728,16 @@ def activation_messages(task: Note, activation: dict, *, agent_name: str,
                         response_contract: str = "", active_exclusions=frozenset(),
                         preparation_prefix: bool = False) -> list[dict]:
     """Render one canonical provider prompt for execution or disposable prefill."""
-    from .native_turn import PROTOCOL as NATIVE_PROTOCOL, TASK_PROTOCOL, DISCORD_PROTOCOL
+    from .native_turn import (PROTOCOL as NATIVE_PROTOCOL, TASK_PROTOCOL, DISCORD_PROTOCOL,
+                              SPEECH_ADMISSION_PROTOCOL, memory_rules)
     from ..conversation.runtime import VOICE_TRANSPORT_CONTRACT
     agent = task.kind == "agent"
     native_session = agent and bool(activation["params"].get("conversation_id"))
     discord = bool(activation.get("bindings", {}).get("discord"))
-    # The Executive's fixed decision protocol, voice reply rules and closing
-    # instruction are identical for every turn and both transports, so they
-    # stay in the cached system message ahead of the native Tool schemas.
+    # The Executive's fixed decision protocol, voice reply rules, spoken turn
+    # admission and recalled-memory rules and closing instruction are identical
+    # for every turn and both transports, so they stay in the cached system
+    # message ahead of the native Tool schemas.
     system = "\n\n".join(filter(None, [
         (f"You are {agent_name}, resolving the current Discord member request in Obsidience. "
          "You are a separate Agent, not the workstation Executive. Discord membership "
@@ -750,6 +752,8 @@ def activation_messages(task: Note, activation: dict, *, agent_name: str,
         "## Decision protocol\n" + (DISCORD_PROTOCOL if discord else NATIVE_PROTOCOL) if agent else "",
         activation.get("provider_begin", "") if agent else "",
         VOICE_TRANSPORT_CONTRACT if agent and not discord else "",
+        SPEECH_ADMISSION_PROTOCOL if agent and not discord else "",
+        memory_rules() if agent else "",
     ]))
     # Each Executive turn names only its transport; the rules it selects are fixed.
     tv_state = ""
