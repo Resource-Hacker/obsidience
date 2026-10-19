@@ -13,8 +13,12 @@ PRODUCT_ROOT=$(dirname -- "$SCRIPT_DIR")
 # draft graph no longer reads slices the target recycled (fattn.cu:762 aborts), and patch 10:
 # no SWA checkpoint 4 tokens before each prompt's end (inside Gemma 4's generation prompt, never
 # restored; a 200 MiB copy) and reused checkpoint buffers: ~52-65 ms less per admission request.
-# Rollback: LLAMA=/var/lib/ai/opt/llama.cpp-b11509-obsidience-admission-g4grammar-tp7-20261019
-LLAMA=/var/lib/ai/opt/llama.cpp-b11509-obsidience-admission-g4grammar-tp8-20261019
+# tp9 (2026-10-19, patches 11-29, /var/lib/ai/src/gpu-tuning-20261018/engine-tp9): upstream SWA
+# checkpoint/slot/kernel-race fixes (#30580 #30666 #30295 #30573 #30103 #29953 #30453 #30662 #30574),
+# a per-word BPE token cache and two template renders instead of three (request handling ~80 -> ~40 ms),
+# reuse of identical checkpoints and parallel state copies; outputs identical to tp8, decode unchanged.
+# Rollback: LLAMA=/var/lib/ai/opt/llama.cpp-b11509-obsidience-admission-g4grammar-tp8-20261019
+LLAMA=/var/lib/ai/opt/llama.cpp-b11509-obsidience-admission-g4grammar-tp9-20261019
 MODEL=${OBSIDIENCE_MODEL:-"$PRODUCT_ROOT/state/models/executive.gguf"}
 LAUNCH="$PRODUCT_ROOT/state/model-launch/obsidience-gemma.json"
 GPU_UUIDS=$(jq -er '.gpu_uuids | join(",")' "$LAUNCH") || exit 64
@@ -49,6 +53,11 @@ if [ "$GPU_COUNT" -gt 1 ]; then
     export NCCL_P2P_DISABLE=1 GGML_CUDA_ALLREDUCE=hybrid
   fi
 fi
+# The Harness saves the warm Executive slot here after a standby warm and restores it into
+# a restarted server (models/runtime.py); file names fingerprint this script and the model.
+SLOT_DIR="$PRODUCT_ROOT/state/model-slots"
+mkdir -p "$SLOT_DIR" || exit 73
+set -- "$@" --slot-save-path "$SLOT_DIR"
 # Browsers can reach loopback ports; inference requires the service key
 # (health and model listings stay public). The Harness sends the same key.
 if [ -n "${CREDENTIALS_DIRECTORY:-}" ] && [ -r "$CREDENTIALS_DIRECTORY/obsidience-model-api-key" ]; then
@@ -59,7 +68,10 @@ fi
 # cold prefill ~42% (26.9 -> 15.6 s at 39.7K) with no warm-turn penalty (2026-10-08).
 # Retain the selector and several Task prefixes across ordinary work changes.
 # Their SWA snapshots exceed the server's default 8 GiB RAM cache together.
-exec env CUDA_DEVICE_ORDER=PCI_BUS_ID \
+# Context checkpoints copy each GPU's share of the SWA state on 4 threads (tp9): ~10 ms less per
+# 200 MiB checkpoint on the two-card split. (LLAMA_SWA_SLACK, a larger SWA ring, was measured and
+# rejected: no checkpoint restores, but decode 14-16% slower.)
+exec env CUDA_DEVICE_ORDER=PCI_BUS_ID LLAMA_STATE_THREADS=4 \
   CUDA_VISIBLE_DEVICES="$GPU_UUIDS" \
   LD_LIBRARY_PATH="$LLAMA/lib:$LD_LIBRARY_PATH" \
   "$LLAMA/bin/llama-server" \
