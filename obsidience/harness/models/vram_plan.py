@@ -30,7 +30,14 @@ def estimate(spec, profile: dict, devices: tuple[str, ...]) -> dict[str, int]:
                "-m", str(spec.model_path), "-c", str(spec.context_tokens),
                "-ngl", "99", "--parallel", str(profile["max_num_seqs"]),
                # Match llm.sh defaults; Gemma retains F16 KV and its projector.
-               "-b", "4096", "-ub", "1024", "-fa", "on", "--split-mode", "none"]
+               # This estimator aborts for tensor mode; its layer split places
+               # the same weights and KV across the selected GPUs.
+               "-b", "4096", "-ub", "1024", "-fa", "on",
+               "--split-mode", "none" if len(devices) == 1 else "layer"]
+    if len(devices) > 1:
+        # The server splits by free memory, and its model GPUs are empty at
+        # launch; an even split keeps a resident model from skewing the plan.
+        command += ["--tensor-split", ",".join("1" for _ in devices)]
     result = subprocess.run(command, capture_output=True, text=True, timeout=20,
                             env={**os.environ, "CUDA_VISIBLE_DEVICES": ",".join(GPU_UUIDS[d] for d in devices),
                                  "CUDA_DEVICE_ORDER": "PCI_BUS_ID", "LD_LIBRARY_PATH": str(FIT_ROOT / "lib")})

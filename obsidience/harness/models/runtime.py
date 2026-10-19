@@ -45,6 +45,7 @@ from ..host.inventory import (
     GPU_UUIDS,
     IGPU_DEVICE,
     RTX_4000_DEVICE,
+    RTX_4000B_DEVICE,
     RTX_4080_DEVICE,
     gpu_snapshot,
     hardware_sensor_snapshot,
@@ -56,6 +57,9 @@ EXECUTIVE_MODEL = "obsidience-gemma"
 AUTO_MODEL = "auto"
 NONE_COMPONENT = "none"
 DISPLAY_COMPONENT = "display-media"
+# llama.cpp multi-GPU split; the first value is the default. "layer" measured
+# +51-78% prefill on both RTX 4000s, "tensor" +8-21% decode but -20-50% prefill.
+SPLIT_MODES = ("layer", "tensor")
 
 GEMMA_SERVICE = "obsidience-gemma.service"
 
@@ -170,12 +174,12 @@ MODELS = {
         max_output_tokens=3_584,
         max_context_tokens=98_304,
         quantization="UDmerge-Q4_K_XXL",
-        hardware="One Ada GPU",
+        hardware="One or both RTX 4000 Ada GPUs",
         runtime="llama.cpp b10078 · MTP3",
         capabilities=("text", "vision", "reasoning", "tools"),
         reasoning_budgets={"none": 0, "low": 256, "medium": 768, "high": 1_536, "xhigh": 2_560},
-        supported_devices=(RTX_4000_DEVICE,),
-        default_allowed_devices=(RTX_4000_DEVICE,),
+        supported_devices=(RTX_4000_DEVICE, RTX_4000B_DEVICE),
+        default_allowed_devices=(RTX_4000_DEVICE, RTX_4000B_DEVICE),
         min_gpu_count=1,
         default_gpu_memory_utilization=0.90,
         default_max_num_seqs=1,
@@ -203,6 +207,7 @@ def _default_profile(spec: ModelSpec) -> dict:
         "max_output_tokens": spec.max_output_tokens,
         "gpu_memory_utilization": spec.default_gpu_memory_utilization,
         "max_num_seqs": spec.default_max_num_seqs,
+        "split_mode": SPLIT_MODES[0],
     }
 
 
@@ -214,6 +219,7 @@ def _default_settings() -> dict:
             IGPU_DEVICE: DISPLAY_COMPONENT,
             RTX_4080_DEVICE: NONE_COMPONENT,
             RTX_4000_DEVICE: EXECUTIVE_MODEL,
+            RTX_4000B_DEVICE: EXECUTIVE_MODEL,
         },
         "models": {model_id: _default_profile(spec) for model_id, spec in MODELS.items()},
         "benchmarks": {},
@@ -251,7 +257,8 @@ def _normalize_settings(raw: object) -> dict:
     hardware = raw.get("hardware")
     if isinstance(hardware, dict):
         for device in (CPU_DEVICE, IGPU_DEVICE, *GPU_DEVICES):
-            value = str(hardware.get(device, defaults["hardware"][device]))
+            # A saved map that predates a GPU leaves it unassigned until chosen.
+            value = str(hardware.get(device, NONE_COMPONENT))
             if value in {NONE_COMPONENT, DISPLAY_COMPONENT, *MODELS}:
                 defaults["hardware"][device] = value
     defaults["hardware"][CPU_DEVICE] = NONE_COMPONENT
@@ -282,6 +289,8 @@ def _normalize_settings(raw: object) -> dict:
                 )
             except (TypeError, ValueError):
                 pass
+            if row.get("split_mode") in SPLIT_MODES:
+                profile["split_mode"] = row["split_mode"]
     benchmarks = raw.get("benchmarks")
     if isinstance(benchmarks, dict):
         defaults["benchmarks"] = {
@@ -323,6 +332,7 @@ def _write_launch(spec: ModelSpec, devices: tuple[str, ...], profile: dict) -> N
         "max_output_tokens": profile["max_output_tokens"],
         "gpu_memory_utilization": profile["gpu_memory_utilization"],
         "max_num_seqs": profile["max_num_seqs"],
+        "split_mode": profile["split_mode"],
         "projector_path": str(spec.projector_path) if spec.projector_path else None,
         "chat_template_path": str(spec.chat_template_path) if spec.chat_template_path else None,
         "mtp_path": str(spec.mtp_path) if spec.mtp_path else None,
@@ -712,6 +722,7 @@ def catalog() -> list[dict]:
             "active_devices": active_devices,
             "gpu_memory_utilization": profile["gpu_memory_utilization"],
             "max_num_seqs": profile["max_num_seqs"],
+            "split_mode": profile["split_mode"],
             "last_benchmark": _benchmark_doc(settings["benchmarks"].get(spec.id), spec),
             "task_capable": spec.task_capable,
             "category": "task_reasoning" if spec.task_capable else "realtime_interface",
@@ -1254,8 +1265,11 @@ class _HardwareModelRuntime:
         return available
 
     def _pick_devices(self, spec: ModelSpec, override: object = None) -> tuple[str, ...]:
-        # Each catalog model has one supported device layout.
-        return self._memory_layouts(spec, self._unreserved_layouts(spec, override))[0]
+        available = self._memory_layouts(spec, self._unreserved_layouts(spec, override))
+        # Prefer the Hardware-assigned layout: a Task lease then never reloads
+        # the default model onto a smaller GPU set and back afterwards.
+        assigned = self._desired_models(_read_settings()).get(spec.id)
+        return assigned if assigned in available else available[0]
 
     async def _activate_task_model(self, spec: ModelSpec, devices: tuple[str, ...]) -> None:
         await asyncio.to_thread(self.check_resources, spec, list(devices))
@@ -1404,9 +1418,12 @@ class _HardwareModelRuntime:
         settings = json.loads(json.dumps(previous_settings))
         hardware = settings["hardware"]
         old = hardware.get(device_id)
-        if old in MODELS and sum(hardware.get(gpu) == old for gpu in GPU_DEVICES) > 1:
-            for gpu in GPU_DEVICES:
-                if hardware.get(gpu) == old:
+        if old in MODELS and old != component_id:
+            # Releasing one GPU keeps the model on the rest while they still
+            # form a valid layout; otherwise the whole linked layout clears.
+            rest = tuple(gpu for gpu in GPU_DEVICES if gpu != device_id and hardware.get(gpu) == old)
+            if rest not in _device_sets(MODELS[old], settings["models"][old]["allowed_devices"]):
+                for gpu in rest:
                     hardware[gpu] = NONE_COMPONENT
         if component_id in MODELS:
             spec = MODELS[component_id]
@@ -1416,7 +1433,10 @@ class _HardwareModelRuntime:
             layouts = [devices for devices in _device_sets(spec, allowed) if device_id in devices]
             if not layouts:
                 raise ValueError(f"{DEVICE_LABELS[device_id]} has no valid layout for {spec.label}")
-            selected = min(layouts, key=len)
+            # Adding a GPU extends the model's current assignment when valid.
+            current = {gpu for gpu in GPU_DEVICES if hardware.get(gpu) == component_id}
+            selected = min((devices for devices in layouts if current <= set(devices)),
+                           key=len, default=None) or min(layouts, key=len)
             for gpu in GPU_DEVICES:
                 if hardware.get(gpu) == component_id:
                     hardware[gpu] = NONE_COMPONENT
@@ -1471,6 +1491,10 @@ class _HardwareModelRuntime:
                 if not 0.50 <= value <= 0.99:
                     raise ValueError("gpu_memory_utilization must be between 0.50 and 0.99")
                 profile["gpu_memory_utilization"] = value
+            if "split_mode" in payload:
+                if payload["split_mode"] not in SPLIT_MODES:
+                    raise ValueError(f"split_mode must be one of: {', '.join(SPLIT_MODES)}")
+                profile["split_mode"] = payload["split_mode"]
             if int(profile["max_output_tokens"]) >= int(profile["context_tokens"]):
                 raise ValueError("max output must be smaller than context")
             for device in GPU_DEVICES:

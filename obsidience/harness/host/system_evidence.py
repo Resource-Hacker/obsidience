@@ -91,6 +91,8 @@ def _compute() -> dict:
             fields = dict(line.split(":", 1) for line in _text(information, 16_384).splitlines() if ":" in line)
             if fields.get("Model"):
                 row["label"] = _label(fields["Model"].strip())
+            if fields.get("GPU UUID"):
+                row["uuid"] = _label(fields["GPU UUID"].strip())
         gpus.append(row)
     return {"cpu": {"model": ", ".join(models), "physical_cores": len(cores) or None,
                     "logical_cpus": len(records)}, "memory": {"total_bytes": int(total[0]) * 1024}, "gpus": gpus}
@@ -364,9 +366,10 @@ def system_node_facts(node: dict, inventory_facts: dict) -> dict:
         if selector == "cpu":
             facts["observed"] = {"cpu": compute["cpu"], "memory": compute.get("memory", {})}
         elif selector in (*inventory.GPU_DEVICES, inventory.IGPU_DEVICE):
+            # NVIDIA GPUs match by UUID: both RTX 4000 Ada cards share one model name.
             matches = [gpu for gpu in compute["gpus"] if (
                 str(gpu.get("vendor_id")).lower() == "0x1002" if selector == inventory.IGPU_DEVICE
-                else inventory.DEVICE_LABELS[selector].casefold() in str(gpu.get("label", "")).casefold())]
+                else gpu.get("uuid") == inventory.GPU_UUIDS[selector])]
             if len(matches) != 1:
                 raise ValueError("Registered GPU does not match one observed device")
             facts["observed"] = matches[0]

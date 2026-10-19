@@ -60,6 +60,9 @@ Item {
         if (device === "rtx4000") {
             return "RTX 4000 Ada"
         }
+        if (device === "rtx4000b") {
+            return "RTX 4000 Ada 2"
+        }
         return String(device)
     }
 

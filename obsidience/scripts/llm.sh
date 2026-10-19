@@ -10,6 +10,8 @@ LLAMA=/var/lib/ai/opt/llama.cpp-b11509-obsidience-admission-g4grammar-20261009
 MODEL=${OBSIDIENCE_MODEL:-"$PRODUCT_ROOT/state/models/executive.gguf"}
 LAUNCH="$PRODUCT_ROOT/state/model-launch/obsidience-gemma.json"
 GPU_UUIDS=$(jq -er '.gpu_uuids | join(",")' "$LAUNCH") || exit 64
+GPU_COUNT=$(jq -er '.gpu_uuids | length' "$LAUNCH") || exit 64
+SPLIT_MODE=$(jq -er '.split_mode // "layer" | select(. == "layer" or . == "tensor")' "$LAUNCH") || exit 64
 CTX=$(jq -er '.context_tokens' "$LAUNCH") || exit 64
 PARALLEL=$(jq -er '.max_num_seqs | select(type == "number") | select(. == floor and . >= 1 and . <= 32)' "$LAUNCH") || exit 64
 MMPROJ=$(jq -er '.projector_path // empty' "$LAUNCH") || exit 64
@@ -25,6 +27,15 @@ if [ -n "$MTP" ]; then
   MTP_TOKENS=$(jq -er '.mtp_tokens | select(type == "number") | select(. == floor and . >= 1 and . <= 16)' "$LAUNCH") || exit 64
   set -- "$@" --spec-draft-model "$MTP" --spec-type draft-mtp \
     --spec-draft-n-max "$MTP_TOKENS" --spec-draft-n-min 0 --spec-draft-ngl 99
+fi
+# CUDA_VISIBLE_DEVICES lists the launch's GPUs in order (CUDA0 = first); llama.cpp
+# splits by free memory. One GPU keeps the default single-device layout.
+if [ "$GPU_COUNT" -gt 1 ]; then
+  set -- "$@" --split-mode "$SPLIT_MODE"
+  if [ "$SPLIT_MODE" = tensor ]; then
+    # Two RTX 4000s (2026-10-18): tensor decode was fastest over NCCL with P2P off.
+    export NCCL_P2P_DISABLE=1
+  fi
 fi
 # Browsers can reach loopback ports; inference requires the service key
 # (health and model listings stay public). The Harness sends the same key.

@@ -14,16 +14,20 @@ CPU_DEVICE = "cpu"
 IGPU_DEVICE = "amd-igpu"
 RTX_4080_DEVICE = "rtx4080"
 RTX_4000_DEVICE = "rtx4000"
-GPU_DEVICES = (RTX_4080_DEVICE, RTX_4000_DEVICE)
+# Second RTX 4000 Ada (2026-10-18); like the first, it serves models only.
+RTX_4000B_DEVICE = "rtx4000b"
+GPU_DEVICES = (RTX_4080_DEVICE, RTX_4000_DEVICE, RTX_4000B_DEVICE)
 DEVICE_LABELS = {
     CPU_DEVICE: "CPU",
     IGPU_DEVICE: "AMD Granite Ridge iGPU",
     RTX_4080_DEVICE: "RTX 4080 SUPER",
     RTX_4000_DEVICE: "RTX 4000 Ada",
+    RTX_4000B_DEVICE: "RTX 4000 Ada 2",
 }
 GPU_UUIDS = {
     RTX_4080_DEVICE: "GPU-4332e1a5-17a8-7e18-5347-5a296549ee81",
     RTX_4000_DEVICE: "GPU-3b820ab6-b7e7-c26b-b400-136780611a3e",
+    RTX_4000B_DEVICE: "GPU-d94d9a00-fb17-0bb6-1c24-853cc2c37407",
 }
 STORAGE_LOCATIONS = (
     ("obsidience", "Obsidience", "product", CONFIG.product_root),
@@ -69,10 +73,12 @@ def gpu_snapshot() -> list[dict]:
         ) = parts
         total_mib = number(total, integer=True)
         used_mib = number(used, integer=True)
+        device = by_uuid.get(uuid)
         rows.append({
-            "device": by_uuid.get(uuid),
+            "device": device,
             "uuid": uuid,
-            "name": name,
+            # Both RTX 4000 Ada cards report the same product name.
+            "name": DEVICE_LABELS.get(device, name),
             "driver": "nvidia",
             "status": "online",
             "memory_label": "VRAM",
