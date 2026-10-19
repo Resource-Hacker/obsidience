@@ -12,7 +12,6 @@ import asyncio
 import base64
 import binascii
 import contextlib
-import copy
 import json
 import math
 import os
@@ -27,10 +26,6 @@ from pathlib import Path
 
 import torch
 
-from nemo.collections.asr.parts.context_biasing.boosting_graph_batched import BoostingTreeModelConfig
-from nemo.collections.asr.parts.submodules.rnnt_decoding import RNNTBPEDecoding
-from nemo.collections.asr.parts.utils.rnnt_utils import Hypothesis
-from omegaconf import OmegaConf, open_dict
 from pipecat.transports.base_input import BaseInputTransport
 
 from . import worker as speech
@@ -93,36 +88,6 @@ def _token(value) -> str:
     return value
 
 
-def _name_decoder(source):
-    """Use native phrase boosting without changing the desktop model's decoder."""
-    model = source.asr_model
-    config = copy.deepcopy(model.decoding.cfg)
-    with open_dict(config):
-        config.strategy = "greedy_batch"
-        config.greedy.loop_labels = True
-        config.greedy.use_cuda_graph_decoder = True
-        config.greedy.enable_per_stream_biasing = False
-        config.greedy.boosting_tree = OmegaConf.structured(BoostingTreeModelConfig(
-            key_phrases_list=[WAKE_WORD, WAKE_WORD.lower()], use_triton=True,
-        ))
-        config.greedy.boosting_tree_alpha = 1.0
-    return RNNTBPEDecoding(config, model.decoder, model.joint, source.tokenizer)
-
-
-class _DiscordDecoder(speech.StreamingASR):
-    def _get_best_hypothesis(self, encoded, encoded_len, partial_hypotheses=None):
-        # Batched NeMo merges continuation text, whereas the streaming adapter
-        # consumes per-chunk alignments. Keep only recurrent predictor/boosting
-        # state between chunks so neither words nor alignment history repeat.
-        previous = [Hypothesis(score=0.0, y_sequence=[], timestamp=[],
-                               dec_state=hyp.dec_state)
-                    for hyp in partial_hypotheses] if partial_hypotheses else None
-        encoded = encoded.to(next(self.asr_model.joint.parameters()).dtype)
-        return self._name_decoding.rnnt_decoder_predictions_tensor(
-            encoded, encoded_len, return_hypotheses=True, partial_hypotheses=previous,
-        )
-
-
 def _decoder_context(source, decoding):
     """Fork only the pinned legacy decoder's explicit stream state.
 
@@ -136,15 +101,16 @@ def _decoder_context(source, decoding):
         "chunk_size", "shift_size", "left_chunks", "asr_model", "tokenizer", "use_amp",
         "pad_and_drop_preencoded", "blank_id", "chunk_size_in_secs", "model_chunk_size",
         "pre_encode_cache_size", "pre_encode_cache_size_in_secs", "tokens_per_frame", "buffer_size_in_secs",
+        "phrase_decoding",
     }
     isolated = {"_audio_buffer", "_cache_last_channel", "_cache_last_time",
                 "_cache_last_channel_len", "_previous_hypotheses", "_last_transcript_timestamp"}
     if type(source) is not speech.StreamingASR or set(vars(source)) != shared | isolated:
         # An upstream decoder adding stream state needs review before sharing.
         raise RuntimeError("unsupported_discord_asr_backend")
-    result = object.__new__(_DiscordDecoder)
+    result = object.__new__(speech.StreamingASR)
     result.__dict__.update(vars(source))
-    result._name_decoding = decoding
+    result.phrase_decoding = decoding
     result._audio_buffer = source.new_feature_buffer()
     result._reset_cache()
     result._previous_hypotheses = result._get_blank_hypothesis()
@@ -154,7 +120,8 @@ def _decoder_context(source, decoding):
 
 def _warm_name_decoder(source):
     """Warm shared encoder/decoder graphs before ingress; discard stream state."""
-    decoding = _name_decoder(source)
+    # Discord boosts only its own wake name, never the desktop phrase list.
+    decoding = speech.phrase_decoding(source, [WAKE_WORD, WAKE_WORD.lower()])
     # desktop_asr() attached and captured the shared encoder's graphs.
     encoder = source.asr_model.encoder
     encoder_graphs = encoder._stream_step_cuda_graphs or encoder.set_streaming_cuda_graphs()

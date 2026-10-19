@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import copy
 import json
 import os
 import re
@@ -40,6 +41,10 @@ from nemo.agents.voice_agent.pipecat.services.nemo.utils import CacheFeatureBuff
 from nemo.agents.voice_agent.pipecat.services.nemo.turn_taking import (
     NeMoTurnTakingService,
 )
+from nemo.collections.asr.parts.context_biasing.boosting_graph_batched import BoostingTreeModelConfig
+from nemo.collections.asr.parts.submodules.rnnt_decoding import RNNTBPEDecoding
+from nemo.collections.asr.parts.utils.rnnt_utils import Hypothesis
+from omegaconf import OmegaConf, open_dict
 from pipecat.audio.turn.base_turn_analyzer import EndOfTurnState
 from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.utils import calculate_audio_volume
@@ -113,6 +118,17 @@ ASR_SILENCE_HOLD_SECS = TRANSCRIPT_IDLE_SECS
 # WER (2026-10-19, asr-v2 replay). The RNNT decoder and joint stay float32.
 # realtime_asr_dtype = "float32" restores full-precision weights.
 ASR_DTYPES = {"bfloat16": torch.bfloat16, "float32": torch.float32}
+# Desktop phrase boosting (NeMo GPU-PB in the label-looping CUDA-graph greedy
+# decoder): the wake word plus the owner's artist, channel and application
+# names, one phrase per line ('#' comments), owner-reviewed, built by
+# gpu-tuning-20261018/asr-v2/build_phrases.py. Replay (2026-10-19): names cut
+# synthetic desk-command WER 8.5 -> 7.3 % at no step cost; song titles of
+# everyday words were inserted into ordinary speech. A missing file boosts the
+# wake word alone; realtime_asr_phrases names another file, false restores
+# NeMo's legacy greedy decoder.
+ASR_PHRASES = Path(__file__).resolve().parents[3] / "state/realtime-asr-phrases.txt"
+ASR_PHRASES_MAX = 2_000
+ASR_BOOST_ALPHA = 1.0
 # A trailing filled pause signals that the speaker is still formulating the
 # request. Reuse the existing pending-text grace, including after ASR tail
 # decoding, instead of accepting Smart Turn's early COMPLETE or delaying every turn.
@@ -635,13 +651,55 @@ def emit(kind: str, **payload: Any) -> None:
     print(json.dumps({"type": kind, **payload}, ensure_ascii=False), flush=True)
 
 
+def load_boost_phrases(path, wake_word: str) -> list[str]:
+    """The wake word plus a bounded, de-duplicated phrase file."""
+    phrases = [wake_word, wake_word.lower()]
+    try:
+        lines = Path(path).read_text(encoding="utf-8").splitlines() if path else []
+    except FileNotFoundError:
+        lines = []
+    for line in lines:
+        line = " ".join(line.split())
+        if line and not line.startswith("#") and len(line) <= 80:
+            phrases.append(line)
+    return list(dict.fromkeys(phrases))[:ASR_PHRASES_MAX]
+
+
+def phrase_decoding(source, phrases: list[str], *, alpha: float = ASR_BOOST_ALPHA):
+    """Greedy label-looping RNNT decoding (CUDA-graph decoder) with GPU-PB.
+
+    Without phrases it is the same greedy search as NeMo's legacy decoder,
+    batched on the GPU without per-symbol host synchronization. Per-frame
+    alignment logits cost 3 ms per step here (0.5 ms without); StreamingASR
+    reads token ids instead.
+    """
+    model = source.asr_model
+    config = copy.deepcopy(model.decoding.cfg)
+    with open_dict(config):
+        config.preserve_alignments = False
+        config.strategy = "greedy_batch"
+        config.greedy.loop_labels = True
+        config.greedy.use_cuda_graph_decoder = True
+        config.greedy.enable_per_stream_biasing = False
+        if phrases:
+            config.greedy.boosting_tree = OmegaConf.structured(BoostingTreeModelConfig(
+                key_phrases_list=list(phrases), use_triton=str(source.device).startswith("cuda"),
+            ))
+            config.greedy.boosting_tree_alpha = alpha
+    return RNNTBPEDecoding(config, model.decoder, model.joint, source.tokenizer)
+
+
 class StreamingASR(NemoStreamingASRService):
     """NeMo's legacy cache-aware stream whose encoder may run in bfloat16.
 
     Encoder weights, caches and stored log-mel features share the encoder's
     dtype; the RNNT decoder and joint keep float32, so encoder output is cast
-    at that boundary. Stream state is unchanged otherwise (see discord.py).
+    at that boundary. ``phrase_decoding`` (shared, stateless between calls)
+    replaces the legacy per-symbol greedy loop. Stream state is unchanged
+    otherwise (see discord.py).
     """
+
+    phrase_decoding = None
 
     def _reset_cache(self) -> None:
         dtype = next(self.asr_model.encoder.parameters()).dtype
@@ -660,10 +718,31 @@ class StreamingASR(NemoStreamingASRService):
 
     def _get_best_hypothesis(self, encoded, encoded_len, partial_hypotheses=None):
         encoded = encoded.to(next(self.asr_model.joint.parameters()).dtype)
-        return super()._get_best_hypothesis(encoded, encoded_len, partial_hypotheses)
+        if self.phrase_decoding is None:
+            return super()._get_best_hypothesis(encoded, encoded_len, partial_hypotheses)
+        # Batched NeMo merges continuation text, whereas the streaming adapter
+        # consumes per-chunk alignments. Keep only recurrent predictor/boosting
+        # state between chunks so neither words nor alignment history repeat.
+        previous = [Hypothesis(score=0.0, y_sequence=[], timestamp=[], dec_state=hyp.dec_state)
+                    for hyp in partial_hypotheses] if partial_hypotheses else None
+        hypotheses = self.phrase_decoding.rnnt_decoder_predictions_tensor(
+            encoded, encoded_len, return_hypotheses=True, partial_hypotheses=previous,
+        )
+        for hyp in hypotheses:
+            # This chunk's token ids where transcribe() reads alignments.
+            hyp.alignments = [[(None, int(token))] for token in hyp.y_sequence]
+        return hypotheses
+
+    def _get_tokens_and_probs_from_alignments(self, alignments):
+        if self.phrase_decoding is None:
+            return super()._get_tokens_and_probs_from_alignments(alignments)
+        # Probabilities only scored EOU/EOB tokens, which this model never emits.
+        tokens = [token for frame in alignments for _, token in frame if token != self.blank_id]
+        return tokens, [1.0] * len(tokens)
 
 
-def desktop_asr(model: str, *, device: str, dtype: str = "bfloat16") -> StreamingASR:
+def desktop_asr(model: str, *, device: str, dtype: str = "bfloat16",
+                phrases: list[str] | None = None, boost_alpha: float = ASR_BOOST_ALPHA) -> StreamingASR:
     """Load, cast, place and warm the one shared ASR model before any capture.
 
     Restoring straight onto the GPU briefly held a second copy of the weights
@@ -677,6 +756,8 @@ def desktop_asr(model: str, *, device: str, dtype: str = "bfloat16") -> Streamin
         service.asr_model.to(device)
         service.device = device
     service._audio_buffer = service.new_feature_buffer()
+    service.phrase_decoding = (phrase_decoding(service, phrases, alpha=boost_alpha)
+                               if phrases is not None else None)
     service.reset_state()  # Caches at the placed device and dtype.
     if device.startswith("cuda"):
         # Ada tensor cores for the float32 parts before graph capture.
@@ -685,6 +766,7 @@ def desktop_asr(model: str, *, device: str, dtype: str = "bfloat16") -> Streamin
         silence = bytes(round(SAMPLE_RATE * service.chunk_size_in_secs) * 2)
         with torch.inference_mode():
             # Native capture follows three eager steps; include a later replay.
+            # Silence also captures the decoder graphs, first chunk then continuation.
             for _ in range(graphs.warmup_steps + 2):
                 service.transcribe(silence)
         torch.cuda.synchronize(device)
@@ -696,8 +778,10 @@ class UtteranceNeMoSTTService(NemoSTTService):
     """Start voiced utterances with fresh ASR context and their onset audio."""
 
     def __init__(self, *, reset_on_vad_onset: bool = True, silence_gate: bool = False,
-                 asr_dtype: str = "bfloat16", **kwargs: Any) -> None:
-        self._asr_dtype = asr_dtype  # Read by _load_model during NeMo's constructor.
+                 asr_dtype: str = "bfloat16", boost_phrases: list[str] | None = None,
+                 **kwargs: Any) -> None:
+        # Read by _load_model during NeMo's constructor.
+        self._asr_dtype, self._boost_phrases = asr_dtype, boost_phrases
         super().__init__(**kwargs)
         self._reset_on_vad_onset = reset_on_vad_onset
         # The gate relies on the onset reset and pre-roll replay below.
@@ -708,7 +792,8 @@ class UtteranceNeMoSTTService(NemoSTTService):
         self._recognized_since_stop = False
 
     def _load_model(self) -> None:
-        self._model = desktop_asr(self._model_name, device=self._device, dtype=self._asr_dtype)
+        self._model = desktop_asr(self._model_name, device=self._device, dtype=self._asr_dtype,
+                                  phrases=self._boost_phrases)
 
     async def _handle_transcription(self, transcript, is_final, language=None):
         if transcript.strip():
@@ -1953,9 +2038,11 @@ def create_stt(args: argparse.Namespace):
     dtype = CONFIG.extras.get("realtime_asr_dtype", "bfloat16")
     if dtype not in ASR_DTYPES:
         raise ValueError("realtime_asr_dtype must be one of: " + ", ".join(ASR_DTYPES))
+    phrases = CONFIG.extras.get("realtime_asr_phrases", str(ASR_PHRASES))
     return UtteranceNeMoSTTService(
         silence_gate=CONFIG.extras.get("realtime_asr_silence_gate", True) is not False,
         asr_dtype=dtype,
+        boost_phrases=None if phrases is False else load_boost_phrases(phrases, args.wake_word),
         model=args.asr_model,
         device="cuda:0",
         sample_rate=SAMPLE_RATE,
