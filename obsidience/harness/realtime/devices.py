@@ -12,6 +12,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from ..host.inventory import DEVICE_LABELS, RTX_4000_DEVICE
+
 PROJECT_ROOT = Path("/home/wissenschafter/Projects/obsidience")
 MEDIA_SETTINGS_PATH = PROJECT_ROOT / "obsidience/state/media-settings.json"
 DEFAULT_MICROPHONE = (
@@ -30,6 +32,9 @@ TTS_VOICES = ("starfleet", "hal", "ultron")
 MAX_PACTL_BYTES = 2 * 1024 * 1024
 OBSBOT_CONTROL = Path("/home/wissenschafter/src/obsbot/obsbot_ctl")
 MICROPHONE_PROBE_SAMPLES = 16_000
+# Speech ASR shares the chipset RTX 4000 with the model (owner, 2026-10-18); the
+# speech worker is launched on it and the speech status reports it.
+ASR_DEVICE = RTX_4000_DEVICE
 
 _SETTINGS_LOCK = threading.RLock()
 _AEC_LOCK = threading.RLock()
@@ -678,7 +683,7 @@ def speech_runtime() -> dict[str, Any]:
         "transport": "Pipecat LocalAudioTransport 0.0.98",
         "turn_taking": "NVIDIA NeMo Voice Agent",
         "asr": "Nemotron Speech Streaming EN 0.6B",
-        "asr_device": "RTX 4080 SUPER",
+        "asr_device": DEVICE_LABELS[ASR_DEVICE],
         "asr_chunk_ms": 160,
         "tts": "Pocket TTS 3.0.2",
         "tts_device": "CPU",

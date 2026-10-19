@@ -341,7 +341,7 @@ class RealtimeSessionManager:
                 "transport": "Pipecat LocalAudioTransport 0.0.98",
                 "turn_taking": "NVIDIA NeMo Voice Agent",
                 "asr": "Nemotron Speech Streaming EN 0.6B",
-                "asr_device": "RTX 4080 SUPER",
+                "asr_device": model_runtime.DEVICE_LABELS[media_runtime.ASR_DEVICE],
                 "asr_chunk_ms": 160,
                 "tts": "Pocket TTS 3.0.2",
                 "tts_device": "CPU",
@@ -1092,7 +1092,7 @@ class RealtimeSessionManager:
                              "CUDA_DEVICE_ORDER": "PCI_BUS_ID",
                              # ASR shares the chipset RTX 4000 with the model (owner, 2026-10-18); the 4080
                              # reservation above still keeps models off the desktop GPU while speech runs.
-                             "CUDA_VISIBLE_DEVICES": model_runtime.GPU_UUIDS[model_runtime.RTX_4000_DEVICE],
+                             "CUDA_VISIBLE_DEVICES": model_runtime.GPU_UUIDS[media_runtime.ASR_DEVICE],
                              "HF_HUB_OFFLINE": "1", "HF_HUB_DISABLE_TELEMETRY": "1",
                              "TRANSFORMERS_OFFLINE": "1", "PYTHONUNBUFFERED": "1"}
                 for key in ("PULSE_SOURCE", "PULSE_SINK", "PULSE_PROP"):
@@ -1381,7 +1381,7 @@ class RealtimeSessionManager:
                         # ASR shares the chipset RTX 4000 with the model (owner, 2026-10-18); the 4080
                         # reservation above still keeps models off the desktop GPU while speech runs.
                         "CUDA_VISIBLE_DEVICES": model_runtime.GPU_UUIDS[
-                            model_runtime.RTX_4000_DEVICE
+                            media_runtime.ASR_DEVICE
                         ],
                         "HF_HUB_OFFLINE": "1",
                         "HF_HUB_DISABLE_TELEMETRY": "1",
