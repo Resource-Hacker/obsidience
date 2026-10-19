@@ -193,11 +193,13 @@ MODELS = {
         projector_path=GEMMA_PROJECTOR,
         projector_sha256=GEMMA_PROJECTOR_SHA256,
         chat_template_path=GEMMA_TEMPLATE,
-        mtp_path=GEMMA_MTP,
-        mtp_sha256=GEMMA_MTP_SHA256,
-        # Tensor split makes each draft token cost all-reduces: depth 2 cut the step 21.6 ->
-        # 18.2 ms with acceptance 0.58 -> 0.68, equal-or-better throughput (2026-10-18).
-        mtp_tokens=2,
+        # MTP draft off (2026-10-19): the tp6 engine aborted twice in 30 min in the MTP
+        # draft's flash attention (fattn.cu:762, no kernel for the shape). Restore
+        # mtp_path=GEMMA_MTP, mtp_sha256=GEMMA_MTP_SHA256, mtp_tokens=2 with the fixed
+        # engine: depth 2 cut the tensor-split step 21.6 -> 18.2 ms (2026-10-18).
+        mtp_path=None,
+        mtp_sha256=None,
+        mtp_tokens=0,
         supports_json_schema=True,
         # Enable only with the matching native admission-guard engine deployment.
         supports_input_token_limit=True,
