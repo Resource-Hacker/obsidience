@@ -142,6 +142,7 @@ def _warm_name_decoder(source):
         pcm = bytes(round(speech.SAMPLE_RATE * source.chunk_size_in_secs) * 2)
         for _ in range(encoder_graphs.warmup_steps + 2):
             context.transcribe(pcm)
+        context.transcribe_final(pcm * speech.final_batches(context))
         torch.cuda.synchronize(source.device)
     return decoding
 

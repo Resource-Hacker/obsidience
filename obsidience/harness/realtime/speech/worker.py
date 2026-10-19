@@ -32,7 +32,7 @@ _nemo_voice_services.__path__ = [
 ]
 sys.modules[_NEMO_SERVICE_PACKAGE] = _nemo_voice_services
 
-from nemo.agents.voice_agent.pipecat.services.nemo.streaming_asr import NemoStreamingASRService
+from nemo.agents.voice_agent.pipecat.services.nemo.streaming_asr import ASRResult, NemoStreamingASRService
 from nemo.agents.voice_agent.pipecat.services.nemo.stt import (
     NemoSTTService,
     NeMoSTTInputParams,
@@ -76,6 +76,7 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.tts_service import TTSService
+from pipecat.utils.time import time_now_iso8601
 from pipecat.transports.local.audio import (
     LocalAudioInputTransport,
     LocalAudioOutputTransport,
@@ -99,10 +100,14 @@ SMART_TURN_VAD_STOP_SECS = 0.2
 # end such as "what's" or "the", or only the wake-word address).
 SMART_TURN_FALLBACK_SECS = 1.8
 SMART_TURN_PENDING_SECS = 3.0
-# NeMo emits a final word up to about 0.7 s of audio after Silero's last voiced
-# frame (the old fixed pause covered it). An earlier end of turn decodes the
-# rest of that tail from silence before NeMo resets, instead of waiting for it.
-ASR_TAIL_SECS = 0.7
+# NeMo emits a final word up to about 1 s of audio after Silero's last voiced
+# frame. An earlier end of turn decodes the rest of that tail from silence in
+# one encoder call before NeMo resets, instead of waiting for it. Replay of 256
+# owner utterances (2026-10-19, asr-v2, one 80 ms step per batch): 0.7 s still
+# cut the last word of 5 and 0.32 s (Pipecat's reference padding) of 30; the
+# latest word came 10 steps (0.8 s) into the tail. In one call the length is
+# nearly free (0.9 s: 17 ms, 1.2 s: 16 ms; stepwise 0.7 s took ~105 ms).
+ASR_TAIL_SECS = 1.2
 # Desktop ASR skips its GPU steps in sustained silence (2026-10-18: 12.5 steps/s
 # kept the shared RTX 4000 ~11% busy and cost tensor-split Gemma ~13%, also while
 # it answered). A voiced onset after silence already resets NeMo and replays the
@@ -740,6 +745,41 @@ class StreamingASR(NemoStreamingASRService):
         tokens = [token for frame in alignments for _, token in frame if token != self.blank_id]
         return tokens, [1.0] * len(tokens)
 
+    def transcribe_final(self, audio: bytes) -> ASRResult:
+        """Decode an utterance's remaining audio in one encoder call.
+
+        NeMo's final-chunk path (keep_all_outputs): the pre-encode cache and the
+        pending lookahead frame from the feature buffer, then the remainder's
+        features. Its text continues the hypothesis; the caller then resets.
+        """
+        started = time.time()
+        buffer = self._audio_buffer
+        samples = torch.from_numpy(np.frombuffer(audio, dtype=np.int16).astype(np.float32) / 32768.0)
+        look_back = buffer.n_chunk_look_back
+        frames = len(samples) // look_back
+        # As CacheFeatureBufferer.update, for a longer chunk: drop the incomplete last frame.
+        features = buffer.preprocess(torch.cat([buffer.sample_buffer.sample_buffer[-look_back:], samples]))
+        features = features[:, :frames + 1][:, -frames:]
+        keep = self.pre_encode_cache_size + buffer.feature_chunk_len
+        signal = torch.cat([buffer.feature_buffer[:, -keep:], features.to(buffer.feature_buffer.dtype)], dim=1)
+        with torch.no_grad():
+            encoded, encoded_len, *_ = self.asr_model.encoder.cache_aware_stream_step(
+                processed_signal=signal.unsqueeze(0),
+                processed_signal_length=torch.tensor([signal.shape[1]], device=signal.device),
+                cache_last_channel=self._cache_last_channel, cache_last_time=self._cache_last_time,
+                cache_last_channel_len=self._cache_last_channel_len,
+                keep_all_outputs=True, drop_extra_pre_encoded=self.drop_extra_pre_encoded,
+            )
+        best = self._get_best_hypothesis(encoded, encoded_len, partial_hypotheses=self._previous_hypotheses)
+        tokens, _ = self._get_tokens_and_probs_from_alignments(best[0].alignments)
+        return ASRResult(text=self.get_text_from_tokens(tokens), is_final=False,
+                         processing_time=time.time() - started)
+
+
+def final_batches(service: StreamingASR) -> int:
+    """Batches in the longest end-of-turn remainder: pending frames plus the tail."""
+    return int(ASR_TAIL_SECS / service.chunk_size_in_secs) + 2
+
 
 def desktop_asr(model: str, *, device: str, dtype: str = "bfloat16",
                 phrases: list[str] | None = None, boost_alpha: float = ASR_BOOST_ALPHA) -> StreamingASR:
@@ -769,6 +809,8 @@ def desktop_asr(model: str, *, device: str, dtype: str = "bfloat16",
             # Silence also captures the decoder graphs, first chunk then continuation.
             for _ in range(graphs.warmup_steps + 2):
                 service.transcribe(silence)
+            # The longest end-of-turn remainder sizes the decoder's graphs once.
+            service.transcribe_final(silence * final_batches(service))
         torch.cuda.synchronize(device)
     service.reset_state()
     return service
@@ -790,6 +832,32 @@ class UtteranceNeMoSTTService(NemoSTTService):
         self._asr_gated = False
         self._preroll = bytearray()
         self._recognized_since_stop = False
+
+    async def _run_model(self, call, *args):
+        # NemoSTTService._transcribe's lock and native-work drain, for other stream calls.
+        async with self._model_lock:
+            inference = asyncio.create_task(asyncio.to_thread(call, *args))
+            try:
+                return await asyncio.shield(inference)
+            except asyncio.CancelledError:
+                while not inference.done():
+                    try:
+                        await asyncio.shield(inference)
+                    except asyncio.CancelledError:
+                        continue
+                    except Exception:
+                        break
+                if not inference.cancelled():
+                    inference.exception()  # Retrieve an error without replacing cancellation.
+                raise
+
+    async def _push_transcript(self, text: str) -> None:
+        # As NemoSTTService.run_stt pushes a step's text.
+        if text:
+            language = self._params.language
+            await self.push_frame(InterimTranscriptionFrame(
+                text, "", time_now_iso8601(), language, result={"text": text}))
+            await self._handle_transcription(transcript=text, is_final=False, language=language)
 
     def _load_model(self) -> None:
         self._model = desktop_asr(self._model_name, device=self._device, dtype=self._asr_dtype,
@@ -843,12 +911,13 @@ class UtteranceNeMoSTTService(NemoSTTService):
         if isinstance(frame, VADUserStoppedSpeakingFrame):
             tail = frame.metadata.get("obsidience_asr_tail_frames", 0)
             if tail > 0:
-                # Complete whole 80 ms batches so every silent frame is decoded.
+                # Complete whole 80 ms batches so every silent frame is decoded,
+                # then decode pending frames and silence in one encoder call.
                 tail += -(len(self.audio_buffer) + tail) % self._params.buffer_size
-                for _ in range(tail):
-                    await super().process_audio_frame(
-                        InputAudioRawFrame(b"\0" * 640, SAMPLE_RATE, 1), direction,
-                    )
+                remainder = b"".join(self.audio_buffer) + b"\0" * (640 * tail)
+                self.audio_buffer.clear()
+                result = await self._run_model(self._model.transcribe_final, remainder)
+                await self._push_transcript(result.text)
         await super().process_frame(frame, direction)
         if isinstance(frame, VADUserStoppedSpeakingFrame):
             # NeMo resets its caches on this same edge. Partial batches belong
