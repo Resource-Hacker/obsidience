@@ -166,27 +166,28 @@ class ModelMemoryUnavailable(ModelResourceUnavailable):
 MODELS = {
     EXECUTIVE_MODEL: ModelSpec(
         id=EXECUTIVE_MODEL,
-        label="Gemma 4 26B-A4B Heretic XXL",
+        label="Gemma 4 26B-A4B Heretic Q6_K",
         family="gemma4",
         base_url="http://127.0.0.1:8089/v1",
         purpose="Executive conversation and specialist Tasks with Task-selected reasoning",
         context_tokens=16_384,
         max_output_tokens=3_584,
         max_context_tokens=98_304,
-        quantization="UDmerge-Q4_K_XXL",
-        hardware="One or both RTX 4000 Ada GPUs",
-        runtime="llama.cpp b10078 · MTP3",
+        quantization="Q6_K",
+        hardware="Both RTX 4000 Ada GPUs",
+        runtime="llama.cpp b11509 · MTP3",
         capabilities=("text", "vision", "reasoning", "tools"),
         reasoning_budgets={"none": 0, "low": 256, "medium": 768, "high": 1_536, "xhigh": 2_560},
         supported_devices=(RTX_4000_DEVICE, RTX_4000B_DEVICE),
         default_allowed_devices=(RTX_4000_DEVICE, RTX_4000B_DEVICE),
-        min_gpu_count=1,
+        # The 22.6 GB Q6_K exceeds one 20 GB card.
+        min_gpu_count=2,
         default_gpu_memory_utilization=0.90,
         default_max_num_seqs=1,
         service=GEMMA_SERVICE,
         model_path=GEMMA_MODEL,
         verified_path=GEMMA_MODEL.with_suffix(".gguf.verified"),
-        expected_size=14_329_791_488,
+        expected_size=22_638_405_120,
         projector_path=GEMMA_PROJECTOR,
         projector_sha256=GEMMA_PROJECTOR_SHA256,
         chat_template_path=GEMMA_TEMPLATE,
@@ -207,7 +208,8 @@ def _default_profile(spec: ModelSpec) -> dict:
         "max_output_tokens": spec.max_output_tokens,
         "gpu_memory_utilization": spec.default_gpu_memory_utilization,
         "max_num_seqs": spec.default_max_num_seqs,
-        "split_mode": SPLIT_MODES[0],
+        # MTP decoding stays fast only in tensor mode on the two RTX 4000s (2026-10-18).
+        "split_mode": "tensor",
     }
 
 

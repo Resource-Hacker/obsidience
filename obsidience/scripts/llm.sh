@@ -28,10 +28,11 @@ if [ -n "$MTP" ]; then
   set -- "$@" --spec-draft-model "$MTP" --spec-type draft-mtp \
     --spec-draft-n-max "$MTP_TOKENS" --spec-draft-n-min 0 --spec-draft-ngl 99
 fi
-# CUDA_VISIBLE_DEVICES lists the launch's GPUs in order (CUDA0 = first); llama.cpp
-# splits by free memory. One GPU keeps the default single-device layout.
+# CUDA_VISIBLE_DEVICES lists the launch's GPUs in order (CUDA0 = first). The split
+# stays even: speech shares the first RTX 4000, and llama.cpp's default split by free
+# memory would leave the tensor-mode peer waiting. One GPU keeps the single-device layout.
 if [ "$GPU_COUNT" -gt 1 ]; then
-  set -- "$@" --split-mode "$SPLIT_MODE"
+  set -- "$@" --split-mode "$SPLIT_MODE" --tensor-split 1,1
   if [ "$SPLIT_MODE" = tensor ]; then
     # Two RTX 4000s (2026-10-18): tensor decode was fastest over NCCL with P2P off.
     export NCCL_P2P_DISABLE=1

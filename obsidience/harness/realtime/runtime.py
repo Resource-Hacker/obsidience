@@ -1090,7 +1090,9 @@ class RealtimeSessionManager:
                 child_env = {**os.environ,
                              "PYTHONPATH": ":".join((str(PROJECT_ROOT), "/var/lib/ai/src/obsidience-nemo-speech")),
                              "CUDA_DEVICE_ORDER": "PCI_BUS_ID",
-                             "CUDA_VISIBLE_DEVICES": model_runtime.GPU_UUIDS[model_runtime.RTX_4080_DEVICE],
+                             # ASR shares the chipset RTX 4000 with the model (owner, 2026-10-18); the 4080
+                             # reservation above still keeps models off the desktop GPU while speech runs.
+                             "CUDA_VISIBLE_DEVICES": model_runtime.GPU_UUIDS[model_runtime.RTX_4000_DEVICE],
                              "HF_HUB_OFFLINE": "1", "HF_HUB_DISABLE_TELEMETRY": "1",
                              "TRANSFORMERS_OFFLINE": "1", "PYTHONUNBUFFERED": "1"}
                 for key in ("PULSE_SOURCE", "PULSE_SINK", "PULSE_PROP"):
@@ -1376,8 +1378,10 @@ class RealtimeSessionManager:
                             "/var/lib/ai/src/obsidience-nemo-speech",
                         )),
                         "CUDA_DEVICE_ORDER": "PCI_BUS_ID",
+                        # ASR shares the chipset RTX 4000 with the model (owner, 2026-10-18); the 4080
+                        # reservation above still keeps models off the desktop GPU while speech runs.
                         "CUDA_VISIBLE_DEVICES": model_runtime.GPU_UUIDS[
-                            model_runtime.RTX_4080_DEVICE
+                            model_runtime.RTX_4000_DEVICE
                         ],
                         "HF_HUB_OFFLINE": "1",
                         "HF_HUB_DISABLE_TELEMETRY": "1",
