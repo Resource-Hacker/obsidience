@@ -162,6 +162,13 @@ WAKE_PAUSE_SECS = 0.4
 # A name ending the recognized text may still become "computer's"; the next
 # ASR delta normally arrives within one or two 80-160 ms steps.
 WAKE_CONFIRM_SECS = 0.35
+# A CPU keyword spotter (wakeword.py) hears the name ~0.2 s after it ends, well
+# before ASR text. At a segment start it chirps and interrupts at once; ASR text
+# still opens the command window, or the segment's end drops the spot quietly.
+# realtime_wake_spotter = false keeps ASR-only wake detection.
+WAKE_SPOTTER_MODEL = "/var/lib/ai/models/obsidience-realtime/wake-word/computer.json"
+# Latest spot after the segment's VAD onset: "hey computer", spoken slowly.
+WAKE_SPOT_ONSET_SECS = 1.6
 WAKE_STRIP = " ,.!?:;—-'’\t\n"
 _WAKE_LEAD = re.compile(r"[\W_]*(?:(?:hey|hay|ok|okay)\b[\W_]*)?", re.IGNORECASE)
 # Streaming ASR can spell the spoken greeting "hey" as its homophone "hay".
@@ -994,7 +1001,7 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
                  mode: str = "realtime", mode_revision: int = 0,
                  wake_word: str = "Computer", smart_turn: bool = False,
                  semantic_turns: bool = False, event_sink=None,
-                 **kwargs: Any) -> None:
+                 wake_spotter=None, **kwargs: Any) -> None:
         # STT audio and VAD share its system-frame FIFO, but transcription
         # frames use a separate downstream queue. Consume text inline so a
         # VAD stop cannot overtake recognized words before finalization.
@@ -1026,6 +1033,9 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
         self._mode_waiting_for_stop = False
         self._wake_cue_eligible = False
         self._wake_cue_name = "ready"
+        self._wake_spotter = wake_spotter
+        self._wake_spotted = False
+        self._segment_onset_at = 0.0
         self._completed_pushed = False
 
     def _invalidate_candidate(self) -> None:
@@ -1103,6 +1113,7 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
                 self._wake_confirm = None
 
     async def _open_wake(self, text: str, *, cue_name: str = "ready") -> str:
+        spotted, self._wake_spotted = self._wake_spotted, False
         text = text.lstrip(WAKE_STRIP)
         self._wake_cue_name = cue_name
         self._wake_open = True
@@ -1116,15 +1127,41 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
         # own stop grace. A completed reply's closing cue extends that tail.
         # Snapshot the actual reply owner before interruption invalidates
         # it, so immediate follow-ups chirp and true speech barge-in stays quiet.
-        reply_active = (self._playback._reply_active if self._playback is not None
-                        else self._bot_speaking)
-        # Owner choice (2026-10-19): the wake word always chirps, also when the
-        # command follows in one breath; true speech barge-in during a reply stays quiet.
-        self._wake_cue_eligible = not reply_active
+        if not spotted:  # A spot already chose the cue and interrupted.
+            self._wake_cue_eligible = self._wake_cue_choice()
         if not self._have_sent_user_started_speaking:
             await self._handle_user_interruption(UserStartedSpeakingFrame())
             self._have_sent_user_started_speaking = True
         return text
+
+    def _wake_cue_choice(self) -> bool:
+        reply_active = (self._playback._reply_active if self._playback is not None
+                        else self._bot_speaking)
+        # Owner choice (2026-10-19): the wake word always chirps, also when the
+        # command follows in one breath; true speech barge-in during a reply stays quiet.
+        return not reply_active
+
+    async def _spot_wake(self) -> None:
+        """The keyword spotter heard the name: chirp and interrupt now.
+
+        Only at a segment start (the ASR rule's address position, before other
+        recognized words). It opens no command window: ASR text still accepts
+        the address, and a segment that ends without one drops the spot.
+        """
+        if (self.mode != "wake" or self._wake_open or self._wake_spotted
+                or self._mode_waiting_for_stop or not self._vad_user_speaking
+                or time.monotonic() - self._segment_onset_at > WAKE_SPOT_ONSET_SECS
+                or self._wake_address != 0
+                or not _WAKE_LEAD.fullmatch(self._wake_pattern.sub("", self._wake_prefix))):
+            return
+        self._wake_spotted = True
+        self._wake_cue_name = "ready"
+        self._wake_cue_eligible = self._wake_cue_choice()
+        self._emit("wake_spotted", mode_revision=self.mode_revision,
+                   score=round(self._wake_spotter.score, 3))
+        if not self._have_sent_user_started_speaking:
+            await self._handle_user_interruption(UserStartedSpeakingFrame())
+            self._have_sent_user_started_speaking = True
 
     async def _wake_delta(self, text: str) -> str | None:
         """Track one unaddressed ASR delta; return command text once addressed."""
@@ -1202,6 +1239,7 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
             await self.cancel_task(timeout)
         await self._reset_wake_scan(segment_start=not self._vad_user_speaking)
         self._wake_open = False
+        self._wake_spotted = False
         self._wake_cue_eligible = False
 
     async def _expire_wake(self) -> None:
@@ -1319,6 +1357,7 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
         """Keep VAD provisional until recognized speech confirms interruption."""
 
         self._vad_user_speaking = True
+        self._segment_onset_at = time.monotonic()
         self._invalidate_candidate()
         if self._timing is not None:
             self._timing.onset(frame.metadata.get("obsidience_onset_ns"))
@@ -1381,6 +1420,9 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
                    flush_ms=frame.flush_ms)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        if (isinstance(frame, InputAudioRawFrame) and self._wake_spotter is not None
+                and self.mode == "wake" and self._wake_spotter.process(frame.audio)):
+            await self._spot_wake()
         if isinstance(frame, SpeechAdmissionFrame):
             await self._admit_speech(frame)
             return
@@ -1442,6 +1484,12 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
                 command = self._classify_wake(final=True)
                 if command is not None:
                     await self._open_wake(command)
+            if self._wake_spotted and not self._wake_open:
+                # ASR never accepted the spotted name; the empty stop below
+                # ends the provisional speech edge.
+                self._wake_spotted = False
+                self._wake_cue_eligible = False
+                self._emit("wake_spot_dropped", mode_revision=self.mode_revision)
             await self._reset_wake_scan(segment_start=True)
             self._mode_waiting_for_stop = False
             if self._timing is not None and self._user_speaking_buffer.strip():
@@ -2273,6 +2321,17 @@ async def run(args: argparse.Namespace) -> None:
                                          lambda: short_replies and turn_taking.turn_short_reply(),
                                          model_path=None if model == "bundled" else model)
                      if CONFIG.extras.get("realtime_smart_turn", True) is not False else None)
+    wake_spotter = None
+    if CONFIG.extras.get("realtime_wake_spotter", True) is not False:
+        try:
+            from .wakeword import WakeWordSpotter
+            wake_spotter = WakeWordSpotter(WAKE_SPOTTER_MODEL)
+            if wake_spotter.wake_word.strip().lower() != args.wake_word.strip().lower():
+                raise ValueError("the spotter model was trained for another wake word")
+        except Exception as exc:
+            # A missing package or model keeps ASR-only wake detection.
+            wake_spotter = None
+            emit("wake_spotter_unavailable", error=type(exc).__name__)
     transport = NeMoLocalAudioTransport(
         LocalAudioTransportParams(
             input_device_index=pulse_devices[0],
@@ -2305,6 +2364,7 @@ async def run(args: argparse.Namespace) -> None:
         wake_word=args.wake_word,
         smart_turn=turn_analyzer is not None,
         semantic_turns=CONFIG.extras.get("realtime_semantic_turns", False) is True,
+        wake_spotter=wake_spotter,
         use_vad=True,
         use_diar=False,
         max_buffer_size=2,
@@ -2366,6 +2426,7 @@ async def run(args: argparse.Namespace) -> None:
             semantic_turns=turn_taking._semantic_turns,
             asr="nvidia/nemotron-speech-streaming-en-0.6b",
             asr_chunk_ms=160,
+            wake_spotter=wake_spotter is not None,
             tts="pocket-tts-3.3.0+9aa7a7f-cpu",
             voice=args.voice,
             cues=sorted(playback._cue_assets),

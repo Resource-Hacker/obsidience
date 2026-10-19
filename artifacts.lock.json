@@ -61,6 +61,23 @@
       "size": 8679182,
       "integration": "Drop-in ONNX for Pipecat's LocalSmartTurnAnalyzerV3 in the speech worker's Smart Turn gate (CPU), replacing the bundled v3.1 (sha256 fb68d55c2d542ce79e44b12013bfd571e90df8594ab096d757198e851b0c6594) after offline replay; realtime_smart_turn_model = \"bundled\" selects v3.1."
     },
+    "pymicro_wakeword": {
+      "repository": "https://github.com/OHF-Voice/pymicro-wakeword",
+      "version": "2.5.0",
+      "license": "Apache-2.0",
+      "wheel_sha256": "3869f536402b1254e3be3549d3a462ecd6ed21ce2c3e77ec8eb501c3c700417c",
+      "dependency_lock": "obsidience/harness/requirements-speech.txt",
+      "integration": "Streaming microWakeWord runtime (bundled TensorFlow Lite C library, one inference per 30 ms on the calling thread) behind wakeword.py in the speech worker; with pymicro-features 2.0.2 (Apache-2.0, wheel sha256 65a76a7c7851ee0dd6083dda56b835ab9dc6eddeaf11b34461795758de846d0f) for the 40-channel micro frontend."
+    },
+    "wake_word_computer_microwakeword": {
+      "repository": "https://github.com/kahrendt/microWakeWord",
+      "revision": "4665173cd35f1cff9a61e06fc427f124766c488e",
+      "license": "Apache-2.0 (training code); weights trained locally with CC-BY-NC-4.0 negative features, so personal non-commercial use",
+      "path": "/var/lib/ai/models/obsidience-realtime/wake-word/computer.tflite",
+      "sha256": "679987ab6c31393fa0e283e7a50d7028ae75d2a11503464d8db7db9d45c142a0",
+      "size": 62304,
+      "integration": "First-stage CPU keyword spotter for the wake word Computer (manifest computer.json beside it sets the cutoff). Trained on CPU (run computer_v2) from Piper LibriTTS-R synthetic positives, MSWC real-voice clips, the upstream negative features and hard negatives mined from LibriSpeech train-clean-100; cutoff 0.97 measured 0.28 false accepts/h on LibriSpeech test-clean/other. Recipe, data and evaluation under /var/lib/ai/src/gpu-tuning-20261018/wakeword. A spot chirps and interrupts at a segment start; ASR text still opens the command window."
+    },
     "pocket_tts_config": {
       "path": "/var/lib/ai/models/obsidience-realtime/pocket-tts/english.yaml",
       "sha256": "0faf97431dec482bf87a47390ab20e73b9181f90e6255e4ce6f593af79f51523",

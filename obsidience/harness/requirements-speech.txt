@@ -9,3 +9,5 @@ librosa==0.10.2.post1
 -e /var/lib/ai/src/obsidience-pocket-tts-9aa7a7f
 -e /var/lib/ai/src/obsidience-nemo-speech[asr]
 websockets==15.0.1
+pymicro-features==2.0.2
+pymicro-wakeword==2.5.0

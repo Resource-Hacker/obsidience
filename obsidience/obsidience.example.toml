@@ -22,6 +22,10 @@ git_commit = true  # Local Vault audit only; never the application repository.
 # ADK model route: "local" streams from llama-server over the Harness's httpx
 # pool; "litellm" restores ADK's LiteLlm route (same requests, more CPU).
 # adk_model_client = "local"
+# Wake mode: a CPU keyword spotter hears "Computer" ~0.2 s after it is spoken
+# and, at a segment start, chirps and interrupts before ASR text arrives; ASR
+# text still opens the command window. false keeps ASR-only wake detection.
+# realtime_wake_spotter = true
 # Optional providers (TOML tables; keep them after the top-level keys above).
 # Hindsight historical memory: leave unset until its service is configured
 # (obsidience/harness/memory/README.md).
