@@ -434,6 +434,15 @@ def validate_decision(sample: dict, tool: str, args: dict) -> tuple[bool, str]:
         return False, str(exc)[:1500]
 
 
+def _exhausted_verdict(reason: str) -> str | None:
+    """Keep historical AutoSaddler findings compatible with the selected optimizer."""
+    for prefix in ('AutoSaddler exhausted its bounded improvement attempt: ',
+                   'Instruction optimizer exhausted its bounded improvement attempt: '):
+        if isinstance(reason, str) and reason.startswith(prefix):
+            return reason.removeprefix(prefix)
+    return None
+
+
 def notifications() -> list[dict]:
     """Project unresolved optimizer outcomes into the existing health Review."""
     rows = []
@@ -454,9 +463,9 @@ def notifications() -> list[dict]:
                 # record and health status instead of Review. A dead-end run is
                 # already in Review as its own failed Task.
                 continue
-            if reason == 'AutoSaddler exhausted its bounded improvement attempt: not_improved':
+            if _exhausted_verdict(reason) == 'not_improved':
                 reason = 'No instruction candidate met the quality gate; the current instructions were kept.'
-            rows.append({**row, 'reason': reason, 'title': 'AutoSaddler',
+            rows.append({**row, 'reason': reason, 'title': 'Instruction improvement',
                          'task': row.get('task', AUDITOR)})
     return rows
 
@@ -473,7 +482,7 @@ def _evaluation_files() -> tuple:
     findings = json.loads(attention_path.read_text()) if attention_path.is_file() else []
     # Admission rewrites the record in another order on every inspection pass.
     return (frozenset((row.get('key'), row.get('run_id'), row.get('reason')) for row in findings
-                      if str(row.get('reason')).startswith('AutoSaddler exhausted its bounded improvement attempt: ')),
+                      if _exhausted_verdict(row.get('reason')) is not None),
             tuple(sorted((path.parent.name, path.stat().st_mtime_ns)
                          for path in (root / 'executive/jobs').glob('*/report.json'))))
 
@@ -503,7 +512,7 @@ def _replacement_reports(row: dict, baseline_failure: bool) -> list[dict]:
             replacement_finding = any(
                 finding.get('key') == report['case_id']
                 and finding.get('run_id') == report['audit_run_id']
-                and finding.get('reason') == 'AutoSaddler exhausted its bounded improvement attempt: ' + report['verdict']
+                and _exhausted_verdict(finding.get('reason')) == report['verdict']
                 for finding in findings)
             if result.get('verdict') == 'incomplete' and not replacement_finding:
                 continue
@@ -541,8 +550,8 @@ def superseding_evaluation(row: dict, files: tuple | None = None) -> str | None:
     passing baseline may resolve it. Historical reports and attention remain.
     """
     reason = row.get('reason')
-    baseline_failure = reason == 'AutoSaddler exhausted its bounded improvement attempt: not_improved'
-    if not baseline_failure and reason != 'AutoSaddler exhausted its bounded improvement attempt: incomplete':
+    baseline_failure = _exhausted_verdict(reason) == 'not_improved'
+    if not baseline_failure and _exhausted_verdict(reason) != 'incomplete':
         return None
     try:
         old_run = INDEX.run(row['run_id'])
