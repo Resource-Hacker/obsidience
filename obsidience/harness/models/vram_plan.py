@@ -8,7 +8,7 @@ from pathlib import Path
 import subprocess
 
 from ..host.gpu_memory import MIB
-from ..host.inventory import GPU_UUIDS
+from ..host.inventory import GPU_UUIDS, cuda_order
 
 FIT_ROOT = Path("/var/lib/ai/opt/llama.cpp-b21e4de")
 
@@ -38,6 +38,8 @@ def estimate(spec, profile: dict, devices: tuple[str, ...]) -> dict[str, int]:
         # The server splits by free memory, and its model GPUs are empty at
         # launch; an even split keeps a resident model from skewing the plan.
         command += ["--tensor-split", ",".join("1" for _ in devices)]
+    # The server's CUDA order: devices[0] is CUDA0, which holds the projector and MTP head.
+    devices = cuda_order(devices)
     result = subprocess.run(command, capture_output=True, text=True, timeout=20,
                             env={**os.environ, "CUDA_VISIBLE_DEVICES": ",".join(GPU_UUIDS[d] for d in devices),
                                  "CUDA_DEVICE_ORDER": "PCI_BUS_ID", "LD_LIBRARY_PATH": str(FIT_ROOT / "lib")})

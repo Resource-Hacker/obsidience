@@ -47,6 +47,7 @@ from ..host.inventory import (
     RTX_4000_DEVICE,
     RTX_4000B_DEVICE,
     RTX_4080_DEVICE,
+    cuda_order,
     gpu_snapshot,
     hardware_sensor_snapshot,
     storage_snapshot,
@@ -329,7 +330,8 @@ def _write_launch(spec: ModelSpec, devices: tuple[str, ...], profile: dict) -> N
     temporary.write_text(json.dumps({
         "model_id": spec.id,
         "devices": list(devices),
-        "gpu_uuids": [GPU_UUIDS[device] for device in devices],
+        # CUDA order; "devices" stays the layout identity _read_launch compares.
+        "gpu_uuids": [GPU_UUIDS[device] for device in cuda_order(devices)],
         "context_tokens": profile["context_tokens"],
         "max_output_tokens": profile["max_output_tokens"],
         "gpu_memory_utilization": profile["gpu_memory_utilization"],

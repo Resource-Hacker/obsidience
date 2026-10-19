@@ -29,11 +29,20 @@ GPU_UUIDS = {
     RTX_4000_DEVICE: "GPU-3b820ab6-b7e7-c26b-b400-136780611a3e",
     RTX_4000B_DEVICE: "GPU-d94d9a00-fb17-0bb6-1c24-853cc2c37407",
 }
+# CUDA0 of a multi-GPU model launch holds the vision projector and main-GPU work:
+# the CPU-attached RTX 4000 (PCI 03:00.0, Gen4 x8) leads, the chipset x4 card also
+# serves speech and side work. GPU_DEVICES keeps the display and layout order.
+MODEL_CUDA_ORDER = (RTX_4000B_DEVICE, RTX_4000_DEVICE, RTX_4080_DEVICE)
 STORAGE_LOCATIONS = (
     ("obsidience", "Obsidience", "product", CONFIG.product_root),
     ("models", "AI Models", "models", Path("/var/lib/ai")),
 )
 _MOUNT_ESCAPE = re.compile(r"\\([0-7]{3})")
+
+
+def cuda_order(devices) -> tuple[str, ...]:
+    """A model launch's GPUs in CUDA enumeration order (CUDA0 first)."""
+    return tuple(sorted(devices, key=MODEL_CUDA_ORDER.index))
 
 
 def gpu_snapshot() -> list[dict]:
