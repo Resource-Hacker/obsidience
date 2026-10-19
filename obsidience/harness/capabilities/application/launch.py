@@ -13,6 +13,7 @@ from obsidience.harness.shell_port.scene import (
 )
 
 READINESS_TIMEOUT_SECONDS = 10.0
+PLAYBACK_TIMEOUT_SECONDS = 6.0
 
 
 def _managed_unit(stdout: str, desktop_id: str) -> str | None:
@@ -118,6 +119,31 @@ def _await_readiness(result: dict, context: dict, *, launch_unit: str | None = N
         token = SCENE.wait_for_change(token, min(remaining, 0.1))
 
 
+def _media_sessions(cancel, seconds: float):
+    """Edge MPRIS sessions as (player, track, title, state), or None when unreadable."""
+    from obsidience.harness.capabilities.media.pause import MediaFailure, players
+    try:
+        return [(row["player"], row["track_id"], row["title"], row["state"])
+                for row in players(cancel, time.monotonic() + seconds)]
+    except MediaFailure:
+        return None
+
+
+def _youtube_playback(before: list, context: dict) -> dict:
+    """A new Playing Edge session after a YouTube dispatch attests playback without pixels."""
+    cancel = context.get("_capability_cancel_event")
+    known = {row[:3] for row in before}
+    deadline = time.monotonic() + PLAYBACK_TIMEOUT_SECONDS
+    seen: list = []
+    while time.monotonic() < deadline and not (cancel is not None and cancel.is_set()):
+        seen = _media_sessions(cancel, 1.5) or []
+        started = [row for row in seen if row[3] == "Playing" and row[:3] not in known]
+        if len(started) == 1:
+            return {"state": "Playing", "title": started[0][2], "source": "edge_media_session"}
+        time.sleep(0.25)
+    return {"state": "unverified", "sessions": [{"title": row[2], "state": row[3]} for row in seen][:4]}
+
+
 def _launch_application(args: dict, context: dict | None = None) -> dict:
     context = context or {}
     cancel = context.get("_capability_cancel_event")
@@ -168,6 +194,10 @@ def _launch_application(args: dict, context: dict | None = None) -> dict:
                 "state": "starting", "ready": False, "dispatched": False}, context)
     if cancel is not None and cancel.is_set():
         raise ValueError("Launch cancelled before dispatch")
+    host = urlsplit(url).hostname if url else None
+    youtube = (application == "microsoft_edge" and host in {"www.youtube.com", "youtube.com", "m.youtube.com"}
+               and urlsplit(url).path == "/watch")
+    sessions_before = _media_sessions(cancel, 1.5) if youtube else None
     result = subprocess.run(
         ["/home/wissenschafter/bin/agent-launch-gui", spec["desktop_id"], *([url] if url else [])],
         capture_output=True, text=True, timeout=30, check=False,
@@ -177,7 +207,7 @@ def _launch_application(args: dict, context: dict | None = None) -> dict:
         return {"application": application, "label": spec["label"], "state": "failed",
                 "ready": False, "dispatched": False, "error": detail,
                 "assistant_status": f"I could not start {spec['label']}: {detail}"}
-    return _await_readiness({"application": application, "label": spec["label"],
+    launched = _await_readiness({"application": application, "label": spec["label"],
         "desktop_id": spec["desktop_id"], "state": "starting", "ready": False,
         **({"url": url, "url_delivery": "dispatched", "page_verified": False} if url else {}),
         "dispatched": True, "window": None,
@@ -185,6 +215,12 @@ def _launch_application(args: dict, context: dict | None = None) -> dict:
         # A running browser may consume the URI and end the launcher client.
         # Its window, not that short-lived forwarding process, owns readiness.
         launch_unit=None if url else _managed_unit(result.stdout, spec["desktop_id"]))
+    if sessions_before is not None and launched.get("ready") is True:
+        launched["playback"] = _youtube_playback(sessions_before, context)
+        if launched["playback"]["state"] == "Playing":
+            launched["assistant_status"] = (f"Playing {launched['playback']['title']} in {spec['label']} "
+                                            "(verified from its media session; no click needed).")
+    return launched
 
 
 def execute(args: dict, context: dict) -> str:

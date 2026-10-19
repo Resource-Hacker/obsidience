@@ -126,6 +126,22 @@ def _normalize(value):
     return ' '.join(unicodedata.normalize('NFKC', value).casefold().split())
 
 
+def players(cancel, deadline):
+    """Read-only snapshots of the current Edge MPRIS players; uninspectable ones are skipped."""
+    names = _call(['call', *_DBUS, 'ListNames'], cancel, deadline)
+    if not isinstance(names, list):
+        raise MediaFailure('invalid_media_players')
+    rows = []
+    for name in names:
+        if isinstance(name, str) and re.fullmatch(r'org\.mpris\.MediaPlayer2\.edge\.instance\d+', name):
+            try:
+                rows.append(_snapshot(name, cancel, deadline))
+            except MediaFailure as error:
+                if str(error) in {'cancelled', 'media_timeout'}:
+                    raise
+    return rows[:16]
+
+
 def _select(query, cancel, deadline):
     names = _call(['call', *_DBUS, 'ListNames'], cancel, deadline)
     if not isinstance(names, list):
