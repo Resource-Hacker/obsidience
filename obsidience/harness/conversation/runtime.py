@@ -166,10 +166,11 @@ class ConversationRuntime:
                 or (self._turn_task is not None and not self._turn_task.done())):
             return
         if getattr(self.speech, "_semantic_enabled", False):
-            # Contextual admission runs on the partial itself; it covers this
-            # warm's recall and prefix and also generates the verdict.
+            # Contextual admission runs on the partial itself (its recall at
+            # once, its model run at a pause); it covers this warm's recall and
+            # prefix and also generates the verdict.
             from ..execution.speech_admission import speculate
-            speculate(self, " ".join(text.split()), SPEECH_RESPONSE_CONTRACT)
+            speculate(self, " ".join(text.split()), SPEECH_RESPONSE_CONTRACT, sequence=sequence)
             return
         # The same normalization as the final realtime transcript in submit().
         latest = (sequence, " ".join(text.split()))

@@ -337,10 +337,14 @@ neighbours); (9) history projected from the native conversation (no conversation
   (trace only). Standby
   preparation waits until the candidate's turn starts or the candidate ends, so it
   cannot replace the admitted request's cached tail before the turn's next step.
-  **Speculative admission**: each speech partial runs this same admission (recall, verdict
-  and first response) on idle resident capacity, like the speech warmup: leases
-  preempt it, busy hardware skips it, exact HassIL commands skip it, and a partial with
-  other words cancels and joins it. It publishes, dispatches and writes nothing. When the
+  **Speculative admission**: each speech partial starts (or reuses) its recall at once;
+  this same admission (recall, verdict and first response) runs only at a pause edge,
+  words unchanged for 0.2 s or an explicit pause edge, at most three per utterance, on
+  idle resident capacity, like the speech warmup: leases preempt it, busy hardware skips
+  it, exact HassIL commands skip it, and a partial with other words cancels and joins it.
+  A candidate whose words still wait for a pause is admitted afresh; a miss reports
+  whether the cancelled request was in flight, and the fresh admission records how
+  recently (after_stale_request_ms). It publishes, dispatches and writes nothing. When the
   candidate arrives, a finished or running speculation for the same words (case,
   punctuation and spacing aside) is adopted after the live binding checks and the
   submission's validation; its prompt, Tools, model and scope bind against the turn's own

@@ -12,6 +12,7 @@ import hashlib
 import json
 import time
 from contextlib import aclosing, asynccontextmanager
+from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import dataclass, field
 
@@ -513,6 +514,15 @@ async def _generate(runtime, text: str, response_contract: str, speculative: boo
                     _runtime=runtime)
 
             handed, said = None, ''
+            if (run := _RUN.get()) is not None:
+                run[1] = time.monotonic()  # its model request is in flight
+            elif _STALE[0] is not None:
+                # A superseded speculation's request may still be prefilling in
+                # the engine, which cancels only between decode batches: this
+                # request's first_public_delta_ms then includes that wait.
+                if started - _STALE[0] < 2:
+                    metrics['after_stale_request_ms'] = round((started - _STALE[0]) * 1000, 3)
+                _STALE[0] = None
             token = sessions.ADMISSION.set(metrics)
             try:
                 async with aclosing(route.generate_content_async(request, stream=True)) as stream:
@@ -551,6 +561,8 @@ async def _generate(runtime, text: str, response_contract: str, speculative: boo
                     await owner.close()
                 finally:
                     sessions.ADMISSION.reset(token)
+                    if run is not None:
+                        run[2] = time.monotonic()
                     if handed is not None:
                         handed._events.put_nowait(None)
             metrics['generation_ms'] = round((time.monotonic() - started) * 1000, 3)
@@ -604,9 +616,26 @@ async def prepare(runtime, text: str, response_contract: str, *,
     return prepared
 
 
-# The latest speculative admission of a speech partial:
-# (runtime, speech_key of its text, monotonic start, task).
+# The latest speculative admission of a speech partial: (runtime, speech_key
+# of its text, monotonic arrival, task, run), run = [model run start, request
+# sent, request ended] (monotonic, None until then).
 _SPECULATION: tuple | None = None
+# Model speculation runs at pause edges only (owner 2026-10-19). Each partial
+# starts or reuses its Hindsight recall at once, but its model run waits for a
+# pause: an explicit edge (a VAD pause or an ASR early final), else words
+# unchanged for SPECULATION_STABLE_SECONDS; at most MAX_SPECULATIONS runs per
+# utterance. Partials change every 150-250 ms, and llama.cpp cancels only
+# between decode batches (-b 4096 holds a whole admission tail), so each
+# superseded run still spent its uncached prefill on the shared RTX 4000s
+# (replayed 2026-10-19: the next request reuses most of it, +3-36 ms median).
+MAX_SPECULATIONS = 3
+SPECULATION_STABLE_SECONDS = 0.2
+# (runtime, speech_sequence) of the current utterance and its model runs.
+_UTTERANCE: list = [None, 0]
+# The speculation run of the current task (see _SPECULATION), for _generate.
+_RUN: ContextVar[list | None] = ContextVar('obsidience_speculation_run', default=None)
+# When a superseded speculation's model request was cancelled in flight.
+_STALE: list = [None]
 # The latest direct answer handed over while generating, until its stream
 # ends. One that no submission took still holds the model; the next final
 # admission or a cancellation stops it.
@@ -653,36 +682,64 @@ def _retrieved(task: asyncio.Task) -> None:
         task.exception()
 
 
-async def _speculative_prepare(runtime, text: str, response_contract: str, previous):
+async def _warm_recall(runtime, text: str) -> None:
+    """Start (or reuse a covering) speech recall for these words; leave it registered."""
+    agent, _, _ = admit_executive(text, 'voice')
+    await speech_recall(agent.ref, recall_query(text, runtime._conversation.conversation_id), cover=True)
+
+
+async def _speculative_prepare(runtime, text: str, response_contract: str, previous, run: list, edge: bool):
     # Resident capacity admits one owner; join the superseded stream first.
     await _close(previous)
     from .commands import recognize_command
     if recognize_command(text, _REFLEX_COMMANDS) is not None:
         return None
+    if not edge:
+        # Recall these words now; run the model only if no newer words follow.
+        warm = asyncio.create_task(_warm_recall(runtime, text), name='obsidience-speech-recall-warm')
+        warm.add_done_callback(_retrieved)
+        try:
+            await asyncio.sleep(SPECULATION_STABLE_SECONDS)
+        finally:
+            warm.cancel()  # Only its wait; a started recall stays registered.
+    if _UTTERANCE[1] >= MAX_SPECULATIONS:
+        return None
+    _UTTERANCE[1] += 1
+    run[0] = time.monotonic()
+    _RUN.set(run)
     # A standby warm holds the same idle capacity; speculation supersedes it.
     await runtime._cancel_speech_prefill()
     return await prepare(runtime, text, response_contract, speculative=True)
 
 
-def speculate(runtime, text: str, response_contract: str) -> None:
+def speculate(runtime, text: str, response_contract: str, *, sequence: int | None = None,
+              edge: bool = False) -> None:
     """Run the real admission on a speech partial while the owner may still speak.
 
-    The same words (speech_key) keep the running or finished run; other words
-    cancel and replace it. Nothing is published, dispatched or written: adopt()
-    hands the response to final admission only for the same words.
+    edge=True marks a pause edge (VAD pause, ASR early final): the model run
+    starts at once instead of after SPECULATION_STABLE_SECONDS of unchanged
+    words. The same words (speech_key) keep the running or finished run; other
+    words cancel and replace it. Nothing is published, dispatched or written:
+    adopt() hands the response to final admission only for the same words.
     """
     global _SPECULATION
+    if _UTTERANCE[0] != (runtime, sequence):
+        _UTTERANCE[:] = [(runtime, sequence), 0]
     key = speech_key(text)
     current = _SPECULATION
-    if current is not None and current[0] is runtime and current[1] == key and not _failed(current[3]):
+    if (current is not None and current[0] is runtime and current[1] == key and not _failed(current[3])
+            and not (edge and current[4][0] is None and not current[3].done())):
         return
     previous = current[3] if current is not None else None
     if previous is not None:
         previous.cancel()
-    task = asyncio.create_task(_speculative_prepare(runtime, text, response_contract, previous),
+        if current[4][1] is not None and current[4][2] is None:
+            _STALE[0] = time.monotonic()
+    run = [None, None, None]
+    task = asyncio.create_task(_speculative_prepare(runtime, text, response_contract, previous, run, edge),
                                name='obsidience-speech-speculation')
     task.add_done_callback(_retrieved)
-    _SPECULATION = (runtime, key, time.monotonic(), task)
+    _SPECULATION = (runtime, key, time.monotonic(), task, run)
 
 
 def pending() -> bool:
@@ -699,14 +756,19 @@ async def discard() -> None:
     still generating (STOP, new turn, teardown)."""
     global _SPECULATION
     current, _SPECULATION = _SPECULATION, None
+    _UTTERANCE[:] = [None, 0]
     await _close(current[3] if current is not None else None)
     await _stop_handed(bound=True)
 
 
-def _report(outcome: str, started: float, arrived: float) -> None:
+def _report(outcome: str, started: float, arrived: float, run: list) -> None:
     action_trace.emit('measurement', 'Speech admission speculation ' + outcome, [
         f'lead_ms: {round((arrived - started) * 1000, 3)}',
+        f'model_lead_ms: {round((arrived - run[0]) * 1000, 3) if run[0] is not None else None}',
         f'wait_ms: {round((time.monotonic() - arrived) * 1000, 3)}',
+        # A request cancelled in flight may keep the engine prefilling; the
+        # fresh admission records after_stale_request_ms with its metrics.
+        f'request_in_flight: {run[1] is not None and run[2] is None}',
     ])
 
 
@@ -720,13 +782,20 @@ async def adopt(runtime, text: str) -> PreparedSpeechTurn | None:
     """
     global _SPECULATION
     current, _SPECULATION = _SPECULATION, None
+    _UTTERANCE[:] = [None, 0]
     if current is None:
         return None
-    owner, key, started, task = current
+    owner, key, started, task, run = current
     arrived = time.monotonic()
-    if owner is not runtime or key != speech_key(text):
+    if owner is not runtime or key != speech_key(text) or (run[0] is None and not task.done()):
+        # Other words, or these words still waiting for a pause: an admission
+        # started now is no later than that run would start.
+        in_flight = run[1] is not None and run[2] is None
         await _close(task)
-        _report('missed', started, arrived)
+        if in_flight:
+            _STALE[0] = time.monotonic()
+        _report('missed' if run[0] is not None or key != speech_key(text) else 'unstarted',
+                started, arrived, run)
         return None
     try:
         # A direct answer is adopted at its control line, still generating.
@@ -736,16 +805,17 @@ async def adopt(runtime, text: str) -> PreparedSpeechTurn | None:
         raise
     error = None if task.cancelled() else task.exception()
     if isinstance(error, SpeechOutputError):
-        _report('failed', started, arrived)
+        _report('failed', started, arrived, run)
         raise error
     prepared = None if task.cancelled() or error is not None else task.result()
     if prepared is None or not await prepared.current(runtime):
         if prepared is not None:
             await prepared.close()
-        _report('unusable', started, arrived)
+        _report('unusable' if run[0] is not None else 'skipped', started, arrived, run)
         return None
     prepared.metrics.update(speculation_lead_ms=round((arrived - started) * 1000, 3),
+                            speculation_model_lead_ms=round((arrived - run[0]) * 1000, 3),
                             speculation_wait_ms=round((time.monotonic() - arrived) * 1000, 3))
-    _report('adopted', started, arrived)
+    _report('adopted', started, arrived, run)
     prepared.audit_recall()
     return prepared
