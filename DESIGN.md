@@ -308,8 +308,12 @@ neighbours); (9) history projected from the native conversation (no conversation
   invalidate owned inference. Missing/invalid markers fail closed. A 30-second abandoned
   continuation expires without execution; it is not a sentence-completion timer. The
   first response is buffered, so early speech starts only after this admission. The
-  completion protocol lives only in the request's trailing private control message, so
-  admission, speech warms and later ADK steps share one system/Tool/history prefix. An
+  completion protocol appears only in admission requests, as a privately marked control
+  appended to the owner request's message, so admission, speech warms and later ADK steps
+  share one system/Tool/history/context/memory prefix, and llama.cpp's last-user-message
+  checkpoint sits at the owner request (its n-4 checkpoint falls inside the generation
+  prompt): the next speculative run, the final admission and the step after a Tool
+  result re-evaluate only from the owner request. An
   exact HassIL command is complete by its full-grammar match and takes the reflex route
   without a model admission. Admission adopts the last speech partial's running or
   finished Hindsight recall for the same Agent and previous request when the request
