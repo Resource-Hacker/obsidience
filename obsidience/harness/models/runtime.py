@@ -67,6 +67,18 @@ GEMMA_SERVICE = "obsidience-gemma.service"
 MODEL_SETTINGS_PATH = CONFIG.runtime_dir / "model-settings.json"
 MODEL_LAUNCH_DIR = CONFIG.runtime_dir / "model-launch"
 MODEL_CATALOG_STATE_PATH = CONFIG.runtime_dir / "model-catalog.json"
+# llm.sh --slot-save-path: a restarted Gemma restores the Executive's warm prefix from
+# here (~0.16 s for 0.9 GB) instead of a ~4.2 s cold prefill. The file name fingerprints
+# the model, MTP head, launch profile and llm.sh, so a changed engine, flag or layout
+# never loads.
+MODEL_SLOT_DIR = CONFIG.runtime_dir / "model-slots"
+# Saved after a standby warm. A slot file holds only the in-window SWA cells, so even a
+# short rewind needs a checkpoint: keep the two nearest the end (~200 MiB each).
+MODEL_SLOT_CHECKPOINTS = 2
+# One save per this interval at most: an older prefix still saves most of the prefill.
+MODEL_SLOT_SAVE_INTERVAL = 30 * 60
+# Idle time after a standby warm before saving; the save briefly holds the engine.
+MODEL_SLOT_SAVE_IDLE = 60
 GEMMA_MODEL = CONFIG.runtime_dir / "models" / "executive.gguf"
 GEMMA_TEMPLATE = GEMMA_MODEL.with_name("executive-template.jinja")
 GEMMA_MTP = Path(
@@ -435,6 +447,36 @@ def _healthy(spec: ModelSpec, timeout: float = 0.35) -> bool:
 async def _probe(spec: ModelSpec, timeout: float = 0.75) -> bool:
     """Run the synchronous health probe off the event loop."""
     return await asyncio.to_thread(_healthy, spec, timeout)
+
+
+def _slot_file(spec: ModelSpec) -> str | None:
+    """Slot file name for this exact model, MTP head, launch profile and llm.sh."""
+    if spec.id != EXECUTIVE_MODEL:
+        return None
+    try:
+        digest = hashlib.sha256()
+        for path in (_launch_path(spec.id), _HardwareModelRuntime._memory_script(spec)):
+            digest.update(path.read_bytes())
+        for path in (spec.model_path, spec.mtp_path):
+            if path:
+                stat = path.stat()
+                digest.update(f"{path.resolve()}:{stat.st_size}:{stat.st_mtime_ns}".encode())
+    except OSError:
+        return None
+    return f"{spec.id}-{digest.hexdigest()[:16]}.bin"
+
+
+async def _slot_request(spec: ModelSpec, method: str, query: str = "",
+                        body: dict | None = None, timeout: float = 60) -> object:
+    url = spec.base_url.removesuffix("/v1") + "/slots" + query
+    try:
+        async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
+            response = await client.request(method, url, json=body, headers=model_auth_headers())
+        response.raise_for_status()
+        return response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        print(f"[models] {spec.id} slot request {method} {query or '/'} failed: {exc!r}")
+        return None
 
 
 def _service_state(service: str | None) -> str:
@@ -908,6 +950,11 @@ class _HardwareModelRuntime:
         self._memory_plan_lock = threading.RLock()
         self._memory_refresh_lock = asyncio.Lock()
         self._reservation_processes: dict[str, tuple[int, float]] = {}
+        # Model processes already checked for a slot restore since start, and the
+        # pending idle save after a standby warm with the last saved slot identity.
+        self._slot_checked: set[str] = set()
+        self._slot_save_task: asyncio.Task | None = None
+        self._slot_saved: tuple = (None, 0.0)
 
     @property
     def work_requested(self) -> bool:
@@ -1127,10 +1174,80 @@ class _HardwareModelRuntime:
         if not installed or not spec.service:
             raise RuntimeError(f"{spec.id} is not installed")
 
+    async def _restore_slot(self, spec: ModelSpec) -> None:
+        """Load the saved slot into an empty slot (a model process that served nothing yet)."""
+        if spec.id in self._slot_checked:
+            return
+        self._slot_checked.add(spec.id)
+        name = _slot_file(spec)
+        if name is None or not (MODEL_SLOT_DIR / name).is_file():
+            return
+        slots = await _slot_request(spec, "GET", timeout=5)
+        if not isinstance(slots, list) or not slots or slots[0].get("n_cached_tokens") != 0:
+            return
+        started = time.monotonic()
+        result = await _slot_request(spec, "POST", "/0?action=restore", {"filename": name})
+        if isinstance(result, dict):
+            print(f"[models] {spec.id} slot restored: {result.get('n_restored')} tokens "
+                  f"in {time.monotonic() - started:.2f} s")
+
+    async def _save_slot(self, spec: ModelSpec, *, force: bool = False) -> None:
+        """Persist the slot unless it is unchanged or saved within the interval."""
+        name = _slot_file(spec)
+        if name is None or not await _probe(spec):
+            return
+        slots = await _slot_request(spec, "GET", timeout=5)
+        if not isinstance(slots, list) or not slots or not slots[0].get("n_cached_tokens"):
+            return
+        identity = (name, slots[0]["n_cached_tokens"])
+        last, saved_at = self._slot_saved
+        if identity == last or (not force and time.monotonic() - saved_at < MODEL_SLOT_SAVE_INTERVAL):
+            return
+        MODEL_SLOT_DIR.mkdir(parents=True, exist_ok=True)
+        partial = MODEL_SLOT_DIR / (name + ".tmp")
+        result = await _slot_request(spec, "POST", "/0?action=save",
+                                     {"filename": partial.name, "checkpoints": MODEL_SLOT_CHECKPOINTS})
+        try:
+            if not isinstance(result, dict):
+                partial.unlink(missing_ok=True)
+                # An engine without --slot-save-path retries only after the interval.
+                self._slot_saved = (last, time.monotonic())
+                return
+            partial.replace(MODEL_SLOT_DIR / name)
+            for old in MODEL_SLOT_DIR.glob(f"{spec.id}-*"):
+                if old.name != name:
+                    old.unlink(missing_ok=True)
+        except OSError as exc:
+            print(f"[models] {spec.id} slot file update failed: {exc!r}")
+            return
+        self._slot_saved = (identity, time.monotonic())
+        timings = result.get("timings") or {}
+        print(f"[models] {spec.id} slot saved: {result.get('n_saved')} tokens, "
+              f"{(result.get('n_written') or 0) / 2**20:.0f} MiB in {timings.get('save_ms', 0):.0f} ms")
+
+    def _schedule_slot_save(self, spec: ModelSpec) -> None:
+        """Save after a standby warm once the engine has stayed idle."""
+        if _slot_file(spec) is None:
+            return
+        if self._slot_save_task is not None:
+            self._slot_save_task.cancel()
+
+        async def save_when_idle() -> None:
+            await asyncio.sleep(MODEL_SLOT_SAVE_IDLE)
+            if self.lock.locked() or self.work_requested:
+                return
+            async with self.lock:
+                await self._save_slot(spec)
+
+        self._slot_save_task = asyncio.create_task(save_when_idle())
+
     async def _stop(self, spec: ModelSpec) -> None:
         if spec.service and (await _active(spec.service) or await _probe(spec)):
             self.residency_generation += 1
+            with contextlib.suppress(Exception):
+                await self._save_slot(spec, force=True)
             await _systemctl("stop", spec.service, timeout=120)
+            self._slot_checked.discard(spec.id)
         if await _probe(spec):
             raise RuntimeError(f"unmanaged {spec.id} process remained after stopping {spec.service}")
 
@@ -1140,6 +1257,8 @@ class _HardwareModelRuntime:
         if current == devices and await _probe(spec):
             if spec.service and not await _active(spec.service):
                 raise RuntimeError(f"{spec.id} is running outside {spec.service}")
+            # A model started outside this Harness (e.g. after the WoW lease) starts cold.
+            await self._restore_slot(spec)
             return
         # Settings/default residency can start a model without a Task lease.
         # Refresh the exact profile before stopping or loading its service.
@@ -1152,6 +1271,8 @@ class _HardwareModelRuntime:
         _write_launch(spec, devices, profile)
         await _systemctl("start", spec.service, timeout=60)
         await self._wait_ready(spec, devices)
+        self._slot_checked.discard(spec.id)
+        await self._restore_slot(spec)
 
     @staticmethod
     def _desired_models(settings: dict) -> dict[str, tuple[str, ...]]:
@@ -1223,6 +1344,8 @@ class _HardwareModelRuntime:
     def invalidate_residency(self) -> None:
         """A failed provider connection voids the settled resident fast path."""
         self._reconciled_state = None
+        # The provider may have restarted cold; the next activation checks its slot.
+        self._slot_checked.clear()
 
     def _unreserved_layouts(
         self, spec: ModelSpec, override: object = None,
@@ -1321,7 +1444,11 @@ class _HardwareModelRuntime:
                     healthy = False
                 finally:
                     self.switching = False
+            if healthy:
+                await self._restore_slot(spec)
             yield healthy
+            if healthy and load_if_idle:
+                self._schedule_slot_save(spec)
         finally:
             self.prefill_task = None
             self.lock.release()
@@ -1649,6 +1776,8 @@ class _HardwareModelRuntime:
 
     async def shutdown(self) -> None:
         await self.cancel_prefill()
+        if self._slot_save_task is not None:
+            self._slot_save_task.cancel()
         # Model services outlive the development harness. Defaults are already
         # reconciled after normal Tasks/settings changes and at next initialize.
         # Interrupted leases deliberately leave a visible pending reconciliation.
