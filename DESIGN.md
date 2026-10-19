@@ -749,7 +749,11 @@ full current reads, unrelated hits do not.
   command text suppresses an unstarted opening chirp, while a started chirp finishes.
   STOP, mute, mode change and shutdown cancel. Code, not model
   wording, replaces spoken confirmation with a completion chirp for receipt-verified
-  reflex effects; failures and uncertain effects never chirp success. In wake mode a
+  reflex effects, and for a short single voice command whose one effect Tool returns a
+  verified receipt: the controller settles it and ADK's `skip_summarization` ends the turn
+  without a closing model step (owner decision 2026-10-19). Failures, uncertain effects,
+  informational results and compound or questioning requests stay spoken; failures and
+  uncertain effects never chirp success. In wake mode a
   completed spoken reply that ends in a question, once its last audio is written, opens the
   command window as the name said alone would: the ready chirp replaces the completion
   chirp, and silence closes it the same way.

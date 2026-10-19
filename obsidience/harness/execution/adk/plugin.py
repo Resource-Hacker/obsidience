@@ -155,6 +155,10 @@ class AgentPlugin(BasePlugin):
         # Set while the provider generates, so foreground demand can cancel
         # unfinished inference (never a Tool in flight).
         self.generating = asyncio.Event()
+        # Native calls in the finished model step and the latest dispatched call:
+        # a verified voice command may end with its cue (after_tool_callback).
+        self.step_calls = 0
+        self._last_call: tuple | None = None
 
     # Model reservation -------------------------------------------------
     async def adopt_lease(self):
@@ -226,6 +230,61 @@ class AgentPlugin(BasePlugin):
     async def before_tool_callback(self, *, tool, tool_args, tool_context):
         return self.admit(tool.name, tool_args)
 
+    async def after_tool_callback(self, *, tool, tool_args, tool_context, result):
+        """End a voice command on its verified receipt, with the cue and no closing step.
+
+        Owner decision 2026-10-19: when the turn's one effect Tool returns a
+        verified receipt that fully satisfies a short single command, the
+        controller settles the turn with its own text and ADK's native
+        ``skip_summarization`` makes this function response the final event, so
+        no second model step composes a sentence. The completion chirp confirms
+        it; failures, uncertain results and questions stay spoken.
+        """
+        call, self._last_call = self._last_call, None
+        if call is None or call[0] != tool.name or call[1] != tool_args:
+            return None  # Answered by policy before dispatch, or not this call.
+        summary = self._cue_only_summary(*call)
+        if summary is None:
+            return None
+        await self.operate('task.complete', {'status': 'completed', 'summary': summary})
+        if not (self.ex.done and self.ex.status == 'completed'):
+            return None  # A rejected completion keeps the ordinary next step.
+        tool_context.actions.skip_summarization = True
+        self.ctx['_voice_confirmation'] = 'cue_only'
+        self.emit('event', f'{tool.name} verified; confirmed by cue without a closing model step',
+                  fields={'payload': {'kind': 'cue_only_completion', 'name': tool.name}})
+        callback = self.ctx.get('_verified_command')
+        if callback is not None and self.ctx.get('_reflex_command_verified') is not True:
+            # A fast-lane reflex proposal already chirped at its receipt.
+            await callback(tool.name, self.run)
+        return None
+
+    def _cue_only_summary(self, name: str, args: dict, outcome) -> str | None:
+        """The settlement text when this call alone completes a voice command, else None."""
+        from ..completion import cue_only_summary, single_command
+        from ...capabilities.registry import READ_ONLY_CAPABILITIES
+        ctx = self.ctx
+        if (self.task_mode or self.evaluation is not None or '_discord' in ctx
+                or ctx.get('_verified_command') is None or self.ex.done or self.steered
+                or self.steering_pending or self.step_calls != 1 or outcome.kind != 'returned'
+                or not self.trace or self.trace[-1].get('tool') != name
+                or not single_command(ctx.get('objective'))):
+            return None
+        # Read-only lookups may lead to the effect (a media.library search before a
+        # verified playback launch); any other earlier Tool or a refused, invalid or
+        # interrupted decision keeps the closing step.
+        if any(('tool' in row and row['tool'] not in READ_ONLY_CAPABILITIES) or any(row.get(key) for key in (
+                'invalid_tool', 'native_tool_error', 'invalid_native_response', 'completion_rejected',
+                'interrupted', 'not_dispatched', 'repeat_blocked')) for row in self.trace[:-1]):
+            return None
+        if any(self.trace[-1].get(key) for key in ('interrupted', 'not_dispatched', 'repeat_blocked')):
+            return None
+        try:
+            result = json.loads(outcome.observation)
+        except (TypeError, ValueError):
+            return None
+        return cue_only_summary(name, args, result, self.trace[-1].get('completion_evidence'))
+
     def admit(self, name: str, args: dict) -> dict | None:
         """Policy before dispatch; a returned response answers the call without an effect."""
         self.last_search_refs = None
@@ -257,6 +316,7 @@ class AgentPlugin(BasePlugin):
         """One admitted call through the capability core; rendered as the Tool result."""
         from .. import executor
         async with self._calls:  # One Tool at a time, like the native single-call step.
+            self._last_call = None
             if self.evaluation is not None:
                 return await self._simulate(name, args)
             if self.lease_prefetch is not None:
@@ -271,6 +331,7 @@ class AgentPlugin(BasePlugin):
                 self.ex, name, args, execute=executor.execute_capability,
                 execute_async=executor.execute_capability_async, scope_checkpoint=executor._scope_checkpoint,
                 blocked=blocked)
+            self._last_call = (name, args, outcome)
             if self.ctx.get('_discord') and name != 'task.complete':
                 # A corrected call must actually run: its prerequisite may now
                 # be satisfied. Bound only identical proven non-effect failures.
@@ -602,6 +663,7 @@ class AgentPlugin(BasePlugin):
         self.trace.append({'provider_metrics': metrics})
         adopt_fast_lane(step['menu'], metrics, self.ctx)
         self.emit_model(f'{self.agent_name} model returned', 'result', step['fields'], metrics=metrics)
+        self.step_calls = len(calls)
         if self.voice is not None:
             if calls:
                 await self.voice.feed({'type': 'block-start', 'blockType': 'tool-call'})

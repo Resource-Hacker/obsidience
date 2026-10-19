@@ -429,6 +429,72 @@ def public_claim_error(summary: str, context: dict) -> str | None:
             or _camera_turn_claim_error(summary, context))
 
 
+# Cue-only confirmation (owner decision 2026-10-19): a voice command fully
+# satisfied by one verified effect ends with the completion chirp instead of a
+# closing model step that speaks a sentence. Only these exact receipts qualify.
+CUE_ONLY_TV_ACTIONS = frozenset({
+    "on", "off", "volume", "volume_up", "volume_down", "mute", "unmute", "pause", "resume",
+})
+CUE_ONLY_MAX_WORDS = 16
+# A greeting or the address ("Computer, ...") before the command, and a closing "please".
+_COMMAND_LEAD = re.compile(r"^(?:(?:hey|hay|ok|okay|please|so|um+|uh+)\b[\s,.!]*)*(?:[\w'’-]+\s*,\s*)?", re.I)
+_COMMAND_PLEASE = re.compile(r"[\s,]*\bplease\b\s*[.!?]?$", re.I)
+# A list, second sentence, conjunction or condition may ask for more than one effect.
+_COMMAND_JOIN = re.compile(
+    r"[,;:&]|[.!?]\s*\S|\b(?:and|then|also|plus|after|before|while|but|or|if|when|unless|until)\b", re.I)
+_POLITE_REQUEST = re.compile(r"(?:can|could|would|will) you\b", re.I)
+
+
+def single_command(objective: object) -> bool:
+    """True for one short spoken command: a single clause, no list, conjunction or
+    second sentence, and no question except a polite request ("can you ...?").
+
+    A request that fails this keeps its closing model step: the one verified
+    effect may not be all the owner asked for. False negatives only keep speech.
+    """
+    if not isinstance(objective, str):
+        return False
+    text = _COMMAND_LEAD.sub("", " ".join(objective.split()), count=1)
+    text = _COMMAND_PLEASE.sub("", text).strip()
+    question = text.endswith("?")
+    text = text.rstrip(".!?").strip()
+    return (bool(text) and len(text.split()) <= CUE_ONLY_MAX_WORDS and not _COMMAND_JOIN.search(text)
+            and (not question or bool(_POLITE_REQUEST.match(text))))
+
+
+def cue_only_summary(name: str, args: dict, result: object, evidence: object) -> str | None:
+    """The controller's public text for a verified effect that fully satisfies a
+    command, or None when the reply must stay spoken.
+
+    Only the Tool's own receipt decides, never model text. Failures, uncertain
+    delivery, an already reached TV state ("already muted"), informational
+    actions and a web page opened without verified playback all return None.
+    """
+    if not isinstance(result, dict) or not isinstance(args, dict):
+        return None
+    evidence = evidence if isinstance(evidence, dict) else {}
+    receipt = result.get("status") == "completed" and result.get("delivery") == "verified"
+    if name == "lights.set" and receipt:
+        from .native_turn import command_summary
+        return command_summary({"name": name, "args": args}, True, result)
+    if (name == "tv.control" and receipt and args.get("action") in CUE_ONLY_TV_ACTIONS
+            and result.get("effect_applied") is not False and not result.get("live_channel")):
+        from obsidience.harness.capabilities.tv.control import reflex_summary
+        return reflex_summary(args, result)
+    if evidence.get("verified") is not True:
+        return None
+    if name == "media.pause":
+        return "Playback stopped."
+    if name == "session.unlock":
+        return "The desktop is unlocked."
+    if name == "application.launch" and (not args.get("url") or evidence.get("playback_verified") is True):
+        from obsidience.harness.computer.applications import APPLICATIONS
+        application = canonical_application_id(args.get("application"))
+        label = APPLICATIONS.get(application, {}).get("label") or "The application"
+        return f"Playing in {label}." if args.get("url") else f"{label} is open."
+    return None
+
+
 def _computer_completion_error(task, status: str, context: dict, verification=None) -> str | None:
     """Attest actual computer operations for every Task with these Tools.
 
