@@ -4,9 +4,12 @@
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PRODUCT_ROOT=$(dirname -- "$SCRIPT_DIR")
 # Pinned b11509 with exact input-budget admission plus Gemma 4 schema-constrained
-# Tool arguments (2026-10-09; artifacts.lock.json llama_cpp_executive_g4grammar).
-# Rollback: LLAMA=/var/lib/ai/opt/llama.cpp-b11509-obsidience-admission-20261008
-LLAMA=/var/lib/ai/opt/llama.cpp-b11509-obsidience-admission-g4grammar-20261009
+# Tool arguments (2026-10-09; artifacts.lock.json llama_cpp_executive_g4grammar), plus
+# five tensor-split patches (2026-10-18; even expert split, vocab-split tied head,
+# draft sampling, all-reduce pool, masked NextN): warm decode 25.6 -> 22.2 ms/step.
+# Patches: /var/lib/ai/src/gpu-tuning-20261018/llama-tp/patches.
+# Rollback: LLAMA=/var/lib/ai/opt/llama.cpp-b11509-obsidience-admission-g4grammar-20261009
+LLAMA=/var/lib/ai/opt/llama.cpp-b11509-obsidience-admission-g4grammar-tp3-20261018
 MODEL=${OBSIDIENCE_MODEL:-"$PRODUCT_ROOT/state/models/executive.gguf"}
 LAUNCH="$PRODUCT_ROOT/state/model-launch/obsidience-gemma.json"
 GPU_UUIDS=$(jq -er '.gpu_uuids | join(",")' "$LAUNCH") || exit 64
