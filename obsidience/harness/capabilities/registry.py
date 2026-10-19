@@ -304,7 +304,7 @@ def argument_schemas() -> dict[str, dict]:
             obj({"action":{"const":"open"},"url":text(300),"start":{"type":"integer","minimum":0,"maximum":86400,
                 "description":"YouTube video start position in seconds."}},("action","url")),
             obj({"action":{"const":"notice"},"text":text(200)},("action","text"))]},
-        "lights.visualize":{"oneOf":[
+        "lights.visualize":{"anyOf":[
             obj({"action":{"enum":["stop","status"]}},("action",)),
             obj({"action":{"const":"start"},"audio_delay_ms":{"type":"number","minimum":250,"maximum":3000},
                  "stream_id":{"type":"integer","minimum":1},"uncalibrated":{"type":"boolean"}},
