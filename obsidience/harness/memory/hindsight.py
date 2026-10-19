@@ -239,9 +239,11 @@ class Hindsight:
     async def start(self):
         if not self.enabled:
             return
+        # Same-machine transport: uncompressed bodies spare Hindsight the gzip
+        # work and the event loop a GIL-releasing zlib call per received chunk.
         self.client = httpx.AsyncClient(
             base_url=CONFIG.extras["memory"]["hindsight_url"].rstrip("/"),
-            timeout=15, trust_env=False, headers=hindsight_auth_headers())
+            timeout=15, trust_env=False, headers={"Accept-Encoding": "identity", **hindsight_auth_headers()})
         self.loop = asyncio.get_running_loop()
         from ..knowledge.vault import iter_notes
         self.banks = {bank_for(n.ref): n.ref for n in iter_notes() if n.kind == "agent"}
