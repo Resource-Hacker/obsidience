@@ -175,15 +175,15 @@ MODELS = {
         max_output_tokens=3_584,
         max_context_tokens=98_304,
         quantization="UDmerge-Q4_K_XXL",
-        hardware="One or both RTX 4000 Ada GPUs",
+        hardware="Both RTX 4000 Ada GPUs",
         runtime="llama.cpp b11509 · MTP3",
         capabilities=("text", "vision", "reasoning", "tools"),
         reasoning_budgets={"none": 0, "low": 256, "medium": 768, "high": 1_536, "xhigh": 2_560},
         supported_devices=(RTX_4000_DEVICE, RTX_4000B_DEVICE),
         default_allowed_devices=(RTX_4000_DEVICE, RTX_4000B_DEVICE),
         # QAT-grid UDmerge Q4_K_XXL: KLD vs BF16 0.0147 (= Q8_0; Q6_K 0.0284) at 2.12 GiB/token
-        # (Q6_K 3.10); fits one card, runs tensor-split over both by assignment (2026-10-18).
-        min_gpu_count=1,
+        # (Q6_K 3.10). Keep both cards: single-card MTP exhausted VRAM beside ASR (2026-10-18).
+        min_gpu_count=2,
         default_gpu_memory_utilization=0.90,
         default_max_num_seqs=1,
         service=GEMMA_SERVICE,
@@ -1059,13 +1059,17 @@ class _HardwareModelRuntime:
         if plan is None:
             return ModelMemoryUnavailable(spec, [devices], detail="measuring this model profile")
         units = {candidate.service for candidate in MODELS.values() if candidate.service}
-        yieldable = {identity for owner, identity in self._reservation_processes.copy().items()
-                     if owner in self._reservation_yielders}
+        reservations = self.device_reservations.copy()
+        yieldable = {(identity, device)
+                     for owner, identity in self._reservation_processes.copy().items()
+                     if owner in self._reservation_yielders
+                     for device in reservations.get(owner, ())}
         capacities = {}
         for device in devices:
             row = rows[device]
+            # Credit only allocations the selected-device release path can drain.
             owned = [p for p in row.processes if managed and (
-                p.unit in units or (p.pid, p.started) in yieldable)]
+                p.unit in units or ((p.pid, p.started), device) in yieldable)]
             reclaimable = sum(p.mib for p in owned)
             edge_mib = sum(self.gpu_memory.edge_reclaimable(p) for p in row.processes) if edge else 0
             capacities[device] = {"required_mib": plan[device], "free_mib": row.free_mib,
