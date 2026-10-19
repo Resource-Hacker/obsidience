@@ -18,10 +18,40 @@ from ..models.context import ContextBudgetExceeded, PROMPT_SAFETY_TOKENS, TaskCo
 # Digests of the latest speech-partial warm sent for the selected conversation:
 # its whole request, runtime context and recalled memory. Never prompt content.
 _PREPARED: dict[str, dict] = {}
+# The latest speech-partial recall: (Agent ref, exact query, task). Cancelling
+# its warm leaves it running, bounded by the recall's own timeout; final speech
+# admission adopts it only for the identical Agent and query (as the memory
+# hook adopts the admission prefetch), and any other recall discards it.
+_RECALL: tuple | None = None
 
 
 def _digest(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
+
+
+def _start_recall(agent_ref, query: tuple) -> tuple:
+    from ..memory.hindsight import MEMORY
+    return agent_ref, query, asyncio.create_task(
+        MEMORY.recall(agent_ref, *query, speculative=True), name="obsidience-speech-recall")
+
+
+async def speech_recall(agent_ref, query: tuple, *, adopt: bool = False) -> tuple[asyncio.Task, bool]:
+    """The provisional speech recall for one Agent and query, and whether it was already running.
+
+    A speech partial keeps it registered for the next partial or final
+    admission; adopt=True (final admission) takes ownership of it instead.
+    The identical Agent and query reuses the registered task; any other
+    replaces it, and the replaced task is cancelled and joined.
+    """
+    global _RECALL
+    previous = _RECALL
+    reused = previous is not None and previous[:2] == (agent_ref, query)
+    current = previous if reused else _start_recall(agent_ref, query)
+    _RECALL = None if adopt else current
+    if previous is not None and not reused:
+        from .native_turn import discard_recall
+        await discard_recall(previous)
+    return current[2], reused
 
 
 def report_reuse(conversation_id: str, context: str, memory: str) -> None:
@@ -93,37 +123,31 @@ async def prepare(conversation, text: str, response_contract: str, *, idle: bool
             stable_only = bool(native) and idle
             recall = None
             if native and not idle:
-                from ..memory.hindsight import MEMORY
                 # The final transcript's turn follows the same latest exchange.
-                recall = asyncio.create_task(MEMORY.recall(agent.ref, *recall_query(text, conversation_id),
-                                                           speculative=True),
-                                             name="obsidience-speech-recall")
-            try:
-                if stable_only:
-                    # The stable prefix renders neither Bindings nor the text
-                    # conversation, so skip their synchronous ledger scans.
-                    context, evidence = "", []
-                else:
-                    # Native history replaces the text conversation projection.
-                    context = "" if native else project_conversation(
-                        conversation, conversation_id=conversation_id,
-                    )["body"]
-                    latest = conversation.history(conversation_id, limit=1)
-                    before_sequence = max((turn["sequence"] for turn in latest), default=0) + 1
-                    evidence = historical_evidence(
-                        conversation, conversation_id=conversation_id, before_sequence=before_sequence,
-                    )
-                if native:
-                    params['conversation_id'] = conversation_id
-                activation = await compile_activation(
-                    agent, params=params, interactive=True, emit_activity=False,
-                    conversation_context=context, conversation_evidence=evidence,
+                recall, _ = await speech_recall(agent.ref, recall_query(text, conversation_id))
+            if stable_only:
+                # The stable prefix renders neither Bindings nor the text
+                # conversation, so skip their synchronous ledger scans.
+                context, evidence = "", []
+            else:
+                # Native history replaces the text conversation projection.
+                context = "" if native else project_conversation(
+                    conversation, conversation_id=conversation_id,
+                )["body"]
+                latest = conversation.history(conversation_id, limit=1)
+                before_sequence = max((turn["sequence"] for turn in latest), default=0) + 1
+                evidence = historical_evidence(
+                    conversation, conversation_id=conversation_id, before_sequence=before_sequence,
                 )
-                memory = memory_message(recall_reply(await recall)) if recall is not None else ""
-            finally:
-                if recall is not None and not recall.done():
-                    recall.cancel()
-                    await asyncio.gather(recall, return_exceptions=True)
+            if native:
+                params['conversation_id'] = conversation_id
+            activation = await compile_activation(
+                agent, params=params, interactive=True, emit_activity=False,
+                conversation_context=context, conversation_evidence=evidence,
+            )
+            # Shielded: a cancelled warm leaves the registered recall for
+            # the next partial or final admission of the same text.
+            memory = memory_message(recall_reply(await asyncio.shield(recall))) if recall is not None else ""
             messages = activation_messages(
                 agent, activation, agent_name=agent.title, response_contract=response_contract,
                 active_exclusions=activation["spine"].get("excluded_subtasks", frozenset()),

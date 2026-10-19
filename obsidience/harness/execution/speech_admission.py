@@ -23,6 +23,7 @@ from .adk import sessions
 from .adk.plugin import request_contents
 from .executor import activation_messages, compile_activation
 from .native_turn import memory_message, recall_query, recall_reply, tool_schemas
+from .prefill import report_reuse, speech_recall
 from ..conversation.evidence import historical_evidence
 from ..conversation.selection import admit_executive
 from ..knowledge.scope import revision as scope_revision
@@ -329,11 +330,11 @@ async def prepare(runtime, text: str, response_contract: str) -> PreparedSpeechT
             spec = active_spec
             evidence = historical_evidence(conversation, conversation_id=conversation_id,
                                            before_sequence=before_sequence)
-            from ..memory.hindsight import MEMORY
             context_started = time.monotonic()
-            recall = asyncio.create_task(MEMORY.recall(
-                agent.ref, *recall_query(clean, conversation_id), speculative=True),
-                name="obsidience-speech-admission-recall")
+            # The last speech partial usually recalled this exact query already;
+            # adopt its running or finished recall instead of repeating it.
+            recall, metrics['recall_adopted'] = await speech_recall(
+                agent.ref, recall_query(clean, conversation_id), adopt=True)
             try:
                 activation = await compile_activation(
                     agent, params=params, interactive=True, emit_activity=False,
@@ -348,6 +349,7 @@ async def prepare(runtime, text: str, response_contract: str) -> PreparedSpeechT
                                            response_contract=response_contract)
             system = _digest(messages[0]['content'])
             compiled_context = deepcopy(messages[1:])
+            report_reuse(conversation_id, messages[1]['content'] if len(messages) > 1 else '', memory)
             if view:
                 messages = sessions.prefill_messages(conversation_id, messages, clean, memory=memory,
                                                      preparation_prefix=False)
