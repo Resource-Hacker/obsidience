@@ -93,14 +93,25 @@ Reusing them would need a Google Cloud project, give a session shell access to
 the workstation and bypass the structured edit protocol. The adapter therefore
 keeps its proposer seam and uses the same vendor CLI with the safe flag set.
 
+Codex reads global instructions from `CODEX_HOME/AGENTS.md` with no switch to
+skip them, and documents a separate `CODEX_HOME` for automation
+([AGENTS.md guide](https://learn.chatgpt.com/docs/agent-configuration/agents-md)).
+Sessions therefore run with `CODEX_HOME=obsidience/state/codex-home`, so the
+owner's private `~/.codex/AGENTS.md` (about 48K tokens) never reaches them: a
+one-line request measured 55.5K input tokens before and 9.7K after (2026-10-19).
+That home's `auth.json` is a symbolic link to `~/.codex/auth.json`; with the file
+credential store (pinned by `cli_auth_credentials_store="file"`) Codex opens,
+reloads before refreshing, and rewrites that one file in place, exactly as any
+other Codex process sharing the login does. Obsidience never reads or copies it.
+If the link is missing it is created; if it points elsewhere or has become a
+separate file, sessions fail closed and the file is left for the owner. A
+separate `codex login` into that home is the fully documented alternative.
+
 Session input is training trajectories, objectives, conversation excerpts,
 Knowledge and Tool/Skill text from the frozen case: selecting a cloud model sends
-that Vault and conversation content to OpenAI or Anthropic. Codex additionally
-always includes the owner's global `~/.codex/AGENTS.md` (about 48K tokens on
-2026-10-19; a one-line request measured 55.5K input tokens), because Codex offers
-no per-invocation switch for it. Usage counts against the ChatGPT or Claude plan
-limits; Claude Code's subscription terms assume ordinary individual use, so
-prefer local Audit for routine volume.
+that Vault and conversation content to OpenAI or Anthropic. Usage counts against
+the ChatGPT or Claude plan limits; Claude Code's subscription terms assume
+ordinary individual use, so prefer local Audit for routine volume.
 
 ## Dependency and rollback
 

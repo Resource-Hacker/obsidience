@@ -26,10 +26,18 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..config import CONFIG
+
 CODEX, CLAUDE = "codex", "claude"
 PROVIDERS = (CODEX, CLAUDE)
 CLI = {CODEX: Path.home() / ".local/bin/codex", CLAUDE: Path.home() / ".local/bin/claude"}
 CODEX_CONFIG = Path.home() / ".codex/config.toml"
+# Codex reads global instructions from CODEX_HOME/AGENTS.md, so sessions run in a
+# dedicated home and the owner's ~/.codex/AGENTS.md never reaches them. Its auth.json
+# is a link to the owner's login file, which Codex itself opens, refreshes and saves
+# in place (file store); this module never reads or copies it.
+CODEX_HOME = CONFIG.runtime_dir / "codex-home"
+OWNER_CODEX_AUTH = Path.home() / ".codex/auth.json"
 # `codex:default` follows the model the owner set for Codex itself.
 DEFAULT = "default"
 MODEL_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
@@ -122,23 +130,39 @@ _DISCOVERY: dict[str, tuple[float, dict]] = {}
 _DISCOVERY_LOCK = threading.Lock()
 
 
-def _run(argv: list[str], timeout: float) -> subprocess.CompletedProcess:
+def _codex_home() -> Path:
+    """The dedicated Codex home, linked to the existing login; fails closed if it drifted."""
+    CODEX_HOME.mkdir(mode=0o700, parents=True, exist_ok=True)
+    link = CODEX_HOME / "auth.json"
+    if link.is_symlink():
+        if os.readlink(link) != str(OWNER_CODEX_AUTH):
+            raise CloudSessionError(f"{link} links somewhere other than {OWNER_CODEX_AUTH}")
+    elif os.path.lexists(link):
+        # Never read, move or delete a credential file; the owner decides what it is.
+        raise CloudSessionError(f"{link} is a separate credential file, not the link to the Codex login")
+    else:
+        link.symlink_to(OWNER_CODEX_AUTH)
+    return CODEX_HOME
+
+
+def _run(argv: list[str], timeout: float, env: dict[str, str]) -> subprocess.CompletedProcess:
     return subprocess.run(argv, capture_output=True, text=True, timeout=timeout, check=False,
-                          stdin=subprocess.DEVNULL, env=_env(), cwd=tempfile.gettempdir())
+                          stdin=subprocess.DEVNULL, env=env, cwd=tempfile.gettempdir())
 
 
 def _discover(provider: str) -> dict:
     cli = CLI[provider]
     if not cli.exists():
         return {"available": False, "error": f"{cli} is not installed", "version": "", "models": []}
-    version = _run([str(cli), "--version"], 15).stdout.strip()
+    env = _env(provider)
+    version = _run([str(cli), "--version"], 15, env).stdout.strip()
     if provider == CLAUDE:
         models = [{"name": name, "label": label, "description": description,
                    "context_tokens": CONTEXT_TOKENS[CLAUDE]}
                   for name, (label, description) in CLAUDE_ALIASES.items()]
         return {"available": True, "error": "", "version": version, "models": models}
     # The account's refreshed catalog (the CLI falls back to its cached copy).
-    result = _run([str(cli), "debug", "models"], 30)
+    result = _run([str(cli), "debug", "models", "-c", 'cli_auth_credentials_store="file"'], 30, env)
     try:
         rows = json.loads(result.stdout)["models"]
     except (ValueError, KeyError, TypeError):
@@ -167,14 +191,17 @@ def discover(provider: str) -> dict:
             return cached[1]
         try:
             found = _discover(provider)
-        except (OSError, subprocess.TimeoutExpired) as exc:
+        except (OSError, subprocess.TimeoutExpired, CloudSessionError) as exc:
             found = {"available": False, "error": f"{type(exc).__name__}: {exc}", "version": "", "models": []}
         _DISCOVERY[provider] = (time.monotonic(), found)
         return found
 
 
-def _env() -> dict[str, str]:
-    return {key: value for key, value in os.environ.items() if key not in DROP_ENV}
+def _env(provider: str) -> dict[str, str]:
+    env = {key: value for key, value in os.environ.items() if key not in DROP_ENV}
+    if provider == CODEX:
+        env["CODEX_HOME"] = str(_codex_home())
+    return env
 
 
 def _codex_argv(cli_model: str, effort: str, system: str, workdir: Path) -> list[str]:
@@ -184,6 +211,8 @@ def _codex_argv(cli_model: str, effort: str, system: str, workdir: Path) -> list
             "--output-schema", str(workdir / "schema.json"),
             "--output-last-message", str(workdir / "last-message.json"),
             "-c", f'model_reasoning_effort="{EFFORT[effort]}"',
+            # auth.json in CODEX_HOME (the link), never a keyring entry keyed by this home.
+            "-c", 'cli_auth_credentials_store="file"',
             # Standard tier only: never fast, priority or ultrafast.
             "-c", 'service_tier="default"', "-c", 'web_search="disabled"',
             # A JSON string literal is a valid TOML basic string.
@@ -203,10 +232,11 @@ def _claude_argv(cli_model: str, effort: str, system: str, schema: dict) -> list
             f"--max-budget-usd={CLAUDE_SESSION_BUDGET_USD}", "--system-prompt=" + system]
 
 
-async def _communicate(argv: list[str], stdin: bytes, workdir: Path) -> tuple[int, bytes, bytes]:
+async def _communicate(argv: list[str], stdin: bytes, workdir: Path,
+                       env: dict[str, str]) -> tuple[int, bytes, bytes]:
     process = await asyncio.create_subprocess_exec(
         *argv, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE, cwd=workdir, env=_env(), start_new_session=True)
+        stderr=asyncio.subprocess.PIPE, cwd=workdir, env=env, start_new_session=True)
     try:
         stdout, stderr = await process.communicate(stdin)
     except BaseException:
@@ -300,7 +330,7 @@ async def complete(provider: str, cli_model: str, system: str, prompt: str, sche
             argv = _codex_argv(cli_model, effort, system, workdir)
         else:
             argv = _claude_argv(cli_model, effort, system, schema)
-        code, stdout, stderr = await _communicate(argv, prompt.encode(), workdir)
+        code, stdout, stderr = await _communicate(argv, prompt.encode(), workdir, _env(provider))
         reply = (_codex_reply(code, stdout, stderr, workdir) if provider == CODEX
                  else _claude_reply(code, stdout, stderr))
     reply.provider_metrics.update(provider=provider, cli_model=cli_model or DEFAULT,
