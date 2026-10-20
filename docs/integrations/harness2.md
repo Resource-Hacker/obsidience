@@ -96,6 +96,7 @@ imports either engine.
 | `execution/optimization/incidents.py` | Receipt-bound decision captures and contract evaluation |
 | `execution/optimization/evaluation.py`, `cases.py`, `store.py` | Frozen trials, paired per-case acceptance, frozen Runbook cases, the immutable artifact store |
 | `execution/optimization/experience.py` | Training-only lessons |
+| `models/cloud.py` | Codex and Claude Code CLI sessions for a cloud Audit model (discovery, one structured tool-less session, the dedicated Codex home) |
 | `execution/revision.py` | The source files whose bytes identify the evaluating and optimizing code; a change invalidates prepared cases |
 | `capabilities/harness/optimize.py` | The `harness.optimize` Tool |
 | `scripts/install-optimization` | Builds the attested Harness2 wheel from the pinned archive and installs both engines |
@@ -111,7 +112,11 @@ optimization package consumes it only through `run_adk_session`.
   wheel and disables implicit working-directory `.env` loading. The refinement
   implementation is unchanged.
 - A reserved-model proposer that uses the existing model owner, isolated ADK
-  trials and the independent acceptance gate described above.
+  trials and the independent acceptance gate described above. When the Audit
+  Task selects a Codex or Claude Code session model, the same structured
+  sessions run through that signed-in CLI without tools (`models/cloud.py`);
+  trials keep the affected Agent's model. See the
+  [integration notes](../harness2.md#cloud-proposer-sessions-codex-claude-code).
 - Content-bound job and attempt records instead of upstream provider caches, so
   a resumed search cannot pick up a changed model, case or experience input.
 
