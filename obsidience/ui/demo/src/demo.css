@@ -1,0 +1,234 @@
+/* The app's own stylesheet (Tailwind and its theme); the demo's Vite root is
+   demo/, so Tailwind must also be told to scan the app sources. */
+@import "../../src/renderer/src/styles/globals.css";
+@source "../../src/renderer/src";
+
+/* Demo chrome around the real stage surfaces: the labels' thin dark boxes and
+   light mono capitals, kept out of the graph's centre. */
+.demo-root {
+  --demo-ink: #d9e9f2;
+  --demo-dim: #7f93ab;
+  --demo-accent: #a5f3fc;
+  --demo-glass: rgba(5, 11, 18, 0.82);
+  --demo-line: rgba(103, 232, 249, 0.22);
+  position: fixed;
+  inset: 0;
+  color: var(--demo-ink);
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+.demo-root button, .demo-root select, .demo-root a { font: inherit; }
+
+.demo-bar {
+  position: absolute;
+  z-index: 60;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: linear-gradient(180deg, rgba(3, 3, 4, 0.9), rgba(3, 3, 4, 0));
+  pointer-events: none;
+}
+.demo-bar > * { pointer-events: auto; }
+.demo-brand {
+  display: flex;
+  flex-direction: column;
+  color: rgba(165, 243, 252, 0.92);
+  font: 13px/1.1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 4.6px;
+  text-decoration: none;
+  text-shadow: 0 0 12px rgba(34, 211, 238, 0.45);
+  margin-right: auto;
+  white-space: nowrap;
+}
+.demo-brand small {
+  margin-top: 4px;
+  color: var(--demo-dim);
+  font-size: 9px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  text-shadow: none;
+}
+.demo-views, .demo-actions { display: flex; gap: 4px; }
+.demo-views button, .demo-actions button, .demo-icon-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 6px 10px;
+  color: #9eb1c6;
+  background: var(--demo-glass);
+  border: 1px solid #1b2b3d;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 12px;
+  text-decoration: none;
+  backdrop-filter: blur(8px);
+}
+.demo-views button:hover, .demo-actions button:hover, .demo-icon-link:hover { color: #e5f5ff; border-color: #3d5771; }
+.demo-views button.current, .demo-actions button.current {
+  color: var(--demo-accent);
+  border-color: var(--demo-line);
+  background: rgba(8, 30, 38, 0.86);
+}
+.demo-root button:focus-visible, .demo-root a:focus-visible, .demo-root input:focus-visible, .demo-root select:focus-visible {
+  outline: 2px solid var(--demo-accent);
+  outline-offset: 2px;
+}
+
+.demo-caption {
+  position: absolute;
+  z-index: 50;
+  left: 16px;
+  bottom: 16px;
+  width: min(420px, calc(100% - 32px));
+  padding: 10px 12px 9px;
+  background: var(--demo-glass);
+  border: 1px solid var(--demo-line);
+  border-radius: 4px;
+  backdrop-filter: blur(10px);
+}
+.demo-caption-head { display: flex; align-items: center; gap: 10px; }
+.demo-caption-head span {
+  color: var(--demo-dim);
+  font: 11px ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+.demo-caption-head span.live { color: var(--demo-accent); }
+.demo-progress { flex: 1; height: 1px; background: rgba(148, 163, 184, 0.25); overflow: hidden; }
+.demo-progress b { display: block; height: 100%; background: var(--demo-accent); transform-origin: left; }
+.demo-caption p { margin: 7px 0 6px; font-size: 12.5px; line-height: 1.45; color: #c3d4e2; }
+.demo-caption small { color: var(--demo-dim); font-size: 11px; }
+.demo-link { padding: 0; border: 0; background: none; color: var(--demo-accent); cursor: pointer; text-decoration: underline; }
+
+.demo-card {
+  position: absolute;
+  z-index: 50;
+  right: 16px;
+  bottom: 16px;
+  width: min(340px, calc(100% - 32px));
+  max-height: min(52vh, 420px);
+  overflow: auto;
+  padding: 10px 12px;
+  background: rgba(3, 7, 12, 0.9);
+  border: 1px solid;
+  border-radius: 2px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  backdrop-filter: blur(10px);
+}
+.demo-card small { display: block; font-size: 10px; letter-spacing: 1.8px; text-transform: uppercase; }
+.demo-card strong { display: block; margin: 5px 24px 0 0; font-size: 13px; font-weight: 400; line-height: 1.35; color: #eef6fb; }
+.demo-card hr { margin: 8px 0; border: 0; border-top: 1px solid rgba(148, 163, 184, 0.28); }
+.demo-card p { margin: 0 0 7px; font: 12px/1.45 Inter, system-ui, sans-serif; color: #b9cad8; }
+.demo-card p.demo-path { font: 10.5px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--demo-dim); overflow-wrap: anywhere; }
+.demo-card a { display: inline-flex; align-items: center; gap: 5px; color: var(--demo-accent); font-size: 11px; text-decoration: none; }
+.demo-card a:hover { text-decoration: underline; }
+.demo-close {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: inline-flex;
+  padding: 4px;
+  color: var(--demo-dim);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.demo-close:hover { color: #fff; }
+
+.demo-hover {
+  position: absolute;
+  z-index: 50;
+  top: 62px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(520px, calc(100% - 32px));
+  padding: 6px 10px;
+  background: rgba(3, 7, 12, 0.88);
+  border: 1px solid var(--demo-line);
+  font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+.demo-hover small { margin-right: 8px; color: var(--demo-dim); letter-spacing: 1.5px; text-transform: uppercase; font-size: 10px; }
+
+.demo-settings {
+  position: absolute;
+  z-index: 70;
+  top: 56px;
+  right: 14px;
+  bottom: 14px;
+  width: min(320px, calc(100% - 28px));
+  display: flex;
+  flex-direction: column;
+  background: rgba(4, 9, 15, 0.94);
+  border: 1px solid #1b2b3d;
+  border-radius: 8px;
+  backdrop-filter: blur(12px);
+  font-size: 12px;
+}
+.demo-settings header { position: relative; padding: 11px 12px 9px; border-bottom: 1px solid #142336; }
+.demo-settings header strong { display: block; font-weight: 550; color: #e9f1fc; }
+.demo-settings header small { color: var(--demo-dim); font-size: 10.5px; }
+.demo-settings-body { flex: 1; overflow-y: auto; padding: 4px 12px 10px; overscroll-behavior: contain; }
+.demo-settings fieldset { margin: 8px 0 0; padding: 0; border: 0; }
+.demo-settings legend {
+  margin-bottom: 4px;
+  color: var(--demo-accent);
+  font: 10px ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+.demo-settings label { display: grid; grid-template-columns: 1fr 110px 38px; align-items: center; gap: 6px; min-height: 26px; color: #b9cad8; }
+.demo-settings label input[type="range"] { width: 100%; accent-color: #67e8f9; }
+.demo-settings label input[type="checkbox"] { grid-column: 2 / 4; justify-self: start; accent-color: #67e8f9; }
+.demo-settings label select { grid-column: 2 / 4; padding: 3px 4px; color: #d9e9f2; background: #0a1521; border: 1px solid #1b2b3d; border-radius: 5px; }
+.demo-settings output { color: var(--demo-dim); font: 10.5px ui-monospace, SFMono-Regular, Menlo, monospace; text-align: right; }
+.demo-settings footer { padding: 9px 12px; border-top: 1px solid #142336; }
+.demo-settings footer button { width: 100%; padding: 7px; color: #9eb1c6; background: #0a1521; border: 1px solid #1b2b3d; border-radius: 6px; cursor: pointer; }
+.demo-settings footer button:hover { color: #fff; border-color: #3d5771; }
+
+/* The stages' own overlays, moved clear of the demo bar and caption and kept
+   narrow enough that the graph stays in view on a laptop-sized window. */
+.demo-root [aria-label="Knowledge activity"], .demo-root aside[aria-label="Code lookup"] { top: 60px; }
+.demo-root section[aria-label="Live Action Trace"] {
+  top: 60px;
+  width: min(30rem, calc(100% - 2rem));
+  max-height: max(220px, calc(100% - 250px));
+}
+
+/* Embedded in the documentation: a compact bar, and vertical swipes scroll the page. */
+.demo-embed .demo-brand small { display: none; }
+.demo-embed canvas { touch-action: pan-y; }
+
+/* Docked as the home page's floating graph: only the graph. */
+.demo-docked .demo-bar, .demo-docked .demo-caption, .demo-docked .demo-card, .demo-docked .demo-hover,
+.demo-docked .demo-settings, .demo-docked section[aria-label="Live Action Trace"],
+.demo-docked [aria-label="Knowledge activity"], .demo-docked aside[aria-label="Code lookup"] { display: none; }
+
+@media (max-width: 640px) {
+  .demo-bar { gap: 6px; padding: 8px; }
+  .demo-brand { font-size: 11px; letter-spacing: 3px; }
+  .demo-brand small { display: none; }
+  .demo-views span { display: none; }
+  .demo-views button, .demo-actions button, .demo-icon-link { padding: 6px 8px; }
+  .demo-caption { left: 8px; right: 8px; bottom: 8px; width: auto; padding: 8px 10px 7px; }
+  .demo-card { left: 8px; right: 8px; bottom: auto; top: 54px; width: auto; max-height: 40vh; }
+  .demo-settings { top: 50px; left: 8px; right: 8px; bottom: 8px; width: auto; }
+  .demo-caption p { display: none; }
+  .demo-root section[aria-label="Live Action Trace"] { left: 8px; top: 52px; width: calc(100% - 16px); max-height: 42%; }
+  .demo-root [aria-label="Knowledge activity"] { display: none; }
+  .demo-root aside[aria-label="Code lookup"] { top: 52px; right: 8px; }
+}
+@media (max-width: 480px) {
+  .demo-brand { display: none; }
+  .demo-views { margin-right: auto; }
+}
+@media (max-height: 460px) {
+  .demo-caption p { display: none; }
+}

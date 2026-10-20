@@ -1,0 +1,9 @@
+{
+  "compilerOptions": {
+    "module": "ESNext", "moduleResolution": "bundler",
+    "target": "ES2022", "lib": ["ES2023", "DOM", "DOM.Iterable"], "jsx": "react-jsx",
+    "strict": false, "skipLibCheck": true, "noEmit": true,
+    "paths": { "@/graph/stream": ["./src/stream.ts"], "@/*": ["../src/renderer/src/*"] }
+  },
+  "include": ["src/**/*", "../src/renderer/src/env.d.ts", "../src/renderer/src/types/**/*"]
+}

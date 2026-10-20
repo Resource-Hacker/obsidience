@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit -p tsconfig.web.json",
-    "start": "vite preview"
+    "start": "vite preview",
+    "build:demo": "vite build --config vite.demo.config.ts"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.0",
