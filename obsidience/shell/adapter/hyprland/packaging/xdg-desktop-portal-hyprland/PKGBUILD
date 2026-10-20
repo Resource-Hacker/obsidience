@@ -10,7 +10,7 @@ pkgrel=2.3
 pkgdesc='xdg-desktop-portal backend for hyprland'
 url="https://github.com/hyprwm/$_upstream"
 arch=(x86_64)
-license=(MIT)
+license=(BSD-3-Clause)
 provides=("$_upstream=$pkgver" xdg-desktop-portal-impl)
 conflicts=("$_upstream")
 depends=(

@@ -965,7 +965,7 @@
       "name": "xdg-desktop-portal-hyprland",
       "package": "xdg-desktop-portal-hyprland-obsidience 1.4.1-2.3",
       "repository": "https://github.com/hyprwm/xdg-desktop-portal-hyprland",
-      "license": "MIT",
+      "license": "BSD-3-Clause",
       "upstream_version": "v1.4.1",
       "source_sha256": "3652c14f63a9666acea2c841e196782dbc0f74ea5b4783622dd04a32f08b709f",
       "upstream_fixes": [
