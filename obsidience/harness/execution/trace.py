@@ -264,7 +264,7 @@ def packet_payload(sections: dict[str, str], refs: list[str], retrieval_ms: floa
     titles = {
         "header": "Thinking Packet", "identity": "Agent Identity", "task": "Task",
         "objective": "Objective", "tools": "Tools", "skills": "Skills", "runbook": "Runbook",
-        "bindings": "Bindings", "knowledge": "Relevant Knowledge", "conversation": "Native conversation context",
+        "pinned": "Required Context", "bindings": "Bindings", "knowledge": "Relevant Knowledge", "conversation": "Native conversation context",
         "begin": "Execution instructions",
     }
     for key, original in sections.items():
