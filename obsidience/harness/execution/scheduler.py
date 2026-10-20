@@ -141,12 +141,12 @@ def _preflight_rejection(call: dict, note: Note) -> str | None:
         # current() can reject before or after isolated evaluation, but always
         # before report/proposal publication. Keep any evaluation artifacts;
         # this does not classify an arbitrary optimizer error as effect-free.
-        from .optimization.admission import STALE_CASE_ERRORS, status as optimization_status, report_result
+        from .optimization.admission import stale_case_errors, status as optimization_status, report_result
         case = (note.meta.get("params") or {}).get("optimization_case")
         if not isinstance(case, str) or not re.fullmatch(r"[a-f0-9]{64}", case):
             return None
         candidates = {json.dumps({"case_id": case, "error": error}, sort_keys=True)
-                      for error in STALE_CASE_ERRORS | {
+                      for error in stale_case_errors(case) | {
                           "Reload the changed Harness before preparing or running optimization"}}
         # The exact-case guard precedes all optimizer work. A mistyped case
         # therefore admits stale-occurrence settlement after receipt attestation,
@@ -880,14 +880,14 @@ def settle_maintenance_occurrence(note: Note) -> dict | None:
 def _resolved_input_evidence(note: Note, params: dict) -> dict | None:
     """Attest obsolete input through its owner; never infer it from a summary."""
     if note.ref == "Tasks/audit" and params.get("optimization_case"):
-        from .optimization.admission import current, STALE_CASE_ERRORS
+        from .optimization.admission import current, stale_case_errors
         if note.meta.get("status") != "failed" or _receipt_retry_blocked_reason(
                 note, str(note.meta.get("last_run") or "")):
             return None
         try:
             current(params["optimization_case"])
         except ValueError as exc:
-            if str(exc) in STALE_CASE_ERRORS:
+            if str(exc) in stale_case_errors(params["optimization_case"]):
                 return {"disposition": "obsolete_optimization_case", "case_id": params["optimization_case"],
                         "reason": str(exc) + ". Retain isolated evaluation artifacts; no instruction was published and the stale case is not replayed"}
     return None

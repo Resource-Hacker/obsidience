@@ -32,6 +32,22 @@ STALE_CASE_ERRORS = frozenset({
 })
 
 
+def stale_case_errors(case_id: str) -> frozenset[str]:
+    """Every exact text current() raises for this case once a captured input changed.
+
+    A contract case also names each Article its decisions were pinned to. None of
+    these precede publication, so each settles the case like the fixed texts.
+    """
+    from .incidents import DEPENDENCY_CHANGED
+    try:
+        document = store.load('executive/cases', case_id)
+        samples = [case['sample'] for case in document['suite']['cases']] if document.get('evaluation_mode') == 'contract' else []
+        refs = {ref for sample in samples for ref in (sample['subject'], *sample['read_revisions'])}
+    except (ValueError, OSError, KeyError, TypeError):
+        return STALE_CASE_ERRORS
+    return STALE_CASE_ERRORS | {DEPENDENCY_CHANGED + ref for ref in refs}
+
+
 def _incident(task_ref: str, definition: str, tool: str, text: str) -> str:
     reason = re.sub(r'[0-9a-f]{8}-[0-9a-f-]{27,}', '<source>', text)
     return store.sha256(store.canonical_json([task_ref, definition, tool, reason]).encode())

@@ -15,6 +15,7 @@ from ...knowledge.vault import _atomic_write, load_note, resolver
 from . import AUDITOR, store
 
 SUPPORTED = {'task.complete', 'vault.propose'}
+DEPENDENCY_CHANGED = 'Captured decision dependency changed: '
 CONTEXT_FIELDS = {
     'task', 'agent', '_agent_ref', 'objective', 'event', 'params', 'interactive',
     '_source_reads', '_article_reads', '_vault_searches', '_created_tasks',
@@ -119,7 +120,7 @@ def _check_evidence(sample: dict) -> None:
     for ref, expected in {sample['subject']: sample['subject_sha256'], **sample['read_revisions']}.items():
         note = load_note(ref + '.md')
         if note is None or store.sha256((CONFIG.vault_dir / note.path).read_bytes()) != expected:
-            raise ValueError('Captured decision dependency changed: ' + ref)
+            raise ValueError(DEPENDENCY_CHANGED + ref)
     if not receipt_matches(sample):
         raise ValueError('Captured decision has no exact committed Tool receipt')
     subject = load_note(sample['subject'] + '.md')
