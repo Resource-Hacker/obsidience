@@ -4,8 +4,8 @@ contact_links:
     url: https://github.com/Resource-Hacker/obsidience/discussions
     about: Ask questions, get setup help and discuss ideas in Discussions.
   - name: Documentation
-    url: https://github.com/Resource-Hacker/obsidience#documentation
-    about: The README, DESIGN.md and the Architecture Articles explain setup and behavior.
+    url: https://resource-hacker.github.io/obsidience/
+    about: The documentation site explains installation, configuration, the ontology, each Module and each integration.
   - name: Report a security vulnerability
     url: https://github.com/Resource-Hacker/obsidience/security/advisories/new
     about: Report vulnerabilities privately, never in a public issue.

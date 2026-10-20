@@ -12,7 +12,8 @@
 - **Security problems:** report them privately as described in
   [SECURITY.md](SECURITY.md), never in a public issue.
 
-Before asking, the [README](README.md), [DESIGN.md](DESIGN.md), the
+Before asking, the [documentation site](https://resource-hacker.github.io/obsidience/),
+the [README](README.md), [DESIGN.md](DESIGN.md), the
 [Shell README](obsidience/shell/README.md) and the
 [Architecture](obsidience/defaults/vault/Architecture/Architecture.md) Articles
 answer many questions about setup and behavior.
