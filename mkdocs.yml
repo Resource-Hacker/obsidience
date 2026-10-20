@@ -32,16 +32,15 @@ theme:
   font:
     text: Inter
     code: JetBrains Mono
+  # Dark by default, matching the graph on the home page; the toggle stays.
   palette:
-    - media: "(prefers-color-scheme: dark)"
-      scheme: slate
+    - scheme: slate
       primary: custom
       accent: custom
       toggle:
         icon: material/weather-sunny
         name: Switch to light mode
-    - media: "(prefers-color-scheme: light)"
-      scheme: default
+    - scheme: default
       primary: custom
       accent: custom
       toggle:
@@ -62,6 +61,9 @@ theme:
 
 extra_css:
   - stylesheets/obsidience.css
+
+extra_javascript:
+  - javascripts/demo-hero.js
 
 plugins:
   - search
@@ -93,6 +95,7 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - Live demo: live-demo.md
   - Getting started:
       - Requirements: getting-started/requirements.md
       - Installation: getting-started/installation.md

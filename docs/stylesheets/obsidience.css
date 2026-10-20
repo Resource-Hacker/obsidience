@@ -83,3 +83,89 @@
 .md-typeset table:not([class]) td {
   vertical-align: top;
 }
+
+/* Live graph demo: the home page hero (index.md, javascripts/demo-hero.js)
+   and the embedded frame on live-demo.md. The demo itself is site/demo/. */
+.md-main {
+  overflow-x: clip;
+}
+
+.md-content__inner:has(.demo-hero) > .md-content__button {
+  display: none;
+}
+
+.md-typeset .demo-hero {
+  position: relative;
+  left: 50%;
+  width: 100vw;
+  height: clamp(420px, 76vh, 860px);
+  /* Up to the tabs: .md-main__inner margin, content padding and its spacer. */
+  margin: -2.5rem 0 1.4rem -50vw;
+  background: #030304;
+  border-bottom: 1px solid rgba(103, 232, 249, 0.18);
+}
+
+.demo-hero-frame {
+  position: absolute;
+  inset: 0;
+}
+
+.demo-hero-frame iframe,
+.md-typeset .demo-frame iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #030304;
+}
+
+.demo-hero-frame.docked {
+  position: fixed;
+  inset: auto 1rem 1rem auto;
+  width: 380px;
+  height: 238px;
+  z-index: 3;
+  overflow: hidden;
+  border: 1px solid rgba(103, 232, 249, 0.3);
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.65);
+}
+
+.demo-hero-close {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 1;
+  width: 26px;
+  height: 26px;
+  color: #cffafe;
+  background: rgba(3, 10, 16, 0.85);
+  border: 1px solid rgba(103, 232, 249, 0.3);
+  border-radius: 50%;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.md-typeset .demo-frame {
+  position: relative;
+  height: clamp(380px, 72vh, 820px);
+  margin: 1rem 0 0.6rem;
+  overflow: hidden;
+  background: #030304;
+  border: 1px solid rgba(103, 232, 249, 0.25);
+  border-radius: 12px;
+}
+
+.md-typeset .demo-hint,
+.md-typeset .demo-links {
+  font-size: 0.72rem;
+  color: var(--md-default-fg-color--light);
+}
+
+@media screen and (max-width: 700px) {
+  .md-typeset .demo-hero {
+    height: 72vh;
+    min-height: 380px;
+  }
+}
