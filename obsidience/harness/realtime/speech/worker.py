@@ -239,7 +239,9 @@ def smart_turn_analyzer(pending, short_reply, model_path: str | None = None):
             """Bound the model's verdict by silence and by the recognized text."""
 
             def __init__(self) -> None:
-                super().__init__(smart_turn_model_path=model_path, params=SmartTurnParams(
+                # Four ONNX threads: the stop-edge verdict is on the end-of-turn path
+                # (v3.2 int8, 8 s window: 25 ms on one thread, 9 ms on four).
+                super().__init__(smart_turn_model_path=model_path, cpu_count=4, params=SmartTurnParams(
                     # Upstream ends any turn after this much silence past the VAD stop.
                     stop_secs=SMART_TURN_PENDING_SECS - SMART_TURN_VAD_STOP_SECS,
                     # Silero confirms onset 100 ms late; keep the first syllable.
