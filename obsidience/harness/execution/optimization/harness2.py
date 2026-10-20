@@ -351,11 +351,14 @@ class ReservedProposer:
                     raise ProposerError('Incomplete training context is not usable evidence')
                 evidence[path.relative_to(context_dir).as_posix()] = value
         spec = self.job.session_spec(body, mission, evidence)
+        output = None
         try:
             output, cached = self.job.bridge.call(lambda: self.job.provider_call(spec, label))
             new = self.job.bridge.call(lambda: self._mutation(body, output, label))
         except (ValueError, OSError, KeyError, TypeError) as exc:
-            self.job.proposal_errors.append({'session': label, 'error': str(exc)[:1000]})
+            # ``rejected``: the session completed and the mutation validator refused its edit.
+            self.job.proposal_errors.append({'session': label, 'error': str(exc)[:1000],
+                                             'rejected': output is not None and isinstance(exc, ValueError)})
             # No harvested tree means upstream retries without overwriting the
             # admitted body. Supply the actual rejection as bounded retry evidence.
             (context_dir / 'attempt-rejection.txt').write_text(str(exc)[:1000])
@@ -427,8 +430,15 @@ async def run(case_id, document, audit, context):
         async with asyncio.timeout(native.JOB_SECONDS - spent):
             method = await _method(job, adapter)
             if method is not None:
-                failures.extend({'session': s.label, 'error': s.error or 'Harness2 stage fell back'}
-                                for s in method.stages if s.fell_back)
+                # Upstream retries an invalid proposal once, then the stage keeps the current
+                # harness. A last retry whose completed edit the validator refused is that
+                # bounded no-change outcome, not an execution failure; keep the actual text.
+                for s in method.stages:
+                    if s.fell_back:
+                        last = next((e for e in job.proposal_errors
+                                     if e['session'] == f'{s.label}.a{recursion.STAGE_ATTEMPTS}'), None)
+                        failures.append({'session': s.label, 'resolved': bool(last and last['rejected']),
+                                         'error': last['error'] if last else s.error or 'Harness2 stage fell back'})
                 failures.extend({'session': 'method', 'error': error} for error in method.errors)
                 failures.extend({'session': label, 'error': rollout.error or 'Training trajectory unavailable'}
                                 for label, rollout in method.rollouts.items() if not rollout.ok)
@@ -453,7 +463,7 @@ async def run(case_id, document, audit, context):
                          {'kind': 'job_budget_end', 'segment': segment,
                           'elapsed': time.monotonic() - started})
     compared = native.comparison(document, rows, job.seed.candidate_id, selected.candidate_id, job.search)
-    if failures:
+    if any(not failure.get('resolved') for failure in failures):
         compared['verdict'] = 'incomplete'
     elif method is None:
         # Only an unreproduced baseline ends the method without a failure.

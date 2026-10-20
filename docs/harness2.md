@@ -24,6 +24,10 @@ requires the existing repeated baseline/control comparison, training improvement
 control pass floor and regression limits, Tool-count check and applicable
 Executive latency check. Missing evidence and execution errors cannot become
 success. The incumbent instructions remain when no candidate qualifies.
+A stage whose one correction retry still returns an edit the validator refuses
+keeps the current instructions, as upstream specifies; the report lists it as a
+resolved failure with the validator's text and the comparison sets the verdict.
+A session that fails to return output still makes the job `incomplete`.
 
 The AutoSaddler artifact layer preserves completed attempt receipts across an
 interruption. Backend, installed-source manifest, model, case content,
