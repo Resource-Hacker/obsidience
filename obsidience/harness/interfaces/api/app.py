@@ -57,7 +57,8 @@ async def lifespan(app: FastAPI):
         from ...memory.hindsight import MEMORY
         await MEMORY.start()
         resources.push_async_callback(MEMORY.close)
-        await resources.enter_async_context(graphs.lifespan())
+        from ...graphs import codebase as code_graph
+        await resources.enter_async_context(code_graph.lifespan())
         scheduler.reconcile_interrupted_runs()
         source.list_sources()  # attest raw evidence before serving it
         # System facts are a deterministic projection of recorded evidence.

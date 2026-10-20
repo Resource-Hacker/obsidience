@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
-from ....config import CONFIG
 from ....knowledge import source
 
 router = APIRouter()
@@ -26,11 +25,10 @@ def read_source_file(key: str, activity: bool = False):
     except source.SourceError as cause:
         raise HTTPException(404, str(cause)) from cause
     if activity and record.get("storage") == "code":
-        from .graphs import CODE_PROJECT
         from ....execution.activity import emit_operation
-        project = str(CONFIG.extras.get("graphs", {}).get("codebase_project", CODE_PROJECT))
+        from ....graphs.codebase import project_id
         emit_operation("read", "returned", ["file:" + key], label="Reading source",
-                       graph_id="code:" + project)
+                       graph_id="code:" + project_id())
     return record
 
 

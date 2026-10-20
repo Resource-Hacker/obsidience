@@ -14,6 +14,8 @@ sources:
 - resource: obsidience/harness/knowledge/projection.py
 - resource: obsidience/harness/interfaces/api/routes/knowledge.py
 - resource: obsidience/harness/interfaces/api/routes/graphs.py
+- resource: obsidience/harness/graphs/memory.py
+- resource: obsidience/harness/graphs/codebase.py
 - resource: obsidience/harness/graphs/agent_activity.py
 - resource: obsidience/harness/graphs/code_refresh.py
 - resource: obsidience/harness/execution/activity.py
@@ -210,8 +212,9 @@ continuity without changing accepted Task authority or packet Knowledge.
 ## Memory and Code provider views
 
 Memory and Code are presentation adapters over their providers
-(`interfaces/api/routes/graphs.py`), composed with the Harness lifespan and the
-activity stream. They add no graph store, Agent, Tool grant or scheduler.
+(`graphs/memory.py` through the Hindsight memory port, `graphs/codebase.py` over
+codebase-memory-mcp; `interfaces/api/routes/graphs.py` only serves them),
+composed with the Harness lifespan and the activity stream. They add no graph store, Agent, Tool grant or scheduler.
 Memory and source content stay read-only; a saved-code refresh only updates the
 provider's own derived index. Knowledge, Memory and Code share one native Graph
 pane (placement identity `knowledge-graph`); its header switches the view
