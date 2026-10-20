@@ -11,7 +11,7 @@ by the concepts of the [Golden ontology](obsidience/defaults/vault/Architecture/
 
 ## [Unreleased]
 
-## [0.1.0] - 2026-10-19
+## [0.1.0] - 2026-10-20
 
 The first public release of Obsidience, a graph-native, local-first agent
 harness and Linux desktop shell. Everything below is new in this release.
