@@ -25,7 +25,7 @@ from copy import deepcopy
 
 from google.genai import types
 
-from . import sessions
+from . import model as model_route, sessions
 from .plugin import AgentPlugin, acquire_model
 from .tools import capability_tools
 from ..capability_core import foreground_checkpoint
@@ -35,7 +35,6 @@ from ..native_turn import (
 from ...config import CONFIG
 
 EXECUTIVE = 'Agents/Executive/Executive'
-COMMANDS = ('lights.set', 'tv.control', 'media.pause', 'task.complete')
 
 
 async def _run_owner_media(plugin: AgentPlugin, command: dict, session_id: str, turn_id: str) -> None:
@@ -506,7 +505,7 @@ async def run_adk_session(task, model, messages, allowed, ctx, agent_name, effor
                 if memory := memory_message(recalled):
                     parts.append(sessions.part(memory, 'plugin:obsidience.memory', run=run))
             agent = LlmAgent(name=sessions.agent_id(session_id),
-                             model=sessions.model(model, effort, plugin.model_slot), instruction='',
+                             model=model_route.route(model, effort, plugin.model_slot), instruction='',
                              tools=capability_tools(allowed, plugin),
                              disallow_transfer_to_parent=True, disallow_transfer_to_peers=True)
             runner = Runner(app=App(name=sessions.APP, root_agent=agent, plugins=[plugin]),

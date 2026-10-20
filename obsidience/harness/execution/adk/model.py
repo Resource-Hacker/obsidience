@@ -1,4 +1,13 @@
-"""The Executive's local ADK model: llama-server's chat stream over the provider pool.
+"""The ADK model route: one model per model, effort and slot, and its admission guard.
+
+``route`` selects ``adk_model_client`` (``local`` default, ``litellm`` rollback),
+``engine_guard`` reports the exact ``input_token_limit`` its requests carry,
+``admitted_input_tokens``/``ADMISSION`` verify and record llama.cpp's acknowledgement,
+and ``owned`` gives a caller a copy whose request stream it closes itself.
+``start``/``stop`` load and close LiteLLM only for its route. The conversation
+store is ``sessions.py``.
+
+The local route is llama-server's chat stream over the provider pool.
 
 ``LocalLlm`` replaces ADK's ``LiteLlm`` route (``adk_model_client = "local"``).
 It sends the request ADK's LiteLlm route sends for the same ``LlmRequest``
@@ -23,26 +32,39 @@ exception classes.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import logging
+import os
+import re
+import sys
+from contextvars import ContextVar
 from typing import Any, AsyncGenerator
 
-import httpx
-from google.adk.models import LlmCapabilities
-from google.adk.models.base_llm import BaseLlm
-from google.adk.models.interactions_utils import extract_system_instruction
-from google.adk.models.llm_request import LlmRequest
-from google.adk.models.llm_response import LlmResponse
-from google.adk.utils.streaming_utils import _JsonPathTracker
-from google.genai import types
-from httpx_sse import aconnect_sse
-from pydantic import Field, PrivateAttr
+# LiteLLM must never fetch a remote cost map at import (owner decision 2026-10-09);
+# the bundled map suffices and the Harness makes no network call of its own here.
+os.environ.setdefault('LITELLM_LOCAL_MODEL_COST_MAP', 'True')
 
-from ...models import llm
-from . import sessions
+import httpx  # noqa: E402
+from google.adk.models import LlmCapabilities  # noqa: E402
+from google.adk.models.base_llm import BaseLlm  # noqa: E402
+from google.adk.models.interactions_utils import extract_system_instruction  # noqa: E402
+from google.adk.models.llm_request import LlmRequest  # noqa: E402
+from google.adk.models.llm_response import LlmResponse  # noqa: E402
+from google.adk.utils.streaming_utils import _JsonPathTracker  # noqa: E402
+from google.genai import types  # noqa: E402
+from httpx_sse import aconnect_sse  # noqa: E402
+from pydantic import Field, PrivateAttr  # noqa: E402
+
+from ...models import llm  # noqa: E402
 
 logger = logging.getLogger(__name__)
+
+_routes: dict[tuple, BaseLlm] = {}
+# The current model step's metrics, set by the plugin before each request; the
+# admission client records the provider's acknowledged input count there.
+ADMISSION: ContextVar[dict | None] = ContextVar('obsidience_admission', default=None)
 
 _FINISH = {'length': types.FinishReason.MAX_TOKENS, 'stop': types.FinishReason.STOP,
            'tool_calls': types.FinishReason.STOP, 'function_call': types.FinishReason.STOP,
@@ -190,7 +212,7 @@ class ChatStream:
 
     def __init__(self, context, source):
         self._context, self._source = context, source
-        self._response_headers = source.response.headers  # sessions.admitted_input_tokens reads these
+        self._response_headers = source.response.headers  # admitted_input_tokens reads these
 
     def events(self):
         return self._source.aiter_sse()
@@ -228,8 +250,8 @@ class LocalModelClient:
                                      f'guard ({limit} tokens); nothing was generated')
                 raise ValueError(f'{model} returned HTTP {response.status_code}: {text[:300]}')
             if limit is not None:
-                count = sessions.admitted_input_tokens(stream, limit)
-                if (metrics := sessions.ADMISSION.get()) is not None:
+                count = admitted_input_tokens(stream, limit)
+                if (metrics := ADMISSION.get()) is not None:
                     metrics.update(admitted_input_tokens=count, input_token_guard='acknowledged')
         except BaseException:
             await stream.aclose()
@@ -243,7 +265,7 @@ class LocalLlm(BaseLlm):
     base_url: str
     llm_client: Any = Field(default_factory=LocalModelClient, exclude=True)
     # The fixed request arguments under LiteLlm's names; speech admission and
-    # sessions.engine_guard read max_tokens and extra_body.input_token_limit here.
+    # engine_guard read max_tokens and extra_body.input_token_limit here.
     _additional_args: dict = PrivateAttr(default_factory=dict)
 
     def __init__(self, model: str, *, base_url: str, **kwargs: Any) -> None:
@@ -449,3 +471,159 @@ class LocalLlm(BaseLlm):
             response.error_message = ('Arguments for the following function calls were not a valid JSON object: '
                                       + ', '.join(malformed))
         return _stamp(response, finish)
+
+
+def admitted_input_tokens(response, limit: int) -> int:
+    """The input count llama.cpp acknowledged for this exact guard, else fail closed.
+
+    The engine enforces ``input_token_limit`` before queueing and answers with
+    ``X-LLAMA-Input-Token-Limit`` and ``X-LLAMA-Input-Tokens``; a response
+    without that acknowledgement may not have been guarded.
+    """
+    headers = getattr(response, '_response_headers', None)
+    if headers is None:
+        extra = (getattr(response, '_hidden_params', None) or {}).get('additional_headers') or {}
+        headers = {key.removeprefix('llm_provider-'): value for key, value in extra.items()}
+    headers = {str(key).lower(): str(value) for key, value in dict(headers).items()}
+    count_text = headers.get('x-llama-input-tokens', '')
+    if (headers.get('x-llama-input-token-limit') != str(limit) or not count_text.isascii()
+            or not count_text.isdecimal() or len(count_text) > 10):
+        raise ValueError('Native provider did not acknowledge the exact input-token guard')
+    count = int(count_text)
+    if count > limit or count_text != str(count):
+        raise ValueError('Native provider returned an invalid admitted token count')
+    return count
+
+
+def _admission_client():
+    """ADK's LiteLLM client that verifies llama.cpp's exact input-token admission."""
+    from google.adk.models.lite_llm import LiteLLMClient
+
+    class AdmittedLiteLLMClient(LiteLLMClient):
+        async def acompletion(self, model, messages, tools, **kwargs):
+            import litellm
+            limit = (kwargs.get('extra_body') or {}).get('input_token_limit')
+            try:
+                response = await super().acompletion(model=model, messages=messages, tools=tools, **kwargs)
+            except litellm.BadRequestError as exc:
+                if limit is not None and 'input_token_limit' in str(exc):
+                    # Either the request had nothing projectable and skipped the
+                    # duplicate client count, or a projected count mismatched.
+                    # Nothing is retried; nothing was generated.
+                    counted = re.search(r'''["']input_tokens["']\s*:\s*(\d+)''', str(exc))
+                    if counted and int(counted.group(1)) > limit:
+                        from ...models.context import ContextBudgetExceeded, PayloadCount
+                        raise ContextBudgetExceeded(PayloadCount(int(counted.group(1))), limit) from None
+                    raise ValueError(f'The model server refused this request at its exact input-token '
+                                     f'guard ({limit} tokens); nothing was generated') from None
+                raise
+            if limit is not None:
+                try:
+                    count = admitted_input_tokens(response, limit)
+                except ValueError:
+                    if hasattr(response, 'aclose'):
+                        await response.aclose()
+                    raise
+                if (metrics := ADMISSION.get()) is not None:
+                    metrics.update(admitted_input_tokens=count, input_token_guard='acknowledged')
+            return response
+
+    return AdmittedLiteLLMClient()
+
+
+def _import_litellm() -> None:
+    from google.adk.models.lite_llm import _ensure_litellm_imported
+    _ensure_litellm_imported()
+    import litellm
+    litellm.suppress_debug_info = True  # Request bodies and keys never reach logs.
+    litellm.telemetry = False
+
+
+def model_client() -> str:
+    """``adk_model_client`` in obsidience.toml: ``local`` (default) or ``litellm`` (rollback)."""
+    from ...config import CONFIG
+    value = CONFIG.extras.get('adk_model_client', 'local')
+    if value not in {'local', 'litellm'}:
+        raise ValueError('adk_model_client must be "local" or "litellm"')
+    return value
+
+
+def route(spec, effort: str, slot: int | None = None):
+    """The ADK model route for one model, reasoning effort and caller slot.
+
+    Carries what the native transport sends: the served model id (so tool
+    results keep the template's native ``tool`` role), output cap,
+    temperature, single Tool call per step, template thinking switch, the
+    caller's llama.cpp slot (``runtime.slot_fields``; the Executive's unless
+    named) and the engine's exact input ceiling, whose acknowledgement every
+    response must carry.
+    ``local`` streams through the API's httpx pool (``LocalLlm``); ``litellm``
+    is ADK's LiteLlm route. Both expose the same ``_additional_args``.
+    """
+    from ...models import runtime as model_runtime
+    pinned = model_runtime.slot_fields(spec, model_runtime.EXECUTIVE_SLOT if slot is None else slot)
+    kind = model_client()
+    key = (spec.id, spec.base_url, effort, kind, pinned.get('id_slot'))
+    if key not in _routes:
+        from ...config import CONFIG
+        from ...models import llm
+        from ...models.context import PROMPT_SAFETY_TOKENS
+        extra = {'chat_template_kwargs': {'enable_thinking': effort != 'none'}, **pinned}
+        if effort != 'none':
+            extra.update(reasoning_format='auto', reasoning_budget_tokens=spec.reasoning_budgets[effort])
+        if spec.supports_input_token_limit:
+            extra['input_token_limit'] = spec.context_tokens - spec.max_output_tokens - PROMPT_SAFETY_TOKENS
+        args = dict(max_tokens=spec.max_output_tokens, temperature=CONFIG.llm_temperature,
+                    parallel_tool_calls=False, timeout=llm.CHAT_TIMEOUT_SECONDS, extra_body=extra)
+        if kind == 'local':
+            _routes[key] = LocalLlm(spec.id, base_url=spec.base_url, **args)
+        else:
+            from google.adk.models.lite_llm import LiteLlm
+            token = model_runtime.model_auth_headers().get('Authorization', '').removeprefix('Bearer ').strip()
+            _routes[key] = LiteLlm(
+                model='openai/' + spec.id, api_base=spec.base_url, api_key=token or 'none', **args,
+                **({'llm_client': _admission_client()} if 'input_token_limit' in extra else {}))
+    return _routes[key]
+
+
+def engine_guard(spec, effort: str) -> int | None:
+    """The exact input_token_limit this route's requests carry, or None without the engine guard."""
+    if not spec.supports_input_token_limit:
+        return None
+    return (route(spec, effort)._additional_args.get('extra_body') or {}).get('input_token_limit')
+
+
+def owned(model: BaseLlm) -> tuple[BaseLlm, Any]:
+    """A copy of ``model`` whose request stream the caller closes with ``await owner.close()``.
+
+    ADK's generator alone does not close the HTTP stream it reads from.
+    """
+    from google.adk.models.lite_llm import LiteLLMClient
+
+    class StreamOwner(LiteLLMClient):
+        def __init__(self, delegate):
+            self.delegate, self.response = delegate, None
+
+        async def acompletion(self, **kwargs):
+            self.response = await self.delegate.acompletion(**kwargs)
+            return self.response
+
+        async def close(self):
+            response, self.response = self.response, None
+            if response is not None and hasattr(response, 'aclose'):
+                await response.aclose()
+
+    owner = StreamOwner(model.llm_client)
+    return model.model_copy(update={'llm_client': owner}), owner
+
+
+async def start() -> None:
+    """Load LiteLLM once, only for its route, before the API accepts turns."""
+    if model_client() == 'litellm':
+        await asyncio.to_thread(_import_litellm)
+
+
+async def stop() -> None:
+    _routes.clear()
+    if 'litellm' in sys.modules:
+        await sys.modules['litellm'].close_litellm_async_clients()

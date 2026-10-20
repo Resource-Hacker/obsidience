@@ -43,7 +43,7 @@ from ..native_turn import (
 from ...config import CONFIG
 from ...models import runtime as model_runtime
 from ...models.context import PROMPT_SAFETY_TOKENS, TaskContext, discard_consumed_images
-from . import sessions
+from . import model as model_route, sessions
 
 
 # "On it." (owner decision 2026-10-19): only a voice turn whose Tool is still
@@ -653,7 +653,7 @@ class AgentPlugin(BasePlugin):
                         vault_read_allowed='vault.read' in self.ex.allowed if self.task_mode else True)
             started = time.monotonic()
             capacity = self.spec.context_tokens - self.spec.max_output_tokens - PROMPT_SAFETY_TOKENS
-            if sessions.engine_guard(self.spec, self.effort) == capacity and not projection.projectable(payload):
+            if model_route.engine_guard(self.spec, self.effort) == capacity and not projection.projectable(payload):
                 # Nothing could be projected, so a client count would only repeat
                 # the engine's exact pre-enqueue input_token_limit check on this
                 # same rendered request (one more template render and tokenization).
@@ -669,7 +669,7 @@ class AgentPlugin(BasePlugin):
         llm_request.contents = request_contents(payload['messages'][1:])
         # Foreground demand that arrived during preparation wins over a new request.
         foreground_checkpoint(self.interruption_event, self.ctx)
-        sessions.ADMISSION.set(metrics)
+        model_route.ADMISSION.set(metrics)
         self._step['dispatched'] = time.monotonic()
         self.generating.set()
         return None

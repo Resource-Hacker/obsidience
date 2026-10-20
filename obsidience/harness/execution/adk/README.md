@@ -16,7 +16,10 @@ fails closed unless llama.cpp acknowledges the exact `input_token_limit`
 (`X-LLAMA-Input-Token-Limit`/`X-LLAMA-Input-Tokens`) on every model step and
 records the admitted count with the step's metrics. The local route also fails
 closed on a stream without a finish reason, never retries a request, and drops
-the connection as soon as ADK closes its generator.
+the connection as soon as ADK closes its generator. `model.py` alone owns the
+route: selection and caching (`route`), the engine guard (`engine_guard`,
+`admitted_input_tokens`, `ADMISSION`), a caller-closed stream (`owned`, used by
+speech admission) and LiteLLM's lifecycle; no other module imports LiteLLM.
 
 - `sessions.py` owns the Executive conversation log: one ADK
   `SqliteSessionService` on `state/adk-sessions.sqlite3`. Events carry

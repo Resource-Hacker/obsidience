@@ -67,7 +67,9 @@ async def lifespan(app: FastAPI):
         await asyncio.to_thread(retrieval.prewarm_fast_context)
         resources.push_async_callback(model_runtime.shutdown)
         model_events = await model_runtime.initialize()
-        from ...execution.adk import sessions as conversation_log
+        from ...execution.adk import model as model_route, sessions as conversation_log
+        await model_route.start()
+        resources.push_async_callback(model_route.stop)
         await conversation_log.start()
         resources.push_async_callback(conversation_log.stop)
         await conversation_log.reconcile(CONVERSATION)

@@ -17,13 +17,12 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 
 from google.adk.models.llm_request import LlmRequest
-from google.adk.models.lite_llm import LiteLLMClient
 from google.adk.models.llm_response import LlmResponse
 from google.genai import types
 
 from . import native
 from . import trace as action_trace
-from .adk import sessions
+from .adk import model as model_route, sessions
 from .adk.plugin import request_contents
 from .executor import activation_messages, compile_activation
 from .native_turn import memory_message, recall_query, recall_reply, speech_admission_reminder, tool_schemas
@@ -82,22 +81,6 @@ class _ControlPrefix:
                     raise SpeechOutputError('Speech admission began without its exact control line')
             if part.function_call is not None and self.prefix != 'C\n':
                 raise SpeechOutputError('Native Tool streamed before a complete-turn control line')
-
-
-class _ResponseOwner(LiteLLMClient):
-    """Own this request's HTTP stream; ADK's generator alone does not close it."""
-
-    def __init__(self, delegate):
-        self.delegate, self.response = delegate, None
-
-    async def acompletion(self, **kwargs):
-        self.response = await self.delegate.acompletion(**kwargs)
-        return self.response
-
-    async def close(self):
-        response, self.response = self.response, None
-        if response is not None and hasattr(response, 'aclose'):
-            await response.aclose()
 
 
 def _digest(value) -> str:
@@ -473,7 +456,7 @@ async def _generate(runtime, text: str, response_contract: str, speculative: boo
             payload = native.request_payload(messages, spec, effort, schemas)
             started = time.monotonic()
             capacity = spec.context_tokens - spec.max_output_tokens - PROMPT_SAFETY_TOKENS
-            if sessions.engine_guard(spec, effort) == capacity:
+            if model_route.engine_guard(spec, effort) == capacity:
                 # A fresh projection holds no pages, so a client count would only
                 # repeat the engine's exact pre-enqueue guard on this same request.
                 metrics['preflight_ms'] = round((time.monotonic() - started) * 1000, 3)
@@ -490,7 +473,7 @@ async def _generate(runtime, text: str, response_contract: str, speculative: boo
             responses = []
             prefix = _ControlPrefix()
             started = time.monotonic()
-            route = sessions.model(spec, effort)
+            route = model_route.route(spec, effort)
             # The shared ADK route is cached by identity/endpoint/effort. Reject
             # an old cached ceiling after an in-process model profile change.
             route_args = route._additional_args
@@ -498,8 +481,8 @@ async def _generate(runtime, text: str, response_contract: str, speculative: boo
                     or (spec.supports_input_token_limit
                         and (route_args.get('extra_body') or {}).get('input_token_limit') != capacity)):
                 raise SpeechPreparationError('The cached ADK model route has outdated token settings')
-            owner = _ResponseOwner(route.llm_client)
-            route = route.model_copy(update={'llm_client': owner})
+            # This request's HTTP stream is closed here; ADK's generator alone does not.
+            route, owner = model_route.owned(route)
 
             def turn(decision, response):
                 return PreparedSpeechTurn(
@@ -523,7 +506,7 @@ async def _generate(runtime, text: str, response_contract: str, speculative: boo
                 if started - _STALE[0] < 2:
                     metrics['after_stale_request_ms'] = round((started - _STALE[0]) * 1000, 3)
                 _STALE[0] = None
-            token = sessions.ADMISSION.set(metrics)
+            token = model_route.ADMISSION.set(metrics)
             try:
                 async with aclosing(route.generate_content_async(request, stream=True)) as stream:
                     async for response in stream:
@@ -560,7 +543,7 @@ async def _generate(runtime, text: str, response_contract: str, speculative: boo
                 try:
                     await owner.close()
                 finally:
-                    sessions.ADMISSION.reset(token)
+                    model_route.ADMISSION.reset(token)
                     if run is not None:
                         run[2] = time.monotonic()
                     if handed is not None:
