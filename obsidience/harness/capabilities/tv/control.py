@@ -2211,6 +2211,14 @@ def _execute(args, context):
             # Seen on this TV: an app launched behind the screensaver stays frozen
             # on its splash. Wake ends the screensaver; it changes no content.
             state = _end_screensaver(row, cancel)
+        elif (opening or action == 'launch') and pc is None and state != {'wakefulness': 'Awake', 'display': 'ON'}:
+            # An app started behind a sleeping screen does not finish launching: the first open after
+            # the TV had been off ran `am start -W` out to its 8 s ADB deadline (2026-10-19).
+            # The power key of `on`, sent once; the TV's own readback decides.
+            context['_tv_effect_uncertain'] = True
+            with _phase(context, 'wake'):
+                state = _end_screensaver(row, cancel, limit=8.0)
+            context['_tv_effect_uncertain'] = False
         if state['wakefulness'] == 'Awake' and action != 'off':
             # Ready for the keys that usually follow; starting it never delays this call.
             _remote(row, cancel, boot, check=False)
