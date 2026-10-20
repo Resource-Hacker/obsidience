@@ -1,0 +1,19 @@
+# Obsidience local SearXNG (upstream image, pinned digest), loopback only.
+[Unit]
+Description=Obsidience local SearXNG metasearch (loopback)
+
+[Container]
+ContainerName=obsidience-searxng
+Image=docker.io/searxng/searxng@sha256:2a8660b510454a7f9f052e614b69c18b102a4c5c751f87076cc67cf5e14c6c44
+PublishPort=127.0.0.1:8888:8080
+Volume=%h/.config/obsidience-searxng:/etc/searxng:ro
+Environment=FORCE_OWNERSHIP=false
+Environment=SEARXNG_BASE_URL=http://127.0.0.1:8888/
+NoNewPrivileges=true
+
+[Service]
+Restart=on-failure
+TimeoutStartSec=120
+
+[Install]
+WantedBy=default.target

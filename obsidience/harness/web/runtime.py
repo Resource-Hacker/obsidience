@@ -25,10 +25,11 @@ from markdownify import MarkdownConverter
 from lxml import html as lxml_html
 from trafilatura import extract as extract_article
 
-from ..config import CONFIG, PROJECT_ROOT
+from ..config import PROJECT_ROOT
 
 WEB_WORKER_MODULE = "obsidience.harness.web.worker"
 from ..knowledge.source import ingest_source
+from . import searxng
 
 MAX_QUERY_CHARS = 300
 MAX_RESULTS = 8
@@ -250,19 +251,10 @@ def _search_worker(query: str, limit: int) -> list[dict]:
 
 
 def _searxng_search(query: str, limit: int) -> list[dict]:
-    """Query the local SearXNG instance; its engines run in parallel."""
-    base = str((CONFIG.extras.get("web") or {}).get("searxng_url", "")).rstrip("/")
-    if not base:
+    if not searxng.url():
         raise WebError("local SearXNG is not configured")
     try:
-        response = httpx.get(
-            base + "/search",
-            params={"q": query, "format": "json", "language": "en-US", "safesearch": 1},
-            # Loopback client identity for SearXNG's bot detection log.
-            headers={"X-Real-IP": "127.0.0.1"}, timeout=httpx.Timeout(8.0, connect=1.0),
-        )
-        response.raise_for_status()
-        rows = response.json().get("results")
+        rows = searxng.search(query, language="en-US")
     except (httpx.HTTPError, ValueError, AttributeError) as exc:
         raise WebError("local SearXNG search failed") from exc
     if not isinstance(rows, list):

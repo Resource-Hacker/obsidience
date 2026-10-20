@@ -517,7 +517,8 @@
       "version": "2026.10.7-6671d89be",
       "revision": "6671d89bede8c9fc108b17bb98916170f5657650",
       "license": "AGPL-3.0-or-later",
-      "integration": "Unmodified upstream container run as the rootless Podman Quadlet user service obsidience-searxng (~/.config/containers/systemd/obsidience-searxng.container), published only on 127.0.0.1:8888 with a read-only local settings.yml enabling the JSON API. The existing web.search Capability queries it over HTTP and keeps DDGS as fallback; no SearXNG code is copied or linked."
+      "unit": "obsidience/harness/systemd/obsidience-searxng.container",
+      "integration": "Unmodified upstream container run as the rootless Podman Quadlet user service obsidience-searxng (source obsidience/harness/systemd/obsidience-searxng.container, installed in ~/.config/containers/systemd/), published only on 127.0.0.1:8888 with a read-only local settings.yml enabling the JSON API. harness/web/searxng.py is its one client: the web.search Capability (DDGS fallback) and the TV YouTube listing consume it over HTTP; no SearXNG code is copied or linked."
     },
     "google_adk": {
       "repository": "https://github.com/google/adk-python",

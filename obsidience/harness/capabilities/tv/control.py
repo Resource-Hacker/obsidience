@@ -258,16 +258,11 @@ def youtube_id(url):
 
 def _youtube_matches(query, limit):
     """YouTube videos and live streams through the local SearXNG instance."""
-    import httpx
-    base = str((CONFIG.extras.get('web') or {}).get('searxng_url', '')).rstrip('/')
-    if not base:
+    from ...web import searxng
+    if not searxng.url():
         return []
-    response = httpx.get(base + '/search', headers={'X-Real-IP': '127.0.0.1'},
-                         params={'q': query, 'format': 'json', 'engines': 'youtube', 'safesearch': 1},
-                         timeout=httpx.Timeout(8.0, connect=1.0))
-    response.raise_for_status()
     found, seen = [], set()
-    for row in response.json().get('results') or []:
+    for row in searxng.search(query, engines='youtube') or []:
         video = youtube_id(str(row.get('url') or '')) if isinstance(row, dict) else None
         if video and video not in seen:
             seen.add(video)
