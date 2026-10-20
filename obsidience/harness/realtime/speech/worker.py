@@ -1037,6 +1037,8 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
         self._wake_timeout: asyncio.Task[None] | None = None
         self._mode_waiting_for_stop = False
         self._wake_cue_eligible = False
+        # The chosen opening cue rides one interruption; see push_frame.
+        self._wake_cue_offered = False
         self._wake_cue_name = "ready"
         self._wake_spotter = wake_spotter
         self._wake_spotted = False
@@ -1134,6 +1136,7 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
         # it, so immediate follow-ups chirp and true speech barge-in stays quiet.
         if not spotted:  # A spot already chose the cue and interrupted.
             self._wake_cue_eligible = self._wake_cue_choice()
+            self._wake_cue_offered = False
         if not self._have_sent_user_started_speaking:
             await self._handle_user_interruption(UserStartedSpeakingFrame())
             self._have_sent_user_started_speaking = True
@@ -1162,6 +1165,7 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
         self._wake_spotted = True
         self._wake_cue_name = "ready"
         self._wake_cue_eligible = self._wake_cue_choice()
+        self._wake_cue_offered = False
         self._emit("wake_spotted", mode_revision=self.mode_revision,
                    score=round(self._wake_spotter.score, 3))
         if not self._have_sent_user_started_speaking:
@@ -1351,7 +1355,12 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
             frame.metadata["obsidience_candidate_revision"] = self._candidate_revision
             frame.metadata["obsidience_speech_sequence"] = self._candidate_sequence
         if isinstance(frame, StartInterruptionFrame):
-            frame.metadata["obsidience_wake_ready"] = self._wake_cue_eligible
+            # Only the window's first interruption presents its opening cue. A
+            # later segment in the same window (the answer after a follow-up
+            # chirp, a command after "Computer" and a pause) starts with its own
+            # interruption and must not chirp again (owner, 2026-10-19: double beep).
+            frame.metadata["obsidience_wake_ready"] = self._wake_cue_eligible and not self._wake_cue_offered
+            self._wake_cue_offered |= self._wake_cue_eligible
         await super().push_frame(frame, direction)
 
     async def _handle_vad_user_started_speaking(
@@ -1896,7 +1905,10 @@ class PlaybackCommands:
                          and self._pending_ready_cue_binding == (marker.generation, marker.epoch))
         return (((marker.generation, marker.epoch) == (self.generation, self.epoch) or pending_ready)
                 and (marker.cue_name in OPENING_CUES or not (turn and turn._user_speaking_buffer.strip()))
-                and (marker.cue_name not in OPENING_CUES or (not self._reply_active and turn and turn._wake_open and turn._wake_cue_eligible)))
+                # A spotted name chirps before ASR text opens the window.
+                and (marker.cue_name not in OPENING_CUES or (not self._reply_active and turn
+                                                             and (turn._wake_open or turn._wake_spotted)
+                                                             and turn._wake_cue_eligible)))
 
     async def queue_cue(self, name: str, generation: int) -> None:
         pcm = self._cue_assets.get(name) if isinstance(name, str) else None
