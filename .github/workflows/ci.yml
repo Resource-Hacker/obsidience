@@ -1,0 +1,66 @@
+# Build checks: the UI typechecks and builds, the Python byte-compiles and passes
+# a syntax-level Ruff selection. No test suite runs here (project rule: automated
+# tests only when maintainers ask), and nothing needs secrets, GPUs, models or
+# network services.
+name: Build checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+# Pull requests cancel their superseded runs; every push keeps its own run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: obsidience/ui
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 10.8.1
+          package_json_file: obsidience/ui/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: obsidience/ui/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run typecheck
+      - run: pnpm run build
+
+  python:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # 3.14 runs the Harness; 3.12 runs the speech worker (its own venv).
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: |
+            3.12
+            3.14
+      - name: Byte-compile (Python 3.14)
+        run: python -m compileall -q -x '(^|/)(node_modules|\.venv|venv|out|dist|__pycache__)(/|$)' obsidience
+      - name: Byte-compile speech worker (Python 3.12)
+        run: python3.12 -m compileall -q obsidience/harness/realtime/speech obsidience/harness/config.py
+      # Syntax errors and undefined names only; current main has other findings
+      # under Ruff's broader defaults, left for maintainers to tighten.
+      - uses: astral-sh/ruff-action@278981a28ce3188b1e39527901f38254bf3aac89 # v4.1.0
+        with:
+          version: 0.17.1
+          src: obsidience
+          args: check --select E9,F63,F7,F82 --target-version py314 --output-format github
