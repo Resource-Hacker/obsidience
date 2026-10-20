@@ -1734,6 +1734,10 @@ def _drop_offline(row):
         if any(line.split() == [target, 'offline'] for line in listed.splitlines()):
             subprocess.run(['/usr/bin/adb', 'disconnect', target], stdin=subprocess.DEVNULL,
                            capture_output=True, timeout=4)
+            # Seen 2026-10-19: `disconnect` answered "disconnected" yet left the offline transport
+            # listed, so `connect` kept saying "already connected"; `reconnect offline` cleared it.
+            subprocess.run(['/usr/bin/adb', 'reconnect', 'offline'], stdin=subprocess.DEVNULL,
+                           capture_output=True, timeout=4)
     except subprocess.TimeoutExpired:
         raise TimeoutError('TV ADB connection timed out; the TV may be in network standby or disconnected') from None
 
