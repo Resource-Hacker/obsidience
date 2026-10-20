@@ -203,6 +203,26 @@ def prefetch_recall(agent_ref, text, turn=None):
         MEMORY.recall(agent_ref, *query), name='obsidience-executive-recall')
 
 
+def trace_recall(emit, value, query, *, supplied, duration_ms=None, reuse='', coverage=None,
+                 context_recall_ms=None) -> None:
+    """The public trace row of a turn's recall: its query, the memories exactly as returned and its timing.
+
+    supplied: the turn's memory message entered the model request. duration_ms is
+    this turn's wait, recall_ms Hindsight's own round trip (absent for a speech
+    recall, which reports its reuse and context preparation instead).
+    """
+    payload = {'kind': 'memory', 'provider': 'hindsight', 'status': value['status'],
+               'refs': [row['ref'] for row in value.get('memories', [])],
+               'query': query[0], 'previous': query[1], 'supplied': supplied,
+               'memories': [{key: row.get(key) for key in ('ref', 'type', 'text', 'mentioned_at', 'occurred_start')}
+                            for row in value.get('memories', [])]}
+    for key, measured in (('duration_ms', duration_ms), ('recall_ms', value.get('duration_ms')),
+                          ('reuse', reuse or None), ('coverage', coverage), ('context_recall_ms', context_recall_ms)):
+        if measured is not None:
+            payload[key] = measured
+    emit('event', 'Hindsight recall ' + value['status'], payload['refs'], fields={'payload': payload})
+
+
 async def turn_recall(ctx, query, *, emit, run, context_text='', evaluation=None) -> dict:
     """The Executive's automatic recall for its owner request, as the model sees it.
 
@@ -233,10 +253,9 @@ async def turn_recall(ctx, query, *, emit, run, context_text='', evaluation=None
     refs = [row['ref'] for row in value.get('memories', [])]
     if refs:
         activity.emit_operation('read', 'returned', refs, label='Hindsight recall', run_id=run)
-    emit('event', 'Hindsight recall ' + value['status'], refs, fields={'payload': {
-        'kind': 'memory', 'provider': 'hindsight', 'status': value['status'], 'refs': refs,
-        'duration_ms': round((time.perf_counter() - recall_started) * 1000, 3)}})
     recalled = recall_reply(value)
+    trace_recall(emit, value, query, supplied=bool(memory_message(recalled)),
+                 duration_ms=round((time.perf_counter() - recall_started) * 1000, 3))
     if evaluation is None and params.get('conversation_id'):
         from .prefill import report_reuse
         report_reuse(params['conversation_id'], context_text, memory_message(recalled))

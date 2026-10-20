@@ -178,6 +178,8 @@ class PreparedSpeechTurn:
     retrieval_ms: float
     metrics: dict = field(repr=False)
     memory: str = field(repr=False, default='')
+    # (recall query, recall result) behind memory, for the run's public trace row.
+    recall: tuple = field(repr=False, default=())
     _runtime: object = field(repr=False, default=None)
     _bound_turn: str | None = field(repr=False, default=None)
     _bound_sequence: int | None = field(repr=False, default=None)
@@ -425,8 +427,8 @@ async def _generate(runtime, text: str, response_contract: str, speculative: boo
                 activation = await compile_activation(
                     agent, params=params, interactive=True, emit_activity=False,
                     conversation_evidence=evidence)
-                memory = memory_message(recall_reply(
-                    await (asyncio.shield(recall) if speculative else recall)))
+                recalled = await (asyncio.shield(recall) if speculative else recall)
+                memory = memory_message(recall_reply(recalled))
             finally:
                 if not speculative:
                     if not recall.done():
@@ -494,7 +496,7 @@ async def _generate(runtime, text: str, response_contract: str, speculative: boo
                     wire=deepcopy(payload['messages']), context=compiled_context,
                     packet=deepcopy(activation['activity_packet']), refs=list(activation['refs']),
                     retrieval_ms=float(activation['retrieval_ms']), metrics=metrics, memory=memory,
-                    _runtime=runtime)
+                    recall=(query, recalled), _runtime=runtime)
 
             handed, said = None, ''
             if (run := _RUN.get()) is not None:

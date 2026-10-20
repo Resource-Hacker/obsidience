@@ -49,7 +49,8 @@ _PAYLOAD_FIELDS = {
     "packet": ("kind", "refs", "retrieval_ms", "knowledge_accounting", "instruction_accounting", "sections"),
     "model": ("kind", "phase", "model", "model_label", "metrics", "error"),
     "context": ("kind", "projection"),
-    "memory": ("kind", "provider", "status", "refs", "duration_ms"),
+    "memory": ("kind", "provider", "status", "refs", "duration_ms", "query", "previous", "memories",
+               "supplied", "recall_ms", "reuse", "coverage", "context_recall_ms"),
     "latency": ("kind", "stage", "monotonic_ms", "duration_ms", "turn_id",
                 "run_id", "speech_sequence", "generation"),
 }

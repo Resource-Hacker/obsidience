@@ -162,8 +162,12 @@ function publicValue(value: unknown, depth = 0, budget = { chars: 70_000 }): Tra
 function entryFromWire(value: unknown, since: number): ActionTraceEntry | null {
   if (!value || typeof value !== "object") return null;
   const row = value as Record<string, unknown>;
+  // A Hindsight recall is the one "event" row this view shows; an evaluation
+  // trial's disabled recall did not happen.
+  const memory = row.channel === "event" ? row.payload as { kind?: unknown; status?: unknown } | null : null;
+  const recall = memory?.kind === "memory" && memory.status !== "disabled";
   if (typeof row.at !== "number" || !Number.isFinite(row.at)
-      || typeof row.channel !== "string" || !CHANNELS.has(row.channel)
+      || typeof row.channel !== "string" || !(CHANNELS.has(row.channel) || recall)
       || typeof row.line !== "string" || !row.line.trim()) return null;
   const detail = Array.isArray(row.detail)
     ? row.detail.slice(0, 12).filter((item): item is string => typeof item === "string").map(item => item.slice(0, 500)).join("\n") : "";
@@ -254,7 +258,7 @@ export function traceConversation(entry: ActionTraceEntry): boolean {
 
 export function traceChannelLabel(channel: string, conversation = false): string {
   return ({ run: conversation ? "Turn" : "Task", activation: "Preparation", tool: "Action", result: "Result",
-    status: "Outcome", error: "Problem", context: "Context", model: "Model" })[channel] ?? "Event";
+    status: "Outcome", error: "Problem", context: "Context", model: "Model", event: "Memory" })[channel] ?? "Event";
 }
 
 export function traceSimulationLabel(entry: ActionTraceEntry): string {
@@ -287,6 +291,7 @@ function actionTitle(entry: ActionTraceEntry): string {
     "observations.retain": "Retain a Hindsight observation",
   };
   if (entry.payload.kind === "packet") return "Thinking Packet";
+  if (entry.payload.kind === "memory") return "Hindsight recall";
   if (entry.payload.kind === "model") return ({ waiting: "Waiting for model availability", started: "Preparing the next response",
     result: "Response received", error: "Response generation failed", interrupted: "Response generation interrupted" })[traceText(entry.payload.phase)] ?? "Response measurements";
   if (entry.payload.kind === "context") return "Update working context";
@@ -333,9 +338,51 @@ export function traceRowState(row: TraceRow): string {
     return ({ error: "Error", rejected: "Rejected", interrupted: "Interrupted", returned: "Returned" })[status] ?? "Returned";
   }
   if (value.payload.kind === "packet") return "Prepared";
+  if (value.payload.kind === "memory") {
+    const recall = traceRecall(value)!;
+    if (recall.memories.length && ["returned", "partial"].includes(recall.status)) {
+      return recall.status === "partial" ? "Partial" : recall.supplied ? "Supplied" : "Returned";
+    }
+    return ({ returned: "No match", empty: "No memories", unavailable: "Unavailable", partial: "Partial",
+      disabled: "Not used", interrupted: "Interrupted" })[recall.status] ?? fieldLabel(recall.status || "recorded");
+  }
   if (value.payload.kind === "model") return ({ waiting: "Waiting", started: "Generating", result: "Measured",
     error: "Error", interrupted: "Interrupted" })[traceText(value.payload.phase)] ?? "Measured";
   return value.payload.kind === "run" ? fieldLabel(traceText(value.payload.status) || "recorded") : "Recorded";
+}
+
+export interface TraceMemory { ref: string; type: string; text: string; mentionedAt: string; occurredStart: string }
+export interface TraceRecall {
+  status: string;
+  query: string;
+  previous: string;
+  /** The turn's memory message entered the model request; null when not reported. */
+  supplied: boolean | null;
+  memories: TraceMemory[];
+  /** This turn's wait, Hindsight's round trip and (speech) context preparation, in ms. */
+  waitMs?: number;
+  recallMs?: number;
+  contextMs?: number;
+  reuse: string;
+  coverage?: number;
+}
+
+/** A recall row's public payload; earlier rows carry only refs, status and wait. */
+export function traceRecall(entry: ActionTraceEntry): TraceRecall | null {
+  const payload = entry.payload;
+  if (payload.kind !== "memory") return null;
+  const measured = (value: TraceValue | undefined) => typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+  const rows = Array.isArray(payload.memories) ? payload.memories : Array.isArray(payload.refs) ? payload.refs.map(ref => ({ ref })) : [];
+  return {
+    status: traceText(payload.status), query: traceText(payload.query), previous: traceText(payload.previous),
+    supplied: typeof payload.supplied === "boolean" ? payload.supplied : null,
+    memories: rows.flatMap(row => row && typeof row === "object" && !Array.isArray(row) && typeof row.ref === "string" ? [{
+      ref: row.ref, type: traceText(row.type), text: traceText(row.text),
+      mentionedAt: traceText(row.mentioned_at), occurredStart: traceText(row.occurred_start),
+    }] : []),
+    waitMs: measured(payload.duration_ms), recallMs: measured(payload.recall_ms), contextMs: measured(payload.context_recall_ms),
+    reuse: traceText(payload.reuse), coverage: measured(payload.coverage),
+  };
 }
 
 /** Correlate only explicit run/call identities. Legacy rows remain separate events. */

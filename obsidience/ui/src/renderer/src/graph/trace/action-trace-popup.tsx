@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { WS_BASE } from "@/lib/api";
 import {
-  applyTraceFrame, fieldLabel, traceActionTarget, traceActionTitle, traceChannelLabel, traceConversation, traceEntriesSince, traceRowFinding, traceRowState, traceRuns, traceSimulationLabel, traceText,
-  LATENCY_STAGES, TRACE_ENTRY_LIMIT, type ActionTraceEntry, type TraceModelRequest, type TraceRow, type TraceRun, type TraceValue,
+  applyTraceFrame, fieldLabel, traceActionTarget, traceActionTitle, traceChannelLabel, traceConversation, traceEntriesSince, traceRecall, traceRowFinding, traceRowState, traceRuns, traceSimulationLabel, traceText,
+  LATENCY_STAGES, TRACE_ENTRY_LIMIT, type ActionTraceEntry, type TraceModelRequest, type TraceRecall, type TraceRow, type TraceRun, type TraceValue,
 } from "./action-trace";
 
 const CHANNEL_COLOR: Record<string, string> = {
   run: "text-sky-200", activation: "text-violet-200", tool: "text-amber-200",
   result: "text-teal-200", status: "text-violet-200", error: "text-rose-300",
-  context: "text-sky-200", model: "text-cyan-200",
+  context: "text-sky-200", model: "text-cyan-200", event: "text-[#c4b5fd]",
 };
 const ROW_GRID = "grid grid-cols-[1.5rem_minmax(0,1fr)_4.75rem_3.75rem] items-baseline gap-2";
 const DISCLOSURE = "[&[open]>summary_.trace-chevron]:rotate-90";
@@ -244,11 +244,128 @@ function Packet({ entry }: { entry: ActionTraceEntry }) {
   </div>;
 }
 
-function EventDetails({ row }: { row: TraceRow }) {
+// The graph labels' voice: light mono capitals (knowledge-3d-labels.ts).
+const LABEL = "font-['JetBrains_Mono',ui-monospace,monospace] font-light uppercase";
+// The memory graph's own type colours (harness/graphs/memory.py).
+const MEMORY_KINDS: Record<string, [string, string]> = {
+  world: ["World fact", "#5eead4"], experience: ["Experience", "#38bdf8"], observation: ["Observation", "#c4b5fd"],
+};
+const MEMORY_UNKNOWN: [string, string] = ["Memory", "#94a3b8"];
+const STAMP = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+
+function moment(value: string): Date | null {
+  const date = value ? new Date(value) : null;
+  return date && Number.isFinite(date.getTime()) ? date : null;
+}
+
+/** Calendar age on the local clock, as the memory hook tells the model. */
+function age(then: Date, now = new Date()): string {
+  const day = (date: Date) => Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / 86_400_000;
+  const days = Math.round(day(now) - day(then));
+  if (days < 2) return days === 1 ? "Yesterday" : "Today";
+  if (days < 14) return `${days} days ago`;
+  if (days < 60) return `${Math.floor(days / 7)} weeks ago`;
+  return days < 730 ? `${Math.floor(days / 30)} months ago` : `${Math.floor(days / 365)} years ago`;
+}
+
+function stamp(date: Date): string {
+  const parts = Object.fromEntries(STAMP.formatToParts(date).map(part => [part.type, part.value]));
+  return `${parts.month} ${parts.day} ${parts.year} · ${parts.hour}:${parts.minute}`;
+}
+
+function RecallSummary({ recall }: { recall: TraceRecall }) {
+  return <span className="mt-0.5 flex min-w-0 items-center gap-2 text-[11px] text-slate-400">
+    {recall.query ? <span className="min-w-0 truncate">“{recall.query}”</span> : null}
+    {recall.memories.length ? <span aria-label={`${recall.memories.length} memories`} className="flex shrink-0 items-center gap-[3px]">
+      {recall.memories.map(memory => <i key={memory.ref} className="block h-[7px] w-[7px] border"
+        style={{ borderColor: (MEMORY_KINDS[memory.type] ?? MEMORY_UNKNOWN)[1] }} />)}
+    </span> : null}
+  </span>;
+}
+
+function MemoryCard({ memory, rank }: { memory: TraceRecall["memories"][number]; rank: number }) {
+  const [kind, color] = MEMORY_KINDS[memory.type] ?? MEMORY_UNKNOWN;
+  // Retained facts append " | When: … | Involving: …"; the date line already says when.
+  const [fact, ...context] = memory.text.split(" | ");
+  const detail = context.filter(part => !part.startsWith("When:")).join(" · ");
+  const recorded = moment(memory.mentionedAt), occurred = moment(memory.occurredStart);
+  const occurredDay = occurred && recorded && occurred.toDateString() !== recorded.toDateString()
+    ? STAMP.format(occurred).split(",").slice(0, 2).join(",") : "";
+  return <li className="border bg-[#030304]/70 px-3 pb-2 pt-2.5" style={{ borderColor: `${color}66` }}>
+    <div className={`${LABEL} flex items-baseline gap-2.5 text-[10px] tracking-[0.14em]`}>
+      <span className="text-slate-500">{String(rank).padStart(2, "0")}</span>
+      <span style={{ color }}>{kind}</span>
+      {recorded ? <span className="ml-auto text-slate-400">{age(recorded)}</span> : null}
+    </div>
+    {fact ? <p className="mt-1.5 text-[12px] leading-[1.55] text-slate-100">{fact}</p>
+      : <p className="mt-1.5 text-[11px] text-slate-500">The record's text is not part of this trace entry.</p>}
+    {detail ? <p className="mt-1 truncate text-[11px] text-slate-500" title={detail}>{detail}</p> : null}
+    <div className="mt-2 h-px bg-white/15" />
+    <p className={`${LABEL} mt-1.5 truncate text-[9px] tracking-[0.12em] text-slate-500`} title={memory.ref}>
+      {recorded ? `Recorded ${stamp(recorded)}` : "Recording time not reported"}{occurredDay ? ` · occurred ${occurredDay}` : ""} · {memory.ref.split("/").at(-1)?.slice(0, 8)}
+    </p>
+  </li>;
+}
+
+function RecallTiming({ recall }: { recall: TraceRecall }) {
+  const rows = ([["Hindsight search", recall.recallMs], ["Turn waited", recall.waitMs],
+    ["Context and memory preparation", recall.contextMs]] as const).filter(([, ms]) => ms !== undefined) as [string, number][];
+  const reuse = ({ exact: "Reused the identical recall started while the owner spoke",
+    words: "Reused a recall of the same words started while the owner spoke",
+    prefix: "Reused the recall of an earlier speech partial" })[recall.reuse];
+  if (!rows.length && !reuse) return null;
+  // One second of track unless a phase took longer, so a fast recall reads as fast.
+  const scale = Math.max(1_000, ...rows.map(([, ms]) => ms));
+  return <div>
+    <p className={`${LABEL} mb-2 flex justify-between text-[9px] tracking-[0.16em] text-slate-500`}>
+      <span>Timing</span>{rows.length ? <span>Scale {duration(scale)}</span> : null}
+    </p>
+    <div className="space-y-1.5">
+      {rows.map(([label, ms]) => <div key={label} className="grid grid-cols-[minmax(0,13rem)_minmax(0,1fr)_4.5rem] items-center gap-3 text-[11px]">
+        <span className="truncate text-slate-300">{label}</span>
+        <span className="h-[2px] bg-white/[0.07]"><span className="block h-full bg-cyan-200/70" style={{ width: `${Math.max(1, ms / scale * 100)}%` }} /></span>
+        <span className="text-right font-mono text-[10px] text-cyan-100">{duration(ms)}</span>
+      </div>)}
+    </div>
+    {reuse ? <p className="mt-2 text-[11px] text-slate-400">{reuse}{recall.coverage !== undefined && recall.reuse !== "exact" ? ` · its query held ${Math.round(recall.coverage * 100)}% of the final words` : ""}.</p> : null}
+    {recall.contextMs !== undefined ? <p className="mt-1 text-[10px] text-slate-500">Preparation overlaps compiling the Thinking Packet; it is not recall time alone.</p> : null}
+  </div>;
+}
+
+function RecallDetails({ entry, agent }: { entry: ActionTraceEntry; agent: string }) {
+  const recall = traceRecall(entry)!;
+  const owner = agent || entry.agentRef?.split("/").at(-1) || "Agent";
+  const count = recall.memories.length;
+  const supplied = recall.supplied === null ? "" : recall.supplied
+    ? count ? `${count} supplied to the turn` : "Notice supplied to the turn" : "Not supplied to the turn";
+  return <div className="space-y-4">
+    <div className="flex items-baseline justify-between gap-3 border-b border-white/10 pb-2">
+      <span className={`${LABEL} text-[10px] tracking-[0.18em] text-slate-300`}>Hindsight · {owner} memory</span>
+      <span className={`${LABEL} shrink-0 text-[9px] tracking-[0.16em] text-amber-200/75`}>Historical · unverified</span>
+    </div>
+    {recall.query ? <div>
+      <p className={`${LABEL} mb-1 text-[9px] tracking-[0.16em] text-slate-500`}>Query</p>
+      <p className="text-[13px] leading-5 text-slate-50">“{recall.query}”</p>
+      {recall.previous ? <p className="mt-1 text-[11px] leading-4 text-slate-400">Also recalled with the previous request, “{recall.previous}”, so a follow-up finds its subject.</p> : null}
+    </div> : null}
+    <div>
+      <p className={`${LABEL} mb-2 text-[9px] tracking-[0.16em] text-slate-500`}>
+        {count ? `${count} ${count === 1 ? "memory" : "memories"} returned` : "No memories returned"}{supplied ? ` · ${supplied}` : ""}
+      </p>
+      {count ? <ol className="space-y-2">{recall.memories.map((memory, index) =>
+        <MemoryCard key={memory.ref} memory={memory} rank={index + 1} />)}</ol> : null}
+    </div>
+    <RecallTiming recall={recall} />
+    <p className="text-[10px] leading-4 text-slate-500">Hindsight memory is an unverified record of earlier conversations, ranked by relevance; it is not accepted Knowledge.</p>
+  </div>;
+}
+
+function EventDetails({ row, agent }: { row: TraceRow; agent: string }) {
   const entry = row.entry;
   const result = row.result;
   const payload = entry.payload;
   if (payload.kind === "packet") return <Packet entry={entry} />;
+  if (payload.kind === "memory") return <RecallDetails entry={entry} agent={agent} />;
   if (payload.kind === "tool") return <div className="space-y-4">
     <p className="text-[11px] text-slate-500">Tool <code className="text-slate-300">{traceText(payload.name)}</code>{entry.step !== undefined ? ` · Agent step ${entry.step}` : ""}</p>
     {payload.arguments !== undefined ? <div><p className="mb-1 font-medium text-amber-100">What was requested</p><TraceFields value={payload.arguments} label="Action inputs" /></div> : null}
@@ -271,11 +388,13 @@ function EventDetails({ row }: { row: TraceRow }) {
   return <TraceFields value={legacy} />;
 }
 
-function ActionRow({ row, index, startedAt }: { row: TraceRow; index: number; startedAt: number }) {
+function ActionRow({ row, index, startedAt, agent }: { row: TraceRow; index: number; startedAt: number; agent: string }) {
   const entry = row.entry;
   const state = traceRowState(row);
   const finding = traceRowFinding(row);
-  const timing = (row.result ?? entry).payload.duration_ms;
+  const recall = traceRecall(entry);
+  // A speech turn's recall was prepared before the run: its preparation is the wait.
+  const timing = recall ? recall.waitMs ?? recall.contextMs : (row.result ?? entry).payload.duration_ms;
   // Model response precedes Tool dispatch/result when their millisecond stamps tie.
   const latest = [...(row.model?.entries ?? []), entry, ...(row.result ? [row.result] : [])].sort((a, b) => a.at - b.at).at(-1)!;
   return <details data-trace-event={latest.id} className={`${DISCLOSURE} border-b border-slate-700/40 last:border-0`}>
@@ -285,16 +404,17 @@ function ActionRow({ row, index, startedAt }: { row: TraceRow; index: number; st
         <span className={`mb-0.5 block text-[9px] font-medium uppercase tracking-[0.12em] ${CHANNEL_COLOR[entry.channel]}`}>{traceChannelLabel(entry.channel, traceConversation(entry))}</span>
         <span className="block break-words text-[12px] leading-5 text-slate-100">{traceActionTitle(entry)}</span>
         {entry.payload.kind === "tool" ? <span className="block truncate text-[11px] text-slate-400" title={traceText(entry.payload.name)}>{traceActionTarget(entry) || traceText(entry.payload.name)}</span> : null}
+        {recall ? <RecallSummary recall={recall} /> : null}
         {finding ? <span className="mt-1 block text-[11px] text-slate-300">{finding}</span> : null}
         {row.model ? <ResponseSummary request={row.model} /> : null}
       </span>
-      <span className={`text-[10px] ${["Problem", "Error", "Rejected", "Failed", "Blocked"].includes(state) ? "text-rose-300" : ["Waiting", "Degraded"].includes(state) ? "text-amber-200" : "text-teal-200/85"}`}>{state}</span>
-      <span className="text-right font-mono text-[10px] text-slate-500" title={typeof timing === "number" ? "Action duration" : "Time since the run started"}>
+      <span className={`text-[10px] ${["Problem", "Error", "Rejected", "Failed", "Blocked"].includes(state) ? "text-rose-300" : ["Waiting", "Degraded", "Unavailable", "Partial"].includes(state) ? "text-amber-200" : ["Not used", "No match", "No memories"].includes(state) ? "text-slate-400" : "text-teal-200/85"}`}>{state}</span>
+      <span className="text-right font-mono text-[10px] text-slate-500" title={typeof timing !== "number" ? "Time since the run started" : recall ? recall.waitMs === undefined ? "Context and memory preparation" : "Turn wait for memory" : "Action duration"}>
         {typeof timing === "number" ? duration(timing) : `+${duration(Math.max(0, entry.at - startedAt))}`}
       </span>
     </summary>
     <div className="mx-3 mb-3 rounded border border-slate-700/50 bg-black/20 px-3 py-3 text-[12px] leading-5">
-      <EventDetails row={row} />
+      <EventDetails row={row} agent={agent} />
       {row.model ? <details className={`${DISCLOSURE} mt-4 border-t border-slate-700/40 pt-3`}>
         <summary className="cursor-pointer list-none rounded text-cyan-200 focus-visible:outline focus-visible:outline-cyan-300"><span className="trace-chevron mr-1 inline-block">›</span>Response measurements</summary>
         <div className="mt-2"><ResponseMeasurements request={row.model} /></div>
@@ -409,7 +529,7 @@ export function ActionTracePopup({ since, keptOpen = false, onKeepOpen, onClose 
           {run.rows.length ? <div className={`${ROW_GRID} border-y border-slate-700/40 px-3 py-1.5 text-[9px] uppercase tracking-widest text-slate-500`} aria-hidden="true">
             <span>#</span><span>Step / evidence</span><span>State</span><span className="text-right">Time</span>
           </div> : null}
-          {run.rows.map((row, index) => <ActionRow key={row.id} row={row} index={index} startedAt={run.at} />)}
+          {run.rows.map((row, index) => <ActionRow key={row.id} row={row} index={index} startedAt={run.at} agent={run.agent} />)}
           <ResponseStatus run={run} />
           <LatencyTimeline run={run} />
           <SimulationTimelines run={run} />
