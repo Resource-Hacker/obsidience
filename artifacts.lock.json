@@ -493,6 +493,16 @@
       "patch_sha256": "71e8f6c2ebcf14ebf309cce2ecf3f75b2ff336ee431268565d7c14bc44ac1a42",
       "integration": "Selected 2026-10-09 for obsidience-gemma (llm.sh). The admission build plus json-schema-to-grammar emitting Gemma 4 value syntax, used by the Gemma 4 parser for Tool arguments (the upstream TODO). Enums, constants, ranges, formats, patterns and required keys are now decoder-enforced; output parsing is unchanged. Trade-offs: required keys are generated first, and length/pattern-bounded strings cannot contain '<'. The embedding service keeps llama_cpp_executive_admission. Rollback: the previous LLAMA path in llm.sh."
     },
+    "llama_cpp_executive_tp9": {
+      "repository": "https://github.com/ggml-org/llama.cpp",
+      "revision": "1167d3f42c2b4dc5469bf4e696cb8c678ca79110",
+      "version": "b11509+obsidience-exact-input-admission+gemma4-tool-argument-grammar+tp9",
+      "license": "MIT",
+      "path": "/var/lib/ai/opt/llama.cpp-b11509-obsidience-admission-g4grammar-tp9-20261019",
+      "launcher": "obsidience/scripts/llm.sh",
+      "patches": "llama_cpp_executive_g4grammar's two tracked patches, then a local series kept outside this repository: 01-10 tensor split and MTP (even expert split, vocabulary-split tied head, draft sampling, all-reduce pool, masked NextN, size-selected hybrid all-reduce, device top-64 sampling candidates, merged dense+MoE all-reduce, per-backend KV view slices, no end-of-prompt SWA checkpoint) and 11-29 (upstream backports #30580 #30666 #30295 #30573 #30103 #29953 #30453 #30662 #30574 plus local slot-file, checkpoint-reuse, parallel state-copy, BPE token-cache and phase-timing changes). Local engine source head 40b54c625ad6111bdeb9122fe5344217b9bc083e.",
+      "integration": "Selected 2026-10-19 by llm.sh for obsidience-gemma: tensor or layer split across the model GPUs from the launch profile, MTP draft depth from the profile, several pinned slots (models/runtime.py slot_fields) with idle-slot cache copies disabled and a slot save path for the warm Executive slot. Outputs identical to tp8; rollback is the tp8 path named in llm.sh. The patch series is not tracked here; record its files before a rebuild or upstream rebase. The embedding service keeps llama_cpp_executive_admission."
+    },
     "embeddinggemma_2_text_bf16_gguf": {
       "repository": "https://huggingface.co/ggml-org/embeddinggemma-2-GGUF",
       "revision": "bfcd298762cc34d0357ece5ebdd31791a3a374d8",
