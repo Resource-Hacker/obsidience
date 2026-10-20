@@ -17,3 +17,7 @@ out/
 .env
 .env.*
 !.env.example
+
+# Documentation site build output and plugin cache (mkdocs.yml)
+/site/
+/.cache/

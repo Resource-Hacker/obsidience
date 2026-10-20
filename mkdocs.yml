@@ -1,0 +1,137 @@
+site_name: Obsidience
+site_description: >-
+  A graph-native, local-first agent harness and Linux desktop shell.
+site_url: https://resource-hacker.github.io/obsidience/
+repo_url: https://github.com/Resource-Hacker/obsidience
+repo_name: Resource-Hacker/obsidience
+edit_uri: edit/main/docs/
+docs_dir: docs
+
+# Build tooling that lives beside the pages but is not part of the site.
+exclude_docs: |
+  /requirements.txt
+  /hooks/
+
+hooks:
+  - docs/hooks/catalogue.py
+
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+
+theme:
+  name: material
+  language: en
+  icon:
+    logo: material/graph-outline
+    repo: fontawesome/brands/github
+  favicon: assets/favicon.svg
+  font:
+    text: Inter
+    code: JetBrains Mono
+  palette:
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - navigation.footer
+    - navigation.tracking
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.action.edit
+
+extra_css:
+  - stylesheets/obsidience.css
+
+plugins:
+  - search
+  # Downloads Google Fonts and the Mermaid runtime at build time and serves
+  # them from the site, so readers make no third-party font or CDN requests.
+  - privacy
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - Requirements: getting-started/requirements.md
+      - Installation: getting-started/installation.md
+      - First run: getting-started/first-run.md
+  - Configuration: configuration.md
+  - Ontology:
+      - ontology/index.md
+      - Document format (OKF): ontology/okf.md
+  - Articles:
+      - articles/index.md
+      - Knowledge: articles/knowledge.md
+      - Agents: articles/agents.md
+      - Tasks: articles/tasks.md
+      - Runbooks: articles/runbooks.md
+      - Skills: articles/skills.md
+      - Tools: articles/tools.md
+  - Sources and Capabilities: sources-and-capabilities.md
+  - Memory: memory.md
+  - Modules:
+      - modules/index.md
+      - Harness:
+          - modules/harness/index.md
+          - Realtime voice: modules/harness/voice.md
+          - Self-improvement:
+              - modules/harness/self-improvement.md
+              - Harness2 integration notes: harness2.md
+      - Shell:
+          - modules/shell/index.md
+          - Graph UI: modules/shell/graph-ui.md
+      - Media: modules/media.md
+      - TV: modules/tv.md
+  - Integrations:
+      - integrations/index.md
+      - Harness2 and AutoSaddler: integrations/harness2.md
+      - Google ADK: integrations/google-adk.md
+      - Hindsight: integrations/hindsight.md
+      - Open Knowledge Format: integrations/okf.md
+      - llama.cpp: integrations/llama-cpp.md
+      - Voice stack: integrations/voice-stack.md
+      - Code graph: integrations/code-graph.md
+      - Agent canvas: integrations/agent-canvas.md
+      - Media: integrations/media.md
+  - Development: development.md

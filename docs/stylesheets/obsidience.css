@@ -1,0 +1,85 @@
+/* Obsidience palette (obsidience/shell/theme/palette.json): near-black
+   blue-teal surfaces, cyan accents and pale cyan text. */
+
+[data-md-color-scheme="slate"] {
+  --md-hue: 200;
+  --md-default-bg-color: #030a10;
+  --md-default-fg-color: rgba(207, 250, 254, 0.92);
+  --md-default-fg-color--light: rgba(207, 250, 254, 0.68);
+  --md-default-fg-color--lighter: rgba(207, 250, 254, 0.42);
+  --md-default-fg-color--lightest: rgba(207, 250, 254, 0.12);
+  --md-primary-fg-color: #061722;
+  --md-primary-fg-color--light: #0b2433;
+  --md-primary-fg-color--dark: #02070b;
+  --md-primary-bg-color: #cffafe;
+  --md-primary-bg-color--light: rgba(207, 250, 254, 0.7);
+  --md-accent-fg-color: #67e8f9;
+  --md-accent-fg-color--transparent: rgba(103, 232, 249, 0.12);
+  --md-typeset-a-color: #67e8f9;
+  --md-code-bg-color: #071520;
+  --md-code-fg-color: #cffafe;
+  --md-footer-bg-color: #02070b;
+  --md-footer-bg-color--dark: #010407;
+  --md-typeset-table-color: rgba(103, 232, 249, 0.16);
+}
+
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color: #061722;
+  --md-primary-fg-color--light: #0b2433;
+  --md-primary-fg-color--dark: #02070b;
+  --md-primary-bg-color: #cffafe;
+  --md-primary-bg-color--light: rgba(207, 250, 254, 0.7);
+  --md-accent-fg-color: #0e7490;
+  --md-accent-fg-color--transparent: rgba(14, 116, 144, 0.1);
+  --md-typeset-a-color: #0e7490;
+}
+
+.md-header,
+.md-tabs {
+  background-color: var(--md-primary-fg-color);
+}
+
+.md-header {
+  border-bottom: 1px solid rgba(103, 232, 249, 0.22);
+}
+
+.md-typeset h1,
+.md-typeset h2 {
+  letter-spacing: 0.01em;
+}
+
+[data-md-color-scheme="slate"] .md-typeset h1 {
+  color: #cffafe;
+}
+
+.md-typeset .hero {
+  text-align: center;
+  margin-bottom: 1.5rem;
+}
+
+.md-typeset .hero img,
+.md-typeset .clip img,
+.md-typeset video {
+  border-radius: 12px;
+  border: 1px solid rgba(103, 232, 249, 0.25);
+  max-width: 100%;
+  height: auto;
+}
+
+.md-typeset .clips {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 1rem;
+}
+
+.md-typeset .clip p {
+  margin-top: 0.4rem;
+}
+
+.md-typeset table:not([class]) {
+  font-size: 0.68rem;
+}
+
+.md-typeset table:not([class]) td {
+  vertical-align: top;
+}
