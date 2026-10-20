@@ -370,6 +370,18 @@
               "installed_sha256": "6065f80feda507084e004ce66c0122b97f98ce38c71a79077a72750d19b6bf5f"
             }
           ]
+        },
+        {
+          "path": "obsidience/scripts/patches/hindsight/0012-worker-single-sigterm-graceful-shutdown.patch",
+          "purpose": "Backport upstream #5747 (issue #5611): one SIGTERM drains the dedicated hindsight-worker gracefully instead of force-exiting, so systemd stops (WoW lease, restarts) release in-flight tasks.",
+          "patch_sha256": "fe2d1de54245241e01d8a0f1cad9c2ce84b0341df56bf6f9189c1a645bb95309",
+          "files": [
+            {
+              "path": "hindsight_api/worker/main.py",
+              "preimage_sha256": "71659074d9d960302a0b98da57b18e360ce1e118767522722dfbeb4107c60e02",
+              "installed_sha256": "46bfe4a51a2e9a4cf842ff3abf772f80518828aab0111ad51ac59959d1247918"
+            }
+          ]
         }
       ]
     },

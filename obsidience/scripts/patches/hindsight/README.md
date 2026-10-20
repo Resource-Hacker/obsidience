@@ -32,3 +32,7 @@ local resource ceilings, not claims about the model's token budget.
 Patch 0011 applies the semantic arm's similarity floor outside its ORDER BY/LIMIT.
 The floor is monotone in the sort key, so the rows are unchanged, but the planner now
 uses the per-bank partial HNSW index instead of an exact scan (store phase ~100 -> ~47 ms).
+
+Patch 0012 backports upstream #5747 (issue #5611): the dedicated `hindsight-worker`
+(2026-10-19; the API runs request-only with `HINDSIGHT_API_WORKER_ENABLED=false`) drains
+in-flight tasks on one SIGTERM instead of force-exiting, so systemd stops release them.

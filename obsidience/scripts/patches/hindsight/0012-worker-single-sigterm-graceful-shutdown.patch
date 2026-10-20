@@ -1,0 +1,22 @@
+--- a/hindsight_api/worker/main.py	2026-10-19 21:10:13.453378660 -0700
++++ b/hindsight_api/worker/main.py	2026-10-19 21:10:22.089348399 -0700
+@@ -10,6 +10,7 @@
+ import argparse
+ import asyncio
+ import atexit
++import contextlib
+ import logging
+ import os
+ import signal
+@@ -373,6 +374,11 @@
+             access_log=False,
+         )
+         server = uvicorn.Server(uvicorn_config)
++        # Backport of upstream #5747 (fixes #5611): the worker owns SIGINT/SIGTERM and stops
++        # the server via should_exit. uvicorn's capture_signals re-raises the captured signal
++        # after the server stops, so one SIGTERM reached signal_handler twice and took the
++        # force-exit path, skipping the drain and release_own_tasks().
++        server.capture_signals = contextlib.nullcontext  # type: ignore[method-assign]
+ 
+         # Start the event-loop stall watchdog: if a task blocks the loop, this
+         # logs the culprit stack so a failing /health can be attributed to a
