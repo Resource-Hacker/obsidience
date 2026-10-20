@@ -881,9 +881,9 @@ def settle_maintenance_occurrence(note: Note) -> dict | None:
 def _resolved_input_evidence(note: Note, params: dict) -> dict | None:
     """Attest obsolete input through its owner; never infer it from a summary."""
     if note.ref == "Tasks/audit" and params.get("optimization_case"):
-        from .optimization.admission import current, stale_case_errors
-        if note.meta.get("status") != "failed" or _receipt_retry_blocked_reason(
-                note, str(note.meta.get("last_run") or "")):
+        from .optimization.admission import current, stale_case_errors, status
+        last_run = str(note.meta.get("last_run") or "")
+        if note.meta.get("status") != "failed" or _receipt_retry_blocked_reason(note, last_run):
             return None
         try:
             current(params["optimization_case"])
@@ -891,6 +891,18 @@ def _resolved_input_evidence(note: Note, params: dict) -> dict | None:
             if str(exc) in stale_case_errors(params["optimization_case"]):
                 return {"disposition": "obsolete_optimization_case", "case_id": params["optimization_case"],
                         "reason": str(exc) + ". Retain isolated evaluation artifacts; no instruction was published and the stale case is not replayed"}
+        # A real report that published nothing is this occurrence's finding (the Audit
+        # Runbook finishes it completed); a retry would resume the same persisted job.
+        try:
+            report = status(params["optimization_case"]).get("report") or {}
+        except (ValueError, OSError, KeyError):
+            return None
+        if any(call["tool"] == "harness.optimize" and _preflight_rejection(call, note) == json.dumps(report, sort_keys=True)
+               for call in (INDEX.tool_run_receipts(last_run) or {}).get("calls", [])):
+            return {"disposition": "finished_optimization_report", "case_id": params["optimization_case"],
+                    "report_id": report["report_id"], "verdict": report["verdict"],
+                    "reason": f"Audit {last_run} returned a real `{report['verdict']}` report ({report['source_path']}); "
+                              "no instruction was published and the case is not replayed"}
     return None
 
 
