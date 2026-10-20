@@ -74,14 +74,93 @@ role icon.</p>
 </tr>
 </table>
 
+## Voice
+
+<div align="center">
+<a href="docs/media/voice-demo.mp4"><img src="docs/media/voice-demo.png" alt="The Executive graph thinking while it explains its own architecture; the central orb follows the spoken waveform" width="760"></a>
+
+**[▶ Play the voice demo](docs/media/voice-demo.mp4)** (46 s, sound on)
+</div>
+
+The Executive explaining its own architecture. The words are its answer to a
+request for a short spoken overview; the graph is the starter Vault, its
+Architecture route lit and the central orb following the speech. The demo uses
+Pocket TTS's stock *alba* voice (Alba MacKenna,
+[CC BY 4.0](https://huggingface.co/kyutai/tts-voices)); an installation selects
+its own voice, which must be one it has the right to use.
+
+<details>
+<summary>Transcript</summary>
+
+> When you speak, your voice is captured by a wake word and sent through a
+> streaming speech recognition system. This system predicts when you are
+> finishing a sentence so I can start processing your request before you even
+> stop talking. My core reasoning happens on a local model through the Google ADK
+> loop. I use a vast knowledge graph of articles to find information, and every
+> change I make goes through a review step to ensure accuracy. For specialized
+> tasks, I coordinate with other agents like Alexandria, Darwin, and Heimdall. I
+> also rely on hindsight memory to remember our past interactions and provide
+> context. Once I have resolved your request, my response is converted back into
+> speech and played aloud immediately. This entire process is designed to be
+> fast, private, and seamless, making our interaction feel natural and highly
+> intelligent.
+
+</details>
+
+Fast voice agents do not wait for silence and then run the whole pipeline from
+zero; they predict the end of the turn and start early. The speech path is built
+that way:
+
+```text
+microphone (hardware echo cancellation)
+  → wake word: CPU spotter, ready chirp within ~0.2 s of "Computer"
+  → Nemotron streaming recognition: partials, an early final at the first pause
+  → end of turn: Silero VAD + Smart Turn, then the Executive's own verdict,
+    speculated at pauses together with its first response and memory recall
+  → Executive ADK loop on the local model
+  → Pocket TTS, sentence by sentence → speaker (ducks when you talk over it)
+```
+
+- **Wake word.** A small CPU wake-word model plays the ready chirp within about
+  0.2 s of the word. Streaming recognition still has to confirm it; an
+  unconfirmed spot is dropped.
+- **Streaming recognition.** NVIDIA NeMo with Nemotron Speech Streaming EN 0.6B
+  (BF16 encoder) on the speech GPU, with optional phrase boosting for names.
+  GPU steps pause during silence. The end-of-turn tail is decoded in one encoder
+  call, so the final transcript lands about 16 ms after the turn ends; with
+  `realtime_asr_early_final` an early final also arrives at the first pause.
+- **End of turn.** Acoustic endpointing proposes an utterance; with
+  `realtime_semantic_turns` the Executive itself decides whether it is
+  complete, incomplete or worth waiting on, in the same request that drafts its
+  first response. That admission starts speculatively at pauses (at most three
+  per utterance) with the memory recall already running from the partial
+  transcript, so a finished sentence usually has its answer under way. An
+  unfinished fragment simply joins the next segment.
+- **Speaking early.** A direct answer is handed to speech at its control line
+  while it is still generating, sentence by sentence. A verified command ends
+  with the completion chirp instead of a sentence, and a long Tool turn says
+  "On it." once.
+- **Barge-in.** Talking over a reply ducks it, holds it once you keep talking
+  and resumes it after a false alarm.
+- **Model.** On the development machine the Executive is Gemma 4 26B-A4B on
+  llama.cpp, tensor-split across two RTX 4000 Ada cards with a two-token MTP
+  draft. The fixed turn rules live in the cached system prompt, and the warm
+  model slot is saved and restored across restarts (about 155 ms instead of a
+  four-second cold prefill).
+
+[DESIGN.md](DESIGN.md) states the speech admission rules and
+[Real-time Executive](obsidience/defaults/vault/Architecture/Harness/real-time-executive.md)
+describes the runtime.
+
 ## Highlights
 
 - **Executive voice and chat.** Typed Chat and final speech transcripts enter
   one Google ADK conversation for the Executive. Its identity Article
   owns its instructions and its direct Skill catalog; there is no router or
-  preliminary model call. Realtime speech uses Pipecat transport, NeMo/Nemotron
-  streaming recognition and Pocket TTS, and partial speech can prepare a
-  cancellable prompt prefix.
+  preliminary model call. Realtime speech uses Pipecat transport, a CPU wake-word
+  spotter, NeMo/Nemotron streaming recognition and Pocket TTS; the Executive
+  predicts the end of your turn and starts answering before you finish (see
+  [Voice](#voice)).
 - **A knowledge graph you review.** Knowledge follows the
   [LLM-wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f):
   immutable Sources, an agent-maintained Markdown wiki and its schema are plain

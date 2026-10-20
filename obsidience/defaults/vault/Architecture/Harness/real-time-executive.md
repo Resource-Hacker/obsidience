@@ -16,9 +16,10 @@ sources:
 
 
 Chat owns the Wake word, Realtime and Mute controls, Executive readiness and
-live recognition. Wake word is the default: the existing STT listens for Computer,
-then only the following command text enters the command buffer, Chat or the
-Executive. Unaddressed speech never interrupts or enters conversation. A trigger
+live recognition. Wake word is the default: a CPU keyword spotter hears Computer and
+plays the ready chirp before ASR text arrives, the existing STT confirms the word (an
+unconfirmed spot is dropped), then only the following command text enters the command
+buffer, Chat or the Executive. Unaddressed speech never interrupts or enters conversation. A trigger
 without a command allows an eight-second pause. The gate closes after the final
 command; Realtime instead keeps continuous conversation available without the
 name. Mute closes the microphone. Mode changes cancel the current turn and reject
@@ -73,6 +74,17 @@ irrevocably locked instructions. The normal 700 ms pause allowance remains.
 An ASR word-update gap cannot end an utterance while VAD still detects speech;
 the transcript-idle fallback applies only to late text without voiced activity.
 
+The end-of-turn tail is decoded in one encoder call, so the final transcript follows
+the turn's end by tens of milliseconds. With contextual speech admission
+(`realtime_semantic_turns`) the acoustic endpoint (Silero VAD, Smart Turn) only
+proposes an utterance: the Executive's first response carries its own verdict on
+whether the turn is complete, and that admission runs speculatively at pause edges
+(words unchanged for 0.2 s, the VAD pause, or the worker's early final with
+`realtime_asr_early_final`), at most three per utterance, reusing the partial's
+Hindsight recall. The accepted chirp plays when the owner stops talking, and a direct
+answer is spoken from its control line while it still generates. DESIGN.md states the
+binding and cancellation rules.
+
 Pocket synthesis remains serialized on its shared model. Cancellation sets
 Pocket's own stop event, which ends the native latent producer at its next frame
 and skips later text chunks; the worker discards cancelled PCM and drains Pocket's
@@ -87,9 +99,12 @@ The Agent-owned run uses the shared activation compiler, model lease, Tool path,
 Ordinary native text passes the shared completion authority locally, then the accepted
 answer is committed and delivered to Chat or Pocket. Structured task.complete remains
 available for terminal status and computer-state verification. The visible Thinking
-Packet and its exact refs are the graph animation source. Speech onset may
-cancel Pocket playback and the current execution without closing the
-microphone; NeMo may ignore a backchannel without gaining semantic authority.
+Packet and its exact refs are the graph animation source. Speech onset ducks
+Pocket playback, holds it once speech continues and resumes it after a false alarm
+(`realtime_barge_in_ducking`); recognized speech may cancel the current execution
+without closing the microphone, and NeMo may ignore a backchannel without gaining
+semantic authority. A verified command ends on its receipt with the completion
+chirp, and a long Tool turn says "On it." once.
 
 
 Idle listening is not a global pause. Actual foreground work, speech startup or

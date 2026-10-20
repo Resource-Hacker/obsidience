@@ -26,6 +26,16 @@ git_commit = true  # Local Vault audit only; never the application repository.
 # and, at a segment start, chirps and interrupts before ASR text arrives; ASR
 # text still opens the command window. false keeps ASR-only wake detection.
 # realtime_wake_spotter = true
+# Contextual speech admission: the Executive judges whether an utterance is
+# complete in the same request that drafts its first response, speculated at
+# speech pauses (DESIGN.md, "Contextual speech admission"). Off by default.
+# realtime_semantic_turns = true
+# Early final: at Silero's 200 ms pause the ASR worker decodes the tail once more
+# and sends the words as a pause edge for speculative admission. Off by default.
+# realtime_asr_early_final = true
+# Owner speech over a reply ducks it, holds it once speech continues and resumes
+# it after a false alarm; false stops playback on speech onset instead.
+# realtime_barge_in_ducking = true
 # Optional providers (TOML tables; keep them after the top-level keys above).
 # Hindsight historical memory: leave unset until its service is configured
 # (obsidience/harness/memory/README.md).
