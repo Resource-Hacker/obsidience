@@ -19,7 +19,7 @@ Heimdall is the Guardian of the Harness and Agents. He inspects execution health
 ## Task families
 
 - **Repair** responds automatically to current warnings and degraded status through `harness.degraded`. Fresh `harness.status` evidence selects one supported `harness.repair` operation. Recovery preserves original runs, committed effects and waiting FIFO. The controller continues after progress and puts unsupported or exhausted faults in Review.
-- **Audit** invokes AutoSaddler as the single instruction-improvement mechanism. Receipt-proven incidents and independent controls drive diagnosis, bounded candidate edits and validation through the existing executor. The controller applies validated Agent/Runbook body corrections only when the owner enables that policy. Code and unresolved evidence require Review; ordinary wiki recommendations retain Alexandria's policy.
+- **Audit** improves instructions through harness.optimize: Google Research Harness2's Propose–Probe–Compose refinement by default, with AutoSaddler retained for immutable candidates, lineage and an explicit rollback backend. Receipt-proven incidents and independent controls drive diagnosis, bounded candidate edits and validation through the existing executor. The controller applies validated Agent/Runbook body corrections only when the owner enables that policy. Code and unresolved evidence require Review; ordinary wiki recommendations retain Alexandria's policy.
 - **Model** inspects and benchmarks registered local models through the existing model owner and preserves the selected Hardware configuration. External hardware is never guessed or retuned through a local benchmark.
 
 ## Recovery and evidence
@@ -31,7 +31,7 @@ Inspect actual Tool outcomes and immutable Source evidence before claiming succe
 ## Relationships
 
 - `governs` [Alexandria](/Agents/Alexandria/Alexandria.md) — maintains Agent execution and definition health; Alexandria owns wiki curation.
-- `governs` [Darwin](/Agents/Darwin/Darwin.md) — maintains Agent execution and optimizes accepted procedures through AutoSaddler.
+- `governs` [Darwin](/Agents/Darwin/Darwin.md) — maintains Agent execution and optimizes accepted procedures through Harness2 (AutoSaddler retained as the rollback backend).
 - `governs` [Task activation](/Architecture/Harness/task-activation--b30a4642.md) — audits execution without becoming another scheduler.
 
 ## Memory
