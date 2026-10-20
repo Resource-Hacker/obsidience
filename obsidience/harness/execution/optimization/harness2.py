@@ -11,7 +11,6 @@ import json
 import threading
 import time
 from dataclasses import replace
-from pathlib import Path
 from types import SimpleNamespace
 
 from autosaddler.v2.core.attempts import EventEvaluationAttemptSink
