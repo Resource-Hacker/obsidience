@@ -1,7 +1,15 @@
 ---
 type: tool
 title: lights.visualize
-description: "Opt-in room music light visualizer for the Executive only. action:start requires explicit audio_delay_ms (250-3000) and uncalibrated:true unless an exact saved optical timing profile is available. Delays only one uniquely observed Discord playback stream, never system defaults or microphones. Optional stream_id must come from observed local visualizer sources. action:stop restores original routing and light appearance; action:status observes current mode. This controls colour and brightness while active. Timing profiles compensate measurements but do not establish perfect physical synchronization; do not claim calibrated or audible alignment from running state. Never replay failed/uncertain effects."
+description: Opt-in room music light visualizer for the Executive only. action:start
+  requires explicit audio_delay_ms (250-3000) and uncalibrated:true unless an exact
+  saved optical timing profile is available. Delays only one uniquely observed Discord
+  playback stream, never system defaults or microphones. Optional stream_id must come
+  from observed local visualizer sources. action:stop restores original routing and
+  light appearance; action:status observes current mode. This controls colour and
+  brightness while active. Timing profiles compensate measurements but do not establish
+  perfect physical synchronization; do not claim calibrated or audible alignment from
+  running state. Never replay failed/uncertain effects.
 obsidience:
   binding: capability:lights.visualize
   source: obsidience/harness/capabilities/lights/visualize.py

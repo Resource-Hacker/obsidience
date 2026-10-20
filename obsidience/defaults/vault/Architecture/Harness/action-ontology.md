@@ -4,6 +4,7 @@ title: Golden ontology
 sources:
 - resource: obsidience/harness/knowledge/scope.py
 - resource: obsidience/harness/knowledge/index.py
+- resource: obsidience/harness/knowledge/okf.py
 - resource: obsidience/harness/knowledge/format.py
 - resource: obsidience/harness/knowledge/dependencies.py
 - resource: obsidience/harness/capabilities/registry.py
@@ -71,6 +72,12 @@ Relative links are valid too. Root `status` describes document lifecycle only;
 Task activity, pending inputs, and results stay in SQLite. Imported `verified`
 assertions and source links never grant review approval or Tool authority.
 OKF supplies the portable document contract, not another agent runtime.
+One Harness module owns that contract (parsing, serialization, reserved
+documents, link resolution and conformance); the Obsidience profile is layered
+on it, and validation reports OKF conformance before profile admission. A
+`sources` resource without a URI scheme names a file in the Obsidience
+checkout, outside the Vault bundle; other OKF readers treat it as an
+unresolvable path, which the format tolerates.
 
 ## Ownership and execution identity
 

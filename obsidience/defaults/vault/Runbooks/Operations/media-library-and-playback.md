@@ -4,9 +4,9 @@ title: Media library and playback
 obsidience:
   for_agent: '[[Agents/Executive/Executive]]'
   skills:
-    - '[[Skills/media.library]]'
-    - '[[Skills/media.acquire]]'
-    - '[[Skills/tv.control]]'
+  - '[[Skills/media.library]]'
+  - '[[Skills/media.acquire]]'
+  - '[[Skills/tv.control]]'
 ---
 
 Jellyfin owns the catalogue, delivery and saved per-user resume position.

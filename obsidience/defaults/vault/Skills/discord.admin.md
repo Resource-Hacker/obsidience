@@ -1,7 +1,8 @@
 ---
 type: skill
 title: Using discord.admin
-description: Discover current server members and kick one exact target for a live Administrator speaker.
+description: Discover current server members and kick one exact target for a live
+  Administrator speaker.
 obsidience:
   tool: '[[Tools/discord.admin]]'
   owner_maintained: true

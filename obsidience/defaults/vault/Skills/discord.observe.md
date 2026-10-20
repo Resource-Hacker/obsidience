@@ -1,7 +1,8 @@
 ---
 type: skill
 title: Using discord.observe
-description: Observe fresh participant cameras in the current bound Discord voice room.
+description: Observe fresh participant cameras in the current bound Discord voice
+  room.
 obsidience:
   tool: '[[Tools/discord.observe]]'
   owner_maintained: true

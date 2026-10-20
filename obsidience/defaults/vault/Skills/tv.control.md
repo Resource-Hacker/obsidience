@@ -1,7 +1,8 @@
 ---
 type: skill
 title: Using tv.control
-description: Use one intent call for TV content, volume, mute, pause and power; navigate with remote keys only as a fallback.
+description: Use one intent call for TV content, volume, mute, pause and power; navigate
+  with remote keys only as a fallback.
 obsidience:
   tool: '[[Tools/tv.control]]'
   owner_maintained: true

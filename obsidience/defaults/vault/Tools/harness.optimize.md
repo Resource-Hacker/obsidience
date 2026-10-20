@@ -1,9 +1,8 @@
 ---
 type: tool
 title: harness.optimize
-description: Run the bound instruction optimization case with case_id. Returns
-  measured comparisons and any candidate staged for Review; never changes the live
-  Executive.
+description: Run the bound instruction optimization case with case_id. Returns measured
+  comparisons and any candidate staged for Review; never changes the live Executive.
 obsidience:
   binding: capability:harness.optimize
   source: obsidience/harness/capabilities/harness/optimize.py

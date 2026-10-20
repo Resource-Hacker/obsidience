@@ -13,8 +13,9 @@ Run deterministic validation of Article formats and load-bearing references. No 
 
 ## Reference
 
-Deterministic graph validator: checks every load-bearing frontmatter edge in
-the vault, including the strict one Skill → one Tool pairing and the ban on
+Deterministic graph validator: checks Open Knowledge Format conformance and
+the Article profile of every document, then every load-bearing frontmatter edge
+in the vault, including the strict one Skill → one Tool pairing and the ban on
 direct Runbook Tool grants.
 
 Arguments: `{}`. The result reports checked and broken edges in one call; do

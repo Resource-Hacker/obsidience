@@ -1,7 +1,8 @@
 ---
 type: skill
 title: Using media.acquire
-description: Register one exact source for an authorized acquisition or media playback request.
+description: Register one exact source for an authorized acquisition or media playback
+  request.
 obsidience:
   tool: '[[Tools/media.acquire]]'
   owner_maintained: true

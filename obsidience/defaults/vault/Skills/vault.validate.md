@@ -24,6 +24,10 @@ Use `vault.validate` to run the deterministic load-bearing graph validator.
   differs from the registry description. It is not a broken reference and does
   not fail validation; report it, and reconcile a description only through an
   ordinary Review proposal.
+- Any result may also end with `OKF advisories (SHOULD guidance, not broken
+  references)`: documents that depart from recommended Open Knowledge Format
+  shapes, such as a body wikilink or a non-actor `generated.by`. Report them;
+  they do not fail validation. OKF and Article profile errors do.
 - Preserve the returned counts and diagnostics verbatim. A diagnostic identifies
   a structural failure; it does not establish an intended replacement edge.
 - Stop on any broken count or unavailable validator result. Repeating the same

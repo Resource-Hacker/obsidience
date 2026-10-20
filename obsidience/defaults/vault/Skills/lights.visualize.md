@@ -1,7 +1,8 @@
 ---
 type: skill
 title: Using lights.visualize
-description: Enable or stop the owner-requested room music light visualizer with explicit audio delay and honest timing status.
+description: Enable or stop the owner-requested room music light visualizer with explicit
+  audio delay and honest timing status.
 obsidience:
   tool: '[[Tools/lights.visualize]]'
 ---
