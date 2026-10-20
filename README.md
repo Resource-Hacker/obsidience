@@ -81,7 +81,7 @@ role icon.</p>
 <div align="center">
 <a href="docs/media/voice-demo.mp4"><img src="docs/media/voice-demo.png" alt="The Executive graph thinking while it explains its own architecture; the central orb follows the spoken waveform" width="760"></a>
 
-**[▶ Play the voice demo](docs/media/voice-demo.mp4)** (46 s, sound on)
+**[▶ Play the voice demo](docs/media/voice-demo.mp4)** (52 s, sound on)
 </div>
 
 The Executive explaining its own architecture. The words are its answer to a
