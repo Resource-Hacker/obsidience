@@ -1,0 +1,119 @@
+name: Bug report
+description: Something in Obsidience does not work as documented.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Questions and open-ended ideas belong in
+        [Discussions](https://github.com/Resource-Hacker/obsidience/discussions), and security
+        problems must be reported privately as described in [SECURITY.md](https://github.com/Resource-Hacker/obsidience/blob/main/SECURITY.md).
+
+        Leave out secrets, tokens, personal data and anything from your private Vault or state.
+  - type: dropdown
+    id: module
+    attributes:
+      label: Module
+      description: Which Module is affected? The graph UI is part of the Shell; voice is part of the Harness.
+      options:
+        - "Harness: Agents, Tasks, Tools, knowledge, memory, models, voice"
+        - "Shell: compositor, panes, graph UI, Edge Cast"
+        - "Media: catalogue service and providers"
+        - "TV: PC-hosted TV session and Fire TV agent"
+        - Not sure
+    validations:
+      required: true
+  - type: dropdown
+    id: article_type
+    attributes:
+      label: Article type
+      description: If the problem is in an Article's content or an Agent's behaviour, which type of Article is involved?
+      options:
+        - Knowledge
+        - Agent
+        - Task
+        - Runbook
+        - Skill
+        - Tool
+        - n/a
+      default: 6
+    validations:
+      required: true
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What happened
+      description: Describe the problem and what you observed.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Obsidience version or commit
+      placeholder: v0.1.0, or a commit hash from main
+    validations:
+      required: true
+  - type: input
+    id: hardware
+    attributes:
+      label: Hardware
+      description: CPU, RAM and every GPU with its driver version.
+      placeholder: "Ryzen 7, 32 GB, RTX 4070 (NVIDIA 615.78)"
+    validations:
+      required: true
+  - type: input
+    id: distro
+    attributes:
+      label: Distribution and kernel
+      placeholder: "Arch Linux, kernel 7.2"
+    validations:
+      required: true
+  - type: input
+    id: compositor
+    attributes:
+      label: Compositor and session
+      description: Hyprland and Quickshell versions, or "none" if you only run the Harness.
+      placeholder: "Hyprland 0.56 with the Obsidience session, Quickshell 0.3"
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Executive model and backend
+      description: Only if the Harness or voice is involved.
+      placeholder: "Gemma 4 26B-A4B on llama.cpp"
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant journal or Harness output. Check it for secrets and personal data first.
+      render: shell
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched the existing issues and discussions.
+          required: true
+        - label: This report contains no secrets, tokens or personal data.
+          required: true

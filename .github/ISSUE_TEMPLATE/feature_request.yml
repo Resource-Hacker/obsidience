@@ -1,0 +1,77 @@
+name: Feature request
+description: Propose a concrete new capability or improvement.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion. Open-ended ideas are easier to shape in
+        [Discussions](https://github.com/Resource-Hacker/obsidience/discussions) first.
+        [DESIGN.md](https://github.com/Resource-Hacker/obsidience/blob/main/DESIGN.md) and
+        [CONTRIBUTING.md](https://github.com/Resource-Hacker/obsidience/blob/main/CONTRIBUTING.md)
+        explain the ontology and where changes belong.
+  - type: dropdown
+    id: module
+    attributes:
+      label: Module
+      description: Which Module would change? The graph UI is part of the Shell; voice is part of the Harness.
+      options:
+        - "Harness: Agents, Tasks, Tools, knowledge, memory, models, voice"
+        - "Shell: compositor, panes, graph UI, Edge Cast"
+        - "Media: catalogue service and providers"
+        - "TV: PC-hosted TV session and Fire TV agent"
+        - Not sure
+    validations:
+      required: true
+  - type: dropdown
+    id: article_type
+    attributes:
+      label: Article type
+      description: If the request adds or changes Articles or Agent behaviour, which type? A new Tool also needs its Capability code and a paired Skill.
+      options:
+        - Knowledge
+        - Agent
+        - Task
+        - Runbook
+        - Skill
+        - Tool
+        - n/a
+      default: 6
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what gets in the way today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What should Obsidience do? Name the existing owner it would extend if you know it.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Other approaches or existing upstream components you considered.
+    validations:
+      required: false
+  - type: input
+    id: environment
+    attributes:
+      label: Hardware, distribution and compositor
+      description: Only if the request depends on them.
+      placeholder: "RTX 4080, Arch Linux, Hyprland 0.56"
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched the existing issues and discussions.
+          required: true

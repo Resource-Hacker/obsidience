@@ -1,0 +1,55 @@
+# Issue and pull request labels, following the project's ontology: one label per
+# Module and per Article type, plus the general triage labels.
+# Each entry: name, color (hex without "#"), description (at most 100 characters).
+# Maintainers create these through the GitHub API or a label-sync action.
+
+# Modules (Architecture/Architecture.md lists the four)
+- name: "module:harness"
+  color: "1d4ed8"
+  description: "Harness: Agents, Tasks, Tools, knowledge, memory, models and voice (obsidience/harness/)"
+- name: "module:shell"
+  color: "7c3aed"
+  description: "Shell: compositor, session, panes, graph UI and Edge Cast (shell/, ui/, browser/edge/)"
+- name: "module:media"
+  color: "047857"
+  description: "Media: the catalogue service and its providers (obsidience/media/)"
+- name: "module:tv"
+  color: "b45309"
+  description: "TV: the PC-hosted TV session, its units and the Fire TV agent (obsidience/tv/)"
+
+# Article types (Golden ontology)
+- name: "type:knowledge"
+  color: "f5e6b8"
+  description: "Knowledge Article: useful context"
+- name: "type:agent"
+  color: "ecd28c"
+  description: "Agent Article: an executor's identity, standing instructions and direct Skills"
+- name: "type:task"
+  color: "e0bc62"
+  description: "Task Article: a reusable outcome and its acceptance condition"
+- name: "type:runbook"
+  color: "d4a73f"
+  description: "Runbook Article: reusable ordered or branching operating instructions"
+- name: "type:skill"
+  color: "bf9030"
+  description: "Skill Article: how to use exactly one Tool"
+- name: "type:tool"
+  color: "a67a22"
+  description: "Tool Article and the code-owned Capability contract behind it"
+
+# Triage (GitHub's default colors and descriptions)
+- name: "bug"
+  color: "d73a4a"
+  description: "Something isn't working"
+- name: "enhancement"
+  color: "a2eeef"
+  description: "New feature or request"
+- name: "documentation"
+  color: "0075ca"
+  description: "Improvements or additions to documentation"
+- name: "good first issue"
+  color: "7057ff"
+  description: "Good for newcomers"
+- name: "question"
+  color: "d876e3"
+  description: "Further information is requested"
