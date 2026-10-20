@@ -608,7 +608,8 @@ def review_blocker(note, accepted_resolver=None) -> str | None:
         if not run or run.get('status') not in {'completed', 'review'} or not receipts:
             raise ValueError('The owning Audit has not finished with complete Tool evidence')
         from ..adk.optimization import comparison
-        if comparison(document, report['observations'], report['seed_id'], report['selected_id']) != report['comparison']:
+        if comparison(document, report['observations'], report['seed_id'], report['selected_id'],
+                      report.get('search_observations')) != report['comparison']:
             raise ValueError('Executive candidate comparison does not match the recorded outcomes')
         result = {**report_result(marker['report_id'], report), 'proposal': Path(note.path).name}
         expected_hash = store.sha256(json.dumps(json.dumps(result, sort_keys=True), sort_keys=True).encode())

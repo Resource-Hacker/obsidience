@@ -125,19 +125,26 @@ MAX_TRIAL_SUMMARY_CHARS = 32_000
 
 # Repetitions of one case are independent samples of one model: the unchanged
 # baseline's training passes varied by up to two of five between measurements
-# (2026-10-13 jobs). Cases are therefore compared by their pass counts, never
-# repetition against repetition. The training trials both select a candidate
-# and judge it, so its gain must be far outside that spread. Controls the
-# baseline mostly fails cannot show a regression (2026-10-13: 11 of 20 passed,
-# failing as the incident did), so the candidate must also pass most of them.
+# (2026-10-13 jobs; 2/4/2/4 within one job). Cases are therefore compared by
+# their pass counts, never repetition against repetition, and the baseline's
+# pass rate comes from every training trial it ran in the job, not its first
+# five. The training trials both select a candidate and judge it, so its gain
+# must be far outside that spread. Controls the baseline mostly fails cannot
+# show a regression (2026-10-13: 11 of 20 passed, failing as the incident did),
+# so the candidate must also pass most of them.
 TRAIN_MARGIN = 4
 CONTROL_FLOOR = 0.75
 
 
 def _train_improved(before, after) -> bool:
-    """Every training trial passes, at least TRAIN_MARGIN of which the baseline failed."""
-    passed = sum(row['passed'] for row in after)
-    return bool(after) and passed == len(after) and passed - sum(row['passed'] for row in before) >= TRAIN_MARGIN
+    """Every training trial passes, at least TRAIN_MARGIN more than the baseline's rate predicts.
+
+    ``before`` is all of the baseline's training trials; with five candidate
+    trials its pass rate may be at most one in five.
+    """
+    passed, base = sum(row['passed'] for row in after), sum(row['passed'] for row in before)
+    return (bool(after) and bool(before) and passed == len(after)
+            and passed * len(before) - base * len(after) >= TRAIN_MARGIN * len(before))
 
 
 def _case_passes(before, after) -> dict:
@@ -191,8 +198,8 @@ def _extra_tool_calls(before, after) -> list[str]:
 
 
 class CompleteImprovement(MatchedValidStrictImprovement):
-    def __init__(self, *, check_latency: bool):
-        self.check_latency = check_latency
+    def __init__(self, *, check_latency: bool, store):
+        self.check_latency, self.store = check_latency, store
 
     def compare(self, parent, child):
         if any(not row.is_valid for row in (*parent.observations, *child.observations)):
@@ -202,10 +209,15 @@ class CompleteImprovement(MatchedValidStrictImprovement):
         verdict = super().compare(parent, child)
         before = [dict(row.metadata['result']) for row in parent.observations]
         after = [dict(row.metadata['result']) for row in child.observations]
-        if not _train_improved(before, after) or _slowdowns(before, after, check_latency=self.check_latency):
+        # Every valid training trial the parent ran in this job, this iteration's included.
+        trained = [row['metadata']['result'] for event in self.store.events_of_type('EvaluationCompleted')
+                   for row in event.payload['evaluation']['observations']
+                   if row['candidate_id'] == parent.candidate_id and row['split'] == 'train'
+                   and not row['metadata']['result'].get('error')]
+        if not _train_improved(trained, after) or _slowdowns(before, after, check_latency=self.check_latency):
             return replace(verdict, accepted=False,
-                           reason=f'Candidate must pass every training trial, at least {TRAIN_MARGIN} of which '
-                                  'the baseline failed, within the applicable execution bounds')
+                           reason=f'Candidate must pass every training trial, at least {TRAIN_MARGIN} more than '
+                                  'the baseline pass rate over the job predicts, within the applicable execution bounds')
         return verdict
 
 
@@ -607,7 +619,8 @@ class ReservedModelProvider:
                 output_tokens=usage.output_tokens, wall_seconds=time.monotonic() - started))
 
 
-def comparison(document, rows, seed_id, selected_id):
+def comparison(document, rows, seed_id, selected_id, search=None):
+    """``search``: Harness2's search measurements by candidate; the baseline's count toward its pass rate."""
     def ordered(candidate_id):
         # Upstream can re-evaluate a parent in later iterations. Keep its first
         # recorded observation for each case, rather than changing the final
@@ -624,11 +637,16 @@ def comparison(document, rows, seed_id, selected_id):
     count = len(document['suite']['cases']) * document['suite']['repetitions']
     if len(baseline) != count or len(candidate) != count:
         result['verdict'] = 'incomplete'
+    # The baseline's pass rate: every training trial it ran in the job. An
+    # execution error is no evidence either way.
+    trained = [row for row in (*rows.get(seed_id, []), *(search or {}).get(seed_id, []))
+               if row['split'] == 'train' and not row.get('error')]
+    result['baseline_train_passed'] = [sum(row['passed'] for row in trained), len(trained)]
     if result['verdict'] != 'incomplete':
         result['cases'] = _case_passes(baseline, candidate)
         result['verdict'] = ('regressed' if _holdout_regressed(result['cases']) else
                              'passed' if _controls_pass(candidate) and _train_improved(
-                                 *([row for row in side if row['split'] == 'train'] for side in (baseline, candidate)))
+                                 trained, [row for row in candidate if row['split'] == 'train'])
                              else 'not_improved')
     check_latency = _latency_sensitive(document)
     slowdowns = (_slowdowns(baseline, candidate, check_latency=check_latency)
@@ -665,7 +683,7 @@ async def run_autosaddler(case_id, document, audit, context):
         required_capabilities=frozenset(), evaluation_repetitions=document['suite']['repetitions'])
     engine = AutoSaddlerEngine(store=store, scenario=scenario, provider=ReservedModelProvider(audit),
         policies=PolicyBundle(task_selection=FixedTaskSelectionPolicy(batch_size=len(scenario.train_cases)),
-            acceptance=CompleteImprovement(check_latency=_latency_sensitive(document)),
+            acceptance=CompleteImprovement(check_latency=_latency_sensitive(document), store=store),
             development=FullOnAcceptDevelopment(), ranking=MeanDevelopmentRanking(),
             budget=JobBudget(store, max_rollouts=len(cases) * document['suite']['repetitions'] * 4, max_iterations=3)),
         diagnosis_patch_timeout_seconds=180, reflection_timeout_seconds=90)

@@ -431,7 +431,7 @@ async def run(case_id, document, audit, context):
                     measured = await job.evaluate(candidate, split, 'independent-final')
                     observations.extend(dict(row.metadata['result']) for row in measured.observations)
                 rows[candidate.candidate_id] = observations
-            compared = native.comparison(document, rows, job.seed.candidate_id, selected.candidate_id)
+            compared = native.comparison(document, rows, job.seed.candidate_id, selected.candidate_id, job.search)
             if compared['verdict'] == 'passed' and not failures:
                 lessons = await _reflect(job, method)
     except Exception as exc:
@@ -440,7 +440,7 @@ async def run(case_id, document, audit, context):
         job.store.append('ExtensionStateChanged', 'budget-end:' + segment,
                          {'kind': 'job_budget_end', 'segment': segment,
                           'elapsed': time.monotonic() - started})
-    compared = native.comparison(document, rows, job.seed.candidate_id, selected.candidate_id)
+    compared = native.comparison(document, rows, job.seed.candidate_id, selected.candidate_id, job.search)
     if failures:
         compared['verdict'] = 'incomplete'
     return {'schema_version': 1, 'case_id': case_id, 'audit_run_id': context['run_id'],
