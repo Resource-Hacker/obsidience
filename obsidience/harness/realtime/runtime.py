@@ -1812,6 +1812,21 @@ class RealtimeSessionManager:
                         ])
                         await self._publish("runtime", reason=event_type, cue=name)
                     continue
+                if event_type == "playback_gaps":
+                    count, frames = worker_event.get("count"), worker_event.get("frames")
+                    unit, name = worker_event.get("unit"), worker_event.get("name")
+                    if (unit in {"cue", "reply"} and (unit == "reply" or name in self._cue_names)
+                            and all(type(worker_event.get(key)) is int and 0 <= worker_event[key] <= 1_000_000
+                                    for key in ("count", "frames", "writer_late"))
+                            and all(type(worker_event.get(key)) in {int, float}
+                                    and 0 <= worker_event[key] <= 600_000 for key in ("gap_ms", "max_ms"))):
+                        # Underruns inside one cue or reply: counts and durations only.
+                        trace.emit("speech", f"Playback gaps: {count} in {unit}", [json.dumps({
+                            "event": "speech.playback_gaps", "unit": unit, "name": name if unit == "cue" else "",
+                            "frames": frames, "count": count, "gap_ms": worker_event["gap_ms"],
+                            "max_ms": worker_event["max_ms"], "writer_late": worker_event["writer_late"],
+                        }, sort_keys=True)])
+                    continue
                 if event_type == "barge_in":
                     outcome, speech_ms = worker_event.get("outcome"), worker_event.get("speech_ms")
                     if (outcome in {"committed", "released"} and type(speech_ms) is int

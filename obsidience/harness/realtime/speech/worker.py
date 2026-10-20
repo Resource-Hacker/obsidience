@@ -534,6 +534,21 @@ class NeMoLocalAudioTransport(LocalAudioTransport):
         return self._output
 
 
+# pipewire-pulse resumes a playback stream that ran dry with a few ms of sound and
+# then a hole (15 ms live, 81 ms on a timer-driven sink; 2026-10-19), so every cue and
+# reply start after a pause stuttered. Between sounds the stream is kept flowing with
+# 10 ms of silence whenever less than KEEPALIVE_LEAD_SECS is queued: no hole, and a
+# new sound starts behind at most that much silence (a restarted stream would also
+# start cleanly, but becomes a new sink-input that the TV voice router does not follow).
+KEEPALIVE_LEAD_SECS = 0.025
+KEEPALIVE_PCM = b"\0" * (TTS_SAMPLE_RATE // 100 * 2)
+KEEPALIVE_BUSY_NS = 30_000_000  # Consecutive real writes come < 5 ms apart.
+# A blocking write returns once the stream has room, leaving about its buffer queued
+# (tlength 60 ms with the Harness drop-in 62-speech-pulse-buffers.conf); a writer idle
+# longer than that inside one sound let it play silence (playback_gaps).
+STREAM_UNDERRUN_NS = 60_000_000
+
+
 class SpeechTimingAudioOutput(LocalAudioOutputTransport):
     """Observe the existing ordered output queue; never own a second audio path."""
 
@@ -547,6 +562,44 @@ class SpeechTimingAudioOutput(LocalAudioOutputTransport):
         self._cue_failed = False
         self._cue_wrote = False
         self._reply_failed = False
+        # Playback continuity: when the last write returned, when the queued audio
+        # will have played (keepalive), and the underruns inside the cue or reply
+        # being written (playback_gaps).
+        self._last_write_ns = 0
+        self._play_end = 0.0
+        self._writing = False
+        self._keepalive: asyncio.Task | None = None
+        self._gaps: dict | None = None
+
+    async def start(self, frame: StartFrame) -> None:
+        await super().start(frame)
+        if self._keepalive is None and self._out_stream is not None:
+            self._keepalive = self.create_task(self._keep_flowing(), name="speech-output-keepalive")
+
+    async def cleanup(self) -> None:
+        if self._keepalive is not None:
+            await self.cancel_task(self._keepalive)
+            self._keepalive = None
+            # Let a silence write already on the write thread finish before closing.
+            await asyncio.get_running_loop().run_in_executor(self._executor, lambda: None)
+        await super().cleanup()
+
+    async def _keep_flowing(self) -> None:
+        # Writes share the transport's single write thread, so they stay ordered.
+        loop = asyncio.get_running_loop()
+        while self._out_stream is not None:
+            lead = self._play_end - time.monotonic()
+            if lead > KEEPALIVE_LEAD_SECS:
+                await asyncio.sleep(max(0.002, lead - KEEPALIVE_LEAD_SECS))
+                continue
+            if self._writing or (time.monotonic_ns() - self._last_write_ns < KEEPALIVE_BUSY_NS and any(
+                    sender._audio_queue.qsize() for sender in self._media_senders.values())):
+                # Real audio is streaming; never interleave silence. A barge-in hold
+                # stops the writes with audio still queued, and keeps the stream flowing.
+                await asyncio.sleep(0.005)
+                continue
+            await loop.run_in_executor(self._executor, self._out_stream.write, KEEPALIVE_PCM)
+            self._play_end = max(self._play_end, time.monotonic()) + 0.010
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         if (direction is FrameDirection.DOWNSTREAM
@@ -576,6 +629,7 @@ class SpeechTimingAudioOutput(LocalAudioOutputTransport):
     async def push_frame(self, frame: Frame, direction=FrameDirection.DOWNSTREAM) -> None:
         if direction is FrameDirection.DOWNSTREAM and isinstance(frame, CueMarker):
             if not frame.end:
+                self._gaps_start("cue", frame.cue_name)
                 self._cue_binding = frame
                 self._cue_failed = False
                 self._cue_wrote = False
@@ -587,11 +641,13 @@ class SpeechTimingAudioOutput(LocalAudioOutputTransport):
             elif self._cue_binding is not None and self._playback.cue_current(frame) and not self._cue_failed and self._cue_wrote:
                 emit("cue_finished", name=frame.cue_name, generation=frame.generation, epoch=frame.epoch)
             if frame.end:
+                self._gaps_report()
                 if (frame.cue_name in OPENING_CUES
                         and self._playback._ready_cue_binding == (frame.generation, frame.epoch)):
                     self._playback._ready_cue_binding = None
                 self._cue_binding = None
         elif direction is FrameDirection.DOWNSTREAM and isinstance(frame, ReplyFinished):
+            self._gaps_report()
             name = self._playback.reply_finished(frame.binding, frame.successful)
             if name and not self._reply_failed:
                 await self._playback.close_reply(name, frame.binding["generation"])
@@ -602,6 +658,10 @@ class SpeechTimingAudioOutput(LocalAudioOutputTransport):
             if not _same_reply(binding, self._binding):
                 # An appended chunk keeps its reply's write-failure state.
                 self._reply_failed = False
+                self._gaps_start("reply", "")
+            elif self._gaps is not None:
+                # Waiting for the next sentence's text is pacing, not an underrun.
+                self._gaps["armed"] = False
             self._timing = frame.metadata.get("obsidience_timing")
             self._binding = binding
             self._first_write = False
@@ -610,6 +670,35 @@ class SpeechTimingAudioOutput(LocalAudioOutputTransport):
             if not (isinstance(frame, TTSStoppedFrame) and self._playback.reply_continues(self._binding)):
                 self._output_level("idle", 0.0)
         await super().push_frame(frame, direction)
+
+    def _gaps_start(self, unit: str, name: str) -> None:
+        self._gaps_report()
+        self._gaps = {"unit": unit, "name": name, "armed": False, "frames": 0,
+                      "count": 0, "ms": 0.0, "max_ms": 0.0, "writer_late": 0}
+
+    def _gaps_note(self, frame, idle_ns: int) -> None:
+        # The writer came back after the queued audio had played out: pipewire-pulse
+        # filled silence. Counted only inside one cue or reply.
+        gaps = self._gaps
+        if gaps is not None:
+            if gaps["armed"] and idle_ns > STREAM_UNDERRUN_NS:
+                late = (idle_ns - STREAM_UNDERRUN_NS) / 1e6
+                gaps["count"] += 1
+                gaps["ms"] += late
+                gaps["max_ms"] = max(gaps["max_ms"], late)
+                sender = self._media_senders.get(frame.transport_destination)
+                if sender is not None and sender._audio_queue.qsize() > 0:
+                    # Audio was already queued: the writer path was late, not synthesis.
+                    gaps["writer_late"] += 1
+            gaps["armed"] = True
+            gaps["frames"] += 1
+
+    def _gaps_report(self) -> None:
+        gaps, self._gaps = self._gaps, None
+        if gaps is not None and gaps["frames"]:
+            emit("playback_gaps", unit=gaps["unit"], name=gaps["name"], frames=gaps["frames"],
+                 count=gaps["count"], gap_ms=round(gaps["ms"], 1), max_ms=round(gaps["max_ms"], 1),
+                 writer_late=gaps["writer_late"])
 
     def _output_level(self, status: str, level: float) -> None:
         binding = self._binding
@@ -635,9 +724,15 @@ class SpeechTimingAudioOutput(LocalAudioOutputTransport):
             return False
         if isinstance(frame, TTSAudioRawFrame) and self._playback is not None:
             # Owner barge-in: duck at once, hold after sustained speech, resume on quiet.
+            held = time.monotonic_ns()
             await self._playback.barge_in_audio(frame, lambda: self._output_level("idle", 0.0))
             if not current_reply():
                 return False
+            if self._gaps is not None and time.monotonic_ns() - held >= BARGE_IN_POLL_SECS * 1e9:
+                self._gaps["armed"] = False  # A barge-in hold is a deliberate pause.
+        idle_ns = time.monotonic_ns() - self._last_write_ns
+        start = time.monotonic()
+        self._writing = True
         try:
             written = await super().write_audio_frame(frame)
         except Exception:
@@ -650,6 +745,12 @@ class SpeechTimingAudioOutput(LocalAudioOutputTransport):
             if not is_cue:
                 self._output_level("idle", 0.0)
             raise
+        finally:
+            self._writing = False
+        if written:
+            self._gaps_note(frame, idle_ns)
+            self._last_write_ns = time.monotonic_ns()
+            self._play_end = max(self._play_end, start) + len(frame.audio) / (2 * frame.sample_rate * frame.num_channels)
         if not written:
             if is_cue:
                 self._cue_failed = True
