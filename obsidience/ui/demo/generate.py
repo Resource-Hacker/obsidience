@@ -59,6 +59,19 @@ PRIVATE = re.compile(
     r"@|https?://|/home|wissenschafter|private|personal|consent|dataset|sample|"
     r"workstation|admech|harness@|revert|television|mouse|dpi\b|keyd", re.IGNORECASE)
 
+_HASHES: set[str] | None = None
+
+
+def is_private(text: str) -> bool:
+    """An owner-specific topic, or a term on the local hashed private-term list (see leak_check)."""
+    global _HASHES
+    sys.path.insert(0, str(DEMO))
+    from leak_check import private_hashes, scan
+    if _HASHES is None:
+        _HASHES = private_hashes()
+    return bool(PRIVATE.search(text)) or any(f.startswith("private term") for f in scan(text, _HASHES))
+
+
 TOPICS = [  # (topic, subject keywords, path prefixes), first match wins
     ("Voice", r"voice|speech|speak|asr|stt|tts|wake|smart turn|end.of.turn|turn.taking|turn verdict|vad|silero|pocket|barge|transcript|utterance|"
               r"playback|chirp|audio|microphone|pipecat|nemo|realtime|smart turn|admission",
@@ -114,7 +127,7 @@ def collect_history(ref: str) -> list[dict]:
         head, _, names = block.partition("\n")
         sha, when, email, subject = head.split("\x1f")
         when = utc(when)
-        if not email.endswith("@users.noreply.github.com") or PRIVATE.search(subject):
+        if not email.endswith("@users.noreply.github.com") or is_private(subject):
             continue
         files = [line for line in names.splitlines() if line.strip()]
         topic = topic_of(subject, files)
@@ -151,7 +164,7 @@ def collect_facts(ref: str) -> list[dict]:
             if not lines or lines[0].lstrip().startswith(("#", "|", "-", "*", ">", "<", "!", "1.", ":", "[", "=")):
                 continue
             sentence = re.split(r"(?<=[.!?])\s+(?=[A-Z])", _plain(" ".join(lines)))[0]
-            if not 50 <= len(sentence) <= 230 or not sentence.endswith(".") or PRIVATE.search(sentence) \
+            if not 50 <= len(sentence) <= 230 or not sentence.endswith(".") or is_private(sentence) \
                     or re.search(r"\d+\.\d+\.\d+\.\d+|:\d{4}\b", sentence):
                 continue
             topic = topic_of(sentence, [name]) or "Docs"
