@@ -239,6 +239,8 @@ class RealtimeSessionManager:
         self._desired_mode = "off"
         self._mode_revision = 0
         self._wake_open = False
+        # The worker's keyword spotter heard the name; ASR text has not opened the window yet.
+        self._wake_spotted = False
         self._wake_word = "Computer"
         self._paused_for_work = False
         self._standby_event = asyncio.Event()
@@ -1752,7 +1754,17 @@ class RealtimeSessionManager:
                     continue
                 if event_type == "transcript_final" and self._semantic_enabled:
                     continue  # A legacy worker cannot bypass contextual admission.
+                if event_type in {"wake_spotted", "wake_spot_dropped"}:
+                    # A spot interrupts before ASR text opens the window. Its speech
+                    # edge and interruption must reach this owner as a wake's do:
+                    # dropped, the worker kept a generation ahead of the conversation
+                    # and discarded the "accepted" chirp (2026-10-19, 21:22:08).
+                    self._wake_spotted = (event_type == "wake_spotted" and self._mode == "wake"
+                                          and self._phase in READY_PHASES
+                                          and worker_event.get("mode_revision", 0) == self._mode_revision)
+                    continue
                 if event_type == "wake_detected":
+                    self._wake_spotted = False
                     if (self._mode != "wake" or self._phase not in READY_PHASES
                             or worker_event.get("mode_revision", 0) != self._mode_revision):
                         continue
@@ -1774,6 +1786,7 @@ class RealtimeSessionManager:
                         }, sort_keys=True)])
                     continue
                 if event_type == "wake_idle":
+                    self._wake_spotted = False
                     if worker_event.get("mode_revision", 0) == self._mode_revision:
                         await self._cancel_speech_candidate()
                         if self._wake_open:
@@ -1814,7 +1827,8 @@ class RealtimeSessionManager:
                                   "transcript_partial", "transcript_pause", "transcript_final"}:
                     if worker_event.get("mode_revision", 0) != self._mode_revision:
                         continue
-                    if self._mode == "wake" and not self._wake_open and event_type != "speech_ended":
+                    if (self._mode == "wake" and not (self._wake_open or self._wake_spotted)
+                            and event_type != "speech_ended"):
                         continue
                 if event_type == "speech_timing":
                     self._record_playback_timing(worker_event)
