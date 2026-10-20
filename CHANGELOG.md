@@ -54,17 +54,27 @@ harness and Linux desktop shell. Everything below is new in this release.
   smallest complete context packet with explicit context accounting. A
   reviewed starter Vault ships in `obsidience/defaults/vault/`, and
   `obsidience init` installs it without ever overwriting an existing Vault.
+  Open Knowledge Format is its own module (`knowledge/okf.py`: codec, reserved
+  documents, links and a spec conformance check) under the Obsidience Article
+  profile; every reader goes through it and the Vault validator checks the spec
+  before the profile.
 - **Memory.** Optional per-Agent Hindsight banks hold facts, experiences and
   consolidated observations with their original dates, kept separate from
   accepted Knowledge. Recall is bounded and starts at admission. The
   Executive's mental models feed at most three Curate recommendations at a
-  time into owner Review. Hindsight 0.10.3 runs with recorded patches.
+  time into owner Review. Hindsight 0.10.3 runs with recorded patches. Background memory work runs in
+  upstream's dedicated worker process, so the request-only API that serves
+  recall is never stalled by retain or consolidation.
 - **Instruction improvement.** Heimdall's Audit improves Agent and Runbook
   instructions from captured failures with Google Research Harness2's
   Propose–Probe–Compose search and AutoSaddler V2 candidates, lineage and
   rollback. Trials run in isolated ADK sessions and dispatch no effects; a
   candidate is published only through Review after repeated baseline and
-  control comparisons.
+  control comparisons. Failed or refused Executive turns are captured too (the
+  Executive's Runtime section is the editable unit), a stale or unreproduced
+  case settles instead of blocking the queue, an interrupted Audit resumes its
+  saved job, and Audit's proposal sessions may run on a cloud model through the
+  official Codex or Claude Code CLI while trials keep the local model.
 - **Voice.** Realtime speech on Pipecat's local transport: a CPU wake-word
   spotter with a ready chirp, NVIDIA NeMo Nemotron streaming recognition with
   early finals and a silence gate, and end-of-turn detection from Silero VAD
@@ -72,13 +82,22 @@ harness and Linux desktop shell. Everything below is new in this release.
   speculated at pauses together with the first response and memory recall, so
   answers start before the speaker finishes. Pocket TTS speaks sentence by
   sentence from the reply's control line, Markdown is spoken as prose, and
-  talking over a reply ducks it.
+  talking over a reply ducks it. The speech stream stays fed between
+  sounds so chirps and replies start without a dropout, a reply that ends in a
+  question reopens the microphone for the answer, Pocket TTS can run with
+  dynamic int8 weights, and the completion check rejects replies that only
+  promise or decline to look instead of using the Tool.
 - **Runtime.** A loopback API (port 8765) that admits only local clients, the
   `obsidience` CLI (`init`, `status`, `serve`, `index`), model catalog and
   hardware residency leases, and a deploy script that restarts only changed
   owners at an idle moment, verifies them and rolls back on failure.
 
 #### Shell
+
+- **Action Trace.** Each run reads in the ontology's terms (a conversation
+  turn is not a Task); a Hindsight recall opens into memory cards with type,
+  age, recorded date and timing, and the Code graph shows each coding-agent
+  lookup as a card with its matched symbols.
 
 - **Desktop shell.** Hyprland owns composition, focus, clipboard and window
   movement; one Quickshell host serves the native panes (Chat, Library, Tasks,
@@ -126,6 +145,9 @@ harness and Linux desktop shell. Everything below is new in this release.
   support guides; issue forms, a pull request template, a proposed label set,
   Dependabot configuration and GitHub Actions build checks (UI typecheck and
   build, Python byte-compile, Ruff).
+- A documentation site on GitHub Pages organised by the ontology (each
+  Article type, each Module, each upstream integration), with the real graph
+  UI as an interactive demo on Obsidience's own knowledge, code and history.
 
 ### Milestones before 0.1.0
 
