@@ -1,0 +1,74 @@
+Obsidience
+Copyright 2026 The Obsidience Authors
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This repository includes material from the third-party projects below. Their
+license texts are in LICENSES/ or in the file named. artifacts.lock.json
+records every adopted component with its revision and license, including the
+Python, npm and system packages, container images and model weights that an
+installation obtains separately; those are not part of this repository and
+their own licenses apply.
+
+Open Knowledge Format
+  https://github.com/GoogleCloudPlatform/open-knowledge-format
+  Portions Copyright 2026 Google LLC. Apache License, Version 2.0.
+  Used in obsidience/harness/knowledge/format.py.
+  License: LICENSES/OpenKnowledgeFormat-Apache-2.0.txt
+
+wlrctl
+  https://git.sr.ht/~brocellous/wlrctl
+  Copyright (c) 2020 Ronan Pigott. MIT License.
+  Adapted in obsidience/shell/adapter/hyprland/pointer.c, which carries the
+  full notice.
+
+Lucide
+  https://github.com/lucide-icons/lucide
+  Copyright (c) 2026 Lucide Icons and Contributors. ISC License.
+  The BrainCircuit icon path in
+  obsidience/shell/qml/components/visual/ShellIcon.qml.
+  License: LICENSES/Lucide-ISC.txt
+
+Omarchy
+  https://github.com/omacom/omarchy
+  Copyright (c) David Heinemeier Hansson. MIT License.
+  Session-lock lifecycle and theme patterns adapted in the Shell.
+  License: LICENSES/Omarchy-MIT.txt
+
+omarchy-windows
+  https://github.com/jwm3000/omarchy-windows
+  Copyright (c) 2026 rawritude. MIT License.
+  Tiling gap geometry adapted in the Shell's workspace tiler and Hyprland
+  Lua layout.
+  License: LICENSES/Omarchy-Windows-MIT.txt
+
+psutil (installed dependency; license text kept for the Hardware pane)
+  https://github.com/giampaolo/psutil
+  Copyright (c) 2009, Jay Loden, Dave Daeschler, Giampaolo Rodola.
+  BSD 3-Clause License.
+  License: LICENSES/psutil-BSD-3-Clause.txt
+
+Patches to third-party projects
+  The .patch files under obsidience/scripts/patches/,
+  obsidience/shell/adapter/hyprland/packaging/*/patches/,
+  obsidience/shell/adapter/quickshell/patches/,
+  obsidience/harness/realtime/speech/ and obsidience/media/ modify the
+  upstream projects recorded in artifacts.lock.json and contain excerpts of
+  their source. Each patch is offered under the license of the project it
+  modifies: llama.cpp (MIT), Hindsight (MIT), Harness2 (Apache-2.0), the
+  Gemma 4 chat template (Apache-2.0), NVIDIA NeMo Speech (Apache-2.0),
+  Hyprland (BSD-3-Clause), xdg-desktop-portal-hyprland (BSD-3-Clause),
+  Quickshell (LGPL-3.0-only) and Tiramisu (GPL-3.0).
+  The PKGBUILD recipes under obsidience/shell/adapter/hyprland/packaging/ are
+  derived from Arch Linux package sources, which Arch Linux licenses under
+  0BSD.
+
+Documentation media
+  The speech in docs/media/voice-demo.mp4 was synthesized with Pocket TTS's
+  "alba" voice (Alba MacKenna, https://huggingface.co/kyutai/tts-voices),
+  licensed under CC BY 4.0.
+
+Code of Conduct
+  CODE_OF_CONDUCT.md is adapted from the Contributor Covenant, version 3.0
+  (https://www.contributor-covenant.org/version/3/0/), stewarded by the
+  Organization for Ethical Source and licensed under CC BY-SA 4.0.
