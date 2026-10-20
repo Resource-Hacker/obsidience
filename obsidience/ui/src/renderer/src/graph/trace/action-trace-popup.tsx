@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { WS_BASE } from "@/lib/api";
 import {
-  applyTraceFrame, fieldLabel, traceActionTarget, traceActionTitle, traceChannelLabel, traceEntriesSince, traceRowFinding, traceRowState, traceRuns, traceSimulationLabel, traceText,
+  applyTraceFrame, fieldLabel, traceActionTarget, traceActionTitle, traceChannelLabel, traceConversation, traceEntriesSince, traceRowFinding, traceRowState, traceRuns, traceSimulationLabel, traceText,
   LATENCY_STAGES, TRACE_ENTRY_LIMIT, type ActionTraceEntry, type TraceModelRequest, type TraceRow, type TraceRun, type TraceValue,
 } from "./action-trace";
 
@@ -89,7 +89,7 @@ function LatencyTimeline({ run, entries = run.latencyEntries, label = "Latency t
       <span className="trace-chevron mr-1 inline-block">›</span>{label} · {entries.length} measurements
     </summary>
     <p className="mb-2 mt-3 text-slate-400">Elapsed from first recorded stage; durations may overlap. Only measurements present in the retained trace are shown.</p>
-    {unbound ? <p className="mb-2 text-slate-400">These measurements have no unique Task binding in the retained trace.</p> : null}
+    {unbound ? <p className="mb-2 text-slate-400">These measurements have no unique run binding in the retained trace.</p> : null}
     <table aria-label={label} className="w-full border-collapse text-left">
       <thead className="text-[10px] text-slate-500"><tr><th className="py-2 font-normal">Stage</th><th className="py-2 text-right font-normal">Measured phase</th><th className="py-2 pl-3 text-right font-normal">Elapsed</th></tr></thead>
       <tbody>{entries.map(entry => {
@@ -206,7 +206,7 @@ function Packet({ entry }: { entry: ActionTraceEntry }) {
   const sections = Array.isArray(entry.payload.sections) ? entry.payload.sections.filter(section =>
     section && typeof section === "object" && !Array.isArray(section) && section.key !== "header") : [];
   return <div>
-    <p className="mb-3 text-slate-400">The instructions and context assembled for this task, in the order supplied to the agent.</p>
+    <p className="mb-3 text-slate-400">The instructions and context assembled for this run, in the order supplied to the agent.</p>
     <ol className="space-y-1">
       {sections.map((section, index) => {
         if (!section || typeof section !== "object" || Array.isArray(section)) return null;
@@ -261,7 +261,9 @@ function EventDetails({ row }: { row: TraceRow }) {
   if (payload.kind === "context") return <TraceFields value={payload.projection ?? {}} label="Working context" />;
   if (payload.kind === "run") {
     const { kind: _kind, ...fields } = payload;
-    return <TraceFields value={fields} label="Task outcome" />;
+    // A conversation run's owner is its Agent; the legacy task_title repeats agent_title.
+    if (traceConversation(entry)) delete fields.task_title;
+    return <TraceFields value={fields} label="Run outcome" />;
   }
   // Compatibility entries stay readable without guessing correlation or success.
   let legacy: TraceValue = entry.detail || entry.line;
@@ -280,14 +282,14 @@ function ActionRow({ row, index, startedAt }: { row: TraceRow; index: number; st
     <summary className={`${ROW_GRID} cursor-pointer list-none rounded px-3 py-3 hover:bg-cyan-100/[0.04] focus-visible:outline focus-visible:outline-cyan-300`}>
       <span className="flex items-center gap-1 font-mono text-[10px] text-slate-500"><span className="trace-chevron inline-block">›</span>{String(index + 1).padStart(2, "0")}</span>
       <span className="min-w-0">
-        <span className={`mb-0.5 block text-[9px] font-medium uppercase tracking-[0.12em] ${CHANNEL_COLOR[entry.channel]}`}>{traceChannelLabel(entry.channel)}</span>
+        <span className={`mb-0.5 block text-[9px] font-medium uppercase tracking-[0.12em] ${CHANNEL_COLOR[entry.channel]}`}>{traceChannelLabel(entry.channel, traceConversation(entry))}</span>
         <span className="block break-words text-[12px] leading-5 text-slate-100">{traceActionTitle(entry)}</span>
         {entry.payload.kind === "tool" ? <span className="block truncate text-[11px] text-slate-400" title={traceText(entry.payload.name)}>{traceActionTarget(entry) || traceText(entry.payload.name)}</span> : null}
         {finding ? <span className="mt-1 block text-[11px] text-slate-300">{finding}</span> : null}
         {row.model ? <ResponseSummary request={row.model} /> : null}
       </span>
       <span className={`text-[10px] ${["Problem", "Error", "Rejected", "Failed", "Blocked"].includes(state) ? "text-rose-300" : ["Waiting", "Degraded"].includes(state) ? "text-amber-200" : "text-teal-200/85"}`}>{state}</span>
-      <span className="text-right font-mono text-[10px] text-slate-500" title={typeof timing === "number" ? "Action duration" : "Time since task started"}>
+      <span className="text-right font-mono text-[10px] text-slate-500" title={typeof timing === "number" ? "Action duration" : "Time since the run started"}>
         {typeof timing === "number" ? duration(timing) : `+${duration(Math.max(0, entry.at - startedAt))}`}
       </span>
     </summary>
@@ -392,10 +394,10 @@ export function ActionTracePopup({ since, keptOpen = false, onKeepOpen, onClose 
               className="rounded px-2 py-0.5 text-lg leading-5 text-slate-400 hover:text-white focus-visible:outline focus-visible:outline-cyan-300">×</button>
           </div>
         </div>
-        <p className="mt-1.5 text-[11px] leading-4 text-slate-400">Follow the task from instructions to actions to outcome. Expand any row to see the evidence.</p>
+        <p className="mt-1.5 text-[11px] leading-4 text-slate-400">Follow each run from instructions to actions to outcome. Expand any row to see the evidence.</p>
         {replayNotice && <p role="status" className="mt-1 text-[11px] text-amber-200">{replayNotice}</p>}
       </div>
-      <div ref={scrollArea} className="min-h-0 overflow-y-auto overscroll-contain [scrollbar-gutter:stable]" aria-label="Task steps">
+      <div ref={scrollArea} className="min-h-0 overflow-y-auto overscroll-contain [scrollbar-gutter:stable]" aria-label="Run steps">
         {runs.length ? runs.map(run => <details key={run.id} open className={`${DISCLOSURE} border-b border-cyan-200/15 last:border-0`}>
           <summary className="flex cursor-pointer list-none items-center gap-2 bg-cyan-100/[0.025] px-4 py-3 focus-visible:outline focus-visible:outline-cyan-300">
             <span className="trace-chevron inline-block text-cyan-200">›</span>
@@ -411,10 +413,10 @@ export function ActionTracePopup({ since, keptOpen = false, onKeepOpen, onClose 
           <ResponseStatus run={run} />
           <LatencyTimeline run={run} />
           <SimulationTimelines run={run} />
-        </details>) : <p className="px-4 py-6 text-[12px] text-slate-400">Waiting for the first task event…</p>}
+        </details>) : <p className="px-4 py-6 text-[12px] text-slate-400">Waiting for the first trace event…</p>}
       </div>
       <div className="flex shrink-0 items-center justify-between gap-3 border-t border-cyan-200/10 px-4 py-2 text-[10px] text-slate-500">
-        <span className="min-w-0 truncate" aria-live="polite" aria-atomic="true">{latest ? `${latestRun?.agent || "System"} · ${traceActionTitle(latest)}` : "Connecting to task activity"}</span>
+        <span className="min-w-0 truncate" aria-live="polite" aria-atomic="true">{latest ? `${latestRun?.agent || "System"} · ${traceActionTitle(latest)}` : "Connecting to the Action Trace"}</span>
         <span className="shrink-0">{current.length >= TRACE_ENTRY_LIMIT ? `Latest ${TRACE_ENTRY_LIMIT} events` : `${current.length} events`} · {keptOpen ? "Stays open while you read" : "Select a row to keep open"}</span>
       </div>
     </section>

@@ -572,7 +572,8 @@ class ConversationRuntime:
                 before_sequence=int(user_turn["sequence"]),
             )
             trace.latency("preparation", duration_ms=(time.monotonic() - preparation_started) * 1000)
-            trace.emit("event", f"{task.title} activated", [task.ref, event])
+            trace.emit("event", "Voice request received" if source == "realtime" else "Chat request received",
+                       [task.ref, event])
             if owner_command is not None:
                 params["owner_command"] = owner_command
             params.update({

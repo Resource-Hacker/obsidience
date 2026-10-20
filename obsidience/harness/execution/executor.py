@@ -178,6 +178,13 @@ def _is_agent_identity(note: Note | None) -> bool:
     return bool(note and (note.kind == "agent" or note.ref == "Agents/Executive/Executive"))
 
 
+def _packet_trace_line(task: Note, agent_name: str, refs: list[str]) -> str:
+    """A conversation run is its Agent's turn, not a Task (action ontology)."""
+    if task.kind == "agent":
+        return f"Thinking Packet · {len(refs)} {'Article' if len(refs) == 1 else 'Articles'}"
+    return f"{agent_name} packet for {task.title}"
+
+
 def _agent_graph_id(agent: Note | None) -> str:
     if not agent or agent.ref == "Agents/Executive/Executive":
         return "main"
@@ -701,8 +708,8 @@ async def compile_activation(
         )
         action_trace.emit(
             "activation",
-            f"{requested_agent.title if _is_agent_identity(requested_agent) else 'Obsidience'} "
-            f"packet for {task.title}",
+            _packet_trace_line(task, requested_agent.title if _is_agent_identity(requested_agent) else "Obsidience",
+                               selected_refs),
             selected_refs,
             {"payload": activity_packet},
         )
@@ -1173,7 +1180,8 @@ async def _run_execution(task: Note, depth: int = 0, reasoning_effort: str | Non
             agent.ref if _is_agent_identity(agent) else "Agents/Executive/Executive",
         )
         emit_state(
-            "run", f"{agent_name} started {task.title}", "running",
+            "run", f"{agent_name} turn started" if task.kind == "agent" else f"{agent_name} started {task.title}",
+            "running",
             f"model: {model_spec.label}; reasoning: {effort}",
             model=model_spec.id, reasoning_effort=effort,
         )
@@ -1203,7 +1211,7 @@ async def _run_execution(task: Note, depth: int = 0, reasoning_effort: str | Non
             # saw its original packet, which owns display and run provenance.
             knowledge_activity.emit("path", packet_refs, query=objective,
                                     graph_id=_agent_graph_id(agent), retrieval_ms=retrieval_ms, run_id=run_id)
-            action_trace.emit("activation", f"{agent_name} packet for {task.title}", packet_refs,
+            action_trace.emit("activation", _packet_trace_line(task, agent_name, packet_refs), packet_refs,
                               {"payload": prepared_speech.packet})
         objective = str(activation["objective"])
         messages = activation_messages(
@@ -1369,7 +1377,7 @@ async def _run_execution(task: Note, depth: int = 0, reasoning_effort: str | Non
             INDEX.sync()
         emit_state(
             "status",
-            f"{task.title} ended {status}",
+            f"{task.title} turn {status}" if task.kind == "agent" else f"{task.title} ended {status}",
             status, summary,
         )
         if (status == "completed" and emit_turn_event and not params.get("conversation_id") and _is_agent_identity(agent)

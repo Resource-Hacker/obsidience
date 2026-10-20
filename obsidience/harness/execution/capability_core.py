@@ -339,7 +339,9 @@ async def run_capability(ex, name: str, args: dict, *, execute, execute_async, s
             "args": completion_args,
             "accepted": True,
         })
-        emit_tool_result(f"{ex.agent_name} completion accepted for {ex.task.title}: {ex.status}", completion_args, channel="status")
+        emit_tool_result(f"{ex.agent_name} completion accepted: {ex.status}" if ex.task.kind == "agent"
+                         else f"{ex.agent_name} completion accepted for {ex.task.title}: {ex.status}",
+                         completion_args, channel="status")
         ex.done = True
         return CallOutcome("completed")
     ex.response_completion_observation = None

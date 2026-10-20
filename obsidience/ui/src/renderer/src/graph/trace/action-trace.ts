@@ -2,7 +2,7 @@
 export type TraceValue = null | boolean | number | string | TraceValue[] | { [key: string]: TraceValue };
 export const LATENCY_STAGES = {
   input_final: "Input accepted", preparation: "Conversation preparation",
-  activation: "Task activation", model_wait: "Model availability", model_preflight: "Model request preparation",
+  activation: "Thinking Packet preparation", model_wait: "Model availability", model_preflight: "Model request preparation",
   model_first_public: "First model text", model_complete: "Model response complete", answer_committed: "Answer saved",
   speech_received: "Speech request received", aec_ready: "Echo cancellation ready", first_pcm: "First audio generated",
   first_output_write: "First audio output write", speech_onset: "Speech detected", first_partial: "First recognized words",
@@ -247,8 +247,13 @@ export function fieldLabel(key: string): string {
   return known[key] ?? key.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[_\.]+/g, " ").replace(/^./, c => c.toUpperCase());
 }
 
-export function traceChannelLabel(channel: string): string {
-  return ({ run: "Task", activation: "Preparation", tool: "Action", result: "Result",
+/** A conversation run is owned by its Agent ref, not a Task (action ontology). */
+export function traceConversation(entry: ActionTraceEntry): boolean {
+  return Boolean(entry.taskRef && entry.taskRef === entry.agentRef);
+}
+
+export function traceChannelLabel(channel: string, conversation = false): string {
+  return ({ run: conversation ? "Turn" : "Task", activation: "Preparation", tool: "Action", result: "Result",
     status: "Outcome", error: "Problem", context: "Context", model: "Model" })[channel] ?? "Event";
 }
 
@@ -285,6 +290,7 @@ function actionTitle(entry: ActionTraceEntry): string {
   if (entry.payload.kind === "model") return ({ waiting: "Waiting for model availability", started: "Preparing the next response",
     result: "Response received", error: "Response generation failed", interrupted: "Response generation interrupted" })[traceText(entry.payload.phase)] ?? "Response measurements";
   if (entry.payload.kind === "context") return "Update working context";
+  if (name === "task.complete" && traceConversation(entry)) return "Submit the reply";
   return name ? titles[name] ?? fieldLabel(name) : entry.line;
 }
 
@@ -344,7 +350,8 @@ export function traceRuns(entries: ActionTraceEntry[]): TraceRun[] {
       : entry.runId ?? legacyId;
     let run = groups.get(id);
     if (!run) {
-      run = { id, title: entry.taskRef?.split("/").at(-1) ?? (entry.latency ? "Response timing" : "System activity"), agent: "", at: entry.at,
+      run = { id, title: traceConversation(entry) ? "Conversation turn"
+        : entry.taskRef?.split("/").at(-1) ?? (entry.latency ? "Response timing" : "System activity"), agent: "", at: entry.at,
         status: "", summary: "", objective: "", entries: [], rows: [], modelRequests: [], latencyEntries: [] };
       groups.set(id, run);
     }
@@ -359,7 +366,7 @@ export function traceRuns(entries: ActionTraceEntry[]): TraceRun[] {
       }
     }
     if (entry.payload.kind === "run" && !entry.trial && entry.payload.simulated !== true) {
-      run.title = traceText(entry.payload.task_title) || run.title;
+      run.title = traceConversation(entry) ? "Conversation turn" : traceText(entry.payload.task_title) || run.title;
       run.agent = traceText(entry.payload.agent_title) || run.agent;
       run.status = traceText(entry.payload.status) || run.status;
       run.summary = traceText(entry.payload.summary) || run.summary;
