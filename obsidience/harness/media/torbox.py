@@ -20,7 +20,7 @@ import httpx
 
 from .config import MediaUnavailable, load_config
 from .jellyfin import _token
-from .tiramisu import _normal_hash
+from .tiramisu import normal_hash
 
 _API = 'https://api.torbox.app/v1/api'
 _BODY_LIMIT = 2 * 1024 * 1024
@@ -183,7 +183,7 @@ def _selection_plan(candidate: dict, files: list[TorBoxFile]) -> list[dict] | No
     return sorted(plan, key=lambda row: (row['season'], row['episode'], row['path']))
 
 
-def _select(candidate: dict, files: list[TorBoxFile]) -> TorBoxFile | None:
+def select_file(candidate: dict, files: list[TorBoxFile]) -> TorBoxFile | None:
     plan = _selection_plan(candidate, files)
     if not plan:
         return None
@@ -308,18 +308,18 @@ class TorBoxAPI:
 
     async def check_cached(self, hashes: list[str], cancel=None) -> dict[str, list[TorBoxFile]]:
         if (not isinstance(hashes, list) or not 1 <= len(hashes) <= 32
-                or any(not _normal_hash(value) for value in hashes)):
+                or any(not normal_hash(value) for value in hashes)):
             raise MediaUnavailable('torbox_hash_limit_or_invalid')
-        normalized = list(dict.fromkeys(_normal_hash(value) for value in hashes))
+        normalized = list(dict.fromkeys(normal_hash(value) for value in hashes))
         params = [('hash', value) for value in normalized] + [('format', 'object'), ('list_files', 'true')]
         data = await self._request('GET', '/torrents/checkcached', params=params, cancel=cancel)
         if not isinstance(data, dict) or len(data) > 32:
             raise MediaUnavailable('torbox_invalid_response')
         result = {}
         for key, row in data.items():
-            info_hash = _normal_hash(key)
+            info_hash = normal_hash(key)
             if (info_hash not in normalized or not isinstance(row, dict)
-                    or _normal_hash(row.get('hash')) != info_hash):
+                    or normal_hash(row.get('hash')) != info_hash):
                 raise MediaUnavailable('torbox_invalid_cache_identity')
             result[info_hash] = _files(row.get('files'))
         return result
@@ -333,8 +333,8 @@ class TorBoxAPI:
         cached = await self.check_cached([candidate.get('hash') for candidate in candidates], cancel)
         result = {}
         for candidate in candidates:
-            info_hash = _normal_hash(candidate.get('hash'))
-            file = _select(candidate, cached.get(info_hash, []))
+            info_hash = normal_hash(candidate.get('hash'))
+            file = select_file(candidate, cached.get(info_hash, []))
             if file is not None:
                 result[info_hash] = {**self.binding(), 'debrid_file': {'hash': info_hash, **file},
                                      'debrid_plan': _selection_plan(candidate, cached[info_hash])}
@@ -357,7 +357,7 @@ class TorBoxAPI:
             raise MediaUnavailable('torbox_inventory_limit')
         result: list[TorBoxTorrent] = []
         for row in data:
-            if not isinstance(row, dict) or not _normal_hash(row.get('hash')):
+            if not isinstance(row, dict) or not normal_hash(row.get('hash')):
                 raise MediaUnavailable('torbox_invalid_inventory')
             identifier = _identifier(row.get('id'))
             name = row.get('name')
@@ -368,7 +368,7 @@ class TorBoxAPI:
             if (not isinstance(tags, list) or len(tags) > 32
                     or any(not isinstance(tag, str) or not 1 <= len(tag) <= 128 for tag in tags)):
                 raise MediaUnavailable('torbox_invalid_tags')
-            result.append({'torrent_id': identifier, 'hash': _normal_hash(row['hash']), 'name': name,
+            result.append({'torrent_id': identifier, 'hash': normal_hash(row['hash']), 'name': name,
                            'tags': tags,
                            'download_present': row.get('download_present') is True,
                            'download_finished': row.get('download_finished') is True,
@@ -379,7 +379,7 @@ class TorBoxAPI:
                           torrent_id: int | None = None) -> tuple[TorBoxTorrent, TorBoxFile] | None:
         bound = candidate['debrid_file']
         rows = await self.mylist(torrent_id=torrent_id, cancel=cancel)
-        matching_hash = [row for row in rows if row['hash'] == _normal_hash(candidate['hash'])]
+        matching_hash = [row for row in rows if row['hash'] == normal_hash(candidate['hash'])]
         if len(matching_hash) > 1:
             raise MediaUnavailable('torbox_ambiguous_inventory')
         if not matching_hash:
@@ -387,7 +387,7 @@ class TorBoxAPI:
         row = matching_hash[0]
         if not row['download_present'] or not row['download_finished']:
             raise MediaUnavailable('torbox_existing_not_ready')
-        selected = _select(candidate, row['files'])
+        selected = select_file(candidate, row['files'])
         plan = _selection_plan(candidate, row['files'])
         expected_plan = candidate.get('debrid_plan')
         if (selected is None or selected['path'] != bound['path'] or selected['size'] != bound['size']
@@ -421,7 +421,7 @@ class TorBoxAPI:
         rows = await self.mylist(torrent_id=registered['torrent_id'], cancel=cancel)
         if len(rows) != 1 or rows[0]['hash'] != registered['hash']:
             raise MediaUnavailable('torbox_registration_changed')
-        selected = _select(candidate, rows[0]['files'])
+        selected = select_file(candidate, rows[0]['files'])
         plan = _selection_plan(candidate, rows[0]['files'])
         if (not selected or any(selected[key] != registered[key] for key in ('file_id', 'path', 'size'))
                 or not plan or plan != registered.get('plan')):
@@ -465,8 +465,8 @@ class TorBoxAPI:
         bound = candidate.get('debrid_file')
         if (not isinstance(context, dict) or not isinstance(bound, dict)
                 or set(bound) != {'hash', 'file_id', 'path', 'size'}
-                or not _normal_hash(candidate.get('hash'))
-                or bound.get('hash') != _normal_hash(candidate['hash'])
+                or not normal_hash(candidate.get('hash'))
+                or bound.get('hash') != normal_hash(candidate['hash'])
                 or not isinstance(candidate.get('debrid_plan'), list)
                 or not candidate['debrid_plan']
                 or candidate.get('type') == 'series' and not isinstance(candidate.get('series_episodes'), list)):
@@ -484,14 +484,14 @@ class TorBoxAPI:
             context['_media_acquisition_outcome'] = result
             return result
         cached = await self.cache_matches([candidate], cancel)
-        fresh = cached.get(_normal_hash(candidate['hash']), {})
+        fresh = cached.get(normal_hash(candidate['hash']), {})
         if fresh.get('debrid_file') != bound or fresh.get('debrid_plan') != candidate.get('debrid_plan'):
             raise MediaUnavailable('torbox_cached_file_changed')
         imdb = candidate.get('imdb')
         if not isinstance(imdb, str) or not re.fullmatch(r'tt[0-9]{7,10}', imdb):
             raise MediaUnavailable('torbox_candidate_invalid')
         name = _registration_name(candidate)
-        form = {'magnet': 'magnet:?xt=urn:btih:' + _normal_hash(candidate['hash']),
+        form = {'magnet': 'magnet:?xt=urn:btih:' + normal_hash(candidate['hash']),
                 'seed': '3', 'allow_zip': 'false', 'as_queued': 'false',
                 'add_only_if_cached': 'true', 'name': name}
         torrent_id = None
@@ -506,7 +506,7 @@ class TorBoxAPI:
                 'effect_applied': None, 'must_not_replay': True}
             data = await self._request('POST', '/torrents/createtorrent', form=form,
                                        cancel=cancel, timeout=35)
-            if not isinstance(data, dict) or _normal_hash(data.get('hash')) != _normal_hash(candidate['hash']):
+            if not isinstance(data, dict) or normal_hash(data.get('hash')) != normal_hash(candidate['hash']):
                 raise MediaUnavailable('torbox_registration_uncertain')
             torrent_id = _identifier(data.get('torrent_id'))
         except asyncio.CancelledError:

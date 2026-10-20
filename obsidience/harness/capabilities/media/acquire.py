@@ -6,15 +6,15 @@ from pathlib import PurePosixPath
 
 from ...media.config import MediaUnavailable, load_config
 from ...media import service
-from ...media.tiramisu import Tiramisu, _episode_path_matches, _normal_hash
+from ...media.tiramisu import Tiramisu, episode_path_matches, normal_hash
 from ...media.sources import describe
 
 
 async def _registered_path(client: Tiramisu, candidate: dict) -> str:
     kind = 'movie' if candidate['type'] == 'movie' else 'tv'
     directory = 'movies' if kind == 'movie' else 'tv'
-    status, rows = await client._request('GET', f'/api/library/list?type={kind}', timeout=6)
-    if status != 200 or not isinstance(rows, list) or len(rows) > 32:
+    rows = await client.library(kind, limit=32)
+    if rows is None:
         raise MediaUnavailable('tiramisu_registration_readback_unavailable')
     config = load_config()
     roots = []
@@ -31,17 +31,17 @@ async def _registered_path(client: Tiramisu, candidate: dict) -> str:
     if len(roots) != 1:
         raise MediaUnavailable('virtual_media_root_unavailable')
     root = roots[0]
-    expected = _normal_hash(candidate['hash'])
+    expected = normal_hash(candidate['hash'])
     paths = []
     for row in rows:
-        if not isinstance(row, dict) or _normal_hash(row.get('hash')) != expected:
+        if not isinstance(row, dict) or normal_hash(row.get('hash')) != expected:
             continue
         if candidate['type'] == 'movie':
             matches = row.get('imdb') == candidate['imdb']
         else:
             matches = (row.get('season') == candidate['season']
                        and row.get('episode') == candidate['episode']
-                       and _episode_path_matches(row.get('path'), candidate))
+                       and episode_path_matches(row.get('path'), candidate))
         fuse_path = row.get('fuse_path')
         if not matches or not isinstance(fuse_path, str) or len(fuse_path) > 4096:
             continue
@@ -124,9 +124,8 @@ async def status() -> dict:
             return {'enabled': False, 'providers': ['tiramisu'],
                     'readiness': 'media_discovery_disabled'}
         client = Tiramisu()
-        code, health = await client._request('GET', '/health', timeout=3)
-        if (code != 200 or not isinstance(health, dict) or health.get('ready') is not True
-                or health.get('draining') is not False):
+        health = await client.health()
+        if health is None or health.get('ready') is not True or health.get('draining') is not False:
             raise MediaUnavailable('tiramisu_not_ready')
         if config.get('debrid', {}).get('enabled'):
             from ...media.torbox import TorBoxAPI
@@ -191,7 +190,7 @@ async def execute(args: dict, context: dict) -> dict:
 
     lock = context.setdefault('_media_acquisition_lock', asyncio.Lock())
     async with lock:
-        duplicate_key = (_normal_hash(candidate.get('hash')), candidate.get('type'),
+        duplicate_key = (normal_hash(candidate.get('hash')), candidate.get('type'),
                          candidate.get('season'), candidate.get('episode'))
         attempts = context.setdefault('_media_refresh_attempts' if args['action'] == 'refresh'
                                       else '_media_acquisition_attempts', set())

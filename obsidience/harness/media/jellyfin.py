@@ -28,7 +28,7 @@ def _invalid_constant(_value: str):
     raise ValueError('invalid_json_constant')
 
 
-def _id(value: object) -> str:
+def catalogue_id(value: object) -> str:
     try:
         return UUID(value).hex
     except (TypeError, ValueError, AttributeError):
@@ -149,12 +149,12 @@ class JellyfinCatalogue:
         return result
 
     def _item(self, item_id: str) -> dict:
-        page = self._query(ids=_id(item_id), limit=2)
+        page = self._query(ids=catalogue_id(item_id), limit=2)
         items = page.get('Items')
         if not isinstance(items, list) or len(items) != 1:
             raise MediaUnavailable('catalogue_item_unavailable')
         item = items[0]
-        if (not isinstance(item, dict) or _id(item.get('Id')) != _id(item_id)
+        if (not isinstance(item, dict) or catalogue_id(item.get('Id')) != catalogue_id(item_id)
                 or item.get('Type') not in ('Movie', 'Episode', 'Audio') or item.get('IsFolder') is True):
             raise MediaUnavailable('catalogue_item_unavailable')
         return item
@@ -198,7 +198,7 @@ class JellyfinCatalogue:
     @staticmethod
     def _revision(item: dict, source: dict, local: dict) -> str:
         # Bind the complete selected source metadata and the exact mapping/file identity.
-        material = {'item_id': _id(item.get('Id')), 'item_type': item['Type'],
+        material = {'item_id': catalogue_id(item.get('Id')), 'item_type': item['Type'],
                     'source': source, 'local': local}
         if item['Type'] == 'Episode':
             material['episode'] = {key: item.get(key) for key in
@@ -230,7 +230,7 @@ class JellyfinCatalogue:
             if not title:
                 continue
             try:
-                item_id = _id(item.get('Id'))
+                item_id = catalogue_id(item.get('Id'))
             except MediaUnavailable:
                 continue
             sources = item.get('MediaSources')
@@ -293,7 +293,7 @@ class JellyfinCatalogue:
         root, relative = self._local(source, item_type=item['Type'])
         local = describe(self.config, root, relative, expected_episode=expected_episode)
         return {**local, 'catalogue_instance': catalogue['instance_id'],
-                'item_id': _id(item_id), 'media_source_id': media_source_id,
+                'item_id': catalogue_id(item_id), 'media_source_id': media_source_id,
                 'source_revision': self._revision(item, source, local),
                 'title': _text(item.get('Name')) or 'Media'}
 
@@ -347,7 +347,7 @@ class JellyfinCatalogue:
             if (len(named) != 1 or named[0].get('CollectionType') != 'tvshows'
                     or named[0].get('Locations') != []):
                 raise MediaUnavailable('catalogue_deferred_root_not_empty_or_ambiguous')
-            expected_folder_id = _id(named[0].get('ItemId'))
+            expected_folder_id = catalogue_id(named[0].get('ItemId'))
             if cancel is not None and cancel.is_set():
                 return {'status': 'pending', 'reason': 'refresh_skipped_cancelled'}
             try:
@@ -370,7 +370,7 @@ class JellyfinCatalogue:
                        and isinstance(folder.get('Locations'), list)
                        and root['catalogue_path'] in folder['Locations']]
             if (len(named) != 1 or len(matches) != 1 or named[0] != matches[0]
-                    or _id(named[0].get('ItemId')) != expected_folder_id
+                    or catalogue_id(named[0].get('ItemId')) != expected_folder_id
                     or named[0].get('CollectionType') != 'tvshows'
                     or named[0].get('Locations') != [root['catalogue_path']]):
                 return {'status': 'pending', 'reason': 'catalogue_root_attachment_uncertain'}
@@ -382,7 +382,7 @@ class JellyfinCatalogue:
                 or sum(isinstance(folder, dict) and folder.get('Name') == library_name
                        for folder in folders) != 1):
             raise MediaUnavailable('catalogue_deferred_root_changed')
-        folder_id = _id(matches[0].get('ItemId'))
+        folder_id = catalogue_id(matches[0].get('ItemId'))
         # A deferred path attachment does not initialize Jellyfin's physical
         # folder record. Collection refresh then acknowledges but scans nothing.
         # Initialization belongs to installation, never a whole-library fallback.
@@ -434,7 +434,7 @@ class JellyfinCatalogue:
             if path in paths:
                 found.append(item)
         if len(found) == 1 and found[0].get('Type') in ('Movie', 'Episode'):
-            return {'status': 'ready', 'item_id': _id(found[0].get('Id')),
+            return {'status': 'ready', 'item_id': catalogue_id(found[0].get('Id')),
                     'source_path_verified': True}
         reason = ('catalogue_refresh_uncertain' if queued is None else
                   'catalogue_readback_ambiguous' if len(found) > 1 else
@@ -476,7 +476,7 @@ class JellyfinCatalogue:
                 raise MediaUnavailable('catalogue_series_identity_unverified')
             self._pin()
             return []
-        series_id = _id(matches[0].get('Id'))
+        series_id = catalogue_id(matches[0].get('Id'))
         if matches[0].get('DisplayOrder') not in (None, '', 'aired'):
             raise MediaUnavailable('catalogue_episode_order_unverified')
         page = self._query(parentId=series_id, parentIndexNumber=season,
@@ -489,7 +489,7 @@ class JellyfinCatalogue:
         rows, occupied = [], set()
         for item in items:
             if (not isinstance(item, dict) or item.get('Type') != 'Episode'
-                    or _id(item.get('SeriesId')) != series_id
+                    or catalogue_id(item.get('SeriesId')) != series_id
                     or type(item.get('ParentIndexNumber')) is not int
                     or item['ParentIndexNumber'] != season):
                 raise MediaUnavailable('catalogue_episode_identity_unverified')
@@ -521,7 +521,7 @@ class JellyfinCatalogue:
                     self._source(item, source_id)
                 except MediaUnavailable:
                     continue
-                choices.append({'item_id': _id(item.get('Id')),
+                choices.append({'item_id': catalogue_id(item.get('Id')),
                                 'media_source_id': source_id})
             tvdb = providers.get('Tvdb')
             rows.append({'episode': episode, 'episode_end': end,
@@ -566,7 +566,7 @@ class JellyfinCatalogue:
                 continue
             providers = item.get('ProviderIds') or {}
             imdb = str(providers.get('Imdb') or '').lower() if isinstance(providers, dict) else ''
-            rows.append({'item_id': _id(item.get('Id')), 'type': item['Type'], 'title': title,
+            rows.append({'item_id': catalogue_id(item.get('Id')), 'type': item['Type'], 'title': title,
                          'year': _number(item.get('ProductionYear')),
                          'imdb': imdb if re.fullmatch(r'tt[0-9]{7,10}', imdb) else None})
         return rows
@@ -594,7 +594,7 @@ class JellyfinCatalogue:
     def series_progress(self, series_id: str) -> list[dict]:
         """Numbered episodes of one Series with native per-user watch state; GET only."""
         self._pin()
-        series_id = _id(series_id)
+        series_id = catalogue_id(series_id)
         page = self._query(parentId=series_id, includeItemTypes='Episode', fields='ProviderIds',
                            enableUserData='true', limit=2049)
         items, total = page.get('Items'), page.get('TotalRecordCount')
@@ -604,7 +604,7 @@ class JellyfinCatalogue:
         rows = []
         for item in items:
             if (not isinstance(item, dict) or item.get('Type') != 'Episode'
-                    or _id(item.get('SeriesId')) != series_id):
+                    or catalogue_id(item.get('SeriesId')) != series_id):
                 raise MediaUnavailable('catalogue_episode_identity_unverified')
             season, episode = item.get('ParentIndexNumber'), item.get('IndexNumber')
             if season in (None, 0):
@@ -626,13 +626,13 @@ class JellyfinCatalogue:
     def resume(self, item_id: str) -> dict:
         """Stored per-user progress; never infer persistence from a player clock."""
         self._pin()
-        page = self._query(ids=_id(item_id), limit=1, enableUserData='true')
+        page = self._query(ids=catalogue_id(item_id), limit=1, enableUserData='true')
         items = page.get('Items') or []
-        if len(items) != 1 or items[0].get('Id', '').replace('-', '') != _id(item_id):
+        if len(items) != 1 or items[0].get('Id', '').replace('-', '') != catalogue_id(item_id):
             raise MediaUnavailable('catalogue_item_unavailable')
         data = items[0].get('UserData') or {}
         ticks = data.get('PlaybackPositionTicks')
         if type(ticks) is not int or ticks < 0:
             raise MediaUnavailable('catalogue_resume_unavailable')
-        return {'item_id': _id(item_id), 'position': ticks / 10000000,
+        return {'item_id': catalogue_id(item_id), 'position': ticks / 10000000,
                 'played': data.get('Played') is True, 'persistence': 'read_back'}

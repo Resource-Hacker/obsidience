@@ -159,9 +159,9 @@ async def execute(args: dict, context: dict) -> dict:
             return {'status': 'completed', 'acquisition': await status()}
         if action == 'resume' and set(args) == {'action', 'item_id'}:
             if context.get('_discord'):
-                from ...media.jellyfin import _id
+                from ...media.jellyfin import catalogue_id
                 try:
-                    _id(args['item_id'])
+                    catalogue_id(args['item_id'])
                 except MediaUnavailable:
                     return {'status': 'failed', 'delivery': 'not_dispatched', 'effect_applied': False,
                             'correction_allowed': True,

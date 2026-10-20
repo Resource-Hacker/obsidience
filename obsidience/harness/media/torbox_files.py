@@ -203,7 +203,7 @@ def refresh(config: dict, registered: dict) -> str:
 
 
 def describe(config: dict, root: dict, relative: str) -> tuple[str, dict]:
-    from .torbox import TorBoxAPI, _select, _episode_span, _selection_plan
+    from .torbox import TorBoxAPI, select_file, _episode_span, _selection_plan
     _parts(relative)
     if PurePosixPath(relative).suffix.lower() not in ('.mkv', '.mp4', '.m4v', '.webm'):
         raise MediaUnavailable('unsupported_virtual_media')
@@ -239,7 +239,7 @@ def describe(config: dict, root: dict, relative: str) -> tuple[str, dict]:
                 continue
             candidate.update({'season': span[0] if span else None,
                               'episode': span[1] if span else None})
-            selected = _select(candidate, row['files'])
+            selected = select_file(candidate, row['files'])
             if selected != file:
                 continue
             registered = {'hash': row['hash'], 'torrent_id': row['torrent_id'],

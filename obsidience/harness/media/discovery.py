@@ -460,11 +460,11 @@ async def candidates(metadata_id: str, *, season: int | None = None,
     if cached_provider and output:
         matches = await cached_provider.cache_matches(
             [pending[row['candidate_id']] for row in output], context.get('_capability_cancel_event'))
-        from .tiramisu import _normal_hash
+        from .tiramisu import normal_hash
         cached_output = []
         for row in output:
             private = pending[row['candidate_id']]
-            match = matches.get(_normal_hash(private['hash']))
+            match = matches.get(normal_hash(private['hash']))
             if match:
                 private.update(match)
                 row['cached'] = True

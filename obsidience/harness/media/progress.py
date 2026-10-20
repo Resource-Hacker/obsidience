@@ -16,7 +16,7 @@ import time
 import httpx
 
 from .config import MediaUnavailable, load_config
-from .jellyfin import _id, _token
+from .jellyfin import catalogue_id, _token
 
 INTERVAL = 15.0
 _SEQUENCE = threading.Lock()  # One TV device session: old stop precedes the next start.
@@ -146,11 +146,11 @@ class PlaybackProgress:
 
     def _stored(self, client):
         page = self._request(client, 'GET', '/Items', params={
-            'userId': self.config['catalogue']['user_id'], 'ids': _id(self.source['item_id']),
+            'userId': self.config['catalogue']['user_id'], 'ids': catalogue_id(self.source['item_id']),
             'limit': 2, 'recursive': 'true', 'enableImages': 'false', 'enableUserData': 'true'})
         items = page.get('Items')
         if (not isinstance(items, list) or len(items) != 1 or not isinstance(items[0], dict)
-                or _id(items[0].get('Id')) != _id(self.source['item_id'])):
+                or catalogue_id(items[0].get('Id')) != catalogue_id(self.source['item_id'])):
             raise MediaUnavailable('progress_item_unavailable')
         data = items[0].get('UserData')
         if not isinstance(data, dict):
@@ -167,7 +167,7 @@ class PlaybackProgress:
         position = vod.get('position')
         if type(position) not in (int, float) or not 0 <= position <= 1_000_000_000:
             raise MediaUnavailable('progress_position_unavailable')
-        payload = {'ItemId': _id(self.source['item_id']), 'MediaSourceId': self.source['media_source_id'],
+        payload = {'ItemId': catalogue_id(self.source['item_id']), 'MediaSourceId': self.source['media_source_id'],
                    'PlaySessionId': self.generation, 'PositionTicks': round(position * 10_000_000)}
         if not stopped:
             payload.update(PlayMethod='DirectPlay', CanSeek=vod.get('seekable') is True,
@@ -221,7 +221,7 @@ class PlaybackProgress:
             catalogue = self.config.get('catalogue') or {}
             info = self._request(client, 'GET', '/System/Info/Public')
             user = self._request(client, 'GET', '/Users/Me')
-            if info.get('Id') != catalogue.get('instance_id') or _id(user.get('Id')) != catalogue.get('user_id'):
+            if info.get('Id') != catalogue.get('instance_id') or catalogue_id(user.get('Id')) != catalogue.get('user_id'):
                 raise MediaUnavailable('progress_identity_changed')
             vod, deadline = None, time.monotonic() + 5
             while vod is None and not self.finished.is_set() and time.monotonic() < deadline:

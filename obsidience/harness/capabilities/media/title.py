@@ -357,29 +357,29 @@ async def _held(rows: list[dict], context: dict) -> tuple[bool, dict | None]:
     inventory; Tiramisu lists its registered library. A truncated or unreadable inventory
     raises: absence must be established before any new registration.
     """
-    from ...media.tiramisu import Tiramisu, _episode_path_identity, _normal_hash
+    from ...media.tiramisu import Tiramisu, episode_path_identity, normal_hash
     privates = context['_media_acquisition_candidates']
     first = privates[rows[0]['candidate_id']]
     cancel = context.get('_capability_cancel_event')
     held = set()
     if first.get('debrid_binding') or load_config().get('debrid', {}).get('enabled'):
-        from ...media.torbox import TorBoxAPI, _select
+        from ...media.torbox import TorBoxAPI, select_file
         tag = f'[imdbid-{first["imdb"]}]'
         for torrent in await TorBoxAPI().mylist(cancel=cancel):
-            if tag in torrent['name'] and (first['type'] == 'movie' or _select(first, torrent['files'])):
+            if tag in torrent['name'] and (first['type'] == 'movie' or select_file(first, torrent['files'])):
                 held.add(torrent['hash'])
     else:
         kind = 'movie' if first['type'] == 'movie' else 'tv'
-        status, body = await Tiramisu()._request('GET', f'/api/library/list?type={kind}', cancel=cancel, timeout=6)
-        if status != 200 or not isinstance(body, list) or len(body) > 20000:
+        body = await Tiramisu().library(kind, cancel=cancel)
+        if body is None:
             raise MediaUnavailable('tiramisu_reconcile_unavailable')
         for row in body:
             if isinstance(row, dict) and (row.get('imdb') == first['imdb'] if kind == 'movie' else (
-                    _episode_path_identity(row.get('path'), first, require_hash=False)
+                    episode_path_identity(row.get('path'), first, require_hash=False)
                     == (first['season'], first['episode']))):
-                held.add(_normal_hash(row.get('hash')))
+                held.add(normal_hash(row.get('hash')))
     held.discard('')
-    matching = next((row for row in rows if _normal_hash(privates[row['candidate_id']]['hash']) in held), None)
+    matching = next((row for row in rows if normal_hash(privates[row['candidate_id']]['hash']) in held), None)
     return bool(held), matching
 
 

@@ -43,7 +43,7 @@ def _show_folder_names(candidate: dict) -> set[str]:
     return {current, base}
 
 
-def _episode_path_identity(path: object, candidate: dict, *, require_hash: bool = True) -> tuple[int, int] | None:
+def episode_path_identity(path: object, candidate: dict, *, require_hash: bool = True) -> tuple[int, int] | None:
     if not isinstance(path, str) or len(path) > 4096 or '\\' in path:
         return None
     parts = PurePosixPath(path).parts
@@ -59,13 +59,13 @@ def _episode_path_identity(path: object, candidate: dict, *, require_hash: bool 
     match = re.fullmatch(r'(.+)_s([0-9]{2})e([0-9]{2})_([a-f0-9]{8})\.mkv', filename)
     if (not match or re.sub(r'[^a-z0-9]', '', match.group(1)) != title
             or parts[folder_index + 1] != f'Season.{int(match.group(2)):02d}'
-            or require_hash and match.group(4) != _normal_hash(candidate['hash'])[:8]):
+            or require_hash and match.group(4) != normal_hash(candidate['hash'])[:8]):
         return None
     return int(match.group(2)), int(match.group(3))
 
 
-def _episode_path_matches(path: object, candidate: dict, *, require_hash: bool = True) -> bool:
-    return _episode_path_identity(path, candidate, require_hash=require_hash) == (
+def episode_path_matches(path: object, candidate: dict, *, require_hash: bool = True) -> bool:
+    return episode_path_identity(path, candidate, require_hash=require_hash) == (
         candidate['season'], candidate['episode'])
 
 
@@ -191,25 +191,33 @@ class Tiramisu:
         except (httpx.HTTPError, OSError):
             raise MediaUnavailable('tiramisu_request_uncertain') from None
 
+    async def library(self, kind: str, *, cancel=None, limit: int = 20000) -> list | None:
+        """The provider's library rows of one kind (``movie`` or ``tv``), or None for any other answer."""
+        status, body = await self._request('GET', f'/api/library/list?type={kind}', cancel=cancel, timeout=6)
+        return body if status == 200 and isinstance(body, list) and len(body) <= limit else None
+
+    async def health(self) -> dict | None:
+        """The provider's readiness document, or None for any other answer."""
+        status, body = await self._request('GET', '/health', timeout=3)
+        return body if status == 200 and isinstance(body, dict) else None
+
     async def _list_exact(self, candidate: dict, cancel=None) -> dict | None:
-        content_type = 'movie' if candidate['type'] == 'movie' else 'tv'
-        status, body = await self._request('GET', f'/api/library/list?type={content_type}',
-                                           cancel=cancel, timeout=6)
-        if status != 200 or not isinstance(body, list) or len(body) > 20000:
+        body = await self.library('movie' if candidate['type'] == 'movie' else 'tv', cancel=cancel)
+        if body is None:
             raise MediaUnavailable('tiramisu_reconcile_unavailable')
-        expected = _normal_hash(candidate['hash'])
+        expected = normal_hash(candidate['hash'])
         saw_hash = False
         for row in body:
             if not isinstance(row, dict):
                 continue
-            row_episode = (_episode_path_identity(row.get('path'), candidate, require_hash=False)
+            row_episode = (episode_path_identity(row.get('path'), candidate, require_hash=False)
                            if candidate['type'] == 'series' else None)
             if (candidate['type'] == 'series' and row_episode == (candidate['season'], candidate['episode'])
                     and row.get('season') == candidate['season']
                     and row.get('episode') == candidate['episode']
-                    and _normal_hash(row.get('hash')) != expected):
+                    and normal_hash(row.get('hash')) != expected):
                 raise MediaUnavailable('tiramisu_episode_replacement_prohibited')
-            if _normal_hash(row.get('hash')) != expected:
+            if normal_hash(row.get('hash')) != expected:
                 continue
             saw_hash = True
             if candidate['type'] == 'movie':
@@ -218,7 +226,7 @@ class Tiramisu:
                         and row['path'].lower().endswith('.mkv')):
                     return {'files': 1, 'already_present': True}
                 raise MediaUnavailable('tiramisu_existing_identity_conflict')
-            row_episode = _episode_path_identity(row.get('path'), candidate)
+            row_episode = episode_path_identity(row.get('path'), candidate)
             if row_episode is None:
                 raise MediaUnavailable('tiramisu_existing_identity_conflict')
             if (row_episode == (candidate['season'], candidate['episode'])
@@ -282,7 +290,7 @@ class Tiramisu:
                     'already_present': True, 'must_not_replay': True}
         payload = {
             'type': 'movie' if candidate['type'] == 'movie' else 'tv',
-            'hash': _normal_hash(candidate['hash']),
+            'hash': normal_hash(candidate['hash']),
             'title': candidate['title'],
             'release_title': candidate['release_title'],
             'metadata_wait': 20,
@@ -312,7 +320,7 @@ class Tiramisu:
                                                cancel=cancel, timeout=35)
             if status in (200, 201) and isinstance(body, dict):
                 files = body.get('files')
-                added_hash = _normal_hash(body.get('hash'))
+                added_hash = normal_hash(body.get('hash'))
                 added_type = body.get('type')
                 if candidate['type'] == 'movie':
                     exact_file = any(isinstance(row, dict)
@@ -324,7 +332,7 @@ class Tiramisu:
                     exact_file = any(isinstance(row, dict)
                                      and row.get('season') == candidate['season']
                                      and row.get('episode') == candidate['episode']
-                                     and _episode_path_matches(row.get('path'), candidate)
+                                     and episode_path_matches(row.get('path'), candidate)
                                      and type(row.get('file_index')) is int
                                      for row in files) if isinstance(files, list) else False
                 if (added_hash == payload['hash'] and added_type == payload['type']
@@ -383,7 +391,7 @@ class Tiramisu:
         return result
 
 
-def _normal_hash(value: object) -> str:
+def normal_hash(value: object) -> str:
     if not isinstance(value, str):
         return ''
     text = value.strip().lower()

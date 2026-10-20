@@ -55,12 +55,12 @@ def preview_record(token: str, kind: str) -> dict:
 
 def source_fingerprint(candidate: dict) -> str:
     """Stable private source identity; volatile seeder/ranking fields cannot choose it."""
-    from .tiramisu import _normal_hash
+    from .tiramisu import normal_hash
     identity = {key: candidate.get(key) for key in (
         'imdb', 'type', 'title', 'year', 'season', 'episode', 'first_air_date',
         'release_title', 'provider', 'instance_id', 'config_fingerprint', 'socket_identity',
         'debrid_binding', 'debrid_file', 'debrid_plan', 'season_episodes', 'series_episodes')}
-    identity['hash'] = _normal_hash(candidate.get('hash'))
+    identity['hash'] = normal_hash(candidate.get('hash'))
     if not identity['hash']:
         raise MediaUnavailable('Invalid discovery source identity')
     return hashlib.sha256(json.dumps(identity, sort_keys=True, separators=(',', ':'),
