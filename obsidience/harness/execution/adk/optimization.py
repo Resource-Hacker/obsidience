@@ -122,6 +122,10 @@ TRIAL_SECONDS = 240
 JOB_SECONDS = 2400
 MAX_TRAJECTORY_BYTES = 160_000
 MAX_TRIAL_SUMMARY_CHARS = 32_000
+# Optimizer sessions return whole instruction units as JSON: six Harness2 sessions of
+# job 7c3cf1a0 stopped at the model's 3,584-token reply cap (2026-10-19) and every
+# truncated reply is refused, so these background sessions get room for a full Runbook.
+OPTIMIZER_MAX_TOKENS = 12_288
 
 # Repetitions of one case are independent samples of one model: the unchanged
 # baseline's training passes varied by up to two of five between measurements
@@ -600,6 +604,7 @@ class ReservedModelProvider:
                 reply = await llm.chat([{'role': 'system', 'content': request.spec.system_context},
                                         {'role': 'user', 'content': request.spec.task_prompt}],
                                        model=model, reasoning_effort=self.effort,
+                                       max_tokens=OPTIMIZER_MAX_TOKENS,
                                        response_schema=json.loads(canonical_json(request.spec.output_schema)))
         error = None
         output = None
