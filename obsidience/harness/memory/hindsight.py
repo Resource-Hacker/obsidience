@@ -170,6 +170,8 @@ class MemoryDeliveryConflict(ValueError):
 class Hindsight:
     def __init__(self):
         self.client = None
+        # Synchronous reads of native bank graphs for presentation worker threads.
+        self.graph_client = None
         self.task = None
         self.wake = asyncio.Event()
         self.banks = {}
@@ -244,6 +246,9 @@ class Hindsight:
         self.client = httpx.AsyncClient(
             base_url=CONFIG.extras["memory"]["hindsight_url"].rstrip("/"),
             timeout=15, trust_env=False, headers={"Accept-Encoding": "identity", **hindsight_auth_headers()})
+        self.graph_client = httpx.Client(
+            base_url=CONFIG.extras["memory"]["hindsight_url"].rstrip("/"),
+            timeout=20, trust_env=False, headers={"Accept-Encoding": "identity", **hindsight_auth_headers()})
         self.loop = asyncio.get_running_loop()
         from ..knowledge.vault import iter_notes
         self.banks = {bank_for(n.ref): n.ref for n in iter_notes() if n.kind == "agent"}
@@ -272,7 +277,9 @@ class Hindsight:
                 await self.task
         if self.client:
             await self.client.aclose()
-        self.task = self.client = None
+        if self.graph_client:
+            self.graph_client.close()
+        self.task = self.client = self.graph_client = None
         self.extraction_checks.clear()
 
     def enqueue(self, agent_ref, text, *, source, identifier, related_refs=(), timestamp=None, previous_text=None):
@@ -407,6 +414,19 @@ class Hindsight:
             if raise_errors:
                 raise
             return False
+
+    def graph_read(self, bank: str, path: str, **params) -> dict:
+        """One blocking GET of a bank's native graph API (``/stats``, ``/graph``, ``/memories/list``).
+
+        For presentation worker threads only (the Memory pane and Discord
+        projections), never the event loop: a complete historical graph is large.
+        """
+        client = self.graph_client
+        if client is None:
+            raise RuntimeError("Hindsight is not running in this Harness lifetime")
+        result = client.get("/v1/default/banks/" + quote(bank, safe="") + path, params=params)
+        result.raise_for_status()
+        return result.json()
 
     async def api(self, method, path, **kwargs):
         if self.client is None:

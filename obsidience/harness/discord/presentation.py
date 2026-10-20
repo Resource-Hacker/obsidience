@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import hashlib
-import json
 import re
 
 from ..knowledge import projection
@@ -131,12 +130,12 @@ def memory_snapshot():
              'nodes': [], 'edges': [], 'total': 0, 'limited': False}
     bank = ''
     try:
+        from ..graphs.memory import project
         from ..memory.hindsight import MEMORY, bank_for
-        from ..interfaces.api.routes.graphs import memory_graph
         bank = bank_for(AGENT_REF)
         if MEMORY.banks.get(bank) != AGENT_REF:
             return empty, {}, ''
-        native = json.loads(memory_graph(bank, limit=MAX_MEMORY_NODES).body)
+        native = project(bank, limit=MAX_MEMORY_NODES)
         if len(native['nodes']) > MAX_MEMORY_NODES:
             return empty, {}, 'memory:' + bank
         mapping = {node['id']: opaque(node['id']) for node in native['nodes']}

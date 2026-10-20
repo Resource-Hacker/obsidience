@@ -16,7 +16,8 @@ history importer and separate coding wiki are deliberately not mounted.
    observations in PostgreSQL/pgvector. Each accepted Agent identity has its own
    bank. These are historical, attributed, unverified memories.
 3. Memory is a separate movable graph pane. It reads native per-Agent memory
-   records and relationships through the provider graph API. Exact
+   records and relationships through the provider graph API (this port's
+   `graph_read`; `../graphs/memory.py` projects them for the pane and Discord). Exact
    `@memory/<bank>/<id>` references remain readable in the existing Reader for
    evidence inspection. No raw memory nodes or native provider edges enter the
    accepted Article graph. Inspection never grants another Agent bank access.
