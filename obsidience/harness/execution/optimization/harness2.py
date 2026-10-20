@@ -208,7 +208,7 @@ class Job:
     def session_spec(self, body, mission, evidence):
         lines = body.split('\n')
         units = [{'unit': i, 'text': '\n'.join(lines[a:b])}
-                 for i, (a, b) in enumerate(native.instruction_units(body), 1)]
+                 for i, (a, b) in native.editable_units(body, admission.subject_ref(self.document))]
         if not units:
             raise ValueError('Instruction body has no editable units')
         # Preserve the existing narrow edit protocol, with an explicit unchanged incumbent.

@@ -238,7 +238,25 @@ class AgentPlugin(BasePlugin):
 
     # Tool policy -------------------------------------------------------
     async def before_tool_callback(self, *, tool, tool_args, tool_context):
-        return self.admit(tool.name, tool_args)
+        before = len(self.trace)
+        response = self.admit(tool.name, tool_args)
+        if (response is not None and len(self.trace) == before + 1
+                and self.trace[-1].get('invalid_tool') == tool.name):
+            self._offer_refusal(tool.name, tool_args, self.trace[-1]['obs'])
+        return response
+
+    def _offer_refusal(self, name: str, args: dict, observation: str) -> None:
+        """Offer the Executive's refused native call to Audit, as a rejected completion is.
+
+        A Task's refused call stays a Tool-contract finding; trials are never captured.
+        """
+        if self.task_mode or self.evaluation is not None:
+            return
+        from ..optimization.incidents import record, snapshot
+        try:
+            record(snapshot(self.ex, name, args, refused=True), self.run, self.ex.step + 1, observation, 'returned')
+        except (ValueError, OSError, KeyError, TypeError) as exc:
+            self.emit('error', 'AutoSaddler decision capture unavailable', [str(exc)[:300]])
 
     async def after_tool_callback(self, *, tool, tool_args, tool_context, result):
         """End a voice command on its verified receipt, with the cue and no closing step.

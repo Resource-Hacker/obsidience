@@ -127,6 +127,9 @@ def reconcile_rejections(notes: list) -> None:
                     # occurrences of one failure; the validator's text does not.
                     if isinstance(result, dict):
                         rejection = f"Completion rejected: {result.get('error', '')}."[:1500]
+                    elif terminal.get('refused'):
+                        # An argument diagnostic echoes the arguments, which vary between occurrences.
+                        rejection = str(result).split(' You sent: ')[0][:1500]
                     legacy = (attested[0]['tool'], str(attested[0]['result'])[:1500])
             except (ValueError, OSError, KeyError, TypeError):
                 pass  # Retained public evidence can still establish the incident.
@@ -438,6 +441,29 @@ def validate_body(body: str, baseline: str, subject: str = EXECUTIVE) -> None:
         raise ValueError('Candidate must contain an Article body without metadata')
     if set(body_links(body, subject + '.md')) != set(body_links(baseline, subject + '.md')):
         raise ValueError('Candidate must preserve the exact authored Article links')
+    old, new = bound_spans(baseline, subject), bound_spans(body, subject)
+    if (len(old) != 1 or len(new) != 1
+            or (body[:new[0][0]], body[new[0][1]:]) != (baseline[:old[0][0]], baseline[old[0][1]:])):
+        raise ValueError('An Executive candidate may change only the Runtime section its prompt carries')
+
+
+def bound_spans(body: str, subject: str) -> list[tuple[int, int]]:
+    """Character spans of a subject's body that a case checks, swaps and may edit.
+
+    The Executive's prompt carries only the executor's selection of its identity
+    (its Runtime section, compiled with no operation); other subjects, the whole body.
+    """
+    if subject != EXECUTIVE:
+        return [(0, len(body))]
+    from types import SimpleNamespace
+    from ..executor import _instruction_ranges
+    return _instruction_ranges(SimpleNamespace(ref=subject, body=body, meta={}))
+
+
+def bound_instructions(note) -> str:
+    """The instruction text of ``note`` that its captured prompts carry (executor._instruction_text)."""
+    from ..executor import _instruction_text
+    return _instruction_text(note) if note.ref == EXECUTIVE else note.body.strip()
 
 
 def report_result(report_id: str, report: dict) -> dict:

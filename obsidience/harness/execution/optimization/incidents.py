@@ -26,8 +26,9 @@ CONTEXT_FIELDS = {
 }
 
 
-def snapshot(dispatch, name: str, args: dict) -> dict | None:
-    if (name not in SUPPORTED or dispatch.task.ref in {AUDITOR, 'Tasks/repair'}
+def snapshot(dispatch, name: str, args: dict, refused: bool = False) -> dict | None:
+    """``refused``: a native call the loop refused before dispatch (unavailable or invalid arguments)."""
+    if ((name not in SUPPORTED and not refused) or dispatch.task.ref in {AUDITOR, 'Tasks/repair'}
             or dispatch.visual_context_seen or not dispatch.ctx.get('run_id')):
         return None
     context = {key: value for key, value in dispatch.ctx.items() if key in CONTEXT_FIELDS}
@@ -39,7 +40,8 @@ def snapshot(dispatch, name: str, args: dict) -> dict | None:
         # live mutable context is admitted as a complete replay input.
         raw = json.dumps({'context': context, 'messages': messages,
                           'prompt_format': getattr(dispatch, 'prompt_format', 'activation'),
-                          'args': args, 'tool': name, 'allowed': dispatch.allowed}, ensure_ascii=False)
+                          'args': args, 'tool': name, 'allowed': dispatch.allowed,
+                          **({'refused': True} if refused else {})}, ensure_ascii=False)
         if len(raw.encode()) > 160_000:
             return None
         return json.loads(raw)
@@ -51,7 +53,8 @@ def record(sample: dict | None, run_id: str, step: int, result: object, status: 
     if sample is None:
         return
     rejected = (isinstance(result, dict) and result.get('accepted') is False
-                or isinstance(result, str) and result.startswith(('Proposal rejected:', 'Tool prerequisite rejected:')))
+                or isinstance(result, str) and result.startswith(('Proposal rejected:', 'Tool prerequisite rejected:'))
+                or sample.get('refused') is True)
     if status != 'returned':
         return
     if not rejected and sample['tool'] == 'task.complete' and (
@@ -95,6 +98,8 @@ def record(sample: dict | None, run_id: str, step: int, result: object, status: 
 
 
 def receipt_matches(sample: dict) -> bool:
+    if sample.get('refused'):
+        return _refusal_recorded(sample)
     receipts = INDEX.tool_run_receipts(sample['run_id']) or {}
     encoded = json.dumps(sample['result'], sort_keys=True).encode()
     signature = sample['tool'] + ':sha256:' + store.sha256(json.dumps(sample['args'], sort_keys=True).encode())
@@ -103,6 +108,23 @@ def receipt_matches(sample: dict) -> bool:
                and call.get('result_chars') == len(encoded)
                and call.get('signature') == signature and call.get('step') == sample['step']
                for call in receipts.get('calls', []))
+
+
+def _refusal_recorded(sample: dict) -> bool:
+    """A refused call has no dispatch receipt; the run's committed trace records the refusal.
+
+    An argument diagnostic echoes the arguments sent, so its exact text binds them.
+    """
+    from ..executor import _bounded_trace_value
+    run = INDEX.run(sample['run_id'])
+    try:
+        entries = json.loads(run['trace']) if run and run.get('status') in {'completed', 'review', 'failed', 'blocked'} else []
+    except (TypeError, ValueError):
+        return False
+    expected = _bounded_trace_value(sample['result'])
+    return isinstance(entries, list) and any(
+        isinstance(entry, dict) and entry.get('invalid_tool') == sample['tool']
+        and entry.get('not_dispatched') is True and entry.get('obs') == expected for entry in entries)
 
 
 def check_current(sample: dict) -> None:
@@ -123,8 +145,9 @@ def _check_evidence(sample: dict) -> None:
             raise ValueError(DEPENDENCY_CHANGED + ref)
     if not receipt_matches(sample):
         raise ValueError('Captured decision has no exact committed Tool receipt')
+    from .admission import bound_instructions
     subject = load_note(sample['subject'] + '.md')
-    if not any(subject.body.strip() in row['content'] for row in messages):
+    if not any(bound_instructions(subject) in row['content'] for row in messages):
         raise ValueError('The captured prompt does not contain its exact instruction body')
 
 
@@ -135,7 +158,9 @@ def _current_instructions(sample: dict) -> dict:
     Without it the sample is returned unchanged and fails the dependency check.
     """
     import subprocess
+    from dataclasses import replace
     from ...knowledge import format as article_format
+    from .admission import bound_instructions
     subject = load_note(sample['subject'] + '.md')
     messages = sample.get('messages')
     if subject is None or not isinstance(messages, list):
@@ -151,7 +176,8 @@ def _current_instructions(sample: dict) -> dict:
             raw = subprocess.run([*git, 'show', f'{commit}:{subject.path}'],
                                  capture_output=True, check=True, timeout=10).stdout
             if store.sha256(raw) == sample['subject_sha256']:
-                captured = article_format.loads(raw.decode('utf-8'))[1].strip()
+                meta, body = article_format.loads(raw.decode('utf-8'))
+                captured = bound_instructions(replace(subject, meta=meta, body=body))
                 break
         else:
             return sample
@@ -164,7 +190,7 @@ def _current_instructions(sample: dict) -> dict:
     for message in messages:
         if isinstance(message, dict) and isinstance(message.get('content'), str):
             replaced += message['content'].count(captured)
-            message['content'] = message['content'].replace(captured, subject.body.strip())
+            message['content'] = message['content'].replace(captured, bound_instructions(subject))
     if not replaced:
         return sample
     return {**sample, 'messages': messages, 'subject_sha256': current, 'captured_subject_sha256': sample['subject_sha256']}
@@ -220,7 +246,9 @@ def prepare(run_id: str, current_instructions: bool = False) -> dict:
             errors.append(str(exc))
     if selected is None:
         raise ValueError(errors[0] if errors else 'No captured rejection is eligible for isolated evaluation')
-    key = store.sha256((selected['context']['task'] + ':' + selected['tool']).encode())
+    # A refused call has no accepted decisions of its own; the Task's accepted completions are its controls.
+    lane = 'task.complete' if selected.get('refused') else selected['tool']
+    key = store.sha256((selected['context']['task'] + ':' + lane).encode())
     controls_path = store.root() / 'controls' / (key + '.json')
     controls = json.loads(controls_path.read_text()) if controls_path.exists() else []
     eligible = []
@@ -414,11 +442,14 @@ def validate_decision(sample: dict, tool: str, args: dict) -> tuple[bool, str]:
         jsonschema.validate(args, argument_schema(tool))
         if error := precondition_error(tool, args, context):
             raise ValueError(error)
-        if tool != sample['tool']:
+        # A call refused as unavailable is corrected by any available operation:
+        # once only completion remains, finishing failed is the honest decision.
+        unavailable = sample.get('refused') is True and sample['tool'] not in sample['allowed']
+        if tool != sample['tool'] and not unavailable:
             raise ValueError('This decision case requires the original operation after any read-only steps')
         if tool == 'task.complete':
             # A model may not replace a rejected success claim with a fabricated failure.
-            if args.get('status') == 'failed':
+            if args.get('status') == 'failed' and not unavailable:
                 raise ValueError('Turning a correctable rejection into failure is not an improvement')
             outcome = complete(args, context)
             return bool(outcome.get('accepted')), str(outcome.get('error') or 'Completion contract satisfied')
@@ -430,6 +461,8 @@ def validate_decision(sample: dict, tool: str, args: dict) -> tuple[bool, str]:
             assert_proposal_scope(str(args.get('target', '')), context, resolver())
             stage_proposal(args, context, validate_only=True)
             return True, 'Proposal contract satisfied without staging or publication'
+        if sample.get('refused') is True:
+            return True, 'Available operation with arguments satisfying its contract; nothing dispatched'
         raise ValueError('No independent contract evaluator for this operation')
     except (ValueError, PermissionError, jsonschema.ValidationError) as exc:
         return False, str(exc)[:1500]

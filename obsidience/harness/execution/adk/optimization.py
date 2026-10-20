@@ -252,12 +252,15 @@ class NativeEvaluator:
                     from ..optimization.incidents import trial_read, validate_decision
                     sample = specification['sample']
                     messages = json.loads(json.dumps(sample['messages']))
+                    # The instruction text the prompt carries: the Executive's Runtime section, a Runbook's body.
+                    captured = admission.bound_instructions(subject)
+                    proposed = admission.bound_instructions(frozen.resolve(subject.ref))
                     replacements = 0
                     for message in messages:
                         content = message.get('content')
                         if isinstance(content, str):
-                            replacements += content.count(subject.body.strip())
-                            message['content'] = content.replace(subject.body.strip(), body.strip())
+                            replacements += content.count(captured)
+                            message['content'] = content.replace(captured, proposed)
                     if not replacements:
                         raise ValueError('The captured prompt does not contain its exact instruction body')
                     trial = DecisionTrial(sample, validate_decision, trial_read)
@@ -404,6 +407,16 @@ _LIST_ITEM = re.compile(r'\s*(?:[-*+]|\d+[.)])\s')
 UNIT_TEXT_LIMIT = 2500
 
 
+def editable_units(body: str, subject: str) -> list[tuple[int, tuple[int, int]]]:
+    """The numbered units a candidate may edit: those inside the subject's bound spans."""
+    starts = [0]
+    for line in body.split('\n'):
+        starts.append(starts[-1] + len(line) + 1)
+    bounds = admission.bound_spans(body, subject)
+    return [(number, (start, end)) for number, (start, end) in enumerate(instruction_units(body), 1)
+            if any(low <= starts[start] and starts[end] - 1 <= high for low, high in bounds)]
+
+
 def instruction_units(body: str) -> list[tuple[int, int]]:
     """Line spans of the body's paragraphs, list items and headings.
 
@@ -512,15 +525,15 @@ class ExecutivePrompts:
         elif kind == 'diagnose_patch':
             # The body as its numbered units; the envelope around it is not instruction text.
             lines = data.pop('candidate')['identity'].split('\n')
-            spans = instruction_units('\n'.join(lines))
-            if not spans:
+            units = editable_units('\n'.join(lines), admission.subject_ref(self.document))
+            if not units:
                 raise ValueError('The instruction body has no unit to edit')
             data['instruction_units'] = [{'unit': number, 'text': '\n'.join(lines[start:end])}
-                                         for number, (start, end) in enumerate(spans, 1)]
+                                         for number, (start, end) in units]
             properties = {'schema_version': {'const': 'autosaddler-diagnosis-patch/v1'},
                           'edits': {'type': 'array', 'minItems': 1, 'maxItems': 3, 'items': {
                               'type': 'object', 'properties': {
-                                  'unit': {'type': 'integer', 'enum': list(range(1, len(spans) + 1))},
+                                  'unit': {'type': 'integer', 'enum': [number for number, _span in units]},
                                   'action': {'type': 'string', 'enum': ['replace', 'insert_after']},
                                   'text': {'type': 'string', 'maxLength': UNIT_TEXT_LIMIT}},
                               'required': ['unit', 'action', 'text'], 'additionalProperties': False}},
