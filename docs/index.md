@@ -49,35 +49,31 @@ and the Tool call. **Recall:** Hindsight lights exactly the memories it returned
 on the memory timeline. **Code:** a coding agent's code-graph lookup lights the
 matching files and symbols, with a card in the graph labels' style.
 
-The clips below are recorded from the same bundle; the rotating ones are
-time-lapsed.
+The clips below are recorded from the real graph UI on a working installation,
+with its own graph settings: a real voice turn, its memory recall and a code lookup.
 
-<div class="clips" markdown>
-<div class="clip" markdown>
-![A thinking turn lighting the Articles in the Executive's context packet](media/thinking.gif)
+### Knowledge graph
 
-**Thinking.** When the Executive answers, the Articles in its context packet
-light up along the route from the Agent to each supplied Article.
-</div>
-<div class="clip" markdown>
-![Hindsight memories being recalled on the memory timeline](media/recall.gif)
+![The Executive's knowledge graph orbiting with its satellites while a voice turn lights its Thinking Packet and the Action Trace follows it](media/knowledge-hero.webp)
 
-**Recall.** A Hindsight recall lights exactly the memories the provider
-returned. Nothing glows that the provider did not return.
-</div>
-<div class="clip" markdown>
-![The Code graph of this repository rotating](media/code-graph.gif)
+A pilot light runs the route and the beam follows it to each Article in the
+Thinking Packet; the Action Trace follows the turn step by step.
 
-**Code.** This repository as indexed by codebase-memory-mcp: folders, files,
-classes and functions, with calls and imports as cross-links.
-</div>
-<div class="clip" markdown>
-![An Agent's Hindsight memory bank as a rotating timeline tube](media/memory-graph.gif)
+### Memory graph
 
-**Memory.** An Agent's Hindsight bank as a timeline tube, oldest to newest,
-colored by memory type.
-</div>
-</div>
+![An Agent's Hindsight memory bank as a timeline tube; a recall lights and labels the returned memories](media/memory-recall.webp)
+
+![The Action Trace's Hindsight recall with a card per returned memory](media/memory-recall-trace.png)
+
+A recall lights exactly the memories the provider returned, and the Action Trace
+opens into a card per memory with its type, age and recorded date.
+
+### Code graph
+
+![This repository's code graph; a coding agent's lookup lights the matched symbols while a card lists them](media/code-lookup.webp)
+
+A coding agent's lookup lights the matched files and symbols, with a card showing
+the query, the symbols, their paths and the call's duration.
 
 ## Voice
 

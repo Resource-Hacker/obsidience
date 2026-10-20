@@ -9,10 +9,10 @@ restart never stops it.
 
 <div class="clips" markdown>
 <div class="clip" markdown>
-![Still of a thinking turn: the supplied Articles are labelled and the route's beams are lit](../../media/thinking.png)
+![Still of a thinking turn: the supplied Articles are labelled, the route's beams are lit and the Action Trace follows the turn](../../media/knowledge-thinking.png)
 </div>
 <div class="clip" markdown>
-![Still of a recall: the returned memories and their neighbours are labelled on the timeline](../../media/recall.png)
+![Still of a recall: the returned memories are labelled on the timeline above the Action Trace's memory cards](../../media/memory-recall-still.png)
 </div>
 </div>
 

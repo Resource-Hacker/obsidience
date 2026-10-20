@@ -4,7 +4,13 @@
 
 **A graph-native, local-first agent harness and Linux desktop shell.**
 
-<img src="docs/media/knowledge-graph.gif" alt="The Obsidience knowledge graph rotating, with the specialist Agents orbiting it as satellites" width="760">
+[![Build checks](https://github.com/Resource-Hacker/obsidience/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Resource-Hacker/obsidience/actions/workflows/ci.yml)
+[![Docs](https://github.com/Resource-Hacker/obsidience/actions/workflows/docs.yml/badge.svg?branch=main)](https://resource-hacker.github.io/obsidience/)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
+<a href="https://resource-hacker.github.io/obsidience/"><img src="docs/media/live-demo.webp" alt="The live Obsidience graph demo: a thinking turn lighting its Articles while the Action Trace follows it" width="100%"></a>
+
+**[▶ Try the live, interactive graph](https://resource-hacker.github.io/obsidience/)** · the real graph UI running in your browser on Obsidience's own knowledge, code and history
 
 </div>
 
@@ -17,64 +23,51 @@ research and verify, Hindsight keeps per-Agent memory, and a Hyprland +
 Quickshell shell puts it all on the desktop as live 3D graphs that show exactly
 which Articles and memories the Agents were given.
 
-## What you're looking at
+The clips below are recorded from the real graph UI on a working installation,
+with its own graph settings: a real voice turn, its real memory recall and a real
+code lookup. The interactive demo above runs the same UI on public data, the
+starter Vault, this repository's code graph and its commit history.
 
-These clips are recorded from the real graph UI (the same React/Three.js bundle
-the shell runs), fed from this repository: the public starter Vault, the code
-index of this repository, and a set of invented demo memories. The rotating
-clips are time-lapsed; the graphs turn slowly on the desktop.
+## Knowledge graph
 
-The banner above is the Executive's knowledge graph: the Agent at the center,
-its subjects and Articles in craters on layered glass shells around it,
-hierarchy beams in each branch's color, and links between Articles as quiet
-fine threads. Darwin, Alexandria and Heimdall orbit it as their own smaller
-graphs, glass marbles with their memory dust floating inside.
+<img src="docs/media/knowledge-hero.webp" alt="The Executive's knowledge graph orbiting with Darwin, Alexandria and Heimdall as satellites; a voice turn lights its Thinking Packet while the Action Trace follows it" width="100%">
 
-<table>
-<tr>
-<td width="50%" valign="top">
-<img src="docs/media/thinking.gif" alt="A thinking turn lighting the Articles in the Executive's context packet">
-<p><b>Thinking.</b> When the Executive answers, the Articles in its context
-packet light up. A thin pilot light runs the route and the main beam follows
-it down the hierarchy to each supplied Article, which takes a label; links
-from a consulted Article light, every node the route passes ripples its glass
-layer, the activity card lists the turn's operations (here a Hindsight recall),
-and the central orb follows the spoken reply's waveform.</p>
-</td>
-<td width="50%" valign="top">
-<img src="docs/media/recall.gif" alt="Hindsight memories being recalled on the memory timeline">
-<p><b>Recall.</b> A Hindsight <code>Memories recalled</code> result lights
-the exact returned memories in the Agent's memory bank, the timeline lens
-opens around them, and their labels appear. Nothing glows that the provider
-did not return.</p>
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-<img src="docs/media/code-graph.gif" alt="The Code graph of this repository rotating">
-<p><b>Code.</b> This repository as indexed by
-<a href="https://github.com/DeusData/codebase-memory-mcp">codebase-memory-mcp</a>,
-laid out with the knowledge graph's spherical solver: folders, files,
-classes and functions, with calls and imports as cross-links. Saved files and
-coding-agent lookups light the exact files and symbols involved.</p>
-</td>
-<td width="50%" valign="top">
-<img src="docs/media/memory-graph.gif" alt="An Agent's Hindsight memory bank as a rotating timeline tube">
-<p><b>Memory.</b> An Agent's Hindsight bank as a timeline tube. Memories run
-oldest to newest along it, spaced by activity; color marks world facts,
-experiences and consolidated observations, and native Hindsight links hold
-the coil together. The desktop stage stacks one tube per Agent beside its
-role icon.</p>
-</td>
-</tr>
-</table>
+The Executive's knowledge graph: the Agent at the center, its subjects and
+Articles in craters on layered glass shells, hierarchy beams in each branch's
+colour and links between Articles as quiet threads. Darwin, Alexandria and
+Heimdall orbit as their own smaller graphs. When the Executive answers, a thin
+pilot light runs the route and the main beam follows it to every Article in its
+Thinking Packet, which take labels, while every node on the way ripples its
+glass layer. The **Action Trace** follows the same turn: the request, the
+Thinking Packet, the Hindsight recall, each Tool call and the outcome, with
+timings. The central orb follows the spoken reply's waveform.
 
-<table>
-<tr>
-<td width="50%"><img src="docs/media/thinking.png" alt="Still of a thinking turn: the supplied Articles are labelled and the route's beams are lit"></td>
-<td width="50%"><img src="docs/media/recall.png" alt="Still of a recall: the returned memories and their neighbours are labelled on the timeline"></td>
-</tr>
-</table>
+## Memory graph
+
+<img src="docs/media/memory-recall.webp" alt="An Agent's Hindsight memory bank as a timeline tube; a recall lights the returned memories and labels them" width="100%">
+
+<img src="docs/media/memory-recall-trace.png" alt="The Action Trace's Hindsight recall: the query, each returned memory as a card with its type, age and recorded date, and the recall timing" width="100%">
+
+Each Agent's Hindsight bank is a timeline tube: memories run oldest to newest,
+spaced by activity, coloured by type (world facts, experiences and consolidated
+observations), held together by Hindsight's own links. A `Memories recalled`
+result lights exactly the records the provider returned, and nothing it did not
+return. In the Action Trace the recall opens into a card per memory with its
+type, age, text and recorded date, whether it reached the turn, and how long the
+recall took. Memory is historical and unverified, separate from accepted
+Knowledge, and the trace says so.
+
+## Code graph
+
+<img src="docs/media/code-lookup.webp" alt="This repository's code graph; a coding agent's lookup lights the matched functions and files while a card lists them" width="100%">
+
+This repository as indexed by
+[codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp), laid out
+with the knowledge graph's spherical solver: folders, files, classes and
+functions, with calls and imports as cross-links. When a coding agent (Claude
+Code or Codex) searches or traces the code, the matched files and symbols light
+up and a card shows who asked, the query, the symbols with their paths and line
+ranges, and the call's duration. Saved files light up the same way.
 
 ## Voice
 
@@ -263,6 +256,29 @@ Validate the affected behavior directly with the needed build, logs and API/UI
 observations. The development build carries no automated test suite; add tests
 only when the owner asks.
 
+## Ontology
+
+Obsidience classifies everything by what it does, never by its folder or file
+name ([Golden ontology](obsidience/defaults/vault/Architecture/Harness/action-ontology.md)).
+Every knowledge-graph node is an **Article**, one
+[Open Knowledge Format](docs/ontology/okf.md) Markdown file, and an Article has
+one of six types:
+
+| Article type | What it is |
+| --- | --- |
+| **Knowledge** | Useful context; the default type |
+| **Agent** | One accountable executor with its identity, standing instructions and direct Skills |
+| **Task** | A reusable outcome with its acceptance condition |
+| **Runbook** | Reusable ordered or branching operating instructions |
+| **Skill** | How to use exactly one Tool |
+| **Tool** | One registered executable interface; its schema and execution live in code |
+
+**Source** (immutable evidence), **Capability** (the code behind a Tool) and
+**Module** (a product component: Harness, Shell, Media, TV) are not Article types.
+An **Activation** is one requested occurrence, a **Run** one attempt, and Tool
+**receipts** prove what was dispatched. The repository, the docs site, the issue
+labels and the changelog are organised by the same terms.
+
 ## How it works
 
 ```text
@@ -288,7 +304,76 @@ Review and execution receipts. Hyprland owns composition and desktop input;
 Quickshell presents native controls and panes, and a QtWebEngine presenter displays
 the shared React/Three.js knowledge graph.
 
+## Built on
+
+Obsidience composes maintained upstream projects, each behind one adapter that
+owns it. Pins, licenses and local patches are recorded in
+[`artifacts.lock.json`](artifacts.lock.json); each integration has its own page
+under [docs/integrations](docs/integrations/index.md).
+
+```mermaid
+flowchart LR
+  subgraph Harness["Harness"]
+    direction TB
+    adk["Google ADK<br/>agent loop"]
+    opt["Harness2 + AutoSaddler<br/>self-improvement"]
+    mem["Hindsight<br/>memory"]
+    okf["OKF<br/>Article files"]
+    voice["Pipecat, NeMo,<br/>Pocket TTS, microWakeWord"]
+    llama["llama.cpp<br/>local models"]
+    cbm["codebase-memory-mcp<br/>code graph"]
+  end
+  subgraph Shell["Shell"]
+    direction TB
+    hypr["Hyprland"]
+    qs["Quickshell"]
+    canvas["nodeterm<br/>agent canvas"]
+  end
+  subgraph Media["Media"]
+    direction TB
+    jf["Jellyfin"]
+    prov["Tiramisu, TorBox,<br/>rclone, Prowlarr"]
+  end
+  subgraph TV["TV"]
+    direction TB
+    sun["Sunshine + Moonlight"]
+  end
+  opt --> adk --> llama
+  okf -->|"Knowledge Articles"| adk
+  hypr ---|"hosts"| qs
+  mem --> llama
+  voice --> adk
+  qs -->|"panes, graph, chat"| adk
+  canvas --- qs
+  qs --- cbm
+  adk -->|"media Tools"| jf
+  prov --> jf
+  sun -->|"plays from"| jf
+```
+
+| Component | Role | Upstream | License |
+| --- | --- | --- | --- |
+| Google ADK | Model/Tool loop of every Agent | [google/adk-python](https://github.com/google/adk-python) | Apache-2.0 |
+| Harness2 | Instruction refinement search | [google-research/harness2](https://github.com/google-research/harness2) | Apache-2.0 |
+| AutoSaddler | Durable candidates and trials | [microsoft/AutoSaddler](https://github.com/microsoft/AutoSaddler) | MIT |
+| Hindsight | Per-Agent historical memory | [vectorize-io/hindsight](https://github.com/vectorize-io/hindsight) | MIT |
+| Open Knowledge Format | Article file format | [GoogleCloudPlatform/open-knowledge-format](https://github.com/GoogleCloudPlatform/open-knowledge-format) | Apache-2.0 |
+| llama.cpp | Local model and embedding server | [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp) | MIT |
+| Pipecat | Speech pipeline and local audio | [pipecat-ai/pipecat](https://github.com/pipecat-ai/pipecat) | BSD-2-Clause |
+| NVIDIA NeMo | Streaming speech recognition | [NVIDIA-NeMo/Speech](https://github.com/NVIDIA-NeMo/Speech) | Apache-2.0 |
+| Pocket TTS | Speech synthesis | [kyutai-labs/pocket-tts](https://github.com/kyutai-labs/pocket-tts) | MIT |
+| microWakeWord | Wake-word spotting | [OHF-Voice/pymicro-wakeword](https://github.com/OHF-Voice/pymicro-wakeword) | Apache-2.0 |
+| codebase-memory-mcp | Code graph and agents' code index | [DeusData/codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) | MIT |
+| nodeterm | Agent canvas in the Terminal pane | [eneskirca/nodeterm](https://github.com/eneskirca/nodeterm) | BUSL-1.1 |
+| Hyprland | Wayland compositor (patched package) | [hyprwm/Hyprland](https://github.com/hyprwm/Hyprland) | BSD-3-Clause |
+| Quickshell | Shell runtime and secure lock (patched) | [quickshell](https://git.outfoxxed.me/quickshell/quickshell) | LGPL-3.0-only |
+| SearXNG | Local metasearch for web search | [searxng/searxng](https://github.com/searxng/searxng) | AGPL-3.0-or-later |
+| Jellyfin | Media catalogue | [jellyfin/jellyfin](https://github.com/jellyfin/jellyfin) | GPL-2.0 |
+| Sunshine | TV session streaming | [LizardByte/Sunshine](https://github.com/LizardByte/Sunshine) | GPL-3.0-only |
+
 ## Documentation
+
+The full manual is the documentation site, **[resource-hacker.github.io/obsidience](https://resource-hacker.github.io/obsidience/)**: installation, configuration, the ontology and each Article type, every Module and integration, and the live graph demo. In the repository:
 
 - [DESIGN.md](DESIGN.md): the ontology, design laws and execution rules.
 - [Architecture](obsidience/defaults/vault/Architecture/Architecture.md): the
@@ -303,19 +388,19 @@ the shared React/Three.js knowledge graph.
 
 | Path | Responsibility |
 | --- | --- |
-| `obsidience/harness/` | API, CLI, conversation, execution, capabilities, models, knowledge and speech |
-| `obsidience/shell/` | Native desktop/session adapters, panes and graph presenter |
+| `obsidience/harness/` | **Harness Module:** API, CLI, conversation, execution, capabilities, models, knowledge and speech |
+| `obsidience/shell/` | **Shell Module:** native desktop/session adapters, panes and graph presenter |
 | `obsidience/ui/` | Shared React/Three.js graph and interface bundle |
 | `obsidience/browser/edge/` | Edge Cast extension, its native messaging host and theme policy |
-| `obsidience/media/` | Media server units, provider launchers and the TorBox mount |
-| `obsidience/tv/` | PC-hosted TV session (`host/`), its units (`systemd/`) and the Fire TV agent (`firetv-agent/`) |
+| `obsidience/media/` | **Media Module:** media server units, provider launchers and the TorBox mount |
+| `obsidience/tv/` | **TV Module:** PC-hosted TV session (`host/`), its units (`systemd/`) and the Fire TV agent (`firetv-agent/`) |
 | `obsidience/defaults/vault/` | Reviewed, distributable starter Articles |
 | `obsidience/vault/` | Ignored live Articles and local audit repository |
 | `obsidience/evidence/` | Ignored immutable Sources, Inbox and evidence |
 | `obsidience/state/` | Ignored SQLite, settings and runtime artifacts |
 | `obsidience/scripts/` | Development and runtime entry points |
 | `LICENSES/` | License texts of adopted code, recorded in `artifacts.lock.json` |
-| `docs/media/` | README screenshots and animations |
+| `docs/` | The documentation site (MkDocs Material), the live graph demo data and README media |
 
 Unit sources live beside the code that owns them: `obsidience/harness/systemd/`,
 `obsidience/shell/systemd/`, `obsidience/tv/systemd/` and the Media units in
@@ -324,3 +409,24 @@ Unit sources live beside the code that owns them: `obsidience/harness/systemd/`,
 Previously published Git history is distinct from the current installation
 snapshot. Removing live files from a new commit does not remove them from older
 commits, branches, forks or existing clones.
+
+## Contributing
+
+Issues, ideas and pull requests are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md)
+for the development setup, the ontology in practice, the validation policy (builds,
+typecheck, lint and direct checks; no test suite unless maintainers ask) and the
+commit style. Questions and show-and-tell go to
+[Discussions](https://github.com/Resource-Hacker/obsidience/discussions); please
+follow the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Security
+
+Report vulnerabilities privately through GitHub's
+[private vulnerability reporting](https://github.com/Resource-Hacker/obsidience/security/advisories/new);
+see [SECURITY.md](SECURITY.md).
+
+## License
+
+Obsidience is released under the [Apache License 2.0](LICENSE). Third-party code
+and assets keep their own licenses, listed in [NOTICE](NOTICE), [LICENSES/](LICENSES/)
+and [`artifacts.lock.json`](artifacts.lock.json).
