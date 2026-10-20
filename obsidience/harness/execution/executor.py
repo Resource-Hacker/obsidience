@@ -1445,11 +1445,12 @@ async def _run_execution(task: Note, depth: int = 0, reasoning_effort: str | Non
                 # reads. Keep the exact occurrence pending without replaying effects.
                 _update_execution_status(task, "pending", {"last_run": run_id,
                     "summary": "Yielded to foreground input without Tool effects; the same occurrence remains pending."})
-            if (task.ref == "Tasks/audit" and ctx.get("interruption_reason") == "foreground_admission"
+            if (task.ref == "Tasks/audit"
                     and ctx.get("_optimization_resume_case") == params.get("optimization_case")
                     and ctx.get("_optimization_resume_case")):
-                # Resume the private optimizer checkpoint through the same FIFO;
-                # its owner attests cancellation before any proposal staging.
+                # Foreground input or a Harness stop: resume the private optimizer
+                # checkpoint through the same FIFO; its owner attests cancellation
+                # before any report or proposal staging.
                 _update_execution_status(task, "pending", {"last_run": run_id,
                     "summary": "Executive optimization yielded before publication; its checkpoint is pending."})
         except Exception as exc:

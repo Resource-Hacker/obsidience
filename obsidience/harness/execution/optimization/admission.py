@@ -499,8 +499,6 @@ async def optimize(case_id: str, context: dict) -> dict:
                 await asyncio.wait((worker, waiter), return_when=asyncio.FIRST_COMPLETED)
                 if interrupt.is_set():
                     context['interruption_reason'] = 'foreground_admission'
-                    # Publication starts strictly after the joined worker.
-                    context['_optimization_resume_case'] = case_id
                     raise asyncio.CancelledError('foreground_admission')
             report = await worker
         finally:
@@ -536,6 +534,12 @@ async def optimize(case_id: str, context: dict) -> dict:
         from ...knowledge.vault import _atomic_write
         _atomic_write(store.root() / 'executive/jobs' / case_id / 'report.json', json.dumps(result, sort_keys=True))
         return result
+    except asyncio.CancelledError:
+        # Foreground input or a Harness stop. Every await above precedes the
+        # report and publication (both synchronous after the joined worker), so
+        # nothing was published; the Audit resumes this persisted job.
+        context['_optimization_resume_case'] = case_id
+        raise
     finally:
         _ACTIVE.discard(case_id)
 

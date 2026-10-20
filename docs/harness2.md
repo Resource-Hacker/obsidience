@@ -34,6 +34,9 @@ interruption. Backend, installed-source manifest, model, case content,
 implementation and experience inputs are bound to the job. Foreground interruption
 cancels and joins inference and the synchronous search worker before releasing
 ownership. Session, trial and job budgets remain bounded across retries.
+An Audit cancelled before `harness.optimize` returns, by foreground input or a
+Harness stop, has published nothing: its occurrence stays pending and the next
+Audit resumes the same persisted job. A returned report is never resumed.
 
 Only training evidence reaches proposals, composition or lesson extraction.
 Control cases and results stay outside that context. Retained lessons are bounded
