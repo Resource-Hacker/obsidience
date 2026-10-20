@@ -26,7 +26,7 @@ from pathlib import Path
 import httpx
 import pynvml
 
-from . import vram_plan
+from . import cloud, vram_plan
 from ..config import CONFIG
 from ..host.gpu_memory import GpuMemory, process_identity
 
@@ -127,6 +127,9 @@ class ModelSpec:
     family: str = ""
     supports_json_schema: bool = False
     supports_input_token_limit: bool = False
+    # "local", or the cloud CLI (cloud.CODEX / cloud.CLAUDE) that answers whole sessions.
+    provider: str = "local"
+    cli_model: str = ""
 
 
 class ModelResourceUnavailable(RuntimeError):
@@ -387,7 +390,33 @@ def _read_launch(model_id: str) -> tuple[str, ...]:
     return tuple(device for device in devices if device in GPU_DEVICES)
 
 
+def is_cloud(model_id: object) -> bool:
+    return cloud.split_id(str(model_id)) is not None
+
+
+def _cloud_spec(model_id: str) -> ModelSpec:
+    """A Codex or Claude Code session model; identity only, no local resources."""
+    found = cloud.describe(model_id)
+    return ModelSpec(
+        id=model_id, label=found["label"], base_url="", provider=found["provider"],
+        cli_model=found["cli_model"],
+        purpose="Structured whole-request sessions (Audit's Harness2 proposals) through the signed-in CLI",
+        context_tokens=found["context_tokens"], max_output_tokens=32_768,
+        max_context_tokens=found["context_tokens"], quantization="Cloud",
+        hardware="Cloud (no local GPU)",
+        runtime="Codex CLI · ChatGPT login" if found["provider"] == cloud.CODEX
+        else "Claude Code CLI · Claude account login",
+        # No client-side function calls: these cannot run the native Tool loop.
+        capabilities=("text", "reasoning", "structured_output"),
+        reasoning_budgets={}, supported_devices=(), default_allowed_devices=(), min_gpu_count=0,
+        default_gpu_memory_utilization=0.0, default_max_num_seqs=1, benchmark_kind="none",
+        hardware_assignable=False, supports_json_schema=True,
+    )
+
+
 def configured_spec(model_id: str) -> ModelSpec:
+    if is_cloud(model_id):
+        return _cloud_spec(model_id)
     spec = MODELS[model_id]
     profile = _read_settings()["models"][model_id]
     return replace(
@@ -399,19 +428,34 @@ def configured_spec(model_id: str) -> ModelSpec:
 
 def normalize_model(value: object, *, allow_auto: bool = True) -> str:
     model = str(value or AUTO_MODEL).strip().lower()
+    if is_cloud(model):
+        return model
     allowed = {model_id for model_id, spec in MODELS.items() if spec.task_capable}
     if allow_auto:
         allowed.add(AUTO_MODEL)
     if model not in allowed:
-        raise ValueError(f"model must be one of: {', '.join(sorted(allowed))}")
+        raise ValueError(f"model must be one of: {', '.join(sorted(allowed))}, codex:<model> or claude:<alias>")
     return model
 
 
 def resolve_model(preference: object, agent_ref: str) -> ModelSpec:
+    """The model that runs a Task's native Tool loop.
+
+    A cloud session model cannot run that loop (its CLI returns no client-side
+    function calls), so a Task that selects one keeps the automatic local model
+    for its loop and uses the cloud model only for sessions
+    (``resolve_session_model``).
+    """
     selected = normalize_model(preference)
-    if selected == AUTO_MODEL:
+    if selected == AUTO_MODEL or is_cloud(selected):
         selected = normalize_model(CONFIG.llm_model, allow_auto=False)
     return configured_spec(selected)
+
+
+def resolve_session_model(preference: object, agent_ref: str) -> ModelSpec:
+    """The model that answers whole structured sessions, such as Harness2 proposals."""
+    selected = normalize_model(preference)
+    return _cloud_spec(selected) if is_cloud(selected) else resolve_model(selected, agent_ref)
 
 
 MODEL_API_KEY_CREDENTIAL = "obsidience-model-api-key"
@@ -564,6 +608,15 @@ def _verification_lines(spec: ModelSpec) -> list[str]:
 
 
 def _model_source_identity(spec: ModelSpec) -> dict:
+    if spec.provider != "local":
+        # No local artifact. The CLI version is left out: Claude Code and Codex update
+        # themselves, and an update must not invalidate a prepared Audit case.
+        identity = {"schema": "obsidience.model-source.v1", "model_id": spec.id, "label": spec.label,
+                    "provider": spec.provider, "cli": str(cloud.CLI[spec.provider]),
+                    "cli_model": spec.cli_model, "runtime": spec.runtime,
+                    "capabilities": list(spec.capabilities)}
+        material = json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
+        return {**identity, "fingerprint": "sha256:" + hashlib.sha256(material).hexdigest()}
     installed, size = _installed(spec)
     model_path = spec.model_path
     resolved_path = None
@@ -748,7 +801,7 @@ def _benchmark_doc(value: object, spec: ModelSpec) -> dict | None:
     return result
 
 
-def catalog() -> list[dict]:
+def catalog(include_cloud: bool = True) -> list[dict]:
     settings = _read_settings()
     hardware = settings["hardware"]
     rows = []
@@ -796,13 +849,53 @@ def catalog() -> list[dict]:
             "benchmark_kind": spec.benchmark_kind,
             "hardware_assignable": spec.hardware_assignable,
             "source_manifest": sync_model_source(spec.id)["source_path"],
+            "provider": spec.provider,
         })
+    return rows + (cloud_catalog() if include_cloud else [])
+
+
+def cloud_catalog() -> list[dict]:
+    """Codex and Claude Code session models the installed CLIs currently offer."""
+    rows = []
+    for provider in cloud.PROVIDERS:
+        found = cloud.discover(provider)
+        entries = list(found["models"])
+        if provider == cloud.CODEX and found["available"]:
+            default = found.get("default") or ""
+            entries.insert(0, {"name": cloud.DEFAULT,
+                               "label": f"Codex default ({default or 'CLI default'})",
+                               "description": "Follows the model set in ~/.codex/config.toml",
+                               "context_tokens": cloud.CONTEXT_TOKENS[cloud.CODEX]})
+        for entry in entries:
+            spec = _cloud_spec(f"{provider}:{entry['name']}")
+            rows.append({
+                "id": spec.id, "label": entry["label"],
+                "purpose": entry["description"] or spec.purpose,
+                "base_url": "", "context_tokens": entry["context_tokens"],
+                "max_output_tokens": spec.max_output_tokens, "max_context_tokens": entry["context_tokens"],
+                "quantization": "Codex CLI" if provider == cloud.CODEX else "Claude Code",
+                "hardware": spec.hardware,
+                "runtime": f"{spec.runtime} · {found['version'] or 'version unknown'}",
+                "capabilities": list(spec.capabilities),
+                "installed": found["available"], "loaded": False, "available": found["available"],
+                "state": "cloud" if found["available"] else "unavailable",
+                "error": found["error"], "size_bytes": None,
+                "default_for": "Audit optimizer sessions",
+                "supported_devices": [], "allowed_devices": [], "min_gpu_count": 0,
+                "device_sets": [], "assigned_devices": [], "active_devices": [],
+                "gpu_memory_utilization": None, "max_num_seqs": None, "split_mode": None,
+                "last_benchmark": None, "task_capable": True, "category": "cloud_session",
+                "benchmark_kind": "none", "hardware_assignable": False, "source_manifest": None,
+                "provider": provider, "cli_model": spec.cli_model,
+                "reasoning_map": dict(cloud.EFFORT),
+                "reasoning_levels": entry.get("reasoning_levels", []),
+            })
     return rows
 
 
 def hardware_catalog() -> dict:
     settings = _read_settings()
-    model_rows = {row["id"]: row for row in catalog()}
+    model_rows = {row["id"]: row for row in catalog(include_cloud=False)}
     sensors = hardware_sensor_snapshot()
     slots = []
     for device in (CPU_DEVICE, IGPU_DEVICE, *GPU_DEVICES):
@@ -1810,7 +1903,7 @@ class _HardwareModelRuntime:
 def model_document(model_id: str) -> dict:
     if model_id not in MODELS:
         raise ValueError("unknown model")
-    return next(row for row in catalog() if row["id"] == model_id)
+    return next(row for row in catalog(include_cloud=False) if row["id"] == model_id)
 
 
 RUNTIME = _HardwareModelRuntime()

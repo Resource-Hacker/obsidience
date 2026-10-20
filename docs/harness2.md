@@ -10,8 +10,9 @@ an activation.
 
 The default performs one sequential refinement step, with one worker at a time:
 baseline, general candidate, task-specific candidate, then a composed candidate.
-The existing model owner handles every proposal and trial; no external agent CLI,
-provider server, benchmark installer or second scheduler is started.
+The existing model owner handles every proposal and trial; no provider server,
+benchmark installer or second scheduler is started. An external agent CLI runs
+only when the Audit Task selects a cloud session model (below).
 
 Candidates may edit only the bound Agent identity or Runbook instruction body,
 using the existing whole-unit mutation validator. Article links, metadata,
@@ -44,6 +45,62 @@ private optimizer evidence, not accepted Knowledge or Hindsight Memory. A case
 freezes its prior experience; later publications cannot change a resumed search.
 New lessons become eligible only after independently validated instruction
 publication and its committed Audit/Review evidence.
+
+## Cloud proposer sessions (Codex, Claude Code)
+
+The model catalog also lists cloud session models offered by the installed,
+signed-in CLIs: `codex:<model>` for every model `codex debug models` lists for
+the ChatGPT login, `codex:default` (the model set in `~/.codex/config.toml`),
+and `claude:fable|opus|sonnet|haiku`, aliases Claude Code resolves to the newest
+model of each family when it runs (`fable` is Anthropic's most capable family).
+Only the Audit Task can select one. Then every proposal, composition and
+reflection session runs through that CLI with the same system text, input and
+JSON schema the local model receives; the output still passes the whole-unit
+mutation validator, and the selected model is part of the optimizer contract,
+so changing it invalidates prepared cases.
+
+Each session is one structured answer with no tools: `codex exec` with
+`--ignore-user-config`, a read-only sandbox, an empty working directory, shell,
+web, multi-agent, memory, plugin, hook and fast/ultrafast features disabled and
+`service_tier="default"`; or `claude -p` with `--tools ""`, `--safe-mode` (no
+hooks, MCP servers or CLAUDE.md), no saved session, a replaced system prompt and
+a per-session `--max-budget-usd` estimate cap. Audit's reasoning maps none/low,
+medium, high to the same CLI levels and xhigh to `max`, the deepest level without
+delegation (Codex `ultra` adds sub-agent delegation, which a tool-less session
+cannot use). A cloud session holds no local model lease and may take up to ten
+minutes; the job budget still bounds the whole optimization. A CLI that answers
+without a complete structured result is a failed session, like invalid output.
+
+The CLIs return no client-side function calls, so they cannot run Obsidience's
+native Tool loop. Audit's own short loop (`harness.optimize`, then completion)
+keeps the automatic local model. Every trial still measures the affected Agent
+with its own model and reasoning, because that model is what will run the
+published instructions. Scoring trials on the proposer's model would
+measure a different system and could publish instructions tuned for a model the
+Agent never uses.
+
+Upstream's own channels are not used. At the pinned revision the `claude_cli`
+proposer forces Vertex AI (`CLAUDE_CODE_USE_VERTEX=1`, Anthropic login variables
+dropped) and runs `--dangerously-skip-permissions` over a writable copy of the
+context, harvesting an edited file tree
+([proposer.py](https://github.com/google-research/harness2/blob/1cfe254e8d25b15f37048c3730134686abe60335/harness2/core/proposer.py#L105));
+Codex appears only as a rollout substrate run with
+`--dangerously-bypass-approvals-and-sandbox`
+([codex.py](https://github.com/google-research/harness2/blob/1cfe254e8d25b15f37048c3730134686abe60335/harness2/substrate/codex.py#L149)),
+with no Codex proposer channel
+([spec.py](https://github.com/google-research/harness2/blob/1cfe254e8d25b15f37048c3730134686abe60335/harness2/core/spec.py#L33)).
+Reusing them would need a Google Cloud project, give a session shell access to
+the workstation and bypass the structured edit protocol. The adapter therefore
+keeps its proposer seam and uses the same vendor CLI with the safe flag set.
+
+Session input is training trajectories, objectives, conversation excerpts,
+Knowledge and Tool/Skill text from the frozen case: selecting a cloud model sends
+that Vault and conversation content to OpenAI or Anthropic. Codex additionally
+always includes the owner's global `~/.codex/AGENTS.md` (about 48K tokens on
+2026-10-19; a one-line request measured 55.5K input tokens), because Codex offers
+no per-invocation switch for it. Usage counts against the ChatGPT or Claude plan
+limits; Claude Code's subscription terms assume ordinary individual use, so
+prefer local Audit for routine volume.
 
 ## Dependency and rollback
 

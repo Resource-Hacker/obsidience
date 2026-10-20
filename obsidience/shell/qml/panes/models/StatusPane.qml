@@ -359,7 +359,9 @@ Item {
                                     "CONTEXT",
                                     Math.round(Number(modelCard.modelData.context_tokens || 0) / 1024) + "K",
                                     "WORKS WITH",
-                                    modelCard.layouts.length
+                                    modelCard.modelData.hardware_assignable === false
+                                        ? String(modelCard.modelData.runtime || "—")
+                                        : modelCard.layouts.length
                                         ? modelCard.layouts.map(layout => root.layoutLabel(layout)).join(" · ")
                                         : "NO ENABLED LAYOUT"
                                 ]
@@ -459,6 +461,8 @@ Item {
                         }
 
                         Row {
+                            // Cloud session models have no local benchmark or device layout.
+                            visible: modelCard.modelData.hardware_assignable !== false
                             spacing: 8
 
                             Rectangle {

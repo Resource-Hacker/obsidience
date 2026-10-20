@@ -526,7 +526,8 @@ Rectangle {
             "label": "Auto · Gemma"
         }]
         for (const model of models) {
-            if (model.available) {
+            // Codex/Claude Code session models only serve Tasks that run optimizer sessions.
+            if (model.available && (model.provider === "local" || task.session_models === true)) {
                 options.push({
                     "id": model.id,
                     "label": model.label + " · " + model.quantization

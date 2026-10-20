@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 
 from croniter import croniter
@@ -12,6 +13,7 @@ from ....execution import scheduler
 from ....execution.assignments import ensure_task_runbook
 from ....execution.executor import task_descendants
 from ....execution.ledger import current_task_issue
+from ....execution.optimization import AUDITOR
 from ....knowledge.dependencies import task_exclusion_path, task_taxonomy_path
 from ....knowledge.index import INDEX
 from ....knowledge.links import metadata_ref
@@ -124,6 +126,8 @@ def tasks():
                     "reasoning_effort": effort,
                     "model": model,
                     "resolved_model": resolved_model,
+                    # Accepts Codex/Claude Code session models for its optimizer sessions.
+                    "session_models": n.ref == AUDITOR,
                     "triggers": list(task_triggers(n.meta)),
                     "queue_depth": len(n.meta.get("event_queue", []))
                     if isinstance(n.meta.get("event_queue"), list) else 0,
@@ -207,6 +211,13 @@ async def set_task_model(ref: str, payload: dict):
         model = model_runtime.normalize_model(payload.get("model"))
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+    if model_runtime.is_cloud(model):
+        if note.ref != AUDITOR:
+            # Cloud CLIs answer whole sessions; they cannot run this Task's native Tool loop.
+            raise HTTPException(400, "Codex and Claude Code models serve Audit's optimizer sessions only")
+        offered = await asyncio.to_thread(model_runtime.cloud_catalog)
+        if model not in {row["id"] for row in offered if row["available"]}:
+            raise HTTPException(400, f"{model} is not offered by the installed, signed-in CLI")
     meta = dict(note.meta)
     meta["model"] = model
     write_note(note.path, meta, note.body)

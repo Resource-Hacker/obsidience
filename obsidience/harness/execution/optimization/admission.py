@@ -251,9 +251,9 @@ def reconcile_rejections(notes: list) -> None:
         INSPECTED_RUNS.add(run_id)
 
 
-def model_contract(note, agent_ref: str) -> dict:
+def model_contract(note, agent_ref: str, *, session: bool = False) -> dict:
     from ...models import runtime
-    contract = cases.model_contract(note, agent_ref)
+    contract = cases.model_contract(note, agent_ref, session=session)
     spec = runtime.configured_spec(contract['spec']['id'])
     return {**contract, 'source_identity': runtime._model_source_identity(spec)}
 
@@ -329,7 +329,7 @@ def prepare(specification: dict) -> dict:
     document = {**specification, 'schema_version': 1, 'agent': EXECUTIVE,
                 'articles': {note.ref: (CONFIG.vault_dir / note.path).read_text() for note in notes},
                 'model_contract': model_contract(agent, agent.ref),
-                'optimizer_contract': model_contract(audit, HEIMDALL),
+                'optimizer_contract': model_contract(audit, HEIMDALL, session=True),
                 'evaluator_revision': implementation_revision(), 'upstream_revision': UPSTREAM_REVISION,
                 'backend_contract': backend.contract(),
                 'origin': {key: origin.get(key) for key in ('id', 'task_ref', 'status', 'summary')},
@@ -346,7 +346,7 @@ def adopt_runbook_case(document: dict) -> dict:
     res = resolver(include_system=False)
     document = {**document, 'subject': document['runbook'], 'evaluation_mode': 'frozen',
                 'model_contract': model_contract(res.resolve(document['task']), document['agent']),
-                'optimizer_contract': model_contract(res.resolve(AUDITOR), HEIMDALL),
+                'optimizer_contract': model_contract(res.resolve(AUDITOR), HEIMDALL, session=True),
                 'evaluator_revision': implementation_revision(), 'upstream_revision': UPSTREAM_REVISION,
                 'backend_contract': backend.contract(),
                 'scope': 'Specialist execution with frozen Tool results; no live effects.'}
@@ -384,7 +384,7 @@ def prepare_decisions(sample: dict, decision_cases: list[dict]) -> dict:
                 'suite': suite,
                 'articles': {note.ref: (CONFIG.vault_dir / note.path).read_text() for note in notes},
                 'model_contract': model_contract(task, agent.ref),
-                'optimizer_contract': model_contract(res.resolve(AUDITOR), HEIMDALL),
+                'optimizer_contract': model_contract(res.resolve(AUDITOR), HEIMDALL, session=True),
                 'evaluator_revision': implementation_revision(), 'upstream_revision': UPSTREAM_REVISION,
                 'backend_contract': backend.contract(),
                 'origin': {'id': sample['run_id'], 'task_ref': task.ref},
@@ -413,7 +413,7 @@ def current(case_id: str, accepted_resolver=None) -> dict:
     task = res.resolve(document.get('task', EXECUTIVE))
     if model_contract(task, document['agent']) != document['model_contract']:
         raise ValueError('Execution model configuration changed; prepare a fresh case')
-    if model_contract(res.resolve(AUDITOR), HEIMDALL) != document['optimizer_contract']:
+    if model_contract(res.resolve(AUDITOR), HEIMDALL, session=True) != document['optimizer_contract']:
         raise ValueError('Audit model configuration changed; prepare a fresh case')
     if document.get('evaluation_mode') == 'contract':
         from .incidents import check_current

@@ -26,7 +26,7 @@ from autosaddler.v2.storage.local import LocalRunStore
 
 from ...config import CONFIG
 from ...knowledge.vault import Resolver
-from ...models import llm, runtime
+from ...models import cloud, llm, runtime
 from .. import executor, trace as action_trace
 from ..adk.runner import run_adk_session
 from . import EXECUTIVE, HEIMDALL, admission, store as evaluation_store
@@ -585,10 +585,29 @@ class ExecutivePrompts:
 
 
 class ReservedModelProvider:
-    """An upstream AgentProvider using the Audit-selected model and shared lease."""
+    """An upstream AgentProvider using the Audit-selected model.
+
+    A local model answers through the shared lease. A Codex or Claude Code model
+    answers the same structured request through its signed-in CLI, without tools
+    and without a local lease; trials keep the subject's own model.
+    """
     def __init__(self, audit):
-        self.spec = runtime.resolve_model(audit.meta.get('model'), HEIMDALL)
+        self.spec = runtime.resolve_session_model(audit.meta.get('model'), HEIMDALL)
         self.effort = llm.normalize_reasoning_effort(audit.meta.get('reasoning_effort'))
+
+    async def _reply(self, request):
+        schema = json.loads(canonical_json(request.spec.output_schema))
+        if self.spec.provider != 'local':
+            async with asyncio.timeout(max(request.timeout_seconds, cloud.SESSION_SECONDS)):
+                return await cloud.complete(self.spec.provider, self.spec.cli_model,
+                                            request.spec.system_context, request.spec.task_prompt,
+                                            schema, self.effort)
+        async with asyncio.timeout(request.timeout_seconds):
+            async with runtime.lease(self.spec) as model:
+                return await llm.chat([{'role': 'system', 'content': request.spec.system_context},
+                                       {'role': 'user', 'content': request.spec.task_prompt}],
+                                      model=model, reasoning_effort=self.effort,
+                                      max_tokens=OPTIMIZER_MAX_TOKENS, response_schema=schema)
 
     async def run(self, request):
         data = json.loads(request.spec.task_prompt)
@@ -597,31 +616,37 @@ class ReservedModelProvider:
                       'component_sources': {}, 'rationale': 'Only one accepted parent is available.'}
             return SessionResult(status='completed', structured_output=output, raw_response=canonical_json(output),
                                  tool_calls=(), usage=(), cost=Cost())
-        action_trace.emit('status', 'Instruction optimizer ' + request.spec.kind.replace('_', ' '))
+        action_trace.emit('status', 'Instruction optimizer ' + request.spec.kind.replace('_', ' ')
+                          + ('' if self.spec.provider == 'local' else ' · ' + self.spec.label))
         started = time.monotonic()
-        async with asyncio.timeout(request.timeout_seconds):
-            async with runtime.lease(self.spec) as model:
-                reply = await llm.chat([{'role': 'system', 'content': request.spec.system_context},
-                                        {'role': 'user', 'content': request.spec.task_prompt}],
-                                       model=model, reasoning_effort=self.effort,
-                                       max_tokens=OPTIMIZER_MAX_TOKENS,
-                                       response_schema=json.loads(canonical_json(request.spec.output_schema)))
         error = None
         output = None
-        if reply.finish_reason != 'stop':
+        try:
+            reply = await self._reply(request)
+        except cloud.CloudSessionError as exc:
+            # The CLI answered without a complete structured result: a failed session.
+            reply, error = None, str(exc)[:1000]
+        if reply is not None and reply.finish_reason != 'stop':
             error = 'Optimizer response did not finish; no partial candidate is admitted'
-        else:
+        elif reply is not None:
             try:
                 output = json.loads(reply.content)
             except ValueError:
                 error = 'Optimizer response was not a complete JSON object'
-        usage = Usage(input_tokens=reply.prompt_tokens or 0, output_tokens=reply.completion_tokens or 0,
+        metrics = (reply.provider_metrics or {}) if reply is not None else {}
+        cost_usd = metrics.get('cost_usd')
+        usage = Usage(input_tokens=(reply.prompt_tokens or 0) if reply else 0,
+                      output_tokens=(reply.completion_tokens or 0) if reply else 0,
+                      cached_input_tokens=int(metrics.get('cached_input_tokens') or 0),
+                      reasoning_tokens=int(metrics.get('reasoning_tokens') or 0),
+                      provider_cost=cost_usd, provider_cost_unit='usd' if cost_usd is not None else None,
                       model=self.spec.id, duration_seconds=time.monotonic() - started,
                       status='failed' if error else 'success', error_type='invalid_output' if error else None)
         return SessionResult(status='failed' if error else 'completed', structured_output=output,
-            raw_response=reply.content, error=error,
+            raw_response=reply.content if reply else '', error=error,
             tool_calls=(), usage=(usage,), cost=Cost(sessions=1, input_tokens=usage.input_tokens,
-                output_tokens=usage.output_tokens, wall_seconds=time.monotonic() - started))
+                output_tokens=usage.output_tokens, wall_seconds=time.monotonic() - started,
+                currency_amount=cost_usd))
 
 
 def comparison(document, rows, seed_id, selected_id, search=None):

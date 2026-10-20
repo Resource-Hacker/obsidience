@@ -33,7 +33,7 @@ OPTIMIZATION = (
     "execution/adk/sessions.py", "execution/adk/model.py", "capabilities/harness/optimize.py",
     "execution/executor.py", "execution/optimization/evaluation.py", "execution/trace.py",
     "capabilities/registry.py", "capabilities/task/complete.py", "execution/completion.py",
-    "models/llm.py", "models/context.py", "models/runtime.py",
+    "models/llm.py", "models/context.py", "models/runtime.py", "models/cloud.py",
     "execution/optimization/incidents.py", "capabilities/vault/propose.py", "knowledge/proposals.py",
     "capabilities/source/read.py", "capabilities/vault/read.py",
     "capabilities/vault/search.py", "capabilities/vault/validate.py",

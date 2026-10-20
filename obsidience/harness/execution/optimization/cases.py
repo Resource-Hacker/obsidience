@@ -18,11 +18,13 @@ def _code_revision() -> str:
                                               for name in revision.REFINEMENT}).encode())
 
 
-def model_contract(task: Note, agent_ref: str) -> dict:
+def model_contract(task: Note, agent_ref: str, *, session: bool = False) -> dict:
+    """``session``: the model answering optimizer sessions, which may be a cloud CLI."""
     from ...models import llm, runtime
-    spec = runtime.resolve_model(task.meta.get("model"), agent_ref)
+    resolve = runtime.resolve_session_model if session else runtime.resolve_model
+    spec = resolve(task.meta.get("model"), agent_ref)
     return {"spec": json.loads(json.dumps(asdict(spec), default=str)),
-            "profile": runtime._read_settings()["models"][spec.id],
+            "profile": runtime._read_settings()["models"].get(spec.id, {}),
             "reasoning_effort": llm.normalize_reasoning_effort(task.meta.get("reasoning_effort")),
             "temperature": CONFIG.llm_temperature, "executor_max_steps": CONFIG.max_steps}
 
