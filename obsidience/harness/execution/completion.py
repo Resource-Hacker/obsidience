@@ -405,6 +405,28 @@ def _screen_claim_error(summary: str, context: dict) -> str | None:
     return None
 
 
+# A final reply that only promises a lookup ("I'll check the TV to see if the score is
+# visible") ends the turn without doing it: voice turn e9958d8a7066 (2026-10-19) said that
+# at its admission control line, called nothing, and the owner had to say "just look it up".
+_PROMISED_ACTION = re.compile(
+    r"^\W*(?:ok(?:ay)?[,.]?\s+|sure[,.]?\s+|alright[,.]?\s+)?"
+    r"(?:I(?:['’]ll| will| am going to|['’]m going to)|let me)\s+"
+    r"(?:quickly\s+|go\s+|now\s+)?(?:check|look|search|find|see|pull up|get|fetch|open|try)\b"
+    r"[^.!?]{0,160}[.!?]?\s*$", re.I)
+
+
+def _promised_action_error(summary: str, context: dict) -> str | None:
+    """Reject a final reply that is only a promise to act, with no Tool call in this execution."""
+    if not _PROMISED_ACTION.match(summary.strip()):
+        return None
+    if any(isinstance(item, dict) and item.get("tool") and item.get("tool") != "task.complete"
+           for item in context.get("trace", [])):
+        return None
+    return ("This reply only promises an action that no Tool call performed, and a final reply ends the turn. "
+            "Perform it now with the matching Tool (web.search for scores, news and other current facts; "
+            "computer.observe or tv.control observe for what a screen shows), then answer from the result.")
+
+
 def _discord_playback_claim_error(summary: str, context: dict) -> str | None:
     """A failed play/resume receipt cannot establish current playback."""
     if context.get("_discord_control_failed") not in {"play", "resume", "continuous"}:
@@ -451,7 +473,8 @@ def public_claim_error(summary: str, context: dict) -> str | None:
         return "The server kick failed or is uncertain. Report the actual receipt without claiming removal."
     return (_discord_playback_claim_error(summary, context)
             or _unlock_claim_error(summary, context) or _effect_claim_error(summary, context)
-            or _camera_turn_claim_error(summary, context) or _screen_claim_error(summary, context))
+            or _camera_turn_claim_error(summary, context) or _screen_claim_error(summary, context)
+            or _promised_action_error(summary, context))
 
 
 # Cue-only confirmation (owner decision 2026-10-19): a voice command fully
