@@ -52,7 +52,10 @@ flowchart LR
   `index_repository` pass; a failed refresh shows the snapshot as stale.
 - The **activity listener** turns new tool calls in the local Codex and Claude
   Code journals into fixed operation labels and the identities they returned,
-  without reasoning, arguments, source or command output.
+  without reasoning, source or command output. Of a call's arguments only the
+  lookup's tool and search terms (and a trace's direction and depth) pass; the
+  Code stage shows the newest lookup as a card in the graph labels' style while
+  its nodes are lit.
 
 ## Boundary
 

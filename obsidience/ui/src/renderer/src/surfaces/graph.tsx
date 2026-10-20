@@ -204,7 +204,7 @@ export function GraphViewer({view, onViewChange, initialGraphId = "main", onGrap
       {!selected && !query && <span className="pg-gesture">{view === "memory" ? "Select to expand · Scroll for labels · Fit for the whole spiral" : view === "code" ? state.codeFile ? "Green: added · Amber: changed · Rose: removed · Right-click to go back" : "Click a file to unfold · Follow saved edits · Drag to orbit" : "Drag to orbit · Scroll to zoom · Click to inspect"}</span>}
     </div>
     <footer className="pg-footer"><div><i className={linked && ready ? "online" : ""}/><span>{linked && ready ? "Linked to desktop stage" : visible ? "Connecting to stage" : "View paused"}</span><span className="pg-count">{(graphCounts?.count ?? viewNodes.length).toLocaleString()} nodes · {(graphCounts?.links ?? 0).toLocaleString()} links</span></div>
-      <div className="pg-activity">{state.latest ? <><span className={state.latest.status === "running" ? "pg-running" : ""}>{state.latest.status === "running" ? "●" : "↳"}</span>{state.latest.label}<small>{state.latest.status}</small></> : <span>{state.connected === false ? "Provider activity reconnecting" : "Waiting for activity"}</span>}</div>
+      <div className="pg-activity">{state.latest ? <><span className={state.latest.status === "running" ? "pg-running" : ""}>{state.latest.status === "running" ? "●" : "↳"}</span>{state.latest.label}{state.latest.detail?.subject ? ` · “${state.latest.detail.subject}”` : ""}<small>{state.latest.status}</small></> : <span>{state.connected === false ? "Provider activity reconnecting" : "Waiting for activity"}</span>}</div>
     </footer>
     {catalog.limited && <div className="pg-limit">Provider record limit reached.</div>}
   </main>;

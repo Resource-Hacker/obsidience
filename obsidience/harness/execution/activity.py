@@ -138,11 +138,13 @@ def _release_run_operations(run_id: str) -> None:
 
 def emit_operation(kind: str, status: str, refs: list[str], *, label: str,
                    operation_id: str = "", graph_id: str = "*", run_id: str = "",
-                   refresh: bool = False) -> dict:
+                   refresh: bool = False, detail: dict | None = None) -> dict:
     """Project an actual operation using owner-supplied, exact Article refs.
 
     `returned` attests a Tool response, not a verified real-world outcome.
     Pending Review is finite activity; its durable preview has its own owner.
+    detail: the caller's small public description of the request (a code
+    lookup's tool and search terms), shown with the operation.
     """
     with _LOCK:
         operations()
@@ -161,6 +163,8 @@ def emit_operation(kind: str, status: str, refs: list[str], *, label: str,
             else now + OPERATION_LINGER_MS,
             "refresh": refresh, "evidence_scope": "runtime_activity_not_hidden_reasoning",
         }
+        if detail:
+            operation["detail"] = detail
         _OPERATIONS.pop(key, None)
         _OPERATIONS[key] = operation
         while len(_OPERATIONS) > MAX_OPERATIONS:

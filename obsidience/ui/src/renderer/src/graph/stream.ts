@@ -15,7 +15,7 @@ export interface GraphViewState {
   codeFile?: string; codeIndex?: {state: string; updated_at?: string; error?: string};
   externalShown?: number; externalTotal?: number;
   selected?: ProviderNode | null; neighbors?: {node: ProviderNode; kind: string}[];
-  hover?: ProviderNode | null; latest?: {label: string; status: string};
+  hover?: ProviderNode | null; latest?: {label: string; status: string; detail?: {subject?: string}};
 }
 type Message = {type: "catalog"; value: GraphCatalog} | {type: "state"; value: GraphViewState};
 type Peer = {pc: RTCPeerConnection; channel?: RTCDataChannel; ice: RTCIceCandidateInit[]; chain: Promise<void>};

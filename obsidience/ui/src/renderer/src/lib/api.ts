@@ -124,6 +124,9 @@ export interface ProviderGraph {
 export interface GraphOperation {
   id: string; kind: string; status: string; refs: string[]; label: string;
   graph_id: string; at: number; expires_at: number; refresh: boolean;
+  started_at?: number; omitted_refs?: number;
+  /** A code lookup's public request: who asked, the tool and its search terms. */
+  detail?: { agent?: string; tool?: string; subject?: string; direction?: string; mode?: string; depth?: number; edge_types?: string[] };
 }
 
 export interface MemoryBank { id: string; name: string; agent_ref: string; count: number; scene: "executive" | "independent" }

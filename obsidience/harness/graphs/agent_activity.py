@@ -1,9 +1,10 @@
 """Display-only Codex/Claude Code tool receipts and repository file-change notifications.
 
 Observe new public tool-call records in the local Codex and Claude Code journals.
-Reasoning, messages, arguments, source contents and command output never enter
-the activity stream. This adapter cannot invoke a tool, alter either agent or
-write either graph.
+Reasoning, messages, source contents and command output never enter the activity
+stream; of a call's arguments only a code lookup's tool and search terms do
+(``lookup_detail``, owner request 2026-10-19). This adapter cannot invoke a
+tool, alter either agent or write either graph.
 """
 from __future__ import annotations
 
@@ -20,12 +21,43 @@ from watchdog.observers import Observer
 from ..execution.activity import emit_operation
 
 TOOLS = {"search_graph": ("search", "Found"), "search_code": ("search", "Found"),
+         "query_graph": ("search", "Queried"),
          "trace_path": ("trace", "Traced"), "get_code_snippet": ("read", "Read"),
          "get_architecture": ("read", "Architecture"), "detect_changes": ("read", "Inspected changes"),
          "index_status": ("read", "Index status"), "check_index_coverage": ("read", "Checked coverage")}
 IGNORED = {".git", "node_modules", "__pycache__", ".venv", ".artifacts", "out",
            ".ruff_cache", "state", "vault", "evidence", "defaults"}
 EXTENSIONS = {".py", ".ts", ".tsx", ".js", ".mjs", ".qml", ".css", ".c", ".h", ".sh", ".toml"}
+# A lookup's public subject: the first of these present, then trace_path's route.
+SUBJECTS = ("query", "name_pattern", "qn_pattern", "function_name", "qualified_name", "pattern", "semantic_query")
+
+
+def lookup_detail(tool, args, agent):
+    """Who asked, which tool and what for: never the call's other arguments."""
+    detail = {"agent": agent, "tool": tool}
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except (ValueError, RecursionError):
+            return detail
+    if not isinstance(args, dict):
+        return detail
+    for key in SUBJECTS:
+        value = args.get(key)
+        if isinstance(value, list):
+            value = " · ".join(str(item) for item in value[:8])
+        if isinstance(value, str) and value.strip():
+            detail["subject"] = " ".join(value.split())[:160]
+            break
+    if tool == "trace_path":
+        for key in ("direction", "mode"):
+            if isinstance(args.get(key), str):
+                detail[key] = args[key][:24]
+        if type(args.get("depth")) is int:
+            detail["depth"] = args["depth"]
+        if isinstance(args.get("edge_types"), list):
+            detail["edge_types"] = [str(kind)[:32] for kind in args["edge_types"][:6]]
+    return detail
 
 
 def result_refs(value, refs=None, depth=0):
@@ -63,6 +95,8 @@ def result_refs(value, refs=None, depth=0):
         # as its grouped JSON. Only accept its explicit result-table header.
         prefix = None
         tree = "qn = group prefix" in value and "results:" in value
+        # BM25 search rows instead start with each full qualified name.
+        flat = not tree and re.search(r"^results: \d+\s+\(cols: qn\b", value, re.M) is not None
         for line in value.splitlines()[:400]:
             if len(refs) >= 128:
                 break
@@ -74,6 +108,10 @@ def result_refs(value, refs=None, depth=0):
                     name = line.strip().split(" ", 1)[0]
                     if name:
                         refs.add("qn:" + (prefix + "." if prefix else "") + name)
+            elif flat and line.startswith("  "):
+                name = line.strip().split(" ", 1)[0]
+                if "." in name:
+                    refs.add("qn:" + name)
             text = line.strip()
             if text.startswith(("{", "[")):
                 try:
@@ -135,9 +173,9 @@ class CodeActivity(FileSystemEventHandler):
             except asyncio.CancelledError:
                 pass
             self.task = None
-        for operation_id, action, label, _ in self.pending.values():
+        for operation_id, action, label, detail in self.pending.values():
             emit_operation(action, "interrupted", [], label=label,
-                           operation_id=operation_id, graph_id=self.graph_id)
+                           operation_id=operation_id, graph_id=self.graph_id, detail=detail)
         self.pending.clear()
 
     def on_modified(self, event):
@@ -219,9 +257,9 @@ class CodeActivity(FileSystemEventHandler):
                             self.claude_blocks(record.get("message", {}), path)
                         elif record.get("type") == "event_msg" and record.get("payload", {}).get("type") in {"task_complete", "task_aborted"}:
                             for key in [key for key in self.pending if key[0] == path]:
-                                operation_id, action, label, _ = self.pending.pop(key)
-                                emit_operation(action, "interrupted", [], label=label,
-                                               operation_id=operation_id, graph_id=self.graph_id)
+                                operation_id, action, label, detail = self.pending.pop(key)
+                                emit_operation(action, "interrupted", [], label=label, operation_id=operation_id,
+                                               graph_id=self.graph_id, detail=detail)
                     except (ValueError, RecursionError):
                         pass
                 self.offsets[path] = stream.tell()
@@ -263,16 +301,17 @@ class CodeActivity(FileSystemEventHandler):
             operation_id = agent.lower() + ":" + hashlib.sha256((path + call).encode()).hexdigest()[:28]
             label = agent + " · " + ", ".join(TOOLS[t][1] for t in matches)
             action = TOOLS[matches[0]][0]
-            self.pending[key] = (operation_id, action, label, scoped)
+            detail = lookup_detail(matches[0], item.get("arguments", item.get("input", "")), agent)
+            self.pending[key] = (operation_id, action, label, detail)
             while len(self.pending) > 128:
-                _, (old_id, old_action, old_label, _) = self.pending.popitem(last=False)
+                _, (old_id, old_action, old_label, old_detail) = self.pending.popitem(last=False)
                 emit_operation(old_action, "interrupted", [], label=old_label,
-                               operation_id=old_id, graph_id=self.graph_id)
+                               operation_id=old_id, graph_id=self.graph_id, detail=old_detail)
             emit_operation(action, "running", [], label=label,
-                           operation_id=operation_id, graph_id=self.graph_id)
+                           operation_id=operation_id, graph_id=self.graph_id, detail=detail)
         elif kind in {"function_call_output", "custom_tool_call_output"} and key in self.pending:
-            operation_id, action, label, scoped = self.pending.pop(key)
+            operation_id, action, label, detail = self.pending.pop(key)
             output = item.get("output", "")
-            refs = sorted(result_refs(output)) if scoped else []
+            refs = sorted(result_refs(output))
             emit_operation(action, "returned", refs, label=label,
-                           operation_id=operation_id, graph_id=self.graph_id)
+                           operation_id=operation_id, graph_id=self.graph_id, detail=detail)

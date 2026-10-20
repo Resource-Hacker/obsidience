@@ -34,6 +34,18 @@ import { operationAccent, operationDeadline, type GraphOperation as ActivityOper
 const CONTAINMENT = new Set(["HAS_BRANCH", "CONTAINS_FOLDER", "CONTAINS_FILE", "DEFINES", "DEFINES_METHOD"]);
 const HUB = { x: 0.5, y: 0.5 } as const;
 const TEST_MS = 6_000;
+// The graph labels' voice: light mono capitals (knowledge-3d-labels.ts).
+const LABEL = "font-['JetBrains_Mono',ui-monospace,monospace] font-light uppercase";
+const LOOKUP_ITEMS = 5;
+const ROUTES: Record<string, string> = { inbound: "Callers", outbound: "Callees", both: "Callers and callees" };
+
+/** The file's trailing folders that fit `max` characters, so the name and lines stay visible. */
+function shortPath(file: string, max: number): string {
+  const parts = file.split("/");
+  let shown = parts.pop() ?? "";
+  while (parts.length && shown.length + parts.at(-1)!.length + 1 <= max) shown = `${parts.pop()}/${shown}`;
+  return parts.length ? `…/${shown}` : shown;
+}
 
 type Role = "root" | "section" | "claim";
 interface CodeCloud {
@@ -208,15 +220,18 @@ export function CodeKnowledgeScene({data, visibleIds, operations, selectedId, vi
     return () => window.clearTimeout(timer);
   }, [live, test]);
   useEffect(() => setNow(Date.now()), [operations]);
-  const activity = useMemo(() => {
-    if (!cloud) return null;
-    const accents = new Map<string, {color: string; mode: number}>();
-    const refs: string[] = [];
+  const aliases = useMemo(() => {
     const aliases = new Map<string, string>();
     for (const node of data?.nodes ?? []) {
       if (node.qualified_name) aliases.set("qn:" + node.qualified_name, node.id);
       if (node.kind === "File" && node.file) aliases.set("file:" + node.file, node.id);
     }
+    return aliases;
+  }, [data]);
+  const activity = useMemo(() => {
+    if (!cloud) return null;
+    const accents = new Map<string, {color: string; mode: number}>();
+    const refs: string[] = [];
     for (const op of live) {
       const accent = operationAccent(op as unknown as ActivityOperation);
       for (const ref of op.refs) {
@@ -229,7 +244,10 @@ export function CodeKnowledgeScene({data, visibleIds, operations, selectedId, vi
     if (test) refs.push(...test.refs);
     const route = refs.length ? buildThinkingRoute(cloud, refs, [refs]) : null;
     return route ? {route, accents, key: test?.key ?? live[0]?.id ?? "code"} : null;
-  }, [cloud, data, live, test]);
+  }, [cloud, aliases, live, test]);
+  // The newest lookup still lit (or still running) is shown as a card.
+  const lookup = useMemo(() => operations.filter(op => op.status === "running" || live.includes(op))
+    .reduce<GraphOperation | null>((latest, op) => !latest || op.at > latest.at ? op : latest, null), [operations, live]);
   const selection = useMemo(() => {
     const id = selectedId ? cloud?.shownAs(selectedId) : undefined;
     const route = id && cloud ? buildThinkingRoute(cloud, [id]) : null;
@@ -273,5 +291,52 @@ export function CodeKnowledgeScene({data, visibleIds, operations, selectedId, vi
       onNodeAction={(kind, id) => { if (kind === "click") onPick(byId.get(id) ?? null); }}
       onContextLost={() => setSceneKey(key => key + 1)}
     />
+    {lookup && cloud ? <CodeLookupCard op={lookup} cloud={cloud} nodes={byId} aliases={aliases} /> : null}
   </div>;
+}
+
+/** One code lookup in the graph labels' style: who asked what, and what it lit. */
+function CodeLookupCard({op, cloud, nodes, aliases}: {
+  op: GraphOperation; cloud: CodeCloud; nodes: Map<string, ProviderNode>; aliases: Map<string, string>;
+}) {
+  const detail = op.detail ?? {};
+  const matched = op.refs.flatMap(ref => {
+    const node = nodes.get(aliases.get(ref) ?? ref);
+    return node ? [node] : [];
+  });
+  // A lookup's call to result; a saved file has no duration.
+  const elapsed = detail.tool && op.started_at && op.status !== "running" ? op.at - op.started_at : undefined;
+  const total = op.refs.length + (op.omitted_refs ?? 0);
+  const route = detail.tool === "trace_path" ? [ROUTES[detail.direction ?? ""] ?? detail.direction,
+    detail.edge_types?.length ? detail.edge_types.join(" · ") : detail.mode, detail.depth ? `depth ${detail.depth}` : ""]
+    .filter(Boolean).join(" · ") : "";
+  const found = op.status === "running" ? "Looking up…" : op.kind === "edit" ? "Saved"
+    : `${total} ${detail.tool === "trace_path" ? total === 1 ? "symbol reached" : "symbols reached" : total === 1 ? "match" : "matches"}`;
+  return <aside aria-label="Code lookup" className="pointer-events-none absolute right-6 top-6 z-10 w-[min(24rem,calc(100%_-_3rem))] border border-cyan-200/20 bg-[#030304]/85 px-4 py-3 text-slate-200 shadow-[0_12px_40px_#0008]">
+    <div className={`${LABEL} flex items-baseline gap-2 text-[10px] tracking-[0.16em]`}>
+      <span className="text-cyan-200">{detail.agent || op.label.split(" · ")[0]}</span>
+      <span className="text-slate-500">·</span>
+      <span className="text-slate-300">{detail.tool?.replace(/_/g, " ") || op.label.split(" · ").slice(1).join(" · ")}</span>
+      {elapsed !== undefined ? <span className="ml-auto font-mono text-slate-400">{elapsed < 1000 ? `${elapsed} ms` : `${(elapsed / 1000).toFixed(1)} s`}</span> : null}
+    </div>
+    {detail.subject ? <p className="mt-1.5 break-words text-[13px] leading-5 text-slate-50">“{detail.subject}”</p> : null}
+    <p className={`${LABEL} mt-1.5 text-[9px] tracking-[0.14em] text-slate-500`}>{[route, found].filter(Boolean).join(" · ")}</p>
+    {matched.length ? <ol className="mt-3 space-y-1.5">
+      {matched.slice(0, LOOKUP_ITEMS).map(node => {
+        const accent = cloud.labels.get(cloud.shownAs(node.id) ?? "")?.accent ?? "#67e8f9";
+        const lines = node.start_line ? `:${node.start_line}${node.end_line && node.end_line !== node.start_line ? `–${node.end_line}` : ""}` : "";
+        return <li key={node.id} className="border bg-[#030304]/80 px-2.5 pb-1.5 pt-1.5" style={{ borderColor: accent }}>
+          <p className={`${LABEL} truncate text-[11px] tracking-[0.08em] text-white`}>{node.name}</p>
+          <div className="my-1 h-px bg-white/30" />
+          <p className={`${LABEL} truncate text-[8.5px] tracking-[0.12em] text-white/60`} title={`${node.file ?? ""}${lines}`}>
+            <span style={{ color: accent }}>{node.kind}</span> · {shortPath(node.file ?? "", 46 - node.kind.length - lines.length) + lines}
+          </p>
+        </li>;
+      })}
+    </ol> : null}
+    {matched.length > LOOKUP_ITEMS || total > matched.length ? <p className={`${LABEL} mt-2 text-[9px] tracking-[0.14em] text-slate-500`}>
+      {matched.length > LOOKUP_ITEMS ? `+ ${matched.length - LOOKUP_ITEMS} more lit in the graph` : ""}
+      {total > matched.length ? `${matched.length > LOOKUP_ITEMS ? " · " : ""}${total - matched.length} not in this index view` : ""}
+    </p> : null}
+  </aside>;
 }
