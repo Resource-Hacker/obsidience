@@ -56,7 +56,9 @@ async def model(request: Request):
     payload = {k: incoming[k] for k in ("messages", "response_format", "temperature", "top_p", "seed", "stop") if k in incoming}
     payload.update(model=spec.id, stream=False,
         max_tokens=min(int(incoming.get("max_completion_tokens", incoming.get("max_tokens", spec.max_output_tokens))), spec.max_output_tokens),
-        chat_template_kwargs={"enable_thinking": False})
+        chat_template_kwargs={"enable_thinking": False},
+        # Background extraction stays off the Executive's and Bard's slots.
+        **runtime.slot_fields(spec, runtime.TASK_SLOT))
     owner = runtime.RUNTIME
     ready = asyncio.Event()
     def activity(busy):

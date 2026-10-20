@@ -165,6 +165,8 @@ async def chat(messages: list[dict], max_tokens: int | None = None,
         messages, spec, max_tokens=max_tokens, temperature=temperature,
         reasoning_effort=effort, response_schema=response_schema,
     )
+    # Controller replies (Harness2/AutoSaddler sessions) are background work: the Task slot.
+    payload.update(model_runtime.slot_fields(spec, model_runtime.TASK_SLOT))
     from .context import PROMPT_SAFETY_TOKENS, TaskContext
 
     async with provider_client() as client:

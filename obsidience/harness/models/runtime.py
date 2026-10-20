@@ -197,7 +197,8 @@ MODELS = {
         # (Q6_K 3.10). Keep both cards: single-card MTP exhausted VRAM beside ASR (2026-10-18).
         min_gpu_count=2,
         default_gpu_memory_utilization=0.90,
-        default_max_num_seqs=1,
+        # One llama.cpp slot per caller (EXECUTIVE_SLOT, BARD_SLOT, TASK_SLOT).
+        default_max_num_seqs=3,
         service=GEMMA_SERVICE,
         model_path=GEMMA_MODEL,
         verified_path=GEMMA_MODEL.with_suffix(".gguf.verified"),
@@ -358,6 +359,23 @@ def _write_launch(spec: ModelSpec, devices: tuple[str, ...], profile: dict) -> N
         "mtp_tokens": spec.mtp_tokens,
     }, indent=2, sort_keys=True) + "\n")
     temporary.replace(path)
+
+
+# llama.cpp slots (2026-10-19): the Executive conversation, Bard and background work
+# (Tasks, instruction trials, Harness2 sessions, the memory route, benchmarks) each keep
+# their own prompt cache; one shared slot let an Audit trial swap the Executive out to
+# --cache-ram (~0.3 s each way) or evict it. Fewer served slots fold the later callers
+# onto the last one; a one-slot launch sends no id_slot (engine selection, as before).
+EXECUTIVE_SLOT, BARD_SLOT, TASK_SLOT = 0, 1, 2
+
+
+def slot_fields(spec: ModelSpec, slot: int) -> dict:
+    """The request field pinning a caller to its slot of the served launch, if it has several."""
+    try:
+        slots = int(json.loads(_launch_path(spec.id).read_text()).get("max_num_seqs", 1))
+    except (OSError, ValueError, TypeError, AttributeError):
+        return {}
+    return {"id_slot": min(slot, slots - 1)} if slots > 1 else {}
 
 
 def _read_launch(model_id: str) -> tuple[str, ...]:
@@ -871,6 +889,8 @@ async def _benchmark_text_sample(
         "stream": True,
         "stream_options": {"include_usage": True},
         "chat_template_kwargs": {"enable_thinking": False},
+        # Off the Executive's and Bard's slots, so their prompt caches stay warm.
+        **slot_fields(active, TASK_SLOT),
     }
     started = time.perf_counter()
     first_text_at: float | None = None

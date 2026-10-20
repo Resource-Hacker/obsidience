@@ -243,7 +243,8 @@ async def prepare(conversation, text: str, response_contract: str, *, idle: bool
                         return {"status": "context_pressure"}
                 # b10078 emits one token even for n_predict=0. Bound that work
                 # explicitly; this caller has no output, Tool or persistence port.
-                payload.update(max_tokens=1, stream=False)
+                payload.update(max_tokens=1, stream=False,
+                               **model_runtime.slot_fields(spec, model_runtime.EXECUTIVE_SLOT))
                 payload.pop("stream_options", None)
                 projection = TaskContext()
                 try:

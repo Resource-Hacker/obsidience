@@ -53,6 +53,17 @@ if [ "$GPU_COUNT" -gt 1 ]; then
     export NCCL_P2P_DISABLE=1 GGML_CUDA_ALLREDUCE=hybrid
   fi
 fi
+# Several slots (2026-10-19): the Harness pins the Executive conversation, Bard and background
+# work to their own slot with id_slot (models/runtime.py slot_fields), so an Audit trial no longer
+# swaps the Executive's prefix out to --cache-ram or evicts it. Without --kv-unified -c is divided
+# across slots, so each slot gets the full context (the admission guard rejects a limit above it).
+# A request launch would otherwise copy every idle slot into --cache-ram (~0.9-1.9 GiB, 0.25-0.4 s
+# on the server loop) although its KV stays in VRAM. The default --slot-prompt-similarity stays: tp9
+# leaves a busy pinned slot untouched (patch 13), and the Task slot keeps swapping Task prefixes
+# through --cache-ram when it changes Task.
+if [ "$PARALLEL" -gt 1 ]; then
+  set -- "$@" --no-cache-idle-slots
+fi
 # The Harness saves the warm Executive slot here after a standby warm and restores it into
 # a restarted server (models/runtime.py); file names fingerprint this script and the model.
 SLOT_DIR="$PRODUCT_ROOT/state/model-slots"
@@ -77,7 +88,7 @@ exec env CUDA_DEVICE_ORDER=PCI_BUS_ID LLAMA_STATE_THREADS=4 \
   "$LLAMA/bin/llama-server" \
   -m "$MODEL" --alias obsidience-gemma \
   --mmproj "$MMPROJ" --mmproj-offload --image-max-tokens 512 \
-  --host 127.0.0.1 --port 8089 -ngl 99 -c "$CTX" --parallel "$PARALLEL" \
+  --host 127.0.0.1 --port 8089 -ngl 99 -c "$((CTX * PARALLEL))" --parallel "$PARALLEL" \
   --batch-size 4096 --ubatch-size 1024 --flash-attn on \
   --checkpoint-min-step 1024 --cache-ram 16384 --no-reasoning-preserve \
   --jinja "$@"

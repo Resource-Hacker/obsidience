@@ -134,6 +134,11 @@ class AgentPlugin(BasePlugin):
         self.task_mode = task.kind != 'agent'
         self.spec, self.effort, self.system, self.agent_name = spec, effort, system, agent_name
         self.evaluation = evaluation
+        # Tasks and instruction trials, Bard (a bound Discord conversation) and the
+        # Executive each keep their own llama.cpp slot and prompt cache.
+        self.model_slot = (model_runtime.TASK_SLOT if self.task_mode or evaluation is not None
+                           else model_runtime.BARD_SLOT if sessions.CONVERSATION_BINDING.get() is not None
+                           else model_runtime.EXECUTIVE_SLOT)
         self.prepared_speech = prepared_speech
         self.max_steps = step_budget(evaluation)
         self.emit = trace_emitter(evaluation)
@@ -595,6 +600,7 @@ class AgentPlugin(BasePlugin):
         else:
             schemas = tool_schemas(self.advertised)
         payload = native.request_payload(wire, self.spec, self.effort, schemas, task=self.task_mode)
+        payload.update(model_runtime.slot_fields(self.spec, self.model_slot))
         if (captured := getattr(self.evaluation, 'wire_messages', None)) is not None:
             # A contract trial evaluates the exact captured provider prompt, which
             # already carries its model-family guidance; never append it twice.

@@ -26,8 +26,9 @@ def plan_key(spec, profile: dict, devices: tuple[str, ...], script: Path) -> tup
 
 
 def estimate(spec, profile: dict, devices: tuple[str, ...]) -> dict[str, int]:
+    # llm.sh gives every slot the full context: without --kv-unified -c is divided across slots.
     command = [str(FIT_ROOT / "bin/llama-fit-params"), "--fit-print", "on",
-               "-m", str(spec.model_path), "-c", str(spec.context_tokens),
+               "-m", str(spec.model_path), "-c", str(spec.context_tokens * profile["max_num_seqs"]),
                "-ngl", "99", "--parallel", str(profile["max_num_seqs"]),
                # Match llm.sh defaults; Gemma retains F16 KV and its projector.
                # This estimator aborts for tensor mode; its layer split places

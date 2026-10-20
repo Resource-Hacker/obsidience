@@ -218,23 +218,27 @@ def model_client() -> str:
     return value
 
 
-def model(spec, effort: str):
-    """The Executive's ADK model route for one model and reasoning effort.
+def model(spec, effort: str, slot: int | None = None):
+    """The ADK model route for one model, reasoning effort and caller slot.
 
     Carries what the native transport sends: the served model id (so tool
     results keep the template's native ``tool`` role), output cap,
-    temperature, single Tool call per step, template thinking switch and the
-    engine's exact input ceiling, whose acknowledgement every response must carry.
+    temperature, single Tool call per step, template thinking switch, the
+    caller's llama.cpp slot (``runtime.slot_fields``; the Executive's unless
+    named) and the engine's exact input ceiling, whose acknowledgement every
+    response must carry.
     ``local`` streams through the API's httpx pool (``adk/model.py``); ``litellm``
     is ADK's LiteLlm route. Both expose the same ``_additional_args``.
     """
+    from ...models import runtime as model_runtime
+    pinned = model_runtime.slot_fields(spec, model_runtime.EXECUTIVE_SLOT if slot is None else slot)
     kind = model_client()
-    key = (spec.id, spec.base_url, effort, kind)
+    key = (spec.id, spec.base_url, effort, kind, pinned.get('id_slot'))
     if key not in _models:
         from ...config import CONFIG
-        from ...models import llm, runtime as model_runtime
+        from ...models import llm
         from ...models.context import PROMPT_SAFETY_TOKENS
-        extra = {'chat_template_kwargs': {'enable_thinking': effort != 'none'}}
+        extra = {'chat_template_kwargs': {'enable_thinking': effort != 'none'}, **pinned}
         if effort != 'none':
             extra.update(reasoning_format='auto', reasoning_budget_tokens=spec.reasoning_budgets[effort])
         if spec.supports_input_token_limit:

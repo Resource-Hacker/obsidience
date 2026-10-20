@@ -227,6 +227,8 @@ async def select(client, payload, spec, choices, metrics, *, objective='', heade
         result = await post('/completion', {
             'prompt': prompt, 'n_predict': 1, 'temperature': 1.0, 'samplers': [], 'seed': 0,
             'cache_prompt': True, 'return_tokens': True, 'n_probs': len(labels),
+            # The step's own slot, whose cached prefix this rendered base shares.
+            **({'id_slot': payload['id_slot']} if 'id_slot' in payload else {}),
             'post_sampling_probs': True, 'logit_bias': [[token, 100.0] for token in token_ids],
             'message_delimiters': [{'role': 'user', 'delimiter': '<|turn>user'},
                                    {'role': 'assistant', 'delimiter': '<|turn>model'}],

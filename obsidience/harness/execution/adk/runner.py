@@ -505,7 +505,8 @@ async def run_adk_session(task, model, messages, allowed, ctx, agent_name, effor
                                              context_text=messages[1]['content'] if len(messages) > 1 else '')
                 if memory := memory_message(recalled):
                     parts.append(sessions.part(memory, 'plugin:obsidience.memory', run=run))
-            agent = LlmAgent(name=sessions.agent_id(session_id), model=sessions.model(model, effort), instruction='',
+            agent = LlmAgent(name=sessions.agent_id(session_id),
+                             model=sessions.model(model, effort, plugin.model_slot), instruction='',
                              tools=capability_tools(allowed, plugin),
                              disallow_transfer_to_parent=True, disallow_transfer_to_peers=True)
             runner = Runner(app=App(name=sessions.APP, root_agent=agent, plugins=[plugin]),
