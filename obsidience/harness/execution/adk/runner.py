@@ -30,8 +30,8 @@ from .plugin import AgentPlugin, acquire_model
 from .tools import capability_tools
 from ..capability_core import foreground_checkpoint
 from ..native_turn import (
-    command_summary, cue_only, memory_message, step_budget_notice, steering_context, tool_schemas, trace_recall,
-    turn_recall,
+    command_summary, cue_only, memory_message, publish_speech_recall, step_budget_notice, steering_context,
+    tool_schemas, trace_recall, turn_recall,
 )
 from ...config import CONFIG
 
@@ -504,6 +504,7 @@ async def run_adk_session(task, model, messages, allowed, ctx, agent_name, effor
                                  supplied=bool(prepared_speech.memory), reuse=metrics.get('recall_reuse', ''),
                                  coverage=metrics.get('recall_coverage'),
                                  context_recall_ms=metrics.get('context_recall_ms'))
+                    publish_speech_recall(prepared_speech.recall[1], run)
                 if prepared_speech.memory:
                     parts.append(sessions.part(prepared_speech.memory, 'plugin:obsidience.memory', run=run))
             elif not continuation and not plugin.task_mode and music_evidence is None:

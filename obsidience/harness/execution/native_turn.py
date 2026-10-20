@@ -223,6 +223,21 @@ def trace_recall(emit, value, query, *, supplied, duration_ms=None, reuse='', co
     emit('event', 'Hindsight recall ' + value['status'], payload['refs'], fields={'payload': payload})
 
 
+def publish_speech_recall(value, run) -> None:
+    """Graph activity for a speech recall the turn adopted.
+
+    It ran speculative, so it published nothing; publish what a direct recall
+    does: the Memory graph's search (MEMORY.recall) and the run's read (turn_recall).
+    """
+    refs = [row['ref'] for row in value.get('memories', [])]
+    if not refs:
+        return
+    from . import activity
+    bank = refs[0].split('/')[1]  # memory_ref: @memory/<bank>/<id>
+    activity.emit_operation('search', 'returned', refs, label='Memories recalled', graph_id='memory:' + bank)
+    activity.emit_operation('read', 'returned', refs, label='Hindsight recall', run_id=run)
+
+
 async def turn_recall(ctx, query, *, emit, run, context_text='', evaluation=None) -> dict:
     """The Executive's automatic recall for its owner request, as the model sees it.
 
