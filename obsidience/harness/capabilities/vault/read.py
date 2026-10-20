@@ -41,9 +41,9 @@ def execute(args: dict, context: dict) -> str:
                    or any(ord(ch) < 32 or 127 <= ord(ch) <= 159 for ch in ref) for ref in refs)):
         return "Invalid refs: use one ref or 1-10 nonempty Article refs, each at most 500 characters without controls."
     refs = [ref.strip() for ref in refs]
-    offset = args.get("offset", 0)
+    offset = args.get("offset")
     expected = args.get("expected_sha256")
-    if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
+    if offset is not None and (not isinstance(offset, int) or isinstance(offset, bool) or offset < 0):
         return "Invalid offset: use a nonnegative character offset from a returned Article page."
     if expected is not None and (
         not isinstance(expected, str) or re.fullmatch(r"[0-9a-f]{64}", expected) is None
@@ -139,6 +139,13 @@ def _read(note, inbound: list[str], offset: int, expected: str | None, context: 
             "expected_sha256. No replacement content was returned. Read offset 0 without "
             "expected_sha256 to explicitly obtain the current view; do not treat it as the old evidence."
         )
+    if offset is None:
+        # expected_sha256 alone can only continue this view: the decoder drops the
+        # optional offset, and Link 6f0bd1ccd3f2 re-read page one four times until
+        # its proposal and the Task failed (2026-10-19). Continue where the read stopped.
+        previous = context.get("_article_reads", {}).get(note.ref, {})
+        ranges = previous.get("ranges") if expected is not None and previous.get("view_sha256") == revision else None
+        offset = ranges[0][1] if ranges and ranges[0][0] == 0 and ranges[0][1] < len(view) else 0
     if offset > len(view):
         context.get("_article_reads", {}).pop(note.ref, None)
         return False, f"Invalid offset: the attested Article view has {len(view)} characters."
