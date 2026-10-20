@@ -44,8 +44,9 @@ the connection as soon as ADK closes its generator.
   without a model, continues an activation only for owner clarifications or
   controller feedback, cancels only unfinished inference on foreground
   demand, and records settlement and interrupted calls in the log.
-- `optimization.py` is the AutoSaddler V2 scenario port for `harness.optimize`.
-  Trials run `run_adk_session` with an evaluation handler: isolated in-memory
+- `harness.optimize` trials (`../optimization/scenario.py`, the AutoSaddler V2
+  scenario port; this package imports no optimizer) run `run_adk_session` with an
+  evaluation handler: isolated in-memory
   session, no Hindsight recall or writeback, every admitted call answered by
   frozen results or the contract validator (no dispatch or receipt), and a
   captured prompt replacing the history in contract mode. A contract trial's

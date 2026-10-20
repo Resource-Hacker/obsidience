@@ -488,7 +488,7 @@ async def optimize(case_id: str, context: dict) -> dict:
         raise ValueError('This optimization case already has an active owner')
     _ACTIVE.add(case_id)
     try:
-        from ..adk.optimization import run
+        from .scenario import run
         # Cancellation is joined, including while the native provider is
         # generating. The foreground does not wait for an evaluation response.
         worker = asyncio.create_task(run(case_id, document, audit, context))
@@ -611,7 +611,7 @@ def review_blocker(note, accepted_resolver=None) -> str | None:
         run = INDEX.run(report['audit_run_id'])
         if not run or run.get('status') not in {'completed', 'review'} or not receipts:
             raise ValueError('The owning Audit has not finished with complete Tool evidence')
-        from ..adk.optimization import comparison
+        from .scenario import comparison
         if comparison(document, report['observations'], report['seed_id'], report['selected_id'],
                       report.get('search_observations')) != report['comparison']:
             raise ValueError('Executive candidate comparison does not match the recorded outcomes')

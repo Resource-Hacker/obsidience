@@ -52,7 +52,7 @@ def published(marker: dict | None, proposal_id: str) -> None:
     if marker is None:
         return
     from . import admission, backend
-    from ..adk.optimization import comparison
+    from .scenario import comparison
     if not isinstance(marker, dict) or set(marker) != {'case_id', 'report_id'}:
         raise ValueError('Published optimizer lesson lost its exact binding')
     report = store.load('executive/reports', marker['report_id'])

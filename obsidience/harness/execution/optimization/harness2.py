@@ -26,8 +26,7 @@ from harness2.core.spec import BenchPrompts, RunView
 
 from ...config import CONFIG
 from ...knowledge.vault import Resolver
-from ..adk import optimization as native
-from . import admission, cases, store as artifacts
+from . import admission, cases, scenario as native, store as artifacts
 
 # k=1: baseline, INV, DOM, composition; six sessions permit one invalid-output
 # retry for each stage, plus one optional training-only reflection.

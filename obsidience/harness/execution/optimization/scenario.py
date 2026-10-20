@@ -28,10 +28,10 @@ from ...config import CONFIG
 from ...knowledge.vault import Resolver
 from ...models import llm, runtime
 from .. import executor, trace as action_trace
-from ..optimization import EXECUTIVE, HEIMDALL, admission, store as evaluation_store
-from ..optimization.cases import frozen_notes
-from ..optimization.evaluation import FrozenTrial, compare_observations, fixture_json
-from .runner import run_adk_session
+from ..adk.runner import run_adk_session
+from . import EXECUTIVE, HEIMDALL, admission, store as evaluation_store
+from .cases import frozen_notes
+from .evaluation import FrozenTrial, compare_observations, fixture_json
 
 
 # The retired JSON action loop's protocol, verbatim in its decision captures.
@@ -265,7 +265,7 @@ class NativeEvaluator:
                 messages = executor.activation_messages(task,
                     {**sections, 'params': {}, 'objective': specification['objective']}, agent_name=agent.title)
                 if self.document.get('evaluation_mode') == 'contract':
-                    from ..optimization.incidents import trial_read, validate_decision
+                    from .incidents import trial_read, validate_decision
                     sample = specification['sample']
                     messages = json.loads(json.dumps(sample['messages']))
                     # The instruction text the prompt carries: the Executive's Runtime section, a Runbook's body.
@@ -737,10 +737,10 @@ async def run_autosaddler(case_id, document, audit, context):
 
 async def run(case_id, document, audit, context):
     """One active engine; failures never select the rollback backend implicitly."""
-    from ..optimization.backend import contract
+    from .backend import contract
     if document.get('backend_contract') != contract():
         raise ValueError('Optimizer backend changed; prepare a fresh case')
     if document['backend_contract']['name'] == 'autosaddler':
         return await run_autosaddler(case_id, document, audit, context)
-    from ..optimization.harness2 import run as run_harness2
+    from .harness2 import run as run_harness2
     return await run_harness2(case_id, document, audit, context)
