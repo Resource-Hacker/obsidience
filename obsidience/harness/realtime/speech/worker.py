@@ -1592,10 +1592,14 @@ class PocketTTSService(TTSService):
         # Small streaming batches start sooner without a 16-thread CPU pool.
         # Four threads also preserve the GPU ASR's measured batch latency.
         torch.set_num_threads(max(1, min(4, (os.cpu_count() or 8) // 2)))
+        from obsidience.harness.config import CONFIG
+
         self._model = TTSModel.load_model(
             config=config,
             temp=0.3,
             sampler_decode_steps=5 if voice == "starfleet" else 1,
+            # Pocket's dynamic int8 for the FlowLM transformer's attention and FFN.
+            quantize=CONFIG.extras.get("realtime_tts_quantize", False) is True,
         )
         self._model.to("cpu")
         self._voice_state = self._model.get_state_for_audio_prompt(str(voice_path))
