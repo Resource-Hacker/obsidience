@@ -380,6 +380,31 @@ def _camera_turn_claim_error(summary: str, context: dict) -> str | None:
     return None
 
 
+# "I'll need to see your screen" while computer.observe is granted is a false
+# inability claim: voice turn 9548f263c5b1 (2026-10-19) answered a question about
+# what the owner was looking at with it, at its control line, and never looked.
+_SCREEN_INABILITY = re.compile(
+    r"\b(?:(?:need|have|would have) to|can(?:no|['’])?t|unable to|don['’]t have (?:access|a way) to)"
+    r"\s+(?:see|view|look at|access|check)\b[^.!?]{0,40}?"
+    r"\b(?:(?:your|the) screens?|what you(?:['’]re| are) (?:looking at|viewing|watching|seeing))"
+    r"|\b(?:don['’]t have|have no|without) access to (?:your|the) screens?\b"
+    r"|\b(?:share|show me) (?:your|the) screen\b|\btake a screenshot\b", re.I)
+
+
+def _screen_claim_error(summary: str, context: dict) -> str | None:
+    """Reject a claimed need to see the screen when this execution may look and has not."""
+    if "computer.observe" not in context.get("_tool_receipt_articles", {}):
+        return None
+    if any(isinstance(item, dict) and item.get("tool") == "computer.observe"
+           for item in context.get("trace", [])):
+        return None
+    if _SCREEN_INABILITY.search(summary):
+        return ("computer.observe is available in this execution, so you can see the current screen. "
+                "Do not say you need to see it: call computer.observe with target kind focused and the owner's "
+                "visual question as query, then answer from that image.")
+    return None
+
+
 def _discord_playback_claim_error(summary: str, context: dict) -> str | None:
     """A failed play/resume receipt cannot establish current playback."""
     if context.get("_discord_control_failed") not in {"play", "resume", "continuous"}:
@@ -426,7 +451,7 @@ def public_claim_error(summary: str, context: dict) -> str | None:
         return "The server kick failed or is uncertain. Report the actual receipt without claiming removal."
     return (_discord_playback_claim_error(summary, context)
             or _unlock_claim_error(summary, context) or _effect_claim_error(summary, context)
-            or _camera_turn_claim_error(summary, context))
+            or _camera_turn_claim_error(summary, context) or _screen_claim_error(summary, context))
 
 
 # Cue-only confirmation (owner decision 2026-10-19): a voice command fully
