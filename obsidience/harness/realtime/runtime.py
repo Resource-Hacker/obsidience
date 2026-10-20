@@ -1105,7 +1105,8 @@ class RealtimeSessionManager:
     def _record_playback_timing(self, event: dict[str, Any]) -> None:
         stage = event.get("stage")
         if (not isinstance(stage, str)
-                or stage not in {"speech_received", "aec_ready", "first_pcm", "first_output_write"}
+                or stage not in {"speech_received", "aec_ready", "first_pcm", "first_output_write",
+                                 "output_latency"}
                 or stage in self._playback_timing_stages
                 or self._playback_timing_binding is None
                 or tuple(event.get(key) for key in ("generation", "speech_sequence", "turn_id", "run_id"))

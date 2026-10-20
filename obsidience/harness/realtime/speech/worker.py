@@ -665,6 +665,11 @@ class SpeechTimingAudioOutput(LocalAudioOutputTransport):
                 and not isinstance(frame, SentencePauseFrame)):
             self._first_write = True
             self._playback.record_timing("first_output_write", timing, since="first_pcm_ns")
+            if self._out_stream is not None:
+                # PortAudio's latency of this ALSA "pulse" stream: the written sample plays
+                # about this long after the write (PipeWire's quantum and the DAC are not in it).
+                self._playback.record_timing("output_latency", timing,
+                                             duration_ms=self._out_stream.get_output_latency() * 1000)
             self._playback.chunk_audible(binding)
         if written and isinstance(frame, TTSAudioRawFrame):
             # The existing transport writes 40 ms PCM chunks at playback pace.
@@ -1931,7 +1936,8 @@ class PlaybackCommands:
         binding = frame.metadata.get("obsidience_playback")
         return binding is None or binding == (self.generation, self.epoch)
 
-    def record_timing(self, stage: str, timing: dict | None, *, since: str = "") -> None:
+    def record_timing(self, stage: str, timing: dict | None, *, since: str = "",
+                      duration_ms: float | None = None) -> None:
         if (not isinstance(timing, dict)
                 or (timing.get("generation"), timing.get("epoch")) != (self.generation, self.epoch)):
             return
@@ -1940,6 +1946,8 @@ class PlaybackCommands:
         payload.update(stage=stage, monotonic_ns=now)
         if since and type(timing.get(since)) is int:
             payload["duration_ms"] = max(0, now - timing[since]) / 1_000_000
+        elif duration_ms is not None:
+            payload["duration_ms"] = duration_ms
         if stage == "first_pcm":
             timing["first_pcm_ns"] = now
         emit("speech_timing", **payload)

@@ -30,7 +30,7 @@ LATENCY_STAGES = frozenset({
     "input_final", "preparation", "admission", "activation", "model_wait",
     "model_preflight", "model_first_public", "model_complete", "model_release", "answer_committed",
     "command_verified",
-    "speech_sent", "speech_received", "aec_ready", "first_pcm", "first_output_write",
+    "speech_sent", "speech_received", "aec_ready", "first_pcm", "first_output_write", "output_latency",
     "speech_onset", "first_partial", "last_voiced", "end_of_turn", "speech_final",
     "speech_prefill_started", "speech_prefill_completed", "speech_prefill_cancelled",
 })
