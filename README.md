@@ -25,19 +25,21 @@ index of this repository, and a set of invented demo memories. The rotating
 clips are time-lapsed; the graphs turn slowly on the desktop.
 
 The banner above is the Executive's knowledge graph: the Agent at the center,
-its subjects and Articles on shells around it, hierarchy beams in each
-branch's color, and links between Articles as fainter tendrils. Darwin,
-Alexandria and Heimdall orbit it as their own smaller graphs.
+its subjects and Articles in craters on layered glass shells around it,
+hierarchy beams in each branch's color, and links between Articles as quiet
+fine threads. Darwin, Alexandria and Heimdall orbit it as their own smaller
+graphs, glass marbles with their memory dust floating inside.
 
 <table>
 <tr>
 <td width="50%" valign="top">
 <img src="docs/media/thinking.gif" alt="A thinking turn lighting the Articles in the Executive's context packet">
 <p><b>Thinking.</b> When the Executive answers, the Articles in its context
-packet light up. Beams travel down the hierarchy to each supplied Article,
-comets run between linked Articles in the same packet, the activity card lists
-the turn's operations (here a Hindsight recall), and the central orb follows
-the spoken reply's waveform.</p>
+packet light up. A thin pilot light runs the route and the main beam follows
+it down the hierarchy to each supplied Article, which takes a label; links
+from a consulted Article light, every node the route passes ripples its glass
+layer, the activity card lists the turn's operations (here a Hindsight recall),
+and the central orb follows the spoken reply's waveform.</p>
 </td>
 <td width="50%" valign="top">
 <img src="docs/media/recall.gif" alt="Hindsight memories being recalled on the memory timeline">
@@ -69,7 +71,7 @@ role icon.</p>
 
 <table>
 <tr>
-<td width="50%"><img src="docs/media/thinking.png" alt="Still of a thinking turn: the supplied Articles are labelled and linked by comets"></td>
+<td width="50%"><img src="docs/media/thinking.png" alt="Still of a thinking turn: the supplied Articles are labelled and the route's beams are lit"></td>
 <td width="50%"><img src="docs/media/recall.png" alt="Still of a recall: the returned memories and their neighbours are labelled on the timeline"></td>
 </tr>
 </table>
