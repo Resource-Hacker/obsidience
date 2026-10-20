@@ -29,7 +29,10 @@ REALTIME_AEC_CAPTURE = "obsidience_realtime_aec_capture"
 REALTIME_AEC_REFERENCE = "obsidience_realtime_aec_reference"
 INTERFACE_KINDS = ("microphone", "speaker", "camera")
 TTS_VOICES = ("starfleet", "hal", "ultron")
-MAX_PACTL_BYTES = 2 * 1024 * 1024
+# A healthy graph with a mixer's level meters open reached 2.14 MB as compact
+# pw-dump JSON (1,021 objects, 2026-10-19); the former 2 MiB bound then read as a
+# lost UMA-8 reference, stopped voice and refused every restart.
+MAX_PACTL_BYTES = 16 * 1024 * 1024
 OBSBOT_CONTROL = Path("/home/wissenschafter/src/obsbot/obsbot_ctl")
 MICROPHONE_PROBE_SAMPLES = 16_000
 # Speech ASR shares the chipset RTX 4000 with the model (owner, 2026-10-18); the
