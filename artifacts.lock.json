@@ -6,7 +6,15 @@
       "revision": "ad30107c31c06aec8a7d5636e0d1058118604e6f",
       "version": "0.2",
       "license": "Apache-2.0",
-      "integration": "Canonical Article serialization contract. Small YAML framing and timestamp-preserving loader adapted from src/reference_agent/bundle/document.py into harness/knowledge/format.py with attribution. No reference-agent runtime, ADK, Gemini service, or second knowledge store.",
+      "reference_files": {
+        "SPEC.md": "26aa5da029278939f914e578107242d9607d4f2dc5fe153272b82f9ed1030101",
+        "src/reference_agent/bundle/document.py": "7d9be6961b38f0fd2196e1cbe630afb1a4682e33ccd43daf3f233401ca62a43b"
+      },
+      "files": [
+        "obsidience/harness/knowledge/okf.py"
+      ],
+      "upstream_review": "2026-10-19: main is still this revision (2026-08-21); no tags, releases, published package, validator or JSON Schema (issue #8 open). The reference-agent package is unpublished and pulls google-adk, BigQuery, pydantic and Gemini helpers for a 100-line codec, and its parser normalizes CRLF and accepts falsy non-mapping frontmatter (open PR #38), so the codec stays vendored.",
+      "integration": "harness/knowledge/okf.py is the one OKF owner: the reference codec's YAML framing and timestamp-preserving loader (adapted with attribution, keeping CRLF bodies and rejecting non-mapping frontmatter), reserved index.md/log.md handling, bundle-relative link resolution and conformance findings derived from SPEC.md. harness/knowledge/format.py layers the Obsidience Article profile on it. No reference-agent runtime, ADK agent, Gemini service, viewer or second knowledge store.",
       "notice": "LICENSES/OpenKnowledgeFormat-Apache-2.0.txt"
     },
     "markdownify": {

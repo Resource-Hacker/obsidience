@@ -184,7 +184,7 @@ def _render(item: dict, facts: dict, source: dict) -> tuple[dict, str]:
                                                  "category": category, "facts": facts}):
         raise ValueError("System capture does not attest the supplied inventory")
     meta = {"kind": "knowledge", "title": item["title"], "tags": ["system-inventory"],
-            "generated": {"by": "Obsidience System inventory", "at": source["captured_at"]},
+            "generated": {"by": "process:obsidience-system-inventory", "at": source["captured_at"]},
             "sources": [{"resource": source["citation"]}]}
     for component in (item, *item.get("components", [])):
         if component["descriptor_path"]:

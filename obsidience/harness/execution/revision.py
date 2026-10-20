@@ -38,7 +38,7 @@ OPTIMIZATION = (
     "capabilities/source/read.py", "capabilities/vault/read.py",
     "capabilities/vault/search.py", "capabilities/vault/validate.py",
     "execution/optimization/cases.py", "execution/optimization/store.py",
-    "memory/hindsight.py", "knowledge/links.py", "knowledge/format.py",
+    "memory/hindsight.py", "knowledge/links.py", "knowledge/format.py", "knowledge/okf.py",
     "knowledge/review.py", "knowledge/scope.py",
     "knowledge/curation.py", "knowledge/source.py",
 )

@@ -91,6 +91,9 @@ Six types, through Open Knowledge Format v0.2 with the Obsidience profile:
   `skills`, `assignee`, `triggers`, `auto_curate`, …) live under `obsidience`. Unknown or
   imported fields (`verified`, `generated`, …) round-trip without trust; parsing is not
   admission. OKF is a document base, not an executor.
+- `harness/knowledge/okf.py` is the one OKF owner (codec, reserved documents, link
+  resolution, conformance); `knowledge/format.py` layers the Article profile on it, and
+  `vault.validate` reports OKF errors before profile errors. Reference: `docs/ontology/okf.md`.
 - Root `status` is document lifecycle (`draft`/`stable`/`deprecated`). Task status,
   inputs, FIFO and results live only in SQLite; execution never rewrites or re-embeds
   Articles.

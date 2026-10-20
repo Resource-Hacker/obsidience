@@ -4,14 +4,13 @@ from __future__ import annotations
 
 from collections import Counter
 
-import yaml
-
 
 def execute(args: dict, context: dict) -> str:
     del args, context
     from obsidience.harness.capabilities.registry import DESCRIPTIONS, REGISTRY, contract_error
     from obsidience.harness.config import CONFIG
-    from obsidience.harness.knowledge.format import parse, validate_profile
+    from obsidience.harness.knowledge import okf
+    from obsidience.harness.knowledge.format import validate_profile
     from obsidience.harness.knowledge.tasks import (
         CANONICAL_TASK_BY_PATH,
         TASK_TAXONOMY_BY_PATH,
@@ -28,7 +27,9 @@ def execute(args: dict, context: dict) -> str:
 
     # Validate persisted bytes, not a re-encoded runtime projection: projection
     # would hide misplaced fields and Task state that must not live in Articles.
+    # OKF conformance comes first; the Article profile is layered on it.
     profile_errors: list[str] = []
+    advisories: list[str] = []
     profiles_checked = 0
     for path in sorted(CONFIG.vault_dir.rglob("*.md")):
         relative = path.relative_to(CONFIG.vault_dir)
@@ -36,22 +37,34 @@ def execute(args: dict, context: dict) -> str:
             part.startswith(".") for part in relative.parts
         ):
             continue
+        label = f"- [[{relative.with_suffix('')}]]"
         try:
-            raw, _ = parse(path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, ValueError, yaml.YAMLError) as error:
-            profile_errors.append(f"- [[{relative.with_suffix('')}]] OKF profile: {error}")
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as error:
+            profile_errors.append(f"{label} OKF: {error}")
             continue
-        if path.name.lower() in {"index.md", "log.md"} and not ({"type", "kind"} & raw.keys()):
+        findings = okf.check_text(text, relative.as_posix(), bundle_root=len(relative.parts) == 1)
+        advisories.extend(f"{label} {finding.message}" for finding in findings
+                          if finding.level == "warning")
+        errors = [finding for finding in findings if finding.level == "error"]
+        if errors:
+            profile_errors.extend(f"{label} OKF SPEC {error.rule}: {error.message}" for error in errors)
+            continue
+        raw, _ = okf.parse(text)
+        if okf.is_reserved(relative) and not ({"type", "kind"} & raw.keys()):
             continue  # Ordinary OKF navigation/history is not an Article.
         profiles_checked += 1
         profile_errors.extend(
-            f"- [[{relative.with_suffix('')}]] OKF profile: {error}"
-            for error in validate_profile(raw, relative)
+            f"{label} Article profile: {error}" for error in validate_profile(raw, relative)
         )
+    advisory = (
+        f"\nOKF advisories (SHOULD guidance, not broken references): {len(advisories)}: "
+        + "; ".join(advisories[:5]) if advisories else ""
+    )
     if profile_errors:
         return (
             f"{profiles_checked} Article profiles checked, {len(profile_errors)} invalid:\n"
-            + "\n".join(profile_errors[:30])
+            + "\n".join(profile_errors[:30]) + advisory
         )
 
     res = resolver()
@@ -274,5 +287,5 @@ def execute(args: dict, context: dict) -> str:
         if drifted else ""
     )
     if not broken:
-        return f"All {checked} load-bearing edges resolve. No broken references." + drift
-    return f"{checked} edges checked, {len(broken)} broken:\n" + "\n".join(broken[:30]) + drift
+        return f"All {checked} load-bearing edges resolve. No broken references." + drift + advisory
+    return f"{checked} edges checked, {len(broken)} broken:\n" + "\n".join(broken[:30]) + drift + advisory

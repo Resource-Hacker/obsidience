@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import posixpath
 import re
 from urllib.parse import quote, unquote, urlsplit
 
 from markdown_it import MarkdownIt
 from markdown_it.rules_inline import image, link
 from markdown_it.rules_inline.state_inline import StateInline
+
+from . import okf
 
 _MARKDOWN = MarkdownIt("commonmark").enable("table")
 _WIKI = re.compile(r"\[\[([^\]\|#]+)(#[^\]\|]*)?(?:\|([^\]]*))?\]\]")
@@ -29,13 +30,8 @@ def article_ref(href: str, path: str = "") -> str | None:
         return None
     if url.scheme or url.netloc or not url.path.lower().endswith(".md"):
         return None
-    target = unquote(url.path)
-    target = (target.lstrip("/") if target.startswith("/") else
-              posixpath.join(posixpath.dirname(path), target))
-    target = posixpath.normpath(target)
-    if target == ".." or target.startswith("../"):
-        return None
-    return target[:-3]
+    target = okf.resolve(href, path)
+    return target[:-3] if target else None
 
 
 def metadata_ref(value: str) -> str:

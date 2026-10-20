@@ -20,6 +20,7 @@ from pathlib import Path
 
 from ..config import CONFIG
 from . import format as article_format
+from . import okf
 from .links import body_links, canonical_body
 
 WIKILINK_RE = re.compile(r"\[\[([^\]\|#]+)(?:#[^\]\|]*)?(?:\|[^\]]*)?\]\]")
@@ -139,7 +140,7 @@ def load_note(rel_path: str | Path) -> Note | None:
         p = CONFIG.vault_dir / rel_path
         if not p.exists() or p.suffix != ".md":
             return None
-        if p.name.lower() in {"index.md", "log.md"}:
+        if okf.is_reserved(p):
             return None  # OKF listings/history are never Articles.
         text = p.read_text(encoding="utf-8")
         # Bound retained input as well as entry count; oversized Articles still
@@ -179,7 +180,7 @@ def _article_files(include_system: bool) -> list[tuple[tuple[str, ...], os.stat_
                                       or (not include_system and name in SYSTEM_DIRS)):
                         continue
                     walk(entry.path, rel)
-                elif name.endswith(".md") and name.lower() not in {"index.md", "log.md"}:
+                elif name.endswith(".md") and not okf.is_reserved(name):
                     try:
                         if entry.is_file():
                             found.append((rel, entry.stat()))
@@ -322,7 +323,7 @@ def write_note(rel_path: str, meta: dict, body: str) -> str:
         meta = dict(meta)
         if "kind" not in meta and "type" not in meta:
             meta["kind"] = "knowledge"
-        if p.name.lower() in {"index.md", "log.md"}:
+        if okf.is_reserved(p):
             raise ValueError("index.md and log.md are reserved OKF listings, not Articles")
         # Runtime proposal envelopes are not accepted Task definitions.
         if meta.get("kind", meta.get("type")) == "task" and not rel_path.startswith(("_", ".")):
@@ -353,7 +354,7 @@ def initialize_vault(destination: Path | None = None) -> dict:
         relative = path.relative_to(template)
         if path.is_symlink() or any(part.startswith(("_", ".")) for part in relative.parts):
             raise ValueError(f"Invalid default Article path: {relative}")
-        raw, body = article_format.parse(path.read_text(encoding="utf-8"))
+        raw, body = okf.parse(path.read_text(encoding="utf-8"))
         errors = article_format.validate_profile(raw, relative)
         if errors:
             raise ValueError(f"Invalid default Article {relative}: {'; '.join(errors)}")

@@ -12,6 +12,8 @@ import re
 from datetime import date, datetime, timezone
 from pathlib import PurePosixPath
 
+from . import okf
+
 _CURATION_TITLE_NOISE = frozenset({
     "agent", "article", "brain", "charter", "curator", "guardian", "identity",
     "index", "knowledge", "researcher", "role",
@@ -196,13 +198,8 @@ def maintenance_candidates(context: dict | None = None) -> dict:
             add_lead("deprecated", "Archive", [note], 0.97,
                      archive_ref=note.ref, article_status="deprecated")
         stale_after = note.meta.get("stale_after")
-        if isinstance(stale_after, str):
-            try:
-                stale = datetime.fromisoformat(stale_after.replace("Z", "+00:00"))
-            except ValueError:
-                stale = None
-            if stale is not None and stale.utcoffset() is not None and stale <= now:
-                add_lead("stale_after", "Improve", [note], 0.96, stale_after=stale_after)
+        if okf.is_timestamp(stale_after) and okf.timestamp(stale_after) <= now:
+            add_lead("stale_after", "Improve", [note], 0.96, stale_after=stale_after)
         review_due = note.meta.get("review_due")
         if review_due:
             try:

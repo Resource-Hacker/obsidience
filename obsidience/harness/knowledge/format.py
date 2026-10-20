@@ -1,17 +1,12 @@
-# Portions Copyright 2026 Google LLC
-# SPDX-License-Identifier: Apache-2.0
-# Adapted for Obsidience: functional codec, local Article profile, metadata
-# projection, Task-ledger separation, and CRLF/body preservation.
-"""OKF Markdown codec and the Obsidience Article profile.
+"""The Obsidience Article profile, layered on the OKF document contract.
 
-Parsing does not admit an Article, verify a claim, or authorize execution.
-``verified`` and the other foreign assertions remain ordinary document data.
-The profile is checked separately, before the caller accepts an Article.
-
-The YAML framing and timestamp-preserving loader follow the small Apache-2.0
-OKF reference codec, not its reference agent or trust-ranking policy:
-https://github.com/GoogleCloudPlatform/open-knowledge-format/blob/
-ad30107c31c06aec8a7d5636e0d1058118604e6f/src/reference_agent/bundle/document.py
+``okf`` owns framing, serialization and conformance of the portable document.
+This module adds what makes a document an Article: the six types, the
+``obsidience`` namespace, the flat application view, and Task-ledger
+separation. Parsing does not admit an Article, verify a claim, or authorize
+execution. ``verified`` and the other foreign assertions remain ordinary
+document data. The profile is checked separately, before the caller accepts
+an Article.
 """
 
 from __future__ import annotations
@@ -22,18 +17,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import yaml
+from . import okf
 
 
 ARTICLE_TYPES = frozenset({"knowledge", "task", "runbook", "skill", "tool", "agent"})
 TASK_RUNTIME_FIELDS = frozenset({
     "status", "params", "event_queue", "status_updated", "triggered_at", "activation_id",
     "last_run", "summary", "blocked_reason", "generated_runbook",
-})
-COMMON_FIELDS = frozenset({
-    "type", "title", "description", "resource", "tags", "sources", "usage_window",
-    "generated", "verified", "status", "stale_after", "runtime", "parameters",
-    "computation", "executor", "attester",
 })
 # Only known application fields move between the flat runtime view and the
 # namespace. Unknown fields retain their original root/namespace placement.
@@ -56,44 +46,6 @@ OBSIDIENCE_FIELDS = frozenset({
     "subtools", "superseded_by", "target", "task", "tasks", "taxonomy_path",
     "temporary", "through_sequence", "tool", "tools", "transient", "triggers", "trust",
 }) | TASK_RUNTIME_FIELDS
-
-
-class _Loader(getattr(yaml, "CSafeLoader", yaml.SafeLoader)):
-    """Keep authored timestamp spellings, including offsets, as strings."""
-
-
-_Loader.yaml_implicit_resolvers = {
-    key: [(tag, pattern) for tag, pattern in values
-          if tag != "tag:yaml.org,2002:timestamp"]
-    for key, values in _Loader.yaml_implicit_resolvers.items()
-}
-
-
-def parse(text: str) -> tuple[dict[str, Any], str]:
-    """Parse generic OKF YAML/Markdown without imposing the Article profile."""
-    lines = text.splitlines(keepends=True)
-    if not lines or lines[0].strip() != "---":
-        return {}, text
-    end = next((i for i in range(1, len(lines)) if lines[i].strip() == "---"), None)
-    if end is None:
-        raise ValueError("Unterminated YAML frontmatter")
-    raw = yaml.load("".join(lines[1:end]), Loader=_Loader)
-    if raw is None:
-        raw = {}
-    if not isinstance(raw, dict):
-        raise ValueError("YAML frontmatter must be a mapping")
-    body = "".join(lines[end + 1:])
-    if body.startswith("\r\n"):
-        body = body[2:]
-    elif body.startswith("\n"):
-        body = body[1:]
-    return raw, body
-
-
-def serialize(raw: Mapping[str, Any], body: str) -> str:
-    """Serialize generic metadata; unknown fields and types are not discarded."""
-    header = yaml.safe_dump(dict(raw), sort_keys=False, allow_unicode=True)
-    return f"---\n{header}---\n\n{body}" + ("" if body.endswith("\n") else "\n")
 
 
 def _namespace(meta: dict[str, Any]) -> dict[str, Any]:
@@ -174,35 +126,26 @@ def encode_metadata(flat: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def loads(text: str) -> tuple[dict[str, Any], str]:
-    raw, body = parse(text)
+    raw, body = okf.parse(text)
     return decode_metadata(raw), body
 
 
 def dumps(meta: Mapping[str, Any], body: str) -> str:
-    return serialize(encode_metadata(meta), body)
-
-
-def _timestamp(value: Any) -> bool:
-    if not isinstance(value, str) or "T" not in value:
-        return False
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00")).utcoffset() is not None
-    except ValueError:
-        return False
+    return okf.serialize(encode_metadata(meta), body)
 
 
 def lifecycle_metadata(meta: Mapping[str, Any], now: datetime | None = None) -> dict[str, str]:
     """Project document freshness, never Task execution status or verification."""
     status = meta.get("article_status", "stable")
-    if status not in ("draft", "stable", "deprecated"):
+    if status not in okf.LIFECYCLE_STATUSES:
         return {"freshness": "unknown"}
     result = {"status": status, "freshness": "deprecated" if status == "deprecated" else "current"}
     if "stale_after" in meta:
         value = meta["stale_after"]
-        if not _timestamp(value):
+        if not okf.is_timestamp(value):
             result["freshness"] = "deprecated" if status == "deprecated" else "unknown"
         else:
-            stale = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            stale = okf.timestamp(value)
             result["stale_after"] = stale.isoformat()
             if status != "deprecated" and stale <= (now or datetime.now(timezone.utc)):
                 result["freshness"] = "stale"
@@ -217,7 +160,7 @@ def validate_profile(raw: Mapping[str, Any], path: str | Path | None = None) -> 
     Reserved navigation/history filenames are not Article concepts.
     """
     errors: list[str] = []
-    if path is not None and Path(path).name.casefold() in {"index.md", "log.md"}:
+    if path is not None and okf.is_reserved(path):
         errors.append("index.md and log.md are reserved OKF documents, not Articles")
     kind = raw.get("type")
     if not isinstance(kind, str) or kind not in ARTICLE_TYPES:
@@ -231,9 +174,9 @@ def validate_profile(raw: Mapping[str, Any], path: str | Path | None = None) -> 
     if "tags" in raw and (not isinstance(raw["tags"], list)
                           or any(not isinstance(tag, str) for tag in raw["tags"])):
         errors.append("tags must be a list of strings")
-    if "status" in raw and raw["status"] not in ("draft", "stable", "deprecated"):
+    if "status" in raw and raw["status"] not in okf.LIFECYCLE_STATUSES:
         errors.append("status must be draft, stable, or deprecated")
-    if "stale_after" in raw and not _timestamp(raw["stale_after"]):
+    if "stale_after" in raw and not okf.is_timestamp(raw["stale_after"]):
         errors.append("stale_after must be an ISO 8601 timestamp with a timezone")
 
     def event(value: Any, label: str) -> None:
@@ -242,7 +185,7 @@ def validate_profile(raw: Mapping[str, Any], path: str | Path | None = None) -> 
             return
         if not isinstance(value.get("by"), str) or not value["by"].strip():
             errors.append(f"{label}.by must be a nonempty string")
-        if "at" in value and not _timestamp(value["at"]):
+        if "at" in value and not okf.is_timestamp(value["at"]):
             errors.append(f"{label}.at must be an ISO 8601 timestamp with a timezone")
 
     if "generated" in raw:
@@ -272,7 +215,7 @@ def validate_profile(raw: Mapping[str, Any], path: str | Path | None = None) -> 
     if not isinstance(namespace, Mapping):
         errors.append("obsidience must be a mapping")
     else:
-        for key in (COMMON_FIELDS - {"status"}) | {"kind", "article_status"}:
+        for key in (okf.SPEC_FIELDS - {"status"}) | {"kind", "article_status"}:
             if key in namespace:
                 errors.append(f"obsidience.{key} is reserved for canonical root metadata")
         if kind == "task":
@@ -317,6 +260,6 @@ def validate_profile(raw: Mapping[str, Any], path: str | Path | None = None) -> 
                     or any(not isinstance(ref, str) or not metadata_ref(ref).startswith("Tools/") for ref in value)
                     for value in values.values()):
                 errors.append("operation tools require exact Tool reference lists")
-    for key in sorted((OBSIDIENCE_FIELDS - COMMON_FIELDS) & raw.keys()):
+    for key in sorted((OBSIDIENCE_FIELDS - okf.SPEC_FIELDS) & raw.keys()):
         errors.append(f"{key} belongs under obsidience, not at the root")
     return errors
