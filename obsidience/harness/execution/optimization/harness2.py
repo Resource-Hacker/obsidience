@@ -35,6 +35,10 @@ MAX_SESSIONS = 7
 SESSION_SECONDS = 180
 MAX_ATTEMPTS_PER_TRIAL = 2
 MAX_CONTEXT_BYTES = 600_000
+# A baseline that passes two of five training trials in its first batch does not
+# reproduce the incident (saved reports: 20 of 34 did, 12 passing all) and can hardly
+# meet the gate's at most one in five over the job, so no search follows.
+NOT_REPRODUCED_RATE = 2 / 5
 # Reuse upstream's AGENTS.md text profile; the adapter admits only that one
 # instruction file and uses ADK, never the Codex/OpenCode execution channels.
 SURFACE = tree.SurfaceSpec(name='codex', always_on=('AGENTS.md',),
@@ -132,6 +136,11 @@ class Job:
         self.bridge = LoopBridge()
         self.search = {}
         self.proposal_errors = []
+
+    def reproduced(self):
+        """The first baseline batch fails often enough to search for a correction."""
+        rows = self.search[self.seed.candidate_id]
+        return sum(row['passed'] for row in rows) < NOT_REPRODUCED_RATE * len(rows)
 
     def candidate(self, body):
         if body in self.candidates:
@@ -363,6 +372,8 @@ class ReservedProposer:
 async def _method(job, adapter):
     def work():
         base_path = adapter.execute(job.case_id, None, 'base')
+        if not job.reproduced():
+            return None
         base = RunView(label='base', run_id='base', run_dir=base_path,
                        ok=True, delivered=adapter.delivered(base_path))
         return recursion.run_sequential(job.case_id, 1, [base], adapter=adapter,
@@ -415,25 +426,26 @@ async def run(case_id, document, audit, context):
             raise ValueError('Harness2 persisted job time budget exhausted')
         async with asyncio.timeout(native.JOB_SECONDS - spent):
             method = await _method(job, adapter)
-            failures.extend({'session': s.label, 'error': s.error or 'Harness2 stage fell back'}
-                            for s in method.stages if s.fell_back)
-            failures.extend({'session': 'method', 'error': error} for error in method.errors)
-            failures.extend({'session': label, 'error': rollout.error or 'Training trajectory unavailable'}
-                            for label, rollout in method.rollouts.items() if not rollout.ok)
-            final_body = method.trees[method.finals[-1]]['AGENTS.md']
-            selected = job.candidate(final_body)
-            # Independent full repeats are never exposed to the proposer or lessons.
-            for candidate in (job.seed, selected):
-                if candidate.candidate_id in rows:
-                    continue
-                observations = []
-                for split in ('train', 'development'):
-                    measured = await job.evaluate(candidate, split, 'independent-final')
-                    observations.extend(dict(row.metadata['result']) for row in measured.observations)
-                rows[candidate.candidate_id] = observations
-            compared = native.comparison(document, rows, job.seed.candidate_id, selected.candidate_id, job.search)
-            if compared['verdict'] == 'passed' and not failures:
-                lessons = await _reflect(job, method)
+            if method is not None:
+                failures.extend({'session': s.label, 'error': s.error or 'Harness2 stage fell back'}
+                                for s in method.stages if s.fell_back)
+                failures.extend({'session': 'method', 'error': error} for error in method.errors)
+                failures.extend({'session': label, 'error': rollout.error or 'Training trajectory unavailable'}
+                                for label, rollout in method.rollouts.items() if not rollout.ok)
+                final_body = method.trees[method.finals[-1]]['AGENTS.md']
+                selected = job.candidate(final_body)
+                # Independent full repeats are never exposed to the proposer or lessons.
+                for candidate in (job.seed, selected):
+                    if candidate.candidate_id in rows:
+                        continue
+                    observations = []
+                    for split in ('train', 'development'):
+                        measured = await job.evaluate(candidate, split, 'independent-final')
+                        observations.extend(dict(row.metadata['result']) for row in measured.observations)
+                    rows[candidate.candidate_id] = observations
+                compared = native.comparison(document, rows, job.seed.candidate_id, selected.candidate_id, job.search)
+                if compared['verdict'] == 'passed' and not failures:
+                    lessons = await _reflect(job, method)
     except Exception as exc:
         failures.append({'session': 'harness2', 'error': type(exc).__name__ + ': ' + str(exc)[:1000]})
     finally:
@@ -443,6 +455,9 @@ async def run(case_id, document, audit, context):
     compared = native.comparison(document, rows, job.seed.candidate_id, selected.candidate_id, job.search)
     if failures:
         compared['verdict'] = 'incomplete'
+    elif method is None:
+        # Only an unreproduced baseline ends the method without a failure.
+        compared['verdict'] = 'not_reproduced'
     return {'schema_version': 1, 'case_id': case_id, 'audit_run_id': context['run_id'],
         'upstream_revision': document['upstream_revision'], 'backend_contract': document['backend_contract'],
         'evaluator_revision': document['evaluator_revision'], 'model_contract': document['model_contract'],

@@ -492,7 +492,7 @@ def notifications() -> list[dict]:
             evidence_gap = ('no complete decision evidence' in reason or 'no complete text-only provider prompt' in reason
                             or 'dependency changed:' in reason or 'original operational outcome is not an instruction grade' in reason)
             if (evidence_gap or reason.startswith('Awaiting independent accepted decisions')
-                    or reason.startswith('Implementation finding')):
+                    or reason.startswith('Implementation finding') or _exhausted_verdict(reason) == 'not_reproduced'):
                 # No owner action can repair these; they stay in the attention
                 # record and health status instead of Review. A dead-end run is
                 # already in Review as its own failed Task.

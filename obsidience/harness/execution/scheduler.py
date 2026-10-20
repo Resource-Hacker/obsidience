@@ -176,7 +176,8 @@ def _preflight_rejection(call: dict, note: Note) -> str | None:
             result = optimization_status(case).get("report") or {}
             report = evaluation_store.load("executive/reports", result.get("report_id", ""))
             if (report.get("case_id") == case and report.get("audit_run_id") == note.meta.get("last_run")
-                    and report.get("verdict") in {"incomplete", "not_improved", "regressed", "latency_regressed", "tool_count_regressed"}
+                    and report.get("verdict") in {"incomplete", "not_improved", "not_reproduced", "regressed",
+                                                  "latency_regressed", "tool_count_regressed"}
                     and result == report_result(result["report_id"], report)
                     and call["tool_sha256"] == hashlib.sha256((CONFIG.vault_dir / "Tools/harness.optimize.md").read_bytes()).hexdigest()):
                 candidates.add(json.dumps(result, sort_keys=True))
