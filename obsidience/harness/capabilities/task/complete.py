@@ -73,6 +73,11 @@ def execute(args: dict, context: dict) -> dict:
         task = resolver().resolve(str(context.get("task", "")))
     summary = str(args.get("summary", ""))[:2000]
     pending, approved, rejected = staged_proposal_states(context)
+    if "status" not in args and pending:
+        # A staged proposal can finish only in review. Without the (optional)
+        # status, Curate 39bacc10adc4 defaulted to completed three times and was
+        # rejected for no-change evidence until the Task blocked (2026-10-19).
+        requested_status = "review"
     if (requested_status == "completed" and not outcome
             and context.get("event") == "observations.memory.ready"
             and not any((pending, approved, rejected))
