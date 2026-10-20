@@ -5,12 +5,12 @@ import { resolve } from "path";
 
 // The Harness serves out/renderer at /shell/knowledge/.
 export default defineConfig({
-  root: resolve(__dirname, "src/renderer"),
+  root: resolve(import.meta.dirname, "src/renderer"),
   base: "./",
-  resolve: { alias: { "@": resolve(__dirname, "src/renderer/src") } },
+  resolve: { alias: { "@": resolve(import.meta.dirname, "src/renderer/src") } },
   plugins: [react(), tailwindcss()],
   build: {
-    outDir: resolve(__dirname, "out/renderer"),
+    outDir: resolve(import.meta.dirname, "out/renderer"),
     emptyOutDir: true,
     target: "chrome108",
     modulePreload: { polyfill: false },
