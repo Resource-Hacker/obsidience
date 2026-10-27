@@ -19,7 +19,7 @@
     "@types/three": "^0.185.1",
     "@vitejs/plugin-react": "^5.2.0",
     "d3-force-3d": "^3.0.6",
-    "lucide-react": "^1.21.0",
+    "lucide-react": "^1.61.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "tailwindcss": "^4",
