@@ -17,7 +17,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@types/three": "^0.185.1",
-    "@vitejs/plugin-react": "^5.2.0",
+    "@vitejs/plugin-react": "^6.1.2",
     "d3-force-3d": "^3.0.6",
     "lucide-react": "^1.21.0",
     "react": "19.3.1",
