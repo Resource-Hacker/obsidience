@@ -201,6 +201,8 @@ def public_layout(layout: dict) -> dict:
             continue
         if node.get("label") == "Project":
             keep[node["id"]] = {**node, "name": PROJECT, "qualified_name": PROJECT}
+        elif node.get("label") == "Branch":
+            keep[node["id"]] = node  # admitted below only with retained descendants
         elif path in tracked or (node.get("label") == "Folder" and path in folders):
             keep[node["id"]] = node
         elif not path:
@@ -221,6 +223,26 @@ def public_layout(layout: dict) -> dict:
         if scan(" ".join((str(node.get("name") or ""), qualified, str(node.get("file_path") or ""))), hashes):
             continue  # a private name or runtime path in a symbol, heading or route
         nodes.append({**node, "qualified_name": qualified})
+    # Structural paths are directories (the Project may have a provider sentinel),
+    # not source files. Keep folders only when a published indexed file remains
+    # beneath them; empty directories from excluded code must not return.
+    structural = {"Project", "Branch", "Folder"}
+    paths = {node.get("file_path") for node in nodes
+             if node.get("label") not in structural and node.get("file_path") in tracked}
+    ancestors = {str(parent) for path in paths for parent in Path(path).parents}
+    supported = {node["id"] for node in nodes if node.get("label") not in structural
+                 or node.get("label") == "Folder" and node.get("file_path") in ancestors}
+    structure_ids = {node["id"] for node in nodes if node.get("label") in structural}
+    containment = {"HAS_BRANCH", "CONTAINS_FOLDER", "CONTAINS_FILE"}
+    while True:
+        parents = {edge["source"] for edge in edges if edge.get("type") in containment
+                   and edge["source"] in structure_ids and edge["target"] in supported}
+        if parents <= supported:
+            break
+        supported.update(parents)
+    if paths:
+        supported.update(node["id"] for node in nodes if node.get("label") == "Project")
+    nodes = [node for node in nodes if node["id"] in supported]
     ids = {node["id"] for node in nodes}
     return {"nodes": nodes, "edges": [e for e in edges if e["source"] in ids and e["target"] in ids],
             "total_nodes": len(nodes)}

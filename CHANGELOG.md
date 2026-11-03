@@ -11,6 +11,12 @@ by the concepts of the [Golden ontology](obsidience/defaults/vault/Architecture/
 
 ## [Unreleased]
 
+### Fixed
+
+- **Demo.** Restore the Code graph's project and folder hierarchy after filtering
+  excluded source paths. Preserve connected tour targets, link folders to GitHub
+  directories, and expose a back control when inspecting a file.
+
 ### Changed
 
 - **Harness.** Lease independent model slots for Executive conversation and

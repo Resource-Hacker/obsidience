@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
-import { Braces, Brain, ExternalLink, Maximize2, Network, Pause, Play, RotateCcw, SlidersHorizontal, X } from "lucide-react";
+import { ArrowLeft, Braces, Brain, ExternalLink, Maximize2, Network, Pause, Play, RotateCcw, SlidersHorizontal, X } from "lucide-react";
 import { KNOWLEDGE_3D_TUNING_FIELDS, clampKnowledge3dTuning, type Knowledge3dTuning } from "@/graph/knowledge/knowledge-3d";
 import { CODE_GRAPH_ID, MAIN_GRAPH_ID, announceGraphTuning, loadGraphTuning } from "@/graph/tuning";
 import type { GraphControl } from "@/graph/stream";
@@ -19,7 +19,7 @@ const VIEWS: { id: View; title: string; Icon: typeof Network }[] = [
   { id: "code", title: "Code", Icon: Braces },
 ];
 type Article = { title: string; type: string; path: string; excerpt: string };
-type Published = { node: ProviderNode | null; hover: ProviderNode | null; command?: (command: GraphControl) => void };
+type Published = { node: ProviderNode | null; hover: ProviderNode | null; codeFile?: string; command?: (command: GraphControl) => void };
 
 function captions(tour: Tour): Record<View, { title: string; text: string }> {
   return {
@@ -83,7 +83,7 @@ export function DemoApp({ tour, ownerTuning, embed }: { tour: Tour; ownerTuning:
     setPublished(current => {
       const node = state.selected ?? null, hover = state.hover ?? null;
       return current.node?.id === node?.id && current.hover?.id === hover?.id && current.command === command
-        ? current : { node, hover, command };
+        && current.codeFile === state.codeFile ? current : { node, hover, command, codeFile: state.codeFile };
     });
   }), [view]);
 
@@ -111,6 +111,8 @@ export function DemoApp({ tour, ownerTuning, embed }: { tour: Tour; ownerTuning:
         </button>)}
       </nav>
       <div className="demo-actions">
+        {view === "code" && published.codeFile && <button type="button" onClick={() => published.command?.({ action: "back" })}
+          title="Back to project" aria-label="Back to project"><ArrowLeft size={15}/></button>}
         <button type="button" onClick={() => tourState.playing ? tour.setPlaying(false) : tour.play(VIEWS.findIndex(v => v.id === view))}
           title={tourState.playing ? "Pause the tour" : "Play the tour from this view"} aria-label={tourState.playing ? "Pause the tour" : "Play the tour"}>
           {tourState.playing ? <Pause size={15}/> : <Play size={15}/>}
@@ -152,7 +154,10 @@ function Progress({ tour }: { tour: Tour }) {
 
 function DetailCard({ view, node, article, onClose }: { view: View; node: ProviderNode; article?: Article; onClose: () => void }) {
   const commit = view === "memory" ? /\(commit ([0-9a-f]{7})\)/.exec(node.text || node.name)?.[1] : undefined;
-  const link = view === "code" && node.file ? `${REPO}/blob/main/${node.file}${node.start_line ? `#L${node.start_line}` : ""}`
+  const container = node.kind === "Project" || node.kind === "Folder";
+  const codeLink = node.kind === "Project" ? REPO : node.file
+    ? `${REPO}/${container ? "tree" : "blob"}/main/${node.file}${!container && node.start_line ? `#L${node.start_line}` : ""}` : "";
+  const link = view === "code" ? codeLink
     : article ? `${REPO}/blob/main/obsidience/defaults/vault/${article.path}`
     : commit ? `${REPO}/commit/${commit}` : "";
   return <aside className="demo-card" style={{ borderColor: node.color }} aria-label="Selected node">
@@ -162,9 +167,9 @@ function DetailCard({ view, node, article, onClose }: { view: View; node: Provid
     <hr/>
     {view === "knowledge" && <p className="demo-path">{article?.path || node.ref || node.id}</p>}
     {view === "knowledge" && article?.excerpt && <p>{article.excerpt}</p>}
-    {view === "code" && <p className="demo-path">{node.file}{node.start_line ? ` · lines ${node.start_line}–${node.end_line || node.start_line}` : ""}</p>}
+    {view === "code" && node.kind !== "Project" && <p className="demo-path">{node.file}{node.start_line ? ` · lines ${node.start_line}–${node.end_line || node.start_line}` : ""}</p>}
     {view === "memory" && node.date && <p className="demo-path">{new Date(node.date).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })} · generated from the repository history</p>}
-    {link && <a href={link} target="_blank" rel="noopener noreferrer">{view === "code" ? "Source" : view === "memory" ? "Commit" : "Article"} on GitHub <ExternalLink size={12}/></a>}
+    {link && <a href={link} target="_blank" rel="noopener noreferrer">{view === "code" ? container ? "Browse" : "Source" : view === "memory" ? "Commit" : "Article"} on GitHub <ExternalLink size={12}/></a>}
   </aside>;
 }
 

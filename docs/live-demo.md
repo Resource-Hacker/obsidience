@@ -27,6 +27,8 @@ bundle the desktop shell renders, with Obsidience describing itself.
 - **Orbit, zoom and inspect.** Drag to orbit, scroll to zoom (hold Ctrl while
   the demo is embedded in a page), and click a node to see its label and
   preview, with a link to the Article, source file or commit on GitHub.
+  In Code, clicking a file opens its symbols; the back arrow returns to the
+  project. Folder links open the corresponding directory on GitHub.
 - **Switch graphs.** Knowledge, Memory and Code are the three desktop stages.
   Choosing one pauses the tour; the play button resumes it.
 - **Change the look.** The sliders button opens the Graph settings the desktop
